@@ -3,10 +3,13 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class Chunk : MonoBehaviour
+public class Chunk
 {
-    public MeshRenderer meshRenderer;
-    public MeshFilter meshFilter;
+    public ChunkCoord coord;
+
+    private GameObject chunkObject;
+    private MeshRenderer meshRenderer;
+    private MeshFilter meshFilter;
 
     private int vertexIndex = 0;
     private List<Vector3> vertices = new List<Vector3>();
@@ -17,10 +20,20 @@ public class Chunk : MonoBehaviour
 
     private World world;
 
-    // Start is called before the first frame update
-    void Start()
+    public Chunk(ChunkCoord _coord, World _world)
     {
-        world = GameObject.Find("World").GetComponent<World>();
+        coord = _coord;
+        world = _world;
+        chunkObject = new GameObject();
+        meshFilter = chunkObject.AddComponent<MeshFilter>();
+        meshRenderer = chunkObject.AddComponent<MeshRenderer>();
+
+        meshRenderer.material = world.material;
+        chunkObject.transform.SetParent(world.transform);
+        chunkObject.transform.position = new Vector3(coord.x * VoxelData.ChunkWidth, 0f, coord.z * VoxelData.ChunkWidth);
+        chunkObject.name = $"Chunk {coord.x}, {coord.z}";
+
+
         PopulateVoxelMap();
         CreateMeshData();
         CreateMesh();
@@ -48,14 +61,34 @@ public class Chunk : MonoBehaviour
             {
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
-                    if (y < 1)
-                        voxelMap[x, y, z] = 7; // Bedrock
-                    else if (y == VoxelData.ChunkHeight -1)
-                        voxelMap[x, y, z] = 1; // Grass
-                    else
-                        voxelMap[x, y, z] = 0;  // Stone
+                    voxelMap[x, y, z] = world.GetVoxel(new Vector3(x, y, z) + position);
                 }
             }
+        }
+    }
+
+    public bool isActive
+    {
+        get { return chunkObject.activeSelf; }
+        set { chunkObject.SetActive(value);}
+    }
+
+    public Vector3 position
+    {
+        get { return chunkObject.transform.position; }
+    }
+
+    private bool IsVoxelInChunk(int x, int y, int z)
+    {
+        if (x < 0 || x > VoxelData.ChunkWidth - 1 ||
+            y < 0 || y > VoxelData.ChunkHeight - 1 ||
+            z < 0 || z > VoxelData.ChunkWidth - 1)
+        {
+            return false;
+        }
+        else
+        {
+            return true;
         }
     }
 
@@ -65,11 +98,9 @@ public class Chunk : MonoBehaviour
         int y = Mathf.FloorToInt(pos.y);
         int z = Mathf.FloorToInt(pos.z);
 
-        if (x < 0 || x > VoxelData.ChunkWidth - 1 ||
-            y < 0 || y > VoxelData.ChunkHeight - 1 ||
-            z < 0 || z > VoxelData.ChunkWidth - 1)
+        if (!IsVoxelInChunk(x, y, z))
         {
-            return false;
+            return world.blockTypes[world.GetVoxel(pos + position)].isSolid;
         }
 
         return world.blockTypes[voxelMap[x, y, z]].isSolid;
@@ -82,14 +113,14 @@ public class Chunk : MonoBehaviour
             if (!CheckVoxel(pos + VoxelData.FaceChecks[p]))
             {
                 byte blockID = voxelMap[(int)pos.x, (int)pos.y, (int)pos.z];
-                
+
                 vertices.Add(pos + VoxelData.VoxelVerts[VoxelData.VoxelTris[p, 0]]);
                 vertices.Add(pos + VoxelData.VoxelVerts[VoxelData.VoxelTris[p, 1]]);
                 vertices.Add(pos + VoxelData.VoxelVerts[VoxelData.VoxelTris[p, 2]]);
                 vertices.Add(pos + VoxelData.VoxelVerts[VoxelData.VoxelTris[p, 3]]);
-                
+
                 AddTexture(world.blockTypes[blockID].GetTextureID(p));
-                
+
                 triangels.Add(vertexIndex);
                 triangels.Add(vertexIndex + 1);
                 triangels.Add(vertexIndex + 2);
@@ -120,7 +151,7 @@ public class Chunk : MonoBehaviour
 
         x *= VoxelData.NormalizedBlockTextureSize;
         y *= VoxelData.NormalizedBlockTextureSize;
-        
+
         // To start reading the atlas from the top left
         y = 1f - y - VoxelData.NormalizedBlockTextureSize;
 
@@ -128,5 +159,27 @@ public class Chunk : MonoBehaviour
         uvs.Add(new Vector2(x, y + VoxelData.NormalizedBlockTextureSize));
         uvs.Add(new Vector2(x + VoxelData.NormalizedBlockTextureSize, y));
         uvs.Add(new Vector2(x + VoxelData.NormalizedBlockTextureSize, y + VoxelData.NormalizedBlockTextureSize));
+    }
+}
+
+public class ChunkCoord
+{
+    public int x;
+    public int z;
+
+    public ChunkCoord(int _x, int _z)
+    {
+        x = _x;
+        z = _z;
+    }
+
+    public bool Equels(ChunkCoord other)
+    {
+        if (other == null)
+            return false;
+        else if (other.x == x && other.z == z)
+            return true;
+        else
+            return false;
     }
 }
