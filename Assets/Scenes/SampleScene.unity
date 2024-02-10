@@ -302,13 +302,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 963194225}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.26668662, y: -0, z: -0, w: 0.9637833}
-  m_LocalPosition: {x: 0, y: 17.41, z: -11}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 18, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 30.934, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1731500967
 GameObject:
   m_ObjectHideFlags: 0
@@ -338,6 +338,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b1422a5c69e44f94b89a0a3086494c2f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  seed: 2147483647
+  biome: {fileID: 11400000, guid: 159c3e2bbfcf09d4bb338c3c44faa01e, type: 2}
+  player: {fileID: 963194228}
+  spawnPosition: {x: 0, y: 0, z: 0}
   material: {fileID: 2100000, guid: 310749baead051949ad82e332a06680f, type: 2}
   blockTypes:
   - blockName: Air
@@ -366,20 +370,20 @@ MonoBehaviour:
     rightFaceTexture: 12
   - blockName: Dirt
     isSolid: 1
+    backFaceTexture: 2
+    frontFaceTexture: 2
+    topFaceTexture: 2
+    bottomFaceTexture: 2
+    leftFaceTexture: 2
+    rightFaceTexture: 2
+  - blockName: Sand
+    isSolid: 1
     backFaceTexture: 3
     frontFaceTexture: 3
     topFaceTexture: 3
     bottomFaceTexture: 3
     leftFaceTexture: 3
     rightFaceTexture: 3
-  - blockName: Sand
-    isSolid: 1
-    backFaceTexture: 4
-    frontFaceTexture: 4
-    topFaceTexture: 4
-    bottomFaceTexture: 4
-    leftFaceTexture: 4
-    rightFaceTexture: 4
   - blockName: Snow
     isSolid: 1
     backFaceTexture: 4
