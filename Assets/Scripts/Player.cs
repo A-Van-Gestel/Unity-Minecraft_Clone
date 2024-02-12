@@ -5,6 +5,8 @@ using UnityEngine;
 
 public class Player : MonoBehaviour
 {
+    public bool isFlying = false;
+
     public bool isGrounded;
     public bool isSprinting;
 
@@ -13,6 +15,7 @@ public class Player : MonoBehaviour
 
     public float walkSpeed = 3f;
     public float sprintSpeed = 6f;
+    public float flyingAscendSpeed = 5f;
     public float jumpForce = 5.7f;
     public float gravity = -13f;
 
@@ -24,6 +27,7 @@ public class Player : MonoBehaviour
 
     private float horizontal;
     private float vertical;
+    private float verticalFlying;
     private float mouseHorizontal;
     private float mouseVertical;
     private Vector3 velocity;
@@ -39,7 +43,7 @@ public class Player : MonoBehaviour
     private void FixedUpdate()
     {
         CalculateVelocity();
-        if (jumpRequest)
+        if (jumpRequest && !isFlying)
             Jump();
 
         transform.Translate(velocity, Space.World);
@@ -70,9 +74,21 @@ public class Player : MonoBehaviour
 
     private void CalculateVelocity()
     {
-        // Affect vertical momentum with gravity.
-        if (verticalMomentum > gravity)
-            verticalMomentum += Time.fixedDeltaTime * gravity;
+        if (!isFlying)
+        {
+            if (verticalMomentum > gravity)
+            {
+                // Affect vertical momentum with gravity.
+                verticalMomentum += Time.fixedDeltaTime * gravity;
+            }
+        }
+        else
+        {
+            if (verticalFlying != 0)
+                verticalMomentum += Time.fixedDeltaTime * verticalFlying * flyingAscendSpeed;
+            else
+                verticalMomentum = 0;
+        }
 
         float moveSpeed = walkSpeed;
         // If we're sprinting, use the sprint multiplier
@@ -81,7 +97,6 @@ public class Player : MonoBehaviour
 
         // Normalized movement so that you don't move faster diagonally (causes little movements to stay stuck for a couple of seconds)
         // velocity = ((transform.forward * vertical) + (transform.right * horizontal)).normalized * Time.fixedDeltaTime * moveSpeed;
-
         velocity = ((transform.forward * vertical) + (transform.right * horizontal)) * Time.fixedDeltaTime * moveSpeed;
 
         // Apply vertical momentum (falling / jumping)
@@ -112,8 +127,17 @@ public class Player : MonoBehaviour
         if (Input.GetButtonUp("Sprint"))
             isSprinting = false;
 
-        if (isGrounded && Input.GetButton("Jump"))
-            jumpRequest = true;
+        if (!isFlying)
+        {
+            if (isGrounded && Input.GetButton("Jump"))
+                jumpRequest = true;
+        }
+        else
+        {
+            float flyingUp = Input.GetAxis("Jump");
+            float flyingDown = Input.GetAxis("Crouch");
+            verticalFlying = flyingUp - flyingDown;
+        }
     }
 
     private float CheckDownSpeed(float downSpeed)

@@ -168,14 +168,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 44b912604a22a6a42978771f835be758, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  isFlying: 0
   isGrounded: 0
   isSprinting: 0
   walkSpeed: 3
   sprintSpeed: 6
+  flyingAscendSpeed: 5
   jumpForce: 5.7
   gravity: -13
   playerWidth: 0.4
   playerHeight: 1.8
+  verticalFlying: 0
 --- !u!1 &705507993
 GameObject:
   m_ObjectHideFlags: 0
