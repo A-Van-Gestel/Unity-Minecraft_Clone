@@ -8,7 +8,7 @@ public class Player : MonoBehaviour
     public bool isGrounded;
     public bool isSprinting;
 
-    private Transform cam;
+    private Transform playerCamera;
     private World world;
 
     public float walkSpeed = 3f;
@@ -32,7 +32,7 @@ public class Player : MonoBehaviour
 
     private void Start()
     {
-        cam = GameObject.Find("Main Camera").transform;
+        playerCamera = GameObject.Find("Main Camera").transform;
         world = GameObject.Find("World").GetComponent<World>();
     }
 
@@ -42,18 +42,23 @@ public class Player : MonoBehaviour
         if (jumpRequest)
             Jump();
 
-        // Rotates the player on the X axis
-        transform.Rotate(Vector3.up * mouseHorizontal);
-
-        // Rotates the camera on the Y axis
-        cam.Rotate(Vector3.right * -mouseVertical);
-
         transform.Translate(velocity, Space.World);
     }
 
     private void Update()
     {
         GetPlayerInputs();
+
+        // Rotates the player on the X axis
+        transform.Rotate(Vector3.up * mouseHorizontal * Time.timeScale);
+
+        // Rotates the camera on the Y axis
+        float angle = (playerCamera.localEulerAngles.x - mouseVertical * Time.timeScale + 360) % 360;
+        if (angle > 180)
+            angle -= 360;
+
+        angle = Mathf.Clamp(angle, -85, 85);
+        playerCamera.localEulerAngles = Vector3.right * angle;
     }
 
     private void Jump()
@@ -69,19 +74,23 @@ public class Player : MonoBehaviour
         if (verticalMomentum > gravity)
             verticalMomentum += Time.fixedDeltaTime * gravity;
 
+        float moveSpeed = walkSpeed;
         // If we're sprinting, use the sprint multiplier
         if (isSprinting)
-            velocity = ((transform.forward * vertical) + (transform.right * horizontal)) * Time.fixedDeltaTime * sprintSpeed;
-        else
-            velocity = ((transform.forward * vertical) + (transform.right * horizontal)) * Time.fixedDeltaTime * walkSpeed;
+            moveSpeed = sprintSpeed;
+
+        // Normalized movement so that you don't move faster diagonally (causes little movements to stay stuck for a couple of seconds)
+        // velocity = ((transform.forward * vertical) + (transform.right * horizontal)).normalized * Time.fixedDeltaTime * moveSpeed;
+
+        velocity = ((transform.forward * vertical) + (transform.right * horizontal)) * Time.fixedDeltaTime * moveSpeed;
 
         // Apply vertical momentum (falling / jumping)
         velocity += Vector3.up * verticalMomentum * Time.fixedDeltaTime;
 
-        if ((velocity.z > 0 && front) || (velocity.z < 0 && back))
+        if ((velocity.z > 0 && Front) || (velocity.z < 0 && Back))
             velocity.z = 0;
 
-        if ((velocity.x > 0 && right) || (velocity.x < 0 && left))
+        if ((velocity.x > 0 && Right) || (velocity.x < 0 && Left))
             velocity.x = 0;
 
         if (velocity.y < 0)
@@ -110,10 +119,10 @@ public class Player : MonoBehaviour
     private float CheckDownSpeed(float downSpeed)
     {
         // Check from the center from the player, from the radius on all 4 corners if a solid voxel is below the player, which will stop the player from falling
-        if ((world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + downSpeed, transform.position.z - playerWidth) && (!left && !back)) ||
-            (world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + downSpeed, transform.position.z - playerWidth) && (!right && !back)) ||
-            (world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + downSpeed, transform.position.z + playerWidth) && (!right && !front)) ||
-            (world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + downSpeed, transform.position.z + playerWidth) && (!left && !front)))
+        if ((world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + downSpeed, transform.position.z - playerWidth) && (!Left && !Back)) ||
+            (world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + downSpeed, transform.position.z - playerWidth) && (!Right && !Back)) ||
+            (world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + downSpeed, transform.position.z + playerWidth) && (!Right && !Front)) ||
+            (world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + downSpeed, transform.position.z + playerWidth) && (!Left && !Front)))
         {
             isGrounded = true;
             return 0;
@@ -128,10 +137,10 @@ public class Player : MonoBehaviour
     private float CheckUpSpeed(float upSpeed)
     {
         // Check from the center from the player, from the radius on all 4 corners if a solid voxel is above the player, which will stop the player from jumping.
-        if ((world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth) && (!left && !back)) ||
-            (world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth) && (!right && !back)) ||
-            (world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth) && (!right && !front)) ||
-            (world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth) && (!left && !front)))
+        if ((world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth) && (!Left && !Back)) ||
+            (world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth) && (!Right && !Back)) ||
+            (world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth) && (!Right && !Front)) ||
+            (world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth) && (!Left && !Front)))
         {
             verticalMomentum = 0; // set to 0 so the player falls when their head hits a block while jumping
             return 0;
@@ -142,55 +151,23 @@ public class Player : MonoBehaviour
         }
     }
 
-    public bool front
-    {
-        get
-        {
-            // Check from the center from the player, at both feet and head level if a solid voxel is in front of the player, which will stop the player from moving into it.
-            if (world.CheckForVoxel(transform.position.x, transform.position.y, transform.position.z + playerWidth) ||
-                world.CheckForVoxel(transform.position.x, transform.position.y + 1f, transform.position.z + playerWidth))
-                return true;
-            else
-                return false;
-        }
-    }
+    public bool Front =>
+        // Check from the center from the player, at both feet and head level if a solid voxel is in front of the player, which will stop the player from moving into it.
+        world.CheckForVoxel(transform.position.x, transform.position.y, transform.position.z + playerWidth) ||
+        world.CheckForVoxel(transform.position.x, transform.position.y + 1f, transform.position.z + playerWidth);
 
-    public bool back
-    {
-        get
-        {
-            // Check from the center from the player, at both feet and head level if a solid voxel is behind of the player, which will stop the player from moving into it.
-            if (world.CheckForVoxel(transform.position.x, transform.position.y, transform.position.z - playerWidth) ||
-                world.CheckForVoxel(transform.position.x, transform.position.y + 1f, transform.position.z - playerWidth))
-                return true;
-            else
-                return false;
-        }
-    }
+    public bool Back =>
+        // Check from the center from the player, at both feet and head level if a solid voxel is behind of the player, which will stop the player from moving into it.
+        world.CheckForVoxel(transform.position.x, transform.position.y, transform.position.z - playerWidth) ||
+        world.CheckForVoxel(transform.position.x, transform.position.y + 1f, transform.position.z - playerWidth);
 
-    public bool left
-    {
-        get
-        {
-            // Check from the center from the player, at both feet and head level if a solid voxel is to the left of the player, which will stop the player from moving into it.
-            if (world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y, transform.position.z) ||
-                world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + 1f, transform.position.z))
-                return true;
-            else
-                return false;
-        }
-    }
+    public bool Left =>
+        // Check from the center from the player, at both feet and head level if a solid voxel is to the left of the player, which will stop the player from moving into it.
+        world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y, transform.position.z) ||
+        world.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + 1f, transform.position.z);
 
-    public bool right
-    {
-        get
-        {
-            // Check from the center from the player, at both feet and head level if a solid voxel is to the right of the player, which will stop the player from moving into it.
-            if (world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y, transform.position.z) ||
-                world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + 1f, transform.position.z))
-                return true;
-            else
-                return false;
-        }
-    }
+    public bool Right =>
+        // Check from the center from the player, at both feet and head level if a solid voxel is to the right of the player, which will stop the player from moving into it.
+        world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y, transform.position.z) ||
+        world.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + 1f, transform.position.z);
 }
