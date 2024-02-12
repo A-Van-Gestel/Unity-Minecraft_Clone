@@ -25,7 +25,7 @@ public class World : MonoBehaviour
     {
         Random.InitState(seed);
 
-        spawnPosition = new Vector3((VoxelData.WorldSizeInChunks * VoxelData.ChunkWidth) / 2f, VoxelData.ChunkHeight + 2, (VoxelData.WorldSizeInChunks * VoxelData.ChunkWidth) / 2f);
+        spawnPosition = new Vector3((VoxelData.WorldSizeInChunks * VoxelData.ChunkWidth) / 2f, VoxelData.ChunkHeight - 50f, (VoxelData.WorldSizeInChunks * VoxelData.ChunkWidth) / 2f);
         GenerateWorld();
         playerLastChunkCoord = GetChunkCoordFromVector3(spawnPosition);
     }
@@ -33,10 +33,11 @@ public class World : MonoBehaviour
     private void Update()
     {
         playerChunkCoord = GetChunkCoordFromVector3(player.position);
-        if (!playerChunkCoord.Equels(playerLastChunkCoord))
-        {
-            CheckViewDistance();
-        }
+        // Only update the chunks if the player has moved from the chunk they where previously on.
+        // if (!playerChunkCoord.Equels(playerLastChunkCoord))
+        // {
+        //     CheckViewDistance();
+        // }
     }
 
     private void GenerateWorld()
@@ -66,12 +67,15 @@ public class World : MonoBehaviour
 
         List<ChunkCoord> previouslyActiveChunks = new List<ChunkCoord>(activeChunks);
 
+        // Loop trough all chunks currently within view distance of the player.
         for (int x = coord.x - VoxelData.ViewDistanceInChunks; x < coord.x + VoxelData.ViewDistanceInChunks; x++)
         {
             for (int z = coord.z - VoxelData.ViewDistanceInChunks; z < coord.z + VoxelData.ViewDistanceInChunks; z++)
             {
+                // If the current chunk is in the world...
                 if (IsChunkInWorld(new ChunkCoord(x, z)))
                 {
+                    // Check if it is active, if not, activate it.
                     if (chunks[x, z] == null)
                     {
                         CreateNewChunk(x, z);
@@ -83,6 +87,7 @@ public class World : MonoBehaviour
                     }
                 }
 
+                // Check trough previously active chunks to see if this chunks is there. If it is, remove it from the list.
                 for (int i = 0; i < previouslyActiveChunks.Count; i++)
                 {
                     if (previouslyActiveChunks[i].Equels(new ChunkCoord(x, z)))
@@ -93,12 +98,30 @@ public class World : MonoBehaviour
             }
         }
 
+        // Any chunks left in the previouslyActiveChunks list are no longer in the player's view distance, so loop trough and disable them.
         foreach (ChunkCoord c in previouslyActiveChunks)
         {
             chunks[c.x, c.z].isActive = false;
         }
     }
 
+    public bool CheckForVoxel(float _x, float _y, float _z)
+    {
+        // Global value
+        int xCheck = Mathf.FloorToInt(_x);
+        int yCheck = Mathf.FloorToInt(_y);
+        int zCheck = Mathf.FloorToInt(_z);
+
+        // Chunk value
+        int xChunk = xCheck / VoxelData.ChunkWidth;
+        int zChunk = zCheck / VoxelData.ChunkWidth;
+
+        xCheck -= (xChunk * VoxelData.ChunkWidth);
+        zCheck -= (zChunk * VoxelData.ChunkWidth);
+
+        return blockTypes[chunks[xChunk, zChunk].voxelMap[xCheck, yCheck, zCheck]].isSolid;
+    }
+    
     public byte GetVoxel(Vector3 pos)
     {
         int xPos = Mathf.FloorToInt(pos.x);
