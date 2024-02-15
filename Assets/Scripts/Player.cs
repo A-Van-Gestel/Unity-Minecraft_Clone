@@ -37,6 +37,7 @@ public class Player : MonoBehaviour
 
     public Transform highlightBlock;
     public Transform placeBlock;
+    private bool blockPlaceable;
 
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
@@ -191,10 +192,10 @@ public class Player : MonoBehaviour
                 Vector3 placeBlockPosition = placeBlock.position;
                 Vector3 playerPosition = transform.position;
                 Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
-                
-                // Don't place blocks inside the player by returning early.
-                if (playerCoord == placeBlockPosition || (playerCoord + new Vector3(0, 1, 0)) == placeBlockPosition) return;
-                
+
+                // Don't place blocks inside the player or other voxels by returning early.
+                if (!blockPlaceable) return;
+
                 world.GetChunkFromVector3(placeBlockPosition).EditVoxel(placeBlockPosition, selectedBlockIndex);
             }
         }
@@ -212,18 +213,53 @@ public class Player : MonoBehaviour
             {
                 highlightBlock.position = new Vector3(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
                 highlightBlock.gameObject.SetActive(true);
-                
-                // Don't show place block highlight inside the player.
-                Vector3 playerPosition = transform.position;
-                Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
-                if (playerCoord != lastPos && (playerCoord + new Vector3(0, 1, 0)) != lastPos)
+
+                // Calculate place block position based on smallest x, y, z value, using highlightBlock position as your origin.
+                float xCheck = pos.x % 1;
+                if (xCheck > 0.5f)
+                    xCheck = xCheck - 1;
+                float yCheck = pos.y % 1;
+                if (yCheck > 0.5f)
+                    yCheck = yCheck - 1;
+                float zCheck = pos.z % 1;
+                if (zCheck > 0.5f)
+                    zCheck = zCheck - 1;
+
+                if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
                 {
-                    placeBlock.position = lastPos;
-                    placeBlock.gameObject.SetActive(true);
+                    // place block on x axis
+                    if (xCheck < 0)
+                        placeBlock.position = highlightBlock.position + Vector3.right;
+                    else
+                        placeBlock.position = highlightBlock.position + Vector3.left;
+                }
+                else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
+                {
+                    // place block on z axis
+                    if (zCheck < 0)
+                        placeBlock.position = highlightBlock.position + Vector3.forward;
+                    else
+                        placeBlock.position = highlightBlock.position + Vector3.back;
                 }
                 else
-                    placeBlock.gameObject.SetActive(false);
+                {
+                    // place block on y axis by default
+                    if (yCheck < 0)
+                        placeBlock.position = highlightBlock.position + Vector3.up;
+                    else
+                        placeBlock.position = highlightBlock.position + Vector3.down;
+                }
 
+
+                // Don't show place block highlight inside the player or when place block is inside solid block.
+                Vector3 playerPosition = transform.position;
+                Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
+                if (playerCoord != placeBlock.position && (playerCoord + new Vector3(0, 1, 0)) != placeBlock.position && !world.CheckForVoxel(placeBlock.position))
+                    blockPlaceable = true;
+                else
+                    blockPlaceable = false;
+                placeBlock.gameObject.SetActive(blockPlaceable);
+                
                 return;
             }
 
