@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 
 public class Player : MonoBehaviour
@@ -34,10 +35,25 @@ public class Player : MonoBehaviour
     private float verticalMomentum = 0;
     private bool jumpRequest;
 
+    public Transform highlightBlock;
+    public Transform placeBlock;
+
+    [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
+    public float checkIncrement = 0.05f;
+
+    public float reach = 8f;
+
+
+    public TextMeshProUGUI selectedBlockText;
+    public byte selectedBlockIndex = 1;
+
     private void Start()
     {
         playerCamera = GameObject.Find("Main Camera").transform;
         world = GameObject.Find("World").GetComponent<World>();
+
+        Cursor.lockState = CursorLockMode.Locked; // Makes cursor invisible and not able to go of screen
+        selectedBlockText.text = world.blockTypes[selectedBlockIndex].blockName + " block selected";
     }
 
     private void FixedUpdate()
@@ -52,6 +68,7 @@ public class Player : MonoBehaviour
     private void Update()
     {
         GetPlayerInputs();
+        PlaceCursorBlocks();
 
         // Rotates the player on the X axis
         transform.Rotate(Vector3.up * mouseHorizontal * Time.timeScale);
@@ -138,6 +155,84 @@ public class Player : MonoBehaviour
             float flyingDown = Input.GetAxis("Crouch");
             verticalFlying = flyingUp - flyingDown;
         }
+
+        float scroll = Input.GetAxis("Mouse ScrollWheel");
+
+        if (scroll != 0)
+        {
+            if (scroll > 0)
+                selectedBlockIndex++;
+            else
+                selectedBlockIndex--;
+
+            // Reached highest index, go back to start
+            if (selectedBlockIndex > (byte)(world.blockTypes.Length - 1))
+                selectedBlockIndex = 1;
+
+            // Reached lowest index, go back to end
+            if (selectedBlockIndex < 1)
+                selectedBlockIndex = (byte)(world.blockTypes.Length - 1);
+
+            selectedBlockText.text = world.blockTypes[selectedBlockIndex].blockName + " block selected";
+        }
+
+        if (highlightBlock.gameObject.activeSelf)
+        {
+            // Destroy block.
+            if (Input.GetMouseButtonDown(0))
+            {
+                Vector3 highlightBlockPosition = highlightBlock.position;
+                world.GetChunkFromVector3(highlightBlockPosition).EditVoxel(highlightBlockPosition, 0);
+            }
+
+            // Place block.
+            if (Input.GetMouseButtonDown(1))
+            {
+                Vector3 placeBlockPosition = placeBlock.position;
+                Vector3 playerPosition = transform.position;
+                Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
+                
+                // Don't place blocks inside the player by returning early.
+                if (playerCoord == placeBlockPosition || (playerCoord + new Vector3(0, 1, 0)) == placeBlockPosition) return;
+                
+                world.GetChunkFromVector3(placeBlockPosition).EditVoxel(placeBlockPosition, selectedBlockIndex);
+            }
+        }
+    }
+
+    private void PlaceCursorBlocks()
+    {
+        float step = checkIncrement;
+        Vector3 lastPos = new Vector3();
+
+        while (step < reach)
+        {
+            Vector3 pos = playerCamera.position + (playerCamera.forward * step);
+            if (world.CheckForVoxel(pos))
+            {
+                highlightBlock.position = new Vector3(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
+                highlightBlock.gameObject.SetActive(true);
+                
+                // Don't show place block highlight inside the player.
+                Vector3 playerPosition = transform.position;
+                Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
+                if (playerCoord != lastPos && (playerCoord + new Vector3(0, 1, 0)) != lastPos)
+                {
+                    placeBlock.position = lastPos;
+                    placeBlock.gameObject.SetActive(true);
+                }
+                else
+                    placeBlock.gameObject.SetActive(false);
+
+                return;
+            }
+
+            lastPos = new Vector3(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
+            step += checkIncrement;
+        }
+
+        highlightBlock.gameObject.SetActive(false);
+        placeBlock.gameObject.SetActive(false);
     }
 
     private float CheckDownSpeed(float downSpeed)
