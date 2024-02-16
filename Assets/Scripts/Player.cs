@@ -32,14 +32,16 @@ public class Player : MonoBehaviour
     private float verticalFlying;
     private float mouseHorizontal;
     private float mouseVertical;
-    private Vector3 velocity;
+    public Vector3 velocity;
     private float verticalMomentum = 0;
     private float lastForwardSpeed;
     private bool jumpRequest;
 
+    private Transform highlightBlocksParent;
     public Transform highlightBlock;
     public Transform placeBlock;
     private bool blockPlaceable;
+    public bool showHighlightBlocks = true;
 
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
@@ -53,6 +55,7 @@ public class Player : MonoBehaviour
     {
         playerCamera = GameObject.Find("Main Camera").transform;
         world = GameObject.Find("World").GetComponent<World>();
+        highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
 
         Cursor.lockState = CursorLockMode.Locked; // Makes cursor invisible and not able to go of screen
     }
@@ -118,8 +121,8 @@ public class Player : MonoBehaviour
         if (isSprinting)
             moveSpeed = sprintSpeed;
 
-        // Only change moveSpeed multiplier when on the ground
-        if (isGrounded)
+        // Only change moveSpeed multiplier when on the ground or when flying
+        if (isGrounded || isFlying)
             lastForwardSpeed = moveSpeed;
         else
             moveSpeed = lastForwardSpeed;
@@ -153,16 +156,23 @@ public class Player : MonoBehaviour
 
     private void GetPlayerInputs()
     {
+        // MOVEMENT & CAMERA
         horizontal = Input.GetAxis("Horizontal");
         vertical = Input.GetAxis("Vertical");
         mouseHorizontal = Input.GetAxis("Mouse X");
         mouseVertical = Input.GetAxis("Mouse Y");
 
+        // SPRINTING
         if (Input.GetButtonDown("Sprint"))
             isSprinting = true;
         if (Input.GetButtonUp("Sprint"))
             isSprinting = false;
 
+        
+        // FLYING
+        if (Input.GetKeyDown(KeyCode.F1))
+            isFlying = !isFlying;
+        
         if (!isFlying)
         {
             if (isGrounded && Input.GetButton("Jump"))
@@ -175,6 +185,10 @@ public class Player : MonoBehaviour
             verticalFlying = flyingUp - flyingDown;
         }
 
+        // PLACING & DESTROYING BLOCKS
+        if (Input.GetKeyDown(KeyCode.F2))
+            showHighlightBlocks = !showHighlightBlocks;
+        
         if (highlightBlock.gameObject.activeSelf)
         {
             // Destroy block.
@@ -210,7 +224,6 @@ public class Player : MonoBehaviour
             {
                 // DESTROY HIGHLIGHT BLOCK
                 highlightBlock.position = new Vector3(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
-                highlightBlock.gameObject.SetActive(true);
 
                 // PLACE HIGHLIGHT BLOCK
                 // Calculate place block position based on smallest x, y, z value, using highlightBlock position as your origin.
@@ -259,6 +272,11 @@ public class Player : MonoBehaviour
                     blockPlaceable = true;
                 else
                     blockPlaceable = false;
+
+                // SHOW HIGHLIGHT BLOCKS
+                highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
+
+                highlightBlock.gameObject.SetActive(true);
                 placeBlock.gameObject.SetActive(blockPlaceable);
 
                 return;

@@ -9,6 +9,7 @@ public class DebugScreen : MonoBehaviour
     public float frameRateUpdateRate = 0.5f;
     
     private World world;
+    private Player player;
     private TextMeshProUGUI text;
 
     private float frameRate;
@@ -20,6 +21,7 @@ public class DebugScreen : MonoBehaviour
     void Start()
     {
         world = GameObject.Find("World").GetComponent<World>();
+        player = GameObject.Find("Player").GetComponent<Player>();
         text = GetComponent<TextMeshProUGUI>();
 
         halfWorldSizeInVoxels = VoxelData.WorldSizeInVoxels / 2;
@@ -40,6 +42,11 @@ public class DebugScreen : MonoBehaviour
         debugText += "\n";
         // debugText += $"Chunk: {world.playerChunkCoord.x - halfWorldSizeInChunks} / {world.playerChunkCoord.z - halfWorldSizeInChunks}";
         debugText += $"Chunk: {world.playerChunkCoord.x} / {world.playerChunkCoord.z}";
+        debugText += "\n\n";
+        debugText += "PLAYER:\n";
+        debugText += $"isGrounded: {player.isGrounded}\nisFlying: {player.isFlying}\nshowHighlightBlocks {player.showHighlightBlocks}";
+        debugText += "\n";
+        debugText += $"Velocity XYZ: {player.velocity.x:F4} / {player.velocity.y:F4} / {player.velocity.z:F4}";
 
         text.text = debugText;
 
