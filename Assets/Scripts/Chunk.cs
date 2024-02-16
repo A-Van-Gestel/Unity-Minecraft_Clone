@@ -270,7 +270,7 @@ public class ChunkCoord
         z = zCheck / VoxelData.ChunkWidth;
     }
 
-    public bool Equels(ChunkCoord other)
+    public bool Equals(ChunkCoord other)
     {
         if (other == null)
             return false;
