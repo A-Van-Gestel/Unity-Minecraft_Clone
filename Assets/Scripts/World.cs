@@ -227,7 +227,7 @@ public class World : MonoBehaviour
         }
     }
 
-    private bool IsVoxelInWorld(Vector3 pos)
+    public bool IsVoxelInWorld(Vector3 pos)
     {
         if (pos.x >= 0 && pos.x < VoxelData.WorldSizeInVoxels &&
             pos.y >= 0 && pos.y < VoxelData.ChunkHeight &&

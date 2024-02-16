@@ -43,6 +43,7 @@ public class Chunk
         meshRenderer = chunkObject.AddComponent<MeshRenderer>();
 
         meshRenderer.material = world.material;
+        meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;  // Mostly fixes lines in the shadows between voxels.
         chunkObject.transform.SetParent(world.transform);
         chunkObject.transform.position = new Vector3(coord.x * VoxelData.ChunkWidth, 0f, coord.z * VoxelData.ChunkWidth);
         chunkObject.name = $"Chunk {coord.x}, {coord.z}";
@@ -133,8 +134,9 @@ public class Chunk
         int yCheck = Mathf.FloorToInt(pos.y);
         int zCheck = Mathf.FloorToInt(pos.z);
 
-        xCheck -= Mathf.FloorToInt(chunkObject.transform.position.x);
-        zCheck -= Mathf.FloorToInt(chunkObject.transform.position.z);
+        Vector3 chunkObjectPosition = chunkObject.transform.position;
+        xCheck -= Mathf.FloorToInt(chunkObjectPosition.x);
+        zCheck -= Mathf.FloorToInt(chunkObjectPosition.z);
 
         return voxelMap[xCheck, yCheck, zCheck];
     }
@@ -159,8 +161,9 @@ public class Chunk
         int yCheck = Mathf.FloorToInt(pos.y);
         int zCheck = Mathf.FloorToInt(pos.z);
 
-        xCheck -= Mathf.FloorToInt(chunkObject.transform.position.x);
-        zCheck -= Mathf.FloorToInt(chunkObject.transform.position.z);
+        Vector3 chunkObjectPosition = chunkObject.transform.position;
+        xCheck -= Mathf.FloorToInt(chunkObjectPosition.x);
+        zCheck -= Mathf.FloorToInt(chunkObjectPosition.z);
 
         voxelMap[xCheck, yCheck, zCheck] = newID;
         

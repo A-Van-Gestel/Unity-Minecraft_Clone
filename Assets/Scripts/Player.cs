@@ -228,10 +228,12 @@ public class Player : MonoBehaviour
                 }
 
 
-                // Don't show place block highlight inside the player or when place block is inside solid block.
+                // Don't show place block highlight inside the player or when place block is inside solid block or when the placed block would be outside the world.
                 Vector3 playerPosition = transform.position;
                 Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
-                if (playerCoord != placeBlock.position && (playerCoord + new Vector3(0, 1, 0)) != placeBlock.position && !world.CheckForVoxel(placeBlock.position))
+                if (playerCoord != placeBlock.position && (playerCoord + new Vector3(0, 1, 0)) != placeBlock.position
+                    && world.IsVoxelInWorld(placeBlock.position + new Vector3(0, 1, 0))
+                    && !world.CheckForVoxel(placeBlock.position))
                     blockPlaceable = true;
                 else
                     blockPlaceable = false;
