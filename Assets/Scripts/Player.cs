@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using TMPro;
+using Unity.VisualScripting;
 using UnityEngine;
 
 public class Player : MonoBehaviour
@@ -34,16 +34,19 @@ public class Player : MonoBehaviour
     private float mouseVertical;
     private Vector3 velocity;
     private float verticalMomentum = 0;
+    private float lastForwardSpeed;
     private bool jumpRequest;
 
     public Transform highlightBlock;
     public Transform placeBlock;
     private bool blockPlaceable;
+
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
+
     [Tooltip("Maximum distance the player can place and delete blocks from.")]
     public float reach = 8f;
-    
+
     public byte selectedBlockIndex = 1;
 
     private void Start()
@@ -89,13 +92,16 @@ public class Player : MonoBehaviour
 
     private void CalculateVelocity()
     {
+        // VERTICAL VELOCITY & GRAVITY
         if (!isFlying)
         {
+            // Only start accelerating downwards when falling of a block.
+            if (isGrounded && verticalMomentum < 0)
+                verticalMomentum = 0f;
+
+            // Affect vertical momentum with gravity.
             if (verticalMomentum > gravity)
-            {
-                // Affect vertical momentum with gravity.
                 verticalMomentum += Time.fixedDeltaTime * gravity;
-            }
         }
         else
         {
@@ -105,18 +111,33 @@ public class Player : MonoBehaviour
                 verticalMomentum = 0;
         }
 
+
+        // FORWARD & HORIZONTAL VELOCITY
         float moveSpeed = walkSpeed;
         // If we're sprinting, use the sprint multiplier
         if (isSprinting)
             moveSpeed = sprintSpeed;
 
-        // Normalized movement so that you don't move faster diagonally (causes little movements to stay stuck for a couple of seconds)
-        // velocity = ((transform.forward * vertical) + (transform.right * horizontal)).normalized * Time.fixedDeltaTime * moveSpeed;
-        velocity = ((transform.forward * vertical) + (transform.right * horizontal)) * Time.fixedDeltaTime * moveSpeed;
+        // Only change moveSpeed multiplier when on the ground
+        if (isGrounded)
+            lastForwardSpeed = moveSpeed;
+        else
+            moveSpeed = lastForwardSpeed;
+
+        Transform playerTransform = transform;
+        velocity = (playerTransform.forward * vertical) + (playerTransform.right * horizontal);
+
+        // Normalized movement so that you don't move faster diagonally only when total velocity is higher than 1.0 (allow slower-than-maximum motion)
+        if (velocity.magnitude > 1.0f)
+            velocity.Normalize();
+
+        velocity = velocity * Time.fixedDeltaTime * moveSpeed;
 
         // Apply vertical momentum (falling / jumping)
         velocity += Vector3.up * verticalMomentum * Time.fixedDeltaTime;
 
+
+        // COLLISION
         if ((velocity.z > 0 && Front) || (velocity.z < 0 && Back))
             velocity.z = 0;
 
@@ -181,16 +202,17 @@ public class Player : MonoBehaviour
     private void PlaceCursorBlocks()
     {
         float step = checkIncrement;
-        Vector3 lastPos = new Vector3();
 
         while (step < reach)
         {
             Vector3 pos = playerCamera.position + (playerCamera.forward * step);
             if (world.CheckForVoxel(pos))
             {
+                // DESTROY HIGHLIGHT BLOCK
                 highlightBlock.position = new Vector3(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
                 highlightBlock.gameObject.SetActive(true);
 
+                // PLACE HIGHLIGHT BLOCK
                 // Calculate place block position based on smallest x, y, z value, using highlightBlock position as your origin.
                 float xCheck = pos.x % 1;
                 if (xCheck > 0.5f)
@@ -232,17 +254,16 @@ public class Player : MonoBehaviour
                 Vector3 playerPosition = transform.position;
                 Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
                 if (playerCoord != placeBlock.position && (playerCoord + new Vector3(0, 1, 0)) != placeBlock.position
-                    && world.IsVoxelInWorld(placeBlock.position + new Vector3(0, 1, 0))
-                    && !world.CheckForVoxel(placeBlock.position))
+                                                       && world.IsVoxelInWorld(placeBlock.position + new Vector3(0, 1, 0))
+                                                       && !world.CheckForVoxel(placeBlock.position))
                     blockPlaceable = true;
                 else
                     blockPlaceable = false;
                 placeBlock.gameObject.SetActive(blockPlaceable);
-                
+
                 return;
             }
 
-            lastPos = new Vector3(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
             step += checkIncrement;
         }
 
