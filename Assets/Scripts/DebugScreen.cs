@@ -35,8 +35,8 @@ public class DebugScreen : MonoBehaviour
         debugText += $"{frameRate} fps";
         debugText += "\n\n";
         // debugText += $"XYZ : {(Mathf.FloorToInt(playerPosition.x) - halfWorldSizeInVoxels)} / {Mathf.FloorToInt(playerPosition.y)} / {(Mathf.FloorToInt(playerPosition.z) - halfWorldSizeInVoxels)} | ";
-        debugText += $"XYZ : {(Mathf.FloorToInt(playerPosition.x))} / {Mathf.FloorToInt(playerPosition.y)} / {(Mathf.FloorToInt(playerPosition.z))} | ";
-        debugText += $"Eye Level : {Mathf.FloorToInt(playerPosition.y) + 1.65f}";
+        debugText += $"XYZ: {(Mathf.FloorToInt(playerPosition.x))} / {Mathf.FloorToInt(playerPosition.y)} / {(Mathf.FloorToInt(playerPosition.z))} | ";
+        debugText += $"Eye Level: {Mathf.FloorToInt(playerPosition.y) + 1.65f}";
         debugText += "\n";
         // debugText += $"Chunk: {world.playerChunkCoord.x - halfWorldSizeInChunks} / {world.playerChunkCoord.z - halfWorldSizeInChunks}";
         debugText += $"Chunk: {world.playerChunkCoord.x} / {world.playerChunkCoord.z}";

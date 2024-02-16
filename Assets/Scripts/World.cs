@@ -13,6 +13,7 @@ public class World : MonoBehaviour
     public Vector3 spawnPosition;
 
     public Material material;
+    public Material transparentMaterial;
     public BlockType[] blockTypes;
 
     private Chunk[,] chunks = new Chunk[VoxelData.WorldSizeInChunks, VoxelData.WorldSizeInChunks];
@@ -150,14 +151,26 @@ public class World : MonoBehaviour
     {
         ChunkCoord thisChunk = new ChunkCoord(pos);
 
-        // if (!IsVoxelInWorld(pos))
-        if (!IsChunkInWorld(thisChunk) || pos.y < 0 || pos.y > VoxelData.ChunkHeight)
+        if (!IsVoxelInWorld(pos))
             return false;
 
         if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].isVoxelMapPopulated)
             return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos)].isSolid;
 
         return blockTypes[GetVoxel(pos)].isSolid;
+    }
+    
+    public bool CheckIfVoxelTransparent(Vector3 pos)
+    {
+        ChunkCoord thisChunk = new ChunkCoord(pos);
+
+        if (!IsVoxelInWorld(pos))
+            return false;
+
+        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].isVoxelMapPopulated)
+            return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos)].isTransparent;
+
+        return blockTypes[GetVoxel(pos)].isTransparent;
     }
     
     public byte GetVoxel(Vector3 pos)
@@ -247,6 +260,7 @@ public class BlockType
 {
     public string blockName;
     public bool isSolid;
+    public bool isTransparent;
     public Sprite icon;
 
     [Header("Texture Values")] public int backFaceTexture;
