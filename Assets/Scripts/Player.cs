@@ -6,6 +6,7 @@ using UnityEngine;
 
 public class Player : MonoBehaviour
 {
+    [Tooltip("Makes the player not be affected by gravity.")]
     public bool isFlying = false;
 
     public bool isGrounded;
@@ -38,14 +39,11 @@ public class Player : MonoBehaviour
     public Transform highlightBlock;
     public Transform placeBlock;
     private bool blockPlaceable;
-
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
-
+    [Tooltip("Maximum distance the player can place and delete blocks from.")]
     public float reach = 8f;
-
-
-    public TextMeshProUGUI selectedBlockText;
+    
     public byte selectedBlockIndex = 1;
 
     private void Start()
@@ -54,7 +52,6 @@ public class Player : MonoBehaviour
         world = GameObject.Find("World").GetComponent<World>();
 
         Cursor.lockState = CursorLockMode.Locked; // Makes cursor invisible and not able to go of screen
-        selectedBlockText.text = world.blockTypes[selectedBlockIndex].blockName + " block selected";
     }
 
     private void FixedUpdate()
@@ -155,26 +152,6 @@ public class Player : MonoBehaviour
             float flyingUp = Input.GetAxis("Jump");
             float flyingDown = Input.GetAxis("Crouch");
             verticalFlying = flyingUp - flyingDown;
-        }
-
-        float scroll = Input.GetAxis("Mouse ScrollWheel");
-
-        if (scroll != 0)
-        {
-            if (scroll > 0)
-                selectedBlockIndex++;
-            else
-                selectedBlockIndex--;
-
-            // Reached highest index, go back to start
-            if (selectedBlockIndex > (byte)(world.blockTypes.Length - 1))
-                selectedBlockIndex = 1;
-
-            // Reached lowest index, go back to end
-            if (selectedBlockIndex < 1)
-                selectedBlockIndex = (byte)(world.blockTypes.Length - 1);
-
-            selectedBlockText.text = world.blockTypes[selectedBlockIndex].blockName + " block selected";
         }
 
         if (highlightBlock.gameObject.activeSelf)

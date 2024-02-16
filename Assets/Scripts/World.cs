@@ -32,12 +32,13 @@ public class World : MonoBehaviour
 
         spawnPosition = new Vector3(VoxelData.WorldSizeInVoxels / 2f, VoxelData.ChunkHeight - 50f, VoxelData.WorldSizeInVoxels / 2f);
         GenerateWorld();
-        playerLastChunkCoord = GetChunkCoordFromVector3(spawnPosition);
+        playerLastChunkCoord = GetChunkCoordFromVector3(player.position);
     }
 
     private void Update()
     {
         playerChunkCoord = GetChunkCoordFromVector3(player.position);
+        
         // Only update the chunks if the player has moved from the chunk they where previously on.
         if (!playerChunkCoord.Equels(playerLastChunkCoord))
         {
@@ -149,7 +150,8 @@ public class World : MonoBehaviour
     {
         ChunkCoord thisChunk = new ChunkCoord(pos);
 
-        if (!IsVoxelInWorld(pos))
+        // if (!IsVoxelInWorld(pos))
+        if (!IsChunkInWorld(thisChunk) || pos.y < 0 || pos.y > VoxelData.ChunkHeight)
             return false;
 
         if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].isVoxelMapPopulated)
@@ -245,6 +247,7 @@ public class BlockType
 {
     public string blockName;
     public bool isSolid;
+    public Sprite icon;
 
     [Header("Texture Values")] public int backFaceTexture;
     public int frontFaceTexture;
