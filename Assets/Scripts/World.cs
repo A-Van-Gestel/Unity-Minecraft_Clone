@@ -29,7 +29,7 @@ public class World : MonoBehaviour
     private bool applyingModifications = false;
 
     private Queue<VoxelMod> modifications = new Queue<VoxelMod>();
-    
+
     [Tooltip("How many voxel modifications can be applied per frame. Setting it to 0 disables this check.")]
     public int maxVoxelModificationCount = 200;
 
@@ -91,23 +91,33 @@ public class World : MonoBehaviour
             VoxelMod v = modifications.Dequeue();
             ChunkCoord c = GetChunkCoordFromVector3(v.position);
 
-            if (chunks[c.x, c.z] == null)
+            // Only try to apply modifications if these modifications are inside the world
+            if (c.x >= 0 && c.x < VoxelData.WorldSizeInChunks &&
+                v.position.y < VoxelData.ChunkHeight &&
+                c.z >= 0 && c.z < VoxelData.WorldSizeInChunks)
             {
-                chunks[c.x, c.z] = new Chunk(c, this, true);
-                activeChunks.Add(c);
+                if (chunks[c.x, c.z] == null)
+                {
+                    chunks[c.x, c.z] = new Chunk(c, this, true);
+                    activeChunks.Add(c);
+                }
+
+                chunks[c.x, c.z].modifications.Enqueue(v);
+
+                if (!chunksToUpdate.Contains(chunks[c.x, c.z]))
+                {
+                    chunksToUpdate.Add(chunks[c.x, c.z]);
+                }
+
+                for (int i = 0; i < chunksToUpdate.Count; i++)
+                {
+                    chunksToUpdate[0].UpdateChunk();
+                    chunksToUpdate.RemoveAt(0);
+                }
             }
-
-            chunks[c.x, c.z].modifications.Enqueue(v);
-
-            if (!chunksToUpdate.Contains(chunks[c.x, c.z]))
+            else
             {
-                chunksToUpdate.Add(chunks[c.x, c.z]);
-            }
-
-            for (int i = 0; i < chunksToUpdate.Count; i++)
-            {
-                chunksToUpdate[0].UpdateChunk();
-                chunksToUpdate.RemoveAt(0);
+                Debug.Log($"World.GenerateWorld | ChunkCoord outside of world: X / Z = {c.x} / {c.z}");
             }
         }
 
@@ -152,24 +162,32 @@ public class World : MonoBehaviour
             VoxelMod v = modifications.Dequeue();
             ChunkCoord c = GetChunkCoordFromVector3(v.position);
 
-            if (chunks[c.x, c.z] == null)
+            // Only try to apply modifications if these modifications are inside the world
+            if (c.x >= 0 && c.x < VoxelData.WorldSizeInChunks && c.z >= 0 && c.z < VoxelData.WorldSizeInChunks)
             {
-                chunks[c.x, c.z] = new Chunk(c, this, true);
-                activeChunks.Add(c);
+                if (chunks[c.x, c.z] == null)
+                {
+                    chunks[c.x, c.z] = new Chunk(c, this, true);
+                    activeChunks.Add(c);
+                }
+
+                chunks[c.x, c.z].modifications.Enqueue(v);
+
+                if (!chunksToUpdate.Contains(chunks[c.x, c.z]))
+                {
+                    chunksToUpdate.Add(chunks[c.x, c.z]);
+                }
+
+                count++;
+                if (count > maxVoxelModificationCount)
+                {
+                    count = 0;
+                    yield return null;
+                }
             }
-
-            chunks[c.x, c.z].modifications.Enqueue(v);
-
-            if (!chunksToUpdate.Contains(chunks[c.x, c.z]))
+            else
             {
-                chunksToUpdate.Add(chunks[c.x, c.z]);
-            }
-
-            count++;
-            if (count > maxVoxelModificationCount)
-            {
-                count = 0;
-                yield return null;
+                Debug.Log($"World.ApplyModifications | ChunkCoord outside of world: X / Z = {c.x} / {c.z}");
             }
         }
 
@@ -216,6 +234,10 @@ public class World : MonoBehaviour
                     else if (!chunks[x, z].isActive)
                     {
                         chunks[x, z].isActive = true;
+                    }
+                    else if (!chunks[x, z].isInitialized)
+                    {
+                        chunksToCreate.Add(new ChunkCoord(x, z));
                     }
 
                     activeChunks.Add(new ChunkCoord(x, z));

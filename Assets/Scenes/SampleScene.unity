@@ -168,7 +168,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 44b912604a22a6a42978771f835be758, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  isFlying: 0
+  isFlying: 1
   isGrounded: 0
   isSprinting: 0
   walkSpeed: 3
@@ -2315,6 +2315,7 @@ MonoBehaviour:
     bottomFaceTexture: 16
     leftFaceTexture: 16
     rightFaceTexture: 16
+  maxVoxelModificationCount: 200
   debugScreen: {fileID: 884714899}
 --- !u!4 &1731500969
 Transform:
