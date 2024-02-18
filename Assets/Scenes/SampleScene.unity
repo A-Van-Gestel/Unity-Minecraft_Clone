@@ -296,9 +296,9 @@ MonoBehaviour:
     icon: {fileID: 1068059367}
   - itemID: 13
     icon: {fileID: 902592859}
-  - itemID: 7
+  - itemID: 14
     icon: {fileID: 959827306}
-  - itemID: 8
+  - itemID: 15
     icon: {fileID: 616865838}
   - itemID: 11
     icon: {fileID: 1736286817}
@@ -2295,6 +2295,26 @@ MonoBehaviour:
     bottomFaceTexture: 13
     leftFaceTexture: 13
     rightFaceTexture: 13
+  - blockName: Oak Log
+    isSolid: 1
+    isTransparent: 0
+    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
+    backFaceTexture: 14
+    frontFaceTexture: 14
+    topFaceTexture: 15
+    bottomFaceTexture: 15
+    leftFaceTexture: 14
+    rightFaceTexture: 14
+  - blockName: Oak Leaves
+    isSolid: 1
+    isTransparent: 1
+    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
+    backFaceTexture: 16
+    frontFaceTexture: 16
+    topFaceTexture: 16
+    bottomFaceTexture: 16
+    leftFaceTexture: 16
+    rightFaceTexture: 16
   debugScreen: {fileID: 884714899}
 --- !u!4 &1731500969
 Transform:
