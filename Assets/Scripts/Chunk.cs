@@ -15,7 +15,7 @@ public class Chunk
     private int vertexIndex = 0;
     private List<Vector3> vertices = new List<Vector3>();
     private List<int> triangels = new List<int>();
-    private List<int> transparantTrangles = new List<int>();
+    private List<int> transparantTriangles = new List<int>();
     private Material[] materials = new Material[2];
     private List<Vector2> uvs = new List<Vector2>();
 
@@ -82,6 +82,7 @@ public class Chunk
         vertexIndex = 0;
         vertices.Clear();
         triangels.Clear();
+        transparantTriangles.Clear();
         uvs.Clear();
     }
 
@@ -220,12 +221,12 @@ public class Chunk
                 }
                 else
                 {
-                    transparantTrangles.Add(vertexIndex);
-                    transparantTrangles.Add(vertexIndex + 1);
-                    transparantTrangles.Add(vertexIndex + 2);
-                    transparantTrangles.Add(vertexIndex + 2);
-                    transparantTrangles.Add(vertexIndex + 1);
-                    transparantTrangles.Add(vertexIndex + 3);
+                    transparantTriangles.Add(vertexIndex);
+                    transparantTriangles.Add(vertexIndex + 1);
+                    transparantTriangles.Add(vertexIndex + 2);
+                    transparantTriangles.Add(vertexIndex + 2);
+                    transparantTriangles.Add(vertexIndex + 1);
+                    transparantTriangles.Add(vertexIndex + 3);
                 }
                 vertexIndex += 4;
             }
@@ -239,7 +240,7 @@ public class Chunk
 
         mesh.subMeshCount = 2;
         mesh.SetTriangles(triangels.ToArray(), 0);
-        mesh.SetTriangles(transparantTrangles.ToArray(), 1);
+        mesh.SetTriangles(transparantTriangles.ToArray(), 1);
         
         mesh.uv = uvs.ToArray();
 
