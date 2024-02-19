@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -25,11 +26,11 @@ public class World : MonoBehaviour
 
     private List<ChunkCoord> chunksToCreate = new List<ChunkCoord>();
     private List<Chunk> chunksToUpdate = new List<Chunk>();
-    public Queue<Chunk> chunksToDraw = new Queue<Chunk>();
+    public ConcurrentQueue<Chunk> chunksToDraw = new ConcurrentQueue<Chunk>();
 
     private bool applyingModifications = false;
 
-    private Queue<Queue<VoxelMod>> modifications = new Queue<Queue<VoxelMod>>();
+    private ConcurrentQueue<ConcurrentQueue<VoxelMod>> modifications = new ConcurrentQueue<ConcurrentQueue<VoxelMod>>();
 
     [Tooltip("How many voxel modifications can be applied per frame. Setting it to 0 disables this check.")]
     public int maxVoxelModificationCount = 200;
@@ -62,13 +63,20 @@ public class World : MonoBehaviour
         if (chunksToUpdate.Count > 0)
             UpdateChunks();
 
-        if (chunksToDraw.Count > 0)
+        lock (chunksToDraw)
         {
-            lock (chunksToDraw)
+            if (chunksToDraw.Count > 0)
             {
-                if (chunksToDraw.Peek().isEditable)
+                if (chunksToDraw.TryPeek(out Chunk chunk) && chunk.IsEditable && chunksToDraw.TryDequeue(out chunk))
                 {
-                    chunksToDraw.Dequeue().CreateMesh();
+                    try
+                    {
+                        chunk.CreateMesh();
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.Log("Chunk MeshCreation Exception: " + e);
+                    }
                 }
             }
         }
@@ -107,7 +115,7 @@ public class World : MonoBehaviour
 
         while (!updated && index < chunksToUpdate.Count - 1)
         {
-            if (chunksToUpdate[index].isEditable)
+            if (chunksToUpdate[index].IsEditable)
             {
                 chunksToUpdate[index].UpdateChunk();
                 chunksToUpdate.RemoveAt(index);
@@ -126,13 +134,15 @@ public class World : MonoBehaviour
 
         while (modifications.Count > 0)
         {
-            Queue<VoxelMod> queue = modifications.Dequeue();
+            // Try getting the queue, if not successful retry later
+            if (!modifications.TryDequeue(out ConcurrentQueue<VoxelMod> queue)) continue;
 
             try
             {
                 while (queue.Count > 0)
                 {
-                    VoxelMod v = queue.Dequeue();
+                    // Try getting the voxelMod, if not successful retry later
+                    if (!queue.TryDequeue(out VoxelMod v)) continue;
                     ChunkCoord c = GetChunkCoordFromVector3(v.position);
 
                     // Only try to apply modifications if these modifications are inside the world
@@ -157,11 +167,10 @@ public class World : MonoBehaviour
                     }
                 }
             }
-            catch (System.NullReferenceException e)
+            catch (NullReferenceException e)
             {
                 Debug.Log("NullReference Exception again: " + e);
             }
-            
         }
 
         applyingModifications = false;
@@ -237,7 +246,7 @@ public class World : MonoBehaviour
         if (!IsVoxelInWorld(pos))
             return false;
 
-        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].isEditable)
+        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].IsEditable)
             return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos)].isSolid;
 
         return blockTypes[GetVoxel(pos)].isSolid;
@@ -250,7 +259,7 @@ public class World : MonoBehaviour
         if (!IsVoxelInWorld(pos))
             return false;
 
-        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].isEditable)
+        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].IsEditable)
             return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos)].isTransparent;
 
         return blockTypes[GetVoxel(pos)].isTransparent;
@@ -314,7 +323,7 @@ public class World : MonoBehaviour
             {
                 if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 2500, biome.treePlacementScale) > biome.treePlacementThreshold)
                 {
-                    Queue<VoxelMod> structureQueue = Structure.MakeTree(pos, biome.minTreeHeight, biome.maxTreeHeight);
+                    ConcurrentQueue<VoxelMod> structureQueue = Structure.MakeTree(pos, biome.minTreeHeight, biome.maxTreeHeight);
                     modifications.Enqueue(structureQueue);
                 }
             }

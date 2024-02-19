@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -26,7 +27,7 @@ public class Chunk
 
     private World world;
 
-    public Queue<VoxelMod> modifications = new Queue<VoxelMod>();
+    public ConcurrentQueue<VoxelMod> modifications = new ConcurrentQueue<VoxelMod>();
 
     private bool _isActive;
     private bool isVoxelMapPopulated = false;
@@ -99,7 +100,8 @@ public class Chunk
 
         while (modifications.Count > 0)
         {
-            VoxelMod v = modifications.Dequeue();
+            // Try getting the voxelMod, if not successful retry later
+            if(!modifications.TryDequeue(out VoxelMod v)) continue;
             Vector3 pos = v.position -= chunkPosition;
             voxelMap[(int)pos.x, (int)pos.y, (int)pos.z] = v.id;
         }
@@ -148,7 +150,7 @@ public class Chunk
         }
     }
 
-    public bool isEditable
+    public bool IsEditable
     {
         get
         {
