@@ -25,10 +25,11 @@ public class World : MonoBehaviour
 
     private List<ChunkCoord> chunksToCreate = new List<ChunkCoord>();
     private List<Chunk> chunksToUpdate = new List<Chunk>();
+    public Queue<Chunk> chunksToDraw = new Queue<Chunk>();
 
     private bool applyingModifications = false;
 
-    private Queue<VoxelMod> modifications = new Queue<VoxelMod>();
+    private Queue<Queue<VoxelMod>> modifications = new Queue<Queue<VoxelMod>>();
 
     [Tooltip("How many voxel modifications can be applied per frame. Setting it to 0 disables this check.")]
     public int maxVoxelModificationCount = 200;
@@ -50,29 +51,31 @@ public class World : MonoBehaviour
 
         // Only update the chunks if the player has moved from the chunk they where previously on.
         if (!playerChunkCoord.Equals(playerLastChunkCoord))
-        {
             CheckViewDistance();
-        }
 
-        if (modifications.Count > 0 && !applyingModifications)
-        {
-            StartCoroutine(ApplyModifications());
-        }
+        if (!applyingModifications)
+            ApplyModifications();
 
         if (chunksToCreate.Count > 0)
-        {
             CreateChunk();
-        }
 
         if (chunksToUpdate.Count > 0)
-        {
             UpdateChunks();
+
+        if (chunksToDraw.Count > 0)
+        {
+            lock (chunksToDraw)
+            {
+                if (chunksToDraw.Peek().isEditable)
+                {
+                    chunksToDraw.Dequeue().CreateMesh();
+                }
+            }
         }
 
+
         if (Input.GetKeyDown(KeyCode.F3))
-        {
             debugScreen.SetActive(!debugScreen.activeSelf);
-        }
     }
 
     private void GenerateWorld()
@@ -83,41 +86,6 @@ public class World : MonoBehaviour
             {
                 chunks[x, z] = new Chunk(new ChunkCoord(x, z), this, true);
                 activeChunks.Add(new ChunkCoord(x, z));
-            }
-        }
-
-        while (modifications.Count > 0)
-        {
-            VoxelMod v = modifications.Dequeue();
-            ChunkCoord c = GetChunkCoordFromVector3(v.position);
-
-            // Only try to apply modifications if these modifications are inside the world
-            if (c.x >= 0 && c.x < VoxelData.WorldSizeInChunks &&
-                v.position.y < VoxelData.ChunkHeight &&
-                c.z >= 0 && c.z < VoxelData.WorldSizeInChunks)
-            {
-                if (chunks[c.x, c.z] == null)
-                {
-                    chunks[c.x, c.z] = new Chunk(c, this, true);
-                    activeChunks.Add(c);
-                }
-
-                chunks[c.x, c.z].modifications.Enqueue(v);
-
-                if (!chunksToUpdate.Contains(chunks[c.x, c.z]))
-                {
-                    chunksToUpdate.Add(chunks[c.x, c.z]);
-                }
-
-                for (int i = 0; i < chunksToUpdate.Count; i++)
-                {
-                    chunksToUpdate[0].UpdateChunk();
-                    chunksToUpdate.RemoveAt(0);
-                }
-            }
-            else
-            {
-                Debug.Log($"World.GenerateWorld | ChunkCoord outside of world: X / Z = {c.x} / {c.z}");
             }
         }
 
@@ -139,7 +107,7 @@ public class World : MonoBehaviour
 
         while (!updated && index < chunksToUpdate.Count - 1)
         {
-            if (chunksToUpdate[index].isVoxelMapPopulated)
+            if (chunksToUpdate[index].isEditable)
             {
                 chunksToUpdate[index].UpdateChunk();
                 chunksToUpdate.RemoveAt(index);
@@ -152,43 +120,48 @@ public class World : MonoBehaviour
         }
     }
 
-    IEnumerator ApplyModifications()
+    private void ApplyModifications()
     {
         applyingModifications = true;
-        int count = 0;
 
         while (modifications.Count > 0)
         {
-            VoxelMod v = modifications.Dequeue();
-            ChunkCoord c = GetChunkCoordFromVector3(v.position);
+            Queue<VoxelMod> queue = modifications.Dequeue();
 
-            // Only try to apply modifications if these modifications are inside the world
-            if (c.x >= 0 && c.x < VoxelData.WorldSizeInChunks && c.z >= 0 && c.z < VoxelData.WorldSizeInChunks)
+            try
             {
-                if (chunks[c.x, c.z] == null)
+                while (queue.Count > 0)
                 {
-                    chunks[c.x, c.z] = new Chunk(c, this, true);
-                    activeChunks.Add(c);
-                }
+                    VoxelMod v = queue.Dequeue();
+                    ChunkCoord c = GetChunkCoordFromVector3(v.position);
 
-                chunks[c.x, c.z].modifications.Enqueue(v);
+                    // Only try to apply modifications if these modifications are inside the world
+                    if (c.x >= 0 && c.x < VoxelData.WorldSizeInChunks && c.z >= 0 && c.z < VoxelData.WorldSizeInChunks)
+                    {
+                        if (chunks[c.x, c.z] == null)
+                        {
+                            chunks[c.x, c.z] = new Chunk(c, this, true);
+                            activeChunks.Add(c);
+                        }
 
-                if (!chunksToUpdate.Contains(chunks[c.x, c.z]))
-                {
-                    chunksToUpdate.Add(chunks[c.x, c.z]);
-                }
+                        chunks[c.x, c.z].modifications.Enqueue(v);
 
-                count++;
-                if (count > maxVoxelModificationCount)
-                {
-                    count = 0;
-                    yield return null;
+                        if (!chunksToUpdate.Contains(chunks[c.x, c.z]))
+                        {
+                            chunksToUpdate.Add(chunks[c.x, c.z]);
+                        }
+                    }
+                    else
+                    {
+                        Debug.Log($"World.ApplyModifications | ChunkCoord outside of world: X / Z = {c.x} / {c.z}");
+                    }
                 }
             }
-            else
+            catch (System.NullReferenceException e)
             {
-                Debug.Log($"World.ApplyModifications | ChunkCoord outside of world: X / Z = {c.x} / {c.z}");
+                Debug.Log("NullReference Exception again: " + e);
             }
+            
         }
 
         applyingModifications = false;
@@ -235,10 +208,6 @@ public class World : MonoBehaviour
                     {
                         chunks[x, z].isActive = true;
                     }
-                    else if (!chunks[x, z].isInitialized)
-                    {
-                        chunksToCreate.Add(new ChunkCoord(x, z));
-                    }
 
                     activeChunks.Add(new ChunkCoord(x, z));
                 }
@@ -268,7 +237,7 @@ public class World : MonoBehaviour
         if (!IsVoxelInWorld(pos))
             return false;
 
-        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].isVoxelMapPopulated)
+        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].isEditable)
             return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos)].isSolid;
 
         return blockTypes[GetVoxel(pos)].isSolid;
@@ -281,7 +250,7 @@ public class World : MonoBehaviour
         if (!IsVoxelInWorld(pos))
             return false;
 
-        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].isVoxelMapPopulated)
+        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].isEditable)
             return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos)].isTransparent;
 
         return blockTypes[GetVoxel(pos)].isTransparent;
@@ -345,7 +314,8 @@ public class World : MonoBehaviour
             {
                 if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 2500, biome.treePlacementScale) > biome.treePlacementThreshold)
                 {
-                    Structure.MakeTree(pos, modifications, biome.minTreeHeight, biome.maxTreeHeight);
+                    Queue<VoxelMod> structureQueue = Structure.MakeTree(pos, biome.minTreeHeight, biome.maxTreeHeight);
+                    modifications.Enqueue(structureQueue);
                 }
             }
         }
