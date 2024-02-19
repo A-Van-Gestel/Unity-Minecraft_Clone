@@ -46,6 +46,8 @@ public class DebugScreen : MonoBehaviour
         debugText += "PLAYER:\n";
         debugText += $"isGrounded: {player.isGrounded}\nisFlying: {player.isFlying}\nshowHighlightBlocks {player.showHighlightBlocks}";
         debugText += "\n";
+        debugText += $"SPEED: Current: {player.moveSpeed:f1} | Flying: {player.flyingSpeed:f1}";
+        debugText += "\n";
         debugText += $"Velocity XYZ: {player.velocity.x:F4} / {player.velocity.y:F4} / {player.velocity.z:F4}";
 
         text.text = debugText;

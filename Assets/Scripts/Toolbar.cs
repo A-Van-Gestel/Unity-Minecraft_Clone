@@ -45,7 +45,7 @@ public class Toolbar : MonoBehaviour
         // SCROLL WHEEL
         float scroll = Input.GetAxis("Mouse ScrollWheel");
 
-        if (scroll != 0)
+        if (scroll != 0 && !Input.GetKey(KeyCode.LeftAlt))
         {
             if (scroll > 0)
                 slotIndex--;

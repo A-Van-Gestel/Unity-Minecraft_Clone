@@ -14,12 +14,18 @@ public class Player : MonoBehaviour
     private Transform playerCamera;
     private World world;
 
+    [Header("Speed modifiers")]
     public float walkSpeed = 3f;
     public float sprintSpeed = 6f;
+    public float flyingSpeed = 3f;
+    public float flyingSpeedIncrement = 0.5f;
     public float flyingAscendSpeed = 5f;
+    
+    [Header("Gravity modifiers")]
     public float jumpForce = 5.7f;
     public float gravity = -13f;
 
+    [Header("Player properties")]
     [Tooltip("The radius of the player")]
     public float playerWidth = 0.4f;
 
@@ -31,16 +37,18 @@ public class Player : MonoBehaviour
     private float verticalFlying;
     private float mouseHorizontal;
     private float mouseVertical;
-    public Vector3 velocity;
+    internal Vector3 velocity;
     private float verticalMomentum = 0;
-    private float lastForwardSpeed;
+    internal float moveSpeed;
+    private float lastMoveSpeed;
     private bool jumpRequest;
 
+    [Header("Block Destroy & Placement properties")]
+    public bool showHighlightBlocks = true;
     private Transform highlightBlocksParent;
     public Transform highlightBlock;
     public Transform placeBlock;
     private bool blockPlaceable;
-    public bool showHighlightBlocks = true;
 
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
@@ -115,16 +123,21 @@ public class Player : MonoBehaviour
 
 
         // FORWARD & HORIZONTAL VELOCITY
-        float moveSpeed = walkSpeed;
+        moveSpeed = walkSpeed;
         // If we're sprinting, use the sprint multiplier
         if (isSprinting)
             moveSpeed = sprintSpeed;
 
         // Only change moveSpeed multiplier when on the ground or when flying
-        if (isGrounded || isFlying)
-            lastForwardSpeed = moveSpeed;
+        if (isGrounded && !isFlying)
+            lastMoveSpeed = moveSpeed;
+        else if (isFlying)
+        {
+            lastMoveSpeed = flyingSpeed;
+            moveSpeed = lastMoveSpeed;
+        }
         else
-            moveSpeed = lastForwardSpeed;
+            moveSpeed = lastMoveSpeed;
 
         Transform playerTransform = transform;
         velocity = (playerTransform.forward * vertical) + (playerTransform.right * horizontal);
@@ -182,6 +195,18 @@ public class Player : MonoBehaviour
             float flyingUp = Input.GetAxis("Jump");
             float flyingDown = Input.GetAxis("Crouch");
             verticalFlying = flyingUp - flyingDown;
+
+            float scroll = Input.GetAxis("Mouse ScrollWheel");
+            if (Input.GetKey(KeyCode.LeftAlt) && scroll != 0)
+            {
+                if (scroll > 0)
+                    flyingSpeed += flyingSpeedIncrement;
+                else
+                    flyingSpeed -= flyingSpeedIncrement;
+
+                if (flyingSpeed <= 0)
+                    flyingSpeed = 1f;
+            }
         }
 
         // PLACING & DESTROYING BLOCKS
