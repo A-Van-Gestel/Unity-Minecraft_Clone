@@ -200,13 +200,10 @@ public class Player : MonoBehaviour
             // Place block.
             if (Input.GetMouseButtonDown(1))
             {
-                Vector3 placeBlockPosition = placeBlock.position;
-                Vector3 playerPosition = transform.position;
-                Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
-
                 // Don't place blocks inside the player or other voxels by returning early.
                 if (!blockPlaceable) return;
-
+                
+                Vector3 placeBlockPosition = placeBlock.position;
                 world.GetChunkFromVector3(placeBlockPosition).EditVoxel(placeBlockPosition, selectedBlockIndex);
             }
         }
