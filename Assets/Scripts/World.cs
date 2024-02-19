@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
@@ -32,16 +33,14 @@ public class World : MonoBehaviour
 
     private ConcurrentQueue<ConcurrentQueue<VoxelMod>> modifications = new ConcurrentQueue<ConcurrentQueue<VoxelMod>>();
 
-    [Tooltip("How many voxel modifications can be applied per frame. Setting it to 0 disables this check.")]
-    public int maxVoxelModificationCount = 200;
-
+    [Header("Debug")]
     public GameObject debugScreen;
 
     private void Start()
     {
         Random.InitState(seed);
 
-        spawnPosition = new Vector3(VoxelData.WorldSizeInVoxels / 2f, VoxelData.ChunkHeight - 50f, VoxelData.WorldSizeInVoxels / 2f);
+        spawnPosition = new Vector3(VoxelData.WorldSizeInVoxels / 2f, VoxelData.ChunkHeight - 1f, VoxelData.WorldSizeInVoxels / 2f);
         GenerateWorld();
         playerLastChunkCoord = GetChunkCoordFromVector3(player.position);
     }
@@ -97,6 +96,7 @@ public class World : MonoBehaviour
             }
         }
 
+        spawnPosition = GetHighestVoxel(spawnPosition) + new Vector3(0.5f, 1.1f, 0.5f);
         player.position = spawnPosition;
     }
 
@@ -237,6 +237,42 @@ public class World : MonoBehaviour
         {
             chunks[c.x, c.z].isActive = false;
         }
+    }
+
+    public Vector3 GetHighestVoxel(Vector3 pos)
+    {
+        ChunkCoord thisChunk = new ChunkCoord(pos);
+        int yMax = VoxelData.ChunkHeight - 1;
+
+        // Voxel outside the world, highest voxel is world height.
+        if (!IsVoxelInWorld(pos))
+        {
+            Debug.Log($"Voxel not in world for X / Y/ Z = {(int)pos.x} / {(int)pos.y} / {(int)pos.z}");
+            return new Vector3(pos.x, yMax, pos.z);
+        }
+
+        // Chunk is created and editable, calculate highest voxel using chunk function.
+        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].IsEditable)
+        {
+            Debug.Log($"Finding highest voxel for chunk {thisChunk.x} / {thisChunk.z} in wold for X / Z = {(int)pos.x} / {(int)pos.z} using chunk function.");
+            Chunk currentChunk = chunks[thisChunk.x, thisChunk.z];
+            Vector3 voxelPositionInChunk = currentChunk.GetVoxelPositionInChunkFromGlobalVector3(pos);
+            Vector3 highestVoxelPositionInChunk = currentChunk.GetHighestVoxel(voxelPositionInChunk);
+            return new Vector3(pos.x, highestVoxelPositionInChunk.y, pos.z);
+        }
+
+        // Chunk is not created, calculate highest voxel using expensive world generation code.
+        for (int i = yMax; i > 0; i--)
+        {
+            Vector3 currentVoxel = new Vector3(pos.x, i, pos.z);
+            if (!blockTypes[GetVoxel(currentVoxel)].isSolid) continue;
+            Debug.Log($"Finding highest voxel in wold for X / Z = {(int)pos.x} / {(int)pos.z} using expensive world generation code.");
+            return currentVoxel;
+        }
+
+        // Fallback, highest voxel is world height
+        Debug.Log($"No solid voxels found for X / Z = {(int)pos.x} / {(int)pos.z}");
+        return new Vector3(pos.x, yMax, pos.z);
     }
 
     public bool CheckForVoxel(Vector3 pos)

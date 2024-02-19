@@ -173,15 +173,16 @@ MonoBehaviour:
   isSprinting: 0
   walkSpeed: 3
   sprintSpeed: 6
+  flyingSpeed: 3
+  flyingSpeedIncrement: 0.5
   flyingAscendSpeed: 5
   jumpForce: 5.7
   gravity: -13
   playerWidth: 0.4
   playerHeight: 1.8
-  velocity: {x: 0, y: 0, z: 0}
+  showHighlightBlocks: 0
   highlightBlock: {fileID: 1989252701}
   placeBlock: {fileID: 1073421876}
-  showHighlightBlocks: 0
   checkIncrement: 0.05
   reach: 8
   selectedBlockIndex: 1

@@ -101,9 +101,11 @@ public class Chunk
         while (modifications.Count > 0)
         {
             // Try getting the voxelMod, if not successful retry later
-            if(!modifications.TryDequeue(out VoxelMod v)) continue;
+            if (!modifications.TryDequeue(out VoxelMod v)) continue;
             Vector3 pos = v.position -= chunkPosition;
-            voxelMap[(int)pos.x, (int)pos.y, (int)pos.z] = v.id;
+            
+            if (IsVoxelInChunk((int)pos.x, (int)pos.y, (int)pos.z))
+                voxelMap[(int)pos.x, (int)pos.y, (int)pos.z] = v.id;
         }
 
         ClearMeshData();
@@ -175,6 +177,18 @@ public class Chunk
         }
     }
 
+    public Vector3 GetVoxelPositionInChunkFromGlobalVector3(Vector3 pos)
+    {
+        int xCheck = Mathf.FloorToInt(pos.x);
+        int yCheck = Mathf.FloorToInt(pos.y);
+        int zCheck = Mathf.FloorToInt(pos.z);
+
+        xCheck -= Mathf.FloorToInt(chunkPosition.x);
+        zCheck -= Mathf.FloorToInt(chunkPosition.z);
+
+        return new Vector3(xCheck, yCheck, zCheck);
+    }
+
     public byte GetVoxelFromGlobalVector3(Vector3 pos)
     {
         int xCheck = Mathf.FloorToInt(pos.x);
@@ -185,6 +199,20 @@ public class Chunk
         zCheck -= Mathf.FloorToInt(chunkPosition.z);
 
         return voxelMap[xCheck, yCheck, zCheck];
+    }
+
+    private bool CheckForVoxel(Vector3 pos)
+    {
+        int x = Mathf.FloorToInt(pos.x);
+        int y = Mathf.FloorToInt(pos.y);
+        int z = Mathf.FloorToInt(pos.z);
+
+        if (!IsVoxelInChunk(x, y, z))
+        {
+            return world.CheckForVoxel(pos + chunkPosition);
+        }
+
+        return world.blockTypes[voxelMap[x, y, z]].isSolid;
     }
 
     private bool CheckIfVoxelTransparent(Vector3 pos)
@@ -199,6 +227,20 @@ public class Chunk
         }
 
         return world.blockTypes[voxelMap[x, y, z]].isTransparent;
+    }
+
+    public Vector3 GetHighestVoxel(Vector3 pos)
+    {
+        int x = Mathf.FloorToInt(pos.x);
+        int z = Mathf.FloorToInt(pos.z);
+
+        for (int i = VoxelData.ChunkHeight - 1; i > 0; i--)
+        {
+            Vector3 currentVoxel = new Vector3(x, i, z);
+            if (CheckForVoxel(currentVoxel)) return currentVoxel;
+        }
+
+        return new Vector3(x, VoxelData.ChunkHeight - 1, z);
     }
 
     public void EditVoxel(Vector3 pos, byte newID)
