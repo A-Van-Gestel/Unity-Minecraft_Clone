@@ -2035,12 +2035,12 @@ MonoBehaviour:
     isSolid: 1
     isTransparent: 0
     icon: {fileID: 122583294, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    backFaceTexture: 5
-    frontFaceTexture: 5
+    backFaceTexture: 21
+    frontFaceTexture: 21
     topFaceTexture: 5
-    bottomFaceTexture: 5
-    leftFaceTexture: 5
-    rightFaceTexture: 5
+    bottomFaceTexture: 2
+    leftFaceTexture: 21
+    rightFaceTexture: 21
   - blockName: Stone Walkway
     isSolid: 1
     isTransparent: 0
@@ -2075,12 +2075,12 @@ MonoBehaviour:
     isSolid: 1
     isTransparent: 0
     icon: {fileID: 2025127514, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    backFaceTexture: 9
-    frontFaceTexture: 9
+    backFaceTexture: 25
+    frontFaceTexture: 25
     topFaceTexture: 9
-    bottomFaceTexture: 9
-    leftFaceTexture: 9
-    rightFaceTexture: 9
+    bottomFaceTexture: 2
+    leftFaceTexture: 25
+    rightFaceTexture: 25
   - blockName: Tile
     isSolid: 1
     isTransparent: 0
