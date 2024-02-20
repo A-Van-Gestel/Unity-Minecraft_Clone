@@ -16,13 +16,15 @@ public class Player : MonoBehaviour
 
     [Header("Speed modifiers")]
     public float walkSpeed = 3f;
+
     public float sprintSpeed = 6f;
     public float flyingSpeed = 3f;
     public float flyingSpeedIncrement = 0.5f;
     public float flyingAscendSpeed = 5f;
-    
+
     [Header("Gravity modifiers")]
     public float jumpForce = 5.7f;
+
     public float gravity = -13f;
 
     [Header("Player properties")]
@@ -45,9 +47,14 @@ public class Player : MonoBehaviour
 
     [Header("Block Destroy & Placement properties")]
     public bool showHighlightBlocks = true;
+
     private Transform highlightBlocksParent;
     public Transform highlightBlock;
     public Transform placeBlock;
+    
+    /// <summary>
+    /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
+    /// </summary>
     private bool blockPlaceable;
 
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
@@ -56,7 +63,7 @@ public class Player : MonoBehaviour
     [Tooltip("Maximum distance the player can place and delete blocks from.")]
     public float reach = 8f;
 
-    public byte selectedBlockIndex = 1;
+    public Toolbar toolbar;
 
     private void Start()
     {
@@ -69,28 +76,39 @@ public class Player : MonoBehaviour
 
     private void FixedUpdate()
     {
-        CalculateVelocity();
-        if (jumpRequest && !isFlying)
-            Jump();
+        if (!world.inUI)
+        {
+            CalculateVelocity();
+            if (jumpRequest && !isFlying)
+                Jump();
 
-        transform.Translate(velocity, Space.World);
+            transform.Translate(velocity, Space.World);
+        }
     }
 
     private void Update()
     {
-        GetPlayerInputs();
-        PlaceCursorBlocks();
+        if (Input.GetKeyDown(KeyCode.I))
+        {
+            world.inUI = !world.inUI;
+        }
 
-        // Rotates the player on the X axis
-        transform.Rotate(Vector3.up * mouseHorizontal * Time.timeScale);
+        if (!world.inUI)
+        {
+            GetPlayerInputs();
+            PlaceCursorBlocks();
 
-        // Rotates the camera on the Y axis
-        float angle = (playerCamera.localEulerAngles.x - mouseVertical * Time.timeScale + 360) % 360;
-        if (angle > 180)
-            angle -= 360;
+            // Rotates the player on the X axis
+            transform.Rotate(Vector3.up * mouseHorizontal * Time.timeScale);
 
-        angle = Mathf.Clamp(angle, -85, 85);
-        playerCamera.localEulerAngles = Vector3.right * angle;
+            // Rotates the camera on the Y axis
+            float angle = (playerCamera.localEulerAngles.x - mouseVertical * Time.timeScale + 360) % 360;
+            if (angle > 180)
+                angle -= 360;
+
+            angle = Mathf.Clamp(angle, -85, 85);
+            playerCamera.localEulerAngles = Vector3.right * angle;
+        }
     }
 
     private void Jump()
@@ -180,11 +198,11 @@ public class Player : MonoBehaviour
         if (Input.GetButtonUp("Sprint"))
             isSprinting = false;
 
-        
+
         // FLYING
         if (Input.GetKeyDown(KeyCode.F1))
             isFlying = !isFlying;
-        
+
         if (!isFlying)
         {
             if (isGrounded && Input.GetButton("Jump"))
@@ -212,7 +230,7 @@ public class Player : MonoBehaviour
         // PLACING & DESTROYING BLOCKS
         if (Input.GetKeyDown(KeyCode.F2))
             showHighlightBlocks = !showHighlightBlocks;
-        
+
         if (highlightBlock.gameObject.activeSelf)
         {
             // Destroy block.
@@ -225,11 +243,13 @@ public class Player : MonoBehaviour
             // Place block.
             if (Input.GetMouseButtonDown(1))
             {
-                // Don't place blocks inside the player or other voxels by returning early.
+                UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
+                // Don't place blocks inside the player or other voxels or when current itemSlot is empty by returning early.
                 if (!blockPlaceable) return;
-                
+
                 Vector3 placeBlockPosition = placeBlock.position;
-                world.GetChunkFromVector3(placeBlockPosition).EditVoxel(placeBlockPosition, selectedBlockIndex);
+                world.GetChunkFromVector3(placeBlockPosition).EditVoxel(placeBlockPosition, itemSlot.itemSlot.stack.id);
+                itemSlot.itemSlot.Take(1);
             }
         }
     }
@@ -284,12 +304,13 @@ public class Player : MonoBehaviour
                 }
 
 
-                // Don't show place block highlight inside the player or when place block is inside solid block or when the placed block would be outside the world.
+                // Don't show place block highlight inside the player or when place block is inside solid block or when the placed block would be outside the world or when current itemSlot is empty.
                 Vector3 playerPosition = transform.position;
                 Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
-                if (playerCoord != placeBlock.position && (playerCoord + new Vector3(0, 1, 0)) != placeBlock.position  // Placed block isn't inside the player
-                                                       && world.IsVoxelInWorld(placeBlock.position)  // Placed block is inside the world
-                                                       && !world.CheckForVoxel(placeBlock.position))  // Placed block isn't inside a other voxel
+                if (playerCoord != placeBlock.position && (playerCoord + new Vector3(0, 1, 0)) != placeBlock.position // Placed block isn't inside the player
+                                                       && world.IsVoxelInWorld(placeBlock.position) // Placed block is inside the world
+                                                       && !world.CheckForVoxel(placeBlock.position) // Placed block isn't inside a other voxel
+                                                       && toolbar.slots[toolbar.slotIndex].itemSlot.HasItem) // Current itemSlot isn't empty
                     blockPlaceable = true;
                 else
                     blockPlaceable = false;
