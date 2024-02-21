@@ -35,8 +35,10 @@ public class World : MonoBehaviour
 
     private bool _inUI = false;
 
-    [Header("Debug")]
+    [Header("UI")]
     public GameObject debugScreen;
+    public GameObject creativeInventoryWindow;
+    public GameObject cursorSlot;
 
     private void Start()
     {
@@ -312,6 +314,18 @@ public class World : MonoBehaviour
         set
         {
             _inUI = value;
+            if (_inUI)
+            {
+                Cursor.lockState = CursorLockMode.None; // Makes cursor visible
+            }
+            else
+            {
+                Cursor.lockState = CursorLockMode.Locked; // Makes cursor invisible and not able to go of screen
+            }
+            
+            // Toggle UI based on inUI state
+            creativeInventoryWindow.SetActive(_inUI);
+            cursorSlot.SetActive(_inUI);
         }
     }
 
@@ -418,6 +432,7 @@ public class BlockType
     public bool isSolid;
     public bool isTransparent;
     public Sprite icon;
+    public int stackSize = 64;
 
     [Header("Texture Values")] public int backFaceTexture;
     public int frontFaceTexture;
