@@ -286,7 +286,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: facade_icon
+      name: oak_log_icon
       rect:
         serializedVersion: 2
         x: 3328
@@ -315,7 +315,7 @@ TextureImporter:
         width: 256
         height: 256
       alignment: 0
-      pivot: {x: 0, y: 0}
+      pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       outline: []
       physicsShape: []
@@ -336,7 +336,7 @@ TextureImporter:
         width: 256
         height: 256
       alignment: 0
-      pivot: {x: 0, y: 0}
+      pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       outline: []
       physicsShape: []
@@ -357,7 +357,7 @@ TextureImporter:
         width: 256
         height: 256
       alignment: 0
-      pivot: {x: 0, y: 0}
+      pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       outline: []
       physicsShape: []
@@ -370,7 +370,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: grass_side_icon
+      name: facade_icon
       rect:
         serializedVersion: 2
         x: 3072
@@ -378,7 +378,7 @@ TextureImporter:
         width: 256
         height: 256
       alignment: 0
-      pivot: {x: 0, y: 0}
+      pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       outline: []
       physicsShape: []
@@ -391,7 +391,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: oak_log_icon
+      name: oak_leaves_icon
       rect:
         serializedVersion: 2
         x: 3584
@@ -399,7 +399,7 @@ TextureImporter:
         width: 256
         height: 256
       alignment: 0
-      pivot: {x: 0, y: 0}
+      pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
       outline: []
       physicsShape: []
@@ -407,48 +407,6 @@ TextureImporter:
       bones: []
       spriteID: 9e0fc93c76dabdf43a2afc28dea5e33c
       internalID: -392713096
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: oak_log_top_icon
-      rect:
-        serializedVersion: 2
-        x: 3840
-        y: 3840
-        width: 256
-        height: 256
-      alignment: 0
-      pivot: {x: 0, y: 0}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 6d829ec357922104e823ccaae40044c8
-      internalID: 504032995
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: oak_leaves_icon
-      rect:
-        serializedVersion: 2
-        x: 0
-        y: 3584
-        width: 256
-        height: 256
-      alignment: 0
-      pivot: {x: 0, y: 0}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 0e941145334124a4da708bf77571cc80
-      internalID: 1460217861
       vertices: []
       indices: 
       edges: []
@@ -467,13 +425,12 @@ TextureImporter:
       bedrock_icon: 1008106713
       desert_cracked_icon: -966074416
       dirt_icon: 1551665942
-      facade_icon: -2144359328
+      facade_icon: -1490239207
       grass_icon: -1336346017
       grass_rocky_icon: 2025127514
-      grass_side_icon: -1490239207
       grass_snowy_icon: 122583294
-      oak_leaves_icon: 1460217861
-      oak_log_icon: -392713096
+      oak_leaves_icon: -392713096
+      oak_log_icon: -2144359328
       oak_log_top_icon: 504032995
       sand_icon: -1153239741
       snow_icon: 455753414
