@@ -30,14 +30,20 @@ public class DragAndDropHandler : MonoBehaviour
 
         cursorSlot.transform.position = Input.mousePosition;
 
-        // TODO: Implement right click behavior (take halve stack, place one item, ...)
+        // Left click behavior: Take full stack, place full stack, swap stack if different items
         if (Input.GetMouseButtonDown(0))
-        {
-            HandleSlotClick(CheckForSlot());
-        }
+            HandleSlotLeftClick(CheckForSlot());
+
+        // Right click behavior: Take halve stack, place one item
+        if (Input.GetMouseButtonDown(1))
+            HandleSlotRightClick(CheckForSlot());
     }
 
-    private void HandleSlotClick(UIItemSlot clickedSlot)
+    /// <summary>
+    /// Take full stack, place full stack, swap stack if different items.
+    /// </summary>
+    /// <param name="clickedSlot">Target slot that has been clicked.</param>
+    private void HandleSlotLeftClick(UIItemSlot clickedSlot)
     {
         if (clickedSlot == null)
             return;
@@ -45,14 +51,6 @@ public class DragAndDropHandler : MonoBehaviour
         // Both cursor slot & clicked slot are empty, nothing can be done.
         if (!cursorSlot.HasItem && !clickedSlot.HasItem)
             return;
-
-        // In Creative inventory, take stack without removing it from inventory.
-        if (clickedSlot.itemSlot.isCreative)
-        {
-            cursorItemSlot.EmptySlot();
-            cursorItemSlot.InsertStack(clickedSlot.itemSlot.stack);
-            return;
-        }
 
         // Cursor slot is empty but clicked slot has items, move items to cursor slot.
         if (!cursorSlot.HasItem && clickedSlot.HasItem)
@@ -77,49 +75,94 @@ public class DragAndDropHandler : MonoBehaviour
                 SwapStacks(clickedSlot, cursorSlot);
                 return;
             }
+
             // Both slots contain the same item, combine item amount based on stack size
-            else
+            int maxStackSize = world.blockTypes[cursorSlot.itemSlot.stack.id].stackSize;
+            int oldCursorSlotStackAmount = cursorSlot.itemSlot.stack.amount;
+            int oldClickedSlotStackAmount = clickedSlot.itemSlot.stack.amount;
+            int combinedStackAmount = oldClickedSlotStackAmount + oldCursorSlotStackAmount;
+
+            // Both stack amounts combined is less than or equals max stack size and clicked slot isn't full, combine both into one stack.
+            if (combinedStackAmount <= maxStackSize)
             {
-                int maxStackSize = world.blockTypes[cursorSlot.itemSlot.stack.id].stackSize;
-                int oldCursorSlotStackAmount = cursorSlot.itemSlot.stack.amount;
-                int oldClickedSlotStackAmount = clickedSlot.itemSlot.stack.amount;
-                int combinedStackAmount = oldClickedSlotStackAmount + oldCursorSlotStackAmount;
+                ItemStack oldCursorSlot = cursorSlot.itemSlot.TakeAll();
+                oldCursorSlot.amount = combinedStackAmount;
+                clickedSlot.itemSlot.InsertStack(oldCursorSlot);
+                return;
+            }
 
-                // Both stack amounts combined is less than or equals max stack size and clicked slot isn't full, combine both into one stack.
-                if (combinedStackAmount <= maxStackSize)
-                {
-                    ItemStack oldCursorSlot = cursorSlot.itemSlot.TakeAll();
-                    oldCursorSlot.amount = combinedStackAmount;
-                    clickedSlot.itemSlot.InsertStack(oldCursorSlot);
-                    return;
-                }
+            // Both stack amounts combined greater than max stack size,  create new stack of the remaining amount.
+            if (combinedStackAmount > maxStackSize && oldClickedSlotStackAmount != maxStackSize)
+            {
+                int stackAmountRemaining = combinedStackAmount - maxStackSize;
 
-                // Both stack amounts combined greater than max stack size,  create new stack of the remaining amount.
-                if (combinedStackAmount > maxStackSize && oldClickedSlotStackAmount != maxStackSize)
-                {
-                    int stackAmountRemaining = combinedStackAmount - maxStackSize;
+                // Full Clicked Slot
+                clickedSlot.itemSlot.stack.amount = maxStackSize;
+                clickedSlot.itemSlot.InsertStack(clickedSlot.itemSlot.stack);
 
-                    // Full Clicked Slot
-                    clickedSlot.itemSlot.stack.amount = maxStackSize;
-                    clickedSlot.itemSlot.InsertStack(clickedSlot.itemSlot.stack);
+                // Remaining Cursor Slot
+                cursorItemSlot.stack.amount = stackAmountRemaining;
+                cursorItemSlot.InsertStack(cursorItemSlot.stack);
+                return;
+            }
 
-                    // Remaining Cursor Slot
-                    cursorItemSlot.stack.amount = stackAmountRemaining;
-                    cursorItemSlot.InsertStack(cursorItemSlot.stack);
-                    return;
-                }
-
-                // Both stack amounts combined greater than max stack size and clicked slot is full, swap them.
-                if (combinedStackAmount > maxStackSize && oldClickedSlotStackAmount == maxStackSize)
-                {
-                    SwapStacks(clickedSlot, cursorSlot);
-                    return;
-                }
+            // Both stack amounts combined greater than max stack size and clicked slot is full, swap them.
+            if (combinedStackAmount > maxStackSize && oldClickedSlotStackAmount == maxStackSize)
+            {
+                SwapStacks(clickedSlot, cursorSlot);
+                return;
             }
         }
     }
 
-    private void SwapStacks(UIItemSlot _clickedSlot, UIItemSlot _cursorSlot)
+    /// <summary>
+    /// Take halve stack, place one item.
+    /// </summary>
+    /// <param name="clickedSlot">Target slot that has been clicked.</param>
+    private void HandleSlotRightClick(UIItemSlot clickedSlot)
+    {
+        if (clickedSlot == null)
+            return;
+
+        // Both cursor slot & clicked slot are empty, nothing can be done.
+        if (!cursorSlot.HasItem && !clickedSlot.HasItem)
+            return;
+
+        // Cursor slot is empty but clicked slot has items, move items to cursor slot.
+        if (!cursorSlot.HasItem && clickedSlot.HasItem)
+        {
+            cursorItemSlot.InsertStack(clickedSlot.itemSlot.TakeHalve());
+            return;
+        }
+
+        // Cursor slot has items but clicked slot is empty, move items to clicked slot.
+        if (cursorSlot.HasItem && !clickedSlot.HasItem)
+        {
+            clickedSlot.itemSlot.InsertStack(cursorItemSlot.Take(1));
+            return;
+        }
+
+        // Both cursor slot & clicked slot have items, ...
+        if (cursorSlot.HasItem && clickedSlot.HasItem)
+        {
+            // Both slots contain different items, do nothing.
+            if (cursorSlot.itemSlot.stack.id != clickedSlot.itemSlot.stack.id)
+                return;
+
+            // Both slots contain the same item, place one item into clicked slot based on stack size
+            int maxStackSize = world.blockTypes[cursorSlot.itemSlot.stack.id].stackSize;
+
+            // Clicked slot is full, do nothing.
+            if (clickedSlot.itemSlot.stack.amount + 1 > maxStackSize) return;
+
+            // Clicked slot isn't full, add one item from cursor slot.
+            clickedSlot.itemSlot.stack.amount += cursorSlot.itemSlot.Take(1).amount;
+            clickedSlot.itemSlot.InsertStack(clickedSlot.itemSlot.stack);
+            return;
+        }
+    }
+
+    private static void SwapStacks(UIItemSlot _clickedSlot, UIItemSlot _cursorSlot)
     {
         ItemStack oldCursorSlot = _cursorSlot.itemSlot.TakeAll();
         ItemStack oldClickedSlot = _clickedSlot.itemSlot.TakeAll();

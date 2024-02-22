@@ -118,35 +118,53 @@ public class ItemSlot
         }
     }
 
-    public int Take(int amount)
+    public ItemStack Take(int amount)
     {
-        // Asked more than amount available, return amount available and empty slot.
-        if (amount > stack.amount)
-        {
-            int currentAmount = stack.amount;
-            EmptySlot();
-            return currentAmount;
-        }
+        // Asked more than amount available, return amount available and empty slot. Or asked exactly amount available, return asked amount and empty slot.
+        if (amount >= stack.amount)
+            return uiItemSlot.itemSlot.TakeAll();
+        
         // Asked less than amount available, return asked amount and reduce stack amount.
-        else if(amount < stack.amount)
-        {
-            stack.amount -= amount;
-            uiItemSlot.UpdateSlot();
-            return amount;
-        }
-        // Asked exactly amount available, return asked amount and empty slot.
-        else
-        {
-            EmptySlot();
-            return amount;
-        }
+        ItemStack handOver = new ItemStack(stack.id, amount);
+
+        // Don't update slot info when slot is creative
+        if (isCreative) return handOver;
+        
+        stack.amount -= amount;
+        uiItemSlot.UpdateSlot();
+
+        return handOver;
     }
 
     public ItemStack TakeAll()
     {
         ItemStack handOver = new ItemStack(stack.id, stack.amount);
+        
+        // Don't update slot info when slot is creative
+        if (isCreative) return handOver;
+        
         EmptySlot();
         return handOver;
+    }
+
+    public ItemStack TakeHalve()
+    {
+        int halveAmount = Mathf.CeilToInt(stack.amount / 2.0f);
+        ItemStack halveStack = new ItemStack(stack.id, halveAmount);
+
+        // Don't update slot info when slot is creative
+        if (isCreative) return halveStack;
+        
+        
+        stack.amount -= halveAmount;
+        
+        // If remaining stack amount is 0, remove stack from slot. Else update slot with new amount.
+        if (stack.amount == 0)
+            EmptySlot();
+        else
+            uiItemSlot.UpdateSlot();
+
+        return halveStack;
     }
 
     public void InsertStack(ItemStack _stack)

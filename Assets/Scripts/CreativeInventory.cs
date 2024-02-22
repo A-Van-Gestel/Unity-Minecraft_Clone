@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
+// TODO: Create Inventory base class to extend from.
 public class CreativeInventory : MonoBehaviour
 {
     public GameObject slotPrefab;
