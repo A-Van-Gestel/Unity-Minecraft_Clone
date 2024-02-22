@@ -12,7 +12,7 @@ public class CreativeInventory : MonoBehaviour
 
     private World world;
 
-    private List<ItemSlot> slots = new List<ItemSlot>();
+    internal List<ItemSlot> slots = new List<ItemSlot>();
 
     void Start()
     {

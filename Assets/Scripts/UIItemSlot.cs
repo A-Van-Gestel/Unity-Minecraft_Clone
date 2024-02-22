@@ -169,6 +169,12 @@ public class ItemSlot
 
     public void InsertStack(ItemStack _stack)
     {
+        if (_stack == null)
+        {
+          EmptySlot();
+          return;
+        }
+        
         stack = _stack;
         uiItemSlot.UpdateSlot();
     }
