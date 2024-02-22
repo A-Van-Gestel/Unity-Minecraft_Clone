@@ -9,6 +9,7 @@ public class DragAndDropHandler : MonoBehaviour
 {
     [SerializeField] private UIItemSlot cursorSlot = null;
     private ItemSlot cursorItemSlot;
+    private UIItemSlot lastClickedSlot = null;
 
     [SerializeField] private GraphicRaycaster m_Raycaster = null;
     private PointerEventData m_PointerEventData;
@@ -25,8 +26,16 @@ public class DragAndDropHandler : MonoBehaviour
 
     private void Update()
     {
-        if (!world.inUI)
+        // UI is closed and cursor slot is empty, do nothing.
+        if (!world.inUI && !cursorSlot.HasItem)
             return;
+
+        // UI is closed and cursor slot still has item, place item back to original place.
+        if (!world.inUI && cursorSlot.HasItem)
+        {
+            PlaceStackToLastLocation(cursorSlot);
+            return;
+        }
 
         cursorSlot.transform.position = Input.mousePosition;
 
@@ -45,6 +54,8 @@ public class DragAndDropHandler : MonoBehaviour
     /// <param name="clickedSlot">Target slot that has been clicked.</param>
     private void HandleSlotLeftClick(UIItemSlot clickedSlot)
     {
+        lastClickedSlot = clickedSlot;
+        
         if (clickedSlot == null)
             return;
 
@@ -121,6 +132,8 @@ public class DragAndDropHandler : MonoBehaviour
     /// <param name="clickedSlot">Target slot that has been clicked.</param>
     private void HandleSlotRightClick(UIItemSlot clickedSlot)
     {
+        lastClickedSlot = clickedSlot;
+        
         if (clickedSlot == null)
             return;
 
@@ -169,6 +182,21 @@ public class DragAndDropHandler : MonoBehaviour
 
         _clickedSlot.itemSlot.InsertStack(oldCursorSlot);
         _cursorSlot.itemSlot.InsertStack(oldClickedSlot);
+    }
+
+    private void PlaceStackToLastLocation(UIItemSlot _cursorSlot)
+    {
+        // Last clicked slot is empty, move cursor items to slot.
+        if (!lastClickedSlot.HasItem)
+        {
+            lastClickedSlot.itemSlot.InsertStack(_cursorSlot.itemSlot.TakeAll());
+            return;
+        }
+        
+        // Last clicked slot isn't empty, combine stacks.
+        lastClickedSlot.itemSlot.stack.amount += _cursorSlot.itemSlot.TakeAll().amount;
+        lastClickedSlot.itemSlot.InsertStack(lastClickedSlot.itemSlot.stack);
+        return;
     }
 
     private UIItemSlot CheckForSlot()
