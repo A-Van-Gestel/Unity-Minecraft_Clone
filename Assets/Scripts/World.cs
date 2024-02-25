@@ -12,6 +12,12 @@ public class World : MonoBehaviour
     public int seed;
     public BiomeAttributes biome;
 
+    [Range(0.95f, 0f)]
+    [Tooltip("Lower value equels darker light level.")]
+    public float globalLightLevel;
+    public Color day;
+    public Color night;
+
     public Transform player;
     public Vector3 spawnPosition;
 
@@ -52,6 +58,9 @@ public class World : MonoBehaviour
     private void Update()
     {
         playerChunkCoord = GetChunkCoordFromVector3(player.position);
+        
+        Shader.SetGlobalFloat("GlobalLightLevel", globalLightLevel);
+        Camera.main!.backgroundColor = Color.Lerp(day, night, globalLightLevel);
 
         // Only update the chunks if the player has moved from the chunk they where previously on.
         if (!playerChunkCoord.Equals(playerLastChunkCoord))

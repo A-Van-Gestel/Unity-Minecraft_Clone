@@ -20,6 +20,7 @@ public class Chunk
     private List<int> transparantTriangles = new List<int>();
     private Material[] materials = new Material[2];
     private List<Vector2> uvs = new List<Vector2>();
+    private List<Color> colors = new List<Color>();
 
     public Vector3 chunkPosition;
 
@@ -51,9 +52,9 @@ public class Chunk
         meshFilter = chunkObject.AddComponent<MeshFilter>();
         meshRenderer = chunkObject.AddComponent<MeshRenderer>();
 
-        materials[0] = world.material;
-        materials[1] = world.transparentMaterial;
-        meshRenderer.materials = materials;
+        // materials[0] = world.material;
+        // materials[1] = world.transparentMaterial;
+        meshRenderer.material = world.material;
 
         meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided; // Mostly fixes lines in the shadows between voxels.
         chunkObject.transform.SetParent(world.transform);
@@ -103,7 +104,7 @@ public class Chunk
             // Try getting the voxelMod, if not successful retry later
             if (!modifications.TryDequeue(out VoxelMod v)) continue;
             Vector3 pos = v.position -= chunkPosition;
-            
+
             if (IsVoxelInChunk((int)pos.x, (int)pos.y, (int)pos.z))
                 voxelMap[(int)pos.x, (int)pos.y, (int)pos.z] = v.id;
         }
@@ -137,6 +138,7 @@ public class Chunk
         triangels.Clear();
         transparantTriangles.Clear();
         uvs.Clear();
+        colors.Clear();
     }
 
     public bool isActive
@@ -303,24 +305,45 @@ public class Chunk
 
                 AddTexture(world.blockTypes[blockID].GetTextureID(p));
 
-                if (!isTransparent)
+                float lightLevel;
+
+                int yPos = (int)pos.y + 1;
+                bool inShade = false;
+                while (yPos < VoxelData.ChunkHeight)
                 {
-                    triangels.Add(vertexIndex);
-                    triangels.Add(vertexIndex + 1);
-                    triangels.Add(vertexIndex + 2);
-                    triangels.Add(vertexIndex + 2);
-                    triangels.Add(vertexIndex + 1);
-                    triangels.Add(vertexIndex + 3);
+                    if (voxelMap[(int)pos.x, yPos, (int)pos.z] != 0)
+                    {
+                        inShade = true;
+                        break;
+                    }
+                    yPos++;
                 }
-                else
-                {
-                    transparantTriangles.Add(vertexIndex);
-                    transparantTriangles.Add(vertexIndex + 1);
-                    transparantTriangles.Add(vertexIndex + 2);
-                    transparantTriangles.Add(vertexIndex + 2);
-                    transparantTriangles.Add(vertexIndex + 1);
-                    transparantTriangles.Add(vertexIndex + 3);
-                }
+
+                lightLevel = inShade ? 0.5f : 0f;
+                
+                colors.Add(new Color(0,0,0, lightLevel));
+                colors.Add(new Color(0,0,0, lightLevel));
+                colors.Add(new Color(0,0,0, lightLevel));
+                colors.Add(new Color(0,0,0, lightLevel));
+
+                // if (!isTransparent)
+                // {
+                triangels.Add(vertexIndex);
+                triangels.Add(vertexIndex + 1);
+                triangels.Add(vertexIndex + 2);
+                triangels.Add(vertexIndex + 2);
+                triangels.Add(vertexIndex + 1);
+                triangels.Add(vertexIndex + 3);
+                // }
+                // else
+                // {
+                //     transparantTriangles.Add(vertexIndex);
+                //     transparantTriangles.Add(vertexIndex + 1);
+                //     transparantTriangles.Add(vertexIndex + 2);
+                //     transparantTriangles.Add(vertexIndex + 2);
+                //     transparantTriangles.Add(vertexIndex + 1);
+                //     transparantTriangles.Add(vertexIndex + 3);
+                // }
 
                 vertexIndex += 4;
             }
@@ -332,12 +355,13 @@ public class Chunk
         Mesh mesh = new Mesh();
         mesh.vertices = vertices.ToArray();
 
-        mesh.subMeshCount = 2;
-        mesh.SetTriangles(triangels.ToArray(), 0);
-        mesh.SetTriangles(transparantTriangles.ToArray(), 1);
-
+        // mesh.subMeshCount = 2;
+        // mesh.SetTriangles(triangels.ToArray(), 0);
+        // mesh.SetTriangles(transparantTriangles.ToArray(), 1);
+        mesh.triangles = triangels.ToArray();
+        
         mesh.uv = uvs.ToArray();
-
+        mesh.colors = colors.ToArray();
         mesh.RecalculateNormals();
 
         meshFilter.mesh = mesh;
