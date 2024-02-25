@@ -42,6 +42,8 @@ Shader "Minecraft/Blocks"
             sampler2D _MainTex;
             float _AlphaCutout;
             float GlobalLightLevel;
+            float minGlobalLightLevel;
+            float maxGlobalLightLevel;
 
             v2f vertFunction(appdata v)
             {
@@ -57,13 +59,25 @@ Shader "Minecraft/Blocks"
             fixed4 fragFunction(v2f i) : SV_Target
             {
                 fixed4 col = tex2D(_MainTex, i.uv);
-                const float localLightLevel = clamp(GlobalLightLevel + i.color.a, 0, 1);
+
+
+                // Calculate block shade level
+                // (0.75 - 0.25) = 0.5  // Total range available
+                // 0.5 * 0.4 = 0.2  // Use certain percent of range available
+                // 0.2 + 0.25 = 0.45  // Re-add the minimum light value to calculate final shade
+                float shade = (maxGlobalLightLevel - minGlobalLightLevel) * GlobalLightLevel + minGlobalLightLevel;
+                // Apply block light level onto block shade level
+                shade *= i.color.a;
+                // 1 = Absulute darkest, so reverse shade so that 1 equels absulute lightest --> 1 - 0.95 = 0.05
+                shade = clamp(1 - shade, minGlobalLightLevel, maxGlobalLightLevel);
+                
+                // const float localLightLevel = clamp(GlobalLightLevel + i.color.a, 0, 1);
 
                 // Remove pixels from the alpha channel below a certain threshold.
                 clip(col.a - _AlphaCutout);
 
                 // Darken block based on block light level.
-                col = lerp(col, col * .25, localLightLevel);
+                col = lerp(col, col * .10, shade);
 
                 return col;
             }

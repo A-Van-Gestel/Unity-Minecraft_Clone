@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using MyBox;
 using UnityEngine;
 using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
@@ -17,8 +18,8 @@ public class World : MonoBehaviour
     public bool enableThreading;
 
     [Header("Lighting")]
-    [Range(0.95f, 0f)]
-    [Tooltip("Lower value equels darker light level.")]
+    [Range(0f, 1f)]
+    [Tooltip("Lower value equals darker light level.")]
     public float globalLightLevel;
     public Color day;
     public Color night;
@@ -52,10 +53,18 @@ public class World : MonoBehaviour
     public GameObject debugScreen;
     public GameObject creativeInventoryWindow;
     public GameObject cursorSlot;
+    
+    // Shader Properties
+    private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
+    private static readonly int ShaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
+    private static readonly int ShaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
 
     private void Start()
     {
         Random.InitState(seed);
+        
+        Shader.SetGlobalFloat(ShaderMinGlobalLightLevel, VoxelData.minLightLevel);
+        Shader.SetGlobalFloat(ShaderMaxGlobalLightLevel, VoxelData.maxLightLevel);
 
         spawnPosition = new Vector3(VoxelData.WorldSizeInVoxels / 2f, VoxelData.ChunkHeight - 1f, VoxelData.WorldSizeInVoxels / 2f);
         GenerateWorld();
@@ -66,8 +75,8 @@ public class World : MonoBehaviour
     {
         playerChunkCoord = GetChunkCoordFromVector3(player.position);
         
-        Shader.SetGlobalFloat("GlobalLightLevel", globalLightLevel);
-        Camera.main!.backgroundColor = Color.Lerp(day, night, globalLightLevel);
+        Shader.SetGlobalFloat(ShaderGlobalLightLevel, globalLightLevel);
+        Camera.main!.backgroundColor = Color.Lerp(night, day, globalLightLevel);
 
         // Only update the chunks if the player has moved from the chunk they where previously on.
         if (!playerChunkCoord.Equals(playerLastChunkCoord))
@@ -294,7 +303,7 @@ public class World : MonoBehaviour
         Debug.Log($"No solid voxels found for X / Z = {(int)pos.x} / {(int)pos.z}");
         return new Vector3(pos.x, yMax, pos.z);
     }
-
+    
     public bool CheckForVoxel(Vector3 pos)
     {
         ChunkCoord thisChunk = new ChunkCoord(pos);
@@ -303,22 +312,22 @@ public class World : MonoBehaviour
             return false;
 
         if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].IsEditable)
-            return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos)].isSolid;
+            return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos).id].isSolid;
 
         return blockTypes[GetVoxel(pos)].isSolid;
     }
 
-    public bool CheckIfVoxelTransparent(Vector3 pos)
+    public VoxelState GetVoxelState(Vector3 pos)
     {
         ChunkCoord thisChunk = new ChunkCoord(pos);
 
         if (!IsVoxelInWorld(pos))
-            return false;
+            return null;
 
         if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].IsEditable)
-            return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos)].isTransparent;
+            return chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos);
 
-        return blockTypes[GetVoxel(pos)].isTransparent;
+        return new VoxelState(GetVoxel(pos));
     }
 
     public bool inUI
@@ -444,9 +453,12 @@ public class World : MonoBehaviour
 [System.Serializable]
 public class BlockType
 {
+    [HideInInspector]
     public string blockName;
     public bool isSolid;
-    public bool isTransparent;
+    public bool renderNeighborFaces;
+    [ConditionalField(nameof(renderNeighborFaces))]
+    public float transparency;
     public Sprite icon;
     public int stackSize = 64;
 
