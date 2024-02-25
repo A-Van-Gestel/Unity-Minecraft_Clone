@@ -9,18 +9,25 @@ using Random = UnityEngine.Random;
 
 public class World : MonoBehaviour
 {
+    [Header("World Generation Values")]
     public int seed;
     public BiomeAttributes biome;
 
+    [Header("Performance")]
+    public bool enableThreading;
+
+    [Header("Lighting")]
     [Range(0.95f, 0f)]
     [Tooltip("Lower value equels darker light level.")]
     public float globalLightLevel;
     public Color day;
     public Color night;
 
+    [Header("Player")]
     public Transform player;
     public Vector3 spawnPosition;
 
+    [Header("Blocks & Materials")]
     public Material material;
     public Material transparentMaterial;
     public BlockType[] blockTypes;

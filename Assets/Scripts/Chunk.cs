@@ -62,8 +62,14 @@ public class Chunk
         chunkObject.name = $"Chunk {coord.x}, {coord.z}";
         chunkPosition = chunkObject.transform.position;
 
-        Thread myThread = new Thread(new ThreadStart(PopulateVoxelMap));
-        myThread.Start();
+        if (world.enableThreading)
+        {
+            Thread myThread = new Thread(new ThreadStart(PopulateVoxelMap));
+            myThread.Start();
+        }
+        else
+            PopulateVoxelMap();
+
     }
 
     private void PopulateVoxelMap()
@@ -88,8 +94,14 @@ public class Chunk
     /// </summary>
     public void UpdateChunk()
     {
-        Thread myThread = new Thread(new ThreadStart(_updateChunk));
-        myThread.Start();
+        if (world.enableThreading)
+        {
+            Thread myThread = new Thread(new ThreadStart(_updateChunk));
+            myThread.Start();
+        }
+        else
+            _updateChunk();
+
     }
 
     /// <summary>
@@ -97,6 +109,7 @@ public class Chunk
     /// </summary>
     private void _updateChunk()
     {
+        // TODO: This function can raise a nullReferenceException.
         threadLocked = true;
 
         while (modifications.Count > 0)
@@ -269,12 +282,12 @@ public class Chunk
         {
             Vector3 currentVoxel = thisVoxel + VoxelData.FaceChecks[p];
 
-            // relative position of the voxel within chunk
+            // Relative position of the voxel within chunk
             int currentVoxelX = (int)currentVoxel.x;
             int currentVoxelY = (int)currentVoxel.y;
             int currentVoxelZ = (int)currentVoxel.z;
 
-            // absolute position of the voxel (because the UpdateSurroundingVoxels() uses the relative position of a voxel within the chunk, not the global voxel position):
+            // Absolute position of the voxel (because the UpdateSurroundingVoxels() uses the relative position of a voxel within the chunk, not the global voxel position):
             int currentVoxelWorldPosX = currentVoxelX + (int)chunkPosition.x;
             int currentVoxelWorldPosZ = currentVoxelZ + (int)chunkPosition.z;
 
@@ -282,7 +295,17 @@ public class Chunk
             if (!IsVoxelInChunk(currentVoxelX, currentVoxelY, currentVoxelZ)
                 && world.IsVoxelInWorld(new Vector3(currentVoxelWorldPosX, currentVoxelY, currentVoxelWorldPosZ)))
             {
-                world.GetChunkFromVector3(currentVoxel + chunkPosition)._updateChunk();
+                Vector3 chunkVector = currentVoxel + chunkPosition;
+                Chunk chunk = world.GetChunkFromVector3(chunkVector);
+                
+                try
+                {
+                    chunk._updateChunk();
+                }
+                catch (NullReferenceException e)
+                {
+                    Debug.LogError($"Chunk.UpdateSurroundingVoxels | NullReferenceException in chunk._updateChunk() at world: X / Z = {chunkVector.x} / {chunkVector.z}   (Y = {chunkVector.y})");
+                }
             }
         }
     }
