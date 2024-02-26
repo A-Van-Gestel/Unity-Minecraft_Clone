@@ -4,7 +4,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
-using System.Threading;
 
 public class Chunk
 {
@@ -32,18 +31,11 @@ public class Chunk
 
     private bool _isActive;
     private bool isVoxelMapPopulated = false;
-    private bool threadLocked = false;
 
-    public Chunk(ChunkCoord _coord, World _world, bool generateOnLoad)
+    public Chunk(ChunkCoord _coord, World _world)
     {
         coord = _coord;
         world = _world;
-        isActive = true;
-
-        if (generateOnLoad)
-        {
-            Init();
-        }
     }
 
     public void Init()
@@ -62,13 +54,7 @@ public class Chunk
         chunkObject.name = $"Chunk {coord.x}, {coord.z}";
         chunkPosition = chunkObject.transform.position;
 
-        if (world.enableThreading)
-        {
-            Thread myThread = new Thread(new ThreadStart(PopulateVoxelMap));
-            myThread.Start();
-        }
-        else
-            PopulateVoxelMap();
+        PopulateVoxelMap();
     }
 
     private void PopulateVoxelMap()
@@ -83,32 +69,21 @@ public class Chunk
                 }
             }
         }
-
-        _updateChunk();
+        
         isVoxelMapPopulated = true;
-    }
 
-    /// <summary>
-    /// Updates chunk on a separate thread.
-    /// </summary>
-    public void UpdateChunk()
-    {
-        if (world.enableThreading)
+        lock (world.ChunkUpdateThreadLock)
         {
-            Thread myThread = new Thread(new ThreadStart(_updateChunk));
-            myThread.Start();
+            world.chunksToUpdate.Add(this);
         }
-        else
-            _updateChunk();
     }
 
     /// <summary>
     /// Updates chunk on the main thread.
     /// </summary>
-    private void _updateChunk()
+    public void UpdateChunk()
     {
         // TODO: This function can raise a nullReferenceException.
-        threadLocked = true;
 
         while (modifications.Count > 0)
         {
@@ -136,12 +111,7 @@ public class Chunk
             }
         }
 
-        lock (world.chunksToDraw)
-        {
-            world.chunksToDraw.Enqueue(this);
-        }
-
-        threadLocked = false;
+        world.chunksToDraw.Enqueue(this);
     }
 
     private void CalculateLight()
@@ -229,7 +199,7 @@ public class Chunk
     {
         get
         {
-            if (!isVoxelMapPopulated || threadLocked)
+            if (!isVoxelMapPopulated)
                 return false;
             else
                 return true;
@@ -313,9 +283,14 @@ public class Chunk
 
         voxelMap[xCheck, yCheck, zCheck].id = newID;
 
-        // Update Surrounding Chunks
-        UpdateSurroundingVoxels(xCheck, yCheck, zCheck);
-        _updateChunk();
+        lock (world.ChunkUpdateThreadLock)
+        {
+            // Update current chunk as fast as possible.
+            world.chunksToUpdate.Insert(0, this);
+        
+            // Update Surrounding Chunks
+            UpdateSurroundingVoxels(xCheck, yCheck, zCheck);
+        }
     }
 
     private void UpdateSurroundingVoxels(int x, int y, int z)
@@ -341,15 +316,9 @@ public class Chunk
             {
                 Vector3 chunkVector = currentVoxel + chunkPosition;
                 Chunk chunk = world.GetChunkFromVector3(chunkVector);
-
-                try
-                {
-                    chunk._updateChunk();
-                }
-                catch (NullReferenceException e)
-                {
-                    Debug.LogError($"Chunk.UpdateSurroundingVoxels | NullReferenceException in chunk._updateChunk() at world: X / Z = {chunkVector.x} / {chunkVector.z}   (Y = {chunkVector.y})");
-                }
+                
+                // Update current chunk as fast as possible.
+                world.chunksToUpdate.Insert(0, chunk);
             }
         }
     }
