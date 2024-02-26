@@ -121,7 +121,7 @@ public class Chunk
         }
 
         ClearMeshData();
-        
+
         CalculateLight();
 
         for (int y = 0; y < VoxelData.ChunkHeight; y++)
@@ -147,22 +147,22 @@ public class Chunk
     private void CalculateLight()
     {
         Queue<Vector3Int> litVoxels = new Queue<Vector3Int>();
-        
+
         for (int x = 0; x < VoxelData.ChunkWidth; x++)
         {
             for (int z = 0; z < VoxelData.ChunkWidth; z++)
             {
                 float lightRay = 1f;
-                
+
                 for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
                 {
                     VoxelState thisVoxel = voxelMap[x, y, z];
 
-                    if (thisVoxel.id > 0 && world.blockTypes[thisVoxel.id].transparency < lightRay)  // Only modify light level if block isn't air and block is less transparent then previous blocks.
+                    if (thisVoxel.id > 0 && world.blockTypes[thisVoxel.id].transparency < lightRay) // Only modify light level if block isn't air and block is less transparent then previous blocks.
                         lightRay = world.blockTypes[thisVoxel.id].transparency;
 
                     thisVoxel.globalLightPercent = lightRay;
-                    
+
                     voxelMap[x, y, z] = thisVoxel;
 
                     // Only add blocks that are still bright enough to affect neighboring blocks.
@@ -175,7 +175,7 @@ public class Chunk
         while (litVoxels.Count > 0)
         {
             Vector3Int v = litVoxels.Dequeue();
-            
+
             for (int p = 0; p < 6; p++)
             {
                 Vector3 currentVoxel = v + VoxelData.FaceChecks[p];
@@ -197,8 +197,8 @@ public class Chunk
                 }
             }
         }
+
         {
-            
         }
     }
 
@@ -368,10 +368,9 @@ public class Chunk
         {
             VoxelState neighbor = CheckForVoxel(pos + VoxelData.FaceChecks[p]);
 
-            if (neighbor != null && (
-                    world.blockTypes[neighbor.id].renderNeighborFaces || // Display face if facing transparent voxel
-                    !world.IsVoxelInWorld(voxelWoldPosition + VoxelData.FaceChecks[p]) // Display face if facing the edge of the world
-                ))
+            if (neighbor != null && (world.blockTypes[neighbor.id].renderNeighborFaces) || // Display face if facing transparent voxel
+                !world.IsVoxelInWorld(voxelWoldPosition + VoxelData.FaceChecks[p]) // Display face if facing the edge of the world
+               )
             {
                 vertices.Add(pos + VoxelData.VoxelVerts[VoxelData.VoxelTris[p, 0]]);
                 vertices.Add(pos + VoxelData.VoxelVerts[VoxelData.VoxelTris[p, 1]]);
@@ -380,7 +379,8 @@ public class Chunk
 
                 AddTexture(world.blockTypes[blockID].GetTextureID(p));
 
-                float lightLevel = neighbor.globalLightPercent;
+                // If outside of the world, neighbor would be null, so use own voxel globalLightPercent in that case.
+                float lightLevel = neighbor?.globalLightPercent ?? CheckForVoxel(pos).globalLightPercent;
 
                 colors.Add(new Color(0, 0, 0, lightLevel));
                 colors.Add(new Color(0, 0, 0, lightLevel));
