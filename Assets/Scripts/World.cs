@@ -217,6 +217,9 @@ public class World : MonoBehaviour
         {
             // Try getting the queue, if not successful retry later
             if (!modifications.TryDequeue(out ConcurrentQueue<VoxelMod> queue)) continue;
+            
+            // Cache chunks modified by the current modification.
+            List<Chunk> modificationModifiedChunks = new List<Chunk>();
 
             try
             {
@@ -235,20 +238,30 @@ public class World : MonoBehaviour
                             chunksToCreate.Add(c);
                         }
 
-                        chunks[c.x, c.z].modifications.Enqueue(v);
+                        
+                        Chunk chunk = chunks[c.x, c.z];
+                        chunk.modifications.Enqueue(v);
 
-                        // TODO: Needed for neighboring chunks to update rerender their updated mesh, but will result in serious lag spikes due to the long thread lock overhead.
-                        // lock (ChunkUpdateThreadLock)
-                        // {
-                        //     if (!chunksToUpdate.Contains(chunks[c.x, c.z]))
-                        //         chunksToUpdate.Add(chunks[c.x, c.z]);
-                        // }
+                        if (!modificationModifiedChunks.Contains(chunk))
+                            modificationModifiedChunks.Add(chunk);
                     }
                     else
                     {
                         Debug.Log($"World.ApplyModifications | ChunkCoord outside of world: X / Z = {c.x} / {c.z}");
                     }
                 }
+
+                // Rerender the chunks modified by the modification.
+                foreach (Chunk chunk in modificationModifiedChunks)
+                {
+                    // TODO: Needed for neighboring chunks to update rerender their updated mesh, but will result in serious lag spikes due to the long thread lock overhead.
+                    lock (ChunkUpdateThreadLock)
+                    {
+                        if (!chunksToUpdate.Contains(chunk))
+                            chunksToUpdate.Add(chunk);
+                    }
+                }
+
             }
             catch (NullReferenceException e)
             {
