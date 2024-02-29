@@ -8,17 +8,15 @@ using UnityEngine;
 using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
 using System.Threading;
+using System.IO;
 
 public class World : MonoBehaviour
 {
+    public Settings settings;
+    private string settingFilePath = Application.dataPath + "/settings.json";
+    
     [Header("World Generation Values")]
-    public int seed;
-
     public BiomeAttributes biome;
-
-    [Header("Performance")]
-    [InitializationField]
-    public bool enableThreading;
 
     [Header("Lighting")]
     [Range(0f, 1f)]
@@ -72,12 +70,22 @@ public class World : MonoBehaviour
 
     private void Start()
     {
-        Random.InitState(seed);
+        // Create settings file if it doesn't yet exist, after that, load it.
+        if (!File.Exists(settingFilePath))
+        {
+            string jsonExport = JsonUtility.ToJson(settings, true);
+            File.WriteAllText(settingFilePath, jsonExport);
+        }
+        
+        string jsonImport = File.ReadAllText(settingFilePath);
+        settings = JsonUtility.FromJson<Settings>(jsonImport);
+        
+        Random.InitState(settings.seed);
 
         Shader.SetGlobalFloat(ShaderMinGlobalLightLevel, VoxelData.minLightLevel);
         Shader.SetGlobalFloat(ShaderMaxGlobalLightLevel, VoxelData.maxLightLevel);
 
-        if (enableThreading)
+        if (settings.enableThreading)
         {
             ChunkUpdateThread = new Thread(new ThreadStart(ThreadedUpdate));
             ChunkUpdateThread.Start();
@@ -123,7 +131,7 @@ public class World : MonoBehaviour
             }
         }
 
-        if (!enableThreading)
+        if (!settings.enableThreading)
         {
             if (!applyingModifications)
                 ApplyModifications();
@@ -139,9 +147,9 @@ public class World : MonoBehaviour
 
     private void GenerateWorld()
     {
-        for (int x = VoxelData.WorldSizeInChunks / 2 - VoxelData.ViewDistanceInChunks; x < VoxelData.WorldSizeInChunks / 2 + VoxelData.ViewDistanceInChunks; x++)
+        for (int x = VoxelData.WorldSizeInChunks / 2 - settings.viewDistance; x < VoxelData.WorldSizeInChunks / 2 + settings.viewDistance; x++)
         {
-            for (int z = VoxelData.WorldSizeInChunks / 2 - VoxelData.ViewDistanceInChunks; z < VoxelData.WorldSizeInChunks / 2 + VoxelData.ViewDistanceInChunks; z++)
+            for (int z = VoxelData.WorldSizeInChunks / 2 - settings.viewDistance; z < VoxelData.WorldSizeInChunks / 2 + settings.viewDistance; z++)
             {
                 ChunkCoord newChunk = new ChunkCoord(x, z);
                 chunks[x, z] = new Chunk(newChunk, this);
@@ -205,7 +213,7 @@ public class World : MonoBehaviour
     /// </summary>
     private void OnDisable()
     {
-        if (enableThreading)
+        if (settings.enableThreading)
             ChunkUpdateThread.Abort();
     }
 
@@ -300,9 +308,9 @@ public class World : MonoBehaviour
         activeChunks.Clear();
 
         // Loop trough all chunks currently within view distance of the player.
-        for (int x = coord.x - VoxelData.ViewDistanceInChunks; x < coord.x + VoxelData.ViewDistanceInChunks; x++)
+        for (int x = coord.x - settings.viewDistance; x < coord.x + settings.viewDistance; x++)
         {
-            for (int z = coord.z - VoxelData.ViewDistanceInChunks; z < coord.z + VoxelData.ViewDistanceInChunks; z++)
+            for (int z = coord.z - settings.viewDistance; z < coord.z + settings.viewDistance; z++)
             {
                 // If the current chunk is in the world...
                 if (IsChunkInWorld(new ChunkCoord(x, z)))
@@ -580,4 +588,26 @@ public class VoxelMod
         position = _position;
         id = _id;
     }
+}
+
+
+[System.Serializable]
+public class Settings
+{
+    [Header("Game Data")]
+    public string version = "0.0.0";
+    
+    [Header("Performance")]
+    public int viewDistance = 5;
+    [InitializationField]
+    public bool enableThreading = true;
+    
+    [Header("Controls")]
+    [Range(0.1f, 10f)]
+    public float mouseSensitivityX = 1f;
+    [Range(0.1f, 10f)]
+    public float mouseSensitivityY = 1f;
+
+    [Header("World Generation")]
+    public int seed = 2147483647;
 }

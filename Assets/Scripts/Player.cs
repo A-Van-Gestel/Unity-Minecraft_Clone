@@ -99,10 +99,10 @@ public class Player : MonoBehaviour
             PlaceCursorBlocks();
 
             // Rotates the player on the X axis
-            transform.Rotate(Vector3.up * mouseHorizontal * Time.timeScale);
+            transform.Rotate(Vector3.up * mouseHorizontal * Time.timeScale * world.settings.mouseSensitivityX);
 
             // Rotates the camera on the Y axis
-            float angle = (playerCamera.localEulerAngles.x - mouseVertical * Time.timeScale + 360) % 360;
+            float angle = (playerCamera.localEulerAngles.x - mouseVertical * Time.timeScale * world.settings.mouseSensitivityY + 360) % 360;
             if (angle > 180)
                 angle -= 360;
 
