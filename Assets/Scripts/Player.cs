@@ -70,8 +70,8 @@ public class Player : MonoBehaviour
         playerCamera = GameObject.Find("Main Camera").transform;
         world = GameObject.Find("World").GetComponent<World>();
         highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
-
-        Cursor.lockState = CursorLockMode.Locked; // Makes cursor invisible and not able to go of screen
+        
+        world.inUI = false;
     }
 
     private void FixedUpdate()
@@ -186,6 +186,10 @@ public class Player : MonoBehaviour
 
     private void GetPlayerInputs()
     {
+        // CLOSE GAME ON ESC BUTTON PRESS
+        if (Input.GetKeyDown(KeyCode.Escape))
+            Application.Quit();
+        
         // MOVEMENT & CAMERA
         horizontal = Input.GetAxis("Horizontal");
         vertical = Input.GetAxis("Vertical");

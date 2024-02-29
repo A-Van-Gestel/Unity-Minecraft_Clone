@@ -1,15 +1,16 @@
-Shader "Minecraft/Blocks"
+Shader "Minecraft/Transparent Blocks"
 {
     Properties
     {
         _MainTex("Block Texture Atlas", 2D) = "white" {}
+        _AlphaCutout("Apha Cutout", Range(0.0, 1.0)) = 0.5
     }
 
     SubShader
     {
         Tags
         {
-            "RenderType"="Opaque"
+            "Queue"="AlphaTest" "IgnoreProjector"="True" "RenderType"="TransparentCutout"
         }
         LOD 100
         Lighting Off
@@ -71,6 +72,9 @@ Shader "Minecraft/Blocks"
                 shade = clamp(1 - shade, minGlobalLightLevel, maxGlobalLightLevel);
                 
                 // const float localLightLevel = clamp(GlobalLightLevel + i.color.a, 0, 1);
+
+                // Remove pixels from the alpha channel below a certain threshold.
+                clip(col.a - _AlphaCutout);
 
                 // Darken block based on block light level.
                 col = lerp(col, col * .10, shade);

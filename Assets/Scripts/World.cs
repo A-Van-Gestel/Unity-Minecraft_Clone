@@ -28,6 +28,7 @@ public class World : MonoBehaviour
 
     [Header("Player")]
     public Transform player;
+    private Camera playerCamera;
 
     public Vector3 spawnPosition;
 
@@ -70,6 +71,9 @@ public class World : MonoBehaviour
 
     private void Start()
     {
+        // Get main camera.
+        playerCamera = Camera.main!;
+        
         // Create settings file if it doesn't yet exist, after that, load it.
         if (!File.Exists(settingFilePath))
         {
@@ -84,6 +88,7 @@ public class World : MonoBehaviour
 
         Shader.SetGlobalFloat(ShaderMinGlobalLightLevel, VoxelData.minLightLevel);
         Shader.SetGlobalFloat(ShaderMaxGlobalLightLevel, VoxelData.maxLightLevel);
+        SetGlobalLightValue();
 
         if (settings.enableThreading)
         {
@@ -96,12 +101,15 @@ public class World : MonoBehaviour
         playerLastChunkCoord = GetChunkCoordFromVector3(player.position);
     }
 
+    public void SetGlobalLightValue()
+    {
+        Shader.SetGlobalFloat(ShaderGlobalLightLevel, globalLightLevel);
+        playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
+    }
+
     private void Update()
     {
         playerChunkCoord = GetChunkCoordFromVector3(player.position);
-
-        Shader.SetGlobalFloat(ShaderGlobalLightLevel, globalLightLevel);
-        Camera.main!.backgroundColor = Color.Lerp(night, day, globalLightLevel);
 
         // Only update the chunks if the player has moved from the chunk they where previously on.
         if (!playerChunkCoord.Equals(playerLastChunkCoord))
@@ -178,10 +186,14 @@ public class World : MonoBehaviour
         {
             while (!updated && index < chunksToUpdate.Count - 1)
             {
-                if (chunksToUpdate[index].IsEditable)
+                Chunk chunkToUpdate = chunksToUpdate[index];
+                if (chunkToUpdate.IsEditable)
                 {
-                    chunksToUpdate[index].UpdateChunk();
-                    activeChunks.Add(chunksToUpdate[index].coord);
+                    chunkToUpdate.UpdateChunk();
+                    if (!activeChunks.Contains(chunkToUpdate.coord))
+                    {
+                        activeChunks.Add(chunkToUpdate.coord);
+                    }
                     chunksToUpdate.RemoveAt(index);
                     updated = true;
                 }
@@ -312,27 +324,29 @@ public class World : MonoBehaviour
         {
             for (int z = coord.z - settings.viewDistance; z < coord.z + settings.viewDistance; z++)
             {
+                ChunkCoord thisChunkCoord = new ChunkCoord(x, z);
+                
                 // If the current chunk is in the world...
-                if (IsChunkInWorld(new ChunkCoord(x, z)))
+                if (IsChunkInWorld(thisChunkCoord))
                 {
                     // Check if it is active, if not, activate it.
                     if (chunks[x, z] == null)
                     {
-                        chunks[x, z] = new Chunk(new ChunkCoord(x, z), this);
-                        chunksToCreate.Add(new ChunkCoord(x, z));
+                        chunks[x, z] = new Chunk(thisChunkCoord, this);
+                        chunksToCreate.Add(thisChunkCoord);
                     }
                     else if (!chunks[x, z].isActive)
                     {
                         chunks[x, z].isActive = true;
                     }
 
-                    activeChunks.Add(new ChunkCoord(x, z));
+                    activeChunks.Add(thisChunkCoord);
                 }
 
                 // Check trough previously active chunks to see if this chunks is there. If it is, remove it from the list.
                 for (int i = 0; i < previouslyActiveChunks.Count; i++)
                 {
-                    if (previouslyActiveChunks[i].Equals(new ChunkCoord(x, z)))
+                    if (previouslyActiveChunks[i].Equals(thisChunkCoord))
                     {
                         previouslyActiveChunks.RemoveAt(i);
                     }
@@ -425,6 +439,7 @@ public class World : MonoBehaviour
             }
 
             // Toggle UI based on inUI state
+            Cursor.visible = _inUI;
             creativeInventoryWindow.SetActive(_inUI);
             cursorSlot.SetActive(_inUI);
         }
