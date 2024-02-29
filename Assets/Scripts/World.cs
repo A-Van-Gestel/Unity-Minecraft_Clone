@@ -222,8 +222,11 @@ public class World : MonoBehaviour
             if (!applyingModifications)
                 ApplyModifications();
 
-            if (chunksToUpdate.Count > 0)
-                UpdateChunks();
+            lock (ChunkUpdateThreadLock)
+            {
+                if (chunksToUpdate.Count > 0)
+                    UpdateChunks();
+            }
         }
     }
 
