@@ -9,12 +9,13 @@ using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
 using System.Threading;
 using System.IO;
+using Helpers;
 
 public class World : MonoBehaviour
 {
     public Settings settings;
     private string settingFilePath = Application.dataPath + "/settings.json";
-    
+
     [Header("World Generation Values")]
     public BiomeAttributes biome;
 
@@ -73,17 +74,17 @@ public class World : MonoBehaviour
     {
         // Get main camera.
         playerCamera = Camera.main!;
-        
+
         // Create settings file if it doesn't yet exist, after that, load it.
         if (!File.Exists(settingFilePath))
         {
             string jsonExport = JsonUtility.ToJson(settings, true);
             File.WriteAllText(settingFilePath, jsonExport);
         }
-        
+
         string jsonImport = File.ReadAllText(settingFilePath);
         settings = JsonUtility.FromJson<Settings>(jsonImport);
-        
+
         Random.InitState(settings.seed);
 
         Shader.SetGlobalFloat(ShaderMinGlobalLightLevel, VoxelData.minLightLevel);
@@ -155,14 +156,19 @@ public class World : MonoBehaviour
 
     private void GenerateWorld()
     {
-        for (int x = VoxelData.WorldSizeInChunks / 2 - settings.viewDistance; x < VoxelData.WorldSizeInChunks / 2 + settings.viewDistance; x++)
+        ChunkCoord centerChunkCoord = GetChunkCoordFromVector3(spawnPosition);
+        SpiralLoop spiralLoop = new SpiralLoop();
+
+        ChunkCoord newChunk = centerChunkCoord;
+        while (newChunk.x < VoxelData.WorldSizeInChunks / 2 + settings.viewDistance && newChunk.z < VoxelData.WorldSizeInChunks / 2 + settings.viewDistance)
         {
-            for (int z = VoxelData.WorldSizeInChunks / 2 - settings.viewDistance; z < VoxelData.WorldSizeInChunks / 2 + settings.viewDistance; z++)
-            {
-                ChunkCoord newChunk = new ChunkCoord(x, z);
-                chunks[x, z] = new Chunk(newChunk, this);
-                chunksToCreate.Add(newChunk);
-            }
+            newChunk = new ChunkCoord(centerChunkCoord.x + spiralLoop.X, centerChunkCoord.z + spiralLoop.Z);
+
+            chunks[newChunk.x, newChunk.z] = new Chunk(newChunk, this);
+            chunksToCreate.Add(newChunk);
+
+            // Next spiral coord
+            spiralLoop.Next();
         }
 
         spawnPosition = GetHighestVoxel(spawnPosition) + new Vector3(0.5f, 1.1f, 0.5f);
@@ -194,6 +200,7 @@ public class World : MonoBehaviour
                     {
                         activeChunks.Add(chunkToUpdate.coord);
                     }
+
                     chunksToUpdate.RemoveAt(index);
                     updated = true;
                 }
@@ -237,7 +244,7 @@ public class World : MonoBehaviour
         {
             // Try getting the queue, if not successful retry later
             if (!modifications.TryDequeue(out ConcurrentQueue<VoxelMod> queue)) continue;
-            
+
             // Cache chunks modified by the current modification.
             List<Chunk> modificationModifiedChunks = new List<Chunk>();
 
@@ -258,7 +265,6 @@ public class World : MonoBehaviour
                             chunksToCreate.Add(c);
                         }
 
-                        
                         Chunk chunk = chunks[c.x, c.z];
                         chunk.modifications.Enqueue(v);
 
@@ -281,7 +287,6 @@ public class World : MonoBehaviour
                             chunksToUpdate.Add(chunk);
                     }
                 }
-
             }
             catch (NullReferenceException e)
             {
@@ -320,38 +325,42 @@ public class World : MonoBehaviour
         activeChunks.Clear();
 
         // Loop trough all chunks currently within view distance of the player.
-        for (int x = coord.x - settings.viewDistance; x < coord.x + settings.viewDistance; x++)
+        SpiralLoop spiralLoop = new SpiralLoop();
+        ChunkCoord thisChunkCoord = coord;
+        while (thisChunkCoord.x < coord.x + settings.viewDistance && thisChunkCoord.z < coord.z + settings.viewDistance)
         {
-            for (int z = coord.z - settings.viewDistance; z < coord.z + settings.viewDistance; z++)
-            {
-                ChunkCoord thisChunkCoord = new ChunkCoord(x, z);
-                
-                // If the current chunk is in the world...
-                if (IsChunkInWorld(thisChunkCoord))
-                {
-                    // Check if it is active, if not, activate it.
-                    if (chunks[x, z] == null)
-                    {
-                        chunks[x, z] = new Chunk(thisChunkCoord, this);
-                        chunksToCreate.Add(thisChunkCoord);
-                    }
-                    else if (!chunks[x, z].isActive)
-                    {
-                        chunks[x, z].isActive = true;
-                    }
+            thisChunkCoord = new ChunkCoord(coord.x + spiralLoop.X, coord.z + spiralLoop.Z);
+            int x = thisChunkCoord.x;
+            int z = thisChunkCoord.z;
 
-                    activeChunks.Add(thisChunkCoord);
+            // If the current chunk is in the world...
+            if (IsChunkInWorld(thisChunkCoord))
+            {
+                // Check if it is active, if not, activate it.
+                if (chunks[x, z] == null)
+                {
+                    chunks[x, z] = new Chunk(thisChunkCoord, this);
+                    chunksToCreate.Add(thisChunkCoord);
+                }
+                else if (!chunks[x, z].isActive)
+                {
+                    chunks[x, z].isActive = true;
                 }
 
-                // Check trough previously active chunks to see if this chunks is there. If it is, remove it from the list.
-                for (int i = 0; i < previouslyActiveChunks.Count; i++)
+                activeChunks.Add(thisChunkCoord);
+            }
+
+            // Check trough previously active chunks to see if this chunks is there. If it is, remove it from the list.
+            for (int i = 0; i < previouslyActiveChunks.Count; i++)
+            {
+                if (previouslyActiveChunks[i].Equals(thisChunkCoord))
                 {
-                    if (previouslyActiveChunks[i].Equals(thisChunkCoord))
-                    {
-                        previouslyActiveChunks.RemoveAt(i);
-                    }
+                    previouslyActiveChunks.RemoveAt(i);
                 }
             }
+
+            // Next spiral coord
+            spiralLoop.Next();
         }
 
         // Any chunks left in the previouslyActiveChunks list are no longer in the player's view distance, so loop trough and disable them.
@@ -611,15 +620,17 @@ public class Settings
 {
     [Header("Game Data")]
     public string version = "0.0.0";
-    
+
     [Header("Performance")]
     public int viewDistance = 5;
+
     [InitializationField]
     public bool enableThreading = true;
-    
+
     [Header("Controls")]
     [Range(0.1f, 10f)]
     public float mouseSensitivityX = 1f;
+
     [Range(0.1f, 10f)]
     public float mouseSensitivityY = 1f;
 
