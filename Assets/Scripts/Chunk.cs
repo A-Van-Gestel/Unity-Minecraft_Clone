@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using MyBox;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -56,6 +57,7 @@ public class Chunk
         chunkPosition = chunkObject.transform.position;
 
         PopulateVoxelMap();
+        PlayChunkLoadAnimation();
     }
 
     private void PopulateVoxelMap()
@@ -70,7 +72,7 @@ public class Chunk
                 }
             }
         }
-        
+
         isVoxelMapPopulated = true;
 
         lock (world.ChunkUpdateThreadLock)
@@ -193,6 +195,7 @@ public class Chunk
             if (chunkObject != null)
             {
                 chunkObject.SetActive(value);
+                PlayChunkLoadAnimation();
             }
         }
     }
@@ -289,7 +292,7 @@ public class Chunk
         {
             // Update current chunk as fast as possible.
             world.chunksToUpdate.Insert(0, this);
-        
+
             // Update Surrounding Chunks
             UpdateSurroundingVoxels(xCheck, yCheck, zCheck);
         }
@@ -318,7 +321,7 @@ public class Chunk
             {
                 Vector3 chunkVector = currentVoxel + chunkPosition;
                 Chunk chunk = world.GetChunkFromVector3(chunkVector);
-                
+
                 // Update current chunk as fast as possible.
                 world.chunksToUpdate.Insert(0, chunk);
             }
@@ -416,6 +419,17 @@ public class Chunk
         uvs.Add(new Vector2(x + VoxelData.NormalizedBlockTextureSize, y));
         uvs.Add(new Vector2(x + VoxelData.NormalizedBlockTextureSize, y + VoxelData.NormalizedBlockTextureSize));
     }
+
+
+    #region Bonus Stuff
+
+    private void PlayChunkLoadAnimation()
+    {
+        if (world.settings.enableChunkLoadAnimations && chunkObject.GetComponent<ChunkLoadAnimation>() == null)
+            chunkObject.AddComponent<ChunkLoadAnimation>();
+    }
+
+    #endregion
 }
 
 public class ChunkCoord

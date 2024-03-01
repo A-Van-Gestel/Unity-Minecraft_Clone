@@ -29,6 +29,7 @@ public class World : MonoBehaviour
 
     [Header("Player")]
     public Transform player;
+
     private Camera playerCamera;
 
     public Vector3 spawnPosition;
@@ -75,6 +76,7 @@ public class World : MonoBehaviour
         // Get main camera.
         playerCamera = Camera.main!;
 
+#if !UNITY_EDITOR
         // Create settings file if it doesn't yet exist, after that, load it.
         if (!File.Exists(settingFilePath))
         {
@@ -84,6 +86,7 @@ public class World : MonoBehaviour
 
         string jsonImport = File.ReadAllText(settingFilePath);
         settings = JsonUtility.FromJson<Settings>(jsonImport);
+# endif
 
         Random.InitState(settings.seed);
 
@@ -280,14 +283,17 @@ public class World : MonoBehaviour
                     }
                 }
 
-                // Rerender the chunks modified by the modification.
-                foreach (Chunk chunk in modificationModifiedChunks)
+                // Rerender the chunks modified by the modification. VERY EXPENSIVE!
+                if (settings.rerenderChunksOnModification)
                 {
-                    // TODO: Needed for neighboring chunks to update rerender their updated mesh, but will result in serious lag spikes due to the long thread lock overhead.
-                    lock (ChunkUpdateThreadLock)
+                    foreach (Chunk chunk in modificationModifiedChunks)
                     {
-                        if (!chunksToUpdate.Contains(chunk))
-                            chunksToUpdate.Add(chunk);
+                        // TODO: Needed for neighboring chunks to update rerender their updated mesh, but will result in serious lag spikes due to the long thread lock overhead.
+                        lock (ChunkUpdateThreadLock)
+                        {
+                            if (!chunksToUpdate.Contains(chunk))
+                                chunksToUpdate.Add(chunk);
+                        }
                     }
                 }
             }
@@ -622,10 +628,13 @@ public class VoxelMod
 public class Settings
 {
     [Header("Game Data")]
-    public string version = "0.0.0";
+    public string version = "0.0.01";
 
     [Header("Performance")]
     public int viewDistance = 5;
+
+    [Tooltip("PERFORMANCE INTENSIVE - Prevent invisible blocks in case of cross chunk structures by re-rendering the modified chunks.")]
+    public bool rerenderChunksOnModification = false;
 
     [InitializationField]
     public bool enableThreading = true;
@@ -638,5 +647,9 @@ public class Settings
     public float mouseSensitivityY = 1f;
 
     [Header("World Generation")]
+    [InitializationField]
     public int seed = 2147483647;
+
+    [Header("Bonus Stuff")]
+    public bool enableChunkLoadAnimations = false;
 }
