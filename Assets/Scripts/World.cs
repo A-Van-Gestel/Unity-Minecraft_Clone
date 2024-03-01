@@ -76,14 +76,14 @@ public class World : MonoBehaviour
         // Get main camera.
         playerCamera = Camera.main!;
 
-#if !UNITY_EDITOR
         // Create settings file if it doesn't yet exist, after that, load it.
-        if (!File.Exists(settingFilePath))
+        if (!File.Exists(settingFilePath) || Application.isEditor)
         {
             string jsonExport = JsonUtility.ToJson(settings, true);
             File.WriteAllText(settingFilePath, jsonExport);
         }
 
+#if !UNITY_EDITOR
         string jsonImport = File.ReadAllText(settingFilePath);
         settings = JsonUtility.FromJson<Settings>(jsonImport);
 # endif
@@ -119,14 +119,19 @@ public class World : MonoBehaviour
         if (!playerChunkCoord.Equals(playerLastChunkCoord))
             CheckViewDistance();
 
-        if (!applyingModifications)
-            ApplyModifications();
-
         if (chunksToCreate.Count > 0)
             CreateChunk();
 
-        if (chunksToUpdate.Count > 0)
-            UpdateChunks();
+        if (!settings.enableThreading)
+        {
+            // ReSharper disable InconsistentlySynchronizedField
+            if (!applyingModifications)
+                ApplyModifications();
+
+            if (chunksToUpdate.Count > 0)
+                UpdateChunks();
+            // ReSharper restore InconsistentlySynchronizedField
+        }
 
         if (chunksToDraw.Count > 0)
         {
@@ -141,15 +146,6 @@ public class World : MonoBehaviour
                     Debug.Log("Chunk MeshCreation Exception: " + e);
                 }
             }
-        }
-
-        if (!settings.enableThreading)
-        {
-            if (!applyingModifications)
-                ApplyModifications();
-
-            if (chunksToUpdate.Count > 0)
-                UpdateChunks();
         }
 
 
@@ -500,29 +496,35 @@ public class World : MonoBehaviour
         }
 
         // ----- SECOND PASS -----
-        if (voxelValue == 1) // Stone
+        if (settings.enableSecondPass)
         {
-            foreach (Lode lode in biome.Lodes)
+            if (voxelValue == 1) // Stone
             {
-                if (yPos > lode.minHeight && yPos < lode.maxHeight)
+                foreach (Lode lode in biome.Lodes)
                 {
-                    if (Noise.Get3DPerlin(pos, lode.noiseOffset, lode.scale, lode.threshold))
+                    if (yPos > lode.minHeight && yPos < lode.maxHeight)
                     {
-                        voxelValue = lode.blockID;
+                        if (Noise.Get3DPerlin(pos, lode.noiseOffset, lode.scale, lode.threshold))
+                        {
+                            voxelValue = lode.blockID;
+                        }
                     }
                 }
             }
         }
 
         // ----- TREE PASS -----
-        if (yPos == terrainHeight)
+        if (settings.enableTreePass)
         {
-            if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biome.treeZoneScale) > biome.treeZoneThreshold)
+            if (yPos == terrainHeight)
             {
-                if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 2500, biome.treePlacementScale) > biome.treePlacementThreshold)
+                if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biome.treeZoneScale) > biome.treeZoneThreshold)
                 {
-                    ConcurrentQueue<VoxelMod> structureQueue = Structure.MakeTree(pos, biome.minTreeHeight, biome.maxTreeHeight);
-                    modifications.Enqueue(structureQueue);
+                    if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 2500, biome.treePlacementScale) > biome.treePlacementThreshold)
+                    {
+                        ConcurrentQueue<VoxelMod> structureQueue = Structure.MakeTree(pos, biome.minTreeHeight, biome.maxTreeHeight);
+                        modifications.Enqueue(structureQueue);
+                    }
                 }
             }
         }
@@ -634,10 +636,10 @@ public class Settings
     public int viewDistance = 5;
 
     [Tooltip("PERFORMANCE INTENSIVE - Prevent invisible blocks in case of cross chunk structures by re-rendering the modified chunks.")]
-    public bool rerenderChunksOnModification = false;
+    public bool rerenderChunksOnModification = true;
 
     [InitializationField]
-    public bool enableThreading = true;
+    public bool enableThreading = false;
 
     [Header("Controls")]
     [Range(0.1f, 10f)]
@@ -649,6 +651,14 @@ public class Settings
     [Header("World Generation")]
     [InitializationField]
     public int seed = 2147483647;
+
+    [InitializationField]
+    [Tooltip("Second Pass: Lode generation")]
+    public bool enableSecondPass = true;
+
+    [InitializationField]
+    [Tooltip("Structure Pass: Tree generation")]
+    public bool enableTreePass = true;
 
     [Header("Bonus Stuff")]
     public bool enableChunkLoadAnimations = false;

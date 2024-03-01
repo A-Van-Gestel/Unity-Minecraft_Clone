@@ -2240,11 +2240,13 @@ MonoBehaviour:
   settings:
     version: 0.0.01
     viewDistance: 5
-    rerenderChunksOnModification: 0
-    enableThreading: 1
+    rerenderChunksOnModification: 1
+    enableThreading: 0
     mouseSensitivityX: 1.2
     mouseSensitivityY: 1.2
     seed: 2147483647
+    enableSecondPass: 1
+    enableTreePass: 1
     enableChunkLoadAnimations: 0
   biome: {fileID: 11400000, guid: 159c3e2bbfcf09d4bb338c3c44faa01e, type: 2}
   globalLightLevel: 1

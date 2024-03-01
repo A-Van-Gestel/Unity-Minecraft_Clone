@@ -93,9 +93,13 @@ public class Chunk
             // Try getting the voxelMod, if not successful retry later
             if (!modifications.TryDequeue(out VoxelMod v)) continue;
             Vector3 pos = v.position -= chunkPosition;
+            
+            int vModX = Mathf.FloorToInt(pos.x);
+            int vModY = Mathf.FloorToInt(pos.y);
+            int vModZ = Mathf.FloorToInt(pos.z);
 
-            if (IsVoxelInChunk((int)pos.x, (int)pos.y, (int)pos.z))
-                voxelMap[(int)pos.x, (int)pos.y, (int)pos.z].id = v.id;
+            if (IsVoxelInChunk(vModX, vModY, vModZ))
+                voxelMap[vModX, vModY, vModZ].id = v.id;
         }
 
         ClearMeshData();
