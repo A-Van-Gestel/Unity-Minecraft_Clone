@@ -159,15 +159,21 @@ public class World : MonoBehaviour
         SpiralLoop spiralLoop = new SpiralLoop();
 
         ChunkCoord newChunk = centerChunkCoord;
-        while (newChunk.x < VoxelData.WorldSizeInChunks / 2 + settings.viewDistance && newChunk.z < VoxelData.WorldSizeInChunks / 2 + settings.viewDistance)
+        
+        int generateChunkDistance = VoxelData.WorldSizeInChunks / 2 + settings.viewDistance;
+        
+        // Don't try to generate chunks outside of the world
+        if (generateChunkDistance > VoxelData.WorldSizeInChunks)
+            generateChunkDistance = VoxelData.WorldSizeInChunks;
+        
+        while (newChunk.x < generateChunkDistance && newChunk.z < generateChunkDistance)
         {
-            newChunk = new ChunkCoord(centerChunkCoord.x + spiralLoop.X, centerChunkCoord.z + spiralLoop.Z);
-
             chunks[newChunk.x, newChunk.z] = new Chunk(newChunk, this);
             chunksToCreate.Add(newChunk);
 
             // Next spiral coord
             spiralLoop.Next();
+            newChunk = new ChunkCoord(centerChunkCoord.x + spiralLoop.X, centerChunkCoord.z + spiralLoop.Z);
         }
 
         spawnPosition = GetHighestVoxel(spawnPosition) + new Vector3(0.5f, 1.1f, 0.5f);
@@ -332,6 +338,7 @@ public class World : MonoBehaviour
         // Loop trough all chunks currently within view distance of the player.
         SpiralLoop spiralLoop = new SpiralLoop();
         ChunkCoord thisChunkCoord = coord;
+        
         while (thisChunkCoord.x < coord.x + settings.viewDistance && thisChunkCoord.z < coord.z + settings.viewDistance)
         {
             thisChunkCoord = new ChunkCoord(coord.x + spiralLoop.X, coord.z + spiralLoop.Z);
@@ -535,8 +542,8 @@ public class World : MonoBehaviour
 
     private bool IsChunkInWorld(ChunkCoord coord)
     {
-        if (coord.x > 0 && coord.x < VoxelData.WorldSizeInChunks - 1 &&
-            coord.z > 0 && coord.z < VoxelData.WorldSizeInChunks - 1)
+        if (coord.x >= 0 && coord.x < VoxelData.WorldSizeInChunks &&
+            coord.z >= 0 && coord.z < VoxelData.WorldSizeInChunks)
         {
             return true;
         }

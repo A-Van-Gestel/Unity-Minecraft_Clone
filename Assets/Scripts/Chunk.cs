@@ -98,6 +98,7 @@ public class Chunk
             int vModY = Mathf.FloorToInt(pos.y);
             int vModZ = Mathf.FloorToInt(pos.z);
 
+            // TODO: VoxelMod check for which blocks it can replace.
             if (IsVoxelInChunk(vModX, vModY, vModZ))
                 voxelMap[vModX, vModY, vModZ].id = v.id;
         }
