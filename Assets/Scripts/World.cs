@@ -17,7 +17,7 @@ public class World : MonoBehaviour
     private string settingFilePath = Application.dataPath + "/settings.json";
 
     [Header("World Generation Values")]
-    public BiomeAttributes biome;
+    public BiomeAttributes[] biomes;
 
     [Header("Lighting")]
     [Range(0f, 1f)]
@@ -159,13 +159,13 @@ public class World : MonoBehaviour
         SpiralLoop spiralLoop = new SpiralLoop();
 
         ChunkCoord newChunk = centerChunkCoord;
-        
+
         int generateChunkDistance = VoxelData.WorldSizeInChunks / 2 + settings.viewDistance;
-        
+
         // Don't try to generate chunks outside of the world
         if (generateChunkDistance > VoxelData.WorldSizeInChunks)
             generateChunkDistance = VoxelData.WorldSizeInChunks;
-        
+
         while (newChunk.x < generateChunkDistance && newChunk.z < generateChunkDistance)
         {
             chunks[newChunk.x, newChunk.z] = new Chunk(newChunk, this);
@@ -338,7 +338,7 @@ public class World : MonoBehaviour
         // Loop trough all chunks currently within view distance of the player.
         SpiralLoop spiralLoop = new SpiralLoop();
         ChunkCoord thisChunkCoord = coord;
-        
+
         while (thisChunkCoord.x < coord.x + settings.viewDistance && thisChunkCoord.z < coord.z + settings.viewDistance)
         {
             thisChunkCoord = new ChunkCoord(coord.x + spiralLoop.X, coord.z + spiralLoop.Z);
@@ -481,17 +481,53 @@ public class World : MonoBehaviour
         if (yPos == 0)
             return 8; // Bedrock
 
+        // ----- BIOME SELECTION PASS -----
+        int solidGroundHeight = 42;
+        float sumOfHeights = 0f;
+        int count = 0;
+        float strongestWeight = 0f;
+        int strongestBiomeIndex = 0;
+
+        for (int i = 0; i < biomes.Length; i++)
+        {
+            float weight = Noise.Get2DPerlin(new Vector2(pos.x, pos.z), biomes[i].offset, biomes[i].scale);
+
+            // Keep track of which weight is strongest.
+            if (weight > strongestWeight)
+            {
+                strongestWeight = weight;
+                strongestBiomeIndex = i;
+            }
+
+            // Get the height of the terrain (for the current biome) and multiply it by its weight.
+            float height = biomes[i].terrainHeight * Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biomes[i].terrainScale) * weight;
+
+            // If the height value is greater than 0, add it to the sum of heights.
+            if (height > 0)
+            {
+                sumOfHeights += height;
+                count++;
+            }
+        }
+
+        // Set biome to the one with the strongest weight.
+        BiomeAttributes biome = biomes[strongestBiomeIndex];
+
+        // Get the average of the heights.
+        sumOfHeights /= count;
+        int terrainHeight = Mathf.FloorToInt(sumOfHeights + solidGroundHeight);
+
+
         // ----- BASIC TERRAIN PASS -----
-        int terrainHeight = Mathf.FloorToInt(biome.terrainHeight * Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biome.terrainScale)) + biome.solidGroundHeight;
         byte voxelValue = 0;
 
         if (yPos == terrainHeight)
         {
-            voxelValue = 2; // Grass
+            voxelValue = biome.surfaceBlock; // Grass
         }
         else if (yPos < terrainHeight && yPos > terrainHeight - 4)
         {
-            voxelValue = 3; // Dirt
+            voxelValue = biome.subSurfaceBlock; // Dirt
         }
         else if (yPos > terrainHeight)
         {
@@ -520,16 +556,16 @@ public class World : MonoBehaviour
             }
         }
 
-        // ----- TREE PASS -----
-        if (settings.enableTreePass)
+        // ----- MAJOR FLORA PASS -----
+        if (settings.enableMajorFloraPass)
         {
-            if (yPos == terrainHeight)
+            if (yPos == terrainHeight && biome.placeMajorFlora)
             {
-                if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biome.treeZoneScale) > biome.treeZoneThreshold)
+                if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biome.majorFloraZoneScale) > biome.majorFloraZoneThreshold)
                 {
-                    if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 2500, biome.treePlacementScale) > biome.treePlacementThreshold)
+                    if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 2500, biome.majorFloraPlacementScale) > biome.majorFloraPlacementThreshold)
                     {
-                        ConcurrentQueue<VoxelMod> structureQueue = Structure.MakeTree(pos, biome.minTreeHeight, biome.maxTreeHeight);
+                        ConcurrentQueue<VoxelMod> structureQueue = Structure.GenerateMajorFlora(biome.majorFloraIndex, pos, biome.minHeight, biome.maxHeight);
                         modifications.Enqueue(structureQueue);
                     }
                 }
@@ -571,7 +607,6 @@ public class World : MonoBehaviour
 [System.Serializable]
 public class BlockType
 {
-    [HideInInspector]
     public string blockName;
 
     public bool isSolid;
@@ -665,7 +700,7 @@ public class Settings
 
     [InitializationField]
     [Tooltip("Structure Pass: Tree generation")]
-    public bool enableTreePass = true;
+    public bool enableMajorFloraPass = true;
 
     [Header("Bonus Stuff")]
     public bool enableChunkLoadAnimations = false;

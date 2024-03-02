@@ -411,6 +411,27 @@ TextureImporter:
       indices: 
       edges: []
       weights: []
+    - serializedVersion: 2
+      name: cactus_icon
+      rect:
+        serializedVersion: 2
+        x: 3840
+        y: 3840
+        width: 256
+        height: 256
+      alignment: 0
+      pivot: {x: 0, y: 0}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 0e77dcd535de2f84ba904a167fa4dd30
+      internalID: -954973061
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
     outline: []
     physicsShape: []
     bones: []
@@ -423,6 +444,7 @@ TextureImporter:
     secondaryTextures: []
     nameFileIdTable:
       bedrock_icon: 1008106713
+      cactus_icon: -954973061
       desert_cracked_icon: -966074416
       dirt_icon: 1551665942
       facade_icon: -1490239207
