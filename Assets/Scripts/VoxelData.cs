@@ -13,6 +13,8 @@ public static class VoxelData
     public static float maxLightLevel = 1.0f;
     public static float lightFallOff = 0.08f;
 
+    public static int seed = 2147483647;
+
     public static int WorldSizeInVoxels
     {
         get { return WorldSizeInChunks * ChunkWidth; }
@@ -67,4 +69,16 @@ public static class VoxelData
         new Vector2(1.0f, 0.0f), // Bottom Right
         new Vector2(1.0f, 1.0f), // Top Right
     };
+
+    public static int CalculateSeed(string seedText)
+    {
+        if (string.IsNullOrEmpty(seedText) || seedText.Length <= 1)  // TextMeshPro empty string has Length of 1 -_-
+        {
+            int randomSeed = new System.Random().Next(int.MinValue, int.MaxValue);
+            Debug.Log($"VoxelData.CalculateSeed | Using Random seed: {randomSeed}");
+            seedText = randomSeed.ToString();
+        }
+
+        return Mathf.Abs(seedText.GetHashCode()) / 10000;
+    }
 }

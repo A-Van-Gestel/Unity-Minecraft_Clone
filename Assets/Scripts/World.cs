@@ -74,6 +74,7 @@ public class World : MonoBehaviour
 
     private void Start()
     {
+        Debug.Log($"Generating new world using seed: {VoxelData.seed}");
         // Get main camera.
         playerCamera = Camera.main!;
 
@@ -90,7 +91,7 @@ public class World : MonoBehaviour
         settings = JsonUtility.FromJson<Settings>(jsonImport);
 # endif
 
-        Random.InitState(settings.seed);
+        Random.InitState(VoxelData.seed);
 
         Shader.SetGlobalFloat(ShaderMinGlobalLightLevel, VoxelData.minLightLevel);
         Shader.SetGlobalFloat(ShaderMaxGlobalLightLevel, VoxelData.maxLightLevel);
@@ -683,19 +684,17 @@ public class Settings
     public bool rerenderChunksOnModification = true;
 
     [InitializationField]
+    [Tooltip("Updates chunks on a separate thread. This however might negatively impact performance due to the extra overhead.")]
     public bool enableThreading = false;
 
     [Header("Controls")]
     [Range(0.1f, 10f)]
-    public float mouseSensitivityX = 1f;
+    public float mouseSensitivityX = 1.2f;
 
     [Range(0.1f, 10f)]
-    public float mouseSensitivityY = 1f;
+    public float mouseSensitivityY = 1.2f;
 
     [Header("World Generation")]
-    [InitializationField]
-    public int seed = 2147483647;
-
     [InitializationField]
     [Tooltip("Second Pass: Lode generation")]
     public bool enableSecondPass = true;
