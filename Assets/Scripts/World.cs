@@ -10,6 +10,7 @@ using Random = UnityEngine.Random;
 using System.Threading;
 using System.IO;
 using Helpers;
+using UnityEditor;
 
 public class World : MonoBehaviour
 {
@@ -81,6 +82,7 @@ public class World : MonoBehaviour
         {
             string jsonExport = JsonUtility.ToJson(settings, true);
             File.WriteAllText(settingFilePath, jsonExport);
+            AssetDatabase.Refresh();  // Refresh Unity's asset database.
         }
 
 #if !UNITY_EDITOR

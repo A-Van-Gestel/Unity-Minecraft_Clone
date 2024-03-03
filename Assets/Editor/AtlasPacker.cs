@@ -115,6 +115,7 @@ public class AtlasPacker : EditorWindow
             string path = Application.dataPath + saveLocation;
             CreateDirectory(path);
             File.WriteAllBytes(path, bytes);
+            AssetDatabase.Refresh();  // Refresh Unity's asset database.
             Debug.Log($"Atlas Packer: Atlas saved to {saveLocation}");
         }
         catch (Exception e)
