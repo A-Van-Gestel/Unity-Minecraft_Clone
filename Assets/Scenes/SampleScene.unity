@@ -2239,19 +2239,17 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   settings:
     version: 0.0.01
-    viewDistance: 15
+    viewDistance: 5
     rerenderChunksOnModification: 1
     enableThreading: 0
     mouseSensitivityX: 1.2
     mouseSensitivityY: 1.2
     seed: 2147483647
     enableSecondPass: 1
-    enableMajorFloraPass: 0
+    enableMajorFloraPass: 1
     enableChunkLoadAnimations: 0
   biomes:
   - {fileID: 11400000, guid: 159c3e2bbfcf09d4bb338c3c44faa01e, type: 2}
-  - {fileID: 11400000, guid: a72f592abb57e0b4aaa7e7418ae23cc9, type: 2}
-  - {fileID: 11400000, guid: c63ff2437e30dfd4eacd9ffd953c5812, type: 2}
   globalLightLevel: 1
   day: {r: 0, g: 0.90980387, b: 1, a: 1}
   night: {r: 0.03137255, g: 0, b: 0.44705883, a: 1}
