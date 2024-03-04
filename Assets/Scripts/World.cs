@@ -62,7 +62,7 @@ public class World : MonoBehaviour
     public GameObject creativeInventoryWindow;
     public GameObject cursorSlot;
     private bool _inUI = false;
-    
+
     // Clouds
     [Header("Clouds")]
     public Clouds clouds;
@@ -87,7 +87,7 @@ public class World : MonoBehaviour
         {
             string jsonExport = JsonUtility.ToJson(settings, true);
             File.WriteAllText(settingFilePath, jsonExport);
-            AssetDatabase.Refresh();  // Refresh Unity's asset database.
+            AssetDatabase.Refresh(); // Refresh Unity's asset database.
         }
 
 #if !UNITY_EDITOR
@@ -334,7 +334,7 @@ public class World : MonoBehaviour
     private void CheckViewDistance()
     {
         clouds.UpdateClouds();
-        
+
         ChunkCoord coord = GetChunkCoordFromVector3(player.position);
         playerLastChunkCoord = playerChunkCoord;
 
@@ -683,6 +683,7 @@ public class Settings
     [Header("Game Data")]
     public string version = "0.0.01";
 
+
     [Header("Performance")]
     public int viewDistance = 5;
 
@@ -692,6 +693,8 @@ public class Settings
     [InitializationField]
     [Tooltip("Updates chunks on a separate thread. This however might negatively impact performance due to the extra overhead.")]
     public bool enableThreading = false;
+    public CloudStyle clouds = CloudStyle.Fancy;
+
 
     [Header("Controls")]
     [Range(0.1f, 10f)]
@@ -699,6 +702,7 @@ public class Settings
 
     [Range(0.1f, 10f)]
     public float mouseSensitivityY = 1.2f;
+
 
     [Header("World Generation")]
     [InitializationField]
@@ -708,6 +712,7 @@ public class Settings
     [InitializationField]
     [Tooltip("Structure Pass: Tree generation")]
     public bool enableMajorFloraPass = true;
+
 
     [Header("Bonus Stuff")]
     public bool enableChunkLoadAnimations = false;

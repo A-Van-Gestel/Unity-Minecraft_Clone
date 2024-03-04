@@ -19,6 +19,13 @@ Shader "Minecraft/CloudShader"
         
         Pass
         {
+            Stencil
+            {
+                Ref 1
+                Comp Greater
+                Pass IncrSat
+            }
+            
             Color [_Color]
         }
     }

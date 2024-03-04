@@ -16,7 +16,7 @@ public class Chunk
 
     private int vertexIndex = 0;
     private List<Vector3> vertices = new List<Vector3>();
-    private List<int> triangels = new List<int>();
+    private List<int> triangles = new List<int>();
     private List<int> transparantTriangles = new List<int>();
     private Material[] materials = new Material[2];
     private List<Vector2> uvs = new List<Vector2>();
@@ -156,8 +156,8 @@ public class Chunk
 
             for (int p = 0; p < 6; p++)
             {
-                Vector3 currentVoxel = v + VoxelData.FaceChecks[p];
-                Vector3Int neighbor = new Vector3Int((int)currentVoxel.x, (int)currentVoxel.y, (int)currentVoxel.z);
+                Vector3Int currentVoxel = v + VoxelData.FaceChecks[p];
+                Vector3Int neighbor = new Vector3Int(currentVoxel.x, currentVoxel.y, currentVoxel.z);
 
                 if (IsVoxelInChunk(neighbor.x, neighbor.y, neighbor.z))
                 {
@@ -175,16 +175,13 @@ public class Chunk
                 }
             }
         }
-
-        {
-        }
     }
 
     private void ClearMeshData()
     {
         vertexIndex = 0;
         vertices.Clear();
-        triangels.Clear();
+        triangles.Clear();
         transparantTriangles.Clear();
         uvs.Clear();
         colors.Clear();
@@ -370,12 +367,12 @@ public class Chunk
 
                 if (!world.blockTypes[blockID].renderNeighborFaces)
                 {
-                    triangels.Add(vertexIndex);
-                    triangels.Add(vertexIndex + 1);
-                    triangels.Add(vertexIndex + 2);
-                    triangels.Add(vertexIndex + 2);
-                    triangels.Add(vertexIndex + 1);
-                    triangels.Add(vertexIndex + 3);
+                    triangles.Add(vertexIndex);
+                    triangles.Add(vertexIndex + 1);
+                    triangles.Add(vertexIndex + 2);
+                    triangles.Add(vertexIndex + 2);
+                    triangles.Add(vertexIndex + 1);
+                    triangles.Add(vertexIndex + 3);
                 }
                 else
                 {
@@ -398,7 +395,7 @@ public class Chunk
         mesh.vertices = vertices.ToArray();
 
         mesh.subMeshCount = 2;
-        mesh.SetTriangles(triangels.ToArray(), 0);
+        mesh.SetTriangles(triangles.ToArray(), 0);
         mesh.SetTriangles(transparantTriangles.ToArray(), 1);
 
         mesh.uv = uvs.ToArray();

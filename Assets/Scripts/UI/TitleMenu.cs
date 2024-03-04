@@ -32,6 +32,9 @@ namespace UI
         // Mouse Sensitivity
         public Slider mouseSensitivitySlider;
         public TextMeshProUGUI mouseSensitivityText;
+        
+        // Cloud Style
+        public TMP_Dropdown cloudStyleDropdown;
 
         // Toggles
         public Toggle threadingToggle;
@@ -78,6 +81,8 @@ namespace UI
             // Mouse Sensitivity
             mouseSensitivitySlider.value = _settings.mouseSensitivityX;
             UpdateMouseSensitivitySlider();
+            // Cloud Style
+            cloudStyleDropdown.value = (int)_settings.clouds;
             // Toggles
             threadingToggle.isOn = _settings.enableThreading;
             chunkAnimationToggle.isOn = _settings.enableChunkLoadAnimations;
@@ -91,6 +96,7 @@ namespace UI
             _settings.viewDistance = (int)viewDistanceSlider.value;
             _settings.mouseSensitivityX = mouseSensitivitySlider.value;
             _settings.mouseSensitivityY = mouseSensitivitySlider.value;
+            _settings.clouds = (CloudStyle)cloudStyleDropdown.value;
             _settings.enableThreading = threadingToggle.isOn;
             _settings.enableChunkLoadAnimations = chunkAnimationToggle.isOn;
 

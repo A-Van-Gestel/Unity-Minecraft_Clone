@@ -7,11 +7,12 @@ using UnityEngine.Serialization;
 public class Clouds : MonoBehaviour
 {
     public int cloudHeight = 100;
+    public int cloudDepth = 4;
 
     [SerializeField] private Texture2D cloudPattern = null;
     [SerializeField] private Material cloudMaterial = null;
     [SerializeField] private World world = null;
-    
+
     private bool[,] cloudData; // Array of bools representing where cloud is.
 
     private int cloudTexWidth;
@@ -51,18 +52,35 @@ public class Clouds : MonoBehaviour
 
     private void CreateClouds()
     {
+        if (world.settings.clouds == CloudStyle.Off)
+            return;
+
         for (int x = 0; x < cloudTexWidth; x += cloudTileSize)
         {
             for (int y = 0; y < cloudTexWidth; y += cloudTileSize)
             {
+                Mesh cloudMesh;
+                if (world.settings.clouds == CloudStyle.Fast)
+                    cloudMesh = CreateFastCloudMesh(x, y);
+                else
+                    cloudMesh = CreateFancyCloudMesh(x, y);
+
                 Vector3 position = new Vector3(x, cloudHeight, y);
-                clouds.Add(CloudTilePosFromVector3(position), CreateCloudTile(CreateCloudMesh(x, y), position));
+
+                // Doesn't seem to be needed --> Center the clouds based around the center of the world
+                // position += transform.position - new Vector3(cloudTexWidth / 2f, 0, cloudTexWidth / 2f);
+                // position.y = cloudHeight;
+
+                clouds.Add(CloudTilePosFromVector3(position), CreateCloudTile(cloudMesh, position));
             }
         }
     }
 
     public void UpdateClouds()
     {
+        if (world.settings.clouds == CloudStyle.Off)
+            return;
+
         for (int x = 0; x < cloudTexWidth; x += cloudTileSize)
         {
             for (int y = 0; y < cloudTexWidth; y += cloudTileSize)
@@ -81,7 +99,7 @@ public class Clouds : MonoBehaviour
         return Mathf.FloorToInt(value / cloudTileSize) * cloudTileSize;
     }
 
-    private Mesh CreateCloudMesh(int x, int z)
+    private Mesh CreateFastCloudMesh(int x, int z)
     {
         List<Vector3> vetices = new List<Vector3>();
         List<int> triangles = new List<int>();
@@ -130,6 +148,81 @@ public class Clouds : MonoBehaviour
         return mesh;
     }
 
+    private Mesh CreateFancyCloudMesh(int x, int z)
+    {
+        List<Vector3> vetices = new List<Vector3>();
+        List<int> triangles = new List<int>();
+        List<Vector3> normals = new List<Vector3>();
+        int vertCount = 0;
+
+        for (int xIncrement = 0; xIncrement < cloudTileSize; xIncrement++)
+        {
+            for (int zIncrement = 0; zIncrement < cloudTileSize; zIncrement++)
+            {
+                int xVal = x + xIncrement;
+                int zVal = z + zIncrement;
+
+                if (cloudData[xVal, zVal])
+                {
+                    // Loop though neigbour points using faceCheck array.
+                    for (int p = 0; p < 6; p++)
+                    {
+                        // If the current neigbour has no cloud, draw this face.
+                        if (!CheckCloudData(new Vector3Int(xVal, 0, zVal) + VoxelData.FaceChecks[p]))
+                        {
+                            // Add our 4 vertices for this face.
+                            for (int i = 0; i < 4; i++)
+                            {
+                                Vector3 vert = new Vector3Int(xIncrement, 0, zIncrement);
+                                vert += VoxelData.VoxelVerts[VoxelData.VoxelTris[p, i]];
+                                vert.y *= cloudDepth;
+                                vetices.Add(vert);
+                            }
+
+                            for (int i = 0; i < 4; i++)
+                                normals.Add(VoxelData.FaceChecks[p]);
+
+                            triangles.Add(vertCount);
+                            triangles.Add(vertCount + 1);
+                            triangles.Add(vertCount + 2);
+                            triangles.Add(vertCount + 2);
+                            triangles.Add(vertCount + 1);
+                            triangles.Add(vertCount + 3);
+
+                            vertCount += 4;
+                        }
+                    }
+                }
+            }
+        }
+
+        Mesh mesh = new Mesh();
+        mesh.vertices = vetices.ToArray();
+        mesh.triangles = triangles.ToArray();
+        mesh.normals = normals.ToArray();
+
+        return mesh;
+    }
+
+    // Returns true or false depending on if there is cloud at the given point.
+    private bool CheckCloudData(Vector3Int point)
+    {
+        // Because clouds are 2D, if y is above or below 0, return false.
+        if (point.y != 0)
+            return false;
+
+        int x = point.x;
+        int z = point.z;
+
+        // If the x or z value is outside of the cloudData range, wrap it around.
+        if (point.x < 0) x = cloudTexWidth - 1;
+        if (point.x > cloudTexWidth - 1) x = 0;
+        if (point.z < 0) z = cloudTexWidth - 1;
+        if (point.z > cloudTexWidth - 1) z = 0;
+
+        return cloudData[x, z];
+    }
+
     private GameObject CreateCloudTile(Mesh mesh, Vector3 position)
     {
         GameObject newCloudTile = new GameObject();
@@ -152,10 +245,17 @@ public class Clouds : MonoBehaviour
 
     private int CloudTileCoordFromFloat(float value)
     {
-        float a = value / (float)cloudTexWidth;  // Gets the position using cloudTexture width as units.
-        a -= Mathf.FloorToInt(a);  // Subtract whole nums to get a 0-1 value representing position in cloud texture.
-        int b = Mathf.FloorToInt((float)cloudTexWidth * a);  // Multiply cloud texture width by a to get position in texture globally.
+        float a = value / (float)cloudTexWidth; // Gets the position using cloudTexture width as units.
+        a -= Mathf.FloorToInt(a); // Subtract whole nums to get a 0-1 value representing position in cloud texture.
+        int b = Mathf.FloorToInt((float)cloudTexWidth * a); // Multiply cloud texture width by a to get position in texture globally.
 
         return b;
     }
+}
+
+public enum CloudStyle
+{
+    Off,
+    Fast,
+    Fancy
 }

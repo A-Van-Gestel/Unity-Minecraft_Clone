@@ -44,14 +44,14 @@ public static class VoxelData
         new Vector3(0.0f, 1.0f, 1.0f),
     };
 
-    public static readonly Vector3[] FaceChecks = new Vector3[6]
+    public static readonly Vector3Int[] FaceChecks = new Vector3Int[6]
     {
-        new Vector3(0.0f, 0.0f, -1.0f), // Back Face
-        new Vector3(0.0f, 0.0f, 1.0f), // Front Face
-        new Vector3(0.0f, 1.0f, 0.0f), // Top Face
-        new Vector3(0.0f, -1.0f, 0.0f), // Bottom Face
-        new Vector3(-1.0f, 0.0f, 0.0f), // Left Face
-        new Vector3(1.0f, 0.0f, 0.0f), // Right Face
+        new Vector3Int(0, 0, -1), // Back Face
+        new Vector3Int(0, 0, 1), // Front Face
+        new Vector3Int(0, 1, 0), // Top Face
+        new Vector3Int(0, -1, 0), // Bottom Face
+        new Vector3Int(-1, 0, 0), // Left Face
+        new Vector3Int(1, 0, 0), // Right Face
     };
 
     public static readonly int[,] VoxelTris = new int[6, 4]
