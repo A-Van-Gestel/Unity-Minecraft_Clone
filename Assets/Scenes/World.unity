@@ -1391,6 +1391,54 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &806419708
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 806419710}
+  - component: {fileID: 806419709}
+  m_Layer: 0
+  m_Name: Clouds
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &806419709
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 806419708}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1faa1affcd50c744d8b632e72ff242d8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cloudHeight: 100
+  cloudPattern: {fileID: 2800000, guid: 97e640f4781f6834a931ea9191f853b5, type: 3}
+  cloudMaterial: {fileID: 2100000, guid: 861bcc19e949283479bc12c433ad1e22, type: 2}
+  world: {fileID: 1731500968}
+--- !u!4 &806419710
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 806419708}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 654.84314, y: 720, z: 837.4927}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &864674880
 GameObject:
   m_ObjectHideFlags: 0
@@ -2240,13 +2288,12 @@ MonoBehaviour:
   settings:
     version: 0.0.01
     viewDistance: 5
-    rerenderChunksOnModification: 1
+    rerenderChunksOnModification: 0
     enableThreading: 0
     mouseSensitivityX: 1.2
     mouseSensitivityY: 1.2
-    seed: 2147483647
     enableSecondPass: 1
-    enableMajorFloraPass: 1
+    enableMajorFloraPass: 0
     enableChunkLoadAnimations: 0
   biomes:
   - {fileID: 11400000, guid: 159c3e2bbfcf09d4bb338c3c44faa01e, type: 2}
@@ -2465,6 +2512,7 @@ MonoBehaviour:
   debugScreen: {fileID: 884714899}
   creativeInventoryWindow: {fileID: 739993166}
   cursorSlot: {fileID: 1721447375}
+  clouds: {fileID: 806419709}
 --- !u!4 &1731500969
 Transform:
   m_ObjectHideFlags: 0
@@ -3017,3 +3065,4 @@ SceneRoots:
   - {fileID: 1080100306}
   - {fileID: 749848862}
   - {fileID: 864674881}
+  - {fileID: 806419710}
