@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using JetBrains.Annotations;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
@@ -181,6 +182,7 @@ public class DragAndDropHandler : MonoBehaviour
         _cursorSlot.itemSlot.InsertStack(oldClickedSlot);
     }
 
+    [CanBeNull]
     private ItemStack CombineStacks(ItemSlot _slotA, ItemStack _stack)
     {
         int maxStackSize = world.blockTypes[_stack.id].stackSize;
@@ -270,6 +272,7 @@ public class DragAndDropHandler : MonoBehaviour
         return false;
     }
 
+    [CanBeNull]
     private UIItemSlot CheckForSlot()
     {
         m_PointerEventData = new PointerEventData(m_EventSystem);

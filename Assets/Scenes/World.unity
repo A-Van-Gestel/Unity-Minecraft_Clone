@@ -2398,10 +2398,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   settings:
     version: 0.0.01
-    viewDistance: 5
+    loadDistance: 4
+    viewDistance: 2
     rerenderChunksOnModification: 1
     enableThreading: 0
-    clouds: 2
+    clouds: 0
     mouseSensitivityX: 1.2
     mouseSensitivityY: 1.2
     enableSecondPass: 1

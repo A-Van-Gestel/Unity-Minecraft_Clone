@@ -9,6 +9,7 @@ using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
 using System.Threading;
 using System.IO;
+using Data;
 using Helpers;
 using UnityEditor;
 
@@ -75,6 +76,33 @@ public class World : MonoBehaviour
     // Threading
     private Thread ChunkUpdateThread;
     public object ChunkUpdateThreadLock = new object();
+    public object ChunkListThreadLock = new object();
+
+    public WorldData worldData = new WorldData();
+
+#region Singleton pattern
+    private static World _instance;
+
+    public static World Instance
+    {
+        get { return _instance; }
+    }
+
+    private void Awake()
+    {
+        // If the instance value is not null and not *this*, we've somehow ended up with more than one World component.
+        // Since another one has already been assigned, delete this one.
+        if (_instance != null && _instance != this)
+        {
+            Destroy(this.gameObject);
+        }
+        else
+        {
+            _instance = this;
+        }
+    }
+#endregion
+
 
     private void Start()
     {
@@ -142,7 +170,7 @@ public class World : MonoBehaviour
 
         if (chunksToDraw.Count > 0)
         {
-            if (chunksToDraw.TryPeek(out Chunk chunk) && chunk.IsEditable && chunksToDraw.TryDequeue(out chunk))
+            if (chunksToDraw.TryDequeue(out Chunk chunk))
             {
                 try
                 {
@@ -160,6 +188,31 @@ public class World : MonoBehaviour
             debugScreen.SetActive(!debugScreen.activeSelf);
     }
 
+    private void LoadWorld()
+    {
+        ChunkCoord centerChunkCoord = GetChunkCoordFromVector3(spawnPosition);
+        SpiralLoop spiralLoop = new SpiralLoop();
+
+        int x = centerChunkCoord.x;
+        int z = centerChunkCoord.z;
+
+        int loadChunkDistance = VoxelData.WorldSizeInChunks / 2 + settings.loadDistance;
+
+        // Don't try to load chunks outside of the world
+        if (loadChunkDistance > VoxelData.WorldSizeInChunks)
+            loadChunkDistance = VoxelData.WorldSizeInChunks;
+
+        while (x < loadChunkDistance && z < loadChunkDistance)
+        {
+            worldData.LoadChunk(new Vector2Int(x, z));
+
+            // Next spiral coord
+            spiralLoop.Next();
+            x = centerChunkCoord.x + spiralLoop.X;
+            z = centerChunkCoord.z + spiralLoop.Z;
+        }
+    }
+
     private void GenerateWorld()
     {
         ChunkCoord centerChunkCoord = GetChunkCoordFromVector3(spawnPosition);
@@ -175,7 +228,7 @@ public class World : MonoBehaviour
 
         while (newChunk.x < generateChunkDistance && newChunk.z < generateChunkDistance)
         {
-            chunks[newChunk.x, newChunk.z] = new Chunk(newChunk, this);
+            chunks[newChunk.x, newChunk.z] = new Chunk(newChunk);
             chunksToCreate.Add(newChunk);
 
             // Next spiral coord
@@ -197,30 +250,15 @@ public class World : MonoBehaviour
 
     private void UpdateChunks()
     {
-        bool updated = false;
-        int index = 0;
-
         lock (ChunkUpdateThreadLock)
         {
-            while (!updated && index < chunksToUpdate.Count - 1)
+            Chunk chunkToUpdate = chunksToUpdate[0];
+            chunkToUpdate.UpdateChunk();
+            if (!activeChunks.Contains(chunkToUpdate.coord))
             {
-                Chunk chunkToUpdate = chunksToUpdate[index];
-                if (chunkToUpdate.IsEditable)
-                {
-                    chunkToUpdate.UpdateChunk();
-                    if (!activeChunks.Contains(chunkToUpdate.coord))
-                    {
-                        activeChunks.Add(chunkToUpdate.coord);
-                    }
-
-                    chunksToUpdate.RemoveAt(index);
-                    updated = true;
-                }
-                else
-                {
-                    index++;
-                }
+                activeChunks.Add(chunkToUpdate.coord);
             }
+            chunksToUpdate.RemoveAt(0);
         }
     }
 
@@ -260,55 +298,13 @@ public class World : MonoBehaviour
             // Try getting the queue, if not successful retry later
             if (!modifications.TryDequeue(out ConcurrentQueue<VoxelMod> queue)) continue;
 
-            // Cache chunks modified by the current modification.
-            List<Chunk> modificationModifiedChunks = new List<Chunk>();
-
-            try
+            while (queue.Count > 0)
             {
-                while (queue.Count > 0)
-                {
-                    // Try getting the voxelMod, if not successful retry later
-                    if (!queue.TryDequeue(out VoxelMod v)) continue;
-                    ChunkCoord c = GetChunkCoordFromVector3(v.position);
+                // Try getting the voxelMod, if not successful retry later
+                if (!queue.TryDequeue(out VoxelMod v)) continue;
+                ChunkCoord c = GetChunkCoordFromVector3(v.position);
 
-                    // Only try to apply modifications if these modifications are inside the world
-                    if (c.x >= 0 && c.x < VoxelData.WorldSizeInChunks && c.z >= 0 && c.z < VoxelData.WorldSizeInChunks)
-                    {
-                        if (chunks[c.x, c.z] == null)
-                        {
-                            chunks[c.x, c.z] = new Chunk(c, this);
-                            chunksToCreate.Add(c);
-                        }
-
-                        Chunk chunk = chunks[c.x, c.z];
-                        chunk.modifications.Enqueue(v);
-
-                        if (!modificationModifiedChunks.Contains(chunk))
-                            modificationModifiedChunks.Add(chunk);
-                    }
-                    else
-                    {
-                        Debug.Log($"World.ApplyModifications | ChunkCoord outside of world: X / Z = {c.x} / {c.z}");
-                    }
-                }
-
-                // Rerender the chunks modified by the modification. VERY EXPENSIVE!
-                if (settings.rerenderChunksOnModification)
-                {
-                    foreach (Chunk chunk in modificationModifiedChunks)
-                    {
-                        // TODO: Needed for neighboring chunks to update rerender their updated mesh, but will result in serious lag spikes due to the long thread lock overhead.
-                        lock (ChunkUpdateThreadLock)
-                        {
-                            if (!chunksToUpdate.Contains(chunk))
-                                chunksToUpdate.Add(chunk);
-                        }
-                    }
-                }
-            }
-            catch (NullReferenceException e)
-            {
-                Debug.Log("NullReference Exception again: " + e);
+                worldData.SetVoxel(v.position, v.id);
             }
         }
 
@@ -360,7 +356,7 @@ public class World : MonoBehaviour
                 // Check if it is active, if not, activate it.
                 if (chunks[x, z] == null)
                 {
-                    chunks[x, z] = new Chunk(thisChunkCoord, this);
+                    chunks[x, z] = new Chunk(thisChunkCoord);
                     chunksToCreate.Add(thisChunkCoord);
                 }
                 else if (!chunks[x, z].isActive)
@@ -397,14 +393,14 @@ public class World : MonoBehaviour
         int yMax = VoxelData.ChunkHeight - 1;
 
         // Voxel outside the world, highest voxel is world height.
-        if (!IsVoxelInWorld(pos))
+        if (!worldData.IsVoxelInWorld(pos))
         {
             Debug.Log($"Voxel not in world for X / Y/ Z = {(int)pos.x} / {(int)pos.y} / {(int)pos.z}");
             return new Vector3(pos.x, yMax, pos.z);
         }
 
         // Chunk is created and editable, calculate highest voxel using chunk function.
-        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].IsEditable)
+        if (chunks[thisChunk.x, thisChunk.z] != null)
         {
             Debug.Log($"Finding highest voxel for chunk {thisChunk.x} / {thisChunk.z} in wold for X / Z = {(int)pos.x} / {(int)pos.z} using chunk function.");
             Chunk currentChunk = chunks[thisChunk.x, thisChunk.z];
@@ -429,28 +425,17 @@ public class World : MonoBehaviour
 
     public bool CheckForVoxel(Vector3 pos)
     {
-        ChunkCoord thisChunk = new ChunkCoord(pos);
 
-        if (!IsVoxelInWorld(pos))
+        VoxelState voxel = worldData.GetVoxel(pos);
+        if (voxel != null && blockTypes[voxel.id].isSolid)
+            return true;
+        else
             return false;
-
-        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].IsEditable)
-            return blockTypes[chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos).id].isSolid;
-
-        return blockTypes[GetVoxel(pos)].isSolid;
     }
 
     public VoxelState GetVoxelState(Vector3 pos)
     {
-        ChunkCoord thisChunk = new ChunkCoord(pos);
-
-        if (!IsVoxelInWorld(pos))
-            return null;
-
-        if (chunks[thisChunk.x, thisChunk.z] != null && chunks[thisChunk.x, thisChunk.z].IsEditable)
-            return chunks[thisChunk.x, thisChunk.z].GetVoxelFromGlobalVector3(pos);
-
-        return new VoxelState(GetVoxel(pos));
+        return worldData.GetVoxel(pos);
     }
 
     public bool inUI
@@ -483,7 +468,7 @@ public class World : MonoBehaviour
 
         // ----- IMMUTABLE PASS -----
         // If outside of world, return air.
-        if (!IsVoxelInWorld(pos))
+        if (!worldData.IsVoxelInWorld(pos))
             return 0;
 
         // If bottom block of chunk, return bedrock
@@ -597,20 +582,6 @@ public class World : MonoBehaviour
             return false;
         }
     }
-
-    public bool IsVoxelInWorld(Vector3 pos)
-    {
-        if (pos.x >= 0 && pos.x < VoxelData.WorldSizeInVoxels &&
-            pos.y >= 0 && pos.y < VoxelData.ChunkHeight &&
-            pos.z >= 0 && pos.z < VoxelData.WorldSizeInVoxels)
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
-    }
 }
 
 [System.Serializable]
@@ -685,6 +656,7 @@ public class Settings
 
 
     [Header("Performance")]
+    public int loadDistance = 10;
     public int viewDistance = 5;
 
     [Tooltip("PERFORMANCE INTENSIVE - Prevent invisible blocks in case of cross chunk structures by re-rendering the modified chunks.")]

@@ -312,7 +312,7 @@ public class Player : MonoBehaviour
                 Vector3 playerPosition = transform.position;
                 Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
                 if (playerCoord != placeBlock.position && (playerCoord + new Vector3(0, 1, 0)) != placeBlock.position // Placed block isn't inside the player
-                                                       && world.IsVoxelInWorld(placeBlock.position) // Placed block is inside the world
+                                                       && world.worldData.IsVoxelInWorld(placeBlock.position) // Placed block is inside the world
                                                        && !world.CheckForVoxel(placeBlock.position) // Placed block isn't inside a other voxel
                                                        && toolbar.slots[toolbar.slotIndex].itemSlot.HasItem) // Current itemSlot isn't empty
                     blockPlaceable = true;

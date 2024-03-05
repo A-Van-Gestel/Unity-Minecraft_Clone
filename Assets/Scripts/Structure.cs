@@ -3,6 +3,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using UnityEngine;
 
+
+// TODO: VoxelMod check for which blocks it can replace.
 public static class Structure
 {
     public static ConcurrentQueue<VoxelMod> GenerateMajorFlora(int index, Vector3 position, int minTrunkHeight, int maxTrunkHeight)
