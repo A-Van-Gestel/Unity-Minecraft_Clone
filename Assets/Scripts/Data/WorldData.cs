@@ -16,14 +16,7 @@ namespace Data
         public Dictionary<Vector2Int, ChunkData> chunks = new Dictionary<Vector2Int, ChunkData>();
 
         [System.NonSerialized]
-        public List<ChunkData> modifiedChunks = new List<ChunkData>();
-
-        // TODO: Might not be needed if modifiedChunks is changed to hashSet.
-        public void AddToModifiedChunksList(ChunkData chunk)
-        {
-            if (!modifiedChunks.Contains(chunk))
-                modifiedChunks.Add(chunk);
-        }
+        public HashSet<ChunkData> modifiedChunks = new HashSet<ChunkData>();
 
         public WorldData(string worldName, int seed)
         {
@@ -64,12 +57,16 @@ namespace Data
                 return;
             
             // Load Chunk from File
-            ChunkData chunk = SaveSystem.LoadChunk(worldName, coord);
-            if (chunk != null)
+            if (World.Instance.settings.loadSaveDataOnStartup)
             {
-                chunks.Add(coord, chunk);
-                return;
+                ChunkData chunk = SaveSystem.LoadChunk(worldName, coord);
+                if (chunk != null)
+                {
+                    chunks.Add(coord, chunk);
+                    return;
+                }
             }
+
 
             chunks.Add(coord, new ChunkData(coord));
             chunks[coord].Populate();
@@ -111,7 +108,7 @@ namespace Data
 
             // Then set the voxel in our chunk.
             chunk.map[voxel.x, voxel.y, voxel.z].id = value;
-            AddToModifiedChunksList(chunk);
+            modifiedChunks.Add(chunk);
         }
 
         [CanBeNull]

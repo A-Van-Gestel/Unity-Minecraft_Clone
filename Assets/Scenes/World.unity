@@ -2398,6 +2398,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   settings:
     version: 0.0.01
+    loadSaveDataOnStartup: 0
     loadDistance: 4
     viewDistance: 2
     rerenderChunksOnModification: 1
@@ -2626,6 +2627,10 @@ MonoBehaviour:
   creativeInventoryWindow: {fileID: 739993166}
   cursorSlot: {fileID: 1721447375}
   clouds: {fileID: 806419709}
+  worldData:
+    worldName: Prototype
+    seed: 0
+  appPath: 
 --- !u!4 &1731500969
 Transform:
   m_ObjectHideFlags: 0

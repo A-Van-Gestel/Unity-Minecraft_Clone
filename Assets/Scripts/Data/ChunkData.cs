@@ -53,7 +53,7 @@ namespace Data
                     }
                 }
             }
-            World.Instance.worldData.AddToModifiedChunksList(this);
+            World.Instance.worldData.modifiedChunks.Add(this);
         }
     }
 }

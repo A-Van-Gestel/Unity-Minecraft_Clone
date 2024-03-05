@@ -110,7 +110,6 @@ public class World : MonoBehaviour
     private void Start()
     {
         Debug.Log($"Generating new world using seed: {VoxelData.seed}");
-        worldData = SaveSystem.LoadWorld("test");
         
         // Get main camera.
         playerCamera = Camera.main!;
@@ -127,6 +126,13 @@ public class World : MonoBehaviour
         string jsonImport = File.ReadAllText(settingFilePath);
         settings = JsonUtility.FromJson<Settings>(jsonImport);
 # endif
+        
+        // TODO: Set worldName using UI
+        if (settings.loadSaveDataOnStartup)
+            worldData = SaveSystem.LoadWorld("Prototype", VoxelData.seed);
+        else
+            worldData = new WorldData("Prototype", VoxelData.seed);
+        
 
         Random.InitState(VoxelData.seed);
 
@@ -664,11 +670,16 @@ public class Settings
     public string version = "0.0.01";
 
 
+    [Header("Save System")]
+    public bool loadSaveDataOnStartup = true;
+
+
     [Header("Performance")]
     public int loadDistance = 10;
     public int viewDistance = 5;
 
     [Tooltip("PERFORMANCE INTENSIVE - Prevent invisible blocks in case of cross chunk structures by re-rendering the modified chunks.")]
+    // TODO: Needs to be re-implemented: https://github.com/A-Van-Gestel/Unity-Minecraft_Clone/commit/320d9710f620db537acb3ed8f94e5d98ec567f59#diff-47f56e730b0aac4f6699ec185244b6f897aacac5d53cc53bab0c19f20dda1c08L295-L307
     public bool rerenderChunksOnModification = true;
 
     [InitializationField]
