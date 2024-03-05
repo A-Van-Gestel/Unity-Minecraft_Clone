@@ -10,16 +10,16 @@ namespace Data
         // The global position of the chunk. ie, (16, 16) NOT (1, 1). We want to be able to access
         // it as a Vector2Int, but Vector2Int's are not serialized so we won't be able
         // to save them. So we'll store them as int's.
-        private int x;
-        private int y;
+        private int _x;
+        private int _y;
 
         public Vector2Int position
         {
-            get { return new Vector2Int(x, y); }
+            get { return new Vector2Int(_x, _y); }
             set
             {
-                x = value.x;
-                y = value.y;
+                _x = value.x;
+                _y = value.y;
             }
         }
 
@@ -33,10 +33,10 @@ namespace Data
             position = pos;
         }
 
-        public ChunkData(int _x, int _y)
+        public ChunkData(int x, int y)
         {
-            x = _x;
-            y = _y;
+            _x = x;
+            _y = y;
         }
     #endregion
 
@@ -53,6 +53,7 @@ namespace Data
                     }
                 }
             }
+            World.Instance.worldData.AddToModifiedChunksList(this);
         }
     }
 }

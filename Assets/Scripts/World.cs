@@ -78,7 +78,9 @@ public class World : MonoBehaviour
     public object ChunkUpdateThreadLock = new object();
     public object ChunkListThreadLock = new object();
 
-    public WorldData worldData = new WorldData();
+    public WorldData worldData;
+
+    public string appPath;
 
 #region Singleton pattern
     private static World _instance;
@@ -99,6 +101,7 @@ public class World : MonoBehaviour
         else
         {
             _instance = this;
+            appPath = Application.persistentDataPath;
         }
     }
 #endregion
@@ -107,6 +110,8 @@ public class World : MonoBehaviour
     private void Start()
     {
         Debug.Log($"Generating new world using seed: {VoxelData.seed}");
+        worldData = SaveSystem.LoadWorld("test");
+        
         // Get main camera.
         playerCamera = Camera.main!;
 
@@ -184,8 +189,12 @@ public class World : MonoBehaviour
         }
 
 
+        // UI - DEBUG SCREEN
         if (Input.GetKeyDown(KeyCode.F3))
             debugScreen.SetActive(!debugScreen.activeSelf);
+
+        if (Input.GetKeyDown(KeyCode.F4))
+            SaveSystem.SaveWorld(worldData);
     }
 
     private void LoadWorld()
