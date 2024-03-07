@@ -34,7 +34,10 @@ public class World : MonoBehaviour
 
     private Camera playerCamera;
 
+    [InitializationField]
     public Vector3 spawnPosition;
+    [InitializationField]
+    public Vector3 spawnPositionOffset = new Vector3(0.5f, 1.1f, 0.5f);
 
     [Header("Blocks & Materials")]
     public Material material;
@@ -48,8 +51,7 @@ public class World : MonoBehaviour
     public ChunkCoord playerChunkCoord;
     private ChunkCoord playerLastChunkCoord;
 
-    private List<ChunkCoord> chunksToCreate = new List<ChunkCoord>();
-    public List<Chunk> chunksToUpdate = new List<Chunk>();
+    private List<Chunk> chunksToUpdate = new List<Chunk>();
     public ConcurrentQueue<Chunk> chunksToDraw = new ConcurrentQueue<Chunk>();
 
     private bool applyingModifications = false;
@@ -110,7 +112,7 @@ public class World : MonoBehaviour
     private void Start()
     {
         Debug.Log($"Generating new world using seed: {VoxelData.seed}");
-        
+
         // Get main camera.
         playerCamera = Camera.main!;
 
@@ -126,13 +128,13 @@ public class World : MonoBehaviour
         string jsonImport = File.ReadAllText(settingFilePath);
         settings = JsonUtility.FromJson<Settings>(jsonImport);
 # endif
-        
+
         // TODO: Set worldName using UI
         if (settings.loadSaveDataOnStartup)
             worldData = SaveSystem.LoadWorld("Prototype", VoxelData.seed);
         else
             worldData = new WorldData("Prototype", VoxelData.seed);
-        
+
 
         Random.InitState(VoxelData.seed);
 
@@ -140,15 +142,23 @@ public class World : MonoBehaviour
         Shader.SetGlobalFloat(ShaderMaxGlobalLightLevel, VoxelData.maxLightLevel);
         SetGlobalLightValue();
 
+        // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
+        spawnPosition = new Vector3(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1f, VoxelData.WorldCentre);
+        LoadWorld();
+
+        // Now set the the Y position on top of the highest voxel at the initial location.
+        spawnPosition = GetHighestVoxel(spawnPosition) + spawnPositionOffset;
+        player.position = spawnPosition;
+        CheckViewDistance();
+
+
+        playerLastChunkCoord = GetChunkCoordFromVector3(player.position);
+
         if (settings.enableThreading)
         {
             ChunkUpdateThread = new Thread(new ThreadStart(ThreadedUpdate));
             ChunkUpdateThread.Start();
         }
-
-        spawnPosition = new Vector3(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1f, VoxelData.WorldCentre);
-        GenerateWorld();
-        playerLastChunkCoord = GetChunkCoordFromVector3(player.position);
     }
 
     public void SetGlobalLightValue()
@@ -164,9 +174,6 @@ public class World : MonoBehaviour
         // Only update the chunks if the player has moved from the chunk they where previously on.
         if (!playerChunkCoord.Equals(playerLastChunkCoord))
             CheckViewDistance();
-
-        if (chunksToCreate.Count > 0)
-            CreateChunk();
 
         if (!settings.enableThreading)
         {
@@ -219,6 +226,7 @@ public class World : MonoBehaviour
 
         while (x < loadChunkDistance && z < loadChunkDistance)
         {
+            // Debug.Log($"World.LoadWorld | Loading chunk X / Z: {x} / {z}");
             worldData.LoadChunk(new Vector2Int(x, z));
 
             // Next spiral coord
@@ -228,39 +236,20 @@ public class World : MonoBehaviour
         }
     }
 
-    private void GenerateWorld()
+    public void AddChunkToUpdate(Chunk chunk, bool immediateUpdate = false)
     {
-        ChunkCoord centerChunkCoord = GetChunkCoordFromVector3(spawnPosition);
-        SpiralLoop spiralLoop = new SpiralLoop();
-
-        ChunkCoord newChunk = centerChunkCoord;
-
-        int generateChunkDistance = VoxelData.WorldSizeInChunks / 2 + settings.viewDistance;
-
-        // Don't try to generate chunks outside of the world
-        if (generateChunkDistance > VoxelData.WorldSizeInChunks)
-            generateChunkDistance = VoxelData.WorldSizeInChunks;
-
-        while (newChunk.x < generateChunkDistance && newChunk.z < generateChunkDistance)
+        // Lock list to ensure only one thing is using the list at a time.
+        lock (ChunkUpdateThreadLock)
         {
-            chunks[newChunk.x, newChunk.z] = new Chunk(newChunk);
-            chunksToCreate.Add(newChunk);
-
-            // Next spiral coord
-            spiralLoop.Next();
-            newChunk = new ChunkCoord(centerChunkCoord.x + spiralLoop.X, centerChunkCoord.z + spiralLoop.Z);
+            // Make sure update list doesn't already contain the chunk.
+            if (!chunksToUpdate.Contains(chunk))
+            {
+                if (immediateUpdate)
+                    chunksToUpdate.Insert(0, chunk);
+                else
+                    chunksToUpdate.Add(chunk);
+            }
         }
-
-        spawnPosition = GetHighestVoxel(spawnPosition) + new Vector3(0.5f, 1.1f, 0.5f);
-        player.position = spawnPosition;
-        CheckViewDistance();
-    }
-
-    private void CreateChunk()
-    {
-        ChunkCoord c = chunksToCreate[0];
-        chunksToCreate.RemoveAt(0);
-        chunks[c.x, c.z].Init();
     }
 
     private void UpdateChunks()
@@ -273,6 +262,7 @@ public class World : MonoBehaviour
             {
                 activeChunks.Add(chunkToUpdate.coord);
             }
+
             chunksToUpdate.RemoveAt(0);
         }
     }
@@ -342,6 +332,7 @@ public class World : MonoBehaviour
         return chunks[x, z];
     }
 
+    // TODO: Make a CheckLoadDistance variant of this.
     private void CheckViewDistance()
     {
         clouds.UpdateClouds();
@@ -372,13 +363,9 @@ public class World : MonoBehaviour
                 if (chunks[x, z] == null)
                 {
                     chunks[x, z] = new Chunk(thisChunkCoord);
-                    chunksToCreate.Add(thisChunkCoord);
-                }
-                else if (!chunks[x, z].isActive)
-                {
-                    chunks[x, z].isActive = true;
                 }
 
+                chunks[x, z].isActive = true;
                 activeChunks.Add(thisChunkCoord);
             }
 
@@ -440,7 +427,6 @@ public class World : MonoBehaviour
 
     public bool CheckForVoxel(Vector3 pos)
     {
-
         VoxelState voxel = worldData.GetVoxel(pos);
         if (voxel != null && blockTypes[voxel.id].isSolid)
             return true;
@@ -606,9 +592,10 @@ public class BlockType
 
     public bool isSolid;
     public bool renderNeighborFaces;
-
-    [ConditionalField(nameof(renderNeighborFaces))]
-    public float transparency;
+    
+    [Tooltip("How many light will be stopped by this block.")]
+    [Range(0, 15)]
+    public byte opacity = 15;
 
     public Sprite icon;
     public int stackSize = 64;

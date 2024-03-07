@@ -107,8 +107,7 @@ namespace Data
             Vector3Int voxel = new Vector3Int((int)(pos.x - x), (int)pos.y, (int)(pos.z - z));
 
             // Then set the voxel in our chunk.
-            chunk.map[voxel.x, voxel.y, voxel.z].id = value;
-            modifiedChunks.Add(chunk);
+            chunk.ModifyVoxel(voxel, value);
         }
 
         [CanBeNull]
@@ -126,8 +125,11 @@ namespace Data
             x *= VoxelData.ChunkWidth;
             z *= VoxelData.ChunkWidth;
 
-            // Check if the chunk exists. If not, create it.
-            ChunkData chunk = RequestChunk(new Vector2Int(x, z), true);
+            // Check if the chunk exists.
+            ChunkData chunk = RequestChunk(new Vector2Int(x, z), false);
+
+            if (chunk == null)
+                return null;
 
             // Then create a Vector3Int with the position of our voxel *within* the chunk.
             Vector3Int voxel = new Vector3Int((int)(pos.x - x), (int)pos.y, (int)(pos.z - z));

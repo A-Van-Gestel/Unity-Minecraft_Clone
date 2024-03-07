@@ -11,7 +11,14 @@ public static class VoxelData
     // Lighting Values
     public static float minLightLevel = 0.15f;
     public static float maxLightLevel = 1.0f;
-    public static float lightFallOff = 0.08f;
+    
+    public static float unitOfLight
+    {
+        // TODO: Lookup table might be more performant than calculation.
+        // Light is handled as float (0-1) byt Minecraft stores light as a byte (0-15),
+        // so we need to know how much of that float a single light level represents.
+        get { return 1f / 16f; }
+    }
 
     public static int seed = 0;
 
@@ -52,6 +59,16 @@ public static class VoxelData
         new Vector3Int(0, -1, 0), // Bottom Face
         new Vector3Int(-1, 0, 0), // Left Face
         new Vector3Int(1, 0, 0), // Right Face
+    };
+
+    public static readonly int[] revFaceChecksIndex = new int[6]
+    {
+        1, // Front Face
+        0, // Back Face
+        3, // Bottom Face
+        2, // Top Face
+        5, // Right Face
+        4, // Left Face
     };
 
     public static readonly int[,] VoxelTris = new int[6, 4]

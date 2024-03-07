@@ -2399,8 +2399,8 @@ MonoBehaviour:
   settings:
     version: 0.0.01
     loadSaveDataOnStartup: 0
-    loadDistance: 4
-    viewDistance: 2
+    loadDistance: 8
+    viewDistance: 4
     rerenderChunksOnModification: 1
     enableThreading: 0
     clouds: 0
@@ -2416,13 +2416,14 @@ MonoBehaviour:
   night: {r: 0.03137255, g: 0, b: 0.44705883, a: 1}
   player: {fileID: 151001797}
   spawnPosition: {x: 0, y: 0, z: 0}
+  spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
   material: {fileID: 2100000, guid: 310749baead051949ad82e332a06680f, type: 2}
   transparentMaterial: {fileID: 2100000, guid: 451dc07c0cc41a649bf3ac4fe7a9e1b0, type: 2}
   blockTypes:
   - blockName: Air
     isSolid: 0
     renderNeighborFaces: 1
-    transparency: 1
+    opacity: 0
     icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
     stackSize: 64
     backFaceTexture: 0
@@ -2434,7 +2435,7 @@ MonoBehaviour:
   - blockName: Stone
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 0
@@ -2446,7 +2447,7 @@ MonoBehaviour:
   - blockName: Grass
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: -1336346017, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 12
@@ -2458,7 +2459,7 @@ MonoBehaviour:
   - blockName: Dirt
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: 1551665942, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 2
@@ -2470,7 +2471,7 @@ MonoBehaviour:
   - blockName: Sand
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: -1153239741, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 3
@@ -2482,7 +2483,7 @@ MonoBehaviour:
   - blockName: Snow
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: 455753414, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 4
@@ -2494,7 +2495,7 @@ MonoBehaviour:
   - blockName: Grass Snowy
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: 122583294, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 21
@@ -2506,7 +2507,7 @@ MonoBehaviour:
   - blockName: Stone Walkway
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: -1793209460, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 6
@@ -2518,7 +2519,7 @@ MonoBehaviour:
   - blockName: Bedrock
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: 1008106713, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 7
@@ -2530,7 +2531,7 @@ MonoBehaviour:
   - blockName: Desert Cracked
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: -966074416, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 8
@@ -2542,7 +2543,7 @@ MonoBehaviour:
   - blockName: Grass Rocky
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: 2025127514, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 25
@@ -2554,7 +2555,7 @@ MonoBehaviour:
   - blockName: Tile
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: 1436998987, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 10
@@ -2566,7 +2567,7 @@ MonoBehaviour:
   - blockName: Wood
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: -1841403712, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 11
@@ -2578,7 +2579,7 @@ MonoBehaviour:
   - blockName: Facade
     isSolid: 1
     renderNeighborFaces: 1
-    transparency: 1
+    opacity: 0
     icon: {fileID: -1490239207, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 13
@@ -2590,7 +2591,7 @@ MonoBehaviour:
   - blockName: Oak Log
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: -2144359328, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 14
@@ -2602,7 +2603,7 @@ MonoBehaviour:
   - blockName: Oak Leaves
     isSolid: 1
     renderNeighborFaces: 1
-    transparency: 0.75
+    opacity: 5
     icon: {fileID: -392713096, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 16
@@ -2614,7 +2615,7 @@ MonoBehaviour:
   - blockName: Cactus
     isSolid: 1
     renderNeighborFaces: 0
-    transparency: 0
+    opacity: 15
     icon: {fileID: -954973061, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 18

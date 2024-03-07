@@ -1,5 +1,7 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using JetBrains.Annotations;
 using UnityEngine;
 
 namespace Data
@@ -27,6 +29,11 @@ namespace Data
         public VoxelState[,,] map = new VoxelState[VoxelData.ChunkWidth, VoxelData.ChunkHeight, VoxelData.ChunkWidth];
 
 
+        [System.NonSerialized]
+        [CanBeNull]
+        public Chunk chunk;
+
+
     #region Constructors
         public ChunkData(Vector2Int pos)
         {
@@ -49,11 +56,88 @@ namespace Data
                 {
                     for (int z = 0; z < VoxelData.ChunkWidth; z++)
                     {
-                        map[x, y, z] = new VoxelState(World.Instance.GetVoxel(new Vector3(x + position.x, y, z + position.y)));
+                        Vector3 voxelGlobalPosition = new Vector3(x + position.x, y, z + position.y);
+
+                        map[x, y, z] = new VoxelState(World.Instance.GetVoxel(voxelGlobalPosition), this, new Vector3Int(x, y, z));
+
+                        // loop though each of the voxels neighbours and attempt to set them.
+                        for (int p = 0; p < 6; p++)
+                        {
+                            Vector3Int neighbourPosition = new Vector3Int(x, y, z) + VoxelData.FaceChecks[p];
+
+                            // If in chunk, get voxel straight from map.
+                            if (IsVoxelInChunk(neighbourPosition))
+                                map[x, y, z].neighbours[p] = VoxelFromV3Int(neighbourPosition);
+                            // Else see if we can get the neighbour from WorldData.
+                            else
+                                map[x, y, z].neighbours[p] = World.Instance.worldData.GetVoxel(voxelGlobalPosition + VoxelData.FaceChecks[p]);
+                        }
                     }
                 }
             }
+
+            Lighting.RecalculateNaturalLight(this);
             World.Instance.worldData.modifiedChunks.Add(this);
+        }
+
+        public void ModifyVoxel(Vector3Int pos, byte id, bool immediateUpdate = false)
+        {
+            // If we try to change a block for the same block, return early.
+            if (map[pos.x, pos.y, pos.z].id == id)
+                return;
+
+            // Cache voxels
+            VoxelState voxel = map[pos.x, pos.y, pos.z];
+            BlockType newVoxel = World.Instance.blockTypes[id];
+
+            // Cache the old opacity value.
+            byte oldOpacity = voxel.Properties.opacity;
+
+            // Set voxel to the new ID.
+            voxel.id = id;
+
+            // If the opacity values of the voxel have changed and the voxel above is in direct sunlight (or is above the world height),
+            // recast light from that voxel downwards.
+            if (oldOpacity != newVoxel.opacity &&
+                (pos.y == VoxelData.ChunkHeight - 1 || map[pos.x, pos.y + 1, pos.z].light == 15))
+            {
+                Lighting.CastNaturalLight(this, pos.x, pos.z, pos.y + 1);
+            }
+
+            // Add this ChunkData to the modified chunks list.
+            World.Instance.worldData.modifiedChunks.Add(this);
+
+            // If we have a chunk attached, ad that for updating.
+            if (chunk != null)
+                World.Instance.AddChunkToUpdate(chunk, immediateUpdate);
+        }
+
+
+        /// Check if voxel is in chunk from local position.
+        public bool IsVoxelInChunk(int x, int y, int z)
+        {
+            if (x >= 0 && x < VoxelData.ChunkWidth &&
+                y >= 0 && y < VoxelData.ChunkHeight &&
+                z >= 0 && z < VoxelData.ChunkWidth)
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        /// Check if voxel is in chunk from local position.
+        public bool IsVoxelInChunk(Vector3Int pos)
+        {
+            return IsVoxelInChunk(pos.x, pos.y, pos.z);
+        }
+
+        /// Get VoxelState from local position.
+        public VoxelState VoxelFromV3Int(Vector3Int pos)
+        {
+            return map[pos.x, pos.y, pos.z];
         }
     }
 }
