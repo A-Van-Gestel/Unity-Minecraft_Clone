@@ -51,7 +51,10 @@ public class Player : MonoBehaviour
     private Transform highlightBlocksParent;
     public Transform highlightBlock;
     public Transform placeBlock;
-    
+
+    [Header("Player Body")]
+    public Transform playerBody;
+
     /// <summary>
     /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
     /// </summary>
@@ -70,7 +73,13 @@ public class Player : MonoBehaviour
         playerCamera = GameObject.Find("Main Camera").transform;
         world = GameObject.Find("World").GetComponent<World>();
         highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
-        
+
+        // Scale playerBody to match the width and height settings.
+        playerBody.localScale = new Vector3(playerWidth * 2f, playerHeight / 2f, playerWidth * 2f);
+        Vector3 playerBodyLocalPosition = playerBody.localPosition;
+        playerBodyLocalPosition = new Vector3(playerBodyLocalPosition.x, playerHeight / 2f, playerBodyLocalPosition.z);
+        playerBody.localPosition = playerBodyLocalPosition;
+
         world.inUI = false;
     }
 
@@ -189,7 +198,7 @@ public class Player : MonoBehaviour
         // CLOSE GAME ON ESC BUTTON PRESS
         if (Input.GetKeyDown(KeyCode.Escape))
             Application.Quit();
-        
+
         // MOVEMENT & CAMERA
         horizontal = Input.GetAxis("Horizontal");
         vertical = Input.GetAxis("Vertical");

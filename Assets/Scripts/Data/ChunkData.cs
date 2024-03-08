@@ -98,14 +98,16 @@ namespace Data
 
             // If the opacity values of the voxel have changed and the voxel above is in direct sunlight (or is above the world height),
             // recast light from that voxel downwards.
-            if (oldOpacity != newVoxelType.opacity &&
-                (pos.y == VoxelData.ChunkHeight - 1 || map[pos.x, pos.y + 1, pos.z].light == 15))
+            if (oldOpacity != newVoxelType.opacity)
             {
-                Lighting.CastNaturalLight(this, pos.x, pos.z, pos.y + 1);
+                if (pos.y == VoxelData.ChunkHeight - 1 || map[pos.x, pos.y + 1, pos.z].light == 15)
+                {
+                    Lighting.CastNaturalLight(this, pos.x, pos.z, pos.y + 1);
+                }
+                // Else recalculate the lighting for the new voxel (and neighbouring voxels).
+                else
+                    voxel.PropagateLight();
             }
-            // Else recalculate the lighting for the new voxel (and neighbouring voxels).
-            else
-                voxel.PropagateLight();
 
             // Add this ChunkData to the modified chunks list.
             World.Instance.worldData.modifiedChunks.Add(this);
