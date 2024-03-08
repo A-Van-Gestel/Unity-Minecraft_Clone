@@ -415,10 +415,7 @@ public class World : MonoBehaviour
     public bool CheckForVoxel(Vector3 pos)
     {
         VoxelState voxel = worldData.GetVoxel(pos);
-        if (voxel != null && blockTypes[voxel.id].isSolid)
-            return true;
-        else
-            return false;
+        return voxel != null && blockTypes[voxel.id].isSolid;
     }
 
     public VoxelState GetVoxelState(Vector3 pos)
@@ -450,9 +447,7 @@ public class World : MonoBehaviour
 
     public byte GetVoxel(Vector3 pos)
     {
-        int xPos = Mathf.FloorToInt(pos.x);
         int yPos = Mathf.FloorToInt(pos.y);
-        int zPos = Mathf.FloorToInt(pos.z);
 
         // ----- IMMUTABLE PASS -----
         // If outside of world, return air.
