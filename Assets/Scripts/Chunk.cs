@@ -303,10 +303,10 @@ public class Chunk
 #endregion
 }
 
-public class ChunkCoord
+public class ChunkCoord : IEquatable<ChunkCoord>
 {
-    public int x;
-    public int z;
+    public readonly int x;
+    public readonly int z;
 
     public ChunkCoord()
     {
@@ -329,13 +329,22 @@ public class ChunkCoord
         z = zCheck / VoxelData.ChunkWidth;
     }
 
+    public override int GetHashCode()
+    {
+        // Multiply x & y by different constant to differentiate between situations like x=12 & z=13 and x=13 & z=12.
+        return 31 * x + 17 * z;
+    }
+
+    public override bool Equals(object obj)
+    {
+        return obj is ChunkCoord coord && Equals(coord);
+    }
+
     public bool Equals(ChunkCoord other)
     {
         if (other == null)
             return false;
-        else if (other.x == x && other.z == z)
-            return true;
-        else
-            return false;
+
+        return other.x == x && other.z == z;
     }
 }

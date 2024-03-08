@@ -1,43 +1,28 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public static class VoxelData
 {
-    public static readonly int ChunkWidth = 16;
-    public static readonly int ChunkHeight = 128;
-    public static readonly int WorldSizeInChunks = 100;
-    
+    public const int ChunkWidth = 16;
+    public const int ChunkHeight = 128;
+    public const int WorldSizeInChunks = 100;
+
     // Lighting Values
-    public static float minLightLevel = 0.15f;
-    public static float maxLightLevel = 1.0f;
+    public static float MinLightLevel = 0.15f;
+    public static float MaxLightLevel = 1.0f;
     
-    public static float unitOfLight
-    {
-        // TODO: Lookup table might be more performant than calculation.
-        // Light is handled as float (0-1) byt Minecraft stores light as a byte (0-15),
-        // so we need to know how much of that float a single light level represents.
-        get { return 1f / 16f; }
-    }
+    // Light is handled as float (0-1) byt Minecraft stores light as a byte (0-15),
+    // so we need to know how much of that float a single light level represents.
+    public const float UnitOfLight = 1f / 16f;
 
-    public static int seed = 0;
+    public static int Seed = 0;
 
-    public static int WorldSizeInVoxels
-    {
-        get { return WorldSizeInChunks * ChunkWidth; }
-    }
+    public const int WorldSizeInVoxels = WorldSizeInChunks * ChunkWidth;
 
-    public static int WorldCentre
-    {
-        get { return WorldSizeInVoxels / 2; }
-    }
+    public const int WorldCentre = WorldSizeInVoxels / 2;
 
-    public static readonly int TextureAtlasSizeInBlocks = 16;
+    public const int TextureAtlasSizeInBlocks = 16;
 
-    public static float NormalizedBlockTextureSize
-    {
-        get { return 1f / (float)TextureAtlasSizeInBlocks; }
-    }
+    public const float NormalizedBlockTextureSize = 1f / TextureAtlasSizeInBlocks;
 
     public static readonly Vector3[] VoxelVerts = new Vector3[8]
     {

@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using JetBrains.Annotations;
+using MyBox;
 using UnityEngine;
 
 namespace Data
@@ -9,8 +10,8 @@ namespace Data
     [System.Serializable]
     public class WorldData
     {
-        public string worldName = "Prototype";
-        public int seed;
+        [ReadOnly] public string worldName;
+        [ReadOnly] public int seed;
 
         [System.NonSerialized]
         public Dictionary<Vector2Int, ChunkData> chunks = new Dictionary<Vector2Int, ChunkData>();
@@ -55,7 +56,7 @@ namespace Data
             // Nothing needs to be loaded if the chunk is already loaded.
             if (chunks.ContainsKey(coord))
                 return;
-            
+
             // Load Chunk from File
             if (World.Instance.settings.loadSaveDataOnStartup)
             {
@@ -74,16 +75,9 @@ namespace Data
 
         public bool IsVoxelInWorld(Vector3 pos)
         {
-            if (pos.x >= 0 && pos.x < VoxelData.WorldSizeInVoxels &&
-                pos.y >= 0 && pos.y < VoxelData.ChunkHeight &&
-                pos.z >= 0 && pos.z < VoxelData.WorldSizeInVoxels)
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            return pos.x is >= 0 and < VoxelData.WorldSizeInVoxels &&
+                   pos.y is >= 0 and < VoxelData.ChunkHeight &&
+                   pos.z is >= 0 and < VoxelData.WorldSizeInVoxels;
         }
 
         public void SetVoxel(Vector3 pos, byte value)

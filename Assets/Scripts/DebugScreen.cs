@@ -21,18 +21,12 @@ public class DebugScreen : MonoBehaviour
     private float groundVoxelStateTimer;
     private VoxelState groundVoxelState;
 
-    private int halfWorldSizeInVoxels;
-    private int halfWorldSizeInChunks;
-
     void Start()
     {
         world = GameObject.Find("World").GetComponent<World>();
         player = GameObject.Find("Player").GetComponent<Player>();
         playerCamera = GameObject.Find("Main Camera").GetComponent<Transform>();
         text = GetComponent<TextMeshProUGUI>();
-
-        halfWorldSizeInVoxels = VoxelData.WorldSizeInVoxels / 2;
-        halfWorldSizeInChunks = VoxelData.WorldSizeInChunks / 2;
     }
 
     void Update()
@@ -44,7 +38,6 @@ public class DebugScreen : MonoBehaviour
         debugText += "\n";
         debugText += $"{frameRate} fps";
         debugText += "\n\n";
-        // debugText += $"XYZ : {(Mathf.FloorToInt(playerPosition.x) - halfWorldSizeInVoxels)} / {Mathf.FloorToInt(playerPosition.y)} / {(Mathf.FloorToInt(playerPosition.z) - halfWorldSizeInVoxels)} | ";
         debugText += $"XYZ: {(Mathf.FloorToInt(playerPosition.x))} / {Mathf.FloorToInt(playerPosition.y)} / {(Mathf.FloorToInt(playerPosition.z))} | ";
         debugText += $"Eye Level: {(playerPosition.y + 1.65f):f2}";
         debugText += "\n";
@@ -52,7 +45,6 @@ public class DebugScreen : MonoBehaviour
         debugText += $"Looking Angle H / V: {lookingDirection.x:f2} / {lookingDirection.y:f2} | Direction: {GetHorizontalDirection(lookingDirection.x)}";
         debugText += "\n";
 
-        // debugText += $"Chunk: {world.playerChunkCoord.x - halfWorldSizeInChunks} / {world.playerChunkCoord.z - halfWorldSizeInChunks}";
         debugText += $"Chunk: {world.playerChunkCoord.x} / {world.playerChunkCoord.z}";
         debugText += "\n\n";
         debugText += "PLAYER:\n";
@@ -98,7 +90,7 @@ public class DebugScreen : MonoBehaviour
         float vAngleRaw = playerCamera.transform.eulerAngles.x;
         float vAngle;
 
-        if (vAngleRaw <= 360 && vAngleRaw >= 270)
+        if (vAngleRaw is <= 360 and >= 270)
             vAngle = 360 - vAngleRaw;
         else
             vAngle = vAngleRaw * -1;
@@ -111,9 +103,13 @@ public class DebugScreen : MonoBehaviour
     {
         return hAngle switch
         {
-            >= 45 and <= 135 => "East",
-            >= 135 and <= 225 => "South",
-            >= 225 and <= 315 => "West",
+            >= 22.5f and < 67.5f => "North-east",
+            >= 67.5f and < 112.5f => "East",
+            >= 112.5f and < 157.5f => "South-east",
+            >= 157.5f and < 202.5f => "South",
+            >= 202.5f and < 247.5f => "South-west",
+            >= 247.5f and < 292.5f => "West",
+            >= 292.5f and < 337.5f => "North-west",
             _ => "North"
         };
     }

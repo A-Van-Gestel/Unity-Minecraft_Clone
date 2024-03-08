@@ -68,7 +68,7 @@ namespace UI
 
         public void StartGame()
         {
-            VoxelData.seed = VoxelData.CalculateSeed(seedField.text);
+            VoxelData.Seed = VoxelData.CalculateSeed(seedField.text);
             SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single);
         }
 

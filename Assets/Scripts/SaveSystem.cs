@@ -13,7 +13,7 @@ public static class SaveSystem
     public static void SaveWorld(WorldData world)
     {
         // Set our save location and make sure we have a saves folder ready to go.
-        string savePath = $"{World.Instance.appPath}/saves/{world.worldName}/";
+        string savePath = $"{World.Instance.appSaveDataPath}/saves/{world.worldName}/";
 
         if (!Directory.Exists(savePath))
             Directory.CreateDirectory(savePath);
@@ -49,7 +49,7 @@ public static class SaveSystem
 
     public static WorldData LoadWorld(string worldName, int seed = 0)
     {
-        string loadPath = $"{World.Instance.appPath}/saves/{worldName}/";
+        string loadPath = $"{World.Instance.appSaveDataPath}/saves/{worldName}/";
 
         if (File.Exists($"{loadPath}world.world"))
         {
@@ -77,7 +77,7 @@ public static class SaveSystem
         string chunkName = $"{chunk.position.x}-{chunk.position.y}";
         
         // Set our save location and make sure we have a saves folder ready to go.
-        string savePath = $"{World.Instance.appPath}/saves/{worldName}/chunks/";
+        string savePath = $"{World.Instance.appSaveDataPath}/saves/{worldName}/chunks/";
 
         if (!Directory.Exists(savePath))
             Directory.CreateDirectory(savePath);
@@ -94,7 +94,7 @@ public static class SaveSystem
     {
         string chunkName = $"{position.x}-{position.y}";
         
-        string loadPath = $"{World.Instance.appPath}/saves/{worldName}/chunks/{chunkName}.chunk";
+        string loadPath = $"{World.Instance.appSaveDataPath}/saves/{worldName}/chunks/{chunkName}.chunk";
 
         if (File.Exists($"{loadPath}"))
         {

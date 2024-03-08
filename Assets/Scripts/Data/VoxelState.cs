@@ -86,7 +86,7 @@ namespace Data
 
         public float lightAsFloat
         {
-            get { return light * VoxelData.unitOfLight; }
+            get { return light * VoxelData.UnitOfLight; }
         }
 
         public byte castLight
@@ -95,8 +95,7 @@ namespace Data
             {
                 // Get the amount of light this voxel is spreading. Bytes (0-255) can overflow if below 0,
                 // so we need to do this with an int so we make sure it doesn't get below 0.
-                int lightLevel = _light - Properties.opacity - 1;
-                if (lightLevel < 0) lightLevel = 0;
+                int lightLevel = Mathf.Max(_light - Properties.opacity - 1, 0);
                 return (byte)lightLevel;
             }
         }

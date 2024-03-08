@@ -88,7 +88,7 @@ namespace Data
 
             // Cache voxels
             VoxelState voxel = map[pos.x, pos.y, pos.z];
-            BlockType newVoxel = World.Instance.blockTypes[id];
+            BlockType newVoxelType = World.Instance.blockTypes[id];
 
             // Cache the old opacity value.
             byte oldOpacity = voxel.Properties.opacity;
@@ -98,11 +98,14 @@ namespace Data
 
             // If the opacity values of the voxel have changed and the voxel above is in direct sunlight (or is above the world height),
             // recast light from that voxel downwards.
-            if (oldOpacity != newVoxel.opacity &&
+            if (oldOpacity != newVoxelType.opacity &&
                 (pos.y == VoxelData.ChunkHeight - 1 || map[pos.x, pos.y + 1, pos.z].light == 15))
             {
                 Lighting.CastNaturalLight(this, pos.x, pos.z, pos.y + 1);
             }
+            // Else recalculate the lighting for the new voxel (and neighbouring voxels).
+            else
+                voxel.PropagateLight();
 
             // Add this ChunkData to the modified chunks list.
             World.Instance.worldData.modifiedChunks.Add(this);
@@ -116,16 +119,9 @@ namespace Data
         /// Check if voxel is in chunk from local position.
         public bool IsVoxelInChunk(int x, int y, int z)
         {
-            if (x >= 0 && x < VoxelData.ChunkWidth &&
-                y >= 0 && y < VoxelData.ChunkHeight &&
-                z >= 0 && z < VoxelData.ChunkWidth)
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            return x is >= 0 and < VoxelData.ChunkWidth &&
+                   y is >= 0 and < VoxelData.ChunkHeight &&
+                   z is >= 0 and < VoxelData.ChunkWidth;
         }
 
         /// Check if voxel is in chunk from local position.

@@ -47,7 +47,7 @@ public class World : MonoBehaviour
 
     private Chunk[,] chunks = new Chunk[VoxelData.WorldSizeInChunks, VoxelData.WorldSizeInChunks];
 
-    private List<ChunkCoord> activeChunks = new List<ChunkCoord>();
+    private HashSet<ChunkCoord> activeChunks = new HashSet<ChunkCoord>();
     public ChunkCoord playerChunkCoord;
     private ChunkCoord playerLastChunkCoord;
 
@@ -69,6 +69,12 @@ public class World : MonoBehaviour
     // Clouds
     [Header("Clouds")]
     public Clouds clouds;
+    
+    [Header("World Data")]
+    public WorldData worldData;
+    
+    [Header("Paths")]
+    [ReadOnly] public string appSaveDataPath;
 
     // Shader Properties
     private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
@@ -80,30 +86,21 @@ public class World : MonoBehaviour
     public object ChunkUpdateThreadLock = new object();
     public object ChunkListThreadLock = new object();
 
-    public WorldData worldData;
-
-    public string appPath;
-
 #region Singleton pattern
-    private static World _instance;
-
-    public static World Instance
-    {
-        get { return _instance; }
-    }
+    public static World Instance { get; private set; }
 
     private void Awake()
     {
         // If the instance value is not null and not *this*, we've somehow ended up with more than one World component.
         // Since another one has already been assigned, delete this one.
-        if (_instance != null && _instance != this)
+        if (Instance != null && Instance != this)
         {
             Destroy(this.gameObject);
         }
         else
         {
-            _instance = this;
-            appPath = Application.persistentDataPath;
+            Instance = this;
+            appSaveDataPath = Application.persistentDataPath;
         }
     }
 #endregion
@@ -111,7 +108,7 @@ public class World : MonoBehaviour
 
     private void Start()
     {
-        Debug.Log($"Generating new world using seed: {VoxelData.seed}");
+        Debug.Log($"Generating new world using seed: {VoxelData.Seed}");
 
         // Get main camera.
         playerCamera = Camera.main!;
@@ -131,15 +128,15 @@ public class World : MonoBehaviour
 
         // TODO: Set worldName using UI
         if (settings.loadSaveDataOnStartup)
-            worldData = SaveSystem.LoadWorld("Prototype", VoxelData.seed);
+            worldData = SaveSystem.LoadWorld("Prototype", VoxelData.Seed);
         else
-            worldData = new WorldData("Prototype", VoxelData.seed);
+            worldData = new WorldData("Prototype", VoxelData.Seed);
 
 
-        Random.InitState(VoxelData.seed);
+        Random.InitState(VoxelData.Seed);
 
-        Shader.SetGlobalFloat(ShaderMinGlobalLightLevel, VoxelData.minLightLevel);
-        Shader.SetGlobalFloat(ShaderMaxGlobalLightLevel, VoxelData.maxLightLevel);
+        Shader.SetGlobalFloat(ShaderMinGlobalLightLevel, VoxelData.MinLightLevel);
+        Shader.SetGlobalFloat(ShaderMaxGlobalLightLevel, VoxelData.MaxLightLevel);
         SetGlobalLightValue();
 
         // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
@@ -258,10 +255,7 @@ public class World : MonoBehaviour
         {
             Chunk chunkToUpdate = chunksToUpdate[0];
             chunkToUpdate.UpdateChunk();
-            if (!activeChunks.Contains(chunkToUpdate.coord))
-            {
-                activeChunks.Add(chunkToUpdate.coord);
-            }
+            activeChunks.Add(chunkToUpdate.coord);
 
             chunksToUpdate.RemoveAt(0);
         }
@@ -283,6 +277,7 @@ public class World : MonoBehaviour
                     UpdateChunks();
             }
         }
+        // ReSharper disable once FunctionNeverReturns
     }
 
     /// <summary>
@@ -341,7 +336,7 @@ public class World : MonoBehaviour
         playerLastChunkCoord = playerChunkCoord;
 
         // Copy currently active chunks.
-        List<ChunkCoord> previouslyActiveChunks = new List<ChunkCoord>(activeChunks);
+        HashSet<ChunkCoord> previouslyActiveChunks = new HashSet<ChunkCoord>(activeChunks);
 
         // Clear active chunks.
         activeChunks.Clear();
@@ -360,23 +355,14 @@ public class World : MonoBehaviour
             if (IsChunkInWorld(thisChunkCoord))
             {
                 // Check if it is active, if not, activate it.
-                if (chunks[x, z] == null)
-                {
-                    chunks[x, z] = new Chunk(thisChunkCoord);
-                }
+                chunks[x, z] ??= new Chunk(thisChunkCoord);
 
                 chunks[x, z].isActive = true;
                 activeChunks.Add(thisChunkCoord);
             }
 
             // Check trough previously active chunks to see if this chunks is there. If it is, remove it from the list.
-            for (int i = 0; i < previouslyActiveChunks.Count; i++)
-            {
-                if (previouslyActiveChunks[i].Equals(thisChunkCoord))
-                {
-                    previouslyActiveChunks.RemoveAt(i);
-                }
-            }
+            previouslyActiveChunks.Remove(thisChunkCoord);
 
             // Next spiral coord
             spiralLoop.Next();
@@ -402,6 +388,7 @@ public class World : MonoBehaviour
         }
 
         // Chunk is created and editable, calculate highest voxel using chunk function.
+        // TODO: Doesn't work anymore, rewrite using worldData / chunkData instead
         if (chunks[thisChunk.x, thisChunk.z] != null)
         {
             Debug.Log($"Finding highest voxel for chunk {thisChunk.x} / {thisChunk.z} in wold for X / Z = {(int)pos.x} / {(int)pos.z} using chunk function.");
@@ -534,35 +521,30 @@ public class World : MonoBehaviour
         }
 
         // ----- SECOND PASS -----
-        if (settings.enableSecondPass)
+        if (settings.enableSecondPass && voxelValue == 1)
         {
-            if (voxelValue == 1) // Stone
+            // Stone
+            foreach (Lode lode in biome.Lodes)
             {
-                foreach (Lode lode in biome.Lodes)
+                if (yPos > lode.minHeight && yPos < lode.maxHeight)
                 {
-                    if (yPos > lode.minHeight && yPos < lode.maxHeight)
+                    if (Noise.Get3DPerlin(pos, lode.noiseOffset, lode.scale, lode.threshold))
                     {
-                        if (Noise.Get3DPerlin(pos, lode.noiseOffset, lode.scale, lode.threshold))
-                        {
-                            voxelValue = lode.blockID;
-                        }
+                        voxelValue = lode.blockID;
                     }
                 }
             }
         }
 
         // ----- MAJOR FLORA PASS -----
-        if (settings.enableMajorFloraPass)
+        if (settings.enableMajorFloraPass && yPos == terrainHeight && biome.placeMajorFlora)
         {
-            if (yPos == terrainHeight && biome.placeMajorFlora)
+            if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biome.majorFloraZoneScale) > biome.majorFloraZoneThreshold)
             {
-                if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biome.majorFloraZoneScale) > biome.majorFloraZoneThreshold)
+                if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 2500, biome.majorFloraPlacementScale) > biome.majorFloraPlacementThreshold)
                 {
-                    if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 2500, biome.majorFloraPlacementScale) > biome.majorFloraPlacementThreshold)
-                    {
-                        ConcurrentQueue<VoxelMod> structureQueue = Structure.GenerateMajorFlora(biome.majorFloraIndex, pos, biome.minHeight, biome.maxHeight);
-                        modifications.Enqueue(structureQueue);
-                    }
+                    ConcurrentQueue<VoxelMod> structureQueue = Structure.GenerateMajorFlora(biome.majorFloraIndex, pos, biome.minHeight, biome.maxHeight);
+                    modifications.Enqueue(structureQueue);
                 }
             }
         }
@@ -573,15 +555,8 @@ public class World : MonoBehaviour
 
     private bool IsChunkInWorld(ChunkCoord coord)
     {
-        if (coord.x >= 0 && coord.x < VoxelData.WorldSizeInChunks &&
-            coord.z >= 0 && coord.z < VoxelData.WorldSizeInChunks)
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
+        return coord.x >= 0 && coord.x < VoxelData.WorldSizeInChunks &&
+               coord.z >= 0 && coord.z < VoxelData.WorldSizeInChunks;
     }
 }
 
@@ -600,7 +575,8 @@ public class BlockType
     public Sprite icon;
     public int stackSize = 64;
 
-    [Header("Texture Values")] public int backFaceTexture;
+    [Header("Texture Values")]
+    public int backFaceTexture;
     public int frontFaceTexture;
     public int topFaceTexture;
     public int bottomFaceTexture;
