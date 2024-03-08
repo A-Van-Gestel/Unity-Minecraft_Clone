@@ -28,6 +28,8 @@ public class Player : MonoBehaviour
     public float gravity = -13f;
 
     [Header("Player properties")]
+    public Transform playerBody = null;
+    
     [Tooltip("The radius of the player")]
     public float playerWidth = 0.4f;
 
@@ -51,10 +53,6 @@ public class Player : MonoBehaviour
     private Transform highlightBlocksParent;
     public Transform highlightBlock;
     public Transform placeBlock;
-
-    [Header("Player Body")]
-    public Transform playerBody;
-
     /// <summary>
     /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
     /// </summary>
@@ -75,10 +73,13 @@ public class Player : MonoBehaviour
         highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
 
         // Scale playerBody to match the width and height settings.
-        playerBody.localScale = new Vector3(playerWidth * 2f, playerHeight / 2f, playerWidth * 2f);
-        Vector3 playerBodyLocalPosition = playerBody.localPosition;
-        playerBodyLocalPosition = new Vector3(playerBodyLocalPosition.x, playerHeight / 2f, playerBodyLocalPosition.z);
-        playerBody.localPosition = playerBodyLocalPosition;
+        if (playerBody)
+        {
+            playerBody.localScale = new Vector3(playerWidth * 2f, playerHeight / 2f, playerWidth * 2f);
+            Vector3 playerBodyLocalPosition = playerBody.localPosition;
+            playerBodyLocalPosition = new Vector3(playerBodyLocalPosition.x, playerHeight / 2f, playerBodyLocalPosition.z);
+            playerBody.localPosition = playerBodyLocalPosition;
+        }
 
         world.inUI = false;
     }
