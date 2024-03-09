@@ -2507,6 +2507,7 @@ MonoBehaviour:
   transparentMaterial: {fileID: 2100000, guid: 451dc07c0cc41a649bf3ac4fe7a9e1b0, type: 2}
   blockTypes:
   - blockName: Air
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 0
     renderNeighborFaces: 1
     opacity: 0
@@ -2519,6 +2520,7 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Stone
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2531,6 +2533,7 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Grass
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2543,6 +2546,7 @@ MonoBehaviour:
     leftFaceTexture: 12
     rightFaceTexture: 12
   - blockName: Dirt
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2555,6 +2559,7 @@ MonoBehaviour:
     leftFaceTexture: 2
     rightFaceTexture: 2
   - blockName: Sand
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2567,6 +2572,7 @@ MonoBehaviour:
     leftFaceTexture: 3
     rightFaceTexture: 3
   - blockName: Snow
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2579,6 +2585,7 @@ MonoBehaviour:
     leftFaceTexture: 4
     rightFaceTexture: 4
   - blockName: Grass Snowy
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2591,6 +2598,7 @@ MonoBehaviour:
     leftFaceTexture: 21
     rightFaceTexture: 21
   - blockName: Stone Walkway
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2603,6 +2611,7 @@ MonoBehaviour:
     leftFaceTexture: 6
     rightFaceTexture: 6
   - blockName: Bedrock
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2615,6 +2624,7 @@ MonoBehaviour:
     leftFaceTexture: 7
     rightFaceTexture: 7
   - blockName: Desert Cracked
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2627,6 +2637,7 @@ MonoBehaviour:
     leftFaceTexture: 8
     rightFaceTexture: 8
   - blockName: Grass Rocky
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2639,6 +2650,7 @@ MonoBehaviour:
     leftFaceTexture: 25
     rightFaceTexture: 25
   - blockName: Tile
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2651,6 +2663,7 @@ MonoBehaviour:
     leftFaceTexture: 10
     rightFaceTexture: 10
   - blockName: Wood
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2663,6 +2676,7 @@ MonoBehaviour:
     leftFaceTexture: 11
     rightFaceTexture: 11
   - blockName: Facade
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 1
     opacity: 0
@@ -2675,6 +2689,7 @@ MonoBehaviour:
     leftFaceTexture: 13
     rightFaceTexture: 13
   - blockName: Oak Log
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2687,6 +2702,7 @@ MonoBehaviour:
     leftFaceTexture: 14
     rightFaceTexture: 14
   - blockName: Oak Leaves
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 1
     opacity: 5
@@ -2699,6 +2715,7 @@ MonoBehaviour:
     leftFaceTexture: 16
     rightFaceTexture: 16
   - blockName: Cactus
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
     opacity: 15
@@ -2710,6 +2727,19 @@ MonoBehaviour:
     bottomFaceTexture: 17
     leftFaceTexture: 18
     rightFaceTexture: 18
+  - blockName: Stone Half Slab
+    meshData: {fileID: 11400000, guid: f1f1cbb961eacda4dbac46e90f49df51, type: 2}
+    isSolid: 1
+    renderNeighborFaces: 1
+    opacity: 15
+    icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    stackSize: 64
+    backFaceTexture: 0
+    frontFaceTexture: 0
+    topFaceTexture: 0
+    bottomFaceTexture: 0
+    leftFaceTexture: 0
+    rightFaceTexture: 0
   debugScreen: {fileID: 884714899}
   creativeInventoryWindow: {fileID: 739993166}
   cursorSlot: {fileID: 1721447375}
