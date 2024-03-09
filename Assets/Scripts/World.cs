@@ -170,7 +170,10 @@ public class World : MonoBehaviour
 
         // Only update the chunks if the player has moved from the chunk they where previously on.
         if (!playerChunkCoord.Equals(playerLastChunkCoord))
+        {
+            CheckLoadDistance();
             CheckViewDistance();
+        }
 
         if (!settings.enableThreading)
         {
@@ -326,8 +329,33 @@ public class World : MonoBehaviour
 
         return chunks[x, z];
     }
+    
+    private void CheckLoadDistance()
+    {
+        ChunkCoord coord = GetChunkCoordFromVector3(player.position);
+        playerLastChunkCoord = playerChunkCoord;
 
-    // TODO: Make a CheckLoadDistance variant of this.
+        // Loop trough all chunks currently within view distance of the player.
+        SpiralLoop spiralLoop = new SpiralLoop();
+        ChunkCoord thisChunkCoord = coord;
+        
+        while (thisChunkCoord.x < coord.x + settings.loadDistance && thisChunkCoord.z < coord.z + settings.loadDistance)
+        {
+            thisChunkCoord = new ChunkCoord(coord.x + spiralLoop.X, coord.z + spiralLoop.Z);
+            int x = thisChunkCoord.x;
+            int z = thisChunkCoord.z;
+
+            // If the current chunk is in the world...
+            if (IsChunkInWorld(thisChunkCoord))
+            {
+                worldData.LoadChunk(new Vector2Int(x, z));
+            }
+
+            // Next spiral coord
+            spiralLoop.Next();
+        }
+    }
+    
     private void CheckViewDistance()
     {
         clouds.UpdateClouds();

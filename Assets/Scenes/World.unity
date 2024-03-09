@@ -2487,7 +2487,7 @@ MonoBehaviour:
     loadDistance: 8
     viewDistance: 4
     rerenderChunksOnModification: 1
-    enableLighting: 0
+    enableLighting: 1
     enableThreading: 0
     clouds: 0
     mouseSensitivityX: 1.2
@@ -2732,7 +2732,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 1
     opacity: 15
-    icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 2016017474, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     backFaceTexture: 0
     frontFaceTexture: 0
