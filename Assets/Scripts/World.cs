@@ -639,6 +639,10 @@ public class Settings
     [Tooltip("PERFORMANCE INTENSIVE - Prevent invisible blocks in case of cross chunk structures by re-rendering the modified chunks.")]
     // TODO: Needs to be re-implemented: https://github.com/A-Van-Gestel/Unity-Minecraft_Clone/commit/320d9710f620db537acb3ed8f94e5d98ec567f59#diff-47f56e730b0aac4f6699ec185244b6f897aacac5d53cc53bab0c19f20dda1c08L295-L307
     public bool rerenderChunksOnModification = true;
+    
+    [InitializationField]
+    [Tooltip("PERFORMANCE INTENSIVE - Enable the lighting system, on large caves this can cause the game to hang for a couple of seconds.")]
+    public bool enableLighting = true;
 
     [InitializationField]
     [Tooltip("Updates chunks on a separate thread. This however might negatively impact performance due to the extra overhead.")]

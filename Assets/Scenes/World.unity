@@ -179,12 +179,12 @@ MonoBehaviour:
   flyingAscendSpeed: 5
   jumpForce: 5.7
   gravity: -13
+  playerBody: {fileID: 439044755}
   playerWidth: 0.4
   playerHeight: 1.8
   showHighlightBlocks: 0
   highlightBlock: {fileID: 1989252701}
   placeBlock: {fileID: 1073421876}
-  playerBody: {fileID: 439044755}
   checkIncrement: 0.05
   reach: 8
   toolbar: {fileID: 154747212}
@@ -2487,6 +2487,7 @@ MonoBehaviour:
     loadDistance: 8
     viewDistance: 4
     rerenderChunksOnModification: 1
+    enableLighting: 0
     enableThreading: 0
     clouds: 0
     mouseSensitivityX: 1.2

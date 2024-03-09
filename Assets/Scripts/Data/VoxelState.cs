@@ -19,6 +19,14 @@ namespace Data
             get { return _light; }
             set
             {
+                // Set light level to 15 if lighting is disabled.
+                if (!World.Instance.settings.enableLighting)
+                {
+                    _light = 15;
+                    return;
+                }
+
+
                 // Only set when light value has actually been changed.
                 if (value != _light)
                 {
@@ -28,7 +36,7 @@ namespace Data
 
                     // Set light value to new value.
                     _light = value;
-                    
+
                     // If our new light value is darker than the old one, check our neighbouring voxels.
                     if (_light < oldLightValue)
                     {
@@ -51,12 +59,12 @@ namespace Data
                                     neighbours[p].PropagateLight();
                             }
                         }
-                        
+
                         // loop through our neighbours for darkening and set their light to 0.
                         // They will then perform their own neighbour checks and tell any brighter voxels (including this one) to propagate.
                         foreach (int neighbourIndex in neighboursToDarken)
                             neighbours[neighbourIndex]!.light = 0;
-                        
+
                         // If this voxel is part of an active chunk, add that chunk for updating.
                         if (chunkData.chunk != null)
                             World.Instance.AddChunkToUpdate(chunkData.chunk);
@@ -78,10 +86,7 @@ namespace Data
 
         public Vector3Int globalPosition
         {
-            get
-            {
-                return new Vector3Int(position.x + chunkData.position.x, position.y, position.z + chunkData.position.y);
-            }
+            get { return new Vector3Int(position.x + chunkData.position.x, position.y, position.z + chunkData.position.y); }
         }
 
         public float lightAsFloat
@@ -102,6 +107,10 @@ namespace Data
 
         public void PropagateLight()
         {
+            // No need to propagate light when lighting is disabled, so return early.
+            if (!World.Instance.settings.enableLighting)
+                return;
+            
             // If the voxel isn't bright enough to propagate, return early.
             if (light < 2)
                 return;
@@ -159,7 +168,7 @@ public class VoxelNeighbours
                 _neighbours[index] = World.Instance.worldData.GetVoxel(parent.globalPosition + VoxelData.FaceChecks[index]);
                 ReturnNeighbour(index);
             }
-            
+
             // Return whatever we have. If it's null at this point, it means that neighbour doesn't exist yet.
             return _neighbours[index];
         }
@@ -175,11 +184,11 @@ public class VoxelNeighbours
         // Can't set our neighbour's neighbour if the neighbour is null.
         if (_neighbours[index] == null)
             return;
-        
+
         // If the opposite neighbour of our voxel is null, set it to this voxel.
         // The opposite neighbour will perform the same check but that check will return true because this neighbour is already set,
         // so we won't run into an endless loop, freezing Unity.
-        if (_neighbours[index].neighbours[VoxelData.revFaceChecksIndex[index]]!= parent)
+        if (_neighbours[index].neighbours[VoxelData.revFaceChecksIndex[index]] != parent)
         {
             _neighbours[index].neighbours[VoxelData.revFaceChecksIndex[index]] = parent;
         }
