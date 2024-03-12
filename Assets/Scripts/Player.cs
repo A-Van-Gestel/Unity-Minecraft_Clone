@@ -24,7 +24,6 @@ public class Player : MonoBehaviour
 
     [Header("Gravity modifiers")]
     public float jumpForce = 5.7f;
-
     public float gravity = -13f;
 
     [Header("Player properties")]
@@ -46,6 +45,8 @@ public class Player : MonoBehaviour
     internal float moveSpeed;
     private float lastMoveSpeed;
     private bool jumpRequest;
+
+    public int orientation;
 
     [Header("Block Destroy & Placement properties")]
     public bool showHighlightBlocks = true;
@@ -69,7 +70,7 @@ public class Player : MonoBehaviour
     private void Start()
     {
         playerCamera = GameObject.Find("Main Camera").transform;
-        world = GameObject.Find("World").GetComponent<World>();
+        world = World.Instance;
         highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
 
         // Scale playerBody to match the width and height settings.
@@ -119,6 +120,18 @@ public class Player : MonoBehaviour
             angle = Mathf.Clamp(angle, -85, 85);
             playerCamera.localEulerAngles = Vector3.right * angle;
         }
+
+        // TODO: Merge with lookingDirection from debug script.
+        Vector3 XZDirection = transform.forward;
+        XZDirection.y = 0;
+        if (Vector3.Angle(XZDirection, Vector3.forward) <= 45)
+            orientation = 0; // Player is facing north.
+        else if (Vector3.Angle(XZDirection, Vector3.right) <= 45)
+            orientation = 5; // Player is facing east.
+        else if (Vector3.Angle(XZDirection, Vector3.back) <= 45)
+            orientation = 1; // Player is facing south.
+        else
+            orientation = 4; // Player is facing west.
     }
 
     private void Jump()

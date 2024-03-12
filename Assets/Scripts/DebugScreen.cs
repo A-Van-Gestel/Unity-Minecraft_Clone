@@ -10,7 +10,6 @@ public class DebugScreen : MonoBehaviour
     public float frameRateUpdateRate = 0.5f;
 
     private World world;
-    private Player player;
     private Transform playerCamera;
     private TextMeshProUGUI text;
 
@@ -23,8 +22,7 @@ public class DebugScreen : MonoBehaviour
 
     void Start()
     {
-        world = GameObject.Find("World").GetComponent<World>();
-        player = GameObject.Find("Player").GetComponent<Player>();
+        world = World.Instance;
         playerCamera = GameObject.Find("Main Camera").GetComponent<Transform>();
         text = GetComponent<TextMeshProUGUI>();
     }
@@ -48,11 +46,11 @@ public class DebugScreen : MonoBehaviour
         debugText += $"Chunk: {world.playerChunkCoord.x} / {world.playerChunkCoord.z}";
         debugText += "\n\n";
         debugText += "PLAYER:\n";
-        debugText += $"isGrounded: {player.isGrounded}\nisFlying: {player.isFlying}\nshowHighlightBlocks {player.showHighlightBlocks}";
+        debugText += $"isGrounded: {world.player.isGrounded}\nisFlying: {world.player.isFlying}\nshowHighlightBlocks {world.player.showHighlightBlocks}";
         debugText += "\n";
-        debugText += $"SPEED: Current: {player.moveSpeed:f1} | Flying: {player.flyingSpeed:f1}";
+        debugText += $"SPEED: Current: {world.player.moveSpeed:f1} | Flying: {world.player.flyingSpeed:f1}";
         debugText += "\n";
-        debugText += $"Velocity XYZ: {player.velocity.x:F4} / {player.velocity.y:F4} / {player.velocity.z:F4}";
+        debugText += $"Velocity XYZ: {world.player.velocity.x:F4} / {world.player.velocity.y:F4} / {world.player.velocity.z:F4}";
         debugText += "\n\n";
         debugText += "LIGHTING:\n";
 
@@ -86,7 +84,7 @@ public class DebugScreen : MonoBehaviour
 
     private Vector2 GetLookingAngles()
     {
-        float hAngle = player.transform.eulerAngles.y;
+        float hAngle = world.player.transform.eulerAngles.y;
         float vAngleRaw = playerCamera.transform.eulerAngles.x;
         float vAngle;
 

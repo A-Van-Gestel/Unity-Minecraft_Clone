@@ -182,6 +182,7 @@ MonoBehaviour:
   playerBody: {fileID: 439044755}
   playerWidth: 0.4
   playerHeight: 1.8
+  orientation: 0
   showHighlightBlocks: 0
   highlightBlock: {fileID: 1989252701}
   placeBlock: {fileID: 1073421876}
@@ -2484,7 +2485,7 @@ MonoBehaviour:
   settings:
     version: 0.0.01
     loadSaveDataOnStartup: 0
-    loadDistance: 8
+    loadDistance: 4
     viewDistance: 4
     rerenderChunksOnModification: 1
     enableLighting: 1
@@ -2500,7 +2501,7 @@ MonoBehaviour:
   globalLightLevel: 1
   day: {r: 0, g: 0.90980387, b: 1, a: 1}
   night: {r: 0.03137255, g: 0, b: 0.44705883, a: 1}
-  player: {fileID: 151001797}
+  player: {fileID: 151001798}
   spawnPosition: {x: 0, y: 0, z: 0}
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
   material: {fileID: 2100000, guid: 310749baead051949ad82e332a06680f, type: 2}
@@ -2736,6 +2737,19 @@ MonoBehaviour:
     stackSize: 64
     backFaceTexture: 0
     frontFaceTexture: 0
+    topFaceTexture: 0
+    bottomFaceTexture: 0
+    leftFaceTexture: 0
+    rightFaceTexture: 0
+  - blockName: Directional Block
+    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    isSolid: 1
+    renderNeighborFaces: 1
+    opacity: 15
+    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
+    stackSize: 64
+    backFaceTexture: 0
+    frontFaceTexture: 7
     topFaceTexture: 0
     bottomFaceTexture: 0
     leftFaceTexture: 0

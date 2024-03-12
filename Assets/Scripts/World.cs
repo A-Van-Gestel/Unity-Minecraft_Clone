@@ -30,8 +30,8 @@ public class World : MonoBehaviour
     public Color night;
 
     [Header("Player")]
-    public Transform player;
-
+    public Player player;
+    private Transform playerTransform;
     private Camera playerCamera;
 
     [InitializationField]
@@ -110,6 +110,9 @@ public class World : MonoBehaviour
     {
         Debug.Log($"Generating new world using seed: {VoxelData.Seed}");
 
+        // Get player transform component
+        playerTransform = player.GetComponent<Transform>();
+        
         // Get main camera.
         playerCamera = Camera.main!;
 
@@ -145,11 +148,11 @@ public class World : MonoBehaviour
 
         // Now set the the Y position on top of the highest voxel at the initial location.
         spawnPosition = GetHighestVoxel(spawnPosition) + spawnPositionOffset;
-        player.position = spawnPosition;
+        playerTransform.position = spawnPosition;
         CheckViewDistance();
 
 
-        playerLastChunkCoord = GetChunkCoordFromVector3(player.position);
+        playerLastChunkCoord = GetChunkCoordFromVector3(playerTransform.position);
 
         if (settings.enableThreading)
         {
@@ -166,7 +169,7 @@ public class World : MonoBehaviour
 
     private void Update()
     {
-        playerChunkCoord = GetChunkCoordFromVector3(player.position);
+        playerChunkCoord = GetChunkCoordFromVector3(playerTransform.position);
 
         // Only update the chunks if the player has moved from the chunk they where previously on.
         if (!playerChunkCoord.Equals(playerLastChunkCoord))
@@ -307,7 +310,7 @@ public class World : MonoBehaviour
                 if (!queue.TryDequeue(out VoxelMod v)) continue;
                 ChunkCoord c = GetChunkCoordFromVector3(v.position);
 
-                worldData.SetVoxel(v.position, v.id);
+                worldData.SetVoxel(v.position, v.id, 1);
             }
         }
 
@@ -332,7 +335,7 @@ public class World : MonoBehaviour
     
     private void CheckLoadDistance()
     {
-        ChunkCoord coord = GetChunkCoordFromVector3(player.position);
+        ChunkCoord coord = GetChunkCoordFromVector3(playerTransform.position);
         playerLastChunkCoord = playerChunkCoord;
 
         // Loop trough all chunks currently within view distance of the player.
@@ -360,7 +363,7 @@ public class World : MonoBehaviour
     {
         clouds.UpdateClouds();
 
-        ChunkCoord coord = GetChunkCoordFromVector3(player.position);
+        ChunkCoord coord = GetChunkCoordFromVector3(playerTransform.position);
         playerLastChunkCoord = playerChunkCoord;
 
         // Copy currently active chunks.
@@ -578,8 +581,8 @@ public class World : MonoBehaviour
 
     private bool IsChunkInWorld(ChunkCoord coord)
     {
-        return coord.x >= 0 && coord.x < VoxelData.WorldSizeInChunks &&
-               coord.z >= 0 && coord.z < VoxelData.WorldSizeInChunks;
+        return coord.x is >= 0 and < VoxelData.WorldSizeInChunks &&
+               coord.z is >= 0 and < VoxelData.WorldSizeInChunks;
     }
 }
 

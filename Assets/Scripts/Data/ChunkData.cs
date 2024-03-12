@@ -80,7 +80,7 @@ namespace Data
             World.Instance.worldData.modifiedChunks.Add(this);
         }
 
-        public void ModifyVoxel(Vector3Int pos, byte id, bool immediateUpdate = false)
+        public void ModifyVoxel(Vector3Int pos, byte id, int direction, bool immediateUpdate = false)
         {
             // If we try to change a block for the same block, return early.
             if (map[pos.x, pos.y, pos.z].id == id)
@@ -95,6 +95,7 @@ namespace Data
 
             // Set voxel to the new ID.
             voxel.id = id;
+            voxel.orientation = direction;
 
             // If the opacity values of the voxel have changed and the voxel above is in direct sunlight (or is above the world height),
             // recast light from that voxel downwards.

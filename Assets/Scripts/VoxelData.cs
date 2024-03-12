@@ -4,7 +4,7 @@ public static class VoxelData
 {
     public const int ChunkWidth = 16;
     public const int ChunkHeight = 128;
-    public const int WorldSizeInChunks = 100;
+    public const int WorldSizeInChunks = 4;
 
     // Lighting Values
     public static float MinLightLevel = 0.15f;

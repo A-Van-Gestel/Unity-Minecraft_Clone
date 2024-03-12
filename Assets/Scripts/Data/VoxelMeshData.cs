@@ -26,6 +26,14 @@ namespace Data
             this.position = position;
             this.uv = uv;
         }
+    
+        public Vector3 GetRotatedPosition(Vector3 angles)
+        {
+            Vector3 center = new Vector3(0.5f, 0.5f, 0.5f); // The center of the block that we are pivoting around.
+            Vector3 direction = position - center; // Get the direction from the center of the current vertice.
+            direction = Quaternion.Euler(angles) * direction; // Rotate the direction by angels specified in the function parameters.
+            return direction + center;
+        }
     }
 
     [System.Serializable]
@@ -35,8 +43,12 @@ namespace Data
         // we can store a single normal value for each face and use that for each vert in the face.
         
         public string direction;  // Purely to make things easier to read in the inspector.
-        public Vector3 normal;
         public VertData[] vertData;
         public int[] triangles;
+
+        public VertData GetVertData(int index)
+        {
+            return vertData[index];
+        }
     }
 }

@@ -80,7 +80,7 @@ namespace Data
                    pos.z is >= 0 and < VoxelData.WorldSizeInVoxels;
         }
 
-        public void SetVoxel(Vector3 pos, byte value)
+        public void SetVoxel(Vector3 pos, byte value, int direction)
         {
             // If the voxel is outside of the world, we don't need to do anything with it.
             if (!IsVoxelInWorld(pos))
@@ -101,7 +101,7 @@ namespace Data
             Vector3Int voxel = new Vector3Int((int)(pos.x - x), (int)pos.y, (int)(pos.z - z));
 
             // Then set the voxel in our chunk.
-            chunk.ModifyVoxel(voxel, value);
+            chunk.ModifyVoxel(voxel, value, direction);
         }
 
         [CanBeNull]
