@@ -28,7 +28,7 @@ public class Player : MonoBehaviour
 
     [Header("Player properties")]
     public Transform playerBody = null;
-    
+
     [Tooltip("The radius of the player")]
     public float playerWidth = 0.4f;
 
@@ -393,6 +393,7 @@ public class Player : MonoBehaviour
         }
     }
 
+    // ReSharper disable ArrangeAccessorOwnerBody
     public bool Front =>
         // Check from the center from the player, at both feet and head level if a solid voxel is in front of the player, which will stop the player from moving into it.
         world.CheckForVoxel(new Vector3(transform.position.x, transform.position.y, transform.position.z + playerWidth)) ||
@@ -412,4 +413,5 @@ public class Player : MonoBehaviour
         // Check from the center from the player, at both feet and head level if a solid voxel is to the right of the player, which will stop the player from moving into it.
         world.CheckForVoxel(new Vector3(transform.position.x + playerWidth, transform.position.y, transform.position.z)) ||
         world.CheckForVoxel(new Vector3(transform.position.x + playerWidth, transform.position.y + 1f, transform.position.z));
+    // ReSharper restore ArrangeAccessorOwnerBody
 }

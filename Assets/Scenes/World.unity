@@ -2506,11 +2506,13 @@ MonoBehaviour:
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
   material: {fileID: 2100000, guid: 310749baead051949ad82e332a06680f, type: 2}
   transparentMaterial: {fileID: 2100000, guid: 451dc07c0cc41a649bf3ac4fe7a9e1b0, type: 2}
+  waterMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
   blockTypes:
   - blockName: Air
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 0
     renderNeighborFaces: 1
+    isWater: 0
     opacity: 0
     icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
     stackSize: 64
@@ -2524,6 +2526,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2537,6 +2540,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: -1336346017, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2550,6 +2554,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: 1551665942, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2563,6 +2568,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: -1153239741, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2576,6 +2582,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: 455753414, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2589,6 +2596,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: 122583294, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2602,6 +2610,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: -1793209460, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2615,6 +2624,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: 1008106713, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2628,6 +2638,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: -966074416, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2641,6 +2652,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: 2025127514, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2654,6 +2666,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: 1436998987, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2667,6 +2680,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: -1841403712, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2680,6 +2694,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 1
+    isWater: 0
     opacity: 0
     icon: {fileID: -1490239207, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2693,6 +2708,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: -2144359328, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2706,6 +2722,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 1
+    isWater: 0
     opacity: 5
     icon: {fileID: -392713096, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2719,6 +2736,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
     renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: -954973061, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2732,6 +2750,7 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: f1f1cbb961eacda4dbac46e90f49df51, type: 2}
     isSolid: 1
     renderNeighborFaces: 1
+    isWater: 0
     opacity: 15
     icon: {fileID: 2016017474, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
@@ -2744,12 +2763,27 @@ MonoBehaviour:
   - blockName: Directional Block
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     isSolid: 1
-    renderNeighborFaces: 1
+    renderNeighborFaces: 0
+    isWater: 0
     opacity: 15
     icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
     stackSize: 64
     backFaceTexture: 0
     frontFaceTexture: 7
+    topFaceTexture: 0
+    bottomFaceTexture: 0
+    leftFaceTexture: 0
+    rightFaceTexture: 0
+  - blockName: Water
+    meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
+    isSolid: 1
+    renderNeighborFaces: 1
+    isWater: 1
+    opacity: 7
+    icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
+    stackSize: 64
+    backFaceTexture: 0
+    frontFaceTexture: 0
     topFaceTexture: 0
     bottomFaceTexture: 0
     leftFaceTexture: 0

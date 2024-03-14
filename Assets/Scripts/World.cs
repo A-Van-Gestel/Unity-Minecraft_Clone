@@ -41,8 +41,8 @@ public class World : MonoBehaviour
 
     [Header("Blocks & Materials")]
     public Material material;
-
     public Material transparentMaterial;
+    public Material waterMaterial;
     public BlockType[] blockTypes;
 
     private Chunk[,] chunks = new Chunk[VoxelData.WorldSizeInChunks, VoxelData.WorldSizeInChunks];
@@ -490,7 +490,6 @@ public class World : MonoBehaviour
             return 8; // Bedrock
 
         // ----- BIOME SELECTION PASS -----
-        int solidGroundHeight = 42;
         float sumOfHeights = 0f;
         int count = 0;
         float strongestWeight = 0f;
@@ -523,7 +522,7 @@ public class World : MonoBehaviour
 
         // Get the average of the heights.
         sumOfHeights /= count;
-        int terrainHeight = Mathf.FloorToInt(sumOfHeights + solidGroundHeight);
+        int terrainHeight = Mathf.FloorToInt(sumOfHeights + VoxelData.SolidGroundHeight);
 
 
         // ----- BASIC TERRAIN PASS -----
@@ -539,6 +538,9 @@ public class World : MonoBehaviour
         }
         else if (yPos > terrainHeight)
         {
+            if (yPos < VoxelData.SeaLevel)
+                return 19; // Water
+            
             return 0; // Air
         }
         else
@@ -593,6 +595,7 @@ public class BlockType
     public VoxelMeshData meshData;
     public bool isSolid;
     public bool renderNeighborFaces;
+    public bool isWater;
     
     [Tooltip("How many light will be stopped by this block.")]
     [Range(0, 15)]

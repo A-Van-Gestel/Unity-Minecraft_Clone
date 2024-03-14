@@ -5,6 +5,10 @@ public static class VoxelData
     public const int ChunkWidth = 16;
     public const int ChunkHeight = 128;
     public const int WorldSizeInChunks = 4;
+    
+    // World Generation Constants
+    public const int SolidGroundHeight = 42;
+    public const int SeaLevel = 45;  // Minecraft = 62
 
     // Lighting Values
     public static float MinLightLevel = 0.15f;

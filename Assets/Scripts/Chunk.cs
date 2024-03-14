@@ -19,7 +19,8 @@ public class Chunk
     private List<Vector3> vertices = new List<Vector3>();
     private List<int> triangles = new List<int>();
     private List<int> transparantTriangles = new List<int>();
-    private Material[] materials = new Material[2];
+    private List<int> waterTriangles = new List<int>();
+    private Material[] materials = new Material[3];
     private List<Vector2> uvs = new List<Vector2>();
     private List<Color> colors = new List<Color>();
     private List<Vector3> normals = new List<Vector3>();
@@ -39,6 +40,7 @@ public class Chunk
 
         materials[0] = World.Instance.material;
         materials[1] = World.Instance.transparentMaterial;
+        materials[2] = World.Instance.waterMaterial;
         meshRenderer.materials = materials;
 
         meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided; // Mostly fixes lines in the shadows between voxels.
@@ -85,6 +87,7 @@ public class Chunk
         vertices.Clear();
         triangles.Clear();
         transparantTriangles.Clear();
+        waterTriangles.Clear();
         uvs.Clear();
         colors.Clear();
         normals.Clear();
@@ -229,7 +232,6 @@ public class Chunk
 
         for (int p = 0; p < 6; p++) // p = faceIndex
         {
-            
             // TODO: Probably move this to a separate function.
             int translatedP = p;
             if (voxel.orientation != 1) // 
@@ -242,6 +244,7 @@ public class Chunk
                     else if (p == 4) translatedP = 5; // left -> right
                     else if (p == 5) translatedP = 4; // right -> left
                 }
+
                 // Rotated leftwards
                 if (voxel.orientation == 4)
                 {
@@ -250,6 +253,7 @@ public class Chunk
                     else if (p == 4) translatedP = 1; // left -> front
                     else if (p == 5) translatedP = 0; // right -> back
                 }
+
                 // Rotated rightwards
                 if (voxel.orientation == 5)
                 {
@@ -259,27 +263,32 @@ public class Chunk
                     else if (p == 5) translatedP = 1; // right -> front
                 }
             }
-            
-            
-            VoxelState neighborVoxel = chunkData.map[x, y, z].neighbours[translatedP];
 
-            if (neighborVoxel != null && neighborVoxel.Properties.renderNeighborFaces || // Display face if facing transparent voxel
+
+            VoxelState neighborVoxelAbsolute = chunkData.map[x, y, z].neighbours[p];
+            VoxelState neighborVoxelContextual = chunkData.map[x, y, z].neighbours[translatedP];
+
+            if (neighborVoxelContextual != null && neighborVoxelContextual.Properties.renderNeighborFaces || // Display face if facing transparent voxel
                 !World.Instance.worldData.IsVoxelInWorld(voxelWoldPosition + VoxelData.FaceChecks[p]) // Display face if facing the edge of the world
                )
             {
                 // If outside of the world, neighbor would be null, so use own voxel globalLightPercent in that case.
-                float lightLevel = neighborVoxel?.lightAsFloat ?? CheckForVoxel(pos).lightAsFloat;
+                float lightLevel = neighborVoxelContextual?.lightAsFloat ?? CheckForVoxel(pos).lightAsFloat;
 
                 int faceVertCount = 0;
 
                 for (int i = 0; i < voxel.Properties.meshData.faces[p].vertData.Length; i++)
                 {
                     VertData vertData = voxel.Properties.meshData.faces[p].GetVertData(i);
-                    
+
                     vertices.Add(pos + vertData.GetRotatedPosition(new Vector3(0, rotation, 0)));
                     normals.Add(VoxelData.FaceChecks[p]);
                     colors.Add(new Color(0, 0, 0, lightLevel));
-                    AddTexture(voxel.Properties.GetTextureID(p), vertData.uv);
+                    if (voxel.Properties.isWater)
+                        uvs.Add(voxel.Properties.meshData.faces[p].vertData[i].uv);
+                    else
+                        AddTexture(voxel.Properties.GetTextureID(p), vertData.uv);
+                    
                     faceVertCount++;
                 }
 
@@ -292,9 +301,24 @@ public class Chunk
                 }
                 else
                 {
-                    foreach (int triangle in voxel.Properties.meshData.faces[p].triangles)
+                    if (voxel.Properties.isWater)
                     {
-                        transparantTriangles.Add(vertexIndex + triangle);
+                        // Only draw a water face when it's visible from a neighbouring voxel & neighbouring voxel isn't water.
+                        if (neighborVoxelAbsolute != null && !neighborVoxelAbsolute.Properties.isWater ||
+                            neighborVoxelAbsolute == null)
+                        {
+                            foreach (int triangle in voxel.Properties.meshData.faces[p].triangles)
+                            {
+                                waterTriangles.Add(vertexIndex + triangle);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        foreach (int triangle in voxel.Properties.meshData.faces[p].triangles)
+                        {
+                            transparantTriangles.Add(vertexIndex + triangle);
+                        }
                     }
                 }
 
@@ -308,9 +332,10 @@ public class Chunk
         Mesh mesh = new Mesh();
         mesh.vertices = vertices.ToArray();
 
-        mesh.subMeshCount = 2;
+        mesh.subMeshCount = 3;
         mesh.SetTriangles(triangles.ToArray(), 0);
         mesh.SetTriangles(transparantTriangles.ToArray(), 1);
+        mesh.SetTriangles(waterTriangles.ToArray(), 2);
 
         mesh.uv = uvs.ToArray();
         mesh.colors = colors.ToArray();
@@ -332,7 +357,7 @@ public class Chunk
 
         x += VoxelData.NormalizedBlockTextureSize * uv.x;
         y += VoxelData.NormalizedBlockTextureSize * uv.y;
-        
+
         uvs.Add(new Vector2(x, y));
     }
 
