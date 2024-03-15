@@ -463,6 +463,13 @@ public class World : MonoBehaviour
         return voxel != null && blockTypes[voxel.id].isSolid;
     }
 
+    /// Returns true when voxel is solid & not water.
+    public bool CheckForCollision(Vector3 pos)
+    {
+        VoxelState voxel = worldData.GetVoxel(pos);
+        return voxel != null && blockTypes[voxel.id].isSolid && !blockTypes[voxel.id].isWater;
+    }
+
     public VoxelState GetVoxelState(Vector3 pos)
     {
         return worldData.GetVoxel(pos);

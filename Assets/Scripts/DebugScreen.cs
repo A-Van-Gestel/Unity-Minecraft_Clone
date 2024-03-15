@@ -20,6 +20,10 @@ public class DebugScreen : MonoBehaviour
     private float groundVoxelStateTimer;
     private VoxelState groundVoxelState;
 
+    private float currentChunkUpdateRate = 0.2f;
+    private float currentChunkTimer;
+    private Chunk currentChunk;
+
     void Start()
     {
         world = World.Instance;
@@ -54,12 +58,30 @@ public class DebugScreen : MonoBehaviour
         debugText += "\n\n";
         debugText += "LIGHTING:\n";
 
-        string groundLightLevel = groundVoxelState != null ? groundVoxelState.light.ToString() : "NULL";
+        string groundLightLevel = groundVoxelState != null ? groundVoxelState?.light.ToString() : "NULL";
         debugText += $"groundLightLevel: {groundLightLevel}";
+        
+        
+        debugText += "\n\n";
+        debugText += "CHUNK:\n";
+
+        string activeBlockBehaviorVoxels = currentChunk != null ? currentChunk?.GetActiveVoxelCount().ToString() : "NULL";
+        debugText += $"activeBlockBehaviorVoxels: {activeBlockBehaviorVoxels}";
 
         text.text = debugText;
 
         // FRAMERATE
+        FrameRate();
+
+        // GROUND VOXEL STATE (LIGHT LEVEL)
+        GroundVoxelState(playerPosition);
+
+        // CURRENT CHUNK
+        CurrentChunk(playerPosition);
+    }
+
+    private void FrameRate()
+    {
         if (frameRateTimer > frameRateUpdateRate)
         {
             frameRate = (int)(1f / Time.unscaledDeltaTime);
@@ -69,8 +91,10 @@ public class DebugScreen : MonoBehaviour
         {
             frameRateTimer += Time.deltaTime;
         }
+    }
 
-        // GROUND VOXEL STATE (LIGHT LEVEL)
+    private void GroundVoxelState(Vector3 playerPosition)
+    {
         if (groundVoxelStateTimer > groundVoxelStateUpdateRate)
         {
             groundVoxelState = world.GetVoxelState(playerPosition - new Vector3(0, -1, 0));
@@ -79,6 +103,19 @@ public class DebugScreen : MonoBehaviour
         else
         {
             groundVoxelStateTimer += Time.deltaTime;
+        }
+    }
+
+    private void CurrentChunk(Vector3 playerPosition)
+    {
+        if (currentChunkTimer > currentChunkUpdateRate)
+        {
+            currentChunk = world.GetChunkFromVector3(playerPosition);
+            currentChunkTimer = 0;
+        }
+        else
+        {
+            currentChunkTimer += Time.deltaTime;
         }
     }
 

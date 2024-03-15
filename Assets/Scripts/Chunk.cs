@@ -75,7 +75,7 @@ public class Chunk
 
     public void TickUpdate()
     {
-        Debug.Log(chunkObject.name + " currently has " + activeVoxels.Count + " active blocks.");
+        // Debug.Log(chunkObject.name + " currently has " + activeVoxels.Count + " active blocks.");
 
         for (int i = activeVoxels.Count - 1; i >= 0; i--)
             if (!BlockBehavior.Active(activeVoxels[i]))
@@ -124,6 +124,11 @@ public class Chunk
                 return;
             }
         }
+    }
+
+    public int GetActiveVoxelCount()
+    {
+        return activeVoxels.Count;
     }
 
     private void ClearMeshData()
