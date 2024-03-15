@@ -18,6 +18,9 @@ public static class VoxelData
     // so we need to know how much of that float a single light level represents.
     public const float UnitOfLight = 1f / 16f;
 
+    /// Ticks per second.
+    public static float TickLength = 1f;
+
     public static int Seed = 0;
 
     public const int WorldSizeInVoxels = WorldSizeInChunks * ChunkWidth;

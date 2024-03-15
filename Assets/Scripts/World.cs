@@ -159,12 +159,26 @@ public class World : MonoBehaviour
             ChunkUpdateThread = new Thread(new ThreadStart(ThreadedUpdate));
             ChunkUpdateThread.Start();
         }
+
+        StartCoroutine(Tick());
     }
 
     public void SetGlobalLightValue()
     {
         Shader.SetGlobalFloat(ShaderGlobalLightLevel, globalLightLevel);
         playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
+    }
+
+    IEnumerator Tick()
+    {
+        while (true)
+        {
+            foreach (ChunkCoord coord in activeChunks)
+            {
+                chunks[coord.x, coord.z].TickUpdate();
+            }
+            yield return new WaitForSeconds(VoxelData.TickLength);
+        }
     }
 
     private void Update()
@@ -603,6 +617,10 @@ public class BlockType
 
     public Sprite icon;
     public int stackSize = 64;
+
+    [Header("Block Behavior")]
+    [Tooltip("Whether the block has any block behavior.")]
+    public bool isActive;
 
     [Header("Texture Values")]
     public int backFaceTexture;

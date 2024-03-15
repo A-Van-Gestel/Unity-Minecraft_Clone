@@ -31,6 +31,8 @@ public class Chunk
 
     private ChunkData chunkData;
 
+    private List<VoxelState> activeVoxels = new List<VoxelState>();
+
     public Chunk(ChunkCoord _coord)
     {
         coord = _coord;
@@ -52,9 +54,34 @@ public class Chunk
         chunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)chunkPosition.x, (int)chunkPosition.z), true);
         chunkData.chunk = this;
 
+        // Add active blocks to the active voxel's list.
+        for (int y = 0; y < VoxelData.ChunkHeight; y++)
+        {
+            for (int x = 0; x < VoxelData.ChunkWidth; x++)
+            {
+                for (int z = 0; z < VoxelData.ChunkWidth; z++)
+                {
+                    VoxelState voxel = chunkData.map[x, y, z];
+                    if (voxel.Properties.isActive)
+                        AddActiveVoxel(voxel);
+                }
+            }
+        }
+
         World.Instance.AddChunkToUpdate(this);
 
         PlayChunkLoadAnimation();
+    }
+
+    public void TickUpdate()
+    {
+        Debug.Log(chunkObject.name + " currently has " + activeVoxels.Count + " active blocks.");
+
+        for (int i = activeVoxels.Count - 1; i >= 0; i--)
+            if (!BlockBehavior.Active(activeVoxels[i]))
+                RemoveActiveVoxel(activeVoxels[i]);
+            else
+                BlockBehavior.Behave(activeVoxels[i]);
     }
 
 
@@ -79,6 +106,24 @@ public class Chunk
         }
 
         World.Instance.chunksToDraw.Enqueue(this);
+    }
+
+    public void AddActiveVoxel(VoxelState voxel)
+    {
+        if (!activeVoxels.Contains(voxel))
+            activeVoxels.Add(voxel);
+    }
+
+    public void RemoveActiveVoxel(VoxelState voxel)
+    {
+        for (int i = 0; i < activeVoxels.Count; i++)
+        {
+            if (activeVoxels[i] == voxel)
+            {
+                activeVoxels.RemoveAt(i);
+                return;
+            }
+        }
     }
 
     private void ClearMeshData()
@@ -288,7 +333,7 @@ public class Chunk
                         uvs.Add(voxel.Properties.meshData.faces[p].vertData[i].uv);
                     else
                         AddTexture(voxel.Properties.GetTextureID(p), vertData.uv);
-                    
+
                     faceVertCount++;
                 }
 

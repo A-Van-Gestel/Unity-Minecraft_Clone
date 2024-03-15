@@ -17,7 +17,7 @@ MonoBehaviour:
   scale: 0.042
   terrainHeight: 42
   terrainScale: 0.25
-  surfaceBlock: 2
+  surfaceBlock: 3
   subSurfaceBlock: 3
   placeMajorFlora: 1
   majorFloraIndex: 0

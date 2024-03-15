@@ -2516,6 +2516,7 @@ MonoBehaviour:
     opacity: 0
     icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -2530,6 +2531,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -2544,6 +2546,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: -1336346017, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 1
     backFaceTexture: 12
     frontFaceTexture: 12
     topFaceTexture: 1
@@ -2558,6 +2561,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: 1551665942, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 2
     frontFaceTexture: 2
     topFaceTexture: 2
@@ -2572,6 +2576,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: -1153239741, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 3
     frontFaceTexture: 3
     topFaceTexture: 3
@@ -2586,6 +2591,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: 455753414, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 4
     frontFaceTexture: 4
     topFaceTexture: 4
@@ -2600,6 +2606,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: 122583294, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 21
     frontFaceTexture: 21
     topFaceTexture: 5
@@ -2614,6 +2621,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: -1793209460, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 6
     frontFaceTexture: 6
     topFaceTexture: 6
@@ -2628,6 +2636,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: 1008106713, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 7
     frontFaceTexture: 7
     topFaceTexture: 7
@@ -2642,6 +2651,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: -966074416, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 8
     frontFaceTexture: 8
     topFaceTexture: 8
@@ -2656,6 +2666,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: 2025127514, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 25
     frontFaceTexture: 25
     topFaceTexture: 9
@@ -2670,6 +2681,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: 1436998987, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 10
     frontFaceTexture: 10
     topFaceTexture: 10
@@ -2684,6 +2696,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: -1841403712, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 11
     frontFaceTexture: 11
     topFaceTexture: 11
@@ -2698,6 +2711,7 @@ MonoBehaviour:
     opacity: 0
     icon: {fileID: -1490239207, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 13
     frontFaceTexture: 13
     topFaceTexture: 13
@@ -2712,6 +2726,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: -2144359328, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 14
     frontFaceTexture: 14
     topFaceTexture: 15
@@ -2726,6 +2741,7 @@ MonoBehaviour:
     opacity: 5
     icon: {fileID: -392713096, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 16
     frontFaceTexture: 16
     topFaceTexture: 16
@@ -2740,6 +2756,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: -954973061, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 18
     frontFaceTexture: 18
     topFaceTexture: 17
@@ -2754,6 +2771,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: 2016017474, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -2768,6 +2786,7 @@ MonoBehaviour:
     opacity: 15
     icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 0
     frontFaceTexture: 7
     topFaceTexture: 0
@@ -2782,6 +2801,7 @@ MonoBehaviour:
     opacity: 7
     icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
     stackSize: 64
+    isActive: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
