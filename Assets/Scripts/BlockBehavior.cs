@@ -69,8 +69,11 @@ public static class BlockBehavior
                 if (neighbours.Count == 0)
                     return;
 
-                int index = Random.Range(0, neighbours.Count);
-                neighbours[index].chunkData.ModifyVoxel(neighbours[index].position, 2, neighbours[index].orientation);
+                if (Random.Range(0f, 1f) <= VoxelData.GrassSpreadChance)
+                {
+                    int index = Random.Range(0, neighbours.Count);
+                    neighbours[index].chunkData.ModifyVoxel(neighbours[index].position, 2, neighbours[index].orientation);
+                }
 
                 break;
         }

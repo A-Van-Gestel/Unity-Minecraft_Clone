@@ -20,6 +20,9 @@ public static class VoxelData
 
     /// Ticks per second.
     public static float TickLength = 1f;
+    
+    // Block Behavior
+    public const float GrassSpreadChance = 0.02f;
 
     public static int Seed = 0;
 
