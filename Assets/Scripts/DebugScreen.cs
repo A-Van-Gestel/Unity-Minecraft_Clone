@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using Data;
+using JetBrains.Annotations;
 using TMPro;
 using UnityEngine;
 
@@ -22,7 +23,7 @@ public class DebugScreen : MonoBehaviour
 
     private float currentChunkUpdateRate = 0.2f;
     private float currentChunkTimer;
-    private Chunk currentChunk;
+    [CanBeNull] private Chunk currentChunk;
 
     void Start()
     {
@@ -110,7 +111,7 @@ public class DebugScreen : MonoBehaviour
     {
         if (currentChunkTimer > currentChunkUpdateRate)
         {
-            currentChunk = world.GetChunkFromVector3(playerPosition);
+            currentChunk = world.worldData.IsVoxelInWorld(playerPosition) ? world.GetChunkFromVector3(playerPosition) : null;
             currentChunkTimer = 0;
         }
         else
