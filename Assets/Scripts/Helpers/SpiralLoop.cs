@@ -3,8 +3,8 @@
 namespace Helpers
 {
     /// <summary>
-    /// Generate X & Z coordinates in a spiral form from 0, 0.
-    /// Source: https://discussions.unity.com/t/how-to-generate-a-grid-from-the-center/171186/2
+    /// Generate <c>X</c> & <c>Z</c> coordinates in a spiral starting from 0, 0.
+    /// Source: <see href="https://discussions.unity.com/t/how-to-generate-a-grid-from-the-center/171186/2">UNITY Discussions - How to generate a grid from the center?</see>
     /// </summary>
     public class SpiralLoop
     {
@@ -19,7 +19,7 @@ namespace Helpers
         #region Public Methods
 
         /// <summary>
-        /// Generates the next X and Z coordinates, access the public X & Z properties to get them.
+        /// Generates the next <c>X</c> & <c>Z</c> coordinates, access the public <c>X</c> & <c>Z</c> properties to get them.
         /// </summary>
         public void Next()
         {
@@ -37,7 +37,7 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Generates the next X and Z coordinates and returns them as a new Vector2.
+        /// Generates the next <c>X</c> & <c>Z</c> coordinates and returns them as a new <c>Vector2</c>.
         /// </summary>
         public Vector2 NextPoint()
         {
@@ -46,7 +46,7 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Resets the X & Z coordinates to 0, 0.
+        /// Resets the <c>X</c> & <c>Z</c> coordinates to 0, 0.
         /// </summary>
         public void Reset()
         {
