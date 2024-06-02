@@ -8,14 +8,22 @@ namespace Helpers
     /// </summary>
     public class SpiralLoop
     {
-        public int X = 0;
-        public int Z = 0;
+        #region Properties
+
+        public int X { get; private set; } = 0;
+        public int Z { get; private set; } = 0;
+
+        #endregion
+
+
+        #region Public Methods
 
         /// <summary>
         /// Generates the next X and Z coordinates, access the public X & Z properties to get them.
         /// </summary>
         public void Next()
         {
+            // Initial case: when both X and Z are 0, move to the first point (1, 0).
             if (X == 0 && Z == 0)
             {
                 X = 1;
@@ -45,5 +53,7 @@ namespace Helpers
             X = 0;
             Z = 0;
         }
+
+        #endregion
     }
 }
