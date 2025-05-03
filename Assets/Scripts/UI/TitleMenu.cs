@@ -1,5 +1,4 @@
 using System.IO;
-using MyBox;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
@@ -55,12 +54,14 @@ namespace UI
                 _settings = new Settings();
                 string jsonExport = JsonUtility.ToJson(_settings, true);
                 File.WriteAllText(_settingFilePath, jsonExport);
+#if UNITY_EDITOR
                 AssetDatabase.Refresh(); // Refresh Unity's asset database.
+# endif
             }
 
 #if !UNITY_EDITOR
-        string jsonImport = File.ReadAllText(settingFilePath);
-        settings = JsonUtility.FromJson<Settings>(jsonImport);
+        string jsonImport = File.ReadAllText(_settingFilePath);
+        _settings = JsonUtility.FromJson<Settings>(jsonImport);
 # endif
 
             versionField.text = $"v{_settings.version}";
@@ -111,7 +112,7 @@ namespace UI
         {
             // save any game data here
 #if UNITY_EDITOR
-            // Application.Quit() does not work in the editor so UnityEditor.EditorApplication.isPlaying need to be set to false to quit the game.
+            // Application.Quit() does not work in the editor so UnityEditor.EditorApplication.isPlaying need to be set too false to quit the game.
             UnityEditor.EditorApplication.isPlaying = false;
 #else
          Application.Quit();

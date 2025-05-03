@@ -4,6 +4,7 @@ using UnityEngine;
 
 namespace Helpers
 {
+#if UNITY_EDITOR
     public static class ScriptableObjectHelpers
     {
         /// <summary> Returns all ScriptableObjects at a certain path.</summary>
@@ -28,4 +29,5 @@ namespace Helpers
             return scripts;
         }
     }
+# endif
 }

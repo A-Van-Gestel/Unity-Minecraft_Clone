@@ -4,7 +4,7 @@ public static class VoxelData
 {
     public const int ChunkWidth = 16;
     public const int ChunkHeight = 128;
-    public const int WorldSizeInChunks = 4;
+    public const int WorldSizeInChunks = 100;
     
     // World Generation Constants
     public const int SolidGroundHeight = 42;

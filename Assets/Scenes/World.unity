@@ -2495,8 +2495,8 @@ MonoBehaviour:
   settings:
     version: 0.0.01
     loadSaveDataOnStartup: 0
-    loadDistance: 4
-    viewDistance: 4
+    loadDistance: 7
+    viewDistance: 5
     rerenderChunksOnModification: 1
     enableLighting: 1
     enableThreading: 0

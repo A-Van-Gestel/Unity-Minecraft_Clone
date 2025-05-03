@@ -47,17 +47,18 @@ namespace Data
                         for (int p = 0; p < 6; p++)
                         {
                             // Make sure we have a neighbour here before trying to do anything with it.
-                            if (neighbours[p] != null)
+                            VoxelState neighbour = neighbours[p]; // Cache neighbour
+                            if (neighbour != null)
                             {
                                 // If a neighbour is less than or equal to our old light value, that means this voxel might have been lighting it up.
-                                // We want to set it's light value to 0 and then it will run its own neighbour checks.
-                                // But we don't want to do that until we've finished here, so add it to our list and we'll do it afterwards.
-                                if (neighbours[p].light <= oldCastLightValue)
+                                // We want to set its light value to 0, and then it will run its own neighbour checks.
+                                // But we don't want to do that until we've finished here, so add it to our list, and we'll do it afterward.
+                                if (neighbour.light <= oldCastLightValue)
                                     neighboursToDarken.Add(p);
                                 // Else if the neighbour is brighter than our old value, then that voxel is being lit from somewhere else.
                                 // We then tell that voxel to propagate and, if it is lighter than this voxel, light will be propagated to here.
                                 else
-                                    neighbours[p].PropagateLight();
+                                    neighbour.PropagateLight();
                             }
                         }
 
@@ -120,19 +121,21 @@ namespace Data
             // Loop through each neighbour of this 
             for (int p = 0; p < 6; p++)
             {
-                if (neighbours[p] != null)
+                VoxelState neighbour = neighbours[p]; // Cache neighbour
+                if (neighbour != null)
                 {
                     // We can ONLY propagate light in one direction (lighter to darker).
                     // If we work in both directions, we will get in a recursive loop.
                     // So any neighbours who are not darker than this voxel's lightCast value, we leave alone.
-                    if (neighbours[p].light < castLight)
-                        neighbours[p].light = castLight;
+                    if (neighbour.light < castLight)
+                        neighbour.light = castLight;
                 }
-
-                if (chunkData.chunk != null)
-                {
-                    World.Instance.AddChunkToUpdate(chunkData.chunk);
-                }
+            }
+            
+            // Update the chunk after checking all neighbours
+            if (chunkData.chunk != null)
+            {
+                World.Instance.AddChunkToUpdate(chunkData.chunk);
             }
         }
 
@@ -168,7 +171,6 @@ public class VoxelNeighbours
             if (_neighbours[index] == null)
             {
                 _neighbours[index] = World.Instance.worldData.GetVoxel(parent.globalPosition + VoxelData.FaceChecks[index]);
-                ReturnNeighbour(index);
             }
 
             // Return whatever we have. If it's null at this point, it means that neighbour doesn't exist yet.

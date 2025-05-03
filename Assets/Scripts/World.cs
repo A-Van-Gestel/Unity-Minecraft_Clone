@@ -2,10 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using MyBox;
 using UnityEngine;
-using UnityEngine.Serialization;
 using Random = UnityEngine.Random;
 using System.Threading;
 using System.IO;
@@ -121,7 +119,9 @@ public class World : MonoBehaviour
         {
             string jsonExport = JsonUtility.ToJson(settings, true);
             File.WriteAllText(settingFilePath, jsonExport);
+#if UNITY_EDITOR
             AssetDatabase.Refresh(); // Refresh Unity's asset database.
+# endif
         }
 
 #if !UNITY_EDITOR
@@ -255,6 +255,9 @@ public class World : MonoBehaviour
 
     public void AddChunkToUpdate(Chunk chunk, bool immediateUpdate = false)
     {
+        if (chunk.coord.x == 0 && chunk.coord.z == 0)
+            Debug.Log($"Adding chunk (0, 0) to update queue. Immediate: {immediateUpdate}");
+        
         // Lock list to ensure only one thing is using the list at a time.
         lock (ChunkUpdateThreadLock)
         {
@@ -344,6 +347,9 @@ public class World : MonoBehaviour
         int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth);
         int z = Mathf.FloorToInt(pos.z / VoxelData.ChunkWidth);
 
+        if (x == 0 && z == 0)
+            Debug.Log($"Getting chunk for position: {pos}, Chunk: {x}, {z}");
+        
         return chunks[x, z];
     }
     
@@ -355,6 +361,8 @@ public class World : MonoBehaviour
         // Loop trough all chunks currently within view distance of the player.
         SpiralLoop spiralLoop = new SpiralLoop();
         ChunkCoord thisChunkCoord = coord;
+        
+        Debug.Log($"settings v: {settings.viewDistance} | l: {settings.loadDistance}");
         
         while (thisChunkCoord.x < coord.x + settings.loadDistance && thisChunkCoord.z < coord.z + settings.loadDistance)
         {
