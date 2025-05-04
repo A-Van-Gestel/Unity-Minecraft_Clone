@@ -1,4 +1,6 @@
+using System;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 [CreateAssetMenu(fileName = "BiomeAttributes", menuName = "MinecraftTutorial/Biome Attributes")]
 public class BiomeAttributes : ScriptableObject
@@ -33,11 +35,11 @@ public class BiomeAttributes : ScriptableObject
     public int maxHeight = 12;
     public int minHeight = 5;
 
-    [Header("Second Pass")]
-    public Lode[] Lodes;
+    [FormerlySerializedAs("Lodes")] [Header("Second Pass")]
+    public Lode[] lodes;
 }
 
-[System.Serializable]
+[Serializable]
 public class Lode
 {
     [Tooltip("Name of the lode.")]

@@ -2,14 +2,14 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using MyBox;
-using UnityEngine;
-using Random = UnityEngine.Random;
-using System.Threading;
 using System.IO;
+using System.Threading;
 using Data;
 using Helpers;
+using MyBox;
 using UnityEditor;
+using UnityEngine;
+using Random = UnityEngine.Random;
 
 public class World : MonoBehaviour
 {
@@ -146,7 +146,7 @@ public class World : MonoBehaviour
         spawnPosition = new Vector3(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1f, VoxelData.WorldCentre);
         LoadWorld();
 
-        // Now set the the Y position on top of the highest voxel at the initial location.
+        // Now set the Y position on top of the highest voxel at the initial location.
         spawnPosition = GetHighestVoxel(spawnPosition) + spawnPositionOffset;
         playerTransform.position = spawnPosition;
         CheckViewDistance();
@@ -156,7 +156,7 @@ public class World : MonoBehaviour
 
         if (settings.enableThreading)
         {
-            ChunkUpdateThread = new Thread(new ThreadStart(ThreadedUpdate));
+            ChunkUpdateThread = new Thread(ThreadedUpdate);
             ChunkUpdateThread.Start();
         }
 
@@ -185,7 +185,7 @@ public class World : MonoBehaviour
     {
         playerChunkCoord = GetChunkCoordFromVector3(playerTransform.position);
 
-        // Only update the chunks if the player has moved from the chunk they where previously on.
+        // Only update the chunks if the player has moved from the chunk they were previously on.
         if (!playerChunkCoord.Equals(playerLastChunkCoord))
         {
             CheckLoadDistance();
@@ -237,7 +237,7 @@ public class World : MonoBehaviour
 
         int loadChunkDistance = VoxelData.WorldSizeInChunks / 2 + settings.loadDistance;
 
-        // Don't try to load chunks outside of the world
+        // Don't try to load chunks outside the world
         if (loadChunkDistance > VoxelData.WorldSizeInChunks)
             loadChunkDistance = VoxelData.WorldSizeInChunks;
 
@@ -358,7 +358,7 @@ public class World : MonoBehaviour
         ChunkCoord coord = GetChunkCoordFromVector3(playerTransform.position);
         playerLastChunkCoord = playerChunkCoord;
 
-        // Loop trough all chunks currently within view distance of the player.
+        // Loop through all chunks currently within view distance of the player.
         SpiralLoop spiralLoop = new SpiralLoop();
         ChunkCoord thisChunkCoord = coord;
         
@@ -394,7 +394,7 @@ public class World : MonoBehaviour
         // Clear active chunks.
         activeChunks.Clear();
 
-        // Loop trough all chunks currently within view distance of the player.
+        // Loop through all chunks currently within view distance of the player.
         SpiralLoop spiralLoop = new SpiralLoop();
         ChunkCoord thisChunkCoord = coord;
 
@@ -451,7 +451,7 @@ public class World : MonoBehaviour
             return new Vector3(pos.x, highestVoxelPositionInChunk.y, pos.z);
         }
 
-        // Chunk is not created, calculate highest voxel using expensive world generation code.
+        // Chunk is not created, calculate the highest voxel using expensive world generation code.
         for (int i = yMax; i > 0; i--)
         {
             Vector3 currentVoxel = new Vector3(pos.x, i, pos.z);
@@ -489,14 +489,9 @@ public class World : MonoBehaviour
         set
         {
             _inUI = value;
-            if (_inUI)
-            {
-                Cursor.lockState = CursorLockMode.None; // Makes cursor visible
-            }
-            else
-            {
-                Cursor.lockState = CursorLockMode.Locked; // Makes cursor invisible and not able to go of screen
-            }
+            Cursor.lockState = _inUI
+                ? CursorLockMode.None // Makes cursor visible
+                : CursorLockMode.Locked; // Makes cursor invisible and not able to go of screen
 
             // Toggle UI based on inUI state
             Cursor.visible = _inUI;
@@ -581,7 +576,7 @@ public class World : MonoBehaviour
         if (settings.enableSecondPass && voxelValue == 1)
         {
             // Stone
-            foreach (Lode lode in biome.Lodes)
+            foreach (Lode lode in biome.lodes)
             {
                 if (yPos > lode.minHeight && yPos < lode.maxHeight)
                 {
@@ -617,7 +612,7 @@ public class World : MonoBehaviour
     }
 }
 
-[System.Serializable]
+[Serializable]
 public class BlockType
 {
     public string blockName;
@@ -688,7 +683,7 @@ public class VoxelMod
 }
 
 
-[System.Serializable]
+[Serializable]
 public class Settings
 {
     [Header("Game Data")]

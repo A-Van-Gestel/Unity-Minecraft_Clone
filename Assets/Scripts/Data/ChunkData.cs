@@ -15,7 +15,7 @@ namespace Data
 
         public Vector2Int position
         {
-            get { return new Vector2Int(_x, _y); }
+            get => new Vector2Int(_x, _y);
             set
             {
                 _x = value.x;

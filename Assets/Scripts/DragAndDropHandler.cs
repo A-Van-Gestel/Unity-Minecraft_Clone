@@ -2,8 +2,8 @@ using System.Collections.Generic;
 using System.Linq;
 using JetBrains.Annotations;
 using UnityEngine;
-using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 public class DragAndDropHandler : MonoBehaviour
 {
@@ -66,7 +66,7 @@ public class DragAndDropHandler : MonoBehaviour
         // Save last clicked slot for later use to reset slot back to last known position.
         lastClickedSlot = clickedSlot;
 
-        // Both cursor slot & clicked slot are empty, nothing can be done.
+        // Both cursor & clicked slots are empty, nothing can be done.
         if (!cursorSlot.HasItem && !clickedSlot.HasItem)
             return;
 
@@ -92,7 +92,7 @@ public class DragAndDropHandler : MonoBehaviour
             return;
         }
 
-        // Both cursor slot & clicked slot have items, ...
+        // Both cursor & clicked slots have items, ...
         if (cursorSlot.HasItem && clickedSlot.HasItem)
         {
             // Both slots contain different items, swap them.
@@ -133,7 +133,7 @@ public class DragAndDropHandler : MonoBehaviour
         // Save last clicked slot for later use to reset slot back to last known position.
         lastClickedSlot = clickedSlot;
 
-        // Both cursor slot & clicked slot are empty, nothing can be done.
+        // Both cursor & clicked slots are empty, nothing can be done.
         if (!cursorSlot.HasItem && !clickedSlot.HasItem)
             return;
 
@@ -151,7 +151,7 @@ public class DragAndDropHandler : MonoBehaviour
             return;
         }
 
-        // Both cursor slot & clicked slot have items, ...
+        // Both cursor & clicked slots have items, ...
         if (cursorSlot.HasItem && clickedSlot.HasItem)
         {
             // Both slots contain different items, do nothing.

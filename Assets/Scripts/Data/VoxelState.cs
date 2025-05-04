@@ -10,7 +10,7 @@ namespace Data
     public class VoxelState
     {
         // Packed data field - not serialized by default Unity serializer if VoxelState is part of another class
-        // Mark NonSerialized if VoxelState itself might be serialized elsewhere and you don't want this raw value saved.
+        // Mark NonSerialized if VoxelState itself might be serialized elsewhere, and you don't want this raw value saved.
         [NonSerialized] private ushort _packedData;
 
         // Context fields - cannot be packed, define the voxel's place and relationships

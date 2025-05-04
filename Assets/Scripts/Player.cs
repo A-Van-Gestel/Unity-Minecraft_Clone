@@ -304,7 +304,7 @@ public class Player : MonoBehaviour
 
                 if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
                 {
-                    // place block on x axis
+                    // place block on x-axis
                     if (xCheck < 0)
                         placeBlock.position = highlightBlock.position + Vector3.right;
                     else
@@ -320,7 +320,7 @@ public class Player : MonoBehaviour
                 }
                 else
                 {
-                    // place block on y axis by default
+                    // place block on y-axis by default
                     if (yCheck < 0)
                         placeBlock.position = highlightBlock.position + Vector3.up;
                     else
@@ -328,12 +328,12 @@ public class Player : MonoBehaviour
                 }
 
 
-                // Don't show place block highlight inside the player or when place block is inside solid block or when the placed block would be outside the world or when current itemSlot is empty.
+                // Don't show, place block highlight inside the player or when place block is inside solid block or when the placed block would be outside the world or when current itemSlot is empty.
                 Vector3 playerPosition = transform.position;
                 Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
                 if (playerCoord != placeBlock.position && (playerCoord + new Vector3(0, 1, 0)) != placeBlock.position // Placed block isn't inside the player
                                                        && world.worldData.IsVoxelInWorld(placeBlock.position) // Placed block is inside the world
-                                                       && !world.CheckForVoxel(placeBlock.position) // Placed block isn't inside a other voxel
+                                                       && !world.CheckForVoxel(placeBlock.position) // Placed block isn't inside another voxel
                                                        && toolbar.slots[toolbar.slotIndex].itemSlot.HasItem) // Current itemSlot isn't empty
                     blockPlaceable = true;
                 else

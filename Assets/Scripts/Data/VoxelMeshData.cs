@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace Data
@@ -12,7 +13,7 @@ namespace Data
         public FaceMeshData[] faces;
     }
     
-    [System.Serializable]
+    [Serializable]
     public class VertData
     {
         [Tooltip("Position relative to the voxel's origin point.")]
@@ -35,10 +36,10 @@ namespace Data
         }
     }
 
-    [System.Serializable]
+    [Serializable]
     public class FaceMeshData
     {
-        // Because all of the verts in this face are facing the same direction,
+        // Because all the verts in this face are facing the same direction,
         // we can store a single normal value for each face and use that for each vert in the face.
         
         public string direction;  // Purely to make things easier to read in the inspector.

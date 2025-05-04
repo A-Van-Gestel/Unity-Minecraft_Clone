@@ -143,7 +143,7 @@ public class Chunk
 
     public bool isActive
     {
-        get { return _isActive; }
+        get => _isActive;
         set
         {
             _isActive = value;
@@ -308,7 +308,7 @@ public class Chunk
                     // Draw if the neighbor doesn't fully block the view (is not solid opaque)
                     shouldDrawFace = !neighborIsSolid || neighborIsTransparent;
                     // TODO: This prevents drawing glass against glass -> Shader should draw backfaces
-                    if (neighborIsTransparent && neighborProps == voxelProps) shouldDrawFace = false;
+                    // if (neighborIsTransparent && neighborProps == voxelProps) shouldDrawFace = false;
                 }
                 else // Current voxel is Solid Opaque
                 {

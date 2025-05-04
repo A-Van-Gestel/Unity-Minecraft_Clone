@@ -106,7 +106,7 @@ namespace Data
         [CanBeNull]
         public VoxelState GetVoxel(Vector3 pos)
         {
-            // If the voxel is outside of the world, we don't need to do anything with it and return null.
+            // If the voxel is outside the world, we don't need to do anything with it and return null.
             if (!IsVoxelInWorld(pos))
                 return null;
 
