@@ -1,9 +1,10 @@
+using System;
 using JetBrains.Annotations;
 using UnityEngine;
 
 namespace Data
 {
-    [System.Serializable]
+    [Serializable]
     public class ChunkData
     {
         // The global position of the chunk. ie, (16, 16) NOT (1, 1). We want to be able to access
@@ -26,7 +27,7 @@ namespace Data
         public VoxelState[,,] map = new VoxelState[VoxelData.ChunkWidth, VoxelData.ChunkHeight, VoxelData.ChunkWidth];
 
 
-        [System.NonSerialized]
+        [NonSerialized]
         [CanBeNull]
         public Chunk chunk;
 
@@ -77,7 +78,7 @@ namespace Data
             World.Instance.worldData.modifiedChunks.Add(this);
         }
 
-        public void ModifyVoxel(Vector3Int pos, byte id, int direction, bool immediateUpdate = false)
+        public void ModifyVoxel(Vector3Int pos, byte id, byte direction, bool immediateUpdate = false)
         {
             // If we try to change a block for the same block, return early.
             if (map[pos.x, pos.y, pos.z].id == id)

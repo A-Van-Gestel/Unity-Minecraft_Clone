@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Data;
+using Helpers;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -259,52 +260,43 @@ public class Chunk
 
         VoxelState voxel = chunkData.map[x, y, z];
         BlockType voxelProps = voxel.Properties;
-        Vector3 voxelWoldPosition = pos + chunkPosition;
+        Vector3 voxelWorldPosition = pos + chunkPosition;
 
         // Calculate rotation angle based on orientation
-        float rotation = 0f;
-        switch (voxel.orientation)
-        {
-            case 0: // Backwards
-                rotation = 180f;
-                break;
-            case 5: // Rightwards (East)
-                rotation = 270f;
-                break;
-            case 1: // Front (Default)
-                rotation = 0f;
-                break;
-            // case 4: // Leftwards (West) - Assuming default handles this
-            default: // Leftwards (West)
-                rotation = 90f;
-                break;
-        }
+        float rotation = VoxelHelper.GetRotationAngle(voxel.orientation);
 
         for (int p = 0; p < 6; p++) // p = World Face Direction Index (0=Back, 1=Front, 2=Top, 3=Bottom, 4=Left, 5=Right)
         {
-            // --- Culling and Lighting based on ACTUAL neighbor ---
-            VoxelState neighborVoxelAbsolute = chunkData.map[x, y, z].neighbours[p];
-            BlockType neighborProps = neighborVoxelAbsolute?.Properties; // Cache neighbor props (handles null)
+            // --- Determine Original Face Index (translatedP) ---
+            // This calculation determines which *original* face of the block
+            // ends up pointing in the *world* direction 'p' after rotation.
+            int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, voxel.orientation);
 
-            bool neighborIsTransparent = neighborProps != null && neighborProps.renderNeighborFaces;
-            bool neighborIsWater = neighborProps != null && neighborProps.isWater;
-            bool neighborIsSolid = neighborProps != null && neighborProps.isSolid;
-            bool isEdgeOfWorld = !World.Instance.worldData.IsVoxelInWorld(voxelWoldPosition + VoxelData.FaceChecks[p]);
+            // --- Culling Decision based on the NEIGHBOR matching the ORIGINAL face direction ---
+            VoxelState neighborVoxel = voxel.neighbours[p];
+            BlockType neighborProps = neighborVoxel?.Properties; // Cache absolute neighbor props
+
+            bool isEdgeOfWorld = !World.Instance.worldData.IsVoxelInWorld(voxelWorldPosition + VoxelData.FaceChecks[p]);
 
             bool shouldDrawFace = false;
+            // Rule 1: Always draw if facing the edge of the loaded world.
             if (isEdgeOfWorld)
             {
                 shouldDrawFace = true;
             }
-            // Neighbor is null but *inside* the world (e.g., unloaded chunk boundary)
-            else if (neighborVoxelAbsolute == null)
+            // Rule 2: Neighbor is null but *inside* the world (e.g., unloaded chunk boundary)
+            else if (neighborVoxel == null)
             {
-                // Treat as air/transparent for drawing purposes.
+                // Treat as air / transparent for drawing purposes.
                 shouldDrawFace = true;
             }
             // Neighbor exists within the world
             else
             {
+                bool neighborIsTransparent = neighborProps.renderNeighborFaces;
+                bool neighborIsSolid = neighborProps.isSolid;
+                bool neighborIsWater = neighborProps.isWater;
+
                 if (voxelProps.isWater) // Current voxel is Water
                 {
                     // Water draws face against anything NOT water
@@ -315,6 +307,8 @@ public class Chunk
                     // Transparent face draws if neighbor is solid OR if neighbor is a DIFFERENT type of transparent?
                     // Draw if the neighbor doesn't fully block the view (is not solid opaque)
                     shouldDrawFace = !neighborIsSolid || neighborIsTransparent;
+                    // TODO: This prevents drawing glass against glass -> Shader should draw backfaces
+                    if (neighborIsTransparent && neighborProps == voxelProps) shouldDrawFace = false;
                 }
                 else // Current voxel is Solid Opaque
                 {
@@ -324,57 +318,22 @@ public class Chunk
                 }
             }
 
-            // --- Proceed only if face is not culled ---
+            // --- Add Geometry ONLY if this face should be drawn ---
             if (shouldDrawFace)
             {
-                // --- Determine which ORIGINAL face data to use based on rotation ---
-                int translatedP = p; // Start with the world face index
-                // Apply inverse rotation logic to find which original face index (0-5)
-                // corresponds to the world direction 'p' AFTER rotation.
-                if (voxel.orientation != 1) // Only apply if not default orientation
-                {
-                    // Rotated backwards (180 deg)
-                    if (voxel.orientation == 0)
-                    {
-                        if (p == 0) translatedP = 1; // back -> front
-                        else if (p == 1) translatedP = 0; // front -> back
-                        else if (p == 4) translatedP = 5; // left -> right
-                        else if (p == 5) translatedP = 4; // right -> left
-                        // Top (2) and Bottom (3) remain the same
-                    }
-                    // Rotated leftwards (90 deg / West)
-                    else if (voxel.orientation == 4) // Assuming 4 is West/Left rot
-                    {
-                        if (p == 0) translatedP = 4; // back -> left
-                        else if (p == 1) translatedP = 5; // front -> right
-                        else if (p == 4) translatedP = 1; // left -> front
-                        else if (p == 5) translatedP = 0; // right -> back
-                        // Top (2) and Bottom (3) remain the same
-                    }
-                    // Rotated rightwards (270 deg / East)
-                    else if (voxel.orientation == 5) // Assuming 5 is East/Right rot
-                    {
-                        if (p == 0) translatedP = 5; // back -> right
-                        else if (p == 1) translatedP = 4; // front -> left
-                        else if (p == 4) translatedP = 0; // left -> back
-                        else if (p == 5) translatedP = 1; // right -> front
-                        // Top (2) and Bottom (3) remain the same
-                    }
-                }
-
-                // --- Get Mesh Data and Texture ID using the translated face index ---
+                // --- Get Mesh Data using the 'translatedP' index ---
                 FaceMeshData faceData = voxelProps.meshData.faces[translatedP];
                 int textureID = voxelProps.GetTextureID(translatedP);
 
-                // --- Calculate Light using the ACTUAL neighbor ---
+                // --- Calculate Light using the ACTUAL neighbor's space ('neighborVoxel') ---
                 // If outside the world, neighbor would be null, so use own voxel globalLightPercent in that case.
-                float lightLevel = neighborVoxelAbsolute?.lightAsFloat ?? voxel.lightAsFloat;
+                float lightLevel = neighborVoxel?.lightAsFloat ?? voxel.lightAsFloat;
 
                 // --- Add Geometry ---
-                int faceVertCount = 0;
-                for (int i = 0; i < faceData.vertData.Length; i++) // Use faceData here
+                int faceVertCount = faceData.vertData.Length;
+                for (int i = 0; i < faceData.vertData.Length; i++)
                 {
-                    VertData vertData = faceData.GetVertData(i); // Use faceData here
+                    VertData vertData = faceData.GetVertData(i);
 
                     // Rotate the vertex position based on the voxel's orientation
                     vertices.Add(pos + vertData.GetRotatedPosition(new Vector3(0, rotation, 0)));
@@ -385,11 +344,9 @@ public class Chunk
 
                     // Add UVs, potentially transformed or just using the textureID lookup
                     if (voxelProps.isWater)
-                        uvs.Add(vertData.uv); // Water might use simple UVs
+                        uvs.Add(vertData.uv);
                     else
                         AddTexture(textureID, vertData.uv); // Use looked-up textureID
-
-                    faceVertCount++;
                 }
 
                 // --- Assign triangles to the correct submesh based on CURRENT voxel type ---
@@ -400,14 +357,14 @@ public class Chunk
                         waterTriangles.Add(vertexIndex + triangle);
                     }
                 }
-                else if (voxelProps.renderNeighborFaces) // Other transparent
+                else if (voxelProps.renderNeighborFaces) // Other transparent blocks
                 {
                     foreach (int triangle in faceData.triangles)
                     {
                         transparentTriangles.Add(vertexIndex + triangle);
                     }
                 }
-                else // Solid
+                else // Solid Opaque blocks
                 {
                     foreach (int triangle in faceData.triangles)
                     {

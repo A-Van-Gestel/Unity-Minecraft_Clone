@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using JetBrains.Annotations;
 using MyBox;
@@ -5,16 +6,16 @@ using UnityEngine;
 
 namespace Data
 {
-    [System.Serializable]
+    [Serializable]
     public class WorldData
     {
         [ReadOnly] public string worldName;
         [ReadOnly] public int seed;
 
-        [System.NonSerialized]
+        [NonSerialized]
         public Dictionary<Vector2Int, ChunkData> chunks = new Dictionary<Vector2Int, ChunkData>();
 
-        [System.NonSerialized]
+        [NonSerialized]
         public HashSet<ChunkData> modifiedChunks = new HashSet<ChunkData>();
 
         public WorldData(string worldName, int seed)
@@ -78,9 +79,9 @@ namespace Data
                    pos.z is >= 0 and < VoxelData.WorldSizeInVoxels;
         }
 
-        public void SetVoxel(Vector3 pos, byte value, int direction)
+        public void SetVoxel(Vector3 pos, byte value, byte direction)
         {
-            // If the voxel is outside of the world, we don't need to do anything with it.
+            // If the voxel is outside the world, we don't need to do anything with it.
             if (!IsVoxelInWorld(pos))
                 return;
 

@@ -1,92 +1,142 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Data;
 using JetBrains.Annotations;
 using UnityEngine;
 
 namespace Data
 {
-    [System.Serializable]
+    [Serializable]
     public class VoxelState
     {
-        public byte id;
-        public int orientation;
-        [System.NonSerialized] private byte _light;
-        [System.NonSerialized] public ChunkData chunkData;
-        [System.NonSerialized] public VoxelNeighbours neighbours;
-        [System.NonSerialized] public Vector3Int position;
+        // Packed data field - not serialized by default Unity serializer if VoxelState is part of another class
+        // Mark NonSerialized if VoxelState itself might be serialized elsewhere and you don't want this raw value saved.
+        [NonSerialized] private ushort _packedData;
+
+        // Context fields - cannot be packed, define the voxel's place and relationships
+        [NonSerialized] public ChunkData chunkData;
+        [NonSerialized] public VoxelNeighbours neighbours;
+        [NonSerialized] public Vector3Int position;
+
+        // --- Public Properties using Packed Data ---
+        public byte id
+        {
+            get { return VoxelData.GetId(_packedData); }
+            set { _packedData = VoxelData.SetId(_packedData, value); } // Direct set, handle consequences elsewhere (like ModifyVoxel)
+        }
+
+        public byte orientation
+        {
+            get { return VoxelData.GetOrientation(_packedData); }
+            set { _packedData = VoxelData.SetOrientation(_packedData, value); } // Direct set
+        }
 
         public byte light
         {
-            get { return _light; }
+            get { return VoxelData.GetLight(_packedData); }
             set
             {
                 // Set light level to 15 if lighting is disabled.
                 if (!World.Instance.settings.enableLighting)
                 {
-                    _light = 15;
+                    if (VoxelData.GetLight(_packedData) != 15)
+                    {
+                        _packedData = VoxelData.SetLight(_packedData, 15);
+                    }
+
                     return;
                 }
 
+                byte currentLight = VoxelData.GetLight(_packedData); // Light value BEFORE modification
+                byte newLight = (byte)(value & 0xF); // Proposed new light value (masked)
 
-                // Only set when light value has actually been changed.
-                if (value != _light)
+                // Only proceed if the light value is actually changing.
+                if (newLight != currentLight)
                 {
-                    // Cache the old light and castLight values before updating them.
-                    byte oldLightValue = _light;
+                    // Cache the *old* light's properties BEFORE updating the internal state.
+                    byte oldLightValue = currentLight;
                     byte oldCastLightValue = castLight;
 
-                    // Set light value to new value.
-                    _light = value;
+                    // Update the internal packed data with the NEW light value.
+                    _packedData = VoxelData.SetLight(_packedData, newLight);
 
-                    // If our new light value is darker than the old one, check our neighbouring voxels.
-                    if (_light < oldLightValue)
+                    // --- Propagation Logic ---
+                    // Check if the NEW light is darker than the OLD light.
+                    if (newLight < oldLightValue)
                     {
+                        // --- Darkness Propagation ---
                         List<int> neighboursToDarken = new List<int>();
-
-                        // Loop though each neighbour.
                         for (int p = 0; p < 6; p++)
                         {
-                            // Make sure we have a neighbour here before trying to do anything with it.
-                            VoxelState neighbour = neighbours[p]; // Cache neighbour
+                            VoxelState neighbour = neighbours[p];
                             if (neighbour != null)
                             {
-                                // If a neighbour is less than or equal to our old light value, that means this voxel might have been lighting it up.
-                                // We want to set its light value to 0, and then it will run its own neighbour checks.
-                                // But we don't want to do that until we've finished here, so add it to our list, and we'll do it afterward.
-                                if (neighbour.light <= oldCastLightValue)
+                                byte neighbourLight = neighbour.light; // Get neighbour's current light
+
+                                // If neighbor might have been lit by our OLD light level...
+                                if (neighbourLight <= oldCastLightValue)
+                                {
+                                    // If the neighbor's current light is ALSO >= the NEW light level we just set,
+                                    // it means the neighbor might need to re-propagate its own light
+                                    // OR be darkened if its only source was us.
+                                    // Setting neighbour.light = 0 forces recalculation based on its *other* neighbours.
                                     neighboursToDarken.Add(p);
-                                // Else if the neighbour is brighter than our old value, then that voxel is being lit from somewhere else.
-                                // We then tell that voxel to propagate and, if it is lighter than this voxel, light will be propagated to here.
-                                else
+                                }
+                                // Else if neighbour was brighter than we WERE casting...
+                                // It might be able to re-light us now (since we just got darker).
+                                // Triggering its PropagateLight will check if it can light up this voxel (now at 'newLight').
+                                else if (neighbourLight > 0) // Optimization: only propagate if neighbour has light
+                                {
                                     neighbour.PropagateLight();
+                                }
                             }
                         }
 
-                        // loop through our neighbours for darkening and set their light to 0.
-                        // They will then perform their own neighbour checks and tell any brighter voxels (including this one) to propagate.
+                        // Set neighbours identified for darkening to 0 light.
+                        // Their own setters will handle further darkness propagation recursively.
                         foreach (int neighbourIndex in neighboursToDarken)
-                            neighbours[neighbourIndex]!.light = 0;
+                        {
+                            // Ensure neighbour still exists (might be modified concurrently?)
+                            VoxelState neighbourToDarken = neighbours[neighbourIndex];
+                            if (neighbourToDarken != null)
+                            {
+                                neighbourToDarken.light = 0; // Trigger neighbour's light setter
+                            }
+                        }
 
-                        // If this voxel is part of an active chunk, add that chunk for updating.
-                        if (chunkData.chunk != null)
+                        // Update this chunk as its light changed and affected neighbours
+                        if (chunkData?.chunk != null)
                             World.Instance.AddChunkToUpdate(chunkData.chunk);
                     }
-                    else if (_light > 1)
+                    // Else if the NEW light value is bright enough to potentially propagate...
+                    else if (newLight > 1)
+                    {
+                        // --- Light Propagation ---
+                        // Call PropagateLight on THIS voxel now that its light level has increased.
                         PropagateLight();
+                    }
+                    // If newLight == oldLightValue, we don't do anything (already handled by initial check)
+                    // If newLight is 0 or 1, it cannot propagate light outwards.
                 }
             }
         }
 
         public VoxelState(byte _id, ChunkData _chunkData, Vector3Int _position)
         {
-            id = _id;
-            orientation = 1;  // Front
+            // Initialize packed data with default values
+            _packedData = VoxelData.PackVoxelData(
+                _id, // id
+                0, // Light = 0
+                1 // Orientation=1 (Front)
+            );
+
+            // Set context
             chunkData = _chunkData;
-            neighbours = new VoxelNeighbours(this);
             position = _position;
-            light = 0;
+            neighbours = new VoxelNeighbours(this);
         }
 
+        // --- Other Properties ---
         public Vector3Int globalPosition
         {
             get { return new Vector3Int(position.x + chunkData.position.x, position.y, position.z + chunkData.position.y); }
@@ -103,7 +153,7 @@ namespace Data
             {
                 // Get the amount of light this voxel is spreading. Bytes (0-255) can overflow if below 0,
                 // so we need to do this with an int so we make sure it doesn't get below 0.
-                int lightLevel = Mathf.Max(_light - Properties.opacity - 1, 0);
+                int lightLevel = Mathf.Max(light - Properties.opacity - 1, 0);
                 return (byte)lightLevel;
             }
         }
@@ -113,7 +163,7 @@ namespace Data
             // No need to propagate light when lighting is disabled, so return early.
             if (!World.Instance.settings.enableLighting)
                 return;
-            
+
             // If the voxel isn't bright enough to propagate, return early.
             if (light < 2)
                 return;
@@ -131,7 +181,7 @@ namespace Data
                         neighbour.light = castLight;
                 }
             }
-            
+
             // Update the chunk after checking all neighbours
             if (chunkData.chunk != null)
             {

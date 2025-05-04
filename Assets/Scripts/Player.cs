@@ -43,7 +43,7 @@ public class Player : MonoBehaviour
     private float lastMoveSpeed;
     private bool jumpRequest;
 
-    public int orientation;
+    public byte orientation;
 
     [Header("Block Destroy & Placement properties")]
     public bool showHighlightBlocks = true;
