@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -12,29 +11,53 @@ public class Clouds : MonoBehaviour
     [SerializeField] private World world = null;
 
     private bool[,] cloudData; // Array of bools representing where cloud is.
-
     private int cloudTexWidth;
-
     private int cloudTileSize;
     private Vector3Int offset;
 
     private Dictionary<Vector2Int, GameObject> clouds = new Dictionary<Vector2Int, GameObject>();
-
-    private void Start()
+    
+    // A flag to ensure we don't try to update before we're ready.
+    private bool isInitialized = false;
+    
+    // Awake() for dependencies that don't rely on other scripts' Start()
+    private void Awake()
     {
+        // Null check is important here for build vs editor asset handling
+        if (cloudPattern == null) {
+            Debug.LogError("Cloud Pattern Texture is not assigned in the Inspector!");
+            this.enabled = false; // Disable the script if texture is missing.
+            return;
+        }
+
         cloudTexWidth = cloudPattern.width;
         cloudTileSize = VoxelData.ChunkWidth;
         offset = new Vector3Int(-(cloudTexWidth / 2), 0, -(cloudTexWidth / 2));
-
         transform.position = new Vector3(VoxelData.WorldCentre, cloudHeight, VoxelData.WorldCentre);
+    }
+    
+    // This is our new public initialization method.
+    public void Initialize()
+    {
+        if (isInitialized) return;
 
         LoadCloudData();
         CreateClouds();
-        UpdateClouds();
+        UpdateClouds(); // Initial position update.
+        
+        isInitialized = true;
     }
 
     private void LoadCloudData()
     {
+        // Ensure the texture is readable. If not, disable clouds to prevent errors.
+        if (!cloudPattern.isReadable)
+        {
+            Debug.LogError("Cloud Pattern texture is not marked as Read/Write Enabled in its import settings. Cannot load cloud data.");
+            this.enabled = false; // Disable clouds if we can't read the texture.
+            return;
+        }
+
         cloudData = new bool[cloudTexWidth, cloudTexWidth];
         Color[] cloudTex = cloudPattern.GetPixels();
 
@@ -57,13 +80,26 @@ public class Clouds : MonoBehaviour
         {
             for (int y = 0; y < cloudTexWidth; y += cloudTileSize)
             {
-                Mesh cloudMesh = world.settings.clouds switch
+                Mesh cloudMesh;
+                switch (world.settings.clouds)
                 {
-                    CloudStyle.Fast => CreateFastCloudMesh(x, y),
-                    CloudStyle.Fancy => CreateFancyCloudMesh(x, y),
-                    CloudStyle.Off => null,
-                    _ => throw new ArgumentOutOfRangeException()
-                };
+                    case CloudStyle.Fast:
+                        cloudMesh = CreateFastCloudMesh(x, y);
+                        break;
+                    case CloudStyle.Fancy:
+                        cloudMesh = CreateFancyCloudMesh(x, y);
+                        break;
+                    case CloudStyle.Off:
+                        cloudMesh = null;
+                        break;
+                    default:
+                        Debug.LogError("Unknown Cloud Style");
+                        cloudMesh = null;
+                        break;
+                }
+                
+                // If we don't have a mesh, skip to the next tile.
+                if (cloudMesh is null) continue;
 
                 Vector3 position = new Vector3(x, cloudHeight, y);
 
@@ -78,7 +114,8 @@ public class Clouds : MonoBehaviour
 
     public void UpdateClouds()
     {
-        if (world.settings.clouds == CloudStyle.Off)
+        // Don't run if not initialized or clouds are off.
+        if (!isInitialized || world.settings.clouds == CloudStyle.Off)
             return;
 
         for (int x = 0; x < cloudTexWidth; x += cloudTileSize)
@@ -89,7 +126,11 @@ public class Clouds : MonoBehaviour
                 position = new Vector3(RoundToCloud(position.x), cloudHeight, RoundToCloud(position.z));
                 Vector2Int cloudPosition = CloudTilePosFromVector3(position);
 
-                clouds[cloudPosition].transform.position = position;
+                // Check to prevent "KeyNotFoundException", though it shouldn't happen now.
+                if (clouds.TryGetValue(cloudPosition, out GameObject cloud))
+                {
+                    cloud.transform.position = position;
+                }
             }
         }
     }

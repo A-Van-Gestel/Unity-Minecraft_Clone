@@ -145,6 +145,11 @@ public class World : MonoBehaviour
 
         // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
         spawnPosition = new Vector3(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1f, VoxelData.WorldCentre);
+        
+        // Initialize clouds
+        clouds?.Initialize();
+
+        // Initialize world
         LoadWorld();
 
         // Now set the Y position on top of the highest voxel at the initial location.
