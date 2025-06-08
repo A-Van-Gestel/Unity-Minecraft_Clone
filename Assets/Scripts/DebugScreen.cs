@@ -17,7 +17,7 @@ public class DebugScreen : MonoBehaviour
 
     private float groundVoxelStateUpdateRate = 0.2f;
     private float groundVoxelStateTimer;
-    private VoxelState groundVoxelState;
+    private VoxelState? groundVoxelState;
 
     private float currentChunkUpdateRate = 0.2f;
     private float currentChunkTimer;
@@ -57,7 +57,7 @@ public class DebugScreen : MonoBehaviour
         debugText += "\n\n";
         debugText += "LIGHTING:\n";
 
-        string groundLightLevel = groundVoxelState != null ? groundVoxelState?.light.ToString() : "NULL";
+        string groundLightLevel = groundVoxelState.HasValue ? groundVoxelState.Value.light.ToString() : "NULL";
         debugText += $"groundLightLevel: {groundLightLevel}";
         
         

@@ -188,7 +188,9 @@ public class World : MonoBehaviour
         // Only update the chunks if the player has moved from the chunk they were previously on.
         if (!playerChunkCoord.Equals(playerLastChunkCoord))
         {
+            // CheckLoadDistance ensures the ChunkData is created/loaded from disk.
             CheckLoadDistance();
+            // CheckViewDistance creates the Chunk GameObjects and makes them active.
             CheckViewDistance();
         }
 
@@ -467,20 +469,20 @@ public class World : MonoBehaviour
 
     public bool CheckForVoxel(Vector3 pos)
     {
-        VoxelState voxel = worldData.GetVoxel(pos);
-        return voxel != null && blockTypes[voxel.id].isSolid;
+        VoxelState? voxel = worldData.GetVoxelState(pos);
+        return voxel.HasValue && blockTypes[voxel.Value.id].isSolid;
     }
 
     /// Returns true when voxel is solid & not water.
     public bool CheckForCollision(Vector3 pos)
     {
-        VoxelState voxel = worldData.GetVoxel(pos);
-        return voxel != null && blockTypes[voxel.id].isSolid && !blockTypes[voxel.id].isWater;
+        VoxelState? voxel = worldData.GetVoxelState(pos);
+        return voxel.HasValue && voxel.Value.Properties.isSolid && !voxel.Value.Properties.isWater;
     }
 
-    public VoxelState GetVoxelState(Vector3 pos)
+    public VoxelState? GetVoxelState(Vector3 pos)
     {
-        return worldData.GetVoxel(pos);
+        return worldData.GetVoxelState(pos);
     }
 
     public bool inUI

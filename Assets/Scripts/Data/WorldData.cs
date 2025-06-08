@@ -9,14 +9,19 @@ namespace Data
     [Serializable]
     public class WorldData
     {
-        [ReadOnly] public string worldName;
-        [ReadOnly] public int seed;
+        [ReadOnly]
+        public string worldName;
+
+        [ReadOnly]
+        public int seed;
 
         [NonSerialized]
         public Dictionary<Vector2Int, ChunkData> chunks = new Dictionary<Vector2Int, ChunkData>();
 
         [NonSerialized]
         public HashSet<ChunkData> modifiedChunks = new HashSet<ChunkData>();
+
+        #region Constructors
 
         public WorldData(string worldName, int seed)
         {
@@ -29,6 +34,10 @@ namespace Data
             worldName = wD.worldName;
             seed = wD.seed;
         }
+
+        #endregion
+
+        #region Chunk Management
 
         public ChunkData RequestChunk(Vector2Int coord, bool create)
         {
@@ -72,11 +81,55 @@ namespace Data
             chunks[coord].Populate();
         }
 
+        /// Returns the global chunk coordinates for a given world position
+        /// <param name="pos">The world position</param>
+        public Vector2Int GetChunkCoordFor(Vector3 pos)
+        {
+            int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth) * VoxelData.ChunkWidth;
+            int z = Mathf.FloorToInt(pos.z / VoxelData.ChunkWidth) * VoxelData.ChunkWidth;
+            return new Vector2Int(x, z);
+        }
+
+        /// Returns the local voxel position in a chunk for a given world position
+        /// <param name="pos">The world position</param>
+        public Vector3Int GetLocalVoxelPositionInChunk(Vector3 pos)
+        {
+            Vector2Int chunkCoord = GetChunkCoordFor(pos);
+            return new Vector3Int((int)(pos.x - chunkCoord.x), (int)pos.y, (int)(pos.z - chunkCoord.y));
+        }
+
+        #endregion
+
+        #region Voxel Management
+
         public bool IsVoxelInWorld(Vector3 pos)
         {
             return pos.x is >= 0 and < VoxelData.WorldSizeInVoxels &&
                    pos.y is >= 0 and < VoxelData.ChunkHeight &&
                    pos.z is >= 0 and < VoxelData.WorldSizeInVoxels;
+        }
+
+        [CanBeNull]
+        public VoxelState? GetVoxelState(Vector3 pos)
+        {
+            // If the voxel is outside the world, we don't need to do anything with it and return null.
+            if (!IsVoxelInWorld(pos))
+                return null;
+
+            // Find out the global ChunkCoord value of our voxel's chunk.
+            Vector2Int chunkCoord = GetChunkCoordFor(pos);
+
+            // Check if the chunk exists.
+            ChunkData chunk = RequestChunk(chunkCoord, false);
+
+            if (chunk == null)
+                return null;
+
+            // Then create a Vector3Int with the position of our voxel *within* the chunk.
+            Vector3Int voxelPos = GetLocalVoxelPositionInChunk(pos);
+
+            // Then get the voxel in our chunk.
+            return chunk.map[voxelPos.x, voxelPos.y, voxelPos.z];
         }
 
         public void SetVoxel(Vector3 pos, byte value, byte direction)
@@ -85,50 +138,34 @@ namespace Data
             if (!IsVoxelInWorld(pos))
                 return;
 
-            // Find out the ChunkCoord value of our voxel's chunk.
-            int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth);
-            int z = Mathf.FloorToInt(pos.z / VoxelData.ChunkWidth);
-
-            // Then reverse that to get the position of the chunk.
-            x *= VoxelData.ChunkWidth;
-            z *= VoxelData.ChunkWidth;
+            // Find out the global ChunkCoord value of our voxel's chunk.
+            Vector2Int chunkCoord = GetChunkCoordFor(pos);
 
             // Check if the chunk exists. If not, create it.
-            ChunkData chunk = RequestChunk(new Vector2Int(x, z), true);
+            ChunkData chunk = RequestChunk(chunkCoord, true);
 
             // Then create a Vector3Int with the position of our voxel *within* the chunk.
-            Vector3Int voxel = new Vector3Int((int)(pos.x - x), (int)pos.y, (int)(pos.z - z));
+            Vector3Int voxelPos = GetLocalVoxelPositionInChunk(pos);
 
             // Then set the voxel in our chunk.
-            chunk.ModifyVoxel(voxel, value, direction);
+            chunk.ModifyVoxel(voxelPos, value, direction);
         }
 
-        [CanBeNull]
-        public VoxelState GetVoxel(Vector3 pos)
+        /// Set light level of a voxel from a world position.
+        public void SetLight(Vector3 pos, byte value)
         {
-            // If the voxel is outside the world, we don't need to do anything with it and return null.
             if (!IsVoxelInWorld(pos))
-                return null;
+                return;
 
-            // Find out the ChunkCoord value of our voxel's chunk.
-            int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth);
-            int z = Mathf.FloorToInt(pos.z / VoxelData.ChunkWidth);
+            Vector2Int chunkCoord = GetChunkCoordFor(pos);
+            ChunkData chunk = RequestChunk(chunkCoord, true); // Create chunk if it doesn't exist
 
-            // Then reverse that to get the position of the chunk.
-            x *= VoxelData.ChunkWidth;
-            z *= VoxelData.ChunkWidth;
+            if (chunk == null) return;
 
-            // Check if the chunk exists.
-            ChunkData chunk = RequestChunk(new Vector2Int(x, z), false);
-
-            if (chunk == null)
-                return null;
-
-            // Then create a Vector3Int with the position of our voxel *within* the chunk.
-            Vector3Int voxel = new Vector3Int((int)(pos.x - x), (int)pos.y, (int)(pos.z - z));
-
-            // Then get the voxel in our chunk.
-            return chunk.map[voxel.x, voxel.y, voxel.z];
+            Vector3Int voxelPos = GetLocalVoxelPositionInChunk(pos);
+            chunk.SetLight(voxelPos, value);
         }
+
+        #endregion
     }
 }

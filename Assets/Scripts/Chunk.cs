@@ -29,8 +29,9 @@ public class Chunk
 
     private ChunkData chunkData;
 
-    private List<VoxelState> activeVoxels = new List<VoxelState>();
+    private List<Vector3Int> activeVoxels = new List<Vector3Int>();
 
+    #region Constructor
     public Chunk(ChunkCoord _coord)
     {
         coord = _coord;
@@ -61,7 +62,7 @@ public class Chunk
                 {
                     VoxelState voxel = chunkData.map[x, y, z];
                     if (voxel.Properties.isActive)
-                        AddActiveVoxel(voxel);
+                        AddActiveVoxel(new Vector3Int(x, y, z));
                 }
             }
         }
@@ -70,17 +71,7 @@ public class Chunk
 
         PlayChunkLoadAnimation();
     }
-
-    public void TickUpdate()
-    {
-        // Debug.Log(chunkObject.name + " currently has " + activeVoxels.Count + " active blocks.");
-
-        for (int i = activeVoxels.Count - 1; i >= 0; i--)
-            if (!BlockBehavior.Active(activeVoxels[i]))
-                RemoveActiveVoxel(activeVoxels[i]);
-            else
-                BlockBehavior.Behave(activeVoxels[i]);
-    }
+    #endregion
 
 
     /// <summary>
@@ -106,40 +97,36 @@ public class Chunk
         World.Instance.chunksToDraw.Enqueue(this);
     }
 
-    public void AddActiveVoxel(VoxelState voxel)
+    #region Block Behavior Methods
+    public void TickUpdate()
     {
-        if (!activeVoxels.Contains(voxel))
-            activeVoxels.Add(voxel);
+        for (int i = activeVoxels.Count - 1; i >= 0; i--)
+        {
+            Vector3Int pos = activeVoxels[i];
+            // Pass context to the static BlockBehavior methods
+            if (!BlockBehavior.Active(chunkData, pos))
+                RemoveActiveVoxel(pos);
+            else
+                BlockBehavior.Behave(chunkData, pos);
+        }
     }
 
-    public void RemoveActiveVoxel(VoxelState voxel)
+    public void AddActiveVoxel(Vector3Int pos)
     {
-        for (int i = 0; i < activeVoxels.Count; i++)
-        {
-            if (activeVoxels[i] == voxel)
-            {
-                activeVoxels.RemoveAt(i);
-                return;
-            }
-        }
+        if (!activeVoxels.Contains(pos))
+            activeVoxels.Add(pos);
+    }
+
+    public void RemoveActiveVoxel(Vector3Int pos)
+    {
+        activeVoxels.Remove(pos); // List<T>.Remove is efficient enough for this
     }
 
     public int GetActiveVoxelCount()
     {
         return activeVoxels.Count;
     }
-
-    private void ClearMeshData()
-    {
-        vertexIndex = 0;
-        vertices.Clear();
-        triangles.Clear();
-        transparentTriangles.Clear();
-        waterTriangles.Clear();
-        uvs.Clear();
-        colors.Clear();
-        normals.Clear();
-    }
+    #endregion
 
     public bool isActive
     {
@@ -155,7 +142,7 @@ public class Chunk
         }
     }
 
-    public Vector3 GetVoxelPositionInChunkFromGlobalVector3(Vector3 pos)
+    public Vector3Int GetVoxelPositionInChunkFromGlobalVector3(Vector3 pos)
     {
         int xCheck = Mathf.FloorToInt(pos.x);
         int yCheck = Mathf.FloorToInt(pos.y);
@@ -164,33 +151,22 @@ public class Chunk
         xCheck -= Mathf.FloorToInt(chunkPosition.x);
         zCheck -= Mathf.FloorToInt(chunkPosition.z);
 
-        return new Vector3(xCheck, yCheck, zCheck);
+        return new Vector3Int(xCheck, yCheck, zCheck);
     }
 
     public VoxelState GetVoxelFromGlobalVector3(Vector3 pos)
     {
-        int xCheck = Mathf.FloorToInt(pos.x);
-        int yCheck = Mathf.FloorToInt(pos.y);
-        int zCheck = Mathf.FloorToInt(pos.z);
-
-        xCheck -= Mathf.FloorToInt(chunkPosition.x);
-        zCheck -= Mathf.FloorToInt(chunkPosition.z);
-
-        return chunkData.map[xCheck, yCheck, zCheck];
+        Vector3Int localPos = GetVoxelPositionInChunkFromGlobalVector3(pos);
+        return chunkData.map[localPos.x, localPos.y, localPos.z];
     }
 
-    private VoxelState CheckForVoxel(Vector3 pos)
+    private VoxelState? CheckForVoxel(Vector3 pos)
     {
         int x = Mathf.FloorToInt(pos.x);
         int y = Mathf.FloorToInt(pos.y);
         int z = Mathf.FloorToInt(pos.z);
 
-        if (!chunkData.IsVoxelInChunk(x, y, z))
-        {
-            return World.Instance.GetVoxelState(pos + chunkPosition);
-        }
-
-        return chunkData.map[x, y, z];
+        return chunkData.GetState(new Vector3Int(x,y,z));
     }
 
     public Vector3 GetHighestVoxel(Vector3 pos)
@@ -200,8 +176,9 @@ public class Chunk
 
         for (int i = VoxelData.ChunkHeight - 1; i > 0; i--)
         {
-            Vector3 currentVoxel = new Vector3(x, i, z);
-            if (CheckForVoxel(currentVoxel).Properties.isSolid) return currentVoxel;
+            Vector3 currentVoxelPos = new Vector3(x, i, z);
+            VoxelState? currentVoxel = CheckForVoxel(currentVoxelPos);
+            if (currentVoxel.HasValue && currentVoxel.Value.Properties.isSolid) return currentVoxelPos;
         }
 
         return new Vector3(x, VoxelData.ChunkHeight - 1, z);
@@ -228,6 +205,9 @@ public class Chunk
 
         for (int p = 0; p < 6; p++) // p = faceIndex
         {
+            // Skip top (2) and bottom (3) faces, as we don't have chunk neighbors for those
+            if (p == 2 || p == 3) continue;
+            
             Vector3 currentVoxel = thisVoxel + VoxelData.FaceChecks[p];
 
             // Relative position of the voxel within chunk
@@ -252,6 +232,7 @@ public class Chunk
         }
     }
 
+    #region Mesh Generation
     private void UpdateMeshData(Vector3 pos)
     {
         int x = Mathf.FloorToInt(pos.x);
@@ -273,21 +254,16 @@ public class Chunk
             int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, voxel.orientation);
 
             // --- Culling Decision based on the NEIGHBOR matching the ORIGINAL face direction ---
-            VoxelState neighborVoxel = voxel.neighbours[p];
+            VoxelState? neighborVoxel = chunkData.GetState(new Vector3Int(x, y, z) + VoxelData.FaceChecks[p]);
             BlockType neighborProps = neighborVoxel?.Properties; // Cache absolute neighbor props
 
             bool isEdgeOfWorld = !World.Instance.worldData.IsVoxelInWorld(voxelWorldPosition + VoxelData.FaceChecks[p]);
 
             bool shouldDrawFace = false;
             // Rule 1: Always draw if facing the edge of the loaded world.
-            if (isEdgeOfWorld)
-            {
-                shouldDrawFace = true;
-            }
             // Rule 2: Neighbor is null but *inside* the world (e.g., unloaded chunk boundary)
-            else if (neighborVoxel == null)
+            if (isEdgeOfWorld || !neighborVoxel.HasValue)
             {
-                // Treat as air / transparent for drawing purposes.
                 shouldDrawFace = true;
             }
             // Neighbor exists within the world
@@ -377,6 +353,18 @@ public class Chunk
         } // End for loop (p)
     }
 
+    private void ClearMeshData()
+    {
+        vertexIndex = 0;
+        vertices.Clear();
+        triangles.Clear();
+        transparentTriangles.Clear();
+        waterTriangles.Clear();
+        uvs.Clear();
+        colors.Clear();
+        normals.Clear();
+    }
+
     public void CreateMesh()
     {
         Mesh mesh = new Mesh();
@@ -410,6 +398,7 @@ public class Chunk
 
         uvs.Add(new Vector2(x, y));
     }
+    #endregion
 
 
     #region Bonus Stuff
