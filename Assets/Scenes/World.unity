@@ -1716,7 +1716,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5cf91c34e0b43354db138f1299d1b594, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  player: {fileID: 151001798}
+  playerCamera: {fileID: 963194228}
   frameRateUpdateRate: 0.25
+  infrequentUpdateRate: 0.2
 --- !u!1 &886881814
 GameObject:
   m_ObjectHideFlags: 0

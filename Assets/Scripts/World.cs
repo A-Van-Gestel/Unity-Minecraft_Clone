@@ -635,6 +635,28 @@ public class World : MonoBehaviour
         return coord.x is >= 0 and < VoxelData.WorldSizeInChunks &&
                coord.z is >= 0 and < VoxelData.WorldSizeInChunks;
     }
+    
+    #region Debug Information Methods
+    public int GetActiveChunksCount()
+    {
+        return activeChunks.Count;
+    }
+    
+    public int GetChunksToBuildMeshCount()
+    {
+        return chunksToBuildMesh.Count;
+    }
+    
+    public int GetChunksToUpdateCount()
+    {
+        return chunksToUpdate.Count;
+    }
+    
+    public int GetVoxelModificationsCount()
+    {
+        return modifications.Count;
+    }
+    #endregion
 }
 
 [Serializable]

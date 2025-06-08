@@ -1,150 +1,307 @@
+using System.Text;
 using Data;
 using JetBrains.Annotations;
 using TMPro;
+using Unity.Profiling;
 using UnityEngine;
+using UnityEngine.Profiling;
 
+[RequireComponent(typeof(TextMeshProUGUI))]
 public class DebugScreen : MonoBehaviour
 {
+    // --- Serialized Fields (Assigned in Inspector) ---
+    [Header("Component References")]
+    [SerializeField] private Player player;
+    [SerializeField] private Transform playerCamera;
+    
+    [Header("Update Rates")]
     [Tooltip("How many times per second the frame rate counter will be updated.")]
-    public float frameRateUpdateRate = 0.5f;
+    [SerializeField] private float frameRateUpdateRate = 0.25f;
+    [Tooltip("How many times per second expensive debug info is updated.")]
+    [SerializeField] private float infrequentUpdateRate = 0.2f;
 
+    // --- Private Fields ---
     private World world;
-    private Transform playerCamera;
     private TextMeshProUGUI text;
+    private readonly StringBuilder debugTextBuilder = new StringBuilder();
+    
+    // --- Profiler Recorders ---
+    // CPU Timings
+    private ProfilerRecorder mainThreadTimeRecorder;
+    private ProfilerRecorder renderThreadTimeRecorder;
+    
+    // Memory
+    private ProfilerRecorder gcAllocatedInFrameRecorder;
+    private ProfilerRecorder systemUsedMemoryRecorder;
+    private ProfilerRecorder gcReservedMemoryRecorder;
 
+    private bool profilerRecordersAreValid;
+    private bool didIEnableTheProfiler = false;
+
+    // --- Cached Data (updated periodically) ---
     private float frameRate;
-    private float frameRateTimer;
-
-    private float groundVoxelStateUpdateRate = 0.2f;
-    private float groundVoxelStateTimer;
     private VoxelState? groundVoxelState;
-
-    private float currentChunkUpdateRate = 0.2f;
-    private float currentChunkTimer;
     [CanBeNull] private Chunk currentChunk;
+    // Profiler data
+    private long mainThreadTime;
+    private long renderThreadTime;
+    private long gcAllocatedInFrame;
+    private long systemUsedMemory;
+    private long gcReservedMemory;
+    
+    // --- Timers ---
+    private float frameRateTimer;
+    private float infrequentUpdateTimer;
+
+    // OnEnable is called when the object becomes enabled and active.
+    void OnEnable()
+    {
+        // For ProfilerRecorder to work, the Profiler needs to be enabled.
+        // This is often disabled in the editor unless the Profiler window is open.
+        // We can force it to be enabled.
+        if (!Profiler.enabled)
+        {
+            Profiler.enabled = true;
+            didIEnableTheProfiler = true;
+        }
+
+        
+        // Initialize CPU Recorders
+        mainThreadTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Main Thread Frame Time");
+        renderThreadTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Render Thread Frame Time");
+        
+        // Initialize Memory Recorders
+        gcAllocatedInFrameRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame");
+        systemUsedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "System Used Memory");
+        gcReservedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Reserved Memory");
+
+        // Check that the main recorders were created successfully. They might not be in certain build types.
+        profilerRecordersAreValid = mainThreadTimeRecorder.Valid && systemUsedMemoryRecorder.Valid;
+    }
+
+    // OnDisable is called when the behaviour becomes disabled or inactive.
+    void OnDisable()
+    {
+        // Clean up the recorders when the object is disabled to prevent memory leaks.
+        mainThreadTimeRecorder.Dispose();
+        renderThreadTimeRecorder.Dispose();
+        gcAllocatedInFrameRecorder.Dispose();
+        systemUsedMemoryRecorder.Dispose();
+        gcReservedMemoryRecorder.Dispose();
+        
+        // Only disable the profiler if this script was the one that enabled it.
+        // This prevents the script from turning off the profiler if the user has the Profiler Window open.
+        if (didIEnableTheProfiler)
+        {
+            Profiler.enabled = false;
+            didIEnableTheProfiler = false; 
+        }
+    }
 
     void Start()
     {
+        // Get references once.
         world = World.Instance;
-        playerCamera = GameObject.Find("Main Camera").GetComponent<Transform>();
         text = GetComponent<TextMeshProUGUI>();
+
+        // Fail-safe if references aren't set in the inspector
+        if (!player)
+            player = FindFirstObjectByType<Player>(); // Slower fallback
+        if (!playerCamera && Camera.main)
+            playerCamera = Camera.main.transform; // Common fallback
     }
 
     void Update()
     {
-        Vector3 playerPosition = world.player.transform.position;
-        Vector2 lookingDirection = GetLookingAngles();
-
-        string debugText = "b3agz' Code a Game Like Minecraft in Unity";
-        debugText += "\n";
-        debugText += $"{frameRate} fps";
-        debugText += "\n\n";
-        debugText += $"XYZ: {(Mathf.FloorToInt(playerPosition.x))} / {Mathf.FloorToInt(playerPosition.y)} / {(Mathf.FloorToInt(playerPosition.z))} | ";
-        debugText += $"Eye Level: {(playerPosition.y + 1.65f):f2}";
-        debugText += "\n";
-
-        debugText += $"Looking Angle H / V: {lookingDirection.x:f2} / {lookingDirection.y:f2} | Direction: {GetHorizontalDirection(lookingDirection.x)}";
-        debugText += "\n";
-
-        debugText += $"Chunk: {world.playerChunkCoord.x} / {world.playerChunkCoord.z}";
-        debugText += "\n\n";
-        debugText += "PLAYER:\n";
-        debugText += $"isGrounded: {world.player.isGrounded}\nisFlying: {world.player.isFlying}\nshowHighlightBlocks {world.player.showHighlightBlocks}";
-        debugText += "\n";
-        debugText += $"SPEED: Current: {world.player.moveSpeed:f1} | Flying: {world.player.flyingSpeed:f1}";
-        debugText += "\n";
-        debugText += $"Velocity XYZ: {world.player.velocity.x:F4} / {world.player.velocity.y:F4} / {world.player.velocity.z:F4}";
-        debugText += "\n\n";
-        debugText += "LIGHTING:\n";
-
-        string groundLightLevel = groundVoxelState.HasValue ? groundVoxelState.Value.light.ToString() : "NULL";
-        debugText += $"groundLightLevel: {groundLightLevel}";
-        
-        
-        debugText += "\n\n";
-        debugText += "CHUNK:\n";
-
-        string activeBlockBehaviorVoxels = currentChunk != null ? currentChunk?.GetActiveVoxelCount().ToString() : "NULL";
-        debugText += $"activeBlockBehaviorVoxels: {activeBlockBehaviorVoxels}";
-
-        text.text = debugText;
-
-        // FRAMERATE
-        FrameRate();
-
-        // GROUND VOXEL STATE (LIGHT LEVEL)
-        GroundVoxelState(playerPosition);
-
-        // CURRENT CHUNK
-        CurrentChunk(playerPosition);
-    }
-
-    private void FrameRate()
-    {
-        if (frameRateTimer > frameRateUpdateRate)
+        // --- Timed Updates ---
+        // Update expensive data on a timer to reduce per-frame cost.
+        frameRateTimer += Time.unscaledDeltaTime;
+        if (frameRateTimer >= frameRateUpdateRate)
         {
-            frameRate = (int)(1f / Time.unscaledDeltaTime);
+            UpdateFrameRate();
             frameRateTimer = 0;
         }
-        else
-        {
-            frameRateTimer += Time.deltaTime;
-        }
-    }
 
-    private void GroundVoxelState(Vector3 playerPosition)
+        infrequentUpdateTimer += Time.deltaTime;
+        if (infrequentUpdateTimer >= infrequentUpdateRate)
+        {
+            UpdateInfrequentData();
+            infrequentUpdateTimer = 0;
+        }
+        
+        // --- Build the debug string every frame using StringBuilder ---
+        BuildDebugString();
+    }
+    
+    /// <summary>
+    /// Updates the cached frame rate.
+    /// </summary>
+    private void UpdateFrameRate()
     {
-        if (groundVoxelStateTimer > groundVoxelStateUpdateRate)
-        {
-            groundVoxelState = world.GetVoxelState(playerPosition - new Vector3(0, -1, 0));
-            groundVoxelStateTimer = 0;
-        }
-        else
-        {
-            groundVoxelStateTimer += Time.deltaTime;
-        }
+        frameRate = (1f / Time.unscaledDeltaTime);
     }
-
-    private void CurrentChunk(Vector3 playerPosition)
+    
+    /// <summary>
+    /// Updates the cached data that should be updated infrequently due to their higher performance cost.
+    /// </summary>
+    private void UpdateInfrequentData()
     {
-        if (currentChunkTimer > currentChunkUpdateRate)
+        Vector3 playerPos = player.transform.position;
+        // Update Ground Voxel State
+        groundVoxelState = world.GetVoxelState(playerPos + Vector3.down);
+
+        // Update Current Chunk
+        currentChunk = world.worldData.IsVoxelInWorld(playerPos) ? world.GetChunkFromVector3(playerPos) : null;
+        
+        // Update CPU times
+        gcAllocatedInFrame = mainThreadTimeRecorder.LastValue;
+        renderThreadTime = renderThreadTimeRecorder.LastValue;
+            
+        // Update Memory
+        gcAllocatedInFrame = gcAllocatedInFrameRecorder.LastValue;
+        gcReservedMemory = gcReservedMemoryRecorder.LastValue;
+        systemUsedMemory = systemUsedMemoryRecorder.LastValue;
+    }
+
+    private void BuildDebugString()
+    {
+        // Clear the builder from the previous frame.
+        debugTextBuilder.Clear();
+        
+        Vector3 playerPosition = player.transform.position;
+        Vector2 lookingDirection = GetLookingAngles();
+
+        // --- General Info ---
+        debugTextBuilder.AppendLine("Minecraft Clone based on b3agz' Code a Game Like Minecraft in Unity");
+        debugTextBuilder.AppendLine();
+        
+        // --- Performance Info ---
+        debugTextBuilder.AppendLine("PERFORMANCE:");
+        debugTextBuilder.Append(Mathf.RoundToInt(frameRate)).AppendLine(" fps");
+
+        // Display profiler status and memory info
+        if (profilerRecordersAreValid)
         {
-            currentChunk = world.worldData.IsVoxelInWorld(playerPosition) ? world.GetChunkFromVector3(playerPosition) : null;
-            currentChunkTimer = 0;
+            // Display CPU times
+            debugTextBuilder.Append("CPU Main: ").AppendLine(FormatMilliseconds(mainThreadTime));
+            debugTextBuilder.Append("CPU Render: ").AppendLine(FormatMilliseconds(renderThreadTime));
+            
+            // Display Memory
+            debugTextBuilder.Append("GC Alloc/frame: ").AppendLine(FormatBytes(gcAllocatedInFrame));
+            debugTextBuilder.Append("GC Reserved Memory: ").AppendLine(FormatBytes(gcReservedMemory));
+            debugTextBuilder.Append("System Memory: ").AppendLine(FormatBytes(systemUsedMemory));
         }
         else
         {
-            currentChunkTimer += Time.deltaTime;
+            debugTextBuilder.AppendLine("Profiler recorders are invalid.");
         }
+        // Self-diagnostic line
+        debugTextBuilder.Append("Profiler Status: ").AppendLine(boolToString(Profiler.enabled));
+        debugTextBuilder.AppendLine();
+        
+        // --- World & Orientation Info ---
+        debugTextBuilder.AppendLine("WORLD:");
+        debugTextBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
+            .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
+            .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
+        debugTextBuilder.Append(" | Eye Level: ").AppendFormat("{0:F2}", (playerPosition.y + player.playerHeight * 0.9f)).AppendLine();
+        
+        debugTextBuilder.Append("Looking Angle H / V: ").AppendFormat("{0:F2} / {1:F2}", lookingDirection.x, lookingDirection.y)
+            .Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
+
+        debugTextBuilder.Append("Chunk: ").Append(world.playerChunkCoord.x).Append(" / ").Append(world.playerChunkCoord.z).AppendLine();
+        debugTextBuilder.Append("Seed: ").Append(world.worldData.seed).AppendLine();
+        debugTextBuilder.AppendLine();
+        
+        // --- Player & Speed Info ---
+        debugTextBuilder.AppendLine("PLAYER:");
+        debugTextBuilder.Append("isGrounded: ").Append(player.isGrounded)
+            .Append(" | isFlying: ").Append(player.isFlying)
+            .Append(" | showHighlight: ").Append(player.showHighlightBlocks).AppendLine();
+        
+        debugTextBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", player.moveSpeed)
+            .Append(" | Flying: ").AppendFormat("{0:F1}", player.flyingSpeed).AppendLine();
+        
+        debugTextBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", player.velocity.x, player.velocity.y, player.velocity.z).AppendLine();
+        debugTextBuilder.AppendLine();
+
+        // --- Lighting Info ---
+        debugTextBuilder.AppendLine("LIGHTING:");
+        string groundLightLevel = groundVoxelState.HasValue ? groundVoxelState.Value.light.ToString() : "NULL";
+        debugTextBuilder.Append("Ground Light Level: ").AppendLine(groundLightLevel);
+        debugTextBuilder.AppendLine();
+
+        // --- Chunk Info ---
+        debugTextBuilder.AppendLine("CHUNK:");
+        string activeBlockBehaviorVoxelsCount = currentChunk != null ? currentChunk.GetActiveVoxelCount().ToString() : "NULL";
+        string chunksToBuildMeshCount = currentChunk != null ? world.GetChunksToBuildMeshCount().ToString() : "NULL";
+        string chunksToUpdateCount = currentChunk != null ? world.GetChunksToUpdateCount().ToString() : "NULL";
+        string voxelModificationsCount = currentChunk != null ? world.GetVoxelModificationsCount().ToString() : "NULL";
+        debugTextBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
+        debugTextBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshCount);
+        debugTextBuilder.Append("Total Chunks to Update: ").AppendLine(chunksToUpdateCount);
+        debugTextBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
+
+        // Finally, set the text property once.
+        text.text = debugTextBuilder.ToString();
+    }
+    
+    /// <summary>
+    /// Formats a time in nanoseconds into a human-readable string in milliseconds.
+    /// </summary>
+    private static string FormatMilliseconds(long nanoseconds)
+    {
+        // 1 Millisecond = 1,000,000 Nanoseconds
+        double milliseconds = nanoseconds / 1_000_000.0;
+        return $"{milliseconds:F2} ms"; // Format to 2 decimal places
+    }
+    
+    /// <summary>
+    /// Formats a byte count into a human-readable string (B, KB, MB).
+    /// </summary>
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes > 1024 * 1024) return $"{(bytes / (1024f * 1024f)):F2} MB";
+        if (bytes > 1024) return $"{(bytes / 1024f):F1} KB";
+        return $"{bytes} B";
     }
 
+    /// <summary>
+    /// Gets the horizontal and vertical angles the player is looking at.
+    /// </summary>
     private Vector2 GetLookingAngles()
     {
-        float hAngle = world.player.transform.eulerAngles.y;
-        float vAngleRaw = playerCamera.transform.eulerAngles.x;
-        float vAngle;
-
-        if (vAngleRaw is <= 360 and >= 270)
-            vAngle = 360 - vAngleRaw;
-        else
-            vAngle = vAngleRaw * -1;
-
-
-        return new Vector2(hAngle, vAngle);
+        // Normalize Yaw to be 0-360
+        float hAngle = player.transform.eulerAngles.y; 
+        
+        // Pitch is simpler if you get it from the camera's local euler angles
+        float vAngle = playerCamera.localEulerAngles.x;
+        // Convert from (0-360) to (-180-180) for a more intuitive display
+        if (vAngle > 180) vAngle -= 360;
+        
+        // Invert so looking down is negative and up is positive
+        return new Vector2(hAngle, -vAngle);
     }
-
+    
+    /// <summary>
+    /// Gets the horizontal direction the player is looking at.
+    /// It returns one of: "North", "North-East", "East", "South-East", "South", "South-West", "West", "North-West".
+    /// </summary>
     private static string GetHorizontalDirection(float hAngle)
     {
-        return hAngle switch
-        {
-            >= 22.5f and < 67.5f => "North-east",
-            >= 67.5f and < 112.5f => "East",
-            >= 112.5f and < 157.5f => "South-east",
-            >= 157.5f and < 202.5f => "South",
-            >= 202.5f and < 247.5f => "South-west",
-            >= 247.5f and < 292.5f => "West",
-            >= 292.5f and < 337.5f => "North-west",
-            _ => "North"
-        };
+        // Normalize angle to prevent issues with negative values or values > 360
+        hAngle = (hAngle % 360f + 360f) % 360f;
+
+        if (hAngle >= 337.5f || hAngle < 22.5f) return "North";
+        if (hAngle < 67.5f) return "North-East";
+        if (hAngle < 112.5f) return "East";
+        if (hAngle < 157.5f) return "South-East";
+        if (hAngle < 202.5f) return "South";
+        if (hAngle < 247.5f) return "South-West";
+        if (hAngle < 292.5f) return "West";
+        if (hAngle < 337.5f) return "North-West";
+        return "North";
     }
+    
+    private static string boolToString(bool value) => value ? "Enabled" : "Disabled";
 }
