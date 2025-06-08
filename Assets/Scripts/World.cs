@@ -50,6 +50,7 @@ public class World : MonoBehaviour
     private ChunkCoord playerLastChunkCoord;
 
     private List<Chunk> chunksToUpdate = new List<Chunk>();
+    private List<Chunk> chunksToBuildMesh = new List<Chunk>();
     public ConcurrentQueue<Chunk> chunksToDraw = new ConcurrentQueue<Chunk>();
 
     private bool applyingModifications = false;
@@ -192,6 +193,18 @@ public class World : MonoBehaviour
             CheckLoadDistance();
             // CheckViewDistance creates the Chunk GameObjects and makes them active.
             CheckViewDistance();
+        }
+        
+        // After CheckViewDistance has run, process any new chunks that need meshes.
+        if (chunksToBuildMesh.Count > 0)
+        {
+            foreach (Chunk chunk in chunksToBuildMesh)
+            {
+                // By the time this runs, all neighboring chunks that are also in view
+                // will have had their ChunkData loaded by CheckLoadDistance.
+                AddChunkToUpdate(chunk);
+            }
+            chunksToBuildMesh.Clear();
         }
 
         if (!settings.enableThreading)
@@ -409,8 +422,13 @@ public class World : MonoBehaviour
             // If the current chunk is in the world...
             if (IsChunkInWorld(thisChunkCoord))
             {
-                // Check if it is active, if not, activate it.
-                chunks[x, z] ??= new Chunk(thisChunkCoord);
+                // If the chunk is being created for the first time...
+                if (chunks[x, z] == null)
+                {
+                    chunks[x, z] = new Chunk(thisChunkCoord);
+                    // Add it to our special list to build its mesh later in Update().
+                    chunksToBuildMesh.Add(chunks[x, z]); 
+                }
 
                 chunks[x, z].isActive = true;
                 activeChunks.Add(thisChunkCoord);
