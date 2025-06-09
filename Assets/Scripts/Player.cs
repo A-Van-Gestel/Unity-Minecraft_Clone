@@ -114,8 +114,7 @@ public class Player : MonoBehaviour
             if (angle > 180)
                 angle -= 360;
 
-            // TODO: Change clamping angle to 90 degrees
-            angle = Mathf.Clamp(angle, -85, 85);
+            angle = Mathf.Clamp(angle, -90, 90);
             playerCamera.localEulerAngles = Vector3.right * angle;
         }
 
