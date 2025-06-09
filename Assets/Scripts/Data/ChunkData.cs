@@ -285,6 +285,22 @@ namespace Data
             return map[pos.x, pos.y, pos.z];
         }
 
+        public Vector3Int GetHighestVoxel(Vector3Int pos)
+        {
+            const int yMax = VoxelData.ChunkHeight - 1;
+            int x = Mathf.FloorToInt(pos.x);
+            int z = Mathf.FloorToInt(pos.z);
+
+            for (int i = yMax; i > 0; i--)
+            {
+                Vector3Int currentVoxelPos = new Vector3Int(x, i, z);
+                VoxelState? currentVoxel = GetState(currentVoxelPos);
+                if (currentVoxel.HasValue && currentVoxel.Value.Properties.isSolid) return currentVoxelPos;
+            }
+
+            return new Vector3Int(x, yMax, z);
+        }
+
         #endregion
     }
 }

@@ -160,30 +160,6 @@ public class Chunk
         return chunkData.map[localPos.x, localPos.y, localPos.z];
     }
 
-    private VoxelState? CheckForVoxel(Vector3 pos)
-    {
-        int x = Mathf.FloorToInt(pos.x);
-        int y = Mathf.FloorToInt(pos.y);
-        int z = Mathf.FloorToInt(pos.z);
-
-        return chunkData.GetState(new Vector3Int(x,y,z));
-    }
-
-    public Vector3 GetHighestVoxel(Vector3 pos)
-    {
-        int x = Mathf.FloorToInt(pos.x);
-        int z = Mathf.FloorToInt(pos.z);
-
-        for (int i = VoxelData.ChunkHeight - 1; i > 0; i--)
-        {
-            Vector3 currentVoxelPos = new Vector3(x, i, z);
-            VoxelState? currentVoxel = CheckForVoxel(currentVoxelPos);
-            if (currentVoxel.HasValue && currentVoxel.Value.Properties.isSolid) return currentVoxelPos;
-        }
-
-        return new Vector3(x, VoxelData.ChunkHeight - 1, z);
-    }
-
     public void EditVoxel(Vector3 pos, byte newID)
     {
         int xCheck = Mathf.FloorToInt(pos.x);

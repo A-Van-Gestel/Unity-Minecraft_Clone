@@ -144,13 +144,17 @@ public class World : MonoBehaviour
         SetGlobalLightValue();
 
         // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
-        spawnPosition = new Vector3(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1f, VoxelData.WorldCentre);
+        spawnPosition = new Vector3Int(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1, VoxelData.WorldCentre);
         
         // Initialize clouds
         clouds?.Initialize();
 
         // Initialize world
         LoadWorld();
+        
+        // Apply any modifications that were generated during the LoadWorld pass (e.g. structures like trees).
+        // This is critical for getting the correct spawn height, as GetHighestVoxel needs to check the final, modified chunk data.
+        ApplyModifications();
 
         // Now set the Y position on top of the highest voxel at the initial location.
         spawnPosition = GetHighestVoxel(spawnPosition) + spawnPositionOffset;
@@ -453,41 +457,66 @@ public class World : MonoBehaviour
         }
     }
 
-    public Vector3 GetHighestVoxel(Vector3 pos)
+    /// <summary>
+    /// Finds the Y-coordinate of the highest solid voxel at a given X/Z position.
+    /// It fist tries to get it from the actual chunk data, this respects voxel modifications (like trees),
+    /// if that fails, it will use the expensive world generation code, this however doesn't respect voxel modifications.
+    /// Should even that fail, it will return the world height.
+    /// </summary>
+    /// <param name="pos">The world position to check.</param>
+    /// <returns>A Vector3 with the original X/Z and the new Y of the highest solid block.</returns>
+    public Vector3Int GetHighestVoxel(Vector3 pos)
     {
+        int x = Mathf.FloorToInt(pos.x);
+        int y = Mathf.FloorToInt(pos.y);
+        int z = Mathf.FloorToInt(pos.z);
+
+        const int yMax = VoxelData.ChunkHeight - 1;
+        Vector3Int worldHeight = new Vector3Int(x, yMax, z);
         ChunkCoord thisChunk = new ChunkCoord(pos);
-        int yMax = VoxelData.ChunkHeight - 1;
 
         // Voxel outside the world, highest voxel is world height.
         if (!worldData.IsVoxelInWorld(pos))
         {
-            Debug.Log($"Voxel not in world for X / Y/ Z = {(int)pos.x} / {(int)pos.y} / {(int)pos.z}");
-            return new Vector3(pos.x, yMax, pos.z);
+            Debug.Log($"Voxel not in world for X / Y/ Z = {x} / {y} / {z}, returning world height.");
+            return worldHeight;
         }
+        
+        // Find the chunk data for this position.
+        // Requesting the chunk ensures that the data is loaded from disk or generated if it doesn't exist.
+        // This is the only reliable way to get voxel data that includes modifications (like trees).
+        Vector2Int chunkCoord = worldData.GetChunkCoordFor(pos);
+        ChunkData chunkData = worldData.RequestChunk(chunkCoord, true);
 
-        // Chunk is created and editable, calculate highest voxel using chunk function.
-        // TODO: Doesn't work anymore, rewrite using worldData / chunkData instead
-        if (chunks[thisChunk.x, thisChunk.z] != null)
+        // Chunk is created and editable, calculate the highest voxel using chunkData function.
+        if (chunkData != null)
         {
-            Debug.Log($"Finding highest voxel for chunk {thisChunk.x} / {thisChunk.z} in wold for X / Z = {(int)pos.x} / {(int)pos.z} using chunk function.");
-            Chunk currentChunk = chunks[thisChunk.x, thisChunk.z];
-            Vector3 voxelPositionInChunk = currentChunk.GetVoxelPositionInChunkFromGlobalVector3(pos);
-            Vector3 highestVoxelPositionInChunk = currentChunk.GetHighestVoxel(voxelPositionInChunk);
-            return new Vector3(pos.x, highestVoxelPositionInChunk.y, pos.z);
+            Debug.Log($"Finding highest voxel for chunk {thisChunk.x} / {thisChunk.z} in wold for X / Z = {x} / {z} using chunk function.");
+            
+            // Get the (highest) local voxel position within the chunk.
+            Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(pos);
+            Vector3Int highestVoxelLocal = chunkData.GetHighestVoxel(localPos);
+
+            // Get the world position of the highest voxel.
+            Vector3Int highestVoxel = new Vector3Int(x, highestVoxelLocal.y, z);
+            Debug.Log($"Highest voxel in chunk {thisChunk.x} / {thisChunk.z} is {highestVoxel}.");
+            return highestVoxel;
         }
 
         // Chunk is not created, calculate the highest voxel using expensive world generation code.
+        // NOTE: This will not include voxel modifications (like trees).
         for (int i = yMax; i > 0; i--)
         {
-            Vector3 currentVoxel = new Vector3(pos.x, i, pos.z);
+            Vector3Int currentVoxel = new Vector3Int(x, i, z);
             if (!blockTypes[GetVoxel(currentVoxel)].isSolid) continue;
-            Debug.Log($"Finding highest voxel in wold for X / Z = {(int)pos.x} / {(int)pos.z} using expensive world generation code.");
+            Debug.Log($"Finding highest voxel in wold for X / Z = {x} / {z} using expensive world generation code.");
+            Debug.Log($"Highest voxel in chunk {thisChunk.x} / {thisChunk.z} is {currentVoxel}.");
             return currentVoxel;
         }
 
         // Fallback, highest voxel is world height
-        Debug.Log($"No solid voxels found for X / Z = {(int)pos.x} / {(int)pos.z}");
-        return new Vector3(pos.x, yMax, pos.z);
+        Debug.Log($"No solid voxels found for X / Z = {x} / {z}, returning world height.");
+        return worldHeight;
     }
 
     public bool CheckForVoxel(Vector3 pos)
