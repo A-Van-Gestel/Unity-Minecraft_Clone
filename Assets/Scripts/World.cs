@@ -715,11 +715,11 @@ public class Settings
 
 
     [Header("Save System")]
-    public bool loadSaveDataOnStartup = true;
+    public bool loadSaveDataOnStartup = false;
 
 
     [Header("Performance")]
-    public int loadDistance = 10;
+    public int loadDistance = 7;
     public int viewDistance = 5;
 
     [Tooltip("PERFORMANCE INTENSIVE - Prevent invisible blocks in case of cross chunk structures by re-rendering the modified chunks.")]
