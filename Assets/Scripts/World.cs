@@ -393,7 +393,7 @@ public class World : MonoBehaviour
             // If the current chunk is in the world...
             if (IsChunkInWorld(thisChunkCoord))
             {
-                worldData.LoadChunk(new Vector2Int(x, z));
+                worldData.LoadChunk(new Vector2Int(x * VoxelData.ChunkWidth, z * VoxelData.ChunkWidth));
             }
 
             // Next spiral coord
