@@ -43,17 +43,14 @@ namespace Data
         {
             ChunkData c;
 
-            lock (World.Instance.ChunkUpdateThreadLock)
+            if (chunks.TryGetValue(coord, out ChunkData chunk))
+                c = chunk;
+            else if (!create)
+                c = null;
+            else
             {
-                if (chunks.TryGetValue(coord, out ChunkData chunk))
-                    c = chunk;
-                else if (!create)
-                    c = null;
-                else
-                {
-                    LoadChunk(coord);
-                    c = chunks[coord];
-                }
+                LoadChunk(coord);
+                c = chunks[coord];
             }
 
             return c;

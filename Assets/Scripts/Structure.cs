@@ -1,11 +1,10 @@
-using System.Collections.Concurrent;
+using System.Collections.Generic;
 using UnityEngine;
-
 
 // TODO: VoxelMod check for which blocks it can replace.
 public static class Structure
 {
-    public static ConcurrentQueue<VoxelMod> GenerateMajorFlora(int index, Vector3 position, int minTrunkHeight, int maxTrunkHeight)
+    public static Queue<VoxelMod> GenerateMajorFlora(int index, Vector3 position, int minTrunkHeight, int maxTrunkHeight)
     {
         switch (index)
         {
@@ -15,12 +14,13 @@ public static class Structure
                 return MakeCacti(position, minTrunkHeight, maxTrunkHeight);
         }
 
-        return new ConcurrentQueue<VoxelMod>();
+        return new Queue<VoxelMod>();
     }
-    public static ConcurrentQueue<VoxelMod> MakeTree(Vector3 position, int minTrunkHeight, int maxTrunkHeight)
+
+    public static Queue<VoxelMod> MakeTree(Vector3 position, int minTrunkHeight, int maxTrunkHeight)
     {
-        ConcurrentQueue<VoxelMod> queue = new ConcurrentQueue<VoxelMod>();
-        
+        Queue<VoxelMod> queue = new Queue<VoxelMod>();
+
         int height = (int)(maxTrunkHeight * Noise.Get2DPerlin(new Vector2(position.x, position.z), 250f, 3f));
 
         if (height < minTrunkHeight)
@@ -61,12 +61,11 @@ public static class Structure
 
         return queue;
     }
-    
-    
-    public static ConcurrentQueue<VoxelMod> MakeCacti(Vector3 position, int minTrunkHeight, int maxTrunkHeight)
+
+    public static Queue<VoxelMod> MakeCacti(Vector3 position, int minTrunkHeight, int maxTrunkHeight)
     {
-        ConcurrentQueue<VoxelMod> queue = new ConcurrentQueue<VoxelMod>();
-        
+        Queue<VoxelMod> queue = new Queue<VoxelMod>();
+
         int height = (int)(maxTrunkHeight * Noise.Get2DPerlin(new Vector2(position.x, position.z), 23456f, 2f));
 
         if (height < minTrunkHeight)

@@ -85,7 +85,6 @@ namespace UI
             // Cloud Style
             cloudStyleDropdown.value = (int)_settings.clouds;
             // Toggles
-            threadingToggle.isOn = _settings.enableThreading;
             chunkAnimationToggle.isOn = _settings.enableChunkLoadAnimations;
 
             mainMenuObject.SetActive(false);
@@ -98,7 +97,6 @@ namespace UI
             _settings.mouseSensitivityX = mouseSensitivitySlider.value;
             _settings.mouseSensitivityY = mouseSensitivitySlider.value;
             _settings.clouds = (CloudStyle)cloudStyleDropdown.value;
-            _settings.enableThreading = threadingToggle.isOn;
             _settings.enableChunkLoadAnimations = chunkAnimationToggle.isOn;
 
             string jsonExport = JsonUtility.ToJson(_settings, true);

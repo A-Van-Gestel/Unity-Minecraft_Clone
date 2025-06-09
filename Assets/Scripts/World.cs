@@ -1,9 +1,7 @@
 using System;
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Threading;
 using Data;
 using Helpers;
 using MyBox;
@@ -51,11 +49,11 @@ public class World : MonoBehaviour
 
     private List<Chunk> chunksToUpdate = new List<Chunk>();
     private List<Chunk> chunksToBuildMesh = new List<Chunk>();
-    public ConcurrentQueue<Chunk> chunksToDraw = new ConcurrentQueue<Chunk>();
+    public Queue<Chunk> chunksToDraw = new Queue<Chunk>();
 
     private bool applyingModifications = false;
 
-    private ConcurrentQueue<ConcurrentQueue<VoxelMod>> modifications = new ConcurrentQueue<ConcurrentQueue<VoxelMod>>();
+    private Queue<Queue<VoxelMod>> modifications = new Queue<Queue<VoxelMod>>();
 
     // UI
     [Header("UI")]
@@ -68,24 +66,21 @@ public class World : MonoBehaviour
     // Clouds
     [Header("Clouds")]
     public Clouds clouds;
-    
+
     [Header("World Data")]
     public WorldData worldData;
-    
+
     [Header("Paths")]
-    [ReadOnly] public string appSaveDataPath;
+    [ReadOnly]
+    public string appSaveDataPath;
 
     // Shader Properties
     private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
     private static readonly int ShaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
     private static readonly int ShaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
 
-    // Threading
-    private Thread ChunkUpdateThread;
-    public object ChunkUpdateThreadLock = new object();
-    public object ChunkListThreadLock = new object();
+    #region Singleton pattern
 
-#region Singleton pattern
     public static World Instance { get; private set; }
 
     private void Awake()
@@ -102,7 +97,8 @@ public class World : MonoBehaviour
             appSaveDataPath = Application.persistentDataPath;
         }
     }
-#endregion
+
+    #endregion
 
 
     private void Start()
@@ -111,7 +107,7 @@ public class World : MonoBehaviour
 
         // Get player transform component
         playerTransform = player.GetComponent<Transform>();
-        
+
         // Get main camera.
         playerCamera = Camera.main!;
 
@@ -145,13 +141,13 @@ public class World : MonoBehaviour
 
         // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
         spawnPosition = new Vector3Int(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1, VoxelData.WorldCentre);
-        
+
         // Initialize clouds
         clouds?.Initialize();
 
         // Initialize world
         LoadWorld();
-        
+
         // Apply any modifications that were generated during the LoadWorld pass (e.g. structures like trees).
         // This is critical for getting the correct spawn height, as GetHighestVoxel needs to check the final, modified chunk data.
         ApplyModifications();
@@ -163,12 +159,6 @@ public class World : MonoBehaviour
 
 
         playerLastChunkCoord = GetChunkCoordFromVector3(playerTransform.position);
-
-        if (settings.enableThreading)
-        {
-            ChunkUpdateThread = new Thread(ThreadedUpdate);
-            ChunkUpdateThread.Start();
-        }
 
         StartCoroutine(Tick());
     }
@@ -187,6 +177,7 @@ public class World : MonoBehaviour
             {
                 chunks[coord.x, coord.z].TickUpdate();
             }
+
             yield return new WaitForSeconds(VoxelData.TickLength);
         }
     }
@@ -203,7 +194,7 @@ public class World : MonoBehaviour
             // CheckViewDistance creates the Chunk GameObjects and makes them active.
             CheckViewDistance();
         }
-        
+
         // After CheckViewDistance has run, process any new chunks that need meshes.
         if (chunksToBuildMesh.Count > 0)
         {
@@ -213,32 +204,26 @@ public class World : MonoBehaviour
                 // will have had their ChunkData loaded by CheckLoadDistance.
                 AddChunkToUpdate(chunk);
             }
+
             chunksToBuildMesh.Clear();
         }
 
-        if (!settings.enableThreading)
-        {
-            // ReSharper disable InconsistentlySynchronizedField
-            if (!applyingModifications)
-                ApplyModifications();
+        if (!applyingModifications)
+            ApplyModifications();
 
-            if (chunksToUpdate.Count > 0)
-                UpdateChunks();
-            // ReSharper restore InconsistentlySynchronizedField
-        }
+        if (chunksToUpdate.Count > 0)
+            UpdateChunks();
 
         if (chunksToDraw.Count > 0)
         {
-            if (chunksToDraw.TryDequeue(out Chunk chunk))
+            Chunk chunk = chunksToDraw.Dequeue();
+            try
             {
-                try
-                {
-                    chunk.CreateMesh();
-                }
-                catch (Exception e)
-                {
-                    Debug.Log("Chunk MeshCreation Exception: " + e);
-                }
+                chunk.CreateMesh();
+            }
+            catch (Exception e)
+            {
+                Debug.Log("Chunk MeshCreation Exception: " + e);
             }
         }
 
@@ -281,59 +266,24 @@ public class World : MonoBehaviour
     {
         if (chunk.coord.x == 0 && chunk.coord.z == 0)
             Debug.Log($"Adding chunk (0, 0) to update queue. Immediate: {immediateUpdate}");
-        
-        // Lock list to ensure only one thing is using the list at a time.
-        lock (ChunkUpdateThreadLock)
+
+        // Make sure update list doesn't already contain the chunk.
+        if (!chunksToUpdate.Contains(chunk))
         {
-            // Make sure update list doesn't already contain the chunk.
-            if (!chunksToUpdate.Contains(chunk))
-            {
-                if (immediateUpdate)
-                    chunksToUpdate.Insert(0, chunk);
-                else
-                    chunksToUpdate.Add(chunk);
-            }
+            if (immediateUpdate)
+                chunksToUpdate.Insert(0, chunk);
+            else
+                chunksToUpdate.Add(chunk);
         }
     }
 
     private void UpdateChunks()
     {
-        lock (ChunkUpdateThreadLock)
-        {
-            Chunk chunkToUpdate = chunksToUpdate[0];
-            chunkToUpdate.UpdateChunk();
-            activeChunks.Add(chunkToUpdate.coord);
+        Chunk chunkToUpdate = chunksToUpdate[0];
+        chunkToUpdate.UpdateChunk();
+        activeChunks.Add(chunkToUpdate.coord);
 
-            chunksToUpdate.RemoveAt(0);
-        }
-    }
-
-    /// <summary>
-    /// Update loop running on a second thread.
-    /// </summary>
-    private void ThreadedUpdate()
-    {
-        while (true)
-        {
-            if (!applyingModifications)
-                ApplyModifications();
-
-            lock (ChunkUpdateThreadLock)
-            {
-                if (chunksToUpdate.Count > 0)
-                    UpdateChunks();
-            }
-        }
-        // ReSharper disable once FunctionNeverReturns
-    }
-
-    /// <summary>
-    /// Disable second update thread when world gameObject is disabled.
-    /// </summary>
-    private void OnDisable()
-    {
-        if (settings.enableThreading)
-            ChunkUpdateThread.Abort();
+        chunksToUpdate.RemoveAt(0);
     }
 
     private void ApplyModifications()
@@ -342,15 +292,11 @@ public class World : MonoBehaviour
 
         while (modifications.Count > 0)
         {
-            // Try getting the queue, if not successful retry later
-            if (!modifications.TryDequeue(out ConcurrentQueue<VoxelMod> queue)) continue;
+            Queue<VoxelMod> queue = modifications.Dequeue();
 
             while (queue.Count > 0)
             {
-                // Try getting the voxelMod, if not successful retry later
-                if (!queue.TryDequeue(out VoxelMod v)) continue;
-                ChunkCoord c = GetChunkCoordFromVector3(v.position);
-
+                VoxelMod v = queue.Dequeue();
                 worldData.SetVoxel(v.position, v.id, 1);
             }
         }
@@ -373,10 +319,10 @@ public class World : MonoBehaviour
 
         if (x == 0 && z == 0)
             Debug.Log($"Getting chunk for position: {pos}, Chunk: {x}, {z}");
-        
+
         return chunks[x, z];
     }
-    
+
     private void CheckLoadDistance()
     {
         ChunkCoord coord = GetChunkCoordFromVector3(playerTransform.position);
@@ -385,9 +331,9 @@ public class World : MonoBehaviour
         // Loop through all chunks currently within view distance of the player.
         SpiralLoop spiralLoop = new SpiralLoop();
         ChunkCoord thisChunkCoord = coord;
-        
+
         Debug.Log($"settings v: {settings.viewDistance} | l: {settings.loadDistance}");
-        
+
         while (thisChunkCoord.x < coord.x + settings.loadDistance && thisChunkCoord.z < coord.z + settings.loadDistance)
         {
             thisChunkCoord = new ChunkCoord(coord.x + spiralLoop.X, coord.z + spiralLoop.Z);
@@ -404,7 +350,7 @@ public class World : MonoBehaviour
             spiralLoop.Next();
         }
     }
-    
+
     private void CheckViewDistance()
     {
         clouds.UpdateClouds();
@@ -436,7 +382,7 @@ public class World : MonoBehaviour
                 {
                     chunks[x, z] = new Chunk(thisChunkCoord);
                     // Add it to our special list to build its mesh later in Update().
-                    chunksToBuildMesh.Add(chunks[x, z]); 
+                    chunksToBuildMesh.Add(chunks[x, z]);
                 }
 
                 chunks[x, z].isActive = true;
@@ -481,7 +427,7 @@ public class World : MonoBehaviour
             Debug.Log($"Voxel not in world for X / Y/ Z = {x} / {y} / {z}, returning world height.");
             return worldHeight;
         }
-        
+
         // Find the chunk data for this position.
         // Requesting the chunk ensures that the data is loaded from disk or generated if it doesn't exist.
         // This is the only reliable way to get voxel data that includes modifications (like trees).
@@ -492,7 +438,7 @@ public class World : MonoBehaviour
         if (chunkData != null)
         {
             Debug.Log($"Finding highest voxel for chunk {thisChunk.x} / {thisChunk.z} in wold for X / Z = {x} / {z} using chunk function.");
-            
+
             // Get the (highest) local voxel position within the chunk.
             Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(pos);
             Vector3Int highestVoxelLocal = chunkData.GetHighestVoxel(localPos);
@@ -618,7 +564,7 @@ public class World : MonoBehaviour
         {
             if (yPos < VoxelData.SeaLevel)
                 return 19; // Water
-            
+
             return 0; // Air
         }
         else
@@ -649,7 +595,7 @@ public class World : MonoBehaviour
             {
                 if (Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 2500, biome.majorFloraPlacementScale) > biome.majorFloraPlacementThreshold)
                 {
-                    ConcurrentQueue<VoxelMod> structureQueue = Structure.GenerateMajorFlora(biome.majorFloraIndex, pos, biome.minHeight, biome.maxHeight);
+                    Queue<VoxelMod> structureQueue = Structure.GenerateMajorFlora(biome.majorFloraIndex, pos, biome.minHeight, biome.maxHeight);
                     modifications.Enqueue(structureQueue);
                 }
             }
@@ -664,27 +610,29 @@ public class World : MonoBehaviour
         return coord.x is >= 0 and < VoxelData.WorldSizeInChunks &&
                coord.z is >= 0 and < VoxelData.WorldSizeInChunks;
     }
-    
+
     #region Debug Information Methods
+
     public int GetActiveChunksCount()
     {
         return activeChunks.Count;
     }
-    
+
     public int GetChunksToBuildMeshCount()
     {
         return chunksToBuildMesh.Count;
     }
-    
+
     public int GetChunksToUpdateCount()
     {
         return chunksToUpdate.Count;
     }
-    
+
     public int GetVoxelModificationsCount()
     {
         return modifications.Count;
     }
+
     #endregion
 }
 
@@ -696,7 +644,7 @@ public class BlockType
     public bool isSolid;
     public bool renderNeighborFaces;
     public bool isWater;
-    
+
     [Tooltip("How many light will be stopped by this block.")]
     [Range(0, 15)]
     public byte opacity = 15;
@@ -777,14 +725,10 @@ public class Settings
     [Tooltip("PERFORMANCE INTENSIVE - Prevent invisible blocks in case of cross chunk structures by re-rendering the modified chunks.")]
     // TODO: Needs to be re-implemented: https://github.com/A-Van-Gestel/Unity-Minecraft_Clone/commit/320d9710f620db537acb3ed8f94e5d98ec567f59#diff-47f56e730b0aac4f6699ec185244b6f897aacac5d53cc53bab0c19f20dda1c08L295-L307
     public bool rerenderChunksOnModification = true;
-    
+
     [InitializationField]
     [Tooltip("PERFORMANCE INTENSIVE - Enable the lighting system, on large caves this can cause the game to hang for a couple of seconds.")]
     public bool enableLighting = true;
-
-    [InitializationField]
-    [Tooltip("Updates chunks on a separate thread. This however might negatively impact performance due to the extra overhead.")]
-    public bool enableThreading = false;
     public CloudStyle clouds = CloudStyle.Fancy;
 
 
