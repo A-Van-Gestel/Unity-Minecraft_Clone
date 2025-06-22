@@ -1869,7 +1869,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 963194225}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 948f4100a11a5c24981795d21301da5c, type: 3}
   m_Name: 
@@ -2500,9 +2500,9 @@ MonoBehaviour:
     loadSaveDataOnStartup: 0
     loadDistance: 7
     viewDistance: 5
+    maxLightJobsPerFrame: 8
     rerenderChunksOnModification: 1
     enableLighting: 1
-    enableThreading: 0
     clouds: 0
     mouseSensitivityX: 1.2
     mouseSensitivityY: 1.2

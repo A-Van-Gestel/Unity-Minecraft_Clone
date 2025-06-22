@@ -148,7 +148,7 @@ public class DebugScreen : MonoBehaviour
     {
         Vector3 playerPos = player.transform.position;
         // Update Ground Voxel State
-        groundVoxelState = world.GetVoxelState(playerPos + Vector3.down);
+        groundVoxelState = world.GetVoxelState(playerPos - Vector3.down);
 
         // Update Current Chunk
         currentChunk = world.worldData.IsVoxelInWorld(playerPos) ? world.GetChunkFromVector3(playerPos) : null;
@@ -234,12 +234,14 @@ public class DebugScreen : MonoBehaviour
         // --- Chunk Info ---
         debugTextBuilder.AppendLine("CHUNK:");
         string activeBlockBehaviorVoxelsCount = currentChunk != null ? currentChunk.GetActiveVoxelCount().ToString() : "NULL";
+        string activeChunksCount = currentChunk != null ? world.GetActiveChunksCount().ToString() : "NULL";
         string chunksToBuildMeshCount = currentChunk != null ? world.GetChunksToBuildMeshCount().ToString() : "NULL";
-        string chunksToUpdateCount = currentChunk != null ? world.GetChunksToUpdateCount().ToString() : "NULL";
+        // string chunksWithLightUpdatesCount = currentChunk != null ? world.GetChunksWithLightUpdatesCount().ToString() : "NULL";
         string voxelModificationsCount = currentChunk != null ? world.GetVoxelModificationsCount().ToString() : "NULL";
         debugTextBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
+        debugTextBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount);
         debugTextBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshCount);
-        debugTextBuilder.Append("Total Chunks to Update: ").AppendLine(chunksToUpdateCount);
+        // debugTextBuilder.Append("Total Chunks to Update Light: ").AppendLine(chunksWithLightUpdatesCount);
         debugTextBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
 
         // Finally, set the text property once.

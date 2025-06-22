@@ -1,3 +1,4 @@
+using MyBox;
 using UnityEngine;
 
 public class Player : MonoBehaviour
@@ -260,19 +261,19 @@ public class Player : MonoBehaviour
             // Destroy block.
             if (Input.GetMouseButtonDown(0))
             {
-                Vector3 highlightBlockPosition = highlightBlock.position;
-                world.GetChunkFromVector3(highlightBlockPosition).EditVoxel(highlightBlockPosition, 0);
+                // OLD: world.GetChunkFromVector3(highlightBlock.position).EditVoxel(highlightBlockPosition, 0);
+                world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), 0));
             }
 
             // Place block.
             if (Input.GetMouseButtonDown(1))
             {
-                UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
                 // Don't place blocks inside the player or other voxels or when current itemSlot is empty by returning early.
                 if (!blockPlaceable) return;
 
-                Vector3 placeBlockPosition = placeBlock.position;
-                world.GetChunkFromVector3(placeBlockPosition).EditVoxel(placeBlockPosition, itemSlot.itemSlot.stack.id);
+                UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
+                // OLD: world.GetChunkFromVector3(placeBlock.position).EditVoxel(placeBlockPosition, itemSlot.itemSlot.stack.id);
+                world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), itemSlot.itemSlot.stack.id, orientation));
                 itemSlot.itemSlot.Take(1);
             }
         }

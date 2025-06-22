@@ -215,8 +215,8 @@ public class Clouds : MonoBehaviour
                             for (int i = 0; i < 4; i++)
                             {
                                 Vector3 vert = new Vector3Int(xIncrement, 0, zIncrement);
-                                vert += VoxelData.VoxelVerts[VoxelData.VoxelTris[p, i]];
-                                vert.y *= cloudDepth;
+                                int vertIndex = VoxelData.VoxelTris[p * 4 + i];
+                                vert += VoxelData.VoxelVerts[vertIndex];
                                 vertices.Add(vert);
                             }
 

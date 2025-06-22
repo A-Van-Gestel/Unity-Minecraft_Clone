@@ -46,6 +46,18 @@ namespace Data
                 1 // Orientation = 1 (Front)
             );
         }
+        
+        /// Create a new voxel state from all its components.
+        public VoxelState(byte blockId, byte lightLevel, byte orientation)
+        {
+            _packedData = VoxelData.PackVoxelData(blockId, lightLevel, orientation);
+        }
+        
+        /// Create a new voxel state from its raw packed data.
+        public VoxelState(ushort packedData)
+        {
+            _packedData = packedData;
+        }
         #endregion
 
         // --- Other Properties ---
@@ -83,6 +95,11 @@ namespace Data
         public override int GetHashCode()
         {
             return _packedData.GetHashCode();
+        }
+        
+        public override string ToString()
+        {
+            return $"VoxelState: {{ Id = {id}, Light = {light}, Orientation = {orientation}, Properties = {Properties} }}";
         }
     }
 }

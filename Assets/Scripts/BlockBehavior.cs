@@ -13,7 +13,8 @@ public static class BlockBehavior
     {
         // Get the voxel's ID. If the position is invalid, this will throw an error,
         // which is intended as this should only be called for valid, active voxels.
-        byte id = chunkData.map[pos.x, pos.y, pos.z].id;
+        VoxelState voxel = chunkData.VoxelFromV3Int(pos);
+        byte id = voxel.id;
 
         switch (id)
         {
@@ -52,7 +53,8 @@ public static class BlockBehavior
     /// </summary>
     public static void Behave(ChunkData chunkData, Vector3Int pos)
     {
-        byte id = chunkData.map[pos.x, pos.y, pos.z].id;
+        VoxelState voxel = chunkData.VoxelFromV3Int(pos);
+        byte id = voxel.id;
 
         switch (id)
         {

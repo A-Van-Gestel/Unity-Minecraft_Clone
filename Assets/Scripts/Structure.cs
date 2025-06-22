@@ -4,7 +4,7 @@ using UnityEngine;
 // TODO: VoxelMod check for which blocks it can replace.
 public static class Structure
 {
-    public static Queue<VoxelMod> GenerateMajorFlora(int index, Vector3 position, int minTrunkHeight, int maxTrunkHeight)
+    public static Queue<VoxelMod> GenerateMajorFlora(int index, Vector3Int position, int minTrunkHeight, int maxTrunkHeight)
     {
         switch (index)
         {
@@ -17,7 +17,7 @@ public static class Structure
         return new Queue<VoxelMod>();
     }
 
-    public static Queue<VoxelMod> MakeTree(Vector3 position, int minTrunkHeight, int maxTrunkHeight)
+    public static Queue<VoxelMod> MakeTree(Vector3Int position, int minTrunkHeight, int maxTrunkHeight)
     {
         Queue<VoxelMod> queue = new Queue<VoxelMod>();
 
@@ -31,8 +31,8 @@ public static class Structure
         {
             for (int z = -2; z < 3; z++)
             {
-                queue.Enqueue(new VoxelMod(new Vector3(position.x + x, position.y + height - 2, position.z + z), 15));
-                queue.Enqueue(new VoxelMod(new Vector3(position.x + x, position.y + height - 3, position.z + z), 15));
+                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height - 2, position.z + z), 15));
+                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height - 3, position.z + z), 15));
             }
         }
 
@@ -40,7 +40,7 @@ public static class Structure
         {
             for (int z = -1; z < 2; z++)
             {
-                queue.Enqueue(new VoxelMod(new Vector3(position.x + x, position.y + height - 1, position.z + z), 15));
+                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height - 1, position.z + z), 15));
             }
         }
 
@@ -49,20 +49,20 @@ public static class Structure
             if (x == 0)
                 for (int z = -1; z < 2; z++)
                 {
-                    queue.Enqueue(new VoxelMod(new Vector3(position.x + x, position.y + height, position.z + z), 15));
+                    queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height, position.z + z), 15));
                 }
             else
-                queue.Enqueue(new VoxelMod(new Vector3(position.x + x, position.y + height, position.z), 15));
+                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height, position.z), 15));
         }
 
         // TRUNK
         for (int i = 1; i <= height; i++)
-            queue.Enqueue(new VoxelMod(new Vector3(position.x, position.y + i, position.z), 14));
+            queue.Enqueue(new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), 14));
 
         return queue;
     }
 
-    public static Queue<VoxelMod> MakeCacti(Vector3 position, int minTrunkHeight, int maxTrunkHeight)
+    public static Queue<VoxelMod> MakeCacti(Vector3Int position, int minTrunkHeight, int maxTrunkHeight)
     {
         Queue<VoxelMod> queue = new Queue<VoxelMod>();
 
@@ -73,7 +73,7 @@ public static class Structure
 
         // TRUNK
         for (int i = 1; i <= height; i++)
-            queue.Enqueue(new VoxelMod(new Vector3(position.x, position.y + i, position.z), 16));
+            queue.Enqueue(new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), 16));
 
         return queue;
     }
