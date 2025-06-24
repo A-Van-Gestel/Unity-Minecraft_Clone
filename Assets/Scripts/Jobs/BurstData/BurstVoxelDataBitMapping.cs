@@ -21,6 +21,36 @@ namespace Jobs.BurstData
         private const int LIGHT_SHIFT = 8;
         private const int ORIENTATION_SHIFT = 12;
 
+        // Inverse map for packing
+        private static byte GetOrientationIndex(byte orientation)
+        {
+            switch (orientation)
+            {
+                case 1: return 0; // Front/North maps to index 0
+                case 0: return 1; // Back/South maps to index 1
+                case 4: return 2; // Left/West  maps to index 2
+                case 5: return 3; // Right/East maps to index 3
+                default: return 0; // Default to index 0 (Front) for any invalid orientation
+            }
+        }
+
+        // --- Packing ---
+        // Creates the initial packed value
+        public static ushort PackVoxelData(byte id, byte lightLevel, byte orientation)
+        {
+            ushort packedData = 0;
+            packedData |= (ushort)((id & 0xFF) << ID_SHIFT); // ID: Ensure only 8 bits
+            packedData |= (ushort)((lightLevel & 0xF) << LIGHT_SHIFT); // Light Level: Ensure only 4 bits
+
+            // Pack Orientation by getting its index from our helper method
+            byte orientationIndex = GetOrientationIndex(orientation);
+            packedData |= (ushort)((orientationIndex & 0x3) << ORIENTATION_SHIFT); // Orientation: Ensure only 2 bits
+
+            return packedData;
+        }
+
+        // --- Unpacking ---
+
         // --- Unpacking ---
         public static byte GetId(ushort packedData)
         {

@@ -39,18 +39,45 @@ namespace Jobs
             var removalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
             var placementQueue = new NativeQueue<Vector3Int>(Allocator.Temp);
             var visited = new NativeHashSet<Vector3Int>(1024, Allocator.Temp);
+            var processedSunlightColumns = new NativeHashSet<Vector2Int>(128, Allocator.Temp);
 
-            // --- PASS 0: SEEDING PASS ---
-            // Sort the initial requests from the main thread into our two queues.
+            // --- PASS 0: SUNLIGHT & SEEDING PASS ---
+            // Recalculate any potential sunlight propagation changes as needed,
+            // and sort the initial requests from the main thread into our two queues.
             while (lightBfsQueue.TryDequeue(out LightQueueNode initialNode))
             {
-                Vector3Int pos = initialNode.position;
-                if (!visited.Add(pos)) continue;
+                // --- PASS 0-1: SUNLIGHT PASS ---
+                // We need to determine the opacity of the block that was *previously* here.
+                // Since we don't have the old ID, we can check the new block's ID. If it's Air (ID 0),
+                // we assume the old block was opaque. This is a robust simplification.
+                ushort newPacked = GetPackedData(initialNode.position);
+                if (newPacked == ushort.MaxValue) continue;
 
-                ushort packed = GetPackedData(pos);
-                if (packed == ushort.MaxValue) continue;
+                byte newId = BurstVoxelDataBitMapping.GetId(newPacked);
+                BlockTypeJobData newProps = blockTypes[newId];
 
-                byte currentLightOnMap = BurstVoxelDataBitMapping.GetLight(packed);
+                // Check if opacity *boundary* was crossed. We check the old light level to infer the old block.
+                // If old light was less than 15, the block above was likely opaque.
+                // A more direct check is if we replaced something with Air (0) or vice versa.
+                bool oldBlockWasOpaque = newId == 0; // If new block is air, old was likely solid.
+                bool newBlockIsOpaque = newProps.opacity > 0;
+
+                if (oldBlockWasOpaque != newBlockIsOpaque)
+                {
+                    Vector2Int columnXZ = new Vector2Int(initialNode.position.x, initialNode.position.z);
+                    if (processedSunlightColumns.Add(columnXZ))
+                    {
+                        // This column hasn't been processed yet. Run the sunlight calc.
+                        RecalculateSunlightForColumn(columnXZ.x, columnXZ.y, placementQueue, removalQueue);
+                    }
+                }
+
+                // --- PASS 0-2: SEEDING PASS ---
+                // We re-read the packed data in case the sunlight pass changed it.
+                newPacked = GetPackedData(initialNode.position);
+                byte currentLightOnMap = BurstVoxelDataBitMapping.GetLight(newPacked);
+                
+                if (!visited.Add(initialNode.position)) continue;
 
                 // A. If the light level on the map is now HIGHER than what it was,
                 //    it must be a new light source. Add it to the placement queue.
@@ -171,9 +198,53 @@ namespace Jobs
             removalQueue.Dispose();
             placementQueue.Dispose();
             visited.Dispose();
+            processedSunlightColumns.Dispose();
         }
 
         #region Helper Methods
+
+        private void RecalculateSunlightForColumn(int x, int z, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue)
+        {
+            bool obstructed = false;
+            for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
+            {
+                var pos = new Vector3Int(x, y, z);
+                ushort packedData = map[GetIndex(pos)];
+                byte oldLight = BurstVoxelDataBitMapping.GetLight(packedData);
+                byte newLight;
+
+                if (obstructed)
+                {
+                    newLight = 0;
+                }
+                else
+                {
+                    BlockTypeJobData props = blockTypes[BurstVoxelDataBitMapping.GetId(packedData)];
+                    if (props.opacity > 0)
+                    {
+                        newLight = 0;
+                        obstructed = true;
+                    }
+                    else
+                    {
+                        newLight = 15;
+                    }
+                }
+
+                if (oldLight != newLight)
+                {
+                    map[GetIndex(pos)] = VoxelData.SetLight(packedData, newLight);
+                    if (newLight > oldLight)
+                    {
+                        pQueue.Enqueue(pos); // This is a new light source
+                    }
+                    else
+                    {
+                        rQueue.Enqueue(new LightRemovalNode { pos = pos, lightLevel = oldLight }); // This source was removed
+                    }
+                }
+            }
+        }
 
         private void SetLight(Vector3Int pos, byte lightLevel)
         {

@@ -94,9 +94,8 @@ public class Chunk
             {
                 // Convert flat index back to 3D position
                 int x = i % VoxelData.ChunkWidth;
-                int rem = i / VoxelData.ChunkWidth;
-                int y = rem % VoxelData.ChunkHeight;
-                int z = rem / VoxelData.ChunkHeight;
+                int y = (i / VoxelData.ChunkWidth) % VoxelData.ChunkHeight;
+                int z = i / (VoxelData.ChunkWidth * VoxelData.ChunkHeight);
 
                 AddActiveVoxel(new Vector3Int(x, y, z));
             }

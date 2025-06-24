@@ -347,9 +347,9 @@ public class World : MonoBehaviour
                     if (chunk.chunkData.hasLightChangesToProcess || lightingJobs.ContainsKey(chunk.coord))
                     {
                         // Don't remove it from the list. We'll try again next frame when the lighting is done.
-                        continue; 
+                        continue;
                     }
-                    
+
                     // ScheduleMeshing will any lighting changes jobs are running and if neighbors are ready.
                     // If any lighting jobs are running, it will return false.
                     // If neighbors are ready, it will schedule the job, and we can remove this from the list.
@@ -679,7 +679,16 @@ public class World : MonoBehaviour
             // It will be checked again next frame.
             return;
         }
+        
+        // If there are no light changes, no need to schedule a job.
+        // NOTE: Might need to be removed if this causes issues.
+        if (chunk.chunkData.LightQueueCount == 0)
+        {
+            chunk.chunkData.hasLightChangesToProcess = false;
+            return;
+        }
 
+        // --- STANDARD LIGHTING PROPAGATION PASS ---
         // These containers are created on the main thread and live until the job is processed on the main thread.
         // They MUST be persistent.
         var mapCopy = new NativeArray<ushort>(chunk.chunkData.map, Allocator.Persistent);
@@ -894,12 +903,6 @@ public class World : MonoBehaviour
             if (VoxelData.GetLight(chunkData.map[index]) != lightValue)
             {
                 chunkData.map[index] = VoxelData.SetLight(chunkData.map[index], lightValue);
-
-                // // Any direct modification to a chunk's lighting data must trigger a mesh rebuild for that chunk.
-                // if (chunkData.chunk != null) 
-                // {
-                //     RequestChunkMeshRebuild(chunkData.chunk);
-                // }
             }
         }
     }
@@ -924,70 +927,28 @@ public class World : MonoBehaviour
             {
                 VoxelMod v = queue.Dequeue();
 
-                // --- 1. Get "Before" State & Chunk Data ---
+                // --- 1. Get Chunk Data ---
                 ChunkData chunkData = worldData.RequestChunk(worldData.GetChunkCoordFor(v.globalPosition), false);
+
+                // If the chunk doesn't exist or its data hasn't been generated yet, defer this modification.
                 if (chunkData == null || !chunkData.isPopulated)
                 {
-                    // Put the failed mod back at the front of its own queue.
                     var tempList = new List<VoxelMod>(queue);
                     tempList.Insert(0, v);
-
-                    // Add the updated queue to the deferred list.
                     deferredModifications.Add(new Queue<VoxelMod>(tempList));
-
-                    // Mark this batch as failed and break from processing it further.
                     batchFailed = true;
-                    // Debug.LogWarning($"Chunk data not ready for modification at {v.globalPosition}. Re-queueing.");
-                    // Break from the inner loop and process the next queue.
-                    break;
+                    break; // Break from processing this batch and move to the next.
                 }
 
-                // --- If we get here, the chunk is ready. Process the modification. ---
+                // --- 2. If chunk is ready, DELEGATE the modification ---
+                // Get the local position within the chunk.
                 Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.globalPosition);
-                int index = localPos.x + VoxelData.ChunkWidth * (localPos.y + VoxelData.ChunkHeight * localPos.z);
 
-                ushort oldPackedData = chunkData.map[index];
-                byte oldId = VoxelData.GetId(oldPackedData);
-                byte oldLight = VoxelData.GetLight(oldPackedData);
-                BlockType oldProps = blockTypes[oldId];
-                BlockType newProps = blockTypes[v.id];
-
-                if (oldId == v.id) continue;
-
-                // --- 2. Perform "After" State Change ---
-                byte newLightSourceValue = 0; // Assuming no blocks emit light yet
-                ushort newPackedData = VoxelData.PackVoxelData(v.id, newLightSourceValue, v.orientation);
-                chunkData.map[index] = newPackedData;
-
-                if (newProps.isActive) chunkData.chunk?.AddActiveVoxel(localPos);
-                else if (oldProps.isActive) chunkData.chunk?.RemoveActiveVoxel(localPos);
-                worldData.modifiedChunks.Add(chunkData);
-
-                // --- 3. Seed the Asynchronous Lighting System ---
-
-                // A. Queue the modified block itself. This is the primary seed for any light change.
-                chunkData.AddToLightQueue(localPos, oldLight);
-
-                // B. If solidity changed, we must also queue the vertical neighbors to handle sunlight.
-                if (oldProps.isSolid != newProps.isSolid)
-                {
-                    // Queue the block ABOVE, as its light might now need to shine down.
-                    worldData.QueueLightUpdate(v.globalPosition + Vector3Int.up, 0); // oldLight doesn't matter, we just need to queue it.
-                    // Queue the block BELOW, as it might now be covered or uncovered.
-                    worldData.QueueLightUpdate(v.globalPosition + Vector3Int.down, 0);
-                }
-
-                // C. Always queue all 6 horizontal neighbors to handle ambient light spill.
-                for (int i = 0; i < 6; i++)
-                {
-                    // Only need to check horizontal neighbors for ambient light spill.
-                    if (VoxelData.FaceChecks[i].y != 0) continue;
-
-                    worldData.QueueLightUpdate(v.globalPosition + VoxelData.FaceChecks[i], 0);
-                }
+                // Call the authoritative ModifyVoxel method in ChunkData.
+                chunkData.ModifyVoxel(localPos, v.id, v.orientation);
             }
 
-            // If part of the batch failed, we already re-queued it. Don't process the rest of this queue.
+            // If part of the batch failed, we already re-queued it.
             if (batchFailed) continue;
         }
 
@@ -1205,6 +1166,7 @@ public class World : MonoBehaviour
 
     #region World Generation
 
+    // TODO: Logic move to WorldGen.GetVoxel, this should be removed and any logic calling this updated to use WorldGen.GetVoxel
     public byte GetVoxel(Vector3Int pos)
     {
         int yPos = Mathf.FloorToInt(pos.y);
@@ -1423,6 +1385,7 @@ public class Settings
 
 
     [Header("Performance")]
+    // TODO: Meke loadDistance dynamic based on considered viewDistance (eg: viewDistance + 2)
     public int loadDistance = 7;
 
     public int viewDistance = 5;
@@ -1430,16 +1393,11 @@ public class Settings
     [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame. Prevents performance drops from lighting cascades.")]
     public int maxLightJobsPerFrame = 8;
 
-    [Tooltip("PERFORMANCE INTENSIVE - Prevent invisible blocks in case of cross chunk structures by re-rendering the modified chunks.")]
-    // TODO: Needs to be re-implemented: https://github.com/A-Van-Gestel/Unity-Minecraft_Clone/commit/320d9710f620db537acb3ed8f94e5d98ec567f59#diff-47f56e730b0aac4f6699ec185244b6f897aacac5d53cc53bab0c19f20dda1c08L295-L307
-    public bool rerenderChunksOnModification = true;
-
     [InitializationField]
     [Tooltip("PERFORMANCE INTENSIVE - Enable the lighting system, on large caves this can cause the game to hang for a couple of seconds.")]
     public bool enableLighting = true;
 
     public CloudStyle clouds = CloudStyle.Fancy;
-
 
     [Header("Controls")]
     [Range(0.1f, 10f)]
