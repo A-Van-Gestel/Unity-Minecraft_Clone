@@ -1,4 +1,5 @@
 ﻿using Data;
+using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -39,7 +40,7 @@ namespace Jobs
                         byte voxelID = WorldGen.GetVoxel(globalPos, seed, biomes, allLodes);
 
                         int index = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-                        outputMap[index] = VoxelData.PackVoxelData(voxelID, 0, 1);
+                        outputMap[index] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, 1);
 
                         // --- Major Flora Pass (Tree Generation) ---
                         // We can't call Structure.GenerateMajorFlora directly as it's not job-safe.

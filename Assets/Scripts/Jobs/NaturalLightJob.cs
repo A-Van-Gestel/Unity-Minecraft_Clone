@@ -1,4 +1,5 @@
 ﻿using Data;
+using Jobs.BurstData;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -31,26 +32,26 @@ namespace Jobs
                     {
                         int mapIndex = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
                         ushort packedData = map[mapIndex];
-                        BlockTypeJobData props = blockTypes[VoxelData.GetId(packedData)];
+                        BlockTypeJobData props = blockTypes[BurstVoxelDataBitMapping.GetId(packedData)];
 
                         // If light has been obstructed, all blocks below this point are dark (light level 0).
                         if (obstructed)
                         {
-                            map[mapIndex] = VoxelData.SetLight(packedData, 0);
+                            map[mapIndex] = BurstVoxelDataBitMapping.SetLight(packedData, 0);
                         }
                         // Else if this block is opaque, it obstructs the light.
                         // It becomes dark, and everything below it will also be dark.
                         // TODO: Check if this is correct, seems to be wrong. Shouldn't blocks with opacity only get slightly darkened? 
                         else if (props.opacity > 0)
                         {
-                            map[mapIndex] = VoxelData.SetLight(packedData, 0);
+                            map[mapIndex] = BurstVoxelDataBitMapping.SetLight(packedData, 0);
                             obstructed = true;
                         }
                         // Else the block is transparent (like air or glass), so sunlight passes through.
                         // Set its light level to the maximum (15) and add it to the propagation queue.
                         else
                         {
-                            map[mapIndex] = VoxelData.SetLight(packedData, 15);
+                            map[mapIndex] = BurstVoxelDataBitMapping.SetLight(packedData, 15);
                             sunlitVoxels.Add(new Vector3Int(x, y, z));
                         }
                     }

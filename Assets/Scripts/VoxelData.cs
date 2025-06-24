@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 using Random = System.Random;
 
@@ -58,7 +57,7 @@ public static class VoxelData
         new Vector3Int(1, 0, 0), // Right Face
     };
 
-    public static readonly int[] revFaceChecksIndex = new int[6]
+    public static readonly int[] RevFaceChecksIndex = new int[6]
     {
         1, // Front Face
         0, // Back Face
@@ -100,90 +99,5 @@ public static class VoxelData
         }
 
         return Mathf.Abs(seedText.GetHashCode()) / 10000;
-    }
-
-    // --- Constants for Bit Packing ---
-    // Using Hex for clarity with bit positions
-    private const ushort ID_MASK = 0x00FF; // Bits 0-7   (00000000 11111111) (8-bits, Values 0-256)
-    private const ushort LIGHT_MASK = 0x0F00; // Bits 8-11 (00001111 00000000) (4-bits, Values 0-15)
-    private const ushort ORIENTATION_MASK = 0x3000; // Bits 12-13 (00110000 00000000) (2-bits, Values 0-3)
-    // Bits 14-15 are reserved (0xC000)
-
-    private const int ID_SHIFT = 0;
-    private const int LIGHT_SHIFT = 8;
-    private const int ORIENTATION_SHIFT = 12;
-
-    // Maps the 2-bit stored value back to the orientation int used elsewhere
-    private static readonly byte[] OrientationMap =
-    {
-        1, // Index 0 maps to Orientation 1 (Front)
-        0, // Index 1 maps to Orientation 0 (Back)
-        4, // Index 2 maps to Orientation 4 (Left)
-        5 // Index 3 maps to Orientation 5 (Right)
-    };
-
-    // Inverse map for packing
-    private static readonly Dictionary<byte, byte> OrientationToIndexMap = new Dictionary<byte, byte>()
-    {
-        { 1, 0 }, { 0, 1 }, { 4, 2 }, { 5, 3 }
-    };
-
-    // --- Packing ---
-    // Creates the initial packed value
-    public static ushort PackVoxelData(byte id, byte lightLevel, byte orientation)
-    {
-        ushort packedData = 0;
-        packedData |= (ushort)((id & 0xFF) << ID_SHIFT); // ID: Ensure only 8 bits
-        packedData |= (ushort)((lightLevel & 0xF) << LIGHT_SHIFT); // Light Level: Ensure only 4 bits
-
-        // Pack Orientation (Find index in map)
-        if (!OrientationToIndexMap.TryGetValue(orientation, out byte orientationIndex))
-        {
-            orientationIndex = 0; // Default to Front if invalid orientation provided
-            Debug.LogWarning($"Invalid orientation {orientation} provided for packing. Defaulting to Front (1).");
-        }
-        packedData |= (ushort)((orientationIndex & 0x3) << ORIENTATION_SHIFT); // Orientation: Ensure only 2 bits
-
-        return packedData;
-    }
-
-    // --- Unpacking ---
-    public static byte GetId(ushort packedData)
-    {
-        return (byte)((packedData & ID_MASK) >> ID_SHIFT);
-    }
-
-    public static byte GetLight(ushort packedData)
-    {
-        return (byte)((packedData & LIGHT_MASK) >> LIGHT_SHIFT);
-    }
-
-    public static byte GetOrientation(ushort packedData)
-    {
-        byte orientationIndex = (byte)((packedData & ORIENTATION_MASK) >> ORIENTATION_SHIFT);
-        // Safely get orientation from map, default to Front (index 0) if somehow out of bounds
-        return (orientationIndex < OrientationMap.Length) ? OrientationMap[orientationIndex] : OrientationMap[0];
-    }
-
-    // --- Setters (Return new packed value) ---
-    public static ushort SetId(ushort packedData, byte id)
-    {
-        return (ushort)((packedData & ~ID_MASK) | (id & 0xFF)); // Clear old, OR in new
-    }
-
-    public static ushort SetLight(ushort packedData, byte lightLevel)
-    {
-        return (ushort)((packedData & ~LIGHT_MASK) | ((lightLevel & 0xF) << LIGHT_SHIFT)); // Clear old, OR in new (masked+shifted)
-    }
-
-    public static ushort SetOrientation(ushort packedData, byte orientation)
-    {
-        if (!OrientationToIndexMap.TryGetValue(orientation, out byte orientationIndex))
-        {
-            orientationIndex = 0; // Default to Front
-            Debug.LogWarning($"Invalid orientation {orientation} provided for setting. Defaulting to Front (1).");
-        }
-
-        return (ushort)((packedData & ~ORIENTATION_MASK) | ((orientationIndex & 0x3) << ORIENTATION_SHIFT)); // Clear old, OR in new (masked+shifted)
     }
 }

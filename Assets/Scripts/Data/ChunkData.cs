@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using JetBrains.Annotations;
 using Jobs;
+using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -83,14 +84,14 @@ namespace Data
             // Get the current state of the voxel from the flat voxel map
             int index = GetIndexFromPosition(pos.x, pos.y, pos.z);
             ushort oldPackedData = map[index];
-            byte oldId = VoxelData.GetId(oldPackedData);
+            byte oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
 
             if (oldId == id) // No change if the block ID is the same
                 return;
 
             // --- Critical Data Capture ---
             // Capture the old light level BEFORE modifying the map
-            byte oldLightLevel = VoxelData.GetLight(oldPackedData);
+            byte oldLightLevel = BurstVoxelDataBitMapping.GetLight(oldPackedData);
 
             BlockType[] blockTypes = World.Instance.blockTypes;
             BlockType oldProps = blockTypes[oldId];
@@ -100,7 +101,7 @@ namespace Data
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
             // The LightingJob will then fill it with propagated light from neighbors.
             byte newLightLevel = 0; // In a full system, this would be newProps.lightEmission
-            ushort newPackedData = VoxelData.PackVoxelData(id, newLightLevel, direction);
+            ushort newPackedData = BurstVoxelDataBitMapping.PackVoxelData(id, newLightLevel, direction);
             map[index] = newPackedData;
 
             // --- Handle Lighting Updates ---
@@ -258,7 +259,7 @@ namespace Data
             for (int y = yMax; y > 0; y--)
             {
                 int index = GetIndexFromPosition(x, y, z);
-                byte id = VoxelData.GetId(map[index]);
+                byte id = BurstVoxelDataBitMapping.GetId(map[index]);
 
                 if (World.Instance.blockTypes[id].isSolid)
                 {

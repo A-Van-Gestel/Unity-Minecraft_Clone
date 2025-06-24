@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using JetBrains.Annotations;
+using Jobs.BurstData;
 using Unity.Collections;
 using UnityEngine;
 
@@ -239,7 +240,7 @@ namespace Data
                 ushort packedData = chunk.map[index];
 
                 // No need to check for brightness, the calling code already does.
-                chunk.map[index] = VoxelData.SetLight(packedData, value);
+                chunk.map[index] = BurstVoxelDataBitMapping.SetLight(packedData, value);
 
                 // Add the chunk coordinate to the set of chunks that need a rebuild.
                 dirtyChunks.Add(chunkCoord);

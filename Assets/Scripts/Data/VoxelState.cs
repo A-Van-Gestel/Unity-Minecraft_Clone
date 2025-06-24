@@ -1,4 +1,5 @@
 ﻿using System;
+using Jobs.BurstData;
 
 namespace Data
 {
@@ -13,24 +14,24 @@ namespace Data
         #region Packed Data Properties
         public byte id
         {
-            get { return VoxelData.GetId(_packedData); }
-            set { _packedData = VoxelData.SetId(_packedData, value); } // Direct set, handle consequences elsewhere (like ModifyVoxel)
+            get { return BurstVoxelDataBitMapping.GetId(_packedData); }
+            set { _packedData = BurstVoxelDataBitMapping.SetId(_packedData, value); } // Direct set, handle consequences elsewhere (like ModifyVoxel)
         }
 
         public byte orientation
         {
-            get { return VoxelData.GetOrientation(_packedData); }
-            set { _packedData = VoxelData.SetOrientation(_packedData, value); } // Direct set
+            get { return BurstVoxelDataBitMapping.GetOrientation(_packedData); }
+            set { _packedData = BurstVoxelDataBitMapping.SetOrientation(_packedData, value); } // Direct set
         }
 
         public byte light
         {
-            get { return VoxelData.GetLight(_packedData); }
+            get { return BurstVoxelDataBitMapping.GetLight(_packedData); }
             set
             {
                 // Direct set to the packed data.
                 // The complex propagation logic is now located in ChunkData.
-                _packedData = VoxelData.SetLight(_packedData, value);
+                _packedData = BurstVoxelDataBitMapping.SetLight(_packedData, value);
             }
         }
         #endregion
@@ -40,7 +41,7 @@ namespace Data
         /// Create a new voxel state from a block id.
         public VoxelState(byte blockId)
         {
-            _packedData = VoxelData.PackVoxelData(
+            _packedData = BurstVoxelDataBitMapping.PackVoxelData(
                 blockId, // blockId
                 0, // Light = 0
                 1 // Orientation = 1 (Front)
@@ -50,7 +51,7 @@ namespace Data
         /// Create a new voxel state from all its components.
         public VoxelState(byte blockId, byte lightLevel, byte orientation)
         {
-            _packedData = VoxelData.PackVoxelData(blockId, lightLevel, orientation);
+            _packedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, lightLevel, orientation);
         }
         
         /// Create a new voxel state from its raw packed data.

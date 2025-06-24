@@ -233,7 +233,7 @@ namespace Jobs
 
                 if (oldLight != newLight)
                 {
-                    map[GetIndex(pos)] = VoxelData.SetLight(packedData, newLight);
+                    map[GetIndex(pos)] = BurstVoxelDataBitMapping.SetLight(packedData, newLight);
                     if (newLight > oldLight)
                     {
                         pQueue.Enqueue(pos); // This is a new light source
@@ -251,7 +251,7 @@ namespace Jobs
             ushort packedData = GetPackedData(pos);
             if (packedData == ushort.MaxValue) return;
 
-            ushort newPackedData = VoxelData.SetLight(packedData, lightLevel);
+            ushort newPackedData = BurstVoxelDataBitMapping.SetLight(packedData, lightLevel);
 
             if (IsVoxelInChunk(pos))
             {

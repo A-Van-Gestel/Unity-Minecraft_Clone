@@ -49,9 +49,7 @@ namespace Jobs.BurstData
             return packedData;
         }
 
-        // --- Unpacking ---
-
-        // --- Unpacking ---
+        // --- Unpacking / Getters ---
         public static byte GetId(ushort packedData)
         {
             return (byte)((packedData & ID_MASK) >> ID_SHIFT);
@@ -74,6 +72,23 @@ namespace Jobs.BurstData
                 case 3: return 5; // Index 3 maps to Orientation 5 (Right/East)
                 default: return 1; // Fallback to Front/North
             }
+        }
+
+        // --- Packing / Setters ---
+        public static ushort SetId(ushort packedData, byte id)
+        {
+            return (ushort)((packedData & ~ID_MASK) | ((id & 0xFF) << ID_SHIFT));
+        }
+    
+        public static ushort SetLight(ushort packedData, byte lightLevel)
+        {
+            return (ushort)((packedData & ~LIGHT_MASK) | ((lightLevel & 0xF) << LIGHT_SHIFT));
+        }
+    
+        public static ushort SetOrientation(ushort packedData, byte orientation)
+        {
+            byte orientationIndex = GetOrientationIndex(orientation);
+            return (ushort)((packedData & ~ORIENTATION_MASK) | ((orientationIndex & 0x3) << ORIENTATION_SHIFT));
         }
     }
 }

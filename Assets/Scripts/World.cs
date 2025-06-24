@@ -6,6 +6,7 @@ using System.Linq;
 using Data;
 using Helpers;
 using Jobs;
+using Jobs.BurstData;
 using MyBox;
 using Unity.Collections;
 using Unity.Jobs;
@@ -517,7 +518,7 @@ public class World : MonoBehaviour
                     // If lighting is off, set all blocks to full brightness.
                     for (int i = 0; i < chunkData.map.Length; i++)
                     {
-                        chunkData.map[i] = VoxelData.SetLight(chunkData.map[i], 15);
+                        chunkData.map[i] = BurstVoxelDataBitMapping.SetLight(chunkData.map[i], 15);
                     }
                 }
 
@@ -900,9 +901,9 @@ public class World : MonoBehaviour
             int index = localPos.x + VoxelData.ChunkWidth * (localPos.y + VoxelData.ChunkHeight * localPos.z);
 
             // Only modify and request a rebuild if the light value is actually changing.
-            if (VoxelData.GetLight(chunkData.map[index]) != lightValue)
+            if (BurstVoxelDataBitMapping.GetLight(chunkData.map[index]) != lightValue)
             {
-                chunkData.map[index] = VoxelData.SetLight(chunkData.map[index], lightValue);
+                chunkData.map[index] = BurstVoxelDataBitMapping.SetLight(chunkData.map[index], lightValue);
             }
         }
     }

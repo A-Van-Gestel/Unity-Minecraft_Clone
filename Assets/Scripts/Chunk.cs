@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Data;
+using Jobs.BurstData;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -58,7 +59,7 @@ public class Chunk
         for (int i = 0; i < chunkData.map.Length; i++)
         {
             ushort packedData = chunkData.map[i];
-            byte id = VoxelData.GetId(packedData);
+            byte id = BurstVoxelDataBitMapping.GetId(packedData);
 
             if (World.Instance.blockTypes[id].isActive)
             {
@@ -88,7 +89,7 @@ public class Chunk
         for (int i = 0; i < chunkData.map.Length; i++)
         {
             ushort packedData = chunkData.map[i];
-            byte id = VoxelData.GetId(packedData);
+            byte id = BurstVoxelDataBitMapping.GetId(packedData);
 
             if (World.Instance.blockTypes[id].isActive)
             {
