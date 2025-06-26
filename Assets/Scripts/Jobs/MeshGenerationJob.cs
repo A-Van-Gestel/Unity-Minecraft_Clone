@@ -12,7 +12,7 @@ namespace Jobs
     public struct MeshGenerationJob : IJob
     {
         [ReadOnly]
-        public NativeArray<ushort> map;
+        public NativeArray<uint> map;
 
         [ReadOnly]
         public NativeArray<BlockTypeJobData> blockTypes;
@@ -22,16 +22,16 @@ namespace Jobs
 
         // Neighboring chunk data for face culling at borders
         [ReadOnly]
-        public NativeArray<ushort> neighborBack;
+        public NativeArray<uint> neighborBack;
 
         [ReadOnly]
-        public NativeArray<ushort> neighborFront;
+        public NativeArray<uint> neighborFront;
 
         [ReadOnly]
-        public NativeArray<ushort> neighborLeft;
+        public NativeArray<uint> neighborLeft;
 
         [ReadOnly]
-        public NativeArray<ushort> neighborRight;
+        public NativeArray<uint> neighborRight;
         // Top and Bottom neighbors are not needed as chunks are only horizontal neighbors
 
         public MeshDataJobOutput output;
@@ -49,7 +49,7 @@ namespace Jobs
                     for (int z = 0; z < VoxelData.ChunkWidth; z++)
                     {
                         int mapIndex = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-                        ushort packedData = map[mapIndex];
+                        uint packedData = map[mapIndex];
                         BlockTypeJobData props = blockTypes[BurstVoxelDataBitMapping.GetId(packedData)];
 
                         if (props.isSolid)
@@ -62,7 +62,7 @@ namespace Jobs
         }
 
         // This is the core meshing logic from Chunk.cs, adapted for jobs.
-        private void UpdateMeshData(Vector3Int pos, ushort packedData)
+        private void UpdateMeshData(Vector3Int pos, uint packedData)
         {
             byte id = BurstVoxelDataBitMapping.GetId(packedData);
             byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
@@ -161,7 +161,7 @@ namespace Jobs
             if (neighborPos.y < 0 || neighborPos.y >= VoxelData.ChunkHeight)
                 return null;
 
-            NativeArray<ushort> neighborMap = map; // Default to current chunk map
+            NativeArray<uint> neighborMap = map; // Default to current chunk map
 
             if (neighborPos.x < 0)
             {
@@ -190,7 +190,7 @@ namespace Jobs
 
             int mapIndex = neighborPos.x + VoxelData.ChunkWidth * (neighborPos.y + VoxelData.ChunkHeight * neighborPos.z);
 
-            ushort packedData = neighborMap[mapIndex];
+            uint packedData = neighborMap[mapIndex];
             return new VoxelState(packedData);
         }
 

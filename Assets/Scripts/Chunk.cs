@@ -49,31 +49,6 @@ public class Chunk
         chunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)chunkPosition.x, (int)chunkPosition.z), true);
         chunkData.chunk = this;
 
-        // We can't immediately check for active blocks here because the data isn't ready.
-        // The check for active voxels needs to move to when the data is populated.
-        // For now, the old logic is commented out and will be triggered later.
-
-        /*
-        // --- THIS LOGIC IS NOW DEFERRED ---
-        // Add active blocks to the active voxel's list.
-        for (int i = 0; i < chunkData.map.Length; i++)
-        {
-            ushort packedData = chunkData.map[i];
-            byte id = BurstVoxelDataBitMapping.GetId(packedData);
-
-            if (World.Instance.blockTypes[id].isActive)
-            {
-                // Convert flat index back to 3D position
-                int x = i % VoxelData.ChunkWidth;
-                int rem = i / VoxelData.ChunkWidth;
-                int y = rem % VoxelData.ChunkHeight;
-                int z = rem / VoxelData.ChunkHeight;
-
-                AddActiveVoxel(new Vector3Int(x, y, z));
-            }
-        }
-        */
-
         // The chunk is created, but its mesh can't be built until the generation job is complete.
         // The job completion logic in World.cs will add this chunk to `chunksToBuildMesh`.
     }
@@ -88,7 +63,7 @@ public class Chunk
         // Now that the data is here, we can scan for active voxels.
         for (int i = 0; i < chunkData.map.Length; i++)
         {
-            ushort packedData = chunkData.map[i];
+            uint packedData = chunkData.map[i];
             byte id = BurstVoxelDataBitMapping.GetId(packedData);
 
             if (World.Instance.blockTypes[id].isActive)

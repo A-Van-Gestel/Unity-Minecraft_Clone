@@ -1,4 +1,5 @@
 ﻿using Unity.Burst;
+using Unity.Mathematics;
 
 namespace Jobs.BurstData
 {
@@ -12,14 +13,16 @@ namespace Jobs.BurstData
     {
         // --- Constants for Bit Packing ---
         // Using Hex for clarity with bit positions
-        private const ushort ID_MASK = 0x00FF; // Bits 0-7   (00000000 11111111) (8-bits, Values 0-256)
-        private const ushort LIGHT_MASK = 0x0F00; // Bits 8-11 (00001111 00000000) (4-bits, Values 0-15)
-        private const ushort ORIENTATION_MASK = 0x3000; // Bits 12-13 (00110000 00000000) (2-bits, Values 0-3)
-        // Bits 14-15 are reserved (0xC000)
+        private const uint ID_MASK = 0x000000FF; // Bits 0-7  (8-bits, Values 0-256)
+        private const uint SUNLIGHT_MASK = 0x00000F00; // Bits 8-11 (4-bits, Values 0-15)
+        private const uint BLOCKLIGHT_MASK = 0x0000F000; // Bits 12-15 (4-bits, Values 0-15)
+        private const uint ORIENTATION_MASK = 0x00030000; // Bits 16-17 (2-bits, Values 0-3)
+        // Bits 18-32 are reserved
 
         private const int ID_SHIFT = 0;
-        private const int LIGHT_SHIFT = 8;
-        private const int ORIENTATION_SHIFT = 12;
+        private const int SUNLIGHT_SHIFT = 8;
+        private const int BLOCKLIGHT_SHIFT = 12;
+        private const int ORIENTATION_SHIFT = 16;
 
         // Inverse map for packing
         private static byte GetOrientationIndex(byte orientation)
@@ -36,32 +39,48 @@ namespace Jobs.BurstData
 
         // --- Packing ---
         // Creates the initial packed value
-        public static ushort PackVoxelData(byte id, byte lightLevel, byte orientation)
+        public static uint PackVoxelData(byte id, byte sunLight, byte blockLight, byte orientation)
         {
-            ushort packedData = 0;
-            packedData |= (ushort)((id & 0xFF) << ID_SHIFT); // ID: Ensure only 8 bits
-            packedData |= (ushort)((lightLevel & 0xF) << LIGHT_SHIFT); // Light Level: Ensure only 4 bits
+            uint packedData = 0;
+            packedData |= (uint)((id & 0xFF) << ID_SHIFT); // ID: Ensure only 8 bits
+            packedData |= (uint)((sunLight & 0xF) << SUNLIGHT_SHIFT); // Sunlight Level: Ensure only 4 bits
+            packedData |= (uint)((blockLight & 0xF) << BLOCKLIGHT_SHIFT); // Blocklight Level: Ensure only 4 bits
 
             // Pack Orientation by getting its index from our helper method
             byte orientationIndex = GetOrientationIndex(orientation);
-            packedData |= (ushort)((orientationIndex & 0x3) << ORIENTATION_SHIFT); // Orientation: Ensure only 2 bits
+            packedData |= (uint)((orientationIndex & 0x3) << ORIENTATION_SHIFT); // Orientation: Ensure only 2 bits
 
             return packedData;
         }
 
         // --- Unpacking / Getters ---
-        public static byte GetId(ushort packedData)
+        public static byte GetId(uint packedData)
         {
             return (byte)((packedData & ID_MASK) >> ID_SHIFT);
         }
 
-        public static byte GetLight(ushort packedData)
+        /// <summary>
+        /// Returns the highest light level between sunlight and blocklight
+        /// </summary>
+        public static byte GetLight(uint packedData)
         {
-            return (byte)((packedData & LIGHT_MASK) >> LIGHT_SHIFT);
+            uint sunlightLevel = GetSunlight(packedData);
+            uint blocklightLevel = GetBlocklight(packedData);
+            return (byte)math.max(sunlightLevel, blocklightLevel);
+        }
+
+        public static byte GetSunlight(uint packedData)
+        {
+            return (byte)((packedData & SUNLIGHT_MASK) >> SUNLIGHT_SHIFT);
+        }
+
+        public static byte GetBlocklight(uint packedData)
+        {
+            return (byte)((packedData & BLOCKLIGHT_MASK) >> BLOCKLIGHT_SHIFT);
         }
 
         // Here we replace the array lookup with a Burst-compatible switch statement.
-        public static byte GetOrientation(ushort packedData)
+        public static byte GetOrientation(uint packedData)
         {
             byte orientationIndex = (byte)((packedData & ORIENTATION_MASK) >> ORIENTATION_SHIFT);
             switch (orientationIndex)
@@ -75,20 +94,25 @@ namespace Jobs.BurstData
         }
 
         // --- Packing / Setters ---
-        public static ushort SetId(ushort packedData, byte id)
+        public static uint SetId(uint packedData, byte id)
         {
-            return (ushort)((packedData & ~ID_MASK) | ((id & 0xFF) << ID_SHIFT));
+            return (packedData & ~ID_MASK) | (uint)((id & 0xFF) << ID_SHIFT);
         }
-    
-        public static ushort SetLight(ushort packedData, byte lightLevel)
+
+        public static uint SetSunLight(uint packedData, byte sunLightLevel)
         {
-            return (ushort)((packedData & ~LIGHT_MASK) | ((lightLevel & 0xF) << LIGHT_SHIFT));
+            return (packedData & ~SUNLIGHT_MASK) | (uint)((sunLightLevel & 0xF) << SUNLIGHT_SHIFT);
         }
-    
-        public static ushort SetOrientation(ushort packedData, byte orientation)
+
+        public static uint SetBlockLight(uint packedData, byte blockLightLevel)
+        {
+            return (packedData & ~BLOCKLIGHT_MASK) | (uint)((blockLightLevel & 0xF) << BLOCKLIGHT_SHIFT);
+        }
+
+        public static uint SetOrientation(uint packedData, byte orientation)
         {
             byte orientationIndex = GetOrientationIndex(orientation);
-            return (ushort)((packedData & ~ORIENTATION_MASK) | ((orientationIndex & 0x3) << ORIENTATION_SHIFT));
+            return (packedData & ~ORIENTATION_MASK) | (uint)((orientationIndex & 0x3) << ORIENTATION_SHIFT);
         }
     }
 }

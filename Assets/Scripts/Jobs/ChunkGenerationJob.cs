@@ -24,7 +24,7 @@ namespace Jobs
         public NativeArray<LodeJobData> allLodes;
 
         // This is the output of our job
-        public NativeArray<ushort> outputMap;
+        public NativeArray<uint> outputMap;
         public NativeQueue<VoxelMod>.ParallelWriter modifications;
 
         public void Execute()
@@ -40,7 +40,7 @@ namespace Jobs
                         byte voxelID = WorldGen.GetVoxel(globalPos, seed, biomes, allLodes);
 
                         int index = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-                        outputMap[index] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, 1);
+                        outputMap[index] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, 0, 1);
 
                         // --- Major Flora Pass (Tree Generation) ---
                         // We can't call Structure.GenerateMajorFlora directly as it's not job-safe.

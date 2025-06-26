@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using JetBrains.Annotations;
-using Jobs.BurstData;
+using Jobs;
 using Unity.Collections;
 using UnityEngine;
 
@@ -21,6 +21,9 @@ namespace Data
 
         [NonSerialized]
         public HashSet<ChunkData> modifiedChunks = new HashSet<ChunkData>();
+
+        [NonSerialized]
+        public HashSet<Vector2Int> sunlightRecalculationQueue = new HashSet<Vector2Int>();
 
         #region Constructors
 
@@ -181,7 +184,7 @@ namespace Data
 
             // 4. ***Crucially, check if on a border and update neighbors.***
             // This handles the mesh update even if lighting doesn't change.
-    
+
             // Check X-axis borders
             if (voxelPos.x == 0)
             {
@@ -221,39 +224,12 @@ namespace Data
         }
 
         /// <summary>
-        /// Sets the light value for a voxel without triggering an immediate mesh rebuild.
-        /// Instead, it adds the affected chunk's coordinate to a "dirty" set.
-        /// </summary>
-        public void SetLightSilent(Vector3 pos, byte value, HashSet<ChunkCoord> dirtyChunks)
-        {
-            if (!IsVoxelInWorld(pos))
-                return;
-
-            Vector2Int chunkV2Coord = GetChunkCoordFor(pos);
-            ChunkCoord chunkCoord = new ChunkCoord(chunkV2Coord.x / VoxelData.ChunkWidth, chunkV2Coord.y / VoxelData.ChunkWidth);
-
-            // Use TryGetValue for performance and safety.
-            if (chunks.TryGetValue(chunkV2Coord, out ChunkData chunk) && chunk.isPopulated)
-            {
-                Vector3Int voxelPos = GetLocalVoxelPositionInChunk(pos);
-                int index = voxelPos.x + VoxelData.ChunkWidth * (voxelPos.y + VoxelData.ChunkHeight * voxelPos.z);
-                ushort packedData = chunk.map[index];
-
-                // No need to check for brightness, the calling code already does.
-                chunk.map[index] = BurstVoxelDataBitMapping.SetLight(packedData, value);
-
-                // Add the chunk coordinate to the set of chunks that need a rebuild.
-                dirtyChunks.Add(chunkCoord);
-            }
-        }
-
-        /// <summary>
         ///  Helper method to get the raw voxel map for jobs.
         /// </summary>
         /// <param name="coord"></param>
         /// <param name="allocator"></param>
         /// <returns>Jobs compatible array of voxels</returns>
-        public NativeArray<ushort> GetChunkMapForJob(Vector2Int coord, Allocator allocator)
+        public NativeArray<uint> GetChunkMapForJob(Vector2Int coord, Allocator allocator)
         {
             ChunkData chunk = RequestChunk(coord, false);
             if (chunk != null)
@@ -263,14 +239,14 @@ namespace Data
 
             // Return an empty array if chunk doesn't exist.
             // The mesh job will check IsCreated.
-            return new NativeArray<ushort>(0, allocator);
+            return new NativeArray<uint>(0, allocator);
         }
 
         #endregion
 
         #region Lighting Management
 
-        public void QueueLightUpdate(Vector3 globalPos, byte oldLightLevel = 0)
+        public void QueueLightUpdate(Vector3 globalPos, byte oldLightLevel = 0, LightChannel channel = LightChannel.Block)
         {
             if (!IsVoxelInWorld(globalPos)) return;
 
@@ -280,7 +256,25 @@ namespace Data
             {
                 // Add the *modified block's position* to the chunk's internal light queue.
                 Vector3Int localPos = GetLocalVoxelPositionInChunk(globalPos);
-                chunkData.AddToLightQueue(localPos, oldLightLevel);
+                if (channel == LightChannel.Block)
+                    chunkData.AddToBlockLightQueue(localPos, oldLightLevel);
+                else
+                    chunkData.AddToSunLightQueue(localPos, oldLightLevel);
+
+                // Mark the target chunk as needing a lighting update.
+                chunkData.hasLightChangesToProcess = true;
+            }
+        }
+
+        public void QueueSunlightRecalculation(Vector2Int columnPos)
+        {
+            sunlightRecalculationQueue.Add(columnPos);
+
+            // Mark the target chunk as needing a lighting update.
+            Vector2Int chunkV2Coord = GetChunkCoordFor(new Vector3(columnPos.x, 0, columnPos.y));
+            if (chunks.TryGetValue(chunkV2Coord, out ChunkData chunkData))
+            {
+                chunkData.hasLightChangesToProcess = true;
             }
         }
 

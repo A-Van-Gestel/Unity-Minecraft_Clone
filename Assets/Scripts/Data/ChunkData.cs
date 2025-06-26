@@ -29,7 +29,7 @@ namespace Data
         }
 
         [HideInInspector]
-        public ushort[] map = new ushort[VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth];
+        public uint[] map = new uint[VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth];
 
 
         [NonSerialized]
@@ -44,9 +44,13 @@ namespace Data
         public bool hasLightChangesToProcess = false;
 
         [NonSerialized]
-        private Queue<LightQueueNode> _lightBfsQueue = new Queue<LightQueueNode>();
+        private Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
 
-        public int LightQueueCount => _lightBfsQueue.Count;
+        [NonSerialized]
+        private Queue<LightQueueNode> _blocklightBfsQueue = new Queue<LightQueueNode>();
+
+        public int SunLightQueueCount => _sunlightBfsQueue.Count;
+        public int BlockLightQueueCount => _blocklightBfsQueue.Count;
 
 
         #region Constructors and Initializers
@@ -63,7 +67,7 @@ namespace Data
         }
 
         /// Populate the chunk with voxels from the world generator.
-        public void Populate(NativeArray<ushort> jobOutputMap)
+        public void Populate(NativeArray<uint> jobOutputMap)
         {
             jobOutputMap.CopyTo(map);
             isPopulated = true;
@@ -76,41 +80,47 @@ namespace Data
         #region Modifier Methods
 
         // --- Modifier Methods --
-        public void ModifyVoxel(Vector3Int pos, byte id, byte direction, bool immediateUpdate = false)
+        public void ModifyVoxel(Vector3Int pos, byte newId, byte direction, bool immediateUpdate = false)
         {
             if (!IsVoxelInChunk(pos)) return;
             if (World.Instance is null) return;
 
             // Get the current state of the voxel from the flat voxel map
             int index = GetIndexFromPosition(pos.x, pos.y, pos.z);
-            ushort oldPackedData = map[index];
+            uint oldPackedData = map[index];
             byte oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
 
-            if (oldId == id) // No change if the block ID is the same
+            if (oldId == newId) // No change if the block ID is the same
                 return;
 
-            // --- Critical Data Capture ---
-            // Capture the old light level BEFORE modifying the map
-            byte oldLightLevel = BurstVoxelDataBitMapping.GetLight(oldPackedData);
+            // --- Capture Old State ---
+            byte oldBlocklight = BurstVoxelDataBitMapping.GetBlocklight(oldPackedData);
+            byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(oldPackedData);
 
             BlockType[] blockTypes = World.Instance.blockTypes;
             BlockType oldProps = blockTypes[oldId];
-            BlockType newProps = blockTypes[id];
 
             // --- Update The Map ---
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
             // The LightingJob will then fill it with propagated light from neighbors.
-            byte newLightLevel = 0; // In a full system, this would be newProps.lightEmission
-            ushort newPackedData = BurstVoxelDataBitMapping.PackVoxelData(id, newLightLevel, direction);
+            BlockType newProps = blockTypes[newId];
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(newId, 0, newProps.lightEmission, direction);
             map[index] = newPackedData;
 
-            // --- Handle Lighting Updates ---
-            if (World.Instance.settings.enableLighting)
+            // --- Queue Lighting Updates ---
+            // 1. Queue the modified block itself for both channels.
+            //    This tells the LightingJob to handle any light removal at this position.
+            AddToSunLightQueue(pos, oldSunlight);
+            AddToBlockLightQueue(pos, oldBlocklight);
+
+            // 2. If opacity changed, we must also trigger a top-down rescan for the entire column.
+            if (newProps.opacity != oldProps.opacity)
             {
-                // We simply queue the change. The new, intelligent LightingJob will handle
-                // both sunlight and propagation logic based on this single seed.
-                AddToLightQueue(pos, oldLightLevel);
+                World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(pos.x + position.x, pos.z + position.y));
             }
+
+            // --- Notify World of Changes for Mesh Rebuilds ---
+            World.Instance.NotifyChunkModified(this.position, pos);
 
             // --- Handle Active Block and Saving ---
             if (newProps.isActive)
@@ -128,28 +138,57 @@ namespace Data
         #region Ligting Methods
 
         /// <summary>
-        /// Entry point for any light updates.
+        /// Entry point for any block light updates.
         /// </summary>
-        public void AddToLightQueue(Vector3Int localPos, byte oldLightLevel)
+        public void AddToBlockLightQueue(Vector3Int localPos, byte oldLightLevel)
         {
             if (World.Instance.settings.enableLighting)
             {
-                _lightBfsQueue.Enqueue(new LightQueueNode { position = localPos, oldLightLevel = oldLightLevel });
+                _blocklightBfsQueue.Enqueue(new LightQueueNode { position = localPos, oldLightLevel = oldLightLevel });
                 hasLightChangesToProcess = true;
             }
         }
 
         /// <summary>
-        /// Method to get the light queue as a NativeQueue for the job
+        /// Entry point for any sunlight updates.
         /// </summary>
-        public NativeQueue<LightQueueNode> GetLightQueueForJob(Allocator allocator)
+        public void AddToSunLightQueue(Vector3Int localPos, byte oldLightLevel)
+        {
+            if (World.Instance.settings.enableLighting)
+            {
+                _sunlightBfsQueue.Enqueue(new LightQueueNode { position = localPos, oldLightLevel = oldLightLevel });
+                hasLightChangesToProcess = true;
+            }
+        }
+
+        /// <summary>
+        /// Method to get the block light queue as a NativeQueue for the job
+        /// </summary>
+        public NativeQueue<LightQueueNode> GetBlocklightQueueForJob(Allocator allocator)
         {
             var nativeQueue = new NativeQueue<LightQueueNode>(allocator);
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
-            while (LightQueueCount > 0)
+            while (BlockLightQueueCount > 0)
             {
-                nativeQueue.Enqueue(_lightBfsQueue.Dequeue());
+                nativeQueue.Enqueue(_blocklightBfsQueue.Dequeue());
+            }
+
+            // The managed queue is now empty and ready for new requests.
+            return nativeQueue;
+        }
+
+        /// <summary>
+        /// Method to get the sunlight queue as a NativeQueue for the job
+        /// </summary>
+        public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator)
+        {
+            var nativeQueue = new NativeQueue<LightQueueNode>(allocator);
+
+            // Dequeue each item from the managed queue and enqueue it into the native one.
+            while (SunLightQueueCount > 0)
+            {
+                nativeQueue.Enqueue(_sunlightBfsQueue.Dequeue());
             }
 
             // The managed queue is now empty and ready for new requests.
@@ -158,14 +197,14 @@ namespace Data
 
         public void RecalculateNaturalLight()
         {
-            var mapData = new NativeArray<ushort>(map, Allocator.TempJob);
+            var mapData = new NativeArray<uint>(map, Allocator.TempJob);
             var blockTypes = World.Instance.GetBlockTypesJobData(Allocator.TempJob);
             var sunlitVoxels = new NativeList<Vector3Int>(Allocator.TempJob);
-            var lightJob = new NaturalLightJob
+            var lightJob = new InitialSunlightJob
             {
-                map = mapData,
-                blockTypes = blockTypes,
-                sunlitVoxels = sunlitVoxels
+                Map = mapData,
+                BlockTypes = blockTypes,
+                SunlightPropagationQueue = sunlitVoxels
             };
 
 
@@ -174,12 +213,12 @@ namespace Data
             handle.Complete();
 
             // Copy data back and dispose
-            lightJob.map.CopyTo(map);
+            lightJob.Map.CopyTo(map);
 
             // After job completes, add all sunlit voxels to the queue.
             foreach (Vector3Int voxel in sunlitVoxels)
             {
-                AddToLightQueue(voxel, 0); // The old light was 0 before this.
+                AddToSunLightQueue(voxel, 0); // The old light was 0 before this.
             }
 
             mapData.Dispose();
@@ -201,9 +240,9 @@ namespace Data
         }
 
         /// Jobs helper method for providing data to jobs
-        public NativeArray<ushort> GetMapForJob(Allocator allocator)
+        public NativeArray<uint> GetMapForJob(Allocator allocator)
         {
-            return new NativeArray<ushort>(map, allocator);
+            return new NativeArray<uint>(map, allocator);
         }
 
         /// Check if a local voxel position is within the bounds of this chunk.
@@ -227,7 +266,7 @@ namespace Data
             if (IsVoxelInChunk(pos.x, pos.y, pos.z))
             {
                 int index = GetIndexFromPosition(pos.x, pos.y, pos.z);
-                ushort packedData = map[index];
+                uint packedData = map[index];
                 return new VoxelState(packedData);
             }
 
@@ -240,7 +279,7 @@ namespace Data
         /// NOTE: Make sure to check if voxel is in chunk first.
         public VoxelState VoxelFromV3Int(Vector3Int pos)
         {
-            ushort packedData = map[GetIndexFromPosition(pos.x, pos.y, pos.z)];
+            uint packedData = map[GetIndexFromPosition(pos.x, pos.y, pos.z)];
             return new VoxelState(packedData);
         }
 

@@ -91,11 +91,11 @@ public class World : MonoBehaviour
     private NativeArray<BlockTypeJobData> blockTypesJobData;
 
     // track the JobHandles and the allocated data together
-    private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<ushort> map, NativeQueue<VoxelMod> mods)> generationJobs = new Dictionary<ChunkCoord, (JobHandle, NativeArray<ushort>, NativeQueue<VoxelMod>)>();
+    private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<uint> map, NativeQueue<VoxelMod> mods)> generationJobs = new Dictionary<ChunkCoord, (JobHandle, NativeArray<uint>, NativeQueue<VoxelMod>)>();
     private Dictionary<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> meshJobs = new Dictionary<ChunkCoord, (JobHandle, MeshDataJobOutput)>();
 
-    private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<ushort> map, NativeQueue<LightQueueNode> queue, NativeList<LightModification> mods)> lightingJobs =
-        new Dictionary<ChunkCoord, (JobHandle, NativeArray<ushort>, NativeQueue<LightQueueNode>, NativeList<LightModification>)>();
+    private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<uint> map, NativeQueue<LightQueueNode> sunLightQueue, NativeQueue<LightQueueNode> blockLightQueue, NativeQueue<Vector2Int> sunLightRecalcQueue, NativeList<LightModification> mods)> lightingJobs =
+        new Dictionary<ChunkCoord, (JobHandle, NativeArray<uint>, NativeQueue<LightQueueNode>, NativeQueue<LightQueueNode>, NativeQueue<Vector2Int>, NativeList<LightModification>)>();
 
     #region Singleton pattern
 
@@ -150,7 +150,9 @@ public class World : MonoBehaviour
         {
             job.handle.Complete();
             job.map.Dispose();
-            job.queue.Dispose();
+            job.sunLightQueue.Dispose();
+            job.blockLightQueue.Dispose();
+            job.sunLightRecalcQueue.Dispose();
             job.mods.Dispose();
         }
 
@@ -518,7 +520,7 @@ public class World : MonoBehaviour
                     // If lighting is off, set all blocks to full brightness.
                     for (int i = 0; i < chunkData.map.Length; i++)
                     {
-                        chunkData.map[i] = BurstVoxelDataBitMapping.SetLight(chunkData.map[i], 15);
+                        chunkData.map[i] = BurstVoxelDataBitMapping.SetSunLight(chunkData.map[i], 15);
                     }
                 }
 
@@ -590,7 +592,7 @@ public class World : MonoBehaviour
 
         // Allocate and track all data together
         var modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
-        var outputMap = new NativeArray<ushort>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent);
+        var outputMap = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent);
 
         ChunkGenerationJob job = new ChunkGenerationJob
         {
@@ -675,15 +677,12 @@ public class World : MonoBehaviour
         if (lightingJobs.ContainsKey(coord)) return; // Job already running for this chunk
 
         // Do not schedule a lighting job until all neighbors have finished generating their data.
-        if (!AreNeighborsDataReady(coord))
-        {
-            // It will be checked again next frame.
-            return;
-        }
-        
+        if (!AreNeighborsDataReady(coord)) return; // It will be checked again next frame.
+
         // If there are no light changes, no need to schedule a job.
         // NOTE: Might need to be removed if this causes issues.
-        if (chunk.chunkData.LightQueueCount == 0)
+        bool noSunlightRecalc = !worldData.sunlightRecalculationQueue.Contains(chunk.chunkData.position); // Simple check, more robust would be to check all columns in chunk
+        if (chunk.chunkData.BlockLightQueueCount == 0 && chunk.chunkData.SunLightQueueCount == 0 && noSunlightRecalc)
         {
             chunk.chunkData.hasLightChangesToProcess = false;
             return;
@@ -692,9 +691,30 @@ public class World : MonoBehaviour
         // --- STANDARD LIGHTING PROPAGATION PASS ---
         // These containers are created on the main thread and live until the job is processed on the main thread.
         // They MUST be persistent.
-        var mapCopy = new NativeArray<ushort>(chunk.chunkData.map, Allocator.Persistent);
-        var lightQueue = chunk.chunkData.GetLightQueueForJob(Allocator.Persistent);
+        var mapCopy = new NativeArray<uint>(chunk.chunkData.map, Allocator.Persistent);
         var crossChunkMods = new NativeList<LightModification>(Allocator.Persistent);
+
+        // Get propagation queues from ChunkData
+        var sunLightBfs = chunk.chunkData.GetSunlightQueueForJob(Allocator.Persistent);
+        var blockLightBfs = chunk.chunkData.GetBlocklightQueueForJob(Allocator.Persistent);
+
+        // Get sunlight column rescan requests from WorldData
+        var sunLightRecalc = new NativeQueue<Vector2Int>(Allocator.Persistent);
+        // This is inefficient. A better system would pass only relevant columns. For now, we pass all.
+        foreach (Vector2Int col in worldData.sunlightRecalculationQueue)
+        {
+            // Check if the column belongs to this chunk
+            Vector2Int chunkForCol = worldData.GetChunkCoordFor(new Vector3(col.x, 0, col.y));
+            if (chunkForCol == chunk.chunkData.position)
+            {
+                // The job expects local coordinates for the column
+                sunLightRecalc.Enqueue(new Vector2Int(col.x - chunk.chunkData.position.x, col.y - chunk.chunkData.position.y));
+            }
+        }
+
+        // Clear the global queue once we've consumed the items for this chunk.
+        // A better system would remove only the consumed items.
+        worldData.sunlightRecalculationQueue.Clear();
 
         // Neighbor maps are read-only inputs, so they can be TempJob, but we MUST schedule their disposal.
         var neighborBack = worldData.GetChunkMapForJob(chunk.chunkData.position + new Vector2Int(0, -VoxelData.ChunkWidth), Allocator.TempJob);
@@ -707,7 +727,9 @@ public class World : MonoBehaviour
             // The chunk's own data is read-write
             map = mapCopy,
             chunkPosition = chunk.chunkData.position,
-            lightBfsQueue = lightQueue,
+            sunlightBfsQueue = sunLightBfs,
+            blocklightBfsQueue = blockLightBfs,
+            sunlightColumnRecalcQueue = sunLightRecalc,
 
             // Neighbor data is read-only
             neighborBack = neighborBack,
@@ -741,7 +763,7 @@ public class World : MonoBehaviour
         chunk.chunkData.hasLightChangesToProcess = false;
 
         // Store this final, all-encompassing handle, along with the persistent data that needs to be processed later.
-        lightingJobs.Add(coord, (finalHandle, mapCopy, lightQueue, crossChunkMods));
+        lightingJobs.Add(coord, (finalHandle, mapCopy, sunLightBfs, blockLightBfs, sunLightRecalc, crossChunkMods));
     }
 
     public void AddModification(VoxelMod mod)
@@ -752,6 +774,37 @@ public class World : MonoBehaviour
 
         // Add this single-item queue to the main modifications queue
         modifications.Enqueue(singleModQueue);
+    }
+
+    public void NotifyChunkModified(Vector2Int chunkPos, Vector3Int localVoxelPos)
+    {
+        // 1. The chunk that was modified always needs a rebuild.
+        ChunkCoord coord = new ChunkCoord(chunkPos.x / VoxelData.ChunkWidth, chunkPos.y / VoxelData.ChunkWidth);
+        if (chunks[coord.x, coord.z] != null)
+        {
+            RequestChunkMeshRebuild(chunks[coord.x, coord.z], true);
+        }
+
+        // 2. If the modification happened on a border, queue the neighbor.
+        // Check X-axis borders
+        if (localVoxelPos.x == 0)
+            QueueNeighborRebuild(chunkPos + new Vector2Int(-VoxelData.ChunkWidth, 0));
+        else if (localVoxelPos.x == VoxelData.ChunkWidth - 1)
+            QueueNeighborRebuild(chunkPos + new Vector2Int(VoxelData.ChunkWidth, 0));
+
+        // Check Z-axis borders
+        if (localVoxelPos.z == 0)
+            QueueNeighborRebuild(chunkPos + new Vector2Int(0, -VoxelData.ChunkWidth));
+        else if (localVoxelPos.z == VoxelData.ChunkWidth - 1)
+            QueueNeighborRebuild(chunkPos + new Vector2Int(0, VoxelData.ChunkWidth));
+    }
+
+    private void QueueNeighborRebuild(Vector2Int neighborV2Coord)
+    {
+        if (worldData.chunks.TryGetValue(neighborV2Coord, out ChunkData neighborData) && neighborData.chunk != null)
+        {
+            RequestChunkMeshRebuild(neighborData.chunk, true);
+        }
     }
 
     private bool AreNeighborsReady(ChunkCoord coord)
@@ -839,35 +892,41 @@ public class World : MonoBehaviour
                     foreach (LightModification mod in jobEntry.Value.mods)
                     {
                         // Check the state of the neighbor voxel BEFORE we do anything.
-                        VoxelState? neighborState = worldData.GetVoxelState(mod.globalPosition);
+                        VoxelState? neighborState = worldData.GetVoxelState(mod.GlobalPosition);
 
                         // If the neighbor doesn't exist or its light level is ALREADY what the job calculated,
                         // then we have reached a stable state. DO NOTHING. This breaks the infinite loop.
-                        if (!neighborState.HasValue || neighborState.Value.light == mod.lightLevel)
+                        if (!neighborState.HasValue || neighborState.Value.light == mod.LightLevel)
                         {
                             continue;
                         }
 
                         // --- If we are here, the light level genuinely needs to be updated. ---
                         // Get the light level BEFORE we change it.
-                        byte oldLight = neighborState.Value.light;
+// Capture the correct old light value from the correct channel
+                        byte oldNeighborLight = (mod.Channel == LightChannel.Sun)
+                            ? neighborState.Value.Sunlight
+                            : neighborState.Value.Blocklight;
 
                         // Apply the new light level. This also marks the chunk for a mesh rebuild.
-                        SetLight(mod.globalPosition, mod.lightLevel);
+                        SetLight(mod.GlobalPosition, mod.LightLevel, mod.Channel);
 
                         // Now, treat this modification as a new event. We must queue the
                         // modified block to ensure the light propagates correctly *within the neighbor chunk*.
-                        worldData.QueueLightUpdate(mod.globalPosition, oldLight);
+                        // Queue update for the neighbor chunk's correct light channel
+                        worldData.QueueLightUpdate(mod.GlobalPosition, oldNeighborLight, mod.Channel);
 
                         // The neighbor's light data has changed. It MUST have its mesh rebuilt.
-                        Vector2Int neighborChunkV2Coord = worldData.GetChunkCoordFor(mod.globalPosition);
+                        Vector2Int neighborChunkV2Coord = worldData.GetChunkCoordFor(mod.GlobalPosition);
                         chunksToRebuildMesh.Add(new ChunkCoord(neighborChunkV2Coord.x / VoxelData.ChunkWidth, neighborChunkV2Coord.y / VoxelData.ChunkWidth));
                     }
                 }
 
                 // 3. Dispose of all the temporary job data.
                 jobEntry.Value.map.Dispose();
-                jobEntry.Value.queue.Dispose();
+                jobEntry.Value.sunLightQueue.Dispose();
+                jobEntry.Value.blockLightQueue.Dispose();
+                jobEntry.Value.sunLightRecalcQueue.Dispose();
                 jobEntry.Value.mods.Dispose();
 
                 completedCoords.Add(jobEntry.Key);
@@ -892,19 +951,29 @@ public class World : MonoBehaviour
 
     // A global SetLight method that ONLY sets the light value
     // This is used by the main thread when processing cross-chunk modifications.
-    public void SetLight(Vector3 globalPos, byte lightValue)
+    public void SetLight(Vector3 globalPos, byte lightValue, LightChannel channel)
     {
         ChunkData chunkData = worldData.RequestChunk(worldData.GetChunkCoordFor(globalPos), false);
         if (chunkData != null && chunkData.isPopulated)
         {
             Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(globalPos);
             int index = localPos.x + VoxelData.ChunkWidth * (localPos.y + VoxelData.ChunkHeight * localPos.z);
+            uint oldPackedData = chunkData.map[index];
+            uint newPackedData;
 
-            // Only modify and request a rebuild if the light value is actually changing.
-            if (BurstVoxelDataBitMapping.GetLight(chunkData.map[index]) != lightValue)
+            // Use the channel to call the correct setter
+            if (channel == LightChannel.Sun)
             {
-                chunkData.map[index] = BurstVoxelDataBitMapping.SetLight(chunkData.map[index], lightValue);
+                if (BurstVoxelDataBitMapping.GetSunlight(oldPackedData) == lightValue) return; // No change needed
+                newPackedData = BurstVoxelDataBitMapping.SetSunLight(oldPackedData, lightValue);
             }
+            else // Blocklight
+            {
+                if (BurstVoxelDataBitMapping.GetBlocklight(oldPackedData) == lightValue) return; // No change needed
+                newPackedData = BurstVoxelDataBitMapping.SetBlockLight(oldPackedData, lightValue);
+            }
+
+            chunkData.map[index] = newPackedData;
         }
     }
 
@@ -1310,11 +1379,17 @@ public class BlockType
     public bool renderNeighborFaces;
     public bool isWater;
 
-    [Tooltip("How many light will be stopped by this block.")]
+    [Tooltip("How many light levels will be blocked by this block.")]
     [Range(0, 15)]
     public byte opacity = 15;
 
+    [Tooltip("How many light levels will be emitted by this block.")]
+    [Range(0, 15)]
+    public byte lightEmission = 0;
+
     public Sprite icon;
+
+    [Range(0, 64)]
     public int stackSize = 64;
 
     [Header("Block Behavior")]
