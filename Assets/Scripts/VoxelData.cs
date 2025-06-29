@@ -57,7 +57,10 @@ public static class VoxelData
         new Vector3Int(1, 0, 0), // Right Face
     };
 
-    public static readonly int[] RevFaceChecksIndex = new int[6]
+    /// <summary>
+    /// Checks for all faces (front, back, top, bottom, right, left).
+    /// </summary>
+    public static readonly int[] RevFaceChecksIndices = new int[6]
     {
         1, // Front Face
         0, // Back Face
@@ -65,6 +68,26 @@ public static class VoxelData
         2, // Top Face
         5, // Right Face
         4, // Left Face
+    };
+
+    /// <summary>
+    /// Checks for only the horizontal faces (front, back, right, left).
+    /// </summary>
+    public static readonly int[] HorizontalFaceChecksIndices = new int[4]
+    {
+        1, // Front Face
+        0, // Back Face
+        5, // Right Face
+        4, // Left Face
+    };
+
+    /// <summary>
+    /// Checks for only the vertical faces (bottom, top).
+    /// </summary>
+    public static readonly int[] VerticalFaceChecksIndices = new int[2]
+    {
+        3, // Bottom Face
+        2, // Top Face
     };
 
     // Should be accessed like this: VoxelTris[face * 4 + vert].

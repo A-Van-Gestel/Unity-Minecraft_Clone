@@ -108,15 +108,30 @@ namespace Data
             map[index] = newPackedData;
 
             // --- Queue Lighting Updates ---
-            // 1. Queue the modified block itself for both channels.
-            //    This tells the LightingJob to handle any light removal at this position.
+            // Queue the modified block itself for both channels.
+            // This tells the LightingJob to handle any light removal at this position.
             AddToSunLightQueue(pos, oldSunlight);
             AddToBlockLightQueue(pos, oldBlocklight);
 
-            // 2. If opacity changed, we must also trigger a top-down rescan for the entire column.
-            if (newProps.opacity != oldProps.opacity)
+            bool newIsOpaque = newProps.opacity > 0;
+            bool oldIsOpaque = oldProps.opacity > 0;
+
+            // If we are placing an opaque block where there was a transparent one...
+            if (newIsOpaque && !oldIsOpaque)
             {
+                // A top-down rescan IS needed to cast new shadows.
                 World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(pos.x + position.x, pos.z + position.y));
+            }
+            // If we are breaking an opaque block...
+            else if (!newIsOpaque && oldIsOpaque)
+            {
+                // A top-down rescan is only needed if the block we broke MIGHT have been letting light through.
+                // Check the block directly above. If it's transparent, we've opened a new path to the sky.
+                VoxelState? stateAbove = GetState(pos + Vector3Int.up);
+                if (stateAbove.HasValue && stateAbove.Value.Properties.opacity == 0)
+                {
+                    World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(pos.x + position.x, pos.z + position.y));
+                }
             }
 
             // --- Notify World of Changes for Mesh Rebuilds ---
@@ -195,7 +210,7 @@ namespace Data
             return nativeQueue;
         }
 
-        public void RecalculateNaturalLight()
+        public void RecalculateSunLightLight()
         {
             var mapData = new NativeArray<uint>(map, Allocator.TempJob);
             var blockTypes = World.Instance.GetBlockTypesJobData(Allocator.TempJob);
@@ -206,7 +221,6 @@ namespace Data
                 BlockTypes = blockTypes,
                 SunlightPropagationQueue = sunlitVoxels
             };
-
 
             // Schedule job to run on all X/Z columns
             JobHandle handle = lightJob.Schedule();
@@ -299,6 +313,7 @@ namespace Data
             {
                 int index = GetIndexFromPosition(x, y, z);
                 byte id = BurstVoxelDataBitMapping.GetId(map[index]);
+                // Debug.Log($"Y: {y:D2} | VoxelState: {World.Instance.blockTypes[id]}");
 
                 if (World.Instance.blockTypes[id].isSolid)
                 {

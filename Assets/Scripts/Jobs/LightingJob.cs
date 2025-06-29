@@ -226,41 +226,52 @@ namespace Jobs
             }
         }
 
+        // This implementation is too simple and causes issues with semi-transparent blocks.
+        // It should be changed to correctly handle diminishing light levels.
         private void RecalculateSunlightForColumn(int x, int z, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue)
         {
-            bool obstructed = false;
+            byte currentSunlight = 15; // Start with full sunlight from the sky.
+
             for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
             {
-                var pos = new Vector3Int(x, y, z);
-                // Check local chunk first
-                if (IsVoxelInChunk(pos))
+                if (currentSunlight == 0)
                 {
+                    // Optimization: If light is zero, everything below is also zero.
+                    // We still need to check for changes to queue removals correctly.
+                    var pos = new Vector3Int(x, y, z);
                     uint packedData = map[GetIndex(pos)];
                     byte oldLight = BurstVoxelDataBitMapping.GetSunlight(packedData);
-                    byte newLight;
+                    if (oldLight > 0)
+                    {
+                        SetLight(pos, 0, LightChannel.Sun);
+                        rQueue.Enqueue(new LightRemovalNode { Pos = pos, LightLevel = oldLight });
+                    }
 
-                    if (obstructed) newLight = 0;
+                    continue;
+                }
+
+                var currentPos = new Vector3Int(x, y, z);
+                uint currentPacked = map[GetIndex(currentPos)];
+                byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(currentPacked);
+                BlockTypeJobData props = blockTypes[BurstVoxelDataBitMapping.GetId(currentPacked)];
+
+                // Update the block's light level
+                if (oldSunlight != currentSunlight)
+                {
+                    SetLight(currentPos, currentSunlight, LightChannel.Sun);
+                    // Queue updates based on the change
+                    if (currentSunlight > oldSunlight)
+                    {
+                        pQueue.Enqueue(currentPos);
+                    }
                     else
                     {
-                        BlockTypeJobData props = blockTypes[BurstVoxelDataBitMapping.GetId(packedData)];
-                        if (props.opacity > 0)
-                        {
-                            newLight = 0;
-                            obstructed = true;
-                        }
-                        else newLight = 15;
-                    }
-
-                    if (oldLight != newLight)
-                    {
-                        SetLight(pos, newLight, LightChannel.Sun);
-                        if (newLight > oldLight) pQueue.Enqueue(pos);
-                        else rQueue.Enqueue(new LightRemovalNode { Pos = pos, LightLevel = oldLight });
+                        rQueue.Enqueue(new LightRemovalNode { Pos = currentPos, LightLevel = oldSunlight });
                     }
                 }
-                // TODO: This doesn't handle columns that cross chunk boundaries well.
-                // For a perfect system, you'd need to be able to read/write to neighbor chunks' columns too.
-                // This implementation is a good starting point.
+
+                // Diminish the light for the next block down
+                currentSunlight = (byte)Mathf.Max(0, currentSunlight - props.opacity);
             }
         }
 
@@ -287,15 +298,39 @@ namespace Jobs
 
         private uint GetPackedData(Vector3Int pos)
         {
-            if (pos.y < 0 || pos.y >= VoxelData.ChunkHeight) return uint.MaxValue;
+            if (pos.y < 0 || pos.y >= VoxelData.ChunkHeight) return uint.MaxValue; // Return "invalid"
             if (IsVoxelInChunk(pos)) return map[GetIndex(pos)];
 
-            if (pos.x < 0) return neighborLeft.IsCreated ? neighborLeft[GetIndex(new Vector3Int(VoxelData.ChunkWidth - 1, pos.y, pos.z))] : uint.MaxValue;
-            if (pos.x >= VoxelData.ChunkWidth) return neighborRight.IsCreated ? neighborRight[GetIndex(new Vector3Int(0, pos.y, pos.z))] : uint.MaxValue;
-            if (pos.z < 0) return neighborBack.IsCreated ? neighborBack[GetIndex(new Vector3Int(pos.x, pos.y, VoxelData.ChunkWidth - 1))] : uint.MaxValue;
-            if (pos.z >= VoxelData.ChunkWidth) return neighborFront.IsCreated ? neighborFront[GetIndex(new Vector3Int(pos.x, pos.y, 0))] : uint.MaxValue;
+            // Check neighbor coordinates
+            if (pos.x < 0)
+            {
+                // Check if the neighbor array is created and has elements, main loop will skip "uint.MaxValue" if not.
+                if (!neighborLeft.IsCreated || neighborLeft.Length == 0) return uint.MaxValue;
+                return neighborLeft[GetIndex(new Vector3Int(VoxelData.ChunkWidth - 1, pos.y, pos.z))];
+            }
 
-            return uint.MaxValue;
+            if (pos.x >= VoxelData.ChunkWidth)
+            {
+                // Check if the neighbor array is created and has elements, main loop will skip "uint.MaxValue" if not.
+                if (!neighborRight.IsCreated || neighborRight.Length == 0) return uint.MaxValue;
+                return neighborRight[GetIndex(new Vector3Int(0, pos.y, pos.z))];
+            }
+
+            if (pos.z < 0)
+            {
+                // Check if the neighbor array is created and has elements, main loop will skip "uint.MaxValue" if not.
+                if (!neighborBack.IsCreated || neighborBack.Length == 0) return uint.MaxValue;
+                return neighborBack[GetIndex(new Vector3Int(pos.x, pos.y, VoxelData.ChunkWidth - 1))];
+            }
+
+            if (pos.z >= VoxelData.ChunkWidth)
+            {
+                // Check if the neighbor array is created and has elements, main loop will skip "uint.MaxValue" if not.
+                if (!neighborFront.IsCreated || neighborFront.Length == 0) return uint.MaxValue;
+                return neighborFront[GetIndex(new Vector3Int(pos.x, pos.y, 0))];
+            }
+
+            return uint.MaxValue; // Should be unreachable, but good for safety
         }
 
         #endregion

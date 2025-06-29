@@ -2501,9 +2501,8 @@ MonoBehaviour:
     loadDistance: 7
     viewDistance: 5
     maxLightJobsPerFrame: 8
-    rerenderChunksOnModification: 1
     enableLighting: 1
-    clouds: 0
+    clouds: 2
     mouseSensitivityX: 1.2
     mouseSensitivityY: 1.2
     enableSecondPass: 1
@@ -2527,6 +2526,7 @@ MonoBehaviour:
     renderNeighborFaces: 1
     isWater: 0
     opacity: 0
+    lightEmission: 0
     icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
     stackSize: 64
     isActive: 0
@@ -2542,6 +2542,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2557,6 +2558,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: -1336346017, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 1
@@ -2572,6 +2574,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: 1551665942, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2587,6 +2590,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: -1153239741, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2602,6 +2606,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: 455753414, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2617,6 +2622,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: 122583294, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2632,6 +2638,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: -1793209460, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2647,6 +2654,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: 1008106713, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2662,6 +2670,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: -966074416, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2677,6 +2686,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: 2025127514, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2692,6 +2702,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: 1436998987, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2707,6 +2718,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: -1841403712, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2722,6 +2734,7 @@ MonoBehaviour:
     renderNeighborFaces: 1
     isWater: 0
     opacity: 0
+    lightEmission: 0
     icon: {fileID: -1490239207, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2737,6 +2750,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: -2144359328, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2752,6 +2766,7 @@ MonoBehaviour:
     renderNeighborFaces: 1
     isWater: 0
     opacity: 5
+    lightEmission: 0
     icon: {fileID: -392713096, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2767,6 +2782,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: -954973061, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2782,6 +2798,7 @@ MonoBehaviour:
     renderNeighborFaces: 1
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: 2016017474, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     stackSize: 64
     isActive: 0
@@ -2797,6 +2814,7 @@ MonoBehaviour:
     renderNeighborFaces: 0
     isWater: 0
     opacity: 15
+    lightEmission: 0
     icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
     stackSize: 64
     isActive: 0
@@ -2812,6 +2830,7 @@ MonoBehaviour:
     renderNeighborFaces: 1
     isWater: 1
     opacity: 7
+    lightEmission: 0
     icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
     stackSize: 64
     isActive: 0

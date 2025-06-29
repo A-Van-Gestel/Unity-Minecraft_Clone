@@ -6,9 +6,14 @@ public class Clouds : MonoBehaviour
     public int cloudHeight = 100;
     public int cloudDepth = 4;
 
-    [SerializeField] private Texture2D cloudPattern = null;
-    [SerializeField] private Material cloudMaterial = null;
-    [SerializeField] private World world = null;
+    [SerializeField]
+    private Texture2D cloudPattern = null;
+
+    [SerializeField]
+    private Material cloudMaterial = null;
+
+    [SerializeField]
+    private World world = null;
 
     private bool[,] cloudData; // Array of bools representing where cloud is.
     private int cloudTexWidth;
@@ -16,15 +21,16 @@ public class Clouds : MonoBehaviour
     private Vector3Int offset;
 
     private Dictionary<Vector2Int, GameObject> clouds = new Dictionary<Vector2Int, GameObject>();
-    
+
     // A flag to ensure we don't try to update before we're ready.
     private bool isInitialized = false;
-    
+
     // Awake() for dependencies that don't rely on other scripts' Start()
     private void Awake()
     {
         // Null check is important here for build vs editor asset handling
-        if (cloudPattern == null) {
+        if (cloudPattern == null)
+        {
             Debug.LogError("Cloud Pattern Texture is not assigned in the Inspector!");
             this.enabled = false; // Disable the script if texture is missing.
             return;
@@ -35,7 +41,7 @@ public class Clouds : MonoBehaviour
         offset = new Vector3Int(-(cloudTexWidth / 2), 0, -(cloudTexWidth / 2));
         transform.position = new Vector3(VoxelData.WorldCentre, cloudHeight, VoxelData.WorldCentre);
     }
-    
+
     // This is our new public initialization method.
     public void Initialize()
     {
@@ -43,9 +49,12 @@ public class Clouds : MonoBehaviour
 
         LoadCloudData();
         CreateClouds();
-        UpdateClouds(); // Initial position update.
-        
+
+        // Initialization is done.
         isInitialized = true;
+
+        // Update clouds to set initial positions.
+        UpdateClouds();
     }
 
     private void LoadCloudData()
@@ -97,7 +106,7 @@ public class Clouds : MonoBehaviour
                         cloudMesh = null;
                         break;
                 }
-                
+
                 // If we don't have a mesh, skip to the next tile.
                 if (cloudMesh is null) continue;
 

@@ -27,30 +27,32 @@ public class Chunk
 
     #region Constructor
 
-    public Chunk(ChunkCoord _coord)
+    public Chunk(ChunkCoord _coord, bool createGameObject = true)
     {
         coord = _coord;
-        chunkObject = new GameObject();
-        meshFilter = chunkObject.AddComponent<MeshFilter>();
-        meshRenderer = chunkObject.AddComponent<MeshRenderer>();
+        Vector3 worldPos = new Vector3(coord.X * VoxelData.ChunkWidth, 0f, coord.Z * VoxelData.ChunkWidth);
+        chunkPosition = worldPos;
 
-        materials[0] = World.Instance.material;
-        materials[1] = World.Instance.transparentMaterial;
-        materials[2] = World.Instance.waterMaterial;
-        meshRenderer.materials = materials;
+        if (createGameObject)
+        {
+            chunkObject = new GameObject();
+            meshFilter = chunkObject.AddComponent<MeshFilter>();
+            meshRenderer = chunkObject.AddComponent<MeshRenderer>();
 
-        meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;
-        chunkObject.transform.SetParent(World.Instance.transform);
-        chunkObject.transform.position = new Vector3(coord.x * VoxelData.ChunkWidth, 0f, coord.z * VoxelData.ChunkWidth);
-        chunkObject.name = $"Chunk {coord.x}, {coord.z}";
-        chunkPosition = chunkObject.transform.position;
+            materials[0] = World.Instance.material;
+            materials[1] = World.Instance.transparentMaterial;
+            materials[2] = World.Instance.waterMaterial;
+            meshRenderer.materials = materials;
+
+            meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;
+            chunkObject.transform.SetParent(World.Instance.transform);
+            chunkObject.transform.position = worldPos;
+            chunkObject.name = $"Chunk {coord.X}, {coord.Z}";
+        }
 
         // Request the ChunkData object. The data inside it will be populated asynchronously by a job.
         chunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)chunkPosition.x, (int)chunkPosition.z), true);
         chunkData.chunk = this;
-
-        // The chunk is created, but its mesh can't be built until the generation job is complete.
-        // The job completion logic in World.cs will add this chunk to `chunksToBuildMesh`.
     }
 
     #endregion
@@ -236,34 +238,59 @@ public class Chunk
 
 public class ChunkCoord : IEquatable<ChunkCoord>
 {
-    public readonly int x;
-    public readonly int z;
+    public readonly int X;
+    public readonly int Z;
+
+    #region Constructors
 
     public ChunkCoord()
     {
-        x = 0;
-        z = 0;
+        X = 0;
+        Z = 0;
     }
 
-    public ChunkCoord(int _x, int _z)
+    public ChunkCoord(int x, int z)
     {
-        x = _x;
-        z = _z;
+        X = x;
+        Z = z;
+    }
+
+    public ChunkCoord(Vector2 pos)
+    {
+        int xInt = Mathf.FloorToInt(pos.x);
+        int zInt = Mathf.FloorToInt(pos.y);
+
+        X = xInt / VoxelData.ChunkWidth;
+        Z = zInt / VoxelData.ChunkWidth;
+    }
+
+    public ChunkCoord(Vector2Int pos)
+    {
+        X = pos.x / VoxelData.ChunkWidth;
+        Z = pos.y / VoxelData.ChunkWidth;
     }
 
     public ChunkCoord(Vector3 pos)
     {
-        int xCheck = Mathf.FloorToInt(pos.x);
-        int zCheck = Mathf.FloorToInt(pos.z);
+        int xInt = Mathf.FloorToInt(pos.x);
+        int zInt = Mathf.FloorToInt(pos.z);
 
-        x = xCheck / VoxelData.ChunkWidth;
-        z = zCheck / VoxelData.ChunkWidth;
+        X = xInt / VoxelData.ChunkWidth;
+        Z = zInt / VoxelData.ChunkWidth;
     }
+
+    public ChunkCoord(Vector3Int pos)
+    {
+        X = pos.x / VoxelData.ChunkWidth;
+        Z = pos.z / VoxelData.ChunkWidth;
+    }
+
+    #endregion
 
     public override int GetHashCode()
     {
         // Multiply x & y by different constant to differentiate between situations like x=12 & z=13 and x=13 & z=12.
-        return 31 * x + 17 * z;
+        return 31 * X + 17 * Z;
     }
 
     public override bool Equals(object obj)
@@ -276,6 +303,6 @@ public class ChunkCoord : IEquatable<ChunkCoord>
         if (other == null)
             return false;
 
-        return other.x == x && other.z == z;
+        return other.X == X && other.Z == Z;
     }
 }
