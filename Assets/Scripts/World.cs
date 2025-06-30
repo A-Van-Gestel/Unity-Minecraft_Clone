@@ -329,7 +329,6 @@ public class World : MonoBehaviour
         return false;
     }
 
-// Helper methods to reduce code duplication
     private void CompleteAndProcessLightingJobs()
     {
         // Force complete all scheduled lighting jobs immediately.
@@ -1017,34 +1016,35 @@ public class World : MonoBehaviour
                     // 2. Process cross-chunk modifications.
                     foreach (LightModification mod in jobEntry.Value.mods)
                     {
-                        // Check the state of the neighbor voxel BEFORE we do anything.
-                        VoxelState? neighborState = worldData.GetVoxelState(mod.GlobalPosition);
+                        // 1. Find the chunk that this modification affects.
+                        Vector2Int neighborChunkV2Coord = worldData.GetChunkCoordFor(mod.GlobalPosition);
+                        ChunkData neighborChunk = worldData.RequestChunk(neighborChunkV2Coord, false);
 
-                        // If the neighbor doesn't exist or its light level is ALREADY what the job calculated,
-                        // then we have reached a stable state. DO NOTHING. This breaks the infinite loop.
-                        if (!neighborState.HasValue) continue;
+                        // If the neighbor doesn't exist or isn't generated, we can't do anything.
+                        if (neighborChunk == null || !neighborChunk.isPopulated) continue;
 
-                        byte neighborChannelLight = (mod.Channel == LightChannel.Sun)
-                            ? neighborState.Value.Sunlight
-                            : neighborState.Value.Blocklight;
+                        // 2. Get the current, actual light level in the neighbor BEFORE we change it.
+                        Vector3Int localPosInNeighbor = worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
+                        VoxelState? oldState = neighborChunk.GetState(localPosInNeighbor);
+                        if (!oldState.HasValue) continue;
 
-                        if (neighborChannelLight == mod.LightLevel)
+                        byte oldLightInNeighbor = (mod.Channel == LightChannel.Sun) ? oldState.Value.Sunlight : oldState.Value.Blocklight;
+
+                        // 3. If the job's proposed light level is the same as what's already there, the light has stabilized.
+                        //    We do nothing and break the ping-pong loop for this light path.
+                        if (mod.LightLevel == oldLightInNeighbor)
                         {
-                            continue; // Light level is already correct for this channel. Stop the loop.
+                            continue;
                         }
 
-                        // --- If we are here, the light level genuinely needs to be updated. ---
-                        // Apply the new light level. This also marks the chunk for a mesh rebuild.
+                        // 4. The light genuinely needs to change.
+                        //    Update the neighbor's data...
                         SetLight(mod.GlobalPosition, mod.LightLevel, mod.Channel);
+                        //    ...and queue it for ITS OWN lighting job, passing the correct OLD value.
+                        worldData.QueueLightUpdate(mod.GlobalPosition, oldLightInNeighbor, mod.Channel);
 
-                        // Now, treat this modification as a new event. We must queue the
-                        // modified block to ensure the light propagates correctly *within the neighbor chunk*.
-                        // Queue update for the neighbor chunk's correct light channel
-                        worldData.QueueLightUpdate(mod.GlobalPosition, neighborChannelLight, mod.Channel);
-
-                        // The neighbor's light data has changed. It MUST have its mesh rebuilt.
-                        Vector2Int neighborChunkV2Coord = worldData.GetChunkCoordFor(mod.GlobalPosition);
-                        chunksToRebuildMesh.Add(new ChunkCoord(neighborChunkV2Coord));
+                        // 5. Mark the neighbor chunk for a mesh rebuild, as its lighting has changed.
+                        chunksToRebuildMesh.Add(new ChunkCoord(neighborChunk.position));
                     }
                 }
 

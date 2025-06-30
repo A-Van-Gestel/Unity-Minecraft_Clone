@@ -113,25 +113,11 @@ namespace Data
             AddToSunLightQueue(pos, oldSunlight);
             AddToBlockLightQueue(pos, oldBlocklight);
 
-            bool newIsOpaque = newProps.opacity > 0;
-            bool oldIsOpaque = oldProps.opacity > 0;
-
-            // If we are placing an opaque block where there was a transparent one...
-            if (newIsOpaque && !oldIsOpaque)
+            // If the opacity of the block we changed is different from what was there before,
+            // the entire column's light path might have changed. We MUST queue a full rescan.
+            if (newProps.opacity != oldProps.opacity)
             {
-                // A top-down rescan IS needed to cast new shadows.
                 World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(pos.x + position.x, pos.z + position.y));
-            }
-            // If we are breaking an opaque block...
-            else if (!newIsOpaque && oldIsOpaque)
-            {
-                // A top-down rescan is only needed if the block we broke MIGHT have been letting light through.
-                // Check the block directly above. If it's transparent, we've opened a new path to the sky.
-                VoxelState? stateAbove = GetState(pos + Vector3Int.up);
-                if (stateAbove.HasValue && stateAbove.Value.Properties.opacity == 0)
-                {
-                    World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(pos.x + position.x, pos.z + position.y));
-                }
             }
 
             // --- Notify World of Changes for Mesh Rebuilds ---

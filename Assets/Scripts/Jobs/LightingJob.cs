@@ -226,52 +226,40 @@ namespace Jobs
             }
         }
 
-        // This implementation is too simple and causes issues with semi-transparent blocks.
-        // It should be changed to correctly handle diminishing light levels.
         private void RecalculateSunlightForColumn(int x, int z, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue)
         {
-            byte currentSunlight = 15; // Start with full sunlight from the sky.
+            byte lightFromSky = 15;
 
             for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
             {
-                if (currentSunlight == 0)
-                {
-                    // Optimization: If light is zero, everything below is also zero.
-                    // We still need to check for changes to queue removals correctly.
-                    var pos = new Vector3Int(x, y, z);
-                    uint packedData = map[GetIndex(pos)];
-                    byte oldLight = BurstVoxelDataBitMapping.GetSunlight(packedData);
-                    if (oldLight > 0)
-                    {
-                        SetLight(pos, 0, LightChannel.Sun);
-                        rQueue.Enqueue(new LightRemovalNode { Pos = pos, LightLevel = oldLight });
-                    }
-
-                    continue;
-                }
-
                 var currentPos = new Vector3Int(x, y, z);
-                uint currentPacked = map[GetIndex(currentPos)];
-                byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(currentPacked);
-                BlockTypeJobData props = blockTypes[BurstVoxelDataBitMapping.GetId(currentPacked)];
+                int mapIndex = GetIndex(currentPos);
+                uint currentPacked = map[mapIndex];
 
-                // Update the block's light level
-                if (oldSunlight != currentSunlight)
+                byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(currentPacked);
+
+                // Compare the light that SHOULD be at this level (lightFromSky) with what IS there (oldSunlight).
+                if (oldSunlight != lightFromSky)
                 {
-                    SetLight(currentPos, currentSunlight, LightChannel.Sun);
-                    // Queue updates based on the change
-                    if (currentSunlight > oldSunlight)
+                    // Update the map with the correct light level for this height.
+                    SetLight(currentPos, lightFromSky, LightChannel.Sun);
+
+                    // If the new light is brighter, it's a new source. It needs to be propagated.
+                    if (lightFromSky > oldSunlight)
                     {
                         pQueue.Enqueue(currentPos);
                     }
+                    // If the new light is darker, we must flood-fill remove the old, brighter light.
                     else
                     {
                         rQueue.Enqueue(new LightRemovalNode { Pos = currentPos, LightLevel = oldSunlight });
                     }
                 }
 
-                // Diminish the light for the next block down
-                currentSunlight = (byte)Mathf.Max(0, currentSunlight - props.opacity);
+                // Now, calculate the light for the block BELOW this one.
+                // This must happen AFTER processing the current block.
+                BlockTypeJobData props = blockTypes[BurstVoxelDataBitMapping.GetId(currentPacked)];
+                lightFromSky = (byte)Mathf.Max(0, lightFromSky - props.opacity);
             }
         }
 
