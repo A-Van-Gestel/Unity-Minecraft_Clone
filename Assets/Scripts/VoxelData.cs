@@ -114,13 +114,33 @@ public static class VoxelData
 
     public static int CalculateSeed(string seedText)
     {
-        if (string.IsNullOrEmpty(seedText) || seedText.Length <= 1) // TextMeshPro empty string has Length of 1 -_-
+        // Trim ZERO WIDTH SPACE (U+8203) from the string that TextMeshPro always adds -_-.
+        seedText = seedText.Trim((char)8203);
+
+        // 1. Handle null or empty strings by generating a random seed.
+        if (string.IsNullOrEmpty(seedText))
         {
             int randomSeed = new Random().Next(int.MinValue, int.MaxValue);
-            Debug.Log($"VoxelData.CalculateSeed | Using Random seed: {randomSeed}");
-            seedText = randomSeed.ToString();
+            int hashCode = randomSeed.ToString().GetHashCode();
+            int safeHashCode = Mathf.Abs(hashCode) / 10000; // TODO: This is a hack to make the make the world generation not shit itself.
+            Debug.Log($"VoxelData.CalculateSeed | Using Random seed: {randomSeed} | Actual seed: {safeHashCode}");
+            return safeHashCode;
         }
 
-        return Mathf.Abs(seedText.GetHashCode()) / 10000;
+        // 2. Try to parse the string as an integer.
+        int parsedSeed;
+        if (int.TryParse(seedText, out parsedSeed))
+        {
+            Debug.Log($"VoxelData.CalculateSeed | Using integer seed: {parsedSeed}");
+            return parsedSeed; // Return the parsed integer directly.
+        }
+        // 3. Seed was string (e.g., "hello world").
+        else
+        {
+            int hashCode = seedText.GetHashCode();
+            int safeHashCode = Mathf.Abs(hashCode) / 10000; // TODO: This is a hack to make the make the world generation not shit itself.
+            Debug.Log($"VoxelData.CalculateSeed | Using hash of string \"{seedText}\" | Actual seed: {safeHashCode}");
+            return safeHashCode;
+        }
     }
 }
