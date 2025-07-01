@@ -95,8 +95,9 @@ public class World : MonoBehaviour
     private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<uint> map, NativeQueue<VoxelMod> mods)> generationJobs = new Dictionary<ChunkCoord, (JobHandle, NativeArray<uint>, NativeQueue<VoxelMod>)>();
     private Dictionary<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> meshJobs = new Dictionary<ChunkCoord, (JobHandle, MeshDataJobOutput)>();
 
-    private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<uint> map, NativeQueue<LightQueueNode> sunLightQueue, NativeQueue<LightQueueNode> blockLightQueue, NativeQueue<Vector2Int> sunLightRecalcQueue, NativeList<LightModification> mods)> lightingJobs =
-        new Dictionary<ChunkCoord, (JobHandle, NativeArray<uint>, NativeQueue<LightQueueNode>, NativeQueue<LightQueueNode>, NativeQueue<Vector2Int>, NativeList<LightModification>)>();
+    private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<uint> map, NativeQueue<LightQueueNode> sunLightQueue, NativeQueue<LightQueueNode> blockLightQueue, NativeQueue<Vector2Int> sunLightRecalcQueue, NativeList<LightModification> mods, NativeArray<bool> isStable)>
+        lightingJobs =
+            new Dictionary<ChunkCoord, (JobHandle, NativeArray<uint>, NativeQueue<LightQueueNode>, NativeQueue<LightQueueNode>, NativeQueue<Vector2Int>, NativeList<LightModification>, NativeArray<bool>)>();
 
     #region Singleton pattern
 
@@ -790,6 +791,7 @@ public class World : MonoBehaviour
         // They MUST be persistent.
         var mapCopy = new NativeArray<uint>(chunk.chunkData.map, Allocator.Persistent);
         var crossChunkMods = new NativeList<LightModification>(Allocator.Persistent);
+        var isStableFlag = new NativeArray<bool>(1, Allocator.Persistent);
 
         // Get propagation queues from ChunkData
         var sunLightBfs = chunk.chunkData.GetSunlightQueueForJob(Allocator.Persistent);
@@ -837,7 +839,8 @@ public class World : MonoBehaviour
             blockTypes = blockTypesJobData,
 
             // Output list for modified neighbor modifications
-            crossChunkLightMods = crossChunkMods
+            crossChunkLightMods = crossChunkMods,
+            isStable = isStableFlag
         };
 
         // Schedule the main job
@@ -860,7 +863,7 @@ public class World : MonoBehaviour
         chunk.chunkData.hasLightChangesToProcess = false;
 
         // Store this final, all-encompassing handle, along with the persistent data that needs to be processed later.
-        lightingJobs.Add(coord, (finalHandle, mapCopy, sunLightBfs, blockLightBfs, sunLightRecalc, crossChunkMods));
+        lightingJobs.Add(coord, (finalHandle, mapCopy, sunLightBfs, blockLightBfs, sunLightRecalc, crossChunkMods, isStableFlag));
     }
 
     public void AddModification(VoxelMod mod)
@@ -1005,13 +1008,13 @@ public class World : MonoBehaviour
             if (jobEntry.Value.handle.IsCompleted)
             {
                 jobEntry.Value.handle.Complete();
+                bool isChunkStable = jobEntry.Value.isStable[0];
 
                 ChunkData chunkData = worldData.RequestChunk(new Vector2Int(jobEntry.Key.X * VoxelData.ChunkWidth, jobEntry.Key.Z * VoxelData.ChunkWidth), false);
                 if (chunkData != null && chunkData.isPopulated)
                 {
-                    // 1. Copy the modified map back. This chunk definitely needs a rebuild.
+                    // 1. Copy the modified map back.
                     jobEntry.Value.map.CopyTo(chunkData.map);
-                    chunksToRebuildMesh.Add(jobEntry.Key);
 
                     // 2. Process cross-chunk modifications.
                     foreach (LightModification mod in jobEntry.Value.mods)
@@ -1048,12 +1051,26 @@ public class World : MonoBehaviour
                     }
                 }
 
-                // 3. Dispose of all the temporary job data.
+                // 3. Check if the chunk is stable.
+                if (isChunkStable)
+                {
+                    // The chunk is stable! It's now safe to request a mesh rebuild.
+                    chunksToRebuildMesh.Add(jobEntry.Key);
+                }
+                else
+                {
+                    // The chunk is NOT stable. It needs another lighting pass.
+                    // We re-assert the flag to ensure the scheduler picks it up next frame.
+                    chunkData.hasLightChangesToProcess = true;
+                }
+
+                // 4. Dispose of all the temporary job data.
                 jobEntry.Value.map.Dispose();
                 jobEntry.Value.sunLightQueue.Dispose();
                 jobEntry.Value.blockLightQueue.Dispose();
                 jobEntry.Value.sunLightRecalcQueue.Dispose();
                 jobEntry.Value.mods.Dispose();
+                jobEntry.Value.isStable.Dispose();
 
                 completedCoords.Add(jobEntry.Key);
             }

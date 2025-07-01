@@ -36,6 +36,7 @@ namespace Jobs
 
         // --- OUTPUT ---
         public NativeList<LightModification> crossChunkLightMods;
+        public NativeArray<bool> isStable;
 
         public void Execute()
         {
@@ -100,7 +101,7 @@ namespace Jobs
                 PropagateLight(pos, LightChannel.Sun, sunlightPlacementQueue);
             }
 
-            // --- PASS 3 & 4: BLOCKLIGHT PROPAGATION (This logic can remain as is) ---
+            // --- PASS 3 & 4: BLOCKLIGHT PROPAGATION ---
             while (blocklightRemovalQueue.TryDequeue(out LightRemovalNode node))
             {
                 PropagateBlockLightDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue);
@@ -110,6 +111,23 @@ namespace Jobs
             {
                 PropagateLight(pos, LightChannel.Block, blocklightPlacementQueue);
             }
+
+            // --- FINAL STEP ---
+            // After all passes, check if any work remains. The chunk is only stable if ALL internal queues are empty.
+            if (sunlightRemovalQueue.IsEmpty() &&
+                sunlightPlacementQueue.IsEmpty() &&
+                blocklightRemovalQueue.IsEmpty() &&
+                blocklightPlacementQueue.IsEmpty())
+            {
+                isStable[0] = true;
+            }
+            else
+            {
+                // This job pass is finished, but it has generated more work for a subsequent pass.
+                // For example, a removal has queued up a placement. We must run again.
+                isStable[0] = false;
+            }
+
 
             // --- CLEANUP ---
             sunlightRemovalQueue.Dispose();
