@@ -2,7 +2,7 @@
   "dependencies": {
     "com.domybest.mybox": "https://github.com/Deadcows/MyBox.git",
     "com.unity.2d.sprite": "1.0.0",
-    "com.unity.burst": "1.8.22",
+    "com.unity.burst": "1.8.23",
     "com.unity.collections": "2.5.7",
     "com.unity.feature.development": "1.0.2",
     "com.unity.ide.rider": "3.0.36",
