@@ -40,10 +40,10 @@ namespace Jobs
                             Map[mapIndex] = BurstVoxelDataBitMapping.SetSunLight(packedData, 0);
                         }
                         // Else if this block is opaque, it obstructs the light.
-                        // It becomes dark, and everything below it will also be dark.
+                        // It receives full sunlight (15), and everything below it will be dark.
                         else if (props.opacity > 0)
                         {
-                            Map[mapIndex] = BurstVoxelDataBitMapping.SetSunLight(packedData, 0);
+                            Map[mapIndex] = BurstVoxelDataBitMapping.SetSunLight(packedData, 15);
                             obstructed = true;
                         }
                         // Else the block is transparent (like air or glass), so sunlight passes through.
