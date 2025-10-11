@@ -52,6 +52,7 @@ public class Player : MonoBehaviour
     private Transform highlightBlocksParent;
     public Transform highlightBlock;
     public Transform placeBlock;
+
     /// <summary>
     /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
     /// </summary>
@@ -255,6 +256,10 @@ public class Player : MonoBehaviour
         // PLACING & DESTROYING BLOCKS
         if (Input.GetKeyDown(KeyCode.F2))
             showHighlightBlocks = !showHighlightBlocks;
+
+        // TOGGLE CHUNK BORDERS
+        if (Input.GetKeyDown(KeyCode.F5))
+            world.settings.showChunkBorders = !world.settings.showChunkBorders;
 
         if (highlightBlock.gameObject.activeSelf)
         {

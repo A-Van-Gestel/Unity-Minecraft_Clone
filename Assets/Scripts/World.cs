@@ -95,9 +95,12 @@ public class World : MonoBehaviour
     private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<uint> map, NativeQueue<VoxelMod> mods)> generationJobs = new Dictionary<ChunkCoord, (JobHandle, NativeArray<uint>, NativeQueue<VoxelMod>)>();
     private Dictionary<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> meshJobs = new Dictionary<ChunkCoord, (JobHandle, MeshDataJobOutput)>();
 
-    private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<uint> map, NativeQueue<LightQueueNode> sunLightQueue, NativeQueue<LightQueueNode> blockLightQueue, NativeQueue<Vector2Int> sunLightRecalcQueue, NativeList<LightModification> mods, NativeArray<bool> isStable)>
-        lightingJobs =
-            new Dictionary<ChunkCoord, (JobHandle, NativeArray<uint>, NativeQueue<LightQueueNode>, NativeQueue<LightQueueNode>, NativeQueue<Vector2Int>, NativeList<LightModification>, NativeArray<bool>)>();
+    private Dictionary<ChunkCoord, LightingJobData> lightingJobs = new Dictionary<ChunkCoord, LightingJobData>();
+
+    // --- Chunk Border Visualization ---
+    private Dictionary<ChunkCoord, GameObject> chunkBorders = new Dictionary<ChunkCoord, GameObject>();
+    private Transform chunkBorderParent;
+    private bool lastChunkBordersState;
 
     #region Singleton pattern
 
@@ -213,6 +216,12 @@ public class World : MonoBehaviour
         Shader.SetGlobalFloat(ShaderMinGlobalLightLevel, VoxelData.MinLightLevel);
         Shader.SetGlobalFloat(ShaderMaxGlobalLightLevel, VoxelData.MaxLightLevel);
         SetGlobalLightValue();
+
+        // --- Initialize Chunk Border Visualization ---
+        GameObject borderParentGO = new GameObject("Chunk Borders");
+        borderParentGO.transform.SetParent(transform);
+        chunkBorderParent = borderParentGO.transform;
+        lastChunkBordersState = settings.showChunkBorders;
 
         // --- STEP 1: DETERMINE INITIAL PLAYER POSITION ---
         // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
@@ -382,6 +391,20 @@ public class World : MonoBehaviour
         {
             // Queue up chunks for generation
             CheckViewDistance();
+        }
+
+        // Toggle chunk border visibility if the setting has changed.
+        if (lastChunkBordersState != settings.showChunkBorders)
+        {
+            foreach (var borderObject in chunkBorders.Values)
+            {
+                if (borderObject != null)
+                {
+                    borderObject.SetActive(settings.showChunkBorders);
+                }
+            }
+
+            lastChunkBordersState = settings.showChunkBorders;
         }
 
         playerLastChunkCoord = playerChunkCoord;
@@ -1257,6 +1280,12 @@ public class World : MonoBehaviour
         // Deactivate chunks that are no longer in view.
         foreach (ChunkCoord c in previouslyActiveChunks.AsParallel().Where(c => !currentViewChunks.Contains(c) && chunks[c.X, c.Z] != null))
         {
+            if (chunkBorders.TryGetValue(c, out GameObject borderObject))
+            {
+                Destroy(borderObject);
+                chunkBorders.Remove(c);
+            }
+
             chunks[c.X, c.Z].isActive = false;
         }
 
@@ -1266,10 +1295,16 @@ public class World : MonoBehaviour
             if (chunks[c.X, c.Z] == null)
             {
                 chunks[c.X, c.Z] = new Chunk(c, createGameObject: true);
+                CreateChunkBorder(c);
                 RequestChunkMeshRebuild(chunks[c.X, c.Z]);
             }
             else if (!chunks[c.X, c.Z].isActive)
             {
+                if (!chunkBorders.ContainsKey(c))
+                {
+                    CreateChunkBorder(c);
+                }
+
                 chunks[c.X, c.Z].isActive = true;
                 RequestChunkMeshRebuild(chunks[c.X, c.Z]);
             }
@@ -1277,6 +1312,18 @@ public class World : MonoBehaviour
 
         // Update the master activeChunks set.
         activeChunks = currentViewChunks;
+    }
+
+    private void CreateChunkBorder(ChunkCoord coord)
+    {
+        if (chunkBorders.ContainsKey(coord)) return;
+
+        GameObject borderObject = new GameObject($"Border {coord.X}, {coord.Z}");
+        borderObject.transform.SetParent(chunkBorderParent);
+        borderObject.transform.position = new Vector3(coord.X * VoxelData.ChunkWidth, 0, coord.Z * VoxelData.ChunkWidth);
+        borderObject.AddComponent<ChunkBorderVisualizer>();
+        borderObject.SetActive(settings.showChunkBorders);
+        chunkBorders.Add(coord, borderObject);
     }
 
     /// <summary>
@@ -1638,4 +1685,8 @@ public class Settings
 
     [Header("Bonus Stuff")]
     public bool enableChunkLoadAnimations = false;
+
+    [Header("Debug")]
+    [Tooltip("Visualize chunk borders in the scene view.")]
+    public bool showChunkBorders = false;
 }
