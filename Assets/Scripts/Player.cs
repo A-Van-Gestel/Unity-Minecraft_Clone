@@ -6,6 +6,9 @@ public class Player : MonoBehaviour
     [Tooltip("Makes the player not be affected by gravity.")]
     public bool isFlying = false;
 
+    [Tooltip("Allows the player to fly through blocks.")]
+    public bool isNoclipping = false;
+
     public bool isGrounded;
     public bool isSprinting;
 
@@ -66,6 +69,15 @@ public class Player : MonoBehaviour
 
     public Toolbar toolbar;
 
+    // A struct to hold the results of our voxel raycast.
+    public struct VoxelRaycastResult
+    {
+        public bool didHit;
+        public Vector3Int hitPosition;
+        public Vector3Int placePosition;
+    }
+
+
     private void Start()
     {
         playerCamera = GameObject.Find("Main Camera").transform;
@@ -109,7 +121,7 @@ public class Player : MonoBehaviour
             PlaceCursorBlocks();
 
             // Rotates the player on the X axis
-            transform.Rotate(Vector3.up * mouseHorizontal * Time.timeScale * world.settings.mouseSensitivityX);
+            transform.Rotate(Vector3.up * (mouseHorizontal * Time.timeScale * world.settings.mouseSensitivityX));
 
             // Rotates the camera on the Y axis
             float angle = (playerCamera.localEulerAngles.x - mouseVertical * Time.timeScale * world.settings.mouseSensitivityY + 360) % 360;
@@ -186,24 +198,27 @@ public class Player : MonoBehaviour
         if (velocity.magnitude > 1.0f)
             velocity.Normalize();
 
-        velocity = velocity * Time.fixedDeltaTime * moveSpeed;
+        velocity *= (Time.fixedDeltaTime * moveSpeed);
 
         // Apply vertical momentum (falling / jumping)
-        velocity += Vector3.up * verticalMomentum * Time.fixedDeltaTime;
+        velocity += Vector3.up * (verticalMomentum * Time.fixedDeltaTime);
 
 
-        // COLLISION
-        if ((velocity.z > 0 && Front) || (velocity.z < 0 && Back))
-            velocity.z = 0;
+        // COLLISION (Only apply if not Noclipping)
+        if (!isNoclipping)
+        {
+            if ((velocity.z > 0 && Front) || (velocity.z < 0 && Back))
+                velocity.z = 0;
 
-        if ((velocity.x > 0 && Right) || (velocity.x < 0 && Left))
-            velocity.x = 0;
+            if ((velocity.x > 0 && Right) || (velocity.x < 0 && Left))
+                velocity.x = 0;
 
-        if (velocity.y < 0)
-            velocity.y = CheckDownSpeed(velocity.y);
+            if (velocity.y < 0)
+                velocity.y = CheckDownSpeed(velocity.y);
 
-        if (velocity.y > 0)
-            velocity.y = CheckUpSpeed(velocity.y);
+            if (velocity.y > 0)
+                velocity.y = CheckUpSpeed(velocity.y);
+        }
     }
 
     private void GetPlayerInputs()
@@ -227,7 +242,18 @@ public class Player : MonoBehaviour
 
         // FLYING
         if (Input.GetKeyDown(KeyCode.F1))
+        {
             isFlying = !isFlying;
+            if (!isFlying) isNoclipping = false; // Disable noclip when flight is disabled
+        }
+
+
+        // NOCLIP (GHOST MODE)
+        if (Input.GetKeyDown(KeyCode.F6))
+        {
+            isNoclipping = !isNoclipping;
+            if (isNoclipping) isFlying = true; // Noclip requires flying
+        }
 
         if (!isFlying)
         {
@@ -284,20 +310,27 @@ public class Player : MonoBehaviour
         }
     }
 
-    private void PlaceCursorBlocks()
+    /// <summary>
+    /// Centralized method to cast a ray from the player's camera to find a voxel.
+    /// </summary>
+    /// <returns>A VoxelRaycastResult struct containing information about the hit.</returns>
+    public VoxelRaycastResult RaycastForVoxel()
     {
         float step = checkIncrement;
 
         while (step < reach)
         {
             Vector3 pos = playerCamera.position + (playerCamera.forward * step);
+
             if (world.CheckForVoxel(pos))
             {
+                VoxelRaycastResult result = new VoxelRaycastResult { didHit = true };
+                
                 // DESTROY HIGHLIGHT BLOCK
-                highlightBlock.position = new Vector3(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
+                result.hitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
 
                 // PLACE HIGHLIGHT BLOCK
-                // Calculate place block position based on smallest x, y, z value, using highlightBlock position as your origin.
+                // Calculate place block position based on smallest x, y, z value, using HitPosition position as your origin.
                 float xCheck = pos.x % 1;
                 if (xCheck > 0.5f)
                     xCheck = xCheck - 1;
@@ -312,53 +345,68 @@ public class Player : MonoBehaviour
                 {
                     // place block on x-axis
                     if (xCheck < 0)
-                        placeBlock.position = highlightBlock.position + Vector3.right;
+                        result.placePosition = result.hitPosition + Vector3Int.right;
                     else
-                        placeBlock.position = highlightBlock.position + Vector3.left;
+                        result.placePosition = result.hitPosition + Vector3Int.left;
                 }
                 else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
                 {
                     // place block on z axis
                     if (zCheck < 0)
-                        placeBlock.position = highlightBlock.position + Vector3.forward;
+                        result.placePosition = result.hitPosition + Vector3Int.forward;
                     else
-                        placeBlock.position = highlightBlock.position + Vector3.back;
+                        result.placePosition = result.hitPosition + Vector3Int.back;
                 }
                 else
                 {
                     // place block on y-axis by default
                     if (yCheck < 0)
-                        placeBlock.position = highlightBlock.position + Vector3.up;
+                        result.placePosition = result.hitPosition + Vector3Int.up;
                     else
-                        placeBlock.position = highlightBlock.position + Vector3.down;
+                        result.placePosition = result.hitPosition + Vector3Int.down;
                 }
 
-
-                // Don't show, place block highlight inside the player or when place block is inside solid block or when the placed block would be outside the world or when current itemSlot is empty.
-                Vector3 playerPosition = transform.position;
-                Vector3 playerCoord = new Vector3(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
-                if (playerCoord != placeBlock.position && (playerCoord + new Vector3(0, 1, 0)) != placeBlock.position // Placed block isn't inside the player
-                                                       && world.worldData.IsVoxelInWorld(placeBlock.position) // Placed block is inside the world
-                                                       && !world.CheckForVoxel(placeBlock.position) // Placed block isn't inside another voxel
-                                                       && toolbar.slots[toolbar.slotIndex].itemSlot.HasItem) // Current itemSlot isn't empty
-                    blockPlaceable = true;
-                else
-                    blockPlaceable = false;
-
-                // SHOW HIGHLIGHT BLOCKS
-                highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
-
-                highlightBlock.gameObject.SetActive(true);
-                placeBlock.gameObject.SetActive(blockPlaceable);
-
-                return;
+                return result;
             }
 
             step += checkIncrement;
         }
 
-        highlightBlock.gameObject.SetActive(false);
-        placeBlock.gameObject.SetActive(false);
+        // If we get here, we didn't hit anything.
+        return new VoxelRaycastResult { didHit = false };
+    }
+
+    private void PlaceCursorBlocks()
+    {
+        VoxelRaycastResult result = RaycastForVoxel();
+
+        if (result.didHit)
+        {
+            highlightBlock.position = result.hitPosition;
+            placeBlock.position = result.placePosition;
+
+            // Check if the placement position is valid.
+            Vector3 playerPosition = transform.position;
+            Vector3Int playerCoord = new Vector3Int(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
+
+            blockPlaceable =
+                result.placePosition != playerCoord && // Not inside player's feet
+                result.placePosition != (playerCoord + Vector3Int.up) && // Not inside player's head
+                world.worldData.IsVoxelInWorld(result.placePosition) &&
+                !world.CheckForVoxel(result.placePosition) &&
+                toolbar.slots[toolbar.slotIndex].itemSlot.HasItem;
+
+            // Set highlight objects active state
+            highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
+            highlightBlock.gameObject.SetActive(true);
+            placeBlock.gameObject.SetActive(blockPlaceable);
+        }
+        else
+        {
+            // If we didn't hit a block, hide the highlights.
+            highlightBlock.gameObject.SetActive(false);
+            placeBlock.gameObject.SetActive(false);
+        }
     }
 
     private float CheckDownSpeed(float downSpeed)

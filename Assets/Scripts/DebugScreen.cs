@@ -1,6 +1,7 @@
 using System.Text;
 using Data;
 using JetBrains.Annotations;
+using MyBox;
 using TMPro;
 using Unity.Profiling;
 using UnityEngine;
@@ -47,6 +48,9 @@ public class DebugScreen : MonoBehaviour
     // --- Cached Data (updated periodically) ---
     private float frameRate;
     private VoxelState? groundVoxelState;
+    private Vector3Int? groundVoxelPos;
+    private VoxelState? targetVoxelState;
+    private Vector3Int? targetVoxelPos;
 
     [CanBeNull]
     private Chunk currentChunk;
@@ -157,7 +161,12 @@ public class DebugScreen : MonoBehaviour
     {
         Vector3 playerPos = player.transform.position;
         // Update Ground Voxel State
-        groundVoxelState = world.GetVoxelState(playerPos - Vector3.down);
+        Vector3 groundVoxelPosVector3 = playerPos + Vector3.down;
+        groundVoxelState = world.GetVoxelState(groundVoxelPosVector3);
+        groundVoxelPos = (groundVoxelPosVector3).ToVector3Int();
+
+        // Update Target Voxel State (for Inspector)
+        UpdateTargetVoxel();
 
         // Update Current Chunk
         currentChunk = world.worldData.IsVoxelInWorld(playerPos) ? world.GetChunkFromVector3(playerPos) : null;
@@ -170,6 +179,26 @@ public class DebugScreen : MonoBehaviour
         gcAllocatedInFrame = gcAllocatedInFrameRecorder.LastValue;
         gcReservedMemory = gcReservedMemoryRecorder.LastValue;
         systemUsedMemory = systemUsedMemoryRecorder.LastValue;
+    }
+
+    /// <summary>
+    /// Raycasts to find the voxel the player is looking at.
+    /// </summary>
+    private void UpdateTargetVoxel()
+    {
+        Player.VoxelRaycastResult result = player.RaycastForVoxel();
+
+        if (result.didHit)
+        {
+            targetVoxelPos = result.hitPosition;
+            targetVoxelState = world.GetVoxelState(result.hitPosition);
+        }
+        else
+        {
+            // If we didn't hit anything, clear the data.
+            targetVoxelPos = null;
+            targetVoxelState = null;
+        }
     }
 
     private void BuildDebugString()
@@ -206,7 +235,7 @@ public class DebugScreen : MonoBehaviour
         }
 
         // Self-diagnostic line
-        debugTextBuilder.Append("Profiler Status: ").AppendLine(boolToString(Profiler.enabled));
+        debugTextBuilder.Append("Profiler Status: ").AppendLine(BoolToString(Profiler.enabled));
         debugTextBuilder.AppendLine();
 
         // --- World & Orientation Info ---
@@ -227,6 +256,7 @@ public class DebugScreen : MonoBehaviour
         debugTextBuilder.AppendLine("PLAYER:");
         debugTextBuilder.Append("isGrounded: ").Append(player.isGrounded)
             .Append(" | isFlying: ").Append(player.isFlying)
+            .Append(" | isNoclipping: ").Append(player.isNoclipping)
             .Append(" | showHighlight: ").Append(player.showHighlightBlocks).AppendLine();
 
         debugTextBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", player.moveSpeed)
@@ -235,10 +265,38 @@ public class DebugScreen : MonoBehaviour
         debugTextBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", player.velocity.x, player.velocity.y, player.velocity.z).AppendLine();
         debugTextBuilder.AppendLine();
 
-        // --- Lighting Info ---
-        debugTextBuilder.AppendLine("LIGHTING:");
-        string groundLightLevel = groundVoxelState.HasValue ? groundVoxelState.Value.light.ToString() : "NULL";
-        debugTextBuilder.Append("Ground Light Level: ").AppendLine(groundLightLevel);
+        // --- Ground Voxel Inspector ---
+        debugTextBuilder.AppendLine("GROUND VOXEL:");
+        if (groundVoxelState.HasValue && groundVoxelPos.HasValue)
+        {
+            VoxelState state = groundVoxelState.Value;
+            Vector3Int voxelPos = groundVoxelPos.Value;
+            debugTextBuilder.Append("Name: ").AppendLine(state.Properties.blockName);
+            debugTextBuilder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
+            debugTextBuilder.Append("Light Levels (Sun / Block / Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.light).AppendLine();
+            debugTextBuilder.Append("Orientation: ").AppendLine(state.orientation.ToString());
+        }
+        else
+        {
+            debugTextBuilder.AppendLine("None");
+        }
+        debugTextBuilder.AppendLine();
+
+        // --- Target Voxel Inspector ---
+        debugTextBuilder.AppendLine("TARGET VOXEL:");
+        if (targetVoxelState.HasValue && targetVoxelPos.HasValue)
+        {
+            VoxelState state = targetVoxelState.Value;
+            Vector3Int voxelPos = targetVoxelPos.Value;
+            debugTextBuilder.Append("Name: ").AppendLine(state.Properties.blockName);
+            debugTextBuilder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
+            debugTextBuilder.Append("Light Levels (Sun / Block / Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.light).AppendLine();
+            debugTextBuilder.Append("Orientation: ").AppendLine(state.orientation.ToString());
+        }
+        else
+        {
+            debugTextBuilder.AppendLine("None");
+        }
         debugTextBuilder.AppendLine();
 
         // --- Chunk Info ---
@@ -315,5 +373,5 @@ public class DebugScreen : MonoBehaviour
         return "North";
     }
 
-    private static string boolToString(bool value) => value ? "Enabled" : "Disabled";
+    private static string BoolToString(bool value) => value ? "Enabled" : "Disabled";
 }
