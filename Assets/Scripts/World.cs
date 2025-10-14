@@ -563,6 +563,7 @@ public class World : MonoBehaviour
                 isSolid = blockTypes[i].isSolid,
                 isWater = blockTypes[i].isWater,
                 opacity = blockTypes[i].opacity,
+                lightEmission = blockTypes[i].lightEmission,
                 renderNeighborFaces = blockTypes[i].renderNeighborFaces,
                 isActive = blockTypes[i].isActive,
                 backFaceTexture = blockTypes[i].backFaceTexture,
@@ -1617,6 +1618,29 @@ public class BlockType
                 return 0;
         }
     }
+
+    // --- HELPER PROPERTIES ---
+
+    /// <summary>
+    /// Returns true if the block has maximum opacity, effectively blocking all light.
+    /// </summary>
+    public bool IsOpaque => opacity >= 15;
+
+    /// <summary>
+    /// Returns true if the block has zero opacity, allowing light to pass through without reduction.
+    /// </summary>
+    public bool IsFullyTransparentToLight => opacity == 0;
+
+    /// <summary>
+    /// Returns true if the block emits its own light.
+    /// </summary>
+    public bool IsLightSource => lightEmission > 0;
+
+    /// <summary>
+    /// Returns true if the block is considered transparent for meshing purposes,
+    /// meaning it does not cull the faces of adjacent solid blocks.
+    /// </summary>
+    public bool IsTransparentForMesh => !isSolid || renderNeighborFaces;
 
     public override string ToString()
     {
