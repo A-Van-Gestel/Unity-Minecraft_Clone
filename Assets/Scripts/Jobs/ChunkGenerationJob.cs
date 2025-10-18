@@ -11,11 +11,18 @@ namespace Jobs
 {
     public struct ChunkGenerationJob : IJob
     {
+        // --- Input Data ---
+
+        #region Input Data
+
         [ReadOnly]
         public int seed;
 
         [ReadOnly]
         public Vector2Int chunkPosition;
+        
+        [ReadOnly]
+        public NativeArray<BlockTypeJobData> blockTypes;
 
         [ReadOnly]
         public NativeArray<BiomeAttributesJobData> biomes;
@@ -23,24 +30,51 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<LodeJobData> allLodes;
 
-        // This is the output of our job
+        #endregion
+
+        // --- Output Data ---
+
+        #region Output Data
+
         public NativeArray<uint> outputMap;
+        public NativeArray<byte> outputHeightMap;
         public NativeQueue<VoxelMod>.ParallelWriter modifications;
+
+        #endregion
 
         public void Execute()
         {
-            for (int y = 0; y < VoxelData.ChunkHeight; y++)
+            // The loop order is column-major (X -> Z -> Y)
+            // This is efficient for calculating a heightmap.
+            for (int x = 0; x < VoxelData.ChunkWidth; x++)
             {
-                for (int x = 0; x < VoxelData.ChunkWidth; x++)
+                for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
-                    for (int z = 0; z < VoxelData.ChunkWidth; z++)
+                    bool highestBlockFound = false;
+
+                    // Loop from the top of the chunk downwards
+                    for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
                     {
                         Vector3Int globalPos = new Vector3Int(x + chunkPosition.x, y, z + chunkPosition.y);
 
                         byte voxelID = WorldGen.GetVoxel(globalPos, seed, biomes, allLodes);
 
+                        // --- Populate the main voxel map ---
                         int index = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
                         outputMap[index] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, 0, 1);
+
+                        // --- Populate the heightmap ---
+                        // If we haven't found the highest block in this column yet, check if this one is light-obstructing.
+                        if (!highestBlockFound)
+                        {
+                            // Check the opacity from the blockTypes array.
+                            if (blockTypes[voxelID].IsLightObstructing)
+                            {
+                                int heightmapIndex = x + VoxelData.ChunkWidth * z;
+                                outputHeightMap[heightmapIndex] = (byte)y;
+                                highestBlockFound = true;
+                            }
+                        }
 
                         // --- Major Flora Pass (Tree Generation) ---
                         // We can't call Structure.GenerateMajorFlora directly as it's not job-safe.
@@ -63,6 +97,13 @@ namespace Jobs
                                 }
                             }
                         }
+                    }
+
+                    // If after checking the whole column, no opaque block was found, set height to 0.
+                    if (!highestBlockFound)
+                    {
+                        int heightmapIndex = x + VoxelData.ChunkWidth * z;
+                        outputHeightMap[heightmapIndex] = 0;
                     }
                 }
             }

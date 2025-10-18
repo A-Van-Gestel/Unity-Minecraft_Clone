@@ -293,7 +293,7 @@ public class Player : MonoBehaviour
             if (Input.GetMouseButtonDown(0))
             {
                 // OLD: world.GetChunkFromVector3(highlightBlock.position).EditVoxel(highlightBlockPosition, 0);
-                world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), 0));
+                world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), 0, _immediate: true));
             }
 
             // Place block.
@@ -304,7 +304,7 @@ public class Player : MonoBehaviour
 
                 UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
                 // OLD: world.GetChunkFromVector3(placeBlock.position).EditVoxel(placeBlockPosition, itemSlot.itemSlot.stack.id);
-                world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), itemSlot.itemSlot.stack.id, orientation));
+                world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), itemSlot.itemSlot.stack.id, orientation, _immediate: true));
                 itemSlot.itemSlot.Take(1);
             }
         }

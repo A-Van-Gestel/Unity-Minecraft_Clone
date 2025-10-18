@@ -63,6 +63,11 @@ namespace Data
         public bool IsOpaque => opacity >= 15;
 
         /// <summary>
+        /// Returns true if the block has an opacity, and thus has an affect on the light.
+        /// </summary>
+        public bool IsLightObstructing => opacity > 0;
+
+        /// <summary>
         /// Returns true if the block has zero opacity, allowing light to pass through without reduction.
         /// </summary>
         public bool IsFullyTransparentToLight => opacity == 0;

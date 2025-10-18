@@ -286,6 +286,22 @@ public class ChunkCoord : IEquatable<ChunkCoord>
     }
 
     #endregion
+    
+    #region Type Conversion
+
+    public Vector2Int ToVector2Int()
+    {
+        return new Vector2Int(X, Z);
+    }
+
+    public static implicit operator Vector2Int(ChunkCoord coord)
+    {
+        return new Vector2Int(coord.X, coord.Z);
+    }
+    
+    #endregion
+    
+    #region Overides
 
     public override int GetHashCode()
     {
@@ -305,4 +321,11 @@ public class ChunkCoord : IEquatable<ChunkCoord>
 
         return other.X == X && other.Z == Z;
     }
+    
+    public override string ToString()
+    {
+        return $"({X}, {Z})";
+    }
+    
+    #endregion
 }

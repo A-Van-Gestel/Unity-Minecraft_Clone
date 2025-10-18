@@ -1,10 +1,8 @@
 using System;
 using System.Collections.Generic;
 using JetBrains.Annotations;
-using Jobs;
 using Jobs.BurstData;
 using Unity.Collections;
-using Unity.Jobs;
 using UnityEngine;
 
 namespace Data
@@ -30,6 +28,11 @@ namespace Data
 
         [HideInInspector]
         public uint[] map = new uint[VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth];
+    
+        /// <summary>
+        /// The heightmap for this chunk. Stores the Y-level of the highest opaque block for each column.
+        /// </summary>
+        public byte[] heightMap = new byte[VoxelData.ChunkWidth * VoxelData.ChunkWidth];
 
 
         [NonSerialized]
@@ -67,9 +70,10 @@ namespace Data
         }
 
         /// Populate the chunk with voxels from the world generator.
-        public void Populate(NativeArray<uint> jobOutputMap)
+        public void Populate(NativeArray<uint> jobOutputMap, NativeArray<byte> jobOutputHeightMap)
         {
             jobOutputMap.CopyTo(map);
+            jobOutputHeightMap.CopyTo(heightMap);
             isPopulated = true;
 
             World.Instance.worldData.modifiedChunks.Add(this);
@@ -99,31 +103,76 @@ namespace Data
 
             BlockType[] blockTypes = World.Instance.blockTypes;
             BlockType oldProps = blockTypes[oldId];
+            BlockType newProps = blockTypes[newId];
 
             // --- Update The Map ---
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
             // The LightingJob will then fill it with propagated light from neighbors.
-            BlockType newProps = blockTypes[newId];
             uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(newId, 0, newProps.lightEmission, direction);
             map[index] = newPackedData;
+            
+            // --- MAINTAIN HEIGHTMAP ---
+            int heightmapIndex = pos.x + VoxelData.ChunkWidth * pos.z;
+            byte currentHeight = heightMap[heightmapIndex];
+
+            // Case 1: A light-obstructing block was placed ABOVE the current highest block.
+            if (newProps.IsLightObstructing && pos.y > currentHeight)
+            {
+                heightMap[heightmapIndex] = (byte)pos.y;
+            }
+            // Case 2: The current highest light-obstructing block was removed or made fully transparent.
+            else if (!newProps.IsLightObstructing && pos.y == currentHeight)
+            {
+                // We need to scan downwards from here to find the NEW highest block.
+                byte newHeight = 0;
+                for (int y = pos.y - 1; y >= 0; y--)
+                {
+                    int checkIndex = GetIndexFromPosition(pos.x, y, pos.z);
+                    byte checkId = BurstVoxelDataBitMapping.GetId(map[checkIndex]);
+                    if (World.Instance.blockTypes[checkId].IsOpaque)
+                    {
+                        newHeight = (byte)y;
+                        break; // Found the new highest block, stop scanning.
+                    }
+                }
+                heightMap[heightmapIndex] = newHeight;
+            }
 
             // --- Queue Lighting Updates ---
-            // Queue the modified block itself for both channels.
-            // This tells the LightingJob to handle any light removal at this position.
+
+            // 1. Queue the modified block itself for light REMOVAL.
             AddToSunLightQueue(pos, oldSunlight);
             AddToBlockLightQueue(pos, oldBlocklight);
 
-            // If the opacity of the block we changed is different from what was there before,
-            // the entire column's light path might have changed. We MUST queue a full rescan.
+            // 2. "WAKE UP" NEIGHBORS to fill any new empty space with their light.
+            for (int i = 0; i < 6; i++)
+            {
+                Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
+                if (IsVoxelInChunk(neighborPos))
+                {
+                    uint neighborPacked = map[GetIndexFromPosition(neighborPos.x, neighborPos.y, neighborPos.z)];
+
+                    byte neighborSunlight = BurstVoxelDataBitMapping.GetSunlight(neighborPacked);
+                    if (neighborSunlight > 0)
+                        AddToSunLightQueue(neighborPos, 0);
+
+                    byte neighborBlocklight = BurstVoxelDataBitMapping.GetBlocklight(neighborPacked);
+                    if (neighborBlocklight > 0)
+                        AddToBlockLightQueue(neighborPos, 0);
+                }
+            }
+
+            // 3. If opacity changed, queue a full vertical sunlight recalculation.
             if (newProps.opacity != oldProps.opacity)
             {
                 World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(pos.x + position.x, pos.z + position.y));
             }
 
-            // --- Notify World of Changes for Mesh Rebuilds ---
-            World.Instance.NotifyChunkModified(this.position, pos);
+            // --- Notify World and Handle Active Voxels ---
 
-            // --- Handle Active Block and Saving ---
+            // Pass the immediateUpdate flag to the world so it can prioritize the mesh rebuild.
+            World.Instance.NotifyChunkModified(this.position, pos, immediateUpdate);
+
             if (newProps.isActive)
                 chunk?.AddActiveVoxel(pos);
             else if (oldProps.isActive)
@@ -196,34 +245,21 @@ namespace Data
             return nativeQueue;
         }
 
+        /// <summary>
+        /// Recalculates the sunlight for this chunk.
+        /// </summary>
         public void RecalculateSunLightLight()
         {
-            var mapData = new NativeArray<uint>(map, Allocator.TempJob);
-            var blockTypes = World.Instance.GetBlockTypesJobData(Allocator.TempJob);
-            var sunlitVoxels = new NativeList<Vector3Int>(Allocator.TempJob);
-            var lightJob = new InitialSunlightJob
+            WorldData worldData = World.Instance.worldData;
+            
+            for (int x = 0; x < VoxelData.ChunkWidth; x++)
             {
-                Map = mapData,
-                BlockTypes = blockTypes,
-                SunlightPropagationQueue = sunlitVoxels
-            };
-
-            // Schedule job to run on all X/Z columns
-            JobHandle handle = lightJob.Schedule();
-            handle.Complete();
-
-            // Copy data back and dispose
-            lightJob.Map.CopyTo(map);
-
-            // After job completes, add all sunlit voxels to the queue.
-            foreach (Vector3Int voxel in sunlitVoxels)
-            {
-                AddToSunLightQueue(voxel, 0); // The old light was 0 before this.
+                for (int z = 0; z < VoxelData.ChunkWidth; z++)
+                {
+                    // The global position of the column.
+                    worldData.QueueSunlightRecalculation(new Vector2Int(position.x + x, position.y + z));
+                }
             }
-
-            mapData.Dispose();
-            blockTypes.Dispose();
-            sunlitVoxels.Dispose();
         }
 
         # endregion
