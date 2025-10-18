@@ -82,6 +82,10 @@ public class World : MonoBehaviour
     [MyBox.ReadOnly]
     public string appSaveDataPath;
 
+    [Header("Debug")]
+    [Tooltip("The prefab to use for chunk borders.")]
+    public GameObject chunkBorderPrefab;
+
     // Shader Properties
     private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
     private static readonly int ShaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
@@ -935,7 +939,7 @@ public class World : MonoBehaviour
             RequestChunkMeshRebuild(neighborData.chunk, immediate);
         }
     }
-    
+
     private void RequestNeighborMeshRebuilds(ChunkCoord coord)
     {
         // Define coordinates for all 4 direct neighbors
@@ -943,7 +947,7 @@ public class World : MonoBehaviour
         Vector2Int south = new Vector2Int(coord.X, coord.Z - 1);
         Vector2Int east = new Vector2Int(coord.X + 1, coord.Z);
         Vector2Int west = new Vector2Int(coord.X - 1, coord.Z);
-        
+
         // Queue rebuilds for all valid neighbors
         QueueNeighborRebuild(north);
         QueueNeighborRebuild(south);
@@ -1086,14 +1090,14 @@ public class World : MonoBehaviour
                         if (mod.Channel == LightChannel.Sun)
                         {
                             byte currentSunlight = BurstVoxelDataBitMapping.GetSunlight(oldPackedData);
-                            
+
                             // If the block already has full sunlight (15), and this modification would decrease it, ignore the modification.
                             // This prevents a job using stale data from overwriting a correct value set by another job.
                             if (currentSunlight == 15 && mod.LightLevel < 15)
                             {
                                 continue; // Skip this modification
                             }
-                            
+
                             oldLightLevel = BurstVoxelDataBitMapping.GetSunlight(oldPackedData);
                             newPackedData = BurstVoxelDataBitMapping.SetSunLight(oldPackedData, mod.LightLevel);
                         }
@@ -1359,17 +1363,31 @@ public class World : MonoBehaviour
         activeChunks = currentViewChunks;
     }
 
+    #region Debug Methods
+
+    /// <summary>
+    /// Creates a visualisation of the chunk border.
+    /// </summary>
+    /// <param name="coord">The chunk coordinate.</param>
     private void CreateChunkBorder(ChunkCoord coord)
     {
+        if (chunkBorderPrefab == null)
+        {
+            Debug.LogError("ChunkBorderPrefab must be assigned in the World inspector.", this);
+            return;
+        }
+
         if (chunkBorders.ContainsKey(coord)) return;
 
-        GameObject borderObject = new GameObject($"Border {coord.X}, {coord.Z}");
-        borderObject.transform.SetParent(chunkBorderParent);
+        GameObject borderObject = Instantiate(chunkBorderPrefab, chunkBorderParent);
+        borderObject.name = $"Border {coord.X}, {coord.Z}";
         borderObject.transform.position = new Vector3(coord.X * VoxelData.ChunkWidth, 0, coord.Z * VoxelData.ChunkWidth);
-        borderObject.AddComponent<ChunkBorderVisualizer>();
+
         borderObject.SetActive(settings.showChunkBorders);
         chunkBorders.Add(coord, borderObject);
     }
+
+    #endregion
 
     /// <summary>
     /// Finds the Y-coordinate of the highest solid voxel at a given X/Z position.

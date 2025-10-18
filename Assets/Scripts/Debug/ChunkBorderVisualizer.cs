@@ -3,15 +3,29 @@ using UnityEngine;
 
 public class ChunkBorderVisualizer : MonoBehaviour
 {
+    [Header("Visual Settings")]
+    [Tooltip("The material to use for the red chunk border lines.")]
+    public Material borderMaterial; // New public field for the border material
+
+    [Tooltip("The material to use for the yellow grid lines.")]
+    public Material gridMaterial; // New public field for the grid material
+
     [Tooltip("The interval in blocks at which to draw the grid lines.")]
     public int gridInterval = 4;
 
-    private LineRenderer borderLineRenderer;
+    private LineRenderer _borderLineRenderer;
 
     void Start()
     {
+        // Ensure materials are assigned to prevent errors
+        if (borderMaterial == null || gridMaterial == null)
+        {
+            Debug.LogError("Border and Grid materials must be assigned in the ChunkBorderVisualizer inspector.", this);
+            return;
+        }
+
         // Set up the main border renderer on this GameObject
-        borderLineRenderer = gameObject.AddComponent<LineRenderer>();
+        _borderLineRenderer = gameObject.AddComponent<LineRenderer>();
         SetupBorderLineRenderer();
         DrawBorders();
 
@@ -22,29 +36,18 @@ public class ChunkBorderVisualizer : MonoBehaviour
         DrawGrid(gridObject);
     }
 
+    #region Border Methods
+
     private void SetupBorderLineRenderer()
     {
-        var material = new Material(Shader.Find("Legacy Shaders/Particles/Alpha Blended Premultiply"));
-        borderLineRenderer.material = material;
+        // Directly assign the material from the public field.
+        _borderLineRenderer.material = borderMaterial;
 
-        borderLineRenderer.startColor = Color.red;
-        borderLineRenderer.endColor = Color.red;
-        borderLineRenderer.startWidth = 0.15f;
-        borderLineRenderer.endWidth = 0.15f;
-        borderLineRenderer.positionCount = 16;
-        borderLineRenderer.useWorldSpace = false;
-        borderLineRenderer.loop = false;
-    }
-
-    private void SetupGridMesh(GameObject gridObject)
-    {
-        gridObject.AddComponent<MeshFilter>();
-        MeshRenderer mr = gridObject.AddComponent<MeshRenderer>();
-
-        // Use a simple unlit material for the grid lines.
-        var material = new Material(Shader.Find("Legacy Shaders/Particles/Alpha Blended Premultiply"));
-        material.color = Color.yellow;
-        mr.material = material;
+        _borderLineRenderer.startWidth = 0.15f;
+        _borderLineRenderer.endWidth = 0.15f;
+        _borderLineRenderer.positionCount = 16;
+        _borderLineRenderer.useWorldSpace = false;
+        _borderLineRenderer.loop = false;
     }
 
     private void DrawBorders()
@@ -72,7 +75,20 @@ public class ChunkBorderVisualizer : MonoBehaviour
         p[14] = new Vector3(0, h, w); // Go back up
         p[15] = new Vector3(0, h, 0); // Close top loop
 
-        borderLineRenderer.SetPositions(p);
+        _borderLineRenderer.SetPositions(p);
+    }
+
+    #endregion
+
+    #region Grid Methods
+
+    private void SetupGridMesh(GameObject gridObject)
+    {
+        gridObject.AddComponent<MeshFilter>();
+        MeshRenderer mr = gridObject.AddComponent<MeshRenderer>();
+
+        // Directly assign the material for the grid.
+        mr.material = gridMaterial;
     }
 
     private void DrawGrid(GameObject gridObject)
@@ -140,4 +156,6 @@ public class ChunkBorderVisualizer : MonoBehaviour
 
         gridObject.GetComponent<MeshFilter>().mesh = mesh;
     }
+
+    #endregion
 }
