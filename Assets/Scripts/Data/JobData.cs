@@ -151,7 +151,7 @@ namespace Data
         public bool IsOpaque => opacity >= 15;
 
         /// <summary>
-        /// Returns true if the block has an opacity, and thus has an affect on the light.
+        /// Returns true if the block has an opacity, and thus has an effect on the light.
         /// </summary>
         public bool IsLightObstructing => opacity > 0;
 
@@ -192,12 +192,12 @@ namespace Data
                 int maxCount = 0;
 
                 // Iterate through each texture to see how many times it appears.
-                for (int i = 0; i < textures.Length; i++)
+                foreach (int tOuter in textures)
                 {
                     int currentCount = 0;
-                    for (int j = 0; j < textures.Length; j++)
+                    foreach (int tInner in textures)
                     {
-                        if (textures[j] == textures[i])
+                        if (tInner == tOuter)
                         {
                             currentCount++;
                         }
@@ -207,7 +207,7 @@ namespace Data
                     if (currentCount > maxCount)
                     {
                         maxCount = currentCount;
-                        mostFrequentTexture = textures[i];
+                        mostFrequentTexture = tOuter;
                     }
                 }
 
