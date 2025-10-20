@@ -1227,17 +1227,8 @@ public class World : MonoBehaviour
                 // Get the local position within the chunk.
                 Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.globalPosition);
 
-                // Call the authoritative ModifyVoxel method in ChunkData.
-                chunkData.ModifyVoxel(localPos, v.id, v.orientation, v.ImmediateUpdate);
-
-                // --- Apply Fluid Level After Modification ---
-                // TODO: This should not be done here, it should be part of the ModifyVoxel call above.
-                if (v.fluidLevel > 0)
-                {
-                    int index = localPos.x + VoxelData.ChunkWidth * (localPos.y + VoxelData.ChunkHeight * localPos.z);
-                    uint packedData = chunkData.map[index];
-                    chunkData.map[index] = BurstVoxelDataBitMapping.SetFluidLevel(packedData, v.fluidLevel);
-                }
+                // Call the authoritative ModifyVoxel method in ChunkData, passing the entire mod struct.
+                chunkData.ModifyVoxel(localPos, v);
             }
 
             // If part of the batch failed, we already re-queued it.

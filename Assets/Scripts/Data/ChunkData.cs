@@ -84,52 +84,61 @@ namespace Data
         #region Modifier Methods
 
         // --- Modifier Methods --
-        // TODO: Change parameters to accept the full voxel data, not just the ID and direction.
-        public void ModifyVoxel(Vector3Int pos, byte newId, byte direction, bool immediateUpdate = false)
+         /// <summary>
+        /// Modifies a single voxel within the chunk based on the data provided in a VoxelMod struct.
+        /// This is the authoritative method for all block changes in the world. It handles:
+        /// - Updating the voxel map with the new state (ID, orientation, fluid level).
+        /// - Maintaining the chunk's heightmap for lighting calculations.
+        /// - Queuing lighting updates for the modified block and its neighbors.
+        /// - Notifying the World that the chunk has been modified for mesh and active voxel updates.
+        /// </summary>
+        /// <param name="localPos">The position of the voxel within this chunk (local coordinates).</param>
+        /// <param name="mod">The VoxelMod struct containing all data for the new voxel state.</param>
+        public void ModifyVoxel(Vector3Int localPos, VoxelMod mod)
         {
-            if (!IsVoxelInChunk(pos)) return;
+            if (!IsVoxelInChunk(localPos)) return;
             if (World.Instance is null) return;
 
             // Get the current state of the voxel from the flat voxel map
-            int index = GetIndexFromPosition(pos.x, pos.y, pos.z);
+            int index = GetIndexFromPosition(localPos.x, localPos.y, localPos.z);
             uint oldPackedData = map[index];
-            byte oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
 
-            // TODO: This is incorrect, we would need to check if the actual voxel data is the same, not just the ID. (eg: static block rotations would not work currently)
-            if (oldId == newId) // No change if the block ID is the same
-                return;
-
-            // --- Capture Old State ---
-            byte oldBlocklight = BurstVoxelDataBitMapping.GetBlocklight(oldPackedData);
-            byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(oldPackedData);
-
-            BlockType[] blockTypes = World.Instance.blockTypes;
-            BlockType oldProps = blockTypes[oldId];
-            BlockType newProps = blockTypes[newId];
-
-            // --- Update The Map ---
+            // --- Create the new voxel data from the modification ---
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
             // The LightingJob will then fill it with propagated light from neighbors.
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(newId, 0, newProps.lightEmission, direction, newProps.fluidLevel);
+            BlockType newProps = World.Instance.blockTypes[mod.id];
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.id, 0, newProps.lightEmission, mod.orientation, mod.fluidLevel);
+
+            // Check if the full voxel state has actually changed.
+            if (oldPackedData == newPackedData)
+                return;
+
+            // --- Capture Old State for Lighting ---
+            byte oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
+            byte oldBlocklight = BurstVoxelDataBitMapping.GetBlocklight(oldPackedData);
+            byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(oldPackedData);
+            BlockType oldProps = World.Instance.blockTypes[oldId];
+
+            // --- Update The Map ---
             map[index] = newPackedData;
 
             // --- MAINTAIN HEIGHTMAP ---
-            int heightmapIndex = pos.x + VoxelData.ChunkWidth * pos.z;
+            int heightmapIndex = localPos.x + VoxelData.ChunkWidth * localPos.z;
             byte currentHeight = heightMap[heightmapIndex];
 
             // Case 1: A light-obstructing block was placed ABOVE the current highest block.
-            if (newProps.IsLightObstructing && pos.y > currentHeight)
+            if (newProps.IsLightObstructing && localPos.y > currentHeight)
             {
-                heightMap[heightmapIndex] = (byte)pos.y;
+                heightMap[heightmapIndex] = (byte)localPos.y;
             }
             // Case 2: The current highest light-obstructing block was removed or made fully transparent.
-            else if (!newProps.IsLightObstructing && pos.y == currentHeight)
+            else if (!newProps.IsLightObstructing && localPos.y == currentHeight)
             {
                 // We need to scan downwards from here to find the NEW highest block.
                 byte newHeight = 0;
-                for (int y = pos.y - 1; y >= 0; y--)
+                for (int y = localPos.y - 1; y >= 0; y--)
                 {
-                    int checkIndex = GetIndexFromPosition(pos.x, y, pos.z);
+                    int checkIndex = GetIndexFromPosition(localPos.x, y, localPos.z);
                     byte checkId = BurstVoxelDataBitMapping.GetId(map[checkIndex]);
                     if (World.Instance.blockTypes[checkId].IsOpaque)
                     {
@@ -137,20 +146,19 @@ namespace Data
                         break; // Found the new highest block, stop scanning.
                     }
                 }
-
                 heightMap[heightmapIndex] = newHeight;
             }
 
             // --- Queue Lighting Updates ---
 
             // 1. Queue the modified block itself for light REMOVAL.
-            AddToSunLightQueue(pos, oldSunlight);
-            AddToBlockLightQueue(pos, oldBlocklight);
+            AddToSunLightQueue(localPos, oldSunlight);
+            AddToBlockLightQueue(localPos, oldBlocklight);
 
             // 2. "WAKE UP" NEIGHBORS to fill any new empty space with their light.
             for (int i = 0; i < 6; i++)
             {
-                Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
+                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[i];
                 if (IsVoxelInChunk(neighborPos))
                 {
                     uint neighborPacked = map[GetIndexFromPosition(neighborPos.x, neighborPos.y, neighborPos.z)];
@@ -168,13 +176,13 @@ namespace Data
             // 3. If opacity changed, queue a full vertical sunlight recalculation.
             if (newProps.opacity != oldProps.opacity)
             {
-                World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(pos.x + position.x, pos.z + position.y));
+                World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(localPos.x + position.x, localPos.z + position.y));
             }
 
             // --- Notify World and Handle Active Voxels ---
 
             // Pass the immediateUpdate flag to the world so it can prioritize the mesh rebuild.
-            World.Instance.NotifyChunkModified(this.position, pos, immediateUpdate);
+            World.Instance.NotifyChunkModified(this.position, localPos, mod.ImmediateUpdate);
 
             // If the chunk object exists, update its active voxel list immediately.
             // If not (e.g., during initial world gen), the active voxel scan in
@@ -182,17 +190,17 @@ namespace Data
             if (chunk != null)
             {
                 if (newProps.isActive)
-                    chunk.AddActiveVoxel(pos);
+                    chunk.AddActiveVoxel(localPos);
                 else if (oldProps.isActive)
-                    chunk.RemoveActiveVoxel(pos);
+                    chunk.RemoveActiveVoxel(localPos);
             }
 
-            // --- NEW: WAKE UP NEIGHBORS ---
-            // After any modification, check all 6 neighbors. If a neighbor is a stable
-            // water block, force it into the active list so it can check if it needs to flow.
+            // --- WAKE UP NEIGHBORS ---
+            // After any modification, check all 6 neighbors. If a neighbor is a stable fluid block,
+            // force it into the active list so it can check if it needs to flow.
             for (int i = 0; i < 6; i++)
             {
-                Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
+                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[i];
                 VoxelState? neighborState = GetState(neighborPos); // Use GetState to handle cross-chunk checks
 
                 if (neighborState.HasValue && neighborState.Value.id == 19) // If neighbor is water

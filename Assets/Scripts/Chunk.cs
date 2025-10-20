@@ -172,47 +172,6 @@ public class Chunk
         return new Vector3Int(xCheck, yCheck, zCheck);
     }
 
-    public void EditVoxel(Vector3 pos, byte newID)
-    {
-        int xCheck = Mathf.FloorToInt(pos.x);
-        int yCheck = Mathf.FloorToInt(pos.y);
-        int zCheck = Mathf.FloorToInt(pos.z);
-
-        xCheck -= Mathf.FloorToInt(chunkPosition.x);
-        zCheck -= Mathf.FloorToInt(chunkPosition.z);
-
-        chunkData.ModifyVoxel(new Vector3Int(xCheck, yCheck, zCheck), newID, World.Instance.player.orientation, true);
-
-        // // Update Surrounding Chunks
-        // UpdateSurroundingVoxels(xCheck, yCheck, zCheck, immediate: true);
-    }
-
-    // private void UpdateSurroundingVoxels(int x, int y, int z, bool immediate = false)
-    // {
-    //     for (int p = 0; p < 6; p++) // p = faceIndex
-    //     {
-    //         // Skip top (2) and bottom (3) faces, as we don't have chunk neighbors for those
-    //         if (p == 2 || p == 3) continue;
-    //
-    //         Vector3Int neighborPos = new Vector3Int(x, y, z) + VoxelData.FaceChecks[p];
-    //
-    //         // If the neighbor is outside the current chunk...
-    //         if (!chunkData.IsVoxelInChunk(neighborPos))
-    //         {
-    //             // We don't need to check IsVoxelInWorld here, as GetChunkFromVector3 will handle it.
-    //             Vector3 neighborWorldPos = new Vector3(neighborPos.x, neighborPos.y, neighborPos.z) + chunkPosition;
-    //             
-    //             Chunk neighborChunk = World.Instance.GetChunkFromVector3(neighborWorldPos);
-    //
-    //             // If we found a valid, active neighbor chunk, request a mesh rebuild for it.
-    //             if (neighborChunk != null && neighborChunk.isActive)
-    //             {
-    //                 World.Instance.RequestChunkMeshRebuild(neighborChunk, immediate: immediate);
-    //             }
-    //         }
-    //     }
-    // }
-
     #region Mesh Generation
 
     // This is called by World.cs when a mesh job for this chunk is complete.

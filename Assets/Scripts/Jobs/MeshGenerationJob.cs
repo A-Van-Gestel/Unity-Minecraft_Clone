@@ -257,7 +257,7 @@ namespace Jobs
                 int faceIndex = VoxelData.HorizontalFaceChecksIndices[p];
                 VoxelState? neighbor = GetVoxelStateFromLocalPos(pos + VoxelData.FaceChecks[faceIndex]);
 
-                // TODO: The topHeight check causes side faces to always be rendered between different fluid levels, which is not desired.
+                // TODO: The topHeight check causes internal side faces to always be rendered between different fluid levels, which is not desired.
                 // A side face should NOT be drawn if the neighbor is the same fluid type AND its surface is at or above our own surface.
                 if (neighbor.HasValue && blockTypes[neighbor.Value.id].fluidType == props.fluidType && templates[neighbor.Value.FluidLevel] >= topHeight)
                 {

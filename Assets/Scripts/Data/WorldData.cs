@@ -149,67 +149,6 @@ namespace Data
             return chunkData.GetState(voxelPos);
         }
 
-        public void SetVoxel(Vector3 pos, byte value, byte direction)
-        {
-            // If the voxel is outside the world, we don't need to do anything with it.
-            if (!IsVoxelInWorld(pos))
-                return;
-
-            // // Before requesting the chunk, ensure it exists or is being created.
-            // EnsureChunkExists(pos);
-
-            // 1. Find out the global ChunkCoord value of our voxel's chunk.
-            Vector2Int chunkCoord = GetChunkCoordFor(pos);
-            ChunkData chunkData = RequestChunk(chunkCoord, create: true); // Ensure chunk data exists
-
-            // If the chunk data is still null (e.g., from a save file), something is wrong. But we proceed.
-            if (chunkData == null)
-            {
-                Debug.LogError($"Failed to get or create chunk for SetVoxel at {pos}");
-                return;
-            }
-
-            // Then create a Vector3Int with the position of our voxel *within* the chunk.
-            Vector3Int voxelPos = GetLocalVoxelPositionInChunk(pos);
-
-            // 2. Perform the actual modification within the chunk data.
-            chunkData.ModifyVoxel(voxelPos, value, direction);
-            // 3. The local chunk will ALWAYS need a mesh update.
-            // ModifyVoxel already adds the chunkData to modifiedChunks for saving,
-            // but the mesh rebuild request happens here.
-            if (chunkData.chunk != null)
-            {
-                World.Instance.RequestChunkMeshRebuild(chunkData.chunk, true);
-            }
-
-            // 4. ***Crucially, check if on a border and update neighbors.***
-            // This handles the mesh update even if lighting doesn't change.
-
-            // Check X-axis borders
-            if (voxelPos.x == 0)
-            {
-                Vector2Int neighborCoord = chunkCoord + new Vector2Int(-VoxelData.ChunkWidth, 0);
-                QueueNeighborRebuild(neighborCoord);
-            }
-            else if (voxelPos.x == VoxelData.ChunkWidth - 1)
-            {
-                Vector2Int neighborCoord = chunkCoord + new Vector2Int(VoxelData.ChunkWidth, 0);
-                QueueNeighborRebuild(neighborCoord);
-            }
-
-            // Check Z-axis borders
-            if (voxelPos.z == 0)
-            {
-                Vector2Int neighborCoord = chunkCoord + new Vector2Int(0, -VoxelData.ChunkWidth);
-                QueueNeighborRebuild(neighborCoord);
-            }
-            else if (voxelPos.z == VoxelData.ChunkWidth - 1)
-            {
-                Vector2Int neighborCoord = chunkCoord + new Vector2Int(0, VoxelData.ChunkWidth);
-                QueueNeighborRebuild(neighborCoord);
-            }
-        }
-
         private void QueueNeighborRebuild(Vector2Int neighborV2Coord)
         {
             // Try to get the neighbor's chunk data.
