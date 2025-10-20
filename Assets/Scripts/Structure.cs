@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// TODO: VoxelMod check for which blocks it can replace.
+// TODO: VoxelMod check for which blocks it can replace. (eg: Now leave blocks could break logs, this should not be the case)
 public static class Structure
 {
     public static Queue<VoxelMod> GenerateMajorFlora(int index, Vector3Int position, int minTrunkHeight, int maxTrunkHeight)
@@ -31,8 +31,8 @@ public static class Structure
         {
             for (int z = -2; z < 3; z++)
             {
-                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height - 2, position.z + z), 15));
-                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height - 3, position.z + z), 15));
+                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height - 2, position.z + z), blockId: 15));
+                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height - 3, position.z + z), blockId: 15));
             }
         }
 
@@ -40,7 +40,7 @@ public static class Structure
         {
             for (int z = -1; z < 2; z++)
             {
-                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height - 1, position.z + z), 15));
+                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height - 1, position.z + z), blockId: 15));
             }
         }
 
@@ -49,15 +49,15 @@ public static class Structure
             if (x == 0)
                 for (int z = -1; z < 2; z++)
                 {
-                    queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height, position.z + z), 15));
+                    queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height, position.z + z), blockId: 15));
                 }
             else
-                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height, position.z), 15));
+                queue.Enqueue(new VoxelMod(new Vector3Int(position.x + x, position.y + height, position.z), blockId: 15));
         }
 
         // TRUNK
         for (int i = 1; i <= height; i++)
-            queue.Enqueue(new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), 14));
+            queue.Enqueue(new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), blockId: 14));
 
         return queue;
     }
@@ -73,7 +73,7 @@ public static class Structure
 
         // TRUNK
         for (int i = 1; i <= height; i++)
-            queue.Enqueue(new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), 16));
+            queue.Enqueue(new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), blockId: 16));
 
         return queue;
     }

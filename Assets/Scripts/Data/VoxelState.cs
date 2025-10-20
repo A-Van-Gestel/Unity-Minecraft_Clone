@@ -43,6 +43,12 @@ namespace Data
             set => _packedData = BurstVoxelDataBitMapping.SetBlockLight(_packedData, value);
         }
 
+        public byte FluidLevel
+        {
+            get => BurstVoxelDataBitMapping.GetFluidLevel(_packedData);
+            set => _packedData = BurstVoxelDataBitMapping.SetFluidLevel(_packedData, value);
+        }
+
         #endregion
 
         // --- Constructors ---
@@ -56,14 +62,15 @@ namespace Data
                 blockId, // blockId
                 0, // SunLight = 0
                 0, // BlockLight = 0
-                1 // Orientation = 1 (Front)
+                1, // Orientation = 1 (Front)
+                0 // FluidLevel = 0
             );
         }
 
         /// Create a new voxel state from all its components.
-        public VoxelState(byte blockId, byte sunLightLevel, byte blockLightLevel, byte orientation)
+        public VoxelState(byte blockId, byte sunLightLevel, byte blockLightLevel, byte orientation = 1, byte fluidLevel = 0)
         {
-            _packedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, sunLightLevel, blockLightLevel, orientation);
+            _packedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, sunLightLevel, blockLightLevel, orientation, fluidLevel);
         }
 
         /// Create a new voxel state from its raw packed data.
@@ -83,6 +90,9 @@ namespace Data
         public float lightAsFloat => light * VoxelData.UnitOfLight;
 
         // --- Operator Overloads for comparison ---
+
+        #region Overides
+        
         public static bool operator ==(VoxelState a, VoxelState b)
         {
             return a._packedData == b._packedData;
@@ -112,5 +122,7 @@ namespace Data
         {
             return $"VoxelState: {{ Id = {id}, Light = {light}, Orientation = {orientation}, Properties = {Properties} }}";
         }
+
+        #endregion
     }
 }

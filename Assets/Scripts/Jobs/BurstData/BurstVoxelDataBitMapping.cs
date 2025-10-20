@@ -17,12 +17,14 @@ namespace Jobs.BurstData
         private const uint SUNLIGHT_MASK = 0x00000F00; // Bits 8-11 (4-bits, Values 0-15)
         private const uint BLOCKLIGHT_MASK = 0x0000F000; // Bits 12-15 (4-bits, Values 0-15)
         private const uint ORIENTATION_MASK = 0x00030000; // Bits 16-17 (2-bits, Values 0-3)
-        // Bits 18-32 are reserved
+        private const uint FLUID_LEVEL_MASK = 0x003C0000; // Bits 18-21 (4-bits, Values 0-15)
+        // Bits 22-32 are reserved
 
         private const int ID_SHIFT = 0;
         private const int SUNLIGHT_SHIFT = 8;
         private const int BLOCKLIGHT_SHIFT = 12;
         private const int ORIENTATION_SHIFT = 16;
+        private const int FLUID_LEVEL_SHIFT = 18;
 
         // Inverse map for packing
         private static byte GetOrientationIndex(byte orientation)
@@ -39,7 +41,7 @@ namespace Jobs.BurstData
 
         // --- Packing ---
         // Creates the initial packed value
-        public static uint PackVoxelData(byte id, byte sunLight, byte blockLight, byte orientation)
+        public static uint PackVoxelData(byte id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel)
         {
             uint packedData = 0;
             packedData |= (uint)((id & 0xFF) << ID_SHIFT); // ID: Ensure only 8 bits
@@ -49,6 +51,9 @@ namespace Jobs.BurstData
             // Pack Orientation by getting its index from our helper method
             byte orientationIndex = GetOrientationIndex(orientation);
             packedData |= (uint)((orientationIndex & 0x3) << ORIENTATION_SHIFT); // Orientation: Ensure only 2 bits
+
+            // Pack Fluid Level
+            packedData |= (uint)((fluidLevel & 0xF) << FLUID_LEVEL_SHIFT); // Fluid Level: Ensure only 4 bits
 
             return packedData;
         }
@@ -93,6 +98,11 @@ namespace Jobs.BurstData
             }
         }
 
+        public static byte GetFluidLevel(uint packedData)
+        {
+            return (byte)((packedData & FLUID_LEVEL_MASK) >> FLUID_LEVEL_SHIFT);
+        }
+
         // --- Packing / Setters ---
         public static uint SetId(uint packedData, byte id)
         {
@@ -113,6 +123,11 @@ namespace Jobs.BurstData
         {
             byte orientationIndex = GetOrientationIndex(orientation);
             return (packedData & ~ORIENTATION_MASK) | (uint)((orientationIndex & 0x3) << ORIENTATION_SHIFT);
+        }
+
+        public static uint SetFluidLevel(uint packedData, byte fluidLevel)
+        {
+            return (packedData & ~FLUID_LEVEL_MASK) | (uint)((fluidLevel & 0xF) << FLUID_LEVEL_SHIFT);
         }
     }
 }

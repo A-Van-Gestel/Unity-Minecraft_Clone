@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Data
 {
-    [CreateAssetMenu(fileName = "New Voxel Mesh Data", menuName = "MinecraftTutorial/Voxel Mesh Data")]
+    [CreateAssetMenu(fileName = "New Voxel Mesh Data", menuName = "Minecraft/Voxel Mesh Data")]
     public class VoxelMeshData : ScriptableObject
     {
         [Tooltip("Name of the block type.")]

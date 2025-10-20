@@ -25,6 +25,7 @@ public class Player : MonoBehaviour
 
     [Header("Gravity modifiers")]
     public float jumpForce = 5.7f;
+
     public float gravity = -13f;
 
     [Header("Player properties")]
@@ -292,8 +293,10 @@ public class Player : MonoBehaviour
             // Destroy block.
             if (Input.GetMouseButtonDown(0))
             {
-                // OLD: world.GetChunkFromVector3(highlightBlock.position).EditVoxel(highlightBlockPosition, 0);
-                world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), 0, _immediate: true));
+                world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: 0)
+                {
+                    ImmediateUpdate = true
+                });
             }
 
             // Place block.
@@ -303,8 +306,11 @@ public class Player : MonoBehaviour
                 if (!blockPlaceable) return;
 
                 UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
-                // OLD: world.GetChunkFromVector3(placeBlock.position).EditVoxel(placeBlockPosition, itemSlot.itemSlot.stack.id);
-                world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), itemSlot.itemSlot.stack.id, orientation, _immediate: true));
+                world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), blockId: itemSlot.itemSlot.stack.id)
+                {
+                    orientation = orientation,
+                    ImmediateUpdate = true
+                });
                 itemSlot.itemSlot.Take(1);
             }
         }
@@ -325,7 +331,7 @@ public class Player : MonoBehaviour
             if (world.CheckForVoxel(pos))
             {
                 VoxelRaycastResult result = new VoxelRaycastResult { didHit = true };
-                
+
                 // DESTROY HIGHLIGHT BLOCK
                 result.hitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
 

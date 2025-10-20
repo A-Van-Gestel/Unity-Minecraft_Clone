@@ -2532,14 +2532,17 @@ MonoBehaviour:
   waterMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
   blockTypes:
   - blockName: Air
+    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 0
     renderNeighborFaces: 1
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 0
     lightEmission: 0
-    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 0
     frontFaceTexture: 0
@@ -2548,14 +2551,17 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Stone
+    icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 0
     frontFaceTexture: 0
@@ -2564,14 +2570,17 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Grass
+    icon: {fileID: -1336346017, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: -1336346017, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 1
     backFaceTexture: 12
     frontFaceTexture: 12
@@ -2580,14 +2589,17 @@ MonoBehaviour:
     leftFaceTexture: 12
     rightFaceTexture: 12
   - blockName: Dirt
+    icon: {fileID: 1551665942, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: 1551665942, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 2
     frontFaceTexture: 2
@@ -2596,14 +2608,17 @@ MonoBehaviour:
     leftFaceTexture: 2
     rightFaceTexture: 2
   - blockName: Sand
+    icon: {fileID: -1153239741, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: -1153239741, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 3
     frontFaceTexture: 3
@@ -2612,14 +2627,17 @@ MonoBehaviour:
     leftFaceTexture: 3
     rightFaceTexture: 3
   - blockName: Snow
+    icon: {fileID: 455753414, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: 455753414, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 4
     frontFaceTexture: 4
@@ -2628,14 +2646,17 @@ MonoBehaviour:
     leftFaceTexture: 4
     rightFaceTexture: 4
   - blockName: Grass Snowy
+    icon: {fileID: 122583294, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: 122583294, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 21
     frontFaceTexture: 21
@@ -2644,14 +2665,17 @@ MonoBehaviour:
     leftFaceTexture: 21
     rightFaceTexture: 21
   - blockName: Stone Walkway
+    icon: {fileID: -1793209460, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: -1793209460, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 6
     frontFaceTexture: 6
@@ -2660,14 +2684,17 @@ MonoBehaviour:
     leftFaceTexture: 6
     rightFaceTexture: 6
   - blockName: Bedrock
+    icon: {fileID: 1008106713, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: 1008106713, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 7
     frontFaceTexture: 7
@@ -2676,14 +2703,17 @@ MonoBehaviour:
     leftFaceTexture: 7
     rightFaceTexture: 7
   - blockName: Desert Cracked
+    icon: {fileID: -966074416, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: -966074416, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 8
     frontFaceTexture: 8
@@ -2692,14 +2722,17 @@ MonoBehaviour:
     leftFaceTexture: 8
     rightFaceTexture: 8
   - blockName: Grass Rocky
+    icon: {fileID: 2025127514, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: 2025127514, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 25
     frontFaceTexture: 25
@@ -2708,14 +2741,17 @@ MonoBehaviour:
     leftFaceTexture: 25
     rightFaceTexture: 25
   - blockName: Tile
+    icon: {fileID: 1436998987, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: 1436998987, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 10
     frontFaceTexture: 10
@@ -2724,14 +2760,17 @@ MonoBehaviour:
     leftFaceTexture: 10
     rightFaceTexture: 10
   - blockName: Wood
+    icon: {fileID: -1841403712, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: -1841403712, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 11
     frontFaceTexture: 11
@@ -2740,14 +2779,17 @@ MonoBehaviour:
     leftFaceTexture: 11
     rightFaceTexture: 11
   - blockName: Facade
+    icon: {fileID: -1490239207, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 1
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 0
     lightEmission: 0
-    icon: {fileID: -1490239207, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 13
     frontFaceTexture: 13
@@ -2756,14 +2798,17 @@ MonoBehaviour:
     leftFaceTexture: 13
     rightFaceTexture: 13
   - blockName: Oak Log
+    icon: {fileID: -2144359328, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: -2144359328, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 14
     frontFaceTexture: 14
@@ -2772,14 +2817,17 @@ MonoBehaviour:
     leftFaceTexture: 14
     rightFaceTexture: 14
   - blockName: Oak Leaves
+    icon: {fileID: -392713096, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 1
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 5
     lightEmission: 0
-    icon: {fileID: -392713096, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 16
     frontFaceTexture: 16
@@ -2788,14 +2836,17 @@ MonoBehaviour:
     leftFaceTexture: 16
     rightFaceTexture: 16
   - blockName: Cactus
+    icon: {fileID: -954973061, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: -954973061, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 18
     frontFaceTexture: 18
@@ -2804,14 +2855,17 @@ MonoBehaviour:
     leftFaceTexture: 18
     rightFaceTexture: 18
   - blockName: Stone Half Slab
+    icon: {fileID: 2016017474, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
     meshData: {fileID: 11400000, guid: f1f1cbb961eacda4dbac46e90f49df51, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 1
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: 2016017474, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 0
     frontFaceTexture: 0
@@ -2820,14 +2874,17 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Directional Block
+    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 0
-    isWater: 0
+    fluidType: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
     opacity: 15
     lightEmission: 0
-    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
-    stackSize: 64
     isActive: 0
     backFaceTexture: 0
     frontFaceTexture: 7
@@ -2836,15 +2893,18 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Water
+    icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
     meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
+    stackSize: 64
     isSolid: 1
     renderNeighborFaces: 1
-    isWater: 1
-    opacity: 7
+    fluidType: 1
+    fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
+    fluidLevel: 0
+    flowLevels: 8
+    opacity: 2
     lightEmission: 0
-    icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
-    stackSize: 64
-    isActive: 0
+    isActive: 1
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0

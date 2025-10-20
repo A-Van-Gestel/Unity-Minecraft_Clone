@@ -28,7 +28,7 @@ namespace Data
 
         [HideInInspector]
         public uint[] map = new uint[VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth];
-    
+
         /// <summary>
         /// The heightmap for this chunk. Stores the Y-level of the highest opaque block for each column.
         /// </summary>
@@ -84,6 +84,7 @@ namespace Data
         #region Modifier Methods
 
         // --- Modifier Methods --
+        // TODO: Change parameters to accept the full voxel data, not just the ID and direction.
         public void ModifyVoxel(Vector3Int pos, byte newId, byte direction, bool immediateUpdate = false)
         {
             if (!IsVoxelInChunk(pos)) return;
@@ -94,6 +95,7 @@ namespace Data
             uint oldPackedData = map[index];
             byte oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
 
+            // TODO: This is incorrect, we would need to check if the actual voxel data is the same, not just the ID. (eg: static block rotations would not work currently)
             if (oldId == newId) // No change if the block ID is the same
                 return;
 
@@ -108,9 +110,9 @@ namespace Data
             // --- Update The Map ---
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
             // The LightingJob will then fill it with propagated light from neighbors.
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(newId, 0, newProps.lightEmission, direction);
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(newId, 0, newProps.lightEmission, direction, newProps.fluidLevel);
             map[index] = newPackedData;
-            
+
             // --- MAINTAIN HEIGHTMAP ---
             int heightmapIndex = pos.x + VoxelData.ChunkWidth * pos.z;
             byte currentHeight = heightMap[heightmapIndex];
@@ -135,6 +137,7 @@ namespace Data
                         break; // Found the new highest block, stop scanning.
                     }
                 }
+
                 heightMap[heightmapIndex] = newHeight;
             }
 
@@ -173,10 +176,46 @@ namespace Data
             // Pass the immediateUpdate flag to the world so it can prioritize the mesh rebuild.
             World.Instance.NotifyChunkModified(this.position, pos, immediateUpdate);
 
-            if (newProps.isActive)
-                chunk?.AddActiveVoxel(pos);
-            else if (oldProps.isActive)
-                chunk?.RemoveActiveVoxel(pos);
+            // If the chunk object exists, update its active voxel list immediately.
+            // If not (e.g., during initial world gen), the active voxel scan in
+            // OnDataPopulated() will handle finding this block later when the chunk is activated.
+            if (chunk != null)
+            {
+                if (newProps.isActive)
+                    chunk.AddActiveVoxel(pos);
+                else if (oldProps.isActive)
+                    chunk.RemoveActiveVoxel(pos);
+            }
+
+            // --- NEW: WAKE UP NEIGHBORS ---
+            // After any modification, check all 6 neighbors. If a neighbor is a stable
+            // water block, force it into the active list so it can check if it needs to flow.
+            for (int i = 0; i < 6; i++)
+            {
+                Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
+                VoxelState? neighborState = GetState(neighborPos); // Use GetState to handle cross-chunk checks
+
+                if (neighborState.HasValue && neighborState.Value.id == 19) // If neighbor is water
+                {
+                    // If the neighbor is in this chunk, add it directly.
+                    if (IsVoxelInChunk(neighborPos))
+                    {
+                        chunk?.AddActiveVoxel(neighborPos);
+                    }
+                    else // If it's in another chunk, we need to find that chunk and add it.
+                    {
+                        Vector3 globalPos = new Vector3(neighborPos.x + position.x, neighborPos.y, neighborPos.z + position.y);
+                        Chunk neighborChunk = World.Instance.GetChunkFromVector3(globalPos);
+
+                        // If the neighbor chunk exists, add the neighbor voxel to its active list.
+                        if (neighborChunk != null)
+                        {
+                            Vector3Int localPosInNeighbor = neighborChunk.GetVoxelPositionInChunkFromGlobalVector3(globalPos);
+                            neighborChunk?.AddActiveVoxel(localPosInNeighbor);
+                        }
+                    }
+                }
+            }
 
             World.Instance.worldData.modifiedChunks.Add(this);
         }
@@ -251,7 +290,7 @@ namespace Data
         public void RecalculateSunLightLight()
         {
             WorldData worldData = World.Instance.worldData;
-            
+
             for (int x = 0; x < VoxelData.ChunkWidth; x++)
             {
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)

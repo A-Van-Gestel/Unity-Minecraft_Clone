@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using Data;
 using Helpers;
+using JetBrains.Annotations;
 using Jobs;
 using Jobs.BurstData;
 using Jobs.Data;
@@ -86,10 +87,14 @@ public class World : MonoBehaviour
     [Tooltip("The prefab to use for chunk borders.")]
     public GameObject chunkBorderPrefab;
 
-    // Shader Properties
+    // --- Shader Properties ---
     private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
     private static readonly int ShaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
     private static readonly int ShaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
+
+    // --- Fluid Vertex Data ---
+    private NativeArray<float> waterVertexTemplates;
+    private NativeArray<float> lavaVertexTemplates;
 
     // --- Job Management Data ---
     private NativeArray<BiomeAttributesJobData> biomesJobData;
@@ -168,6 +173,10 @@ public class World : MonoBehaviour
         if (biomesJobData.IsCreated) biomesJobData.Dispose();
         if (allLodesJobData.IsCreated) allLodesJobData.Dispose();
         if (blockTypesJobData.IsCreated) blockTypesJobData.Dispose();
+
+        // 3. Dispose of fluid vertex templates.
+        if (waterVertexTemplates.IsCreated) waterVertexTemplates.Dispose();
+        if (lavaVertexTemplates.IsCreated) lavaVertexTemplates.Dispose();
     }
 
     private void Start()
@@ -496,7 +505,7 @@ public class World : MonoBehaviour
             SaveSystem.SaveWorld(worldData);
     }
 
-    // --- NEW JOB-RELATED METHODS ---
+    // --- JOB-RELATED METHODS ---
     private void PrepareJobData()
     {
         // --- Biomes: Biome and Lode ---
@@ -518,38 +527,11 @@ public class World : MonoBehaviour
             for (int j = 0; j < biomes[i].lodes.Length; j++)
             {
                 Lode lode = biomes[i].lodes[j];
-                allLodesJobData[currentLodeIndex + j] = new LodeJobData
-                {
-                    blockID = lode.blockID,
-                    minHeight = lode.minHeight,
-                    maxHeight = lode.maxHeight,
-                    scale = lode.scale,
-                    threshold = lode.threshold,
-                    noiseOffset = lode.noiseOffset
-                };
+                allLodesJobData[currentLodeIndex + j] = new LodeJobData(lode);
             }
 
             // Populate the biome data, including the start index and count for its lodes.
-            biomesJobData[i] = new BiomeAttributesJobData
-            {
-                // Copy all fields from biomes[i] to biomesJobData[i]
-                offset = biomes[i].offset,
-                scale = biomes[i].scale,
-                terrainHeight = biomes[i].terrainHeight,
-                terrainScale = biomes[i].terrainScale,
-                surfaceBlock = biomes[i].surfaceBlock,
-                subSurfaceBlock = biomes[i].subSurfaceBlock,
-                placeMajorFlora = biomes[i].placeMajorFlora,
-                majorFloraIndex = biomes[i].majorFloraIndex,
-                majorFloraZoneScale = biomes[i].majorFloraZoneScale,
-                majorFloraZoneThreshold = biomes[i].majorFloraZoneThreshold,
-                majorFloraPlacementScale = biomes[i].majorFloraPlacementScale,
-                majorFloraPlacementThreshold = biomes[i].majorFloraPlacementThreshold,
-                maxHeight = biomes[i].maxHeight,
-                minHeight = biomes[i].minHeight,
-                lodeStartIndex = currentLodeIndex,
-                lodeCount = biomes[i].lodes.Length
-            };
+            biomesJobData[i] = new BiomeAttributesJobData(biomes[i], currentLodeIndex);
 
             // Advance the master lode index for the next biome.
             currentLodeIndex += biomes[i].lodes.Length;
@@ -559,21 +541,23 @@ public class World : MonoBehaviour
         blockTypesJobData = new NativeArray<BlockTypeJobData>(blockTypes.Length, Allocator.Persistent);
         for (int i = 0; i < blockTypes.Length; i++)
         {
-            blockTypesJobData[i] = new BlockTypeJobData
-            {
-                isSolid = blockTypes[i].isSolid,
-                isWater = blockTypes[i].isWater,
-                opacity = blockTypes[i].opacity,
-                lightEmission = blockTypes[i].lightEmission,
-                renderNeighborFaces = blockTypes[i].renderNeighborFaces,
-                isActive = blockTypes[i].isActive,
-                backFaceTexture = blockTypes[i].backFaceTexture,
-                frontFaceTexture = blockTypes[i].frontFaceTexture,
-                topFaceTexture = blockTypes[i].topFaceTexture,
-                bottomFaceTexture = blockTypes[i].bottomFaceTexture,
-                leftFaceTexture = blockTypes[i].leftFaceTexture,
-                rightFaceTexture = blockTypes[i].rightFaceTexture,
-            };
+            blockTypesJobData[i] = new BlockTypeJobData(blockTypes[i]);
+        }
+
+        // --- Prepare Fluid Vertex Templates ---
+        // This is a simplified example. A more robust system might use a dictionary or loop
+        // through block types to find all unique FluidMeshData assets and load them.
+        const string fluidDataPath = "FluidData";
+        var waterAsset = Resources.Load<FluidMeshData>($"{fluidDataPath}/FluidData_Water");
+        if (waterAsset)
+        {
+            waterVertexTemplates = new NativeArray<float>(waterAsset.vertexYPositions, Allocator.Persistent);
+        }
+
+        var lavaAsset = Resources.Load<FluidMeshData>($"{fluidDataPath}/FluidData_Lava");
+        if (lavaAsset)
+        {
+            lavaVertexTemplates = new NativeArray<float>(lavaAsset.vertexYPositions, Allocator.Persistent);
         }
     }
 
@@ -767,6 +751,8 @@ public class World : MonoBehaviour
             neighborFront = front,
             neighborLeft = left,
             neighborRight = right,
+            waterVertexTemplates = waterVertexTemplates,
+            lavaVertexTemplates = lavaVertexTemplates,
             output = meshOutput
         };
 
@@ -1195,6 +1181,18 @@ public class World : MonoBehaviour
 
     #region Voxel Modifications
 
+    /// <summary>
+    /// Enqueues a batch of voxel modifications to be processed.
+    /// </summary>
+    /// <param name="voxelMods">The queue of voxel modifications to process.</param>
+    public void EnqueueVoxelModifications(Queue<VoxelMod> voxelMods)
+    {
+        modifications.Enqueue(voxelMods);
+    }
+
+    /// <summary>
+    /// Applies all queued voxel modifications.
+    /// </summary>
     private void ApplyModifications()
     {
         applyingModifications = true;
@@ -1230,7 +1228,16 @@ public class World : MonoBehaviour
                 Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.globalPosition);
 
                 // Call the authoritative ModifyVoxel method in ChunkData.
-                chunkData.ModifyVoxel(localPos, v.id, v.orientation, v.immediate);
+                chunkData.ModifyVoxel(localPos, v.id, v.orientation, v.ImmediateUpdate);
+
+                // --- Apply Fluid Level After Modification ---
+                // TODO: This should not be done here, it should be part of the ModifyVoxel call above.
+                if (v.fluidLevel > 0)
+                {
+                    int index = localPos.x + VoxelData.ChunkWidth * (localPos.y + VoxelData.ChunkHeight * localPos.z);
+                    uint packedData = chunkData.map[index];
+                    chunkData.map[index] = BurstVoxelDataBitMapping.SetFluidLevel(packedData, v.fluidLevel);
+                }
             }
 
             // If part of the batch failed, we already re-queued it.
@@ -1252,7 +1259,7 @@ public class World : MonoBehaviour
     /// Adds a chunk to the queue to have its mesh rebuilt.
     /// For priority, add it to the front of the list.
     /// </summary>
-    public void RequestChunkMeshRebuild(Chunk chunk, bool immediate = false)
+    public void RequestChunkMeshRebuild([CanBeNull] Chunk chunk, bool immediate = false)
     {
         // We only add it if it's not already in the list to avoid redundant processing.
         if (chunk == null || chunksToBuildMesh.Contains(chunk)) return;
@@ -1271,6 +1278,7 @@ public class World : MonoBehaviour
         return new ChunkCoord(x, z);
     }
 
+    [CanBeNull]
     public Chunk GetChunkFromVector3(Vector3 pos)
     {
         int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth);
@@ -1462,7 +1470,7 @@ public class World : MonoBehaviour
     public bool CheckForCollision(Vector3 pos)
     {
         VoxelState? voxel = worldData.GetVoxelState(pos);
-        return voxel.HasValue && voxel.Value.Properties.isSolid && !voxel.Value.Properties.isWater;
+        return voxel.HasValue && voxel.Value.Properties.isSolid && voxel.Value.Properties.fluidType == FluidType.None;
     }
 
     public VoxelState? GetVoxelState(Vector3 pos)
@@ -1626,12 +1634,42 @@ public class World : MonoBehaviour
 [Serializable]
 public class BlockType
 {
+    [Header("Block Properties")]
     public string blockName;
-    public VoxelMeshData meshData;
-    public bool isSolid;
-    public bool renderNeighborFaces;
-    public bool isWater;
 
+    [InitializationField]
+    public Sprite icon;
+
+    [InitializationField]
+    public VoxelMeshData meshData;
+
+    [Tooltip("The maximum amount of this block that can be stacked.")]
+    [Range(0, 64)]
+    public int stackSize = 64;
+
+    [Tooltip("Indicates whether the player collides with this block.")]
+    public bool isSolid;
+
+    [Tooltip("Indicates whether the neighbouring faces should still be rendered when this block is placed.")]
+    public bool renderNeighborFaces;
+
+    [Header("Fluid Properties")]
+    [Tooltip("The type of fluid this block represents. 'None' for solid blocks.")]
+    public FluidType fluidType = FluidType.None;
+
+    [Tooltip("The pre-computed mesh data for this fluid.")]
+    [InitializationField]
+    public FluidMeshData fluidMeshData;
+
+    [Tooltip("Default fluid level.")]
+    [Range(0, 15)]
+    public byte fluidLevel = 0;
+
+    [Tooltip("How many blocks a fluid can flow horizontally from a source block.\nWater is 8 (levels 0-7), Lava is typically 4.")]
+    [Range(1, 8)]
+    public byte flowLevels = 8;
+
+    [Header("Lighting Properties")]
     [Tooltip("How many light levels will be blocked by this block.")]
     [Range(0, 15)]
     public byte opacity = 15;
@@ -1640,13 +1678,8 @@ public class BlockType
     [Range(0, 15)]
     public byte lightEmission = 0;
 
-    public Sprite icon;
-
-    [Range(0, 64)]
-    public int stackSize = 64;
-
     [Header("Block Behavior")]
-    [Tooltip("Whether the block has any block behavior.")]
+    [Tooltip("Indicates whether the block has any block behavior.")]
     public bool isActive;
 
     [Header("Texture Values")]
@@ -1711,24 +1744,68 @@ public class BlockType
 
     public override string ToString()
     {
-        return $"BlockType: {{ Name = {blockName}, IsSolid = {isSolid}, IsWater = {isWater}, Opacity = {opacity}, RenderNeighborFaces = {renderNeighborFaces}, Icon = {icon}, StackSize = {stackSize} }}";
+        return $"BlockType: {{ Name = {blockName}, IsSolid = {isSolid}, fluidType = {fluidType}, fluidLevel = {fluidLevel.GetType().Name}, Opacity = {opacity}, RenderNeighborFaces = {renderNeighborFaces}, Icon = {icon}, StackSize = {stackSize} }}";
     }
 }
 
-public struct VoxelMod
+public enum FluidType : byte // Using byte makes it job-safe and memory-efficient
+{
+    None,
+    Water,
+    Lava
+}
+
+/// <summary>
+/// A structure representing a voxel modification to be applied to a chunk.
+/// </summary>
+public struct VoxelMod : IEquatable<VoxelMod>
 {
     public Vector3Int globalPosition;
     public byte id;
     public byte orientation;
-    public bool immediate;
+    public byte fluidLevel;
+    public bool ImmediateUpdate;
 
-    public VoxelMod(Vector3Int _globalPosition, byte _id, byte _orientation = 1, bool _immediate = false)
+    // --- Constructors ---
+
+    #region Constructors
+
+    public VoxelMod(Vector3Int _globalPosition, byte blockId)
     {
         globalPosition = _globalPosition;
-        id = _id;
-        orientation = _orientation; // Default to Front / North (1)
-        immediate = _immediate; // Default to false
+        id = blockId;
+        orientation = 1; // Default to Front / North (1)
+        fluidLevel = 0; // Default to source (0)
+        ImmediateUpdate = false; // Default to false
     }
+
+    #endregion
+
+    // --- Overrides  ---
+
+    #region Overides
+
+    public bool Equals(VoxelMod other)
+    {
+        return globalPosition.Equals(other.globalPosition) && id == other.id && orientation == other.orientation && fluidLevel == other.fluidLevel && ImmediateUpdate == other.ImmediateUpdate;
+    }
+
+    public override bool Equals(object obj)
+    {
+        return obj is VoxelMod other && Equals(other);
+    }
+
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(globalPosition, id, orientation, fluidLevel, ImmediateUpdate);
+    }
+
+    public override string ToString()
+    {
+        return $"VoxelMod: {{ Global Position = {globalPosition}, ID = {id}, Orientation = {orientation}, Fluid Level = {fluidLevel}, Immediate Update = {ImmediateUpdate} }}";
+    }
+
+    #endregion
 }
 
 

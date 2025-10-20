@@ -93,15 +93,39 @@ public class Chunk
 
     public void TickUpdate()
     {
-        for (int i = activeVoxels.Count - 1; i >= 0; i--)
+        // A temporary list to avoid modifying the activeVoxels list while iterating.
+        List<Vector3Int> stillActive = new List<Vector3Int>();
+        Queue<VoxelMod> modifications = new Queue<VoxelMod>();
+
+        foreach (Vector3Int pos in activeVoxels)
         {
-            Vector3Int pos = activeVoxels[i];
-            // Pass context to the static BlockBehavior methods
-            if (!BlockBehavior.Active(chunkData, pos))
-                RemoveActiveVoxel(pos);
-            else
-                BlockBehavior.Behave(chunkData, pos);
+            // Get the list of modifications from the behavior logic.
+            List<VoxelMod> mods = BlockBehavior.Behave(chunkData, pos);
+
+            // If the block is still active, keep it for the next tick.
+            if (BlockBehavior.Active(chunkData, pos))
+            {
+                stillActive.Add(pos);
+            }
+
+            // If the behavior produced any changes, add them to our queue.
+            if (mods != null)
+            {
+                foreach (VoxelMod mod in mods)
+                {
+                    modifications.Enqueue(mod);
+                }
+            }
         }
+
+        // If there are any modifications, submit them to the world's global queue.
+        if (modifications.Count > 0)
+        {
+            World.Instance.EnqueueVoxelModifications(modifications);
+        }
+
+        // Update the active voxel list for the next frame.
+        activeVoxels = stillActive;
     }
 
     public void AddActiveVoxel(Vector3Int pos)
@@ -199,7 +223,7 @@ public class Chunk
         mesh.subMeshCount = 3;
         mesh.SetTriangles(meshData.triangles.ToArray(Allocator.Temp).ToArray(), 0);
         mesh.SetTriangles(meshData.transparentTriangles.ToArray(Allocator.Temp).ToArray(), 1);
-        mesh.SetTriangles(meshData.waterTriangles.ToArray(Allocator.Temp).ToArray(), 2);
+        mesh.SetTriangles(meshData.fluidTriangles.ToArray(Allocator.Temp).ToArray(), 2);
         mesh.uv = meshData.uvs.ToArray(Allocator.Temp).ToArray();
         mesh.colors = meshData.colors.ToArray(Allocator.Temp).ToArray();
         mesh.normals = meshData.normals.ToArray(Allocator.Temp).ToArray();
@@ -324,7 +348,7 @@ public class ChunkCoord : IEquatable<ChunkCoord>
     
     public override string ToString()
     {
-        return $"({X}, {Z})";
+        return $"ChunkCoord({X}, {Z})";
     }
     
     #endregion

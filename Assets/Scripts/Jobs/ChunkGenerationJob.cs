@@ -58,10 +58,11 @@ namespace Jobs
                         Vector3Int globalPos = new Vector3Int(x + chunkPosition.x, y, z + chunkPosition.y);
 
                         byte voxelID = WorldGen.GetVoxel(globalPos, seed, biomes, allLodes);
-
+                        BlockTypeJobData voxelProps = blockTypes[voxelID];
                         // --- Populate the main voxel map ---
+                        
                         int index = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-                        outputMap[index] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, 0, 1);
+                        outputMap[index] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.lightEmission, 1, voxelProps.fluidLevel);
 
                         // --- Populate the heightmap ---
                         // If we haven't found the highest block in this column yet, check if this one is light-obstructing.
@@ -92,7 +93,7 @@ namespace Jobs
                                         // to generate it on the main thread later.
                                         // For simplicity here, we'll queue the *base* of the structure.
                                         // The main thread will then expand this into the full tree.
-                                        modifications.Enqueue(new VoxelMod(globalPos, (byte)biome.majorFloraIndex));
+                                        modifications.Enqueue(new VoxelMod(globalPos, blockId: (byte)biome.majorFloraIndex));
                                     }
                                 }
                             }
