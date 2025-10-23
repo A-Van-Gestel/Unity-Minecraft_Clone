@@ -48,8 +48,7 @@ public class World : MonoBehaviour
     public Material material;
 
     public Material transparentMaterial;
-    public Material waterMaterial;
-    public Material lavaMaterial;
+    public Material liquidMaterial;
     public BlockType[] blockTypes;
 
     private Chunk[,] chunks = new Chunk[VoxelData.WorldSizeInChunks, VoxelData.WorldSizeInChunks];

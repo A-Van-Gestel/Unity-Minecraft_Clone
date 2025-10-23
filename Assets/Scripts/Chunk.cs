@@ -41,7 +41,7 @@ public class Chunk
 
             materials[0] = World.Instance.material;
             materials[1] = World.Instance.transparentMaterial;
-            materials[2] = World.Instance.waterMaterial;
+            materials[2] = World.Instance.liquidMaterial;
             meshRenderer.materials = materials;
 
             meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;

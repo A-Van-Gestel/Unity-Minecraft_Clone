@@ -68,8 +68,7 @@ MonoBehaviour:
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
   material: {fileID: 2100000, guid: 310749baead051949ad82e332a06680f, type: 2}
   transparentMaterial: {fileID: 2100000, guid: 451dc07c0cc41a649bf3ac4fe7a9e1b0, type: 2}
-  waterMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
-  lavaMaterial: {fileID: 2100000, guid: fb0ac3c545f87ea4589f6a3d92191ba4, type: 2}
+  liquidMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
   blockTypes:
   - blockName: Air edit
     icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}

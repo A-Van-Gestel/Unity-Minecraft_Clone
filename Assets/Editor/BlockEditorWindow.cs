@@ -2,6 +2,7 @@
 using Data;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace Editor
 {
@@ -25,6 +26,13 @@ namespace Editor
         private Mesh previewMesh;
         private Material previewMaterial;
         private Vector2 previewRotation = new Vector2(15, -30); // Initial rotation
+
+        // --- Shader Keywords ---
+        private const string LIQUID_TYPE_WATER = "_LIQUIDTYPE_WATER";
+        private const string LIQUID_TYPE_LAVA = "_LIQUIDTYPE_LAVA";
+
+        private LocalKeyword liquidTypeWaterKeyword;
+        private LocalKeyword liquidTypeLavaKeyword;
 
         // --- Custom GUI Style ---
         private GUIStyle listButtonStyle;
@@ -490,19 +498,38 @@ namespace Editor
             previewMesh = EditorMeshGenerator.GenerateBlockMesh(selectedBlock);
 
             // --- logic to switch materials based on block type ---
-            if (selectedBlock.fluidType == FluidType.Water)
+            if (selectedBlock.fluidType != FluidType.None)
             {
-                if (worldPrefab.waterMaterial != null)
+                if (worldPrefab.liquidMaterial != null)
                 {
                     // Use the dedicated water material for the preview
-                    previewMaterial.shader = worldPrefab.waterMaterial.shader;
-                    previewMaterial.CopyPropertiesFromMaterial(worldPrefab.waterMaterial);
+                    var shader = worldPrefab.liquidMaterial.shader;
+
+                    // Create and cache the LocalKeyword
+                    if (liquidTypeWaterKeyword != null && liquidTypeLavaKeyword != null)
+                    {
+                        liquidTypeWaterKeyword = new LocalKeyword(shader, LIQUID_TYPE_WATER);
+                        liquidTypeLavaKeyword = new LocalKeyword(shader, LIQUID_TYPE_LAVA);
+                    }
+
+                    previewMaterial.shader = worldPrefab.liquidMaterial.shader;
+                    previewMaterial.CopyPropertiesFromMaterial(worldPrefab.liquidMaterial);
+
+                    if (selectedBlock.fluidType == FluidType.Water)
+                    {
+                        previewMaterial.SetKeyword(liquidTypeWaterKeyword, true);
+                        previewMaterial.SetKeyword(liquidTypeLavaKeyword, false);
+                    }
+                    else if (selectedBlock.fluidType == FluidType.Lava)
+                    {
+                        previewMaterial.SetKeyword(liquidTypeWaterKeyword, false);
+                        previewMaterial.SetKeyword(liquidTypeLavaKeyword, true);
+                    }
                 }
-            }
-            else if (selectedBlock.fluidType == FluidType.Lava)
-            {
-                previewMaterial.shader = worldPrefab.lavaMaterial.shader;
-                previewMaterial.CopyPropertiesFromMaterial(worldPrefab.lavaMaterial);
+                else
+                {
+                    EditorUtility.DisplayDialog("Error", "Liquid material not found.", "OK");
+                }
             }
             else if (selectedBlock.renderNeighborFaces)
             {
