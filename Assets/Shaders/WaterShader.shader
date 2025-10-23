@@ -18,6 +18,7 @@ Shader "Minecraft/Water Shader"
         LOD 100
         Lighting Off
         ZWrite Off
+        Cull Off
         Blend SrcAlpha OneMinusSrcAlpha
 
         Pass

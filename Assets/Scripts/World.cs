@@ -49,6 +49,7 @@ public class World : MonoBehaviour
 
     public Material transparentMaterial;
     public Material waterMaterial;
+    public Material lavaMaterial;
     public BlockType[] blockTypes;
 
     private Chunk[,] chunks = new Chunk[VoxelData.WorldSizeInChunks, VoxelData.WorldSizeInChunks];
@@ -1197,8 +1198,7 @@ public class World : MonoBehaviour
     {
         applyingModifications = true;
 
-        // Use a temporary list for modifications that need to be re-queued.
-        // These will most likely be cross-chunk modifications in un-loaded chunks.
+        // A list for modifications that target ungenerated chunks, to be re-queued for the next frame.
         List<Queue<VoxelMod>> deferredModifications = new List<Queue<VoxelMod>>();
 
         while (modifications.Count > 0)
@@ -1223,7 +1223,80 @@ public class World : MonoBehaviour
                     break; // Break from processing this batch and move to the next.
                 }
 
-                // --- 2. If chunk is ready, DELEGATE the modification ---
+                // --- 2. Check Placement Rules ---
+                // Special Case: If the mod is to place Air (ID 0), it's a "break" action.
+                // We should always allow this, unless the target is unbreakable.
+                if (v.id == 0)
+                {
+                    VoxelState? stateToBreak = worldData.GetVoxelState(v.globalPosition);
+                    if (stateToBreak.HasValue && (blockTypes[stateToBreak.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
+                    {
+                        continue; // Cannot break an unbreakable block.
+                    }
+                }
+                else // This is a "place" action, so run the full rule check.
+                {
+                    bool canPlace = true;
+                    VoxelState? existingState = worldData.GetVoxelState(v.globalPosition);
+
+                    if (existingState.HasValue)
+                    {
+                        switch (v.rule)
+                        {
+                            case ReplacementRule.ForcePlace:
+                                // Force placement, but still respect Unbreakable blocks.
+                                if ((blockTypes[existingState.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
+                                    canPlace = false;
+                                break;
+
+                            case ReplacementRule.OnlyReplaceAir:
+                                // Only allow placement if the existing block is Air (ID 0).
+                                if (existingState.Value.id != 0)
+                                    canPlace = false;
+                                break;
+
+                            case ReplacementRule.Default:
+                            default:
+                                // --- Use the default Block Tag system ---
+                                BlockType incomingProps = blockTypes[v.id];
+                                BlockType existingProps = blockTypes[existingState.Value.id];
+
+                                // Rule A: Nothing can replace an Unbreakable block.
+                                if ((existingProps.tags & BlockTags.UNBREAKABLE) != 0)
+                                {
+                                    canPlace = false;
+                                }
+                                // Rule B: If the incoming block has specific replacement rules...
+                                else if (incomingProps.canReplaceTags != BlockTags.NONE)
+                                {
+                                    // ...and the existing block has NO tags that match, it can't be placed.
+                                    // The bitwise AND (&) will be 0 if there are no common flags.
+                                    if ((existingProps.tags & incomingProps.canReplaceTags) == 0)
+                                    {
+                                        // We make one exception: anything can replace "Air", which we define as a block with NONE tags.
+                                        if (existingProps.tags != BlockTags.NONE)
+                                        {
+                                            canPlace = false;
+                                        }
+                                    }
+                                }
+                                // Rule C: If the incoming block is set to NONE, it means it can only replace Air.
+                                else if (existingProps.tags != BlockTags.NONE)
+                                {
+                                    canPlace = false;
+                                }
+
+                                break;
+                        }
+                    }
+
+                    if (!canPlace)
+                    {
+                        continue; // Skip this VoxelMod, move to the next in the queue.
+                    }
+                }
+
+                // --- 3. If chunk is ready, Apply Modification ---
                 // Get the local position within the chunk.
                 Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.globalPosition);
 

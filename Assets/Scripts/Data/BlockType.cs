@@ -1,6 +1,7 @@
 ﻿using System;
 using MyBox;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Data
 {
@@ -11,11 +12,14 @@ namespace Data
     public class BlockType
     {
         [Header("Block Properties")]
+        [Tooltip("The display name of the block.")]
         public string blockName;
 
+        [Tooltip("The icon that appears in the toolbar and inventory.")]
         [InitializationField]
         public Sprite icon;
 
+        [Tooltip("The custom mesh data for this block, if it's not a standard cube.")]
         [InitializationField]
         public VoxelMeshData meshData;
 
@@ -53,18 +57,34 @@ namespace Data
         [Tooltip("How many light levels will be emitted by this block.")]
         [Range(0, 15)]
         public byte lightEmission = 0;
+        
+        [Header("Placement Rules")]
+        [Tooltip("Apply a preset for the tags below. This is a workflow helper and doesn't affect the game directly. After applying, the values are copied to the fields below.")]
+        public BlockTagPreset tagPreset;
+        
+        [Tooltip("What tags does this block have? A block can have multiple tags.")]
+        public BlockTags tags;
+
+        [FormerlySerializedAs("canBeReplacedByTags")]
+        [Tooltip("What tags can this block replace? If NONE, it can only replace Air. If ALL tags are selected, it can replace anything (except Unbreakable).")]
+        public BlockTags canReplaceTags;
 
         [Header("Block Behavior")]
         [Tooltip("Indicates whether the block has any block behavior.")]
         public bool isActive;
 
         [Header("Texture Values")]
+        [Tooltip("Texture ID for the Negative Z face.")]
         public int backFaceTexture;
-
+        [Tooltip("Texture ID for the Positive Z face.")]
         public int frontFaceTexture;
+        [Tooltip("Texture ID for the Positive Y face.")]
         public int topFaceTexture;
+        [Tooltip("Texture ID for the Negative Y face.")]
         public int bottomFaceTexture;
+        [Tooltip("Texture ID for the Negative X face.")]
         public int leftFaceTexture;
+        [Tooltip("Texture ID for the Positive X face.")]
         public int rightFaceTexture;
 
         // Back, Front, Top, Bottom, Left, Right

@@ -2476,465 +2476,17 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 4390134498371623791, guid: 87fc70fbcd08fc84f98e71569f12280c, type: 3}
   m_PrefabInstance: {fileID: 1559195426}
   m_PrefabAsset: {fileID: 0}
---- !u!1 &1731500967
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1731500969}
-  - component: {fileID: 1731500968}
-  m_Layer: 0
-  m_Name: World
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1731500968
+--- !u!114 &1731500968 stripped
 MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
+  m_CorrespondingSourceObject: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+  m_PrefabInstance: {fileID: 4046504433199967918}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1731500967}
+  m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b1422a5c69e44f94b89a0a3086494c2f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  settings:
-    version: 0.0.01
-    loadSaveDataOnStartup: 0
-    loadDistance: 7
-    viewDistance: 5
-    maxLightJobsPerFrame: 8
-    enableLighting: 1
-    clouds: 2
-    mouseSensitivityX: 1.2
-    mouseSensitivityY: 1.2
-    enableSecondPass: 1
-    enableMajorFloraPass: 1
-    enableChunkLoadAnimations: 0
-    showChunkBorders: 0
-  biomes:
-  - {fileID: 11400000, guid: 159c3e2bbfcf09d4bb338c3c44faa01e, type: 2}
-  globalLightLevel: 1
-  day: {r: 0, g: 0.90980387, b: 1, a: 1}
-  night: {r: 0.03137255, g: 0, b: 0.44705883, a: 1}
-  player: {fileID: 151001798}
-  spawnPosition: {x: 0, y: 0, z: 0}
-  spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
-  material: {fileID: 2100000, guid: 310749baead051949ad82e332a06680f, type: 2}
-  transparentMaterial: {fileID: 2100000, guid: 451dc07c0cc41a649bf3ac4fe7a9e1b0, type: 2}
-  waterMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
-  blockTypes:
-  - blockName: Air
-    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 0
-    renderNeighborFaces: 1
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 0
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 0
-    frontFaceTexture: 0
-    topFaceTexture: 0
-    bottomFaceTexture: 0
-    leftFaceTexture: 0
-    rightFaceTexture: 0
-  - blockName: Stone
-    icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 0
-    frontFaceTexture: 0
-    topFaceTexture: 0
-    bottomFaceTexture: 0
-    leftFaceTexture: 0
-    rightFaceTexture: 0
-  - blockName: Grass
-    icon: {fileID: -1336346017, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 1
-    backFaceTexture: 12
-    frontFaceTexture: 12
-    topFaceTexture: 1
-    bottomFaceTexture: 2
-    leftFaceTexture: 12
-    rightFaceTexture: 12
-  - blockName: Dirt
-    icon: {fileID: 1551665942, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 2
-    frontFaceTexture: 2
-    topFaceTexture: 2
-    bottomFaceTexture: 2
-    leftFaceTexture: 2
-    rightFaceTexture: 2
-  - blockName: Sand
-    icon: {fileID: -1153239741, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 3
-    frontFaceTexture: 3
-    topFaceTexture: 3
-    bottomFaceTexture: 3
-    leftFaceTexture: 3
-    rightFaceTexture: 3
-  - blockName: Snow
-    icon: {fileID: 455753414, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 4
-    frontFaceTexture: 4
-    topFaceTexture: 4
-    bottomFaceTexture: 4
-    leftFaceTexture: 4
-    rightFaceTexture: 4
-  - blockName: Grass Snowy
-    icon: {fileID: 122583294, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 21
-    frontFaceTexture: 21
-    topFaceTexture: 5
-    bottomFaceTexture: 2
-    leftFaceTexture: 21
-    rightFaceTexture: 21
-  - blockName: Stone Walkway
-    icon: {fileID: -1793209460, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 6
-    frontFaceTexture: 6
-    topFaceTexture: 6
-    bottomFaceTexture: 6
-    leftFaceTexture: 6
-    rightFaceTexture: 6
-  - blockName: Bedrock
-    icon: {fileID: 1008106713, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 7
-    frontFaceTexture: 7
-    topFaceTexture: 7
-    bottomFaceTexture: 7
-    leftFaceTexture: 7
-    rightFaceTexture: 7
-  - blockName: Desert Cracked
-    icon: {fileID: -966074416, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 8
-    frontFaceTexture: 8
-    topFaceTexture: 8
-    bottomFaceTexture: 8
-    leftFaceTexture: 8
-    rightFaceTexture: 8
-  - blockName: Grass Rocky
-    icon: {fileID: 2025127514, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 25
-    frontFaceTexture: 25
-    topFaceTexture: 9
-    bottomFaceTexture: 2
-    leftFaceTexture: 25
-    rightFaceTexture: 25
-  - blockName: Tile
-    icon: {fileID: 1436998987, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 10
-    frontFaceTexture: 10
-    topFaceTexture: 10
-    bottomFaceTexture: 10
-    leftFaceTexture: 10
-    rightFaceTexture: 10
-  - blockName: Wood
-    icon: {fileID: -1841403712, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 11
-    frontFaceTexture: 11
-    topFaceTexture: 11
-    bottomFaceTexture: 11
-    leftFaceTexture: 11
-    rightFaceTexture: 11
-  - blockName: Facade
-    icon: {fileID: -1490239207, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 1
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 0
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 13
-    frontFaceTexture: 13
-    topFaceTexture: 13
-    bottomFaceTexture: 13
-    leftFaceTexture: 13
-    rightFaceTexture: 13
-  - blockName: Oak Log
-    icon: {fileID: -2144359328, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 14
-    frontFaceTexture: 14
-    topFaceTexture: 15
-    bottomFaceTexture: 15
-    leftFaceTexture: 14
-    rightFaceTexture: 14
-  - blockName: Oak Leaves
-    icon: {fileID: -392713096, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 1
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 5
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 16
-    frontFaceTexture: 16
-    topFaceTexture: 16
-    bottomFaceTexture: 16
-    leftFaceTexture: 16
-    rightFaceTexture: 16
-  - blockName: Cactus
-    icon: {fileID: -954973061, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 18
-    frontFaceTexture: 18
-    topFaceTexture: 17
-    bottomFaceTexture: 17
-    leftFaceTexture: 18
-    rightFaceTexture: 18
-  - blockName: Stone Half Slab
-    icon: {fileID: 2016017474, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
-    meshData: {fileID: 11400000, guid: f1f1cbb961eacda4dbac46e90f49df51, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 1
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 0
-    frontFaceTexture: 0
-    topFaceTexture: 0
-    bottomFaceTexture: 0
-    leftFaceTexture: 0
-    rightFaceTexture: 0
-  - blockName: Directional Block
-    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
-    meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 0
-    fluidType: 0
-    fluidMeshData: {fileID: 0}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 15
-    lightEmission: 0
-    isActive: 0
-    backFaceTexture: 0
-    frontFaceTexture: 7
-    topFaceTexture: 0
-    bottomFaceTexture: 0
-    leftFaceTexture: 0
-    rightFaceTexture: 0
-  - blockName: Water
-    icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
-    meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
-    stackSize: 64
-    isSolid: 1
-    renderNeighborFaces: 1
-    fluidType: 1
-    fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
-    fluidLevel: 0
-    flowLevels: 8
-    opacity: 2
-    lightEmission: 0
-    isActive: 1
-    backFaceTexture: 0
-    frontFaceTexture: 0
-    topFaceTexture: 0
-    bottomFaceTexture: 0
-    leftFaceTexture: 0
-    rightFaceTexture: 0
-  debugScreen: {fileID: 884714899}
-  creativeInventoryWindow: {fileID: 739993166}
-  cursorSlot: {fileID: 1721447375}
-  clouds: {fileID: 806419709}
-  worldData:
-    worldName: Prototype
-    seed: 0
-  appSaveDataPath: 
-  chunkBorderPrefab: {fileID: 2348571843614231521, guid: 0c5d03a94304a4b4bbf7153e8f2675e4, type: 3}
---- !u!4 &1731500969
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1731500967}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &1810338387
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -3353,6 +2905,83 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b93e701e49c72624ebf0ea0edb68c0ce, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!1001 &4046504433199967918
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 0}
+    m_Modifications:
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 927538490966982780, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2574360936984693049, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: m_Name
+      value: World
+      objectReference: {fileID: 0}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: clouds
+      value: 
+      objectReference: {fileID: 806419709}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: player
+      value: 
+      objectReference: {fileID: 151001798}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: cursorSlot
+      value: 
+      objectReference: {fileID: 1721447375}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: debugScreen
+      value: 
+      objectReference: {fileID: 884714899}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: creativeInventoryWindow
+      value: 
+      objectReference: {fileID: 739993166}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
 --- !u!1001 &8778869234902397198
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -3468,7 +3097,7 @@ SceneRoots:
   m_Roots:
   - {fileID: 705507995}
   - {fileID: 886881816}
-  - {fileID: 1731500969}
+  - {fileID: 4046504433199967918}
   - {fileID: 151001797}
   - {fileID: 1080100306}
   - {fileID: 749848862}

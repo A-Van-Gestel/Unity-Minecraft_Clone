@@ -14,6 +14,11 @@ namespace Data
         public byte fluidLevel;
         public bool ImmediateUpdate;
 
+        /// <summary>
+        /// An override rule for placement logic. Defaults to 'Default', which uses the Block Tag system.
+        /// </summary>
+        public ReplacementRule rule;
+
         // --- Constructors ---
 
         #region Constructors
@@ -25,6 +30,7 @@ namespace Data
             orientation = 1; // Default to Front / North (1)
             fluidLevel = 0; // Default to source (0)
             ImmediateUpdate = false; // Default to false
+            rule = ReplacementRule.Default; // Use the block's default placement rules.
         }
 
         #endregion
