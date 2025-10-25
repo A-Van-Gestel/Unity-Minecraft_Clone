@@ -506,7 +506,7 @@ namespace Editor
         private void UpdatePreviewMesh()
         {
             if (previewMesh != null) DestroyImmediate(previewMesh);
-            previewMesh = EditorMeshGenerator.GenerateBlockMesh(selectedBlock);
+            previewMesh = EditorMeshGenerator.GenerateBlockMesh(selectedBlock, blockTypesCopy); 
 
             // Material switching logic
             if (selectedBlock.fluidType != FluidType.None)

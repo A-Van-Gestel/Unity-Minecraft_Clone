@@ -13,4 +13,4 @@ MonoBehaviour:
   m_Name: BTP_Wood_log
   m_EditorClassIdentifier: Assembly-CSharp::Data.BlockTagPreset
   tags: 1057
-  canReplaceTags: 8384
+  canReplaceTags: 8386

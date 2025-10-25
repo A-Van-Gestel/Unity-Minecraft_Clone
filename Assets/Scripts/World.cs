@@ -610,19 +610,9 @@ public class World : MonoBehaviour
         }
 
         // --- Prepare Fluid Vertex Templates ---
-        // ... (rest of the method is unchanged)
-        const string fluidDataPath = "FluidData";
-        var waterAsset = Resources.Load<FluidMeshData>($"{fluidDataPath}/FluidData_Water");
-        if (waterAsset)
-        {
-            waterVertexTemplates = new NativeArray<float>(waterAsset.vertexYPositions, Allocator.Persistent);
-        }
-
-        var lavaAsset = Resources.Load<FluidMeshData>($"{fluidDataPath}/FluidData_Lava");
-        if (lavaAsset)
-        {
-            lavaVertexTemplates = new NativeArray<float>(lavaAsset.vertexYPositions, Allocator.Persistent);
-        }
+        FluidTemplates fluidTemplates = ResourceLoader.LoadFluidTemplates();
+        waterVertexTemplates = new NativeArray<float>(fluidTemplates.WaterVertexTemplates, Allocator.Persistent);
+        lavaVertexTemplates = new NativeArray<float>(fluidTemplates.LavaVertexTemplates, Allocator.Persistent);
     }
 
     // Helper for other classes to get job data

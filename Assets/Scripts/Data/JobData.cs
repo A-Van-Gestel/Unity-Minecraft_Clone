@@ -3,6 +3,21 @@ using UnityEngine;
 
 namespace Data
 {
+    /// <summary>
+    /// A job-safe representation of a nullable VoxelState.
+    /// </summary>
+    public struct OptionalVoxelState
+    {
+        public VoxelState state;
+        public bool hasValue;
+
+        public OptionalVoxelState(VoxelState state)
+        {
+            this.state = state;
+            this.hasValue = true;
+        }
+    }
+    
     /// A job-safe representation of BiomeAttributes
     public struct BiomeAttributesJobData
     {

@@ -1,6 +1,8 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Data;
 using Helpers;
+using Jobs.BurstData;
 using Unity.Collections;
 using UnityEngine;
 
@@ -10,9 +12,9 @@ namespace Editor
     {
         /// <summary>
         /// Generates a Mesh for a given BlockType. This is for editor previews only.
-        /// It mirrors the logic of MeshGenerationJob but uses standard C# lists.
+        /// It now contains self-sufficient logic for all block types, including a simplified fluid preview.
         /// </summary>
-        public static Mesh GenerateBlockMesh(BlockType blockType)
+        public static Mesh GenerateBlockMesh(BlockType blockType, List<BlockType> allBlockTypes)
         {
             if (blockType == null) return null;
 
@@ -27,39 +29,49 @@ namespace Editor
             // Center point for rotating the mesh around its true center
             Vector3 centerOffset = new Vector3(-0.5f, -0.5f, -0.5f);
 
+            // --- Unified path for all block types using VoxelMeshHelper ---
+            var nativeVertices = new NativeList<Vector3>(Allocator.Temp);
+            var nativeOpaqueTris = new NativeList<int>(Allocator.Temp);
+            var nativeTransparentTris = new NativeList<int>(Allocator.Temp);
+            var nativeFluidTris = new NativeList<int>(Allocator.Temp);
+            var nativeUvs = new NativeList<Vector2>(Allocator.Temp);
+            var nativeColors = new NativeList<Color>(Allocator.Temp);
+            var nativeNormals = new NativeList<Vector3>(Allocator.Temp);
+            int vertexIndex = 0;
 
-            // Case 1: Fluid Block (generates mesh with vertex colors)
+
+            // Case 1: Fluid Block
             if (blockType.fluidType != FluidType.None)
             {
-                float liquidType = (blockType.fluidType == FluidType.Lava) ? 1.0f : 0.0f;
-                // Pack data: r=type, g=shore(0), b=unused(0), a=light(1)
-                Color liquidColor = new Color(liquidType, 0, 0, 1);
+                // Create mock data needed by the helper that isn't available in the editor.
+                var mockProps = new BlockTypeJobData(blockType);
+                // Use fluid level 0 (full block) and full sunlight (15) for the preview.
+                uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0, 1, blockType.fluidLevel);
 
-                for (int p = 0; p < 6; p++) // Iterate through 6 faces
-                {
-                    int vertCount = vertices.Count;
+                // For a simple, flat preview, an empty (default) array is sufficient.
+                var mockNeighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
 
-                    for (int i = 0; i < 4; i++)
-                    {
-                        int vertIndex = VoxelData.VoxelTris[p * 4 + i];
-                        vertices.Add(VoxelData.VoxelVerts[vertIndex] + centerOffset);
-                        normals.Add(VoxelData.FaceChecks[p]);
-                        colors.Add(liquidColor); // Add the packed color data
-                        uvs.Add(VoxelData.VoxelUvs[i]); // Add dummy UVs
-                    }
+                // Load fluid templates using the new helper - works perfectly in the editor.
+                FluidTemplates fluidTemplates = ResourceLoader.LoadFluidTemplates();
+                var templates = new NativeArray<float>(16, Allocator.Temp);
+                templates.CopyFrom(blockType.fluidType == FluidType.Water ? fluidTemplates.WaterVertexTemplates : fluidTemplates.LavaVertexTemplates);
 
-                    // All fluid faces go to a transparent sub-mesh
-                    transparentTriangles.Add(vertCount);
-                    transparentTriangles.Add(vertCount + 1);
-                    transparentTriangles.Add(vertCount + 2);
-                    transparentTriangles.Add(vertCount + 2);
-                    transparentTriangles.Add(vertCount + 1);
-                    transparentTriangles.Add(vertCount + 3);
-                }
+                // Create temporary BlockTypeJobData from the editor's list.
+                var blockTypesJobData = new NativeArray<BlockTypeJobData>(allBlockTypes.Select(bt => new BlockTypeJobData(bt)).ToArray(), Allocator.Temp);
+
+                VoxelMeshHelper.GenerateFluidMeshData(Vector3Int.zero, mockPackedData, mockProps, in templates, in blockTypesJobData, mockNeighbors,
+                    ref vertexIndex, ref nativeVertices, ref nativeFluidTris, ref nativeUvs, ref nativeColors, ref nativeNormals);
+
+                // Dispose all temporary native arrays.
+                mockNeighbors.Dispose();
+                templates.Dispose();
+                blockTypesJobData.Dispose();
             }
             // Case 2: Custom Mesh
             else if (blockType.meshData != null)
             {
+                // This logic does not use native lists, so it remains unchanged for now.
+                // It could be unified in a future pass.
                 for (int p = 0; p < blockType.meshData.faces.Length; p++)
                 {
                     if (p >= 6) continue; // Safety break for assets with >6 faces
@@ -78,8 +90,7 @@ namespace Editor
 
                     foreach (var vertData in face.vertData)
                     {
-                        vertices.Add(vertData.position + centerOffset);
-                        // Combine the base atlas UV with the vertex's local UV
+                        vertices.Add(vertData.position);
                         uvs.Add(new Vector2(
                             baseUv.x + vertData.uv.x * VoxelData.NormalizedBlockTextureSize,
                             baseUv.y + vertData.uv.y * VoxelData.NormalizedBlockTextureSize
@@ -101,44 +112,43 @@ namespace Editor
             // Case 3: Standard Solid Block
             else
             {
-                var nativeVertices = new NativeList<Vector3>(Allocator.Temp);
-                var nativeOpaqueTris = new NativeList<int>(Allocator.Temp);
-                var nativeTransparentTris = new NativeList<int>(Allocator.Temp);
-                var nativeUvs = new NativeList<Vector2>(Allocator.Temp);
-                var nativeColors = new NativeList<Color>(Allocator.Temp);
-                var nativeNormals = new NativeList<Vector3>(Allocator.Temp);
-                int vertexIndex = 0;
-
                 for (int p = 0; p < 6; p++)
                 {
                     int textureID = blockType.GetTextureID(p);
-                    // Pass BOTH triangle lists to the helper
                     VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f,
                         ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
                         blockType.renderNeighborFaces);
                 }
+            }
 
-                // Adjust all generated vertices to be centered for the preview camera.
-                for (int i = 0; i < nativeVertices.Length; i++)
-                {
-                    nativeVertices[i] += centerOffset;
-                }
-
-                // Convert from native to managed lists
+            // --- Post-processing for all native-generated meshes ---
+            // If any native lists were populated, convert them to managed lists.
+            if (nativeVertices.Length > 0)
+            {
                 vertices.AddRange(nativeVertices.AsArray());
                 opaqueTriangles.AddRange(nativeOpaqueTris.AsArray());
                 transparentTriangles.AddRange(nativeTransparentTris.AsArray());
+                // Add fluid triangles to the transparent sub-mesh for rendering
+                transparentTriangles.AddRange(nativeFluidTris.AsArray());
                 uvs.AddRange(nativeUvs.AsArray());
                 colors.AddRange(nativeColors.AsArray());
                 normals.AddRange(nativeNormals.AsArray());
+            }
 
-                // Dispose native collections
-                nativeVertices.Dispose();
-                nativeOpaqueTris.Dispose();
-                nativeTransparentTris.Dispose();
-                nativeUvs.Dispose();
-                nativeColors.Dispose();
-                nativeNormals.Dispose();
+            // Dispose all native collections
+            nativeVertices.Dispose();
+            nativeOpaqueTris.Dispose();
+            nativeTransparentTris.Dispose();
+            nativeFluidTris.Dispose();
+            nativeUvs.Dispose();
+            nativeColors.Dispose();
+            nativeNormals.Dispose();
+
+            // --- Final Mesh Assembly ---
+            // Apply center offset to ALL vertices before creating the mesh
+            for (int i = 0; i < vertices.Count; i++)
+            {
+                vertices[i] += centerOffset;
             }
 
             mesh.vertices = vertices.ToArray();
