@@ -29,6 +29,7 @@ namespace Editor
         // --- Custom GUI Style ---
         private GUIStyle _listButtonStyle;
         private static GUIStyle _checkerboardStyle;
+        private static GUIStyle _centeredIntFieldStyle;
 
         [MenuItem("Minecraft Clone/Block Editor")]
         public static void ShowWindow()
@@ -76,7 +77,7 @@ namespace Editor
                     }
                 }
             }
-            
+
             //  Subscribe to the editor's update loop to enable real-time preview.
             EditorApplication.update += OnUpdate;
         }
@@ -86,13 +87,13 @@ namespace Editor
         {
             // Unsubscribe from the update loop when the window is closed or disabled.
             EditorApplication.update -= OnUpdate;
-            
+
             // IMPORTANT: Clean up the preview utility and created objects to prevent memory leaks
             previewRenderUtility?.Cleanup();
             if (previewMesh != null) DestroyImmediate(previewMesh);
             if (previewMaterial != null) DestroyImmediate(previewMaterial);
         }
-        
+
         // This method will be called on every editor frame.
         private void OnUpdate()
         {
@@ -326,7 +327,8 @@ namespace Editor
                 if (selectedBlock.fluidType != FluidType.None)
                 {
                     EditorGUI.indentLevel++;
-                    selectedBlock.fluidShaderID = (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Shader ID", "The ID passed to the liquid shader, controlling its visual style (e.g., 0 for Water, 1 for Lava)."), selectedBlock.fluidShaderID, 0, 16); // 256 (byte) is actual maximum
+                    selectedBlock.fluidShaderID =
+                        (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Shader ID", "The ID passed to the liquid shader, controlling its visual style (e.g., 0 for Water, 1 for Lava)."), selectedBlock.fluidShaderID, 0, 16); // 256 (byte) is actual maximum
                     selectedBlock.fluidLevel = (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Level", "Default fluid level."), selectedBlock.fluidLevel, 0, 15);
                     selectedBlock.flowLevels = (byte)EditorGUILayout.IntSlider(new GUIContent("Flow Levels", "How many blocks a fluid can flow horizontally from a source block."), selectedBlock.flowLevels, 1, 8);
                     EditorGUI.indentLevel--;
@@ -340,7 +342,7 @@ namespace Editor
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Placement Rules & Tags", EditorStyles.boldLabel);
-                
+
                 // ... (Tag Preset and Tag fields with tooltips) ...
                 EditorGUILayout.BeginHorizontal();
                 selectedBlock.tagPreset = (BlockTagPreset)EditorGUILayout.ObjectField(new GUIContent("Tag Preset", "Apply a preset for the tags below."), selectedBlock.tagPreset, typeof(BlockTagPreset), false);
@@ -369,13 +371,43 @@ namespace Editor
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Face Textures (ID)", EditorStyles.boldLabel);
 
-                // --- Texture Previews ---
-                DrawTextureSelector(new GUIContent("Back (-Z)", "Texture ID for the Negative Z face."), ref selectedBlock.backFaceTexture);
-                DrawTextureSelector(new GUIContent("Front (+Z)", "Texture ID for the Positive Z face."), ref selectedBlock.frontFaceTexture);
-                DrawTextureSelector(new GUIContent("Top (+Y)", "Texture ID for the Positive Y face."), ref selectedBlock.topFaceTexture);
-                DrawTextureSelector(new GUIContent("Bottom (-Y)", "Texture ID for the Negative Y face."), ref selectedBlock.bottomFaceTexture);
-                DrawTextureSelector(new GUIContent("Left (-X)", "Texture ID for the Negative X face."), ref selectedBlock.leftFaceTexture);
-                DrawTextureSelector(new GUIContent("Right (+X)", "Texture ID for the Positive X face."), ref selectedBlock.rightFaceTexture);
+                // --- Plus-Shaped Texture Selector Layout ---
+                // This layout uses nested vertical and horizontal groups to align the selectors
+                // in an "unfolded cube" pattern without hardcoding pixel sizes.
+
+                // Only draw the texture selectors if the block is not a fluid. As fluids are drawn using shaders.
+                if (selectedBlock.fluidType == FluidType.None)
+                {
+                    // Row 1: Top Face (centered)
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.FlexibleSpace();
+                    DrawTextureSelectorControl(new GUIContent("Top (+Y)", "Texture ID for the Positive Y face."), ref selectedBlock.topFaceTexture);
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
+
+                    // Row 2: Left, Front, and Right Faces
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.FlexibleSpace();
+                    DrawTextureSelectorControl(new GUIContent("Left (-X)", "Texture ID for the Negative X face."), ref selectedBlock.leftFaceTexture);
+                    DrawTextureSelectorControl(new GUIContent("Front (+Z)", "Texture ID for the Positive Z face."), ref selectedBlock.frontFaceTexture);
+                    DrawTextureSelectorControl(new GUIContent("Right (+X)", "Texture ID for the Positive X face."), ref selectedBlock.rightFaceTexture);
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
+
+                    // Row 3: Bottom Face (centered)
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.FlexibleSpace();
+                    DrawTextureSelectorControl(new GUIContent("Bottom (-Y)", "Texture ID for the Negative Y face."), ref selectedBlock.bottomFaceTexture);
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
+
+                    // Row 4: Back Face (centered)
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.FlexibleSpace();
+                    DrawTextureSelectorControl(new GUIContent("Back (-Z)", "Texture ID for the Negative Z face."), ref selectedBlock.backFaceTexture);
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
+                }
 
                 // --- 3D Preview ---
                 EditorGUILayout.Space(20);
@@ -516,7 +548,7 @@ namespace Editor
         private void UpdatePreviewMesh()
         {
             if (previewMesh != null) DestroyImmediate(previewMesh);
-            previewMesh = EditorMeshGenerator.GenerateBlockMesh(selectedBlock, blockTypesCopy); 
+            previewMesh = EditorMeshGenerator.GenerateBlockMesh(selectedBlock, blockTypesCopy);
 
             // Material switching logic
             if (selectedBlock.fluidType != FluidType.None)
@@ -609,7 +641,7 @@ namespace Editor
                 GUI.DrawTexture(previewRect, previewTexture);
             }
         }
-        
+
         /// <summary>
         /// Programmatically creates a GUIStyle with a checkerboard texture background.
         /// The texture is generated once and the style is cached for performance.
@@ -619,14 +651,14 @@ namespace Editor
             // Define two colors for the checkerboard that work in both light and dark themes.
             Color c0 = EditorGUIUtility.isProSkin ? new Color(0.32f, 0.32f, 0.32f) : new Color(0.8f, 0.8f, 0.8f);
             Color c1 = EditorGUIUtility.isProSkin ? new Color(0.28f, 0.28f, 0.28f) : new Color(0.75f, 0.75f, 0.75f);
-            
+
             // Create a 16x16 texture
             int width = 16;
             int height = 16;
             var texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
             texture.hideFlags = HideFlags.HideAndDontSave; // Don't save this texture with the scene
             var pixels = new Color[width * height];
-            
+
             // Fill the texture with the checkerboard pattern
             for (int y = 0; y < height; y++)
             {
@@ -640,7 +672,7 @@ namespace Editor
 
             texture.SetPixels(pixels);
             texture.Apply();
-            
+
             // This ensures the small texture tiles correctly over the whole preview area.
             texture.wrapMode = TextureWrapMode.Repeat;
 
@@ -689,21 +721,57 @@ namespace Editor
             return rotation;
         }
 
-        private void DrawTextureSelector(GUIContent label, ref int textureID)
+        /// <summary>
+        /// Draws a single, self-contained texture selector widget with a vertical layout:
+        /// Label on top, then the Int Field, then the Texture Preview.
+        /// </summary>
+        private void DrawTextureSelectorControl(GUIContent label, ref int textureID)
         {
-            EditorGUILayout.BeginHorizontal();
-            textureID = EditorGUILayout.IntField(label, textureID, GUILayout.Width(200));
-            if (atlasTexture != null)
+            // Use a vertical group with a more compact width to suit the new layout.
+            EditorGUILayout.BeginVertical(GUILayout.Width(120));
+
+            // --- Row 1: The Label ---
+            // We center the label using a horizontal group with flexible spaces.
+            GUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            GUILayout.Label(label, EditorStyles.boldLabel); // Use GUILayout.Label to respect the centering.
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+
+            // --- Row 2: The Centered Int Field ---
+            // On first run, create and cache a new GUIStyle for the IntField.
+            if (_centeredIntFieldStyle == null)
             {
-                // This will now be drawn right next to the 250px-wide IntField.
-                Rect previewRect = EditorGUILayout.GetControlRect(GUILayout.Width(48), GUILayout.Height(48));
-                DrawTexturePreview(previewRect, textureID);
+                // We create a new style based on the default number field,
+                // otherwise it would look completely different (no background, etc.).
+                _centeredIntFieldStyle = new GUIStyle(EditorStyles.numberField)
+                {
+                    // Set the text alignment to the center.
+                    alignment = TextAnchor.MiddleCenter
+                };
             }
 
-            // Add a flexible space to ensure any other horizontal elements are pushed away.
-            GUILayout.FlexibleSpace();
+            // Draw the integer field using our custom centered style.
+            textureID = EditorGUILayout.IntField(textureID, _centeredIntFieldStyle);
 
-            EditorGUILayout.EndHorizontal();
+            // --- Row 3: The Texture Preview ---
+            if (atlasTexture != null)
+            {
+                // This horizontal group just serves to center the preview image.
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                Rect previewRect = EditorGUILayout.GetControlRect(GUILayout.Width(48), GUILayout.Height(48));
+                DrawTexturePreview(previewRect, textureID);
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+            }
+            else
+            {
+                // Add a placeholder space to maintain the layout's height and alignment.
+                GUILayout.Space(52);
+            }
+
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawTexturePreview(Rect position, int textureID)
