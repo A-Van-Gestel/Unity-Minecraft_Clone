@@ -2,7 +2,6 @@
 using Data;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.Rendering;
 
 namespace Editor
 {
@@ -27,15 +26,9 @@ namespace Editor
         private Material previewMaterial;
         private Vector2 previewRotation = new Vector2(15, -30); // Initial rotation
 
-        // --- Shader Keywords ---
-        private const string LIQUID_TYPE_WATER = "_LIQUIDTYPE_WATER";
-        private const string LIQUID_TYPE_LAVA = "_LIQUIDTYPE_LAVA";
-
-        private LocalKeyword liquidTypeWaterKeyword;
-        private LocalKeyword liquidTypeLavaKeyword;
-
         // --- Custom GUI Style ---
-        private GUIStyle listButtonStyle;
+        private GUIStyle _listButtonStyle;
+        private static GUIStyle _checkerboardStyle;
 
         [MenuItem("Minecraft Clone/Block Editor")]
         public static void ShowWindow()
@@ -83,15 +76,33 @@ namespace Editor
                     }
                 }
             }
+            
+            //  Subscribe to the editor's update loop to enable real-time preview.
+            EditorApplication.update += OnUpdate;
         }
 
         // --- OnDisable for Cleanup ---
         void OnDisable()
         {
+            // Unsubscribe from the update loop when the window is closed or disabled.
+            EditorApplication.update -= OnUpdate;
+            
             // IMPORTANT: Clean up the preview utility and created objects to prevent memory leaks
             previewRenderUtility?.Cleanup();
             if (previewMesh != null) DestroyImmediate(previewMesh);
             if (previewMaterial != null) DestroyImmediate(previewMaterial);
+        }
+        
+        // This method will be called on every editor frame.
+        private void OnUpdate()
+        {
+            // Only force a repaint if we have a block selected that might be animated.
+            // This is a small optimization to prevent the window from repainting constantly
+            // when it's just sitting empty.
+            if (selectedBlock != null)
+            {
+                Repaint();
+            }
         }
 
         private void LoadBlockData()
@@ -165,9 +176,9 @@ namespace Editor
 
             // --- Initialize custom GUIStyle here ---
             // We create a new style based on the default button, then modify it.
-            if (listButtonStyle == null)
+            if (_listButtonStyle == null)
             {
-                listButtonStyle = new GUIStyle(EditorStyles.toolbarButton)
+                _listButtonStyle = new GUIStyle(EditorStyles.toolbarButton)
                 {
                     alignment = TextAnchor.MiddleLeft,
                     imagePosition = ImagePosition.ImageLeft,
@@ -228,10 +239,10 @@ namespace Editor
                     GUI.backgroundColor = (i == selectedBlockIndex) ? Color.cyan : Color.white;
 
                     // Button for each block with its icon and name.
-                    Rect buttonRect = GUILayoutUtility.GetRect(new GUIContent(), listButtonStyle, GUILayout.Height(24));
+                    Rect buttonRect = GUILayoutUtility.GetRect(new GUIContent(), _listButtonStyle, GUILayout.Height(24));
                     string buttonText = $" {blockTypesCopy[i].blockName} (ID: {i})";
 
-                    if (GUI.Button(buttonRect, buttonText, listButtonStyle))
+                    if (GUI.Button(buttonRect, buttonText, _listButtonStyle))
                     {
                         if (selectedBlockIndex != i)
                         {
@@ -497,34 +508,14 @@ namespace Editor
             if (previewMesh != null) DestroyImmediate(previewMesh);
             previewMesh = EditorMeshGenerator.GenerateBlockMesh(selectedBlock);
 
-            // --- logic to switch materials based on block type ---
+            // Material switching logic
             if (selectedBlock.fluidType != FluidType.None)
             {
                 if (worldPrefab.liquidMaterial != null)
                 {
-                    // Use the dedicated water material for the preview
-                    var shader = worldPrefab.liquidMaterial.shader;
-
-                    // Create and cache the LocalKeyword
-                    if (liquidTypeWaterKeyword != null && liquidTypeLavaKeyword != null)
-                    {
-                        liquidTypeWaterKeyword = new LocalKeyword(shader, LIQUID_TYPE_WATER);
-                        liquidTypeLavaKeyword = new LocalKeyword(shader, LIQUID_TYPE_LAVA);
-                    }
-
+                    // Just assign the material. The vertex colors in the mesh will handle the rest.
                     previewMaterial.shader = worldPrefab.liquidMaterial.shader;
                     previewMaterial.CopyPropertiesFromMaterial(worldPrefab.liquidMaterial);
-
-                    if (selectedBlock.fluidType == FluidType.Water)
-                    {
-                        previewMaterial.SetKeyword(liquidTypeWaterKeyword, true);
-                        previewMaterial.SetKeyword(liquidTypeLavaKeyword, false);
-                    }
-                    else if (selectedBlock.fluidType == FluidType.Lava)
-                    {
-                        previewMaterial.SetKeyword(liquidTypeWaterKeyword, false);
-                        previewMaterial.SetKeyword(liquidTypeLavaKeyword, true);
-                    }
                 }
                 else
                 {
@@ -556,6 +547,30 @@ namespace Editor
             // Define the rectangle for the preview
             Rect previewRect = GUILayoutUtility.GetRect(200, 300, GUILayout.ExpandWidth(true));
 
+            // 1. Initialize the style on first use. This is a common performance pattern for IMGUI.
+            if (_checkerboardStyle == null)
+            {
+                _checkerboardStyle = CreateCheckerboardStyle();
+            }
+
+            // 2. Draw the cached style as the background.
+            if (Event.current.type == EventType.Repaint)
+            {
+                // Get the texture from our cached style.
+                Texture2D checkerTexture = _checkerboardStyle.normal.background;
+                if (checkerTexture != null)
+                {
+                    // Calculate how many times the texture should repeat based on the rect's size.
+                    // If our preview is 200px wide and the texture is 16px wide, the UV rect width will be 200/16 = 12.5.
+                    // This tells the GPU to repeat the texture 12.5 times horizontally.
+                    Rect texCoords = new Rect(0, 0, previewRect.width / checkerTexture.width, previewRect.height / checkerTexture.height);
+
+                    // Draw the texture using the calculated tiling coordinates.
+                    // This respects the texture's wrapMode, which we set to Repeat.
+                    GUI.DrawTextureWithTexCoords(previewRect, checkerTexture, texCoords);
+                }
+            }
+
             if (Event.current.type == EventType.Repaint)
             {
                 if (previewMesh == null) UpdatePreviewMesh();
@@ -570,13 +585,61 @@ namespace Editor
 
                 // Draw the mesh with the current rotation
                 var rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(previewRotation.y, 0, 0) * Quaternion.Euler(0, previewRotation.x, 0), Vector3.one);
+
+                // Draw sub-mesh 0 (Opaque parts)
                 previewRenderUtility.DrawMesh(previewMesh, rotationMatrix, previewMaterial, 0);
+                // Draw sub-mesh 1 (Transparent parts)
+                previewRenderUtility.DrawMesh(previewMesh, rotationMatrix, previewMaterial, 1);
 
                 previewRenderUtility.Render();
                 Texture previewTexture = previewRenderUtility.EndPreview();
+
+                // Because the preview utility has a transparent background, this will
+                // draw the rendered block correctly on top of the checkerboard we drew earlier.
                 GUI.DrawTexture(previewRect, previewTexture);
             }
         }
+        
+        /// <summary>
+        /// Programmatically creates a GUIStyle with a checkerboard texture background.
+        /// The texture is generated once and the style is cached for performance.
+        /// </summary>
+        private static GUIStyle CreateCheckerboardStyle()
+        {
+            // Define two colors for the checkerboard that work in both light and dark themes.
+            Color c0 = EditorGUIUtility.isProSkin ? new Color(0.32f, 0.32f, 0.32f) : new Color(0.8f, 0.8f, 0.8f);
+            Color c1 = EditorGUIUtility.isProSkin ? new Color(0.28f, 0.28f, 0.28f) : new Color(0.75f, 0.75f, 0.75f);
+            
+            // Create a 16x16 texture
+            int width = 16;
+            int height = 16;
+            var texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
+            texture.hideFlags = HideFlags.HideAndDontSave; // Don't save this texture with the scene
+            var pixels = new Color[width * height];
+            
+            // Fill the texture with the checkerboard pattern
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    // Use integer division to create 8x8 pixel squares
+                    bool isFirstColor = ((x / 8) + (y / 8)) % 2 == 0;
+                    pixels[y * width + x] = isFirstColor ? c0 : c1;
+                }
+            }
+
+            texture.SetPixels(pixels);
+            texture.Apply();
+            
+            // This ensures the small texture tiles correctly over the whole preview area.
+            texture.wrapMode = TextureWrapMode.Repeat;
+
+            // Create the style and assign the texture to its background.
+            var style = new GUIStyle();
+            style.normal.background = texture;
+            return style;
+        }
+
 
         // Helper for interactive rotation
         private static Vector2 DragAndDropPreviewRotation(Rect position, Vector2 rotation)

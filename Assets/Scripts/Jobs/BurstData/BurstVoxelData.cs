@@ -1,6 +1,9 @@
 ﻿using Unity.Burst;
 using Unity.Collections;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace Jobs
 {
@@ -23,6 +26,8 @@ namespace Jobs
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         public static void Initialize()
         {
+            Dispose(); // Clean up any old data before initializing
+            
             // Allocate persistent memory for our arrays, as they will exist for the lifetime of the app.
             var voxelVerts = new NativeArray<Vector3>(VoxelData.VoxelVerts, Allocator.Persistent);
             var voxelTris = new NativeArray<int>(VoxelData.VoxelTris, Allocator.Persistent);
@@ -39,21 +44,28 @@ namespace Jobs
             // This ensures our native memory is cleaned up when the game closes.
             // We unsubscribe first to prevent duplicate subscriptions during editor domain reloads.
             Application.quitting -= Dispose;
-            Application.quitting += Dispose;
+            // Hook into the editor's assembly reload event to dispose data correctly.
+#if UNITY_EDITOR
+            AssemblyReloadEvents.beforeAssemblyReload += Dispose;
+#endif
         }
     
         // It's crucial to dispose of NativeArrays to prevent memory leaks.
         // This method is called when the application closes or the editor recompiles.
         private static void Dispose()
         {
+            // Unsubscribe from events to prevent memory leaks in the editor
+            Application.quitting -= Dispose;
+#if UNITY_EDITOR
+            AssemblyReloadEvents.beforeAssemblyReload -= Dispose;
+#endif
+
+            
             // Check if the data has been created before trying to dispose it.
             if (VoxelVerts.Data.IsCreated) VoxelVerts.Data.Dispose();
             if (VoxelTris.Data.IsCreated) VoxelTris.Data.Dispose();
             if (VoxelUvs.Data.IsCreated) VoxelUvs.Data.Dispose();
             if (FaceChecks.Data.IsCreated) FaceChecks.Data.Dispose();
-        
-            // It's also good practice to unsubscribe after the event has fired, though not strictly necessary on quit.
-            Application.quitting -= Dispose;
         }
     }
 }

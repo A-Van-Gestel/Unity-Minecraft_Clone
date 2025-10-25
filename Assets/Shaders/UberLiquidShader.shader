@@ -2,30 +2,41 @@
 {
     Properties
     {
-        [KeywordEnum(Lava, Water)] _LiquidType("Liquid Type", Float) = 0
+        // This now correctly controls the preview in the editor
+        [KeywordEnum(Water, Lava)] _EditorPreviewType("Editor Preview Type", Float) = 0
+
+        // --- Global Shoreline Controls ---
+        [Header(Shoreline Effects)]
+        [Toggle(USE_SHORE_EFFECTS)] _UseShoreEffects ("Enable Shore Effects", Float) = 1
+        _ShoreSize("Shore Effect Size", Range(0.0, 1.0)) = 0.6
 
         // --- Lava Properties ---
         [Header(Lava)]
         _BrightColor("Bright Color (Cracks)", Color) = (1, 0.9, 0.6, 1)
         _MidColor("Mid Color", Color) = (1, 0.5, 0, 1)
         _DarkColor("Dark Color (Crust)", Color) = (0.6, 0.1, 0, 1)
+        _CrustColor("Cooled Crust Color (Shore)", Color) = (0.2, 0.05, 0.0, 1)
+        _LavaFlowDirection("Flow Direction (XZ)", Vector) = (0.1, 0.05, 0, 0)
         _NoiseScale("Lava Scale", Range(0.1, 10)) = 2.0
         _CellDensity("Cell Density", Range(1, 4)) = 2.5
         _Speed("Flow Speed", Range(0, 2)) = 0.3
         _CrackBrightness("Crack Brightness", Range(0, 3)) = 1.5
         _PulseSpeed("Pulse Speed", Range(0, 5)) = 1.5
+        _HeatDistortionAmount("Heat Distortion", Range(0, 0.1)) = 0.015
+        _FlowHighlight("Flow Highlight", Range(0, 2)) = 0.5
 
-        // --- Water Properties (New & Procedural) ---
+        // --- Water Properties ---
         [Header(Water)]
-        _DeepColor("Deep Color", Color) = (0.1, 0.2, 0.5, 1)
-        _ShallowColor("Shallow Color", Color) = (0.3, 0.5, 0.9, 1)
+        _DeepColor("Deep Color (Low Light)", Color) = (0.1, 0.2, 0.5, 0.85)
+        _ShallowColor("Shallow Color (High Light)", Color) = (0.3, 0.5, 0.9, 0.7)
         _FoamColor("Foam Color", Color) = (0.9, 0.9, 0.9, 1)
+        _WaterFlowDirection("Flow Direction (XZ)", Vector) = (0.3, 0.2, 0, 0)
         _WaveScale("Wave Scale", Range(0.1, 10)) = 5.0
         _WaveSpeed("Wave Speed", Range(0, 2)) = 0.4
         _RippleScale("Ripple Scale", Range(1, 20)) = 15.0
         _RippleSpeed("Ripple Speed", Range(0, 5)) = 1.2
-        _FoamThreshold("Foam Threshold", Range(0.5, 1.0)) = 0.8
-        _Transparency("Transparency", Range(0.0, 1.0)) = 0.7
+        _FoamThreshold("Wave Foam Threshold", Range(0.5, 1.0)) = 0.8
+        _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.02
     }
 
     SubShader
@@ -34,11 +45,11 @@
         {
             "Queue"="Transparent" "RenderType"="Transparent"
         }
-        LOD 100
-        Lighting Off
-        ZWrite Off
-        Blend SrcAlpha OneMinusSrcAlpha
-        Cull Off
+
+        GrabPass
+        {
+            "_GrabTexture"
+        }
 
         Pass
         {
@@ -47,54 +58,49 @@
             #pragma fragment fragFunction
             #pragma target 3.0
 
-            #pragma shader_feature _LIQUIDTYPE_LAVA _LIQUIDTYPE_WATER
+            // Keyword for the shoreline toggle
+            #pragma shader_feature USE_SHORE_EFFECTS
 
             #include "UnityCG.cginc"
+            #include "UnityShaderVariables.cginc" // For unity_IsEditorPlaying
 
             // Structs
             struct appdata
             {
                 float4 vertex : POSITION;
+                float3 normal : NORMAL; // Normal is required for gradient
                 float2 uv : TEXCOORD0;
-                fixed4 color : COLOR;
+                fixed4 color : COLOR; // r:LiquidType, g:Shoreline, b:Unused, a:LightLevel
             };
 
             struct v2f
             {
                 float4 vertex : SV_POSITION;
-                float2 uv : TEXCOORD0;
-                fixed4 color : COLOR;
-                float3 worldPos : TEXCOORD1;
+                float3 worldPos : TEXCOORD0;
+                float4 screenPos : TEXCOORD1;
+                float3 worldNormal : TEXCOORD2; // Pass normal to fragment
+                float liquidType : TEXCOORD3;
+                float shorelineFlag : TEXCOORD4;
+                float lightLevel : TEXCOORD5;
             };
 
-            // Global Lighting
-            float GlobalLightLevel;
-            float minGlobalLightLevel;
-            float maxGlobalLightLevel;
+            // Global Properties
+            float _EditorPreviewType;
+            float _ShoreSize;
+            sampler2D _GrabTexture;
+            float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
 
-            // --- Lava Properties ---
-            fixed4 _BrightColor;
-            fixed4 _MidColor;
-            fixed4 _DarkColor;
-            float _NoiseScale;
-            float _CellDensity;
-            float _Speed;
-            float _CrackBrightness;
-            float _PulseSpeed;
+            // Lava Properties
+            fixed4 _BrightColor, _MidColor, _DarkColor, _CrustColor;
+            float2 _LavaFlowDirection;
+            float _NoiseScale, _CellDensity, _Speed, _CrackBrightness, _PulseSpeed, _HeatDistortionAmount, _FlowHighlight;
 
-            // --- Water Properties ---
-            fixed4 _DeepColor;
-            fixed4 _ShallowColor;
-            fixed4 _FoamColor;
-            float _WaveScale;
-            float _WaveSpeed;
-            float _RippleScale;
-            float _RippleSpeed;
-            float _FoamThreshold;
-            float _Transparency;
+            // Water Properties
+            fixed4 _DeepColor, _ShallowColor, _FoamColor;
+            float2 _WaterFlowDirection;
+            float _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _DistortionAmount;
 
-
-            // --- Noise Functions (Used by both Lava and Water) ---
+            // Noise Functions
             float3 mod289(float3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
             float4 mod289(float4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
             float4 permute(float4 x) { return mod289(((x * 34.0) + 1.0) * x); }
@@ -144,84 +150,164 @@
                 return 42.0 * dot(m * m, float4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
             }
 
-            float fbm(float3 p)
+            float fbm(float3 p, int octaves)
             {
-                float value = 0.0;
-                float amplitude = 0.5;
-                float frequency = 1.0;
-                for (int i = 0; i < 4; i++) // Reduced iterations for water for a softer look
+                float v = 0.0;
+                float a = 0.5;
+                float f = 1.0;
+                for (int i = 0; i < octaves; i++)
                 {
-                    value += amplitude * snoise(p * frequency);
-                    amplitude *= 0.5;
-                    frequency *= 2.0;
+                    v += a * snoise(p * f);
+                    a *= 0.5;
+                    f *= 2.0;
                 }
-                return value;
+                return v;
             }
 
-            // Vertex Shader (Unchanged)
             v2f vertFunction(appdata v)
             {
                 v2f o;
                 o.vertex = UnityObjectToClipPos(v.vertex);
-                o.uv = v.uv;
-                o.color = v.color;
                 o.worldPos = mul(unity_ObjectToWorld, v.vertex).xyz;
+                o.screenPos = ComputeGrabScreenPos(o.vertex);
+                o.worldNormal = UnityObjectToWorldNormal(v.normal); // ransform normal to world space
+                o.liquidType = v.color.r;
+                o.shorelineFlag = v.color.g;
+                o.lightLevel = v.color.a;
                 return o;
             }
 
-            // Fragment Shader
+            // Helper function to calculate the shoreline gradient
+            float get_shore_factor(float3 worldPos, float3 worldNormal, float shoreSize)
+            {
+                // Determine which plane the quad is on based on the normal
+                float3 absNormal = abs(worldNormal);
+                float2 quadUV;
+                if (absNormal.y > absNormal.x && absNormal.y > absNormal.z)
+                    quadUV = frac(worldPos.xz); // Horizontal plane
+                else if (absNormal.x > absNormal.y && absNormal.x > absNormal.z)
+                    quadUV = frac(worldPos.yz); // X-facing vertical plane
+                else
+                    quadUV = frac(worldPos.xy); // Z-facing vertical plane
+
+                // Calculate distance from the center of the quad (0-0.5)
+                float2 distFromCenter = abs(quadUV - 0.5);
+                float maxDist = max(distFromCenter.x, distFromCenter.y);
+
+                // Create a smooth gradient that starts from the edge and moves inwards
+                // The 'shoreSize' property now controls the width of this gradient
+                return 1.0 - smoothstep(0.5 - (shoreSize * 0.5), 0.5, maxDist);
+            }
+
             fixed4 fragFunction(v2f i) : SV_Target
             {
-                fixed4 col;
+                float finalLiquidType = i.liquidType;
 
-                // --- Shared Lighting Calculation ---
+                // This block correctly handles editor vs. runtime logic ---
+                #if defined(UNITY_EDITOR)
+                // When the editor is NOT in play mode, use the dropdown property.
+                if (!unity_IsEditorPlaying)
+                {
+                    finalLiquidType = _EditorPreviewType;
+                }
+                #endif
+
+                // Shared Lighting
                 float shade = (maxGlobalLightLevel - minGlobalLightLevel) * GlobalLightLevel + minGlobalLightLevel;
-                shade *= i.color.a;
+                shade *= i.lightLevel;
                 shade = clamp(1.0 - shade, minGlobalLightLevel, maxGlobalLightLevel);
 
-                #if _LIQUIDTYPE_LAVA
-                float t = _Time.y * _Speed;
-                float3 p1 = i.worldPos * _NoiseScale + float3(0.0, t, 0.0);
-                float3 p2 = i.worldPos * _NoiseScale + float3(0.0, -t * 0.8, 0.0);
-                float noise1 = fbm(p1 * _CellDensity);
-                float noise2 = fbm(p2 * _CellDensity);
-                float crack_pattern = pow(abs(noise1 - noise2), 2.0) * _CrackBrightness;
-                float base_noise = (fbm(p1) + 1.0) * 0.5;
-                fixed3 lava_col = _DarkColor.rgb;
-                lava_col = lerp(lava_col, _MidColor.rgb, smoothstep(0.3, 0.7, base_noise));
-                lava_col = lerp(lava_col, _BrightColor.rgb, smoothstep(0.1, 0.35, crack_pattern));
-                float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
-                lava_col *= pulse;
-                lava_col = lerp(lava_col, lava_col * 0.1, shade);
-                col = fixed4(lava_col, 1.0);
-                #endif
+                // --- DYNAMIC LIQUID BRANCH ---
+                if (finalLiquidType > 0.5) // Is it Lava?
+                {
+                    // --- LAVA LOGIC ---
+                    float t = _Time.y * _Speed;
+                    float2 flow = _LavaFlowDirection * t;
 
-                #if _LIQUIDTYPE_WATER
-                // Two scrolling noise patterns for waves and ripples
-                float3 wave_p = i.worldPos * _WaveScale + float3(0.0, _Time.y * _WaveSpeed, 0.0);
-                float3 ripple_p = i.worldPos * _RippleScale + float3(0.0, _Time.y * _RippleSpeed, 0.0);
+                    float3 p1 = i.worldPos * _NoiseScale + float3(t + flow.x, t, flow.y);
+                    float3 p2 = i.worldPos * _NoiseScale + float3(-t * 0.8 - flow.y, -t * 0.8, -flow.x);
 
-                // Calculate noise, map from [-1,1] to [0,1]
-                float wave_noise = (fbm(wave_p) + 1.0) * 0.5;
-                float ripple_noise = (fbm(ripple_p) + 1.0) * 0.5;
+                    float base_fbm = fbm(p1, 6);
+                    float base_noise = (base_fbm + 1.0) * 0.5;
 
-                // Combine noises for a more complex surface
-                float combined_noise = (wave_noise * 0.7) + (ripple_noise * 0.3);
+                    // Heat Distortion Normal
+                    float2 offset = float2(0.01, 0.0);
+                    float normal_dx = fbm(p1 + offset.xyy, 6) - base_fbm;
+                    float normal_dz = fbm(p1 + offset.yxy, 6) - base_fbm;
+                    float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
+                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + (normal.xz * _HeatDistortionAmount);
+                    fixed4 background = tex2D(_GrabTexture, distortedUV);
 
-                // Build the water color
-                fixed3 water_col = lerp(_DeepColor.rgb, _ShallowColor.rgb, combined_noise);
+                    // Color Calculation
+                    float noise1 = fbm(p1 * _CellDensity, 6);
+                    float noise2 = fbm(p2 * _CellDensity, 6);
+                    float crack_pattern = pow(abs(noise1 - noise2), 2.0) * _CrackBrightness;
 
-                // Add foam to the wave crests
-                float foam_line = smoothstep(_FoamThreshold - 0.1, _FoamThreshold + 0.1, combined_noise);
-                water_col = lerp(water_col, _FoamColor.rgb, foam_line);
+                    fixed3 lava_col = lerp(_DarkColor.rgb, _MidColor.rgb, smoothstep(0.3, 0.7, base_noise));
+                    lava_col = lerp(lava_col, _BrightColor.rgb, smoothstep(0.1, 0.35, crack_pattern));
 
-                // Apply lighting
-                water_col = lerp(water_col, water_col * 0.1, shade);
+                    // Flow Highlight
+                    float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + float3(flow.x * 2, 0, flow.y * 2);
+                    float flow_mask = (fbm(flow_mask_p, 4) + 1.0) * 0.5;
+                    lava_col += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * _FlowHighlight;
 
-                col = fixed4(water_col, _Transparency);
-                #endif
+                    // Shoreline Crust with Gradient and Toggle
+                    #if defined(USE_SHORE_EFFECTS)
+                    float crust_noise = (snoise(p2.xzy * 0.7) + 1.0) * 0.5;
+                    float shore_factor = get_shore_factor(i.worldPos, i.worldNormal, _ShoreSize);
+                    float crust_amount = i.shorelineFlag * shore_factor * crust_noise;
+                    lava_col = lerp(lava_col, _CrustColor.rgb, crust_amount);
+                    #endif
 
-                return col;
+                    // Final Touches
+                    float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
+                    lava_col *= pulse;
+                    lava_col = lerp(lava_col, lava_col * 0.1, shade);
+
+                    // Compose with distorted background for a hazy, semi-opaque effect
+                    return lerp(background, fixed4(lava_col, 1.0), 0.95);
+                }
+                else // It's Water
+                {
+                    // --- WATER LOGIC ---
+                    float2 flow = _WaterFlowDirection * _Time.y;
+                    float3 wave_p = i.worldPos * _WaveScale + float3(flow.x, _Time.y * _WaveSpeed, flow.y);
+                    float3 ripple_p = i.worldPos * _RippleScale + float3(flow.y, _Time.y * _RippleSpeed, -flow.x);
+
+                    float wave_fbm = fbm(wave_p, 4);
+                    float ripple_noise = fbm(ripple_p, 5);
+
+                    float2 offset = float2(0.01, 0.0);
+                    float normal_dx = fbm(wave_p + offset.xyy, 4) - wave_fbm;
+                    float normal_dz = fbm(wave_p + offset.yxy, 4) - wave_fbm;
+                    float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
+
+                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + (normal.xz * _DistortionAmount);
+                    fixed4 background = tex2D(_GrabTexture, distortedUV);
+
+                    fixed4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
+
+                    float combined_noise = (wave_fbm + ripple_noise) * 0.5;
+                    combined_noise = (combined_noise + 1.0) * 0.5;
+
+                    fixed3 water_surface_color = lerp(water_base_color.rgb, _ShallowColor.rgb, combined_noise);
+
+                    float wave_foam = smoothstep(_FoamThreshold - 0.1, _FoamThreshold + 0.1, combined_noise);
+
+                    float total_foam = wave_foam;
+
+                    // Shoreline Foam with Gradient and Toggle
+                    #if defined(USE_SHORE_EFFECTS)
+                    float shore_foam_noise = (snoise(wave_p.xzy * 0.5) + 1.0) * 0.5;
+                    float shore_factor = get_shore_factor(i.worldPos, i.worldNormal, _ShoreSize);
+                    float shore_foam = i.shorelineFlag * shore_factor * shore_foam_noise;
+                    total_foam = saturate(total_foam + shore_foam);
+                    #endif
+
+                    fixed3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
+                    final_color = lerp(final_color, final_color * 0.1, shade);
+                    return lerp(background, fixed4(final_color, 1.0), water_base_color.a);
+                }
             }
             ENDCG
         }

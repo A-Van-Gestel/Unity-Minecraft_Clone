@@ -78,6 +78,35 @@ namespace Data
             noiseOffset = lode.noiseOffset;
         }
     }
+    
+    /// <summary>
+    /// A job-safe representation of a custom mesh vertex.
+    /// </summary>
+    public struct CustomVertData
+    {
+        public Vector3 position;
+        public Vector2 uv;
+    }
+
+    /// <summary>
+    /// A job-safe representation of a custom mesh face.
+    /// </summary>
+    public struct CustomFaceData
+    {
+        public int vertStartIndex;
+        public int vertCount;
+        public int triStartIndex;
+        public int triCount;
+    }
+
+    /// <summary>
+    /// A job-safe representation of a custom mesh.
+    /// </summary>
+    public struct CustomMeshData
+    {
+        public int faceStartIndex;
+        public int faceCount;
+    }
 
     /// A job-safe representation of BlockType properties needed for meshing and lighting
     public struct BlockTypeJobData
@@ -85,6 +114,7 @@ namespace Data
         // Block properties
         public bool isSolid;
         public bool renderNeighborFaces;
+        public int customMeshIndex; // -1 if not a custom mesh
 
         // Fluid properties
         public FluidType fluidType;
@@ -112,11 +142,13 @@ namespace Data
         /// Constructor that creates BlockTypeJobData from a BlockType class.
         /// </summary>
         /// <param name="blockType">The BlockType to copy properties from.</param>
-        public BlockTypeJobData(BlockType blockType)
+        /// <param name="customMeshIdx">The index of the custom mesh in the flattened data arrays. -1 if none.</param>
+        public BlockTypeJobData(BlockType blockType, int customMeshIdx = -1)
         {
             // Block properties
             isSolid = blockType.isSolid;
             renderNeighborFaces = blockType.renderNeighborFaces;
+            customMeshIndex = customMeshIdx;
 
             // Fluid properties
             fluidType = blockType.fluidType;

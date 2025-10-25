@@ -18,6 +18,18 @@ namespace Jobs
         public NativeArray<BlockTypeJobData> blockTypes;
 
         [ReadOnly]
+        public NativeArray<CustomMeshData> customMeshes;
+
+        [ReadOnly]
+        public NativeArray<CustomFaceData> customFaces;
+
+        [ReadOnly]
+        public NativeArray<CustomVertData> customVerts;
+
+        [ReadOnly]
+        public NativeArray<int> customTris;
+
+        [ReadOnly]
         public Vector3 chunkPosition;
 
         // Neighboring chunk data for face culling at borders
@@ -58,31 +70,12 @@ namespace Jobs
                     {
                         int mapIndex = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
                         uint packedData = map[mapIndex];
-                        BlockTypeJobData props = blockTypes[BurstVoxelDataBitMapping.GetId(packedData)];
+                        byte id = BurstVoxelDataBitMapping.GetId(packedData);
+                        BlockTypeJobData props = blockTypes[id];
 
                         if (props.isSolid)
                         {
-                            if (props.fluidType != FluidType.None)
-                            {
-                                if (props.fluidType != FluidType.None)
-                                {
-                                    Vector3Int voxelPos = new Vector3Int(x, y, z);
-
-                                    // Pass the correct template based on the fluid type
-                                    if (props.fluidType == FluidType.Water)
-                                    {
-                                        GenerateFluidMeshData(voxelPos, packedData, props, waterVertexTemplates);
-                                    }
-                                    else if (props.fluidType == FluidType.Lava)
-                                    {
-                                        GenerateFluidMeshData(voxelPos, packedData, props, lavaVertexTemplates);
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                UpdateMeshData(new Vector3Int(x, y, z), packedData);
-                            }
+                            GenerateVoxelMeshData(new Vector3Int(x, y, z), packedData, props);
                         }
                     }
                 }
@@ -90,99 +83,77 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Generates the mesh for a standard, solid voxel (like stone, dirt, or custom blocks).
-        /// It handles face culling against neighbors, block orientation, and assigns vertices to the
-        /// correct sub-mesh (opaque or transparent).
+        /// The main mesh generation router. It decides which helper function to call
+        /// based on the block's properties in the following order: fluid, custom mesh, or standard cube.
         /// </summary>
-        private void UpdateMeshData(Vector3Int pos, uint packedData)
+        private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps)
         {
             byte id = BurstVoxelDataBitMapping.GetId(packedData);
-            byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
-            BlockTypeJobData voxelProps = blockTypes[id];
-
-            float rotation = VoxelHelper.GetRotationAngle(orientation);
-
-            // Iterate through all 6 faces of the voxel (Back, Front, Top, Bottom, Left, Right)
-            for (int p = 0; p < 6; p++)
+            
+            
+            // Case 1: The block is a fluid.
+            if (voxelProps.fluidType != FluidType.None)
             {
-                // Account for the block's orientation to get the correct texture for the world-facing direction.
-                int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
-
-                // --- INTEGRATION POINT ---
-                // Get the neighboring voxel using the new, robust GetVoxelStateFromLocalPos method.
-                // This correctly checks neighbors in all directions, including across chunk boundaries, preventing crashes.
-                // We use BurstVoxelData.FaceChecks.Data to get the direction vector for the current face (p).
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
-
-                // --- Face Culling Logic ---
-                // Determine if this face should be drawn.
-                bool shouldDrawFace = false;
-                if (!neighborVoxel.HasValue) // If the neighbor is outside the world or in an unloaded chunk, always draw the face.
+                if (voxelProps.fluidType == FluidType.Water)
                 {
-                    shouldDrawFace = true;
+                    GenerateFluidMeshData(pos, packedData, voxelProps, waterVertexTemplates);
                 }
-                else
+                else if (voxelProps.fluidType == FluidType.Lava)
                 {
-                    // Get the properties of the neighboring block.
-                    BlockTypeJobData neighborProps = blockTypes[neighborVoxel.Value.id];
-
-                    // The face should be drawn if this block is transparent and the neighbor isn't,
-                    // or if the neighbor is transparent. This prevents z-fighting and renders interiors correctly.
-                    if (voxelProps.renderNeighborFaces)
-                        shouldDrawFace = !neighborProps.isSolid || neighborProps.renderNeighborFaces;
-                    else
-                        shouldDrawFace = neighborProps.renderNeighborFaces || !neighborProps.isSolid;
+                    GenerateFluidMeshData(pos, packedData, voxelProps, lavaVertexTemplates);
                 }
+            }
 
-
-                if (shouldDrawFace)
+            // Case 2: The block has a custom mesh.
+            else if (voxelProps.customMeshIndex > -1)
+            {
+                //: Get the specific mesh data to access its face count
+                CustomMeshData meshData = customMeshes[voxelProps.customMeshIndex];
+                
+                // Loop only up to the number of faces defined in the asset.
+                for (int p = 0; p < meshData.faceCount; p++)
                 {
-                    // Get the correct texture ID and the light level of the space the face is exposed to.
-                    int textureID = GetTextureID(id, translatedP);
-                    float lightLevel = neighborVoxel?.lightAsFloat ?? 1.0f;
-
-                    // A face is a quad, which consists of 4 vertices.
-                    for (int i = 0; i < 4; i++)
+                    VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+                    if (ShouldDrawFace(voxelProps, neighborVoxel))
                     {
-                        // LINTING FIX: Access Burst SharedStatic data using the .Data property.
-                        int vertIndex = BurstVoxelData.VoxelTris.Data[translatedP * 4 + i];
-                        Vector3 vertPos = BurstVoxelData.VoxelVerts.Data[vertIndex];
+                        int textureID = GetTextureID(id, p);
+                        float lightLevel = neighborVoxel?.lightAsFloat ?? 1.0f;
 
-                        // Rotate the vertex around the block's center if it has an orientation.
-                        Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
-                        Vector3 direction = vertPos - center;
-                        direction = Quaternion.Euler(0, rotation, 0) * direction;
-
-                        // Add all vertex data to the output lists.
-                        output.vertices.Add(pos + direction + center);
-                        output.normals.Add(BurstVoxelData.FaceChecks.Data[p]);
-                        output.colors.Add(new Color(0, 0, 0, lightLevel));
-                        AddTexture(textureID, BurstVoxelData.VoxelUvs.Data[i]);
+                        // Call the new helper for custom meshes
+                        VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, lightLevel, pos,
+                            voxelProps.customMeshIndex, ref customMeshes, ref customFaces, ref customVerts, ref customTris,
+                            ref vertexIndex, ref output.vertices, ref output.triangles, ref output.transparentTriangles, ref output.uvs,
+                            ref output.colors, ref output.normals, voxelProps.renderNeighborFaces);
                     }
+                }
+            }
+            // Case 3: The block is a standard cube.
+            else
+            {
+                byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
+                float rotation = VoxelHelper.GetRotationAngle(orientation);
 
-                    // --- Triangle Generation ---
-                    // Add the triangle indices to the correct sub-mesh based on the block's properties.
-                    if (voxelProps.renderNeighborFaces) // Transparent blocks (leaves, glass)
+                // Iterate through all 6 faces of the voxel (Back, Front, Top, Bottom, Left, Right)
+                for (int p = 0; p < 6; p++)
+                {
+                    // Get the neighboring voxel.
+                    // This correctly checks neighbors in all directions, including across chunk boundaries, preventing crashes.
+                    // We use BurstVoxelData.FaceChecks.Data to get the direction vector for the current face (p).
+                    VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                    if (ShouldDrawFace(voxelProps, neighborVoxel))
                     {
-                        output.transparentTriangles.Add(vertexIndex);
-                        output.transparentTriangles.Add(vertexIndex + 1);
-                        output.transparentTriangles.Add(vertexIndex + 2);
-                        output.transparentTriangles.Add(vertexIndex + 2);
-                        output.transparentTriangles.Add(vertexIndex + 1);
-                        output.transparentTriangles.Add(vertexIndex + 3);
-                    }
-                    else // Solid, opaque blocks
-                    {
-                        output.triangles.Add(vertexIndex);
-                        output.triangles.Add(vertexIndex + 1);
-                        output.triangles.Add(vertexIndex + 2);
-                        output.triangles.Add(vertexIndex + 2);
-                        output.triangles.Add(vertexIndex + 1);
-                        output.triangles.Add(vertexIndex + 3);
-                    }
+                        // Account for the block's orientation to get the correct texture for the world-facing direction.
+                        int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
+                        int textureID = GetTextureID(id, translatedP);
+                        float lightLevel = neighborVoxel?.lightAsFloat ?? 1.0f;
 
-                    // Increment the vertex index for the next quad.
-                    vertexIndex += 4;
+                        // Call the new helper for standard cubes
+                        VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, pos, rotation,
+                            ref vertexIndex, ref output.vertices, ref output.triangles, ref output.transparentTriangles,
+                            ref output.uvs, ref output.colors, ref output.normals,
+                            voxelProps.renderNeighborFaces);
+                    }
                 }
             }
         }
@@ -200,14 +171,8 @@ namespace Jobs
         private void GenerateFluidMeshData(Vector3Int pos, uint packedData, BlockTypeJobData props, NativeArray<float> templates)
         {
             // TODO: When a fluid voxel is below a an other fluid voxel, it should be rendered as a full block regardless of fluid level.
-            // --- 1. Get Height Data and Neighbor States ---
-            // This data is required for both the top and side faces, so we calculate it once at the beginning.
 
-            // Get the base height of the fluid's surface from the pre-computed template array.
-            byte fluidLevel = BurstVoxelDataBitMapping.GetFluidLevel(packedData);
-            float topHeight = templates[fluidLevel];
-
-            // Get all relevant neighbors to calculate smoothed corner heights for a realistic sloped surface.
+            // Get all relevant neighbors to calculate smoothed corner heights and detect shorelines.
             VoxelState? n_N = GetVoxelStateFromLocalPos(pos + new Vector3Int(0, 0, 1));
             VoxelState? n_E = GetVoxelStateFromLocalPos(pos + new Vector3Int(1, 0, 0));
             VoxelState? n_S = GetVoxelStateFromLocalPos(pos + new Vector3Int(0, 0, -1));
@@ -217,6 +182,26 @@ namespace Jobs
             VoxelState? n_SW = GetVoxelStateFromLocalPos(pos + new Vector3Int(-1, 0, -1));
             VoxelState? n_NW = GetVoxelStateFromLocalPos(pos + new Vector3Int(-1, 0, 1));
 
+            // --- 1. DETERMINE SHADER FLAGS ---
+            float liquidType = props.fluidType == FluidType.Lava ? 1.0f : 0.0f;
+            float shorelineFlag = 0.0f;
+
+            // Check horizontal neighbors to see if this is a "shoreline" block.
+            VoxelState?[] horizontalNeighbors = { n_N, n_E, n_S, n_W };
+            foreach (var neighbor in horizontalNeighbors)
+            {
+                // A shoreline exists if the neighbor is a solid block that is NOT a fluid.
+                if (neighbor.HasValue && blockTypes[neighbor.Value.id].isSolid && blockTypes[neighbor.Value.id].fluidType == FluidType.None)
+                {
+                    shorelineFlag = 1.0f;
+                    break; // Found one solid neighbor, no need to check others.
+                }
+            }
+
+            // --- 2. GET HEIGHT DATA ---
+            byte fluidLevel = BurstVoxelDataBitMapping.GetFluidLevel(packedData);
+            float topHeight = templates[fluidLevel];
+
             // Calculate the final Y-position for each of the four corners of the top face.
             // These are declared here to be in scope for both top and side face generation.
             float height_tr = GetSmoothedCornerHeight(props, fluidLevel, n_N, n_E, n_NE, templates); // Top-Right
@@ -224,7 +209,8 @@ namespace Jobs
             float height_br = GetSmoothedCornerHeight(props, fluidLevel, n_S, n_E, n_SE, templates); // Bottom-Right
             float height_bl = GetSmoothedCornerHeight(props, fluidLevel, n_S, n_W, n_SW, templates); // Bottom-Left
 
-            // --- 2. Generate the Top Face (The visible surface of the fluid) ---
+            // --- 3. GENERATE FACES ---
+            // --- 3A. Top Face ---
             VoxelState? above = GetVoxelStateFromLocalPos(pos + new Vector3Int(0, 1, 0));
             if (above == null || !blockTypes[above.Value.id].isSolid)
             {
@@ -235,11 +221,14 @@ namespace Jobs
                 output.vertices.Add(pos + new Vector3(1, height_tr, 1)); // Front-Right
 
                 float lightLevel = above?.lightAsFloat ?? 1.0f;
+                Color vertexColor = new Color(liquidType, shorelineFlag, 0.0f, lightLevel);
+
+                // Add the packed vertex color data for each of the 4 vertices.
                 for (int i = 0; i < 4; i++)
                 {
                     output.normals.Add(Vector3.up);
-                    output.colors.Add(new Color(0, 0, 0, lightLevel));
-                    AddTexture(props.topFaceTexture, BurstVoxelData.VoxelUvs.Data[i]);
+                    output.colors.Add(vertexColor); // Add the packed vertexColor
+                    output.uvs.Add(Vector2.zero); // Uber shader doesn't use atlas UVs
                 }
 
                 output.fluidTriangles.Add(vertexIndex);
@@ -251,7 +240,7 @@ namespace Jobs
                 vertexIndex += 4;
             }
 
-            // --- 3. Generate Side Faces (and "waterfall" faces) ---
+            // --- 3B. Side Faces ---
             for (int p = 0; p < 4; p++)
             {
                 int faceIndex = VoxelData.HorizontalFaceChecksIndices[p];
@@ -264,7 +253,6 @@ namespace Jobs
                     continue;
                 }
 
-                // Access Burst SharedStatic data using the .Data property.
                 int v1 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 0];
                 int v2 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 1];
                 int v3 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 2];
@@ -275,10 +263,10 @@ namespace Jobs
                 Vector3 p3 = BurstVoxelData.VoxelVerts.Data[v3];
                 Vector3 p4 = BurstVoxelData.VoxelVerts.Data[v4];
 
-                p1.y = (p1.y > 0.5f) ? GetVertexHeightForCorner(p1, height_tl, height_tr, height_bl, height_br) : 0;
-                p2.y = (p2.y > 0.5f) ? GetVertexHeightForCorner(p2, height_tl, height_tr, height_bl, height_br) : 0;
-                p3.y = (p3.y > 0.5f) ? GetVertexHeightForCorner(p3, height_tl, height_tr, height_bl, height_br) : 0;
-                p4.y = (p4.y > 0.5f) ? GetVertexHeightForCorner(p4, height_tl, height_tr, height_bl, height_br) : 0;
+                p1.y = p1.y > 0.5f ? GetVertexHeightForCorner(p1, height_tl, height_tr, height_bl, height_br) : 0;
+                p2.y = p2.y > 0.5f ? GetVertexHeightForCorner(p2, height_tl, height_tr, height_bl, height_br) : 0;
+                p3.y = p3.y > 0.5f ? GetVertexHeightForCorner(p3, height_tl, height_tr, height_bl, height_br) : 0;
+                p4.y = p4.y > 0.5f ? GetVertexHeightForCorner(p4, height_tl, height_tr, height_bl, height_br) : 0;
 
                 output.vertices.Add(pos + p1);
                 output.vertices.Add(pos + p2);
@@ -286,16 +274,14 @@ namespace Jobs
                 output.vertices.Add(pos + p4);
 
                 float lightLevel = neighbor?.lightAsFloat ?? 1.0f;
+                Color vertexColor = new Color(liquidType, shorelineFlag, 0.0f, lightLevel);
 
-                // Get the block's ID and pass it to GetTextureID correctly.
-                byte blockId = BurstVoxelDataBitMapping.GetId(packedData);
-                int textureID = GetTextureID(blockId, faceIndex);
-
+                // Add the packed vertex color data for each of the 4 vertices.
                 for (int i = 0; i < 4; i++)
                 {
                     output.normals.Add(VoxelData.FaceChecks[faceIndex]);
-                    output.colors.Add(new Color(0, 0, 0, lightLevel));
-                    AddTexture(textureID, BurstVoxelData.VoxelUvs.Data[i]);
+                    output.colors.Add(vertexColor); // Add the packed vertexColor
+                    output.uvs.Add(Vector2.zero); // Uber shader doesn't use atlas UVs
                 }
 
                 output.fluidTriangles.Add(vertexIndex);
@@ -355,6 +341,25 @@ namespace Jobs
         #endregion
 
         #region Helper Methods
+
+        /// <summary>
+        /// Contains the face culling logic to determine if a face should be drawn.
+        /// </summary>
+        private bool ShouldDrawFace(BlockTypeJobData voxelProps, VoxelState? neighborVoxel)
+        {
+            if (!neighborVoxel.HasValue) // If the neighbor is outside the world, always draw.
+                return true;
+
+            BlockTypeJobData neighborProps = blockTypes[neighborVoxel.Value.id];
+
+            // If this block is transparent, draw if the neighbor is not solid OR also transparent.
+            if (voxelProps.renderNeighborFaces)
+                return !neighborProps.isSolid || neighborProps.renderNeighborFaces;
+
+            // If this block is solid, draw if the neighbor is transparent OR not solid.
+            return neighborProps.renderNeighborFaces || !neighborProps.isSolid;
+        }
+
 
         /// <summary>
         /// A robust method to get a VoxelState from any local position relative to the current chunk's origin.

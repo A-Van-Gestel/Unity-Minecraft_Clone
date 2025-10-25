@@ -11,10 +11,11 @@ Material:
   m_Shader: {fileID: 4800000, guid: f316339b7c3b46468201dd11c443f2c4, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - _LIQUIDTYPE_WATER
+  m_ValidKeywords: []
   m_InvalidKeywords:
   - _ALPHATEST_ON
+  - _EDITORPREVIEWTYPE_WATER
+  - _LIQUIDTYPE_WATER
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
@@ -93,6 +94,7 @@ Material:
     - _CellDensity: 2.5
     - _ContrastDetailMap: 0
     - _CrackBrightness: 1.5
+    - _CrustWidth: 0.3
     - _Cull: 0
     - _Cutoff: 0.5
     - _DetailBrightness: 1
@@ -101,13 +103,18 @@ Material:
     - _DetailSaturation: 0
     - _DetailSource: 0
     - _DetailSpecularIntensity: 0.2
+    - _DistortionAmount: 0.02
     - _DstBlend: 0
+    - _EditorPreviewType: 0
     - _EmissionIntensity: 1
     - _EnableDetailMask: 0
     - _EnableTriplanarProjection: 1
+    - _FlowHighlight: 0.5
+    - _FoamThreshold: 0.8
     - _GlossMapScale: 1
     - _Glossiness: 0
     - _GlossyReflections: 1
+    - _HeatDistortionAmount: 0.015
     - _IntensityCutoutMap: 0.5
     - _IntensityMask: 1
     - _InvertABaseColor: 0
@@ -121,7 +128,11 @@ Material:
     - _OcclusionStrength: 1
     - _Parallax: 0.02
     - _PulseSpeed: 1.5
+    - _RippleScale: 15
+    - _RippleSpeed: 1.2
     - _Saturation: 0
+    - _ShoreFoamWidth: 0.25
+    - _ShoreSize: 0.6
     - _SmoothnessTextureChannel: 0
     - _Source: 0
     - _SourceMask: 0
@@ -137,21 +148,30 @@ Material:
     - _UseAoFromMainProperties: 1
     - _UseBaseColorAlpha: 1
     - _UseEmissionFromMainProperties: 1
+    - _UseShoreEffects: 0
     - _VisualizeMask: 0
+    - _WaveScale: 5
+    - _WaveSpeed: 0.4
     - _ZTest: 4
     - _ZWrite: 1
     - __dirty: 1
     m_Colors:
     - _BrightColor: {r: 1, g: 0.9, b: 0.6, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _CrustColor: {r: 0.2, g: 0.05, b: 0, a: 1}
     - _DarkColor: {r: 0.6, g: 0.1, b: 0, a: 1}
+    - _DeepColor: {r: 0.1, g: 0.2, b: 0.5, a: 0.85}
     - _DetailColor: {r: 1, g: 1, b: 1, a: 0}
     - _DetailSpecularColor: {r: 1, g: 1, b: 1, a: 0}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - _FoamColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
     - _GlobalXYTilingXYZWOffsetXY: {r: 1, g: 1, b: 0, a: 0}
+    - _LavaFlowDirection: {r: 0.1, g: 0.05, b: 0, a: 0}
     - _MidColor: {r: 1, g: 0.5, b: 0, a: 1}
+    - _ShallowColor: {r: 0.3, g: 0.5, b: 0.9, a: 0.7}
     - _SpecColor: {r: 0.2, g: 0.2, b: 0.2, a: 1}
     - _SpecularColor: {r: 1, g: 1, b: 1, a: 0}
     - _TriplanarXYTilingXYZWOffsetXY1: {r: 1, g: 1, b: 0, a: 0}
+    - _WaterFlowDirection: {r: 0.3, g: 0.2, b: 0, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

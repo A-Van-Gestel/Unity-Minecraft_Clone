@@ -100,6 +100,10 @@ public class World : MonoBehaviour
     private NativeArray<BiomeAttributesJobData> biomesJobData;
     private NativeArray<LodeJobData> allLodesJobData;
     private NativeArray<BlockTypeJobData> blockTypesJobData;
+    private NativeArray<CustomMeshData> customMeshesJobData;
+    private NativeArray<CustomFaceData> customFacesJobData;
+    private NativeArray<CustomVertData> customVertsJobData;
+    private NativeArray<int> customTrisJobData;
 
     // track the JobHandles and the allocated data together
     private Dictionary<ChunkCoord, (JobHandle handle, NativeArray<uint> map, NativeArray<byte> heightMap, NativeQueue<VoxelMod> mods)> generationJobs = new Dictionary<ChunkCoord, (JobHandle, NativeArray<uint>, NativeArray<byte>, NativeQueue<VoxelMod>)>();
@@ -173,6 +177,10 @@ public class World : MonoBehaviour
         if (biomesJobData.IsCreated) biomesJobData.Dispose();
         if (allLodesJobData.IsCreated) allLodesJobData.Dispose();
         if (blockTypesJobData.IsCreated) blockTypesJobData.Dispose();
+        if (customMeshesJobData.IsCreated) customMeshesJobData.Dispose();
+        if (customFacesJobData.IsCreated) customFacesJobData.Dispose();
+        if (customVertsJobData.IsCreated) customVertsJobData.Dispose();
+        if (customTrisJobData.IsCreated) customTrisJobData.Dispose();
 
         // 3. Dispose of fluid vertex templates.
         if (waterVertexTemplates.IsCreated) waterVertexTemplates.Dispose();
@@ -537,16 +545,72 @@ public class World : MonoBehaviour
             currentLodeIndex += biomes[i].lodes.Length;
         }
 
-        // --- Block Types ---
+         // --- Block Types & Custom Meshes ---
+        // --- Step 1: Collect all unique custom mesh assets
+        List<VoxelMeshData> uniqueCustomMeshes = new List<VoxelMeshData>();
+        foreach (var blockType in blockTypes)
+        {
+            if (blockType.meshData != null && !uniqueCustomMeshes.Contains(blockType.meshData))
+            {
+                uniqueCustomMeshes.Add(blockType.meshData);
+            }
+        }
+        
+        // --- Step 2: Flatten custom mesh data into temporary lists
+        List<CustomMeshData> customMeshesList = new List<CustomMeshData>();
+        List<CustomFaceData> customFacesList = new List<CustomFaceData>();
+        List<CustomVertData> customVertsList = new List<CustomVertData>();
+        List<int> customTrisList = new List<int>();
+
+        foreach (var meshAsset in uniqueCustomMeshes)
+        {
+            customMeshesList.Add(new CustomMeshData 
+            { 
+                faceStartIndex = customFacesList.Count,
+                faceCount = meshAsset.faces.Length
+            });
+            
+            if (meshAsset.faces.Length > 6)
+                Debug.LogWarning($"VoxelMeshData asset '{meshAsset.name}' has more than 6 faces. Only the first 6 will be used.");
+            
+            foreach (var faceAsset in meshAsset.faces)
+            {
+                customFacesList.Add(new CustomFaceData
+                {
+                    vertStartIndex = customVertsList.Count,
+                    vertCount = faceAsset.vertData.Length,
+                    triStartIndex = customTrisList.Count,
+                    triCount = faceAsset.triangles.Length
+                });
+                
+                foreach (var vertAsset in faceAsset.vertData)
+                {
+                    customVertsList.Add(new CustomVertData { position = vertAsset.position, uv = vertAsset.uv });
+                }
+                customTrisList.AddRange(faceAsset.triangles);
+            }
+        }
+        
+        // --- Step 3: Convert lists to persistent NativeArrays
+        customMeshesJobData = new NativeArray<CustomMeshData>(customMeshesList.ToArray(), Allocator.Persistent);
+        customFacesJobData = new NativeArray<CustomFaceData>(customFacesList.ToArray(), Allocator.Persistent);
+        customVertsJobData = new NativeArray<CustomVertData>(customVertsList.ToArray(), Allocator.Persistent);
+        customTrisJobData = new NativeArray<int>(customTrisList.ToArray(), Allocator.Persistent);
+
+        // --- Step 4: Populate blockTypesJobData, including the custom mesh index
         blockTypesJobData = new NativeArray<BlockTypeJobData>(blockTypes.Length, Allocator.Persistent);
         for (int i = 0; i < blockTypes.Length; i++)
         {
-            blockTypesJobData[i] = new BlockTypeJobData(blockTypes[i]);
+            int customMeshIndex = -1;
+            if (blockTypes[i].meshData != null)
+            {
+                customMeshIndex = uniqueCustomMeshes.IndexOf(blockTypes[i].meshData);
+            }
+            blockTypesJobData[i] = new BlockTypeJobData(blockTypes[i], customMeshIndex);
         }
 
         // --- Prepare Fluid Vertex Templates ---
-        // This is a simplified example. A more robust system might use a dictionary or loop
-        // through block types to find all unique FluidMeshData assets and load them.
+        // ... (rest of the method is unchanged)
         const string fluidDataPath = "FluidData";
         var waterAsset = Resources.Load<FluidMeshData>($"{fluidDataPath}/FluidData_Water");
         if (waterAsset)
@@ -751,6 +815,10 @@ public class World : MonoBehaviour
             neighborFront = front,
             neighborLeft = left,
             neighborRight = right,
+            customMeshes = customMeshesJobData,
+            customFaces = customFacesJobData,
+            customVerts = customVertsJobData,
+            customTris = customTrisJobData,
             waterVertexTemplates = waterVertexTemplates,
             lavaVertexTemplates = lavaVertexTemplates,
             output = meshOutput
