@@ -77,6 +77,7 @@ MonoBehaviour:
     isSolid: 0
     renderNeighborFaces: 1
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -99,6 +100,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -121,6 +123,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -143,6 +146,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -165,6 +169,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -187,6 +192,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -209,6 +215,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -231,6 +238,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -253,6 +261,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -275,6 +284,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -297,6 +307,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -319,6 +330,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -341,6 +353,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -363,6 +376,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 1
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -385,6 +399,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -407,6 +422,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 1
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -429,6 +445,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -451,6 +468,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 1
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -473,6 +491,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
@@ -495,6 +514,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 1
     fluidType: 1
+    fluidShaderID: 0
     fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
     fluidLevel: 0
     flowLevels: 8
@@ -517,6 +537,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 1
     fluidType: 2
+    fluidShaderID: 1
     fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
     fluidLevel: 0
     flowLevels: 4
@@ -539,6 +560,7 @@ MonoBehaviour:
     isSolid: 1
     renderNeighborFaces: 0
     fluidType: 0
+    fluidShaderID: 0
     fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8

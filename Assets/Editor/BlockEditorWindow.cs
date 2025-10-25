@@ -123,6 +123,7 @@ namespace Editor
                     isSolid = blockType.isSolid,
                     renderNeighborFaces = blockType.renderNeighborFaces,
                     fluidType = blockType.fluidType,
+                    fluidShaderID = blockType.fluidShaderID,
                     fluidMeshData = blockType.fluidMeshData,
                     fluidLevel = blockType.fluidLevel,
                     flowLevels = blockType.flowLevels,
@@ -305,36 +306,44 @@ namespace Editor
                 EditorGUILayout.LabelField($"Editing: {selectedBlock.blockName} (ID: {selectedBlockIndex})", EditorStyles.boldLabel);
                 EditorGUILayout.Space();
 
-                // --- Block details  ---
-                selectedBlock.blockName = EditorGUILayout.TextField("Block Name", selectedBlock.blockName);
-                selectedBlock.icon = (Sprite)EditorGUILayout.ObjectField("Icon", selectedBlock.icon, typeof(Sprite), false, GUILayout.Width(200));
-                selectedBlock.meshData = (VoxelMeshData)EditorGUILayout.ObjectField("Custom Mesh Data", selectedBlock.meshData, typeof(VoxelMeshData), false);
+                // --- Block details with Tooltips ---
+                selectedBlock.blockName = EditorGUILayout.TextField(new GUIContent("Block Name", "The display name of the block."), selectedBlock.blockName);
+                selectedBlock.icon = (Sprite)EditorGUILayout.ObjectField(new GUIContent("Icon", "The icon that appears in the toolbar and inventory."), selectedBlock.icon, typeof(Sprite), false, GUILayout.Width(200));
+                selectedBlock.meshData = (VoxelMeshData)EditorGUILayout.ObjectField(new GUIContent("Custom Mesh Data", "The custom mesh data for this block, if it's not a standard cube."), selectedBlock.meshData, typeof(VoxelMeshData), false);
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Properties", EditorStyles.boldLabel);
-                selectedBlock.stackSize = EditorGUILayout.IntSlider("Stack Size", selectedBlock.stackSize, 1, 64);
-                selectedBlock.isSolid = EditorGUILayout.Toggle("Is Solid", selectedBlock.isSolid);
-                selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle("Render Neighbor Faces", selectedBlock.renderNeighborFaces);
-                selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Does this block have behavior that needs to be ticked?"), selectedBlock.isActive);
+                selectedBlock.stackSize = EditorGUILayout.IntSlider(new GUIContent("Stack Size", "The maximum amount of this block that can be stacked."), selectedBlock.stackSize, 1, 64);
+                selectedBlock.isSolid = EditorGUILayout.Toggle(new GUIContent("Is Solid", "Indicates whether the player collides with this block."), selectedBlock.isSolid);
+                selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighbouring faces should still be rendered when this block is placed."), selectedBlock.renderNeighborFaces);
+                selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), selectedBlock.isActive);
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Fluid Properties", EditorStyles.boldLabel);
-                selectedBlock.fluidType = (FluidType)EditorGUILayout.EnumPopup("Fluid Type", selectedBlock.fluidType);
-                selectedBlock.fluidLevel = (byte)EditorGUILayout.IntSlider("Fluid Level", selectedBlock.fluidLevel, 0, 15);
-                selectedBlock.flowLevels = (byte)EditorGUILayout.IntSlider("Flow Levels", selectedBlock.flowLevels, 1, 8);
+                selectedBlock.fluidType = (FluidType)EditorGUILayout.EnumPopup(new GUIContent("Fluid Type", "The type of fluid this block represents. 'None' for solid blocks."), selectedBlock.fluidType);
+
+                // --- Conditional Fluid Properties ---
+                if (selectedBlock.fluidType != FluidType.None)
+                {
+                    EditorGUI.indentLevel++;
+                    selectedBlock.fluidShaderID = (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Shader ID", "The ID passed to the liquid shader, controlling its visual style (e.g., 0 for Water, 1 for Lava)."), selectedBlock.fluidShaderID, 0, 16); // 256 (byte) is actual maximum
+                    selectedBlock.fluidLevel = (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Level", "Default fluid level."), selectedBlock.fluidLevel, 0, 15);
+                    selectedBlock.flowLevels = (byte)EditorGUILayout.IntSlider(new GUIContent("Flow Levels", "How many blocks a fluid can flow horizontally from a source block."), selectedBlock.flowLevels, 1, 8);
+                    EditorGUI.indentLevel--;
+                }
 
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Lighting Properties", EditorStyles.boldLabel);
-                selectedBlock.opacity = (byte)EditorGUILayout.IntSlider("Opacity", selectedBlock.opacity, 0, 15);
-                selectedBlock.lightEmission = (byte)EditorGUILayout.IntSlider("Light Emission", selectedBlock.lightEmission, 0, 15);
+                selectedBlock.opacity = (byte)EditorGUILayout.IntSlider(new GUIContent("Opacity", "How many light levels will be blocked by this block."), selectedBlock.opacity, 0, 15);
+                selectedBlock.lightEmission = (byte)EditorGUILayout.IntSlider(new GUIContent("Light Emission", "How many light levels will be emitted by this block."), selectedBlock.lightEmission, 0, 15);
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Placement Rules & Tags", EditorStyles.boldLabel);
-
-                // --- Tag Preset System ---
+                
+                // ... (Tag Preset and Tag fields with tooltips) ...
                 EditorGUILayout.BeginHorizontal();
-                selectedBlock.tagPreset = (BlockTagPreset)EditorGUILayout.ObjectField("Tag Preset", selectedBlock.tagPreset, typeof(BlockTagPreset), false);
+                selectedBlock.tagPreset = (BlockTagPreset)EditorGUILayout.ObjectField(new GUIContent("Tag Preset", "Apply a preset for the tags below."), selectedBlock.tagPreset, typeof(BlockTagPreset), false);
 
                 // Button to create a new preset asset
                 if (GUILayout.Button("New", GUILayout.Width(40)))
@@ -353,20 +362,20 @@ namespace Editor
 
                 EditorGUILayout.EndHorizontal();
 
-                selectedBlock.tags = (BlockTags)EditorGUILayout.EnumFlagsField("Tags", selectedBlock.tags);
-                selectedBlock.canReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField("Can Replace Tags", selectedBlock.canReplaceTags);
+                selectedBlock.tags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Tags", "What tags does this block have? A block can have multiple tags."), selectedBlock.tags);
+                selectedBlock.canReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Can Replace Tags", "What tags can this block replace?"), selectedBlock.canReplaceTags);
 
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Face Textures (ID)", EditorStyles.boldLabel);
 
                 // --- Texture Previews ---
-                DrawTextureSelector("Back (-Z)", ref selectedBlock.backFaceTexture);
-                DrawTextureSelector("Front (+Z)", ref selectedBlock.frontFaceTexture);
-                DrawTextureSelector("Top (+Y)", ref selectedBlock.topFaceTexture);
-                DrawTextureSelector("Bottom (-Y)", ref selectedBlock.bottomFaceTexture);
-                DrawTextureSelector("Left (-X)", ref selectedBlock.leftFaceTexture);
-                DrawTextureSelector("Right (+X)", ref selectedBlock.rightFaceTexture);
+                DrawTextureSelector(new GUIContent("Back (-Z)", "Texture ID for the Negative Z face."), ref selectedBlock.backFaceTexture);
+                DrawTextureSelector(new GUIContent("Front (+Z)", "Texture ID for the Positive Z face."), ref selectedBlock.frontFaceTexture);
+                DrawTextureSelector(new GUIContent("Top (+Y)", "Texture ID for the Positive Y face."), ref selectedBlock.topFaceTexture);
+                DrawTextureSelector(new GUIContent("Bottom (-Y)", "Texture ID for the Negative Y face."), ref selectedBlock.bottomFaceTexture);
+                DrawTextureSelector(new GUIContent("Left (-X)", "Texture ID for the Negative X face."), ref selectedBlock.leftFaceTexture);
+                DrawTextureSelector(new GUIContent("Right (+X)", "Texture ID for the Positive X face."), ref selectedBlock.rightFaceTexture);
 
                 // --- 3D Preview ---
                 EditorGUILayout.Space(20);
@@ -420,6 +429,7 @@ namespace Editor
                 isSolid = selectedBlock.isSolid,
                 renderNeighborFaces = selectedBlock.renderNeighborFaces,
                 fluidType = selectedBlock.fluidType,
+                fluidShaderID = selectedBlock.fluidShaderID,
                 fluidMeshData = selectedBlock.fluidMeshData,
                 fluidLevel = selectedBlock.fluidLevel,
                 flowLevels = selectedBlock.flowLevels,
@@ -679,12 +689,10 @@ namespace Editor
             return rotation;
         }
 
-        private void DrawTextureSelector(string label, ref int textureID)
+        private void DrawTextureSelector(GUIContent label, ref int textureID)
         {
             EditorGUILayout.BeginHorizontal();
-
             textureID = EditorGUILayout.IntField(label, textureID, GUILayout.Width(200));
-
             if (atlasTexture != null)
             {
                 // This will now be drawn right next to the 250px-wide IntField.

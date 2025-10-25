@@ -168,7 +168,7 @@ namespace Helpers
             OptionalVoxelState above = neighbors[8], below = neighbors[9];
 
             // --- 1. DETERMINE SHADER FLAGS ---
-            float liquidType = props.fluidType == FluidType.Lava ? 1.0f : 0.0f;
+            float liquidType = props.fluidShaderID;
             float shorelineFlag = 0.0f;
 
             // Check horizontal neighbors (N, E, S, W) for "shoreline" effect

@@ -36,6 +36,10 @@ namespace Data
         [Header("Fluid Properties")]
         [Tooltip("The type of fluid this block represents. 'None' for solid blocks.")]
         public FluidType fluidType = FluidType.None;
+        
+        [Tooltip("The ID passed to the liquid shader (e.g., 0 for Water, 1 for Lava). This controls the visual style.")]
+        [Range(0, 16)] // 0 = Water, 1 = Lava, range can be expanded up to 256 (byte)
+        public byte fluidShaderID = 0;
 
         [Tooltip("The pre-computed mesh data for this fluid.")]
         [InitializationField]
@@ -144,10 +148,14 @@ namespace Data
         }
     }
 
+    /// <summary>
+    /// Enumerates the different types of fluids that can be used in the game.
+    /// This is used to determine the behavior of the fluid.
+    /// </summary>
     public enum FluidType : byte // Using byte makes it job-safe and memory-efficient
     {
         None,
-        Water,
-        Lava
+        WaterLike,
+        LavaLike
     }
 }

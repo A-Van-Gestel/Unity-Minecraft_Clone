@@ -54,7 +54,7 @@ namespace Editor
                 // Load fluid templates using the new helper - works perfectly in the editor.
                 FluidTemplates fluidTemplates = ResourceLoader.LoadFluidTemplates();
                 var templates = new NativeArray<float>(16, Allocator.Temp);
-                templates.CopyFrom(blockType.fluidType == FluidType.Water ? fluidTemplates.WaterVertexTemplates : fluidTemplates.LavaVertexTemplates);
+                templates.CopyFrom(blockType.fluidType == FluidType.WaterLike ? fluidTemplates.WaterVertexTemplates : fluidTemplates.LavaVertexTemplates);
 
                 // Create temporary BlockTypeJobData from the editor's list.
                 var blockTypesJobData = new NativeArray<BlockTypeJobData>(allBlockTypes.Select(bt => new BlockTypeJobData(bt)).ToArray(), Allocator.Temp);

@@ -133,6 +133,7 @@ namespace Data
 
         // Fluid properties
         public FluidType fluidType;
+        public byte fluidShaderID;
         public byte fluidLevel;
         public byte flowLevels;
 
@@ -167,6 +168,7 @@ namespace Data
 
             // Fluid properties
             fluidType = blockType.fluidType;
+            fluidShaderID = blockType.fluidShaderID;
             fluidLevel = blockType.fluidLevel;
             flowLevels = blockType.flowLevels;
 

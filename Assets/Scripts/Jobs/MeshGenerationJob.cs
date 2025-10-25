@@ -95,7 +95,7 @@ namespace Jobs
             if (voxelProps.fluidType != FluidType.None)
             {
                 // Select the correct vertex height templates based on fluid type.
-                NativeArray<float> templates = (voxelProps.fluidType == FluidType.Water) ? waterVertexTemplates : lavaVertexTemplates;
+                NativeArray<float> templates = (voxelProps.fluidType == FluidType.WaterLike) ? waterVertexTemplates : lavaVertexTemplates;
 
                 // Gather all 9 required neighbors for fluid meshing.
                 var neighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
