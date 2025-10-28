@@ -106,7 +106,7 @@ namespace Data
             // --- Create the new voxel data from the modification ---
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
             // The LightingJob will then fill it with propagated light from neighbors.
-            BlockType newProps = World.Instance.blockTypes[mod.id];
+            BlockType newProps = World.Instance.blockDatabase.blockTypes[mod.id];
             uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.id, 0, newProps.lightEmission, mod.orientation, mod.fluidLevel);
 
             // Check if the full voxel state has actually changed.
@@ -117,7 +117,7 @@ namespace Data
             byte oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
             byte oldBlocklight = BurstVoxelDataBitMapping.GetBlocklight(oldPackedData);
             byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(oldPackedData);
-            BlockType oldProps = World.Instance.blockTypes[oldId];
+            BlockType oldProps = World.Instance.blockDatabase.blockTypes[oldId];
 
             // --- Update The Map ---
             map[index] = newPackedData;
@@ -140,7 +140,7 @@ namespace Data
                 {
                     int checkIndex = GetIndexFromPosition(localPos.x, y, localPos.z);
                     byte checkId = BurstVoxelDataBitMapping.GetId(map[checkIndex]);
-                    if (World.Instance.blockTypes[checkId].IsOpaque)
+                    if (World.Instance.blockDatabase.blockTypes[checkId].IsOpaque)
                     {
                         newHeight = (byte)y;
                         break; // Found the new highest block, stop scanning.
@@ -382,9 +382,9 @@ namespace Data
             {
                 int index = GetIndexFromPosition(x, y, z);
                 byte id = BurstVoxelDataBitMapping.GetId(map[index]);
-                // Debug.Log($"Y: {y:D2} | VoxelState: {World.Instance.blockTypes[id]}");
+                // Debug.Log($"Y: {y:D2} | VoxelState: {World.Instance.blockDatabase.blockTypes[id]}");
 
-                if (World.Instance.blockTypes[id].isSolid)
+                if (World.Instance.blockDatabase.blockTypes[id].isSolid)
                 {
                     return new Vector3Int(x, y, z);
                 }

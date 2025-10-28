@@ -8,7 +8,8 @@ namespace Editor
     public class BlockEditorWindow : EditorWindow
     {
         // Data references
-        private World worldPrefab;
+        private BlockDatabase blockDatabase;
+        private World worldPrefab; // Still needed for Material references
         private List<BlockType> blockTypesCopy;
         private BlockType selectedBlock;
         private int selectedBlockIndex = -1;
@@ -60,16 +61,34 @@ namespace Editor
             light.intensity = 1.2f;
             light.transform.rotation = Quaternion.Euler(30, 30, 0);
 
-            // --- Find World Prefab ---
-            string[] guids = AssetDatabase.FindAssets("t:Prefab World");
-            if (guids.Length > 0)
+            // ---  Find BlockDatabase asset ---
+            string[] guids = AssetDatabase.FindAssets("t:BlockDatabase");
+            if (guids.Length == 0)
             {
-                string path = AssetDatabase.GUIDToAssetPath(guids[0]);
-                worldPrefab = AssetDatabase.LoadAssetAtPath<World>(path);
-                if (worldPrefab != null)
+                Debug.LogError("Block Editor Error: Could not find a 'BlockDatabase.asset' in the project. Please create one or run the migration tool.", this);
+                return;
+            }
+
+            if (guids.Length > 1)
+            {
+                Debug.LogWarning("Block Editor Warning: Multiple 'BlockDatabase.asset' files found. Using the first one.", this);
+            }
+
+            string path = AssetDatabase.GUIDToAssetPath(guids[0]);
+            blockDatabase = AssetDatabase.LoadAssetAtPath<BlockDatabase>(path);
+
+            if (blockDatabase != null)
+            {
+                LoadBlockData();
+
+                // --- Find World Prefab ---
+                // For the preview, we still need to find a World prefab to get its material references.
+                string[] worldGuids = AssetDatabase.FindAssets("t:Prefab World");
+                if (worldGuids.Length > 0)
                 {
-                    LoadBlockData();
-                    if (worldPrefab.material != null)
+                    string worldPath = AssetDatabase.GUIDToAssetPath(worldGuids[0]);
+                    worldPrefab = AssetDatabase.LoadAssetAtPath<World>(worldPath);
+                    if (worldPrefab != null && worldPrefab.material != null)
                     {
                         atlasTexture = worldPrefab.material.mainTexture as Texture2D;
                         // Create an instance of the material for our preview
@@ -108,10 +127,10 @@ namespace Editor
 
         private void LoadBlockData()
         {
-            if (worldPrefab == null) return;
+            if (blockDatabase == null || worldPrefab == null) return;
             // We work on a copy of the data. This allows for "Save" and "Revert" functionality.
             blockTypesCopy = new List<BlockType>();
-            foreach (var blockType in worldPrefab.blockTypes)
+            foreach (var blockType in blockDatabase.blockTypes)
             {
                 // Simple member-wise copy for a new instance.
                 blockTypesCopy.Add(new BlockType
@@ -143,29 +162,29 @@ namespace Editor
                 });
             }
 
-            Debug.Log("Block Editor: Loaded " + blockTypesCopy.Count + " block types from World prefab.");
+            Debug.Log("Block Editor: Loaded " + blockTypesCopy.Count + " block types from BlockDatabase asset.");
         }
 
         private void SaveBlockData()
         {
-            if (worldPrefab == null || blockTypesCopy == null)
+            if (blockDatabase == null || blockTypesCopy == null)
             {
-                EditorUtility.DisplayDialog("Error", "World prefab not found or data not loaded.", "OK");
+                EditorUtility.DisplayDialog("Error", "BlockDatabase asset not found or data not loaded.", "OK");
                 return;
             }
 
-            // Prepare the prefab for modification.
-            Undo.RecordObject(worldPrefab, "Save Block Types");
+            // Prepare the BlockDatabase asset for modification.
+            Undo.RecordObject(blockDatabase, "Save Block Types");
 
-            // Overwrite the prefab's array with our edited copy.
-            worldPrefab.blockTypes = blockTypesCopy.ToArray();
+            // Overwrite the BlockDatabase asset's array with our edited copy.
+            blockDatabase.blockTypes = blockTypesCopy.ToArray();
 
-            // Mark the prefab as dirty and save the assets to disk. This is the "sync" part.
-            EditorUtility.SetDirty(worldPrefab);
+            // Mark the BlockDatabase asset as dirty and save the assets to disk. This is the "sync" part.
+            EditorUtility.SetDirty(blockDatabase);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            EditorUtility.DisplayDialog("Success", $"Saved {blockTypesCopy.Count} block types to the World prefab.", "OK");
+            EditorUtility.DisplayDialog("Success", $"Saved {blockTypesCopy.Count} block types to the BlockDatabase asset.", "OK");
         }
 
         void OnGUI()
@@ -173,6 +192,12 @@ namespace Editor
             if (worldPrefab == null)
             {
                 EditorGUILayout.HelpBox("Could not find the 'World' prefab. Please ensure it exists in your project.", MessageType.Error);
+                return;
+            }
+
+            if (blockDatabase == null)
+            {
+                EditorGUILayout.HelpBox("Could not find the 'BlockDatabase.asset'. Please ensure it exists in your project by creating one via the Assets > Create menu.", MessageType.Error);
                 return;
             }
 
@@ -343,7 +368,7 @@ namespace Editor
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Placement Rules & Tags", EditorStyles.boldLabel);
 
-                // ... (Tag Preset and Tag fields with tooltips) ...
+                // --- Tag Preset and Tag fields ---
                 EditorGUILayout.BeginHorizontal();
                 selectedBlock.tagPreset = (BlockTagPreset)EditorGUILayout.ObjectField(new GUIContent("Tag Preset", "Apply a preset for the tags below."), selectedBlock.tagPreset, typeof(BlockTagPreset), false);
 

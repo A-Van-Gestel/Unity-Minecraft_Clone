@@ -103,7 +103,7 @@ public class DragAndDropHandler : MonoBehaviour
             }
 
             // Both slots contain the same item, combine item amount based on stack size
-            int maxStackSize = world.blockTypes[cursorSlot.itemSlot.stack.id].stackSize;
+            int maxStackSize = world.blockDatabase.blockTypes[cursorSlot.itemSlot.stack.id].stackSize;
             int oldCursorSlotStackAmount = cursorSlot.itemSlot.stack.amount;
             int oldClickedSlotStackAmount = clickedSlot.itemSlot.stack.amount;
             int combinedStackAmount = oldClickedSlotStackAmount + oldCursorSlotStackAmount;
@@ -159,7 +159,7 @@ public class DragAndDropHandler : MonoBehaviour
                 return;
 
             // Both slots contain the same item, place one item into clicked slot based on stack size
-            int maxStackSize = world.blockTypes[cursorSlot.itemSlot.stack.id].stackSize;
+            int maxStackSize = world.blockDatabase.blockTypes[cursorSlot.itemSlot.stack.id].stackSize;
 
             // Clicked slot is full, do nothing.
             if (clickedSlot.itemSlot.stack.amount + 1 > maxStackSize) return;
@@ -183,7 +183,7 @@ public class DragAndDropHandler : MonoBehaviour
     [CanBeNull]
     private ItemStack CombineStacks(ItemSlot _slotA, ItemStack _stack)
     {
-        int maxStackSize = world.blockTypes[_stack.id].stackSize;
+        int maxStackSize = world.blockDatabase.blockTypes[_stack.id].stackSize;
         int oldSlotAStackAmount = _slotA.stack.amount;
         int combinedStackAmount = oldSlotAStackAmount + _stack.amount;
 
@@ -247,7 +247,7 @@ public class DragAndDropHandler : MonoBehaviour
         if (!_uiItemSlot.HasItem)
             return true;
 
-        int maxStackSize = world.blockTypes[_uiItemSlot.itemSlot.stack.id].stackSize;
+        int maxStackSize = world.blockDatabase.blockTypes[_uiItemSlot.itemSlot.stack.id].stackSize;
 
         // First fill slots in inventory with same item.
         foreach (ItemSlot slot in creativeInventory.slots.Where(slot => !slot.isCreative && slot.HasItem && slot.stack.id == _uiItemSlot.itemSlot.stack.id && slot.stack.amount < maxStackSize))

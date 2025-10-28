@@ -49,7 +49,7 @@ public class World : MonoBehaviour
 
     public Material transparentMaterial;
     public Material liquidMaterial;
-    public BlockType[] blockTypes;
+    public BlockDatabase blockDatabase;
 
     private Chunk[,] chunks = new Chunk[VoxelData.WorldSizeInChunks, VoxelData.WorldSizeInChunks];
 
@@ -548,7 +548,7 @@ public class World : MonoBehaviour
          // --- Block Types & Custom Meshes ---
         // --- Step 1: Collect all unique custom mesh assets
         List<VoxelMeshData> uniqueCustomMeshes = new List<VoxelMeshData>();
-        foreach (var blockType in blockTypes)
+        foreach (var blockType in blockDatabase.blockTypes)
         {
             if (blockType.meshData != null && !uniqueCustomMeshes.Contains(blockType.meshData))
             {
@@ -598,15 +598,15 @@ public class World : MonoBehaviour
         customTrisJobData = new NativeArray<int>(customTrisList.ToArray(), Allocator.Persistent);
 
         // --- Step 4: Populate blockTypesJobData, including the custom mesh index
-        blockTypesJobData = new NativeArray<BlockTypeJobData>(blockTypes.Length, Allocator.Persistent);
-        for (int i = 0; i < blockTypes.Length; i++)
+        blockTypesJobData = new NativeArray<BlockTypeJobData>(blockDatabase.blockTypes.Length, Allocator.Persistent);
+        for (int i = 0; i < blockDatabase.blockTypes.Length; i++)
         {
             int customMeshIndex = -1;
-            if (blockTypes[i].meshData != null)
+            if (blockDatabase.blockTypes[i].meshData != null)
             {
-                customMeshIndex = uniqueCustomMeshes.IndexOf(blockTypes[i].meshData);
+                customMeshIndex = uniqueCustomMeshes.IndexOf(blockDatabase.blockTypes[i].meshData);
             }
-            blockTypesJobData[i] = new BlockTypeJobData(blockTypes[i], customMeshIndex);
+            blockTypesJobData[i] = new BlockTypeJobData(blockDatabase.blockTypes[i], customMeshIndex);
         }
 
         // --- Prepare Fluid Vertex Templates ---
@@ -1286,7 +1286,7 @@ public class World : MonoBehaviour
                 if (v.id == 0)
                 {
                     VoxelState? stateToBreak = worldData.GetVoxelState(v.globalPosition);
-                    if (stateToBreak.HasValue && (blockTypes[stateToBreak.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
+                    if (stateToBreak.HasValue && (blockDatabase.blockTypes[stateToBreak.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
                     {
                         continue; // Cannot break an unbreakable block.
                     }
@@ -1302,7 +1302,7 @@ public class World : MonoBehaviour
                         {
                             case ReplacementRule.ForcePlace:
                                 // Force placement, but still respect Unbreakable blocks.
-                                if ((blockTypes[existingState.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
+                                if ((blockDatabase.blockTypes[existingState.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
                                     canPlace = false;
                                 break;
 
@@ -1315,8 +1315,8 @@ public class World : MonoBehaviour
                             case ReplacementRule.Default:
                             default:
                                 // --- Use the default Block Tag system ---
-                                BlockType incomingProps = blockTypes[v.id];
-                                BlockType existingProps = blockTypes[existingState.Value.id];
+                                BlockType incomingProps = blockDatabase.blockTypes[v.id];
+                                BlockType existingProps = blockDatabase.blockTypes[existingState.Value.id];
 
                                 // Rule A: Nothing can replace an Unbreakable block.
                                 if ((existingProps.tags & BlockTags.UNBREAKABLE) != 0)
@@ -1570,7 +1570,7 @@ public class World : MonoBehaviour
         for (int i = yMax; i > 0; i--)
         {
             Vector3Int currentVoxel = new Vector3Int(x, i, z);
-            if (!blockTypes[GetVoxel(currentVoxel)].isSolid) continue;
+            if (!blockDatabase.blockTypes[GetVoxel(currentVoxel)].isSolid) continue;
             Debug.Log($"Finding highest voxel in wold for X / Z = {x} / {z} using expensive world generation code.");
             Debug.Log($"Highest voxel in chunk {thisChunk.X} / {thisChunk.Z} is {currentVoxel}.");
             return currentVoxel;
@@ -1584,7 +1584,7 @@ public class World : MonoBehaviour
     public bool CheckForVoxel(Vector3 pos)
     {
         VoxelState? voxel = worldData.GetVoxelState(pos);
-        return voxel.HasValue && blockTypes[voxel.Value.id].isSolid;
+        return voxel.HasValue && blockDatabase.blockTypes[voxel.Value.id].isSolid;
     }
 
     /// Returns true when voxel is solid & not water.

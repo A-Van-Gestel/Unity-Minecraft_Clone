@@ -68,7 +68,7 @@ public class Chunk
             uint packedData = chunkData.map[i];
             byte id = BurstVoxelDataBitMapping.GetId(packedData);
 
-            if (World.Instance.blockTypes[id].isActive)
+            if (World.Instance.blockDatabase.blockTypes[id].isActive)
             {
                 // Convert flat index back to 3D position
                 int x = i % VoxelData.ChunkWidth;
