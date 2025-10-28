@@ -1,4 +1,5 @@
-﻿using Data;
+﻿/*
+using Data;
 using UnityEditor;
 using UnityEngine;
 
@@ -15,17 +16,17 @@ namespace Editor
             // Get a reference to the World instance being inspected
             World world = (World)target;
 
-            // Don't do anything if the blockTypes array is null or empty
-            if (world.blockTypes == null || world.blockTypes.Length == 0)
+            // Check the referenced BlockDatabase asset.
+            if (world.blockDatabase == null || world.blockDatabase.blockTypes == null || world.blockDatabase.blockTypes.Length == 0)
                 return;
 
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Block Tag Preset Tools", EditorStyles.boldLabel);
 
-            // Iterate through each BlockType in the array
-            for (int i = 0; i < world.blockTypes.Length; i++)
+            // Iterate through the database's array.
+            for (int i = 0; i < world.blockDatabase.blockTypes.Length; i++)
             {
-                BlockType blockType = world.blockTypes[i];
+                BlockType blockType = world.blockDatabase.blockTypes[i];
 
                 // Check if a preset is assigned for this block type
                 if (blockType.tagPreset != null)
@@ -34,14 +35,14 @@ namespace Editor
                     if (GUILayout.Button($"Apply Preset to '{blockType.blockName}' (ID: {i})"))
                     {
                         // This allows the action to be undone with Ctrl+Z
-                        Undo.RecordObject(world, $"Apply Preset to {blockType.blockName}");
+                        Undo.RecordObject(world.blockDatabase, $"Apply Preset to {blockType.blockName}");
 
                         // Core Logic: Copy values from the preset to the block type.
                         blockType.tags = blockType.tagPreset.tags;
                         blockType.canReplaceTags = blockType.tagPreset.canReplaceTags;
 
                         // Mark the object as "dirty" to ensure the changes are saved.
-                        EditorUtility.SetDirty(world);
+                        EditorUtility.SetDirty(world.blockDatabase);
 
                         Debug.Log($"Applied preset '{blockType.tagPreset.name}' to block '{blockType.blockName}'.");
                     }
@@ -50,3 +51,4 @@ namespace Editor
         }
     }
 }
+*/
