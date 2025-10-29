@@ -24,7 +24,11 @@ namespace Editor
         private PreviewRenderUtility previewRenderUtility;
         private Mesh previewMesh;
         private Material previewMaterial;
+
         private Vector2 previewRotation = new Vector2(15, -30); // Initial rotation
+
+        // Stores the editor-only state of the fluid preview slider.
+        private int _previewFluidLevel = 0;
 
         // --- Custom GUI Style ---
         private GUIStyle _listButtonStyle;
@@ -262,6 +266,10 @@ namespace Editor
                             selectedBlock = blockTypesCopy[i];
                             selectedBlockIndex = i;
                             GUI.FocusControl(null); // Deselect text fields
+
+                            // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
+                            _previewFluidLevel = 0;
+
                             UpdatePreviewMesh();
                         }
                     }
@@ -342,6 +350,21 @@ namespace Editor
                         (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Shader ID", "The ID passed to the liquid shader, controlling its visual style (e.g., 0 for Water, 1 for Lava)."), selectedBlock.fluidShaderID, 0, 16); // 256 (byte) is actual maximum
                     selectedBlock.fluidLevel = (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Level", "Default fluid level."), selectedBlock.fluidLevel, 0, 15);
                     selectedBlock.flowLevels = (byte)EditorGUILayout.IntSlider(new GUIContent("Flow Levels", "How many blocks a fluid can flow horizontally from a source block."), selectedBlock.flowLevels, 1, 8);
+
+                    // --- Fluid Preview Slider ---
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Editor Preview", EditorStyles.boldLabel);
+
+                    // Begin a change check. This is more efficient than comparing before/after values.
+                    EditorGUI.BeginChangeCheck();
+                    _previewFluidLevel = EditorGUILayout.IntSlider(new GUIContent("Preview Fluid Level", "Adjust the fluid level for the 3D preview below. This does not affect game data."), _previewFluidLevel, 0, 15);
+
+                    // // If the check detected a change (i.e., the user moved the slider), update the mesh.
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        UpdatePreviewMesh();
+                    }
+
                     EditorGUI.indentLevel--;
                 }
 
@@ -449,6 +472,9 @@ namespace Editor
             };
             blockTypesCopy.Add(newBlock);
 
+            // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
+            _previewFluidLevel = 0;
+
             // Automatically select the new block for immediate editing
             selectedBlockIndex = blockTypesCopy.Count - 1;
             selectedBlock = newBlock;
@@ -492,6 +518,9 @@ namespace Editor
 
             int insertIndex = selectedBlockIndex + 1;
             blockTypesCopy.Insert(insertIndex, newBlock);
+
+            // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
+            _previewFluidLevel = 0;
 
             // Select the newly created duplicate
             selectedBlockIndex = insertIndex;
@@ -559,7 +588,7 @@ namespace Editor
         private void UpdatePreviewMesh()
         {
             if (previewMesh != null) DestroyImmediate(previewMesh);
-            previewMesh = EditorMeshGenerator.GenerateBlockMesh(selectedBlock, blockTypesCopy);
+            previewMesh = EditorMeshGenerator.GenerateBlockMesh(selectedBlock, blockTypesCopy, _previewFluidLevel);
 
             // Material switching logic
             if (selectedBlock.fluidType != FluidType.None)

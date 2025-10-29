@@ -14,7 +14,7 @@ namespace Editor
         /// Generates a Mesh for a given BlockType. This is for editor previews only.
         /// It now contains self-sufficient logic for all block types, including a simplified fluid preview.
         /// </summary>
-        public static Mesh GenerateBlockMesh(BlockType blockType, List<BlockType> allBlockTypes)
+        public static Mesh GenerateBlockMesh(BlockType blockType, List<BlockType> allBlockTypes, int fluidLevel = 0)
         {
             if (blockType == null) return null;
 
@@ -46,7 +46,7 @@ namespace Editor
                 // Create mock data needed by the helper that isn't available in the editor.
                 var mockProps = new BlockTypeJobData(blockType);
                 // Use fluid level 0 (full block) and full sunlight (15) for the preview.
-                uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0, 1, blockType.fluidLevel);
+                uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0, 1, (byte)fluidLevel);
 
                 // For a simple, flat preview, an empty (default) array is sufficient.
                 var mockNeighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
