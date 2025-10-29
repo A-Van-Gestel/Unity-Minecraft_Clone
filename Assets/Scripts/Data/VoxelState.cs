@@ -82,7 +82,7 @@ namespace Data
         #endregion
 
         // --- Other Properties ---
-        public BlockType Properties => World.Instance.blockDatabase.blockTypes[id];
+        public BlockType Properties => World.Instance.blockTypes[id];
 
         /// <summary>
         /// Returns the highest light level between sunlight and blocklight as a float between 0 and 1.

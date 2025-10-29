@@ -39,7 +39,7 @@ public class Chunk
             meshFilter = chunkObject.AddComponent<MeshFilter>();
             meshRenderer = chunkObject.AddComponent<MeshRenderer>();
 
-            materials[0] = World.Instance.material;
+            materials[0] = World.Instance.opaqueMaterial;
             materials[1] = World.Instance.transparentMaterial;
             materials[2] = World.Instance.liquidMaterial;
             meshRenderer.materials = materials;
@@ -68,7 +68,7 @@ public class Chunk
             uint packedData = chunkData.map[i];
             byte id = BurstVoxelDataBitMapping.GetId(packedData);
 
-            if (World.Instance.blockDatabase.blockTypes[id].isActive)
+            if (World.Instance.blockTypes[id].isActive)
             {
                 // Convert flat index back to 3D position
                 int x = i % VoxelData.ChunkWidth;

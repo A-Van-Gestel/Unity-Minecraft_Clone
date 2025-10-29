@@ -17,16 +17,16 @@ namespace Editor
             World world = (World)target;
 
             // Check the referenced BlockDatabase asset.
-            if (world.blockDatabase == null || world.blockDatabase.blockTypes == null || world.blockDatabase.blockTypes.Length == 0)
+            if (world.blockDatabase == null || world.blockTypes == null || world.blockTypes.Length == 0)
                 return;
 
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Block Tag Preset Tools", EditorStyles.boldLabel);
 
             // Iterate through the database's array.
-            for (int i = 0; i < world.blockDatabase.blockTypes.Length; i++)
+            for (int i = 0; i < world.blockTypes.Length; i++)
             {
-                BlockType blockType = world.blockDatabase.blockTypes[i];
+                BlockType blockType = world.blockTypes[i];
 
                 // Check if a preset is assigned for this block type
                 if (blockType.tagPreset != null)

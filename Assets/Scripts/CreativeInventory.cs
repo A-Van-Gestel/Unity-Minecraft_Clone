@@ -25,8 +25,8 @@ public class CreativeInventory : MonoBehaviour
         canvasGridLayoutGroup.cellSize = prefabSize;
 
         // Calculate how many rows the different block types will fill.
-        int creativeSlotRows = Mathf.CeilToInt((float)world.blockDatabase.blockTypes.Length / itemColumnCount);
-        if ((world.blockDatabase.blockTypes.Length - 1) % itemColumnCount == 0)
+        int creativeSlotRows = Mathf.CeilToInt((float)world.blockTypes.Length / itemColumnCount);
+        if ((world.blockTypes.Length - 1) % itemColumnCount == 0)
             creativeSlotRows--;
 
         // Fill in the slots.
@@ -36,9 +36,9 @@ public class CreativeInventory : MonoBehaviour
             int currentRow = Mathf.CeilToInt((float)(i) / itemColumnCount);
 
             // First fill with creative menu with all block types.
-            if (i < world.blockDatabase.blockTypes.Length)
+            if (i < world.blockTypes.Length)
             {
-                ItemStack stack = new ItemStack((byte)i, world.blockDatabase.blockTypes[i].stackSize);
+                ItemStack stack = new ItemStack((byte)i, world.blockTypes[i].stackSize);
                 ItemSlot slot = new ItemSlot(newSlot.GetComponent<UIItemSlot>(), stack);
                 slot.isCreative = true;
                 slots.Add(slot);

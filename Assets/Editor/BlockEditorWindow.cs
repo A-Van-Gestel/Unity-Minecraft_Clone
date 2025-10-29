@@ -9,7 +9,6 @@ namespace Editor
     {
         // Data references
         private BlockDatabase blockDatabase;
-        private World worldPrefab; // Still needed for Material references
         private List<BlockType> blockTypesCopy;
         private BlockType selectedBlock;
         private int selectedBlockIndex = -1;
@@ -81,19 +80,12 @@ namespace Editor
             {
                 LoadBlockData();
 
-                // --- Find World Prefab ---
-                // For the preview, we still need to find a World prefab to get its material references.
-                string[] worldGuids = AssetDatabase.FindAssets("t:Prefab World");
-                if (worldGuids.Length > 0)
+                // --- Load Materials ---
+                if (blockDatabase.opaqueMaterial != null)
                 {
-                    string worldPath = AssetDatabase.GUIDToAssetPath(worldGuids[0]);
-                    worldPrefab = AssetDatabase.LoadAssetAtPath<World>(worldPath);
-                    if (worldPrefab != null && worldPrefab.material != null)
-                    {
-                        atlasTexture = worldPrefab.material.mainTexture as Texture2D;
-                        // Create an instance of the material for our preview
-                        previewMaterial = new Material(worldPrefab.material);
-                    }
+                    atlasTexture = blockDatabase.opaqueMaterial.mainTexture as Texture2D;
+                    // Create an instance of the material for our preview
+                    previewMaterial = new Material(blockDatabase.opaqueMaterial);
                 }
             }
 
@@ -127,7 +119,7 @@ namespace Editor
 
         private void LoadBlockData()
         {
-            if (blockDatabase == null || worldPrefab == null) return;
+            if (blockDatabase == null) return;
             // We work on a copy of the data. This allows for "Save" and "Revert" functionality.
             blockTypesCopy = new List<BlockType>();
             foreach (var blockType in blockDatabase.blockTypes)
@@ -189,12 +181,6 @@ namespace Editor
 
         void OnGUI()
         {
-            if (worldPrefab == null)
-            {
-                EditorGUILayout.HelpBox("Could not find the 'World' prefab. Please ensure it exists in your project.", MessageType.Error);
-                return;
-            }
-
             if (blockDatabase == null)
             {
                 EditorGUILayout.HelpBox("Could not find the 'BlockDatabase.asset'. Please ensure it exists in your project by creating one via the Assets > Create menu.", MessageType.Error);
@@ -578,11 +564,11 @@ namespace Editor
             // Material switching logic
             if (selectedBlock.fluidType != FluidType.None)
             {
-                if (worldPrefab.liquidMaterial != null)
+                if (blockDatabase.liquidMaterial != null)
                 {
                     // Just assign the material. The vertex colors in the mesh will handle the rest.
-                    previewMaterial.shader = worldPrefab.liquidMaterial.shader;
-                    previewMaterial.CopyPropertiesFromMaterial(worldPrefab.liquidMaterial);
+                    previewMaterial.shader = blockDatabase.liquidMaterial.shader;
+                    previewMaterial.CopyPropertiesFromMaterial(blockDatabase.liquidMaterial);
                 }
                 else
                 {
@@ -592,19 +578,27 @@ namespace Editor
             else if (selectedBlock.renderNeighborFaces)
             {
                 // Use the transparent material for see-through solid blocks
-                if (worldPrefab.transparentMaterial != null)
+                if (blockDatabase.transparentMaterial != null)
                 {
-                    previewMaterial.shader = worldPrefab.transparentMaterial.shader;
-                    previewMaterial.CopyPropertiesFromMaterial(worldPrefab.transparentMaterial);
+                    previewMaterial.shader = blockDatabase.transparentMaterial.shader;
+                    previewMaterial.CopyPropertiesFromMaterial(blockDatabase.transparentMaterial);
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog("Error", "Transparent material not found.", "OK");
                 }
             }
             else
             {
                 // Default to the standard opaque material
-                if (worldPrefab.material != null)
+                if (blockDatabase.opaqueMaterial != null)
                 {
-                    previewMaterial.shader = worldPrefab.material.shader;
-                    previewMaterial.CopyPropertiesFromMaterial(worldPrefab.material);
+                    previewMaterial.shader = blockDatabase.opaqueMaterial.shader;
+                    previewMaterial.CopyPropertiesFromMaterial(blockDatabase.opaqueMaterial);
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog("Error", "Opaque material not found.", "OK");
                 }
             }
         }

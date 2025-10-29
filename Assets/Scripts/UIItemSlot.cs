@@ -47,7 +47,7 @@ public class UIItemSlot : MonoBehaviour
     {
         if (itemSlot != null && itemSlot.HasItem)
         {
-            slotIcon.sprite = world.blockDatabase.blockTypes[itemSlot.stack.id].icon;
+            slotIcon.sprite = world.blockTypes[itemSlot.stack.id].icon;
             slotAmount.text = itemSlot.stack.amount.ToString();
             slotIcon.enabled = true;
             slotAmount.enabled = true;

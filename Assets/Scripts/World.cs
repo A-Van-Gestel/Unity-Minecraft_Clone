@@ -45,11 +45,14 @@ public class World : MonoBehaviour
     public Vector3 spawnPositionOffset = new Vector3(0.5f, 1.1f, 0.5f);
 
     [Header("Blocks & Materials")]
-    public Material material;
-
-    public Material transparentMaterial;
-    public Material liquidMaterial;
+    [SerializeField]
+    [Tooltip("The BlockDatabase asset that contains all the block data & materials.")]
     public BlockDatabase blockDatabase;
+
+    public BlockType[] blockTypes => blockDatabase.blockTypes;
+    public Material opaqueMaterial => blockDatabase.opaqueMaterial;
+    public Material transparentMaterial => blockDatabase.transparentMaterial;
+    public Material liquidMaterial => blockDatabase.liquidMaterial;
 
     private Chunk[,] chunks = new Chunk[VoxelData.WorldSizeInChunks, VoxelData.WorldSizeInChunks];
 
@@ -545,7 +548,7 @@ public class World : MonoBehaviour
             currentLodeIndex += biomes[i].lodes.Length;
         }
 
-         // --- Block Types & Custom Meshes ---
+        // --- Block Types & Custom Meshes ---
         // --- Step 1: Collect all unique custom mesh assets
         List<VoxelMeshData> uniqueCustomMeshes = new List<VoxelMeshData>();
         foreach (var blockType in blockDatabase.blockTypes)
@@ -555,7 +558,7 @@ public class World : MonoBehaviour
                 uniqueCustomMeshes.Add(blockType.meshData);
             }
         }
-        
+
         // --- Step 2: Flatten custom mesh data into temporary lists
         List<CustomMeshData> customMeshesList = new List<CustomMeshData>();
         List<CustomFaceData> customFacesList = new List<CustomFaceData>();
@@ -564,15 +567,15 @@ public class World : MonoBehaviour
 
         foreach (var meshAsset in uniqueCustomMeshes)
         {
-            customMeshesList.Add(new CustomMeshData 
-            { 
+            customMeshesList.Add(new CustomMeshData
+            {
                 faceStartIndex = customFacesList.Count,
                 faceCount = meshAsset.faces.Length
             });
-            
+
             if (meshAsset.faces.Length > 6)
                 Debug.LogWarning($"VoxelMeshData asset '{meshAsset.name}' has more than 6 faces. Only the first 6 will be used.");
-            
+
             foreach (var faceAsset in meshAsset.faces)
             {
                 customFacesList.Add(new CustomFaceData
@@ -582,15 +585,16 @@ public class World : MonoBehaviour
                     triStartIndex = customTrisList.Count,
                     triCount = faceAsset.triangles.Length
                 });
-                
+
                 foreach (var vertAsset in faceAsset.vertData)
                 {
                     customVertsList.Add(new CustomVertData { position = vertAsset.position, uv = vertAsset.uv });
                 }
+
                 customTrisList.AddRange(faceAsset.triangles);
             }
         }
-        
+
         // --- Step 3: Convert lists to persistent NativeArrays
         customMeshesJobData = new NativeArray<CustomMeshData>(customMeshesList.ToArray(), Allocator.Persistent);
         customFacesJobData = new NativeArray<CustomFaceData>(customFacesList.ToArray(), Allocator.Persistent);
@@ -606,6 +610,7 @@ public class World : MonoBehaviour
             {
                 customMeshIndex = uniqueCustomMeshes.IndexOf(blockDatabase.blockTypes[i].meshData);
             }
+
             blockTypesJobData[i] = new BlockTypeJobData(blockDatabase.blockTypes[i], customMeshIndex);
         }
 

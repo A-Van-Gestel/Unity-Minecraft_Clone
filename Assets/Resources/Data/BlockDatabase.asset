@@ -12,6 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 131f965a5fb24787b70a3a8cefe1c5cb, type: 3}
   m_Name: BlockDatabase
   m_EditorClassIdentifier: Assembly-CSharp::Data.BlockDatabase
+  opaqueMaterial: {fileID: 2100000, guid: 310749baead051949ad82e332a06680f, type: 2}
+  transparentMaterial: {fileID: 2100000, guid: 451dc07c0cc41a649bf3ac4fe7a9e1b0, type: 2}
+  liquidMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
   blockTypes:
   - blockName: Air edit
     icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
