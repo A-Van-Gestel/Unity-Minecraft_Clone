@@ -1569,14 +1569,16 @@ public class World : MonoBehaviour
             Debug.Log($"Highest voxel in chunk {thisChunk.X} / {thisChunk.Z} is {highestVoxel}.");
             return highestVoxel;
         }
+        Debug.Log($"Chunk {thisChunk.X} / {thisChunk.Z} is not created, accurate result is not possible.");
 
         // Chunk is not created, calculate the highest voxel using expensive world generation code.
         // NOTE: This will not include voxel modifications (like trees).
+        Debug.Log($"Finding highest voxel in wold for X / Z = {x} / {z} using expensive world generation code. This will not include voxel modifications (eg: trees)");
         for (int i = yMax; i > 0; i--)
         {
             Vector3Int currentVoxel = new Vector3Int(x, i, z);
-            if (!blockDatabase.blockTypes[GetVoxel(currentVoxel)].isSolid) continue;
-            Debug.Log($"Finding highest voxel in wold for X / Z = {x} / {z} using expensive world generation code.");
+            byte voxelBlockId = WorldGen.GetVoxel(currentVoxel, VoxelData.Seed, biomesJobData, allLodesJobData);
+            if (!blockDatabase.blockTypes[voxelBlockId].isSolid) continue;
             Debug.Log($"Highest voxel in chunk {thisChunk.X} / {thisChunk.Z} is {currentVoxel}.");
             return currentVoxel;
         }
@@ -1620,116 +1622,6 @@ public class World : MonoBehaviour
             cursorSlot.SetActive(_inUI);
         }
     }
-
-    #region World Generation
-
-    // TODO: Logic move to WorldGen.GetVoxel, this should be removed and any logic calling this updated to use WorldGen.GetVoxel
-    public byte GetVoxel(Vector3Int pos)
-    {
-        int yPos = Mathf.FloorToInt(pos.y);
-
-        // ----- IMMUTABLE PASS -----
-        // If outside of world, return air.
-        if (!worldData.IsVoxelInWorld(pos))
-            return 0;
-
-        // If bottom block of chunk, return bedrock
-        if (yPos == 0)
-            return 8; // Bedrock
-
-        // ----- BIOME SELECTION PASS -----
-        float sumOfHeights = 0f;
-        int count = 0;
-        float strongestWeight = 0f;
-        int strongestBiomeIndex = 0;
-
-        for (int i = 0; i < biomes.Length; i++)
-        {
-            float weight = Noise.Get2DPerlin(new Vector2(pos.x, pos.z), biomes[i].offset, biomes[i].scale);
-
-            // Keep track of which weight is strongest.
-            if (weight > strongestWeight)
-            {
-                strongestWeight = weight;
-                strongestBiomeIndex = i;
-            }
-
-            // Get the height of the terrain (for the current biome) and multiply it by its weight.
-            float height = biomes[i].terrainHeight * Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biomes[i].terrainScale) * weight;
-
-            // If the height value is greater than 0, add it to the sum of heights.
-            if (height > 0)
-            {
-                sumOfHeights += height;
-                count++;
-            }
-        }
-
-        // Set biome to the one with the strongest weight.
-        BiomeAttributes biome = biomes[strongestBiomeIndex];
-
-        // Get the average of the heights.
-        sumOfHeights /= count;
-        int terrainHeight = Mathf.FloorToInt(sumOfHeights + VoxelData.SolidGroundHeight);
-
-
-        // ----- BASIC TERRAIN PASS -----
-        byte voxelValue = 0;
-
-        if (yPos == terrainHeight)
-        {
-            voxelValue = biome.surfaceBlock; // Grass
-        }
-        else if (yPos < terrainHeight && yPos > terrainHeight - 4)
-        {
-            voxelValue = biome.subSurfaceBlock; // Dirt
-        }
-        else if (yPos > terrainHeight)
-        {
-            if (yPos < VoxelData.SeaLevel)
-                return 19; // Water
-
-            return 0; // Air
-        }
-        else
-        {
-            voxelValue = 1; // Stone
-        }
-
-        // ----- SECOND PASS -----
-        if (settings.enableSecondPass && voxelValue == 1)
-        {
-            // Stone
-            foreach (Lode lode in biome.lodes)
-            {
-                if (yPos > lode.minHeight && yPos < lode.maxHeight)
-                {
-                    if (Noise.Get3DPerlin(pos, lode.noiseOffset, lode.scale, lode.threshold))
-                    {
-                        voxelValue = lode.blockID;
-                    }
-                }
-            }
-        }
-
-        // ----- MAJOR FLORA PASS -----
-        if (settings.enableMajorFloraPass && yPos == terrainHeight && biome.placeMajorFlora)
-        {
-            if (Noise.Get2DPerlin(new Vector2Int(pos.x, pos.z), 0, biome.majorFloraZoneScale) > biome.majorFloraZoneThreshold)
-            {
-                if (Noise.Get2DPerlin(new Vector2Int(pos.x, pos.z), 2500, biome.majorFloraPlacementScale) > biome.majorFloraPlacementThreshold)
-                {
-                    Queue<VoxelMod> structureQueue = Structure.GenerateMajorFlora(biome.majorFloraIndex, pos, biome.minHeight, biome.maxHeight);
-                    modifications.Enqueue(structureQueue);
-                }
-            }
-        }
-
-
-        return voxelValue;
-    }
-
-    #endregion
 
     private bool IsChunkInWorld(ChunkCoord coord)
     {

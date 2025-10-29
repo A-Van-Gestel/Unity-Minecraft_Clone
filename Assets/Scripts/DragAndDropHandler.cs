@@ -18,7 +18,6 @@ public class DragAndDropHandler : MonoBehaviour
     private World world;
 
     private CreativeInventory creativeInventory = null;
-    private List<ItemSlot> inventorySlots;
 
     private void Start()
     {

@@ -36,7 +36,6 @@ namespace UI
         public TMP_Dropdown cloudStyleDropdown;
 
         // Toggles
-        public Toggle threadingToggle;
         public Toggle chunkAnimationToggle;
     #endregion
 
