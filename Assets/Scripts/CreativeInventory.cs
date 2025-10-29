@@ -25,9 +25,8 @@ public class CreativeInventory : MonoBehaviour
         canvasGridLayoutGroup.cellSize = prefabSize;
 
         // Calculate how many rows the different block types will fill.
-        int creativeSlotRows = Mathf.CeilToInt((float)world.blockTypes.Length / itemColumnCount);
-        if ((world.blockTypes.Length - 1) % itemColumnCount == 0)
-            creativeSlotRows--;
+        int itemCount = world.blockTypes.Length - 1; // Exclude Air (blockTypes[0]) 
+        int creativeSlotRows = Mathf.CeilToInt((float)itemCount / itemColumnCount);
 
         // Fill in the slots.
         for (int i = 1; i <= itemColumnCount * itemRowCount; i++)
