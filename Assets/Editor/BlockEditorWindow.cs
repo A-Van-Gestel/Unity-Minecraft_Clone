@@ -25,7 +25,7 @@ namespace Editor
         private Mesh previewMesh;
         private Material previewMaterial;
 
-        private Vector2 previewRotation = new Vector2(15, -30); // Initial rotation
+        private Vector2 previewRotation = new Vector2(135, -30); // Initial rotation
 
         // Stores the editor-only state of the fluid preview slider.
         private int _previewFluidLevel = 0;
