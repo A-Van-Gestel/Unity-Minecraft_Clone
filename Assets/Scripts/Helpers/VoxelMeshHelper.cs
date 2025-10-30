@@ -100,7 +100,7 @@ namespace Helpers
         /// </summary>
         [BurstCompile]
         public static void GenerateCustomMeshFace(
-            int faceIndex, int textureID, float lightLevel, Vector3Int position,
+            int faceIndex, int textureID, float lightLevel, Vector3Int position, float rotation,
             int customMeshIndex,
             [ReadOnly] ref NativeArray<CustomMeshData> customMeshes,
             [ReadOnly] ref NativeArray<CustomFaceData> customFaces,
@@ -120,7 +120,15 @@ namespace Helpers
             for (int i = 0; i < faceData.vertCount; i++)
             {
                 CustomVertData vertData = customVerts[faceData.vertStartIndex + i];
-                vertices.Add(position + vertData.position);
+                Vector3 vertPos = vertData.position;
+
+                // Rotate the vertex around the block's center (0.5, 0.5, 0.5)
+                Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
+                Vector3 direction = vertPos - center;
+                direction = Quaternion.Euler(0, rotation, 0) * direction;
+
+                vertices.Add(position + direction + center);
+
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]); // Assuming one normal per face for custom meshes
                 colors.Add(new Color(0, 0, 0, lightLevel));
                 AddTexture(textureID, vertData.uv, ref uvs);

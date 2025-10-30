@@ -126,20 +126,32 @@ namespace Jobs
             // Case 2: The block has a custom mesh.
             else if (voxelProps.customMeshIndex > -1)
             {
+                byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
+                float rotation = VoxelHelper.GetRotationAngle(orientation);
+
                 //: Get the specific mesh data to access its face count
                 CustomMeshData meshData = customMeshes[voxelProps.customMeshIndex];
 
-                // Loop only up to the number of faces defined in the asset.
-                for (int p = 0; p < meshData.faceCount; p++)
+                // Iterate through all 6 WORLD directions, same as a standard cube.
+                for (int p = 0; p < 6; p++)
                 {
+                    // Safety check: If the custom mesh asset doesn't define this face, skip it.
+                    if (p >= meshData.faceCount) continue;
+
+                    // Check the neighbor in the current WORLD direction.
                     VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
                     if (ShouldDrawFace(voxelProps, neighborVoxel))
                     {
-                        int textureID = GetTextureID(id, p);
+                        // Translate the WORLD direction (p) to the correct ORIGINAL face index based on the block's orientation.
+                        int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
+
+                        // Use the translated index to get the correct texture for the face being rendered.
+                        int textureID = GetTextureID(id, translatedP);
                         float lightLevel = neighborVoxel?.lightAsFloat ?? 1.0f;
 
-                        // Call the new helper for custom meshes
-                        VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, lightLevel, pos,
+                        // Call the helper, passing the TRANSLATED face index so it generates the correct set of vertices from the VoxelMeshData asset.
+                        VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, lightLevel, pos, rotation,
                             voxelProps.customMeshIndex, ref customMeshes, ref customFaces, ref customVerts, ref customTris,
                             ref vertexIndex, ref output.vertices, ref output.triangles, ref output.transparentTriangles, ref output.uvs,
                             ref output.colors, ref output.normals, voxelProps.renderNeighborFaces);
