@@ -353,7 +353,7 @@ MonoBehaviour:
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 929eb7cd71e07db4aa16102fa5ec0746, type: 2}
     tags: 1057
-    canReplaceTags: 8384
+    canReplaceTags: 8386
     isActive: 0
     backFaceTexture: 14
     frontFaceTexture: 14
