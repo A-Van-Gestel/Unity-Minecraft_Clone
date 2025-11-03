@@ -37,14 +37,14 @@ namespace Data
 
         [NonSerialized]
         [CanBeNull]
-        public Chunk chunk;
+        public Chunk Chunk;
 
         [NonSerialized]
-        public bool isPopulated;
+        public bool IsPopulated;
 
         // --- lighting ---
         [NonSerialized]
-        public bool hasLightChangesToProcess = false;
+        public bool HasLightChangesToProcess = false;
 
         [NonSerialized]
         private Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
@@ -74,9 +74,9 @@ namespace Data
         {
             jobOutputMap.CopyTo(map);
             jobOutputHeightMap.CopyTo(heightMap);
-            isPopulated = true;
+            IsPopulated = true;
 
-            World.Instance.worldData.modifiedChunks.Add(this);
+            World.Instance.worldData.ModifiedChunks.Add(this);
         }
 
         #endregion
@@ -84,7 +84,7 @@ namespace Data
         #region Modifier Methods
 
         // --- Modifier Methods --
-         /// <summary>
+        /// <summary>
         /// Modifies a single voxel within the chunk based on the data provided in a VoxelMod struct.
         /// This is the authoritative method for all block changes in the world. It handles:
         /// - Updating the voxel map with the new state (ID, orientation, fluid level).
@@ -106,8 +106,8 @@ namespace Data
             // --- Create the new voxel data from the modification ---
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
             // The LightingJob will then fill it with propagated light from neighbors.
-            BlockType newProps = World.Instance.blockTypes[mod.id];
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.id, 0, newProps.lightEmission, mod.orientation, mod.fluidLevel);
+            BlockType newProps = World.Instance.blockTypes[mod.ID];
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, 0, newProps.lightEmission, mod.Orientation, mod.FluidLevel);
 
             // Check if the full voxel state has actually changed.
             if (oldPackedData == newPackedData)
@@ -146,6 +146,7 @@ namespace Data
                         break; // Found the new highest block, stop scanning.
                     }
                 }
+
                 heightMap[heightmapIndex] = newHeight;
             }
 
@@ -182,17 +183,17 @@ namespace Data
             // --- Notify World and Handle Active Voxels ---
 
             // Pass the immediateUpdate flag to the world so it can prioritize the mesh rebuild.
-            World.Instance.NotifyChunkModified(this.position, localPos, mod.ImmediateUpdate);
+            World.Instance.NotifyChunkModified(position, localPos, mod.ImmediateUpdate);
 
             // If the chunk object exists, update its active voxel list immediately.
             // If not (e.g., during initial world gen), the active voxel scan in
             // OnDataPopulated() will handle finding this block later when the chunk is activated.
-            if (chunk != null)
+            if (Chunk != null)
             {
                 if (newProps.isActive)
-                    chunk.AddActiveVoxel(localPos);
+                    Chunk.AddActiveVoxel(localPos);
                 else if (oldProps.isActive)
-                    chunk.RemoveActiveVoxel(localPos);
+                    Chunk.RemoveActiveVoxel(localPos);
             }
 
             // --- WAKE UP NEIGHBORS ---
@@ -208,7 +209,7 @@ namespace Data
                     // If the neighbor is in this chunk, add it directly.
                     if (IsVoxelInChunk(neighborPos))
                     {
-                        chunk?.AddActiveVoxel(neighborPos);
+                        Chunk?.AddActiveVoxel(neighborPos);
                     }
                     else // If it's in another chunk, we need to find that chunk and add it.
                     {
@@ -219,13 +220,13 @@ namespace Data
                         if (neighborChunk != null)
                         {
                             Vector3Int localPosInNeighbor = neighborChunk.GetVoxelPositionInChunkFromGlobalVector3(globalPos);
-                            neighborChunk?.AddActiveVoxel(localPosInNeighbor);
+                            neighborChunk.AddActiveVoxel(localPosInNeighbor);
                         }
                     }
                 }
             }
 
-            World.Instance.worldData.modifiedChunks.Add(this);
+            World.Instance.worldData.ModifiedChunks.Add(this);
         }
 
         #endregion
@@ -241,8 +242,8 @@ namespace Data
         {
             if (World.Instance.settings.enableLighting)
             {
-                _blocklightBfsQueue.Enqueue(new LightQueueNode { position = localPos, oldLightLevel = oldLightLevel });
-                hasLightChangesToProcess = true;
+                _blocklightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
+                HasLightChangesToProcess = true;
             }
         }
 
@@ -253,8 +254,8 @@ namespace Data
         {
             if (World.Instance.settings.enableLighting)
             {
-                _sunlightBfsQueue.Enqueue(new LightQueueNode { position = localPos, oldLightLevel = oldLightLevel });
-                hasLightChangesToProcess = true;
+                _sunlightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
+                HasLightChangesToProcess = true;
             }
         }
 
@@ -396,9 +397,45 @@ namespace Data
         #endregion
     }
 
-    public struct LightQueueNode
+    public struct LightQueueNode : IEquatable<LightQueueNode>
     {
-        public Vector3Int position;
-        public byte oldLightLevel;
+        public Vector3Int Position;
+        public byte OldLightLevel;
+
+        // --- Operator Overloads for comparison ---
+
+        #region Overides
+
+        public static bool operator ==(LightQueueNode a, LightQueueNode b)
+        {
+            return a.Position == b.Position && a.OldLightLevel == b.OldLightLevel;
+        }
+
+        public static bool operator !=(LightQueueNode a, LightQueueNode b)
+        {
+            return a.Position != b.Position || a.OldLightLevel != b.OldLightLevel;
+        }
+
+        public bool Equals(LightQueueNode other)
+        {
+            return Position == other.Position && OldLightLevel == other.OldLightLevel;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is LightQueueNode other && this == other;
+        }
+
+        public override int GetHashCode()
+        {
+            return Position.GetHashCode() ^ OldLightLevel.GetHashCode();
+        }
+
+        public override string ToString()
+        {
+            return $"LightQueueNode: {{ Position = {Position}, OldLightLevel = {OldLightLevel} }}";
+        }
+
+        #endregion
     }
 }

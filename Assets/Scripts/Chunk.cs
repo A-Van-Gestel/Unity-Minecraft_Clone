@@ -8,51 +8,51 @@ using UnityEngine.Rendering;
 
 public class Chunk
 {
-    public ChunkCoord coord;
+    public readonly ChunkCoord Coord;
 
-    private GameObject chunkObject;
-    private MeshRenderer meshRenderer;
-    private MeshFilter meshFilter;
+    private readonly GameObject _chunkObject;
+    private readonly MeshRenderer _meshRenderer;
+    private readonly MeshFilter _meshFilter;
 
 
-    private Material[] materials = new Material[3];
+    private readonly Material[] _materials = new Material[3];
 
-    public Vector3 chunkPosition;
+    public Vector3 ChunkPosition;
 
     private bool _isActive;
 
-    public ChunkData chunkData;
+    public readonly ChunkData ChunkData;
 
-    private List<Vector3Int> activeVoxels = new List<Vector3Int>();
+    private List<Vector3Int> _activeVoxels = new List<Vector3Int>();
 
     #region Constructor
 
-    public Chunk(ChunkCoord _coord, bool createGameObject = true)
+    public Chunk(ChunkCoord coord, bool createGameObject = true)
     {
-        coord = _coord;
-        Vector3 worldPos = new Vector3(coord.X * VoxelData.ChunkWidth, 0f, coord.Z * VoxelData.ChunkWidth);
-        chunkPosition = worldPos;
+        Coord = coord;
+        Vector3 worldPos = new Vector3(Coord.X * VoxelData.ChunkWidth, 0f, Coord.Z * VoxelData.ChunkWidth);
+        ChunkPosition = worldPos;
 
         if (createGameObject)
         {
-            chunkObject = new GameObject();
-            meshFilter = chunkObject.AddComponent<MeshFilter>();
-            meshRenderer = chunkObject.AddComponent<MeshRenderer>();
+            _chunkObject = new GameObject();
+            _meshFilter = _chunkObject.AddComponent<MeshFilter>();
+            _meshRenderer = _chunkObject.AddComponent<MeshRenderer>();
 
-            materials[0] = World.Instance.opaqueMaterial;
-            materials[1] = World.Instance.transparentMaterial;
-            materials[2] = World.Instance.liquidMaterial;
-            meshRenderer.materials = materials;
+            _materials[0] = World.Instance.opaqueMaterial;
+            _materials[1] = World.Instance.transparentMaterial;
+            _materials[2] = World.Instance.liquidMaterial;
+            _meshRenderer.materials = _materials;
 
-            meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;
-            chunkObject.transform.SetParent(World.Instance.transform);
-            chunkObject.transform.position = worldPos;
-            chunkObject.name = $"Chunk {coord.X}, {coord.Z}";
+            _meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;
+            _chunkObject.transform.SetParent(World.Instance.transform);
+            _chunkObject.transform.position = worldPos;
+            _chunkObject.name = $"Chunk {Coord.X}, {Coord.Z}";
         }
 
         // Request the ChunkData object. The data inside it will be populated asynchronously by a job.
-        chunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)chunkPosition.x, (int)chunkPosition.z), true);
-        chunkData.chunk = this;
+        ChunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)ChunkPosition.x, (int)ChunkPosition.z), true);
+        ChunkData.Chunk = this;
     }
 
     #endregion
@@ -63,16 +63,16 @@ public class Chunk
     public void OnDataPopulated()
     {
         // Now that the data is here, we can scan for active voxels.
-        for (int i = 0; i < chunkData.map.Length; i++)
+        for (int i = 0; i < ChunkData.map.Length; i++)
         {
-            uint packedData = chunkData.map[i];
+            uint packedData = ChunkData.map[i];
             byte id = BurstVoxelDataBitMapping.GetId(packedData);
 
             if (World.Instance.blockTypes[id].isActive)
             {
                 // Convert flat index back to 3D position
                 int x = i % VoxelData.ChunkWidth;
-                int y = (i / VoxelData.ChunkWidth) % VoxelData.ChunkHeight;
+                int y = i / VoxelData.ChunkWidth % VoxelData.ChunkHeight;
                 int z = i / (VoxelData.ChunkWidth * VoxelData.ChunkHeight);
 
                 AddActiveVoxel(new Vector3Int(x, y, z));
@@ -86,7 +86,7 @@ public class Chunk
     public void UpdateChunk()
     {
         // The responsibility of meshing is now on the World orchestrator
-        World.Instance.ScheduleMeshing(this);
+        World.Instance.JobManager.ScheduleMeshing(this);
     }
 
     #region Block Behavior Methods
@@ -97,13 +97,13 @@ public class Chunk
         List<Vector3Int> stillActive = new List<Vector3Int>();
         Queue<VoxelMod> modifications = new Queue<VoxelMod>();
 
-        foreach (Vector3Int pos in activeVoxels)
+        foreach (Vector3Int pos in _activeVoxels)
         {
             // Get the list of modifications from the behavior logic.
-            List<VoxelMod> mods = BlockBehavior.Behave(chunkData, pos);
+            List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
 
             // If the block is still active, keep it for the next tick.
-            if (BlockBehavior.Active(chunkData, pos))
+            if (BlockBehavior.Active(ChunkData, pos))
             {
                 stillActive.Add(pos);
             }
@@ -125,23 +125,23 @@ public class Chunk
         }
 
         // Update the active voxel list for the next frame.
-        activeVoxels = stillActive;
+        _activeVoxels = stillActive;
     }
 
     public void AddActiveVoxel(Vector3Int pos)
     {
-        if (!activeVoxels.Contains(pos))
-            activeVoxels.Add(pos);
+        if (!_activeVoxels.Contains(pos))
+            _activeVoxels.Add(pos);
     }
 
     public void RemoveActiveVoxel(Vector3Int pos)
     {
-        activeVoxels.Remove(pos); // List<T>.Remove is efficient enough for this
+        _activeVoxels.Remove(pos); // List<T>.Remove is efficient enough for this
     }
 
     public int GetActiveVoxelCount()
     {
-        return activeVoxels.Count;
+        return _activeVoxels.Count;
     }
 
     #endregion
@@ -152,9 +152,9 @@ public class Chunk
         set
         {
             _isActive = value;
-            if (chunkObject != null)
+            if (_chunkObject != null)
             {
-                chunkObject.SetActive(value);
+                _chunkObject.SetActive(value);
                 PlayChunkLoadAnimation();
             }
         }
@@ -166,8 +166,8 @@ public class Chunk
         int yCheck = Mathf.FloorToInt(pos.y);
         int zCheck = Mathf.FloorToInt(pos.z);
 
-        xCheck -= Mathf.FloorToInt(chunkPosition.x);
-        zCheck -= Mathf.FloorToInt(chunkPosition.z);
+        xCheck -= Mathf.FloorToInt(ChunkPosition.x);
+        zCheck -= Mathf.FloorToInt(ChunkPosition.z);
 
         return new Vector3Int(xCheck, yCheck, zCheck);
     }
@@ -178,23 +178,23 @@ public class Chunk
     public void ApplyMeshData(MeshDataJobOutput meshData)
     {
         Mesh mesh = new Mesh();
-        mesh.vertices = meshData.vertices.ToArray(Allocator.Temp).ToArray();
+        mesh.vertices = meshData.Vertices.ToArray(Allocator.Temp).ToArray();
         mesh.subMeshCount = 3;
-        mesh.SetTriangles(meshData.triangles.ToArray(Allocator.Temp).ToArray(), 0);
-        mesh.SetTriangles(meshData.transparentTriangles.ToArray(Allocator.Temp).ToArray(), 1);
-        mesh.SetTriangles(meshData.fluidTriangles.ToArray(Allocator.Temp).ToArray(), 2);
-        mesh.uv = meshData.uvs.ToArray(Allocator.Temp).ToArray();
-        mesh.colors = meshData.colors.ToArray(Allocator.Temp).ToArray();
-        mesh.normals = meshData.normals.ToArray(Allocator.Temp).ToArray();
+        mesh.SetTriangles(meshData.Triangles.ToArray(Allocator.Temp).ToArray(), 0);
+        mesh.SetTriangles(meshData.TransparentTriangles.ToArray(Allocator.Temp).ToArray(), 1);
+        mesh.SetTriangles(meshData.FluidTriangles.ToArray(Allocator.Temp).ToArray(), 2);
+        mesh.uv = meshData.Uvs.ToArray(Allocator.Temp).ToArray();
+        mesh.colors = meshData.Colors.ToArray(Allocator.Temp).ToArray();
+        mesh.normals = meshData.Normals.ToArray(Allocator.Temp).ToArray();
 
         mesh.RecalculateBounds();
-        meshFilter.mesh = mesh;
+        _meshFilter.mesh = mesh;
 
         // Dispose the native lists now that we're done with them.
         meshData.Dispose();
 
         // Add to the draw queue to be enabled on the main thread
-        World.Instance.chunksToDraw.Enqueue(this);
+        World.Instance.ChunksToDraw.Enqueue(this);
     }
 
     // CreateMesh is now just the final step of enabling the renderer after data is applied.
@@ -212,8 +212,8 @@ public class Chunk
 
     private void PlayChunkLoadAnimation()
     {
-        if (World.Instance.settings.enableChunkLoadAnimations && chunkObject.GetComponent<ChunkLoadAnimation>() == null)
-            chunkObject.AddComponent<ChunkLoadAnimation>();
+        if (World.Instance.settings.enableChunkLoadAnimations && _chunkObject.GetComponent<ChunkLoadAnimation>() == null)
+            _chunkObject.AddComponent<ChunkLoadAnimation>();
     }
 
     #endregion

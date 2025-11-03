@@ -12,8 +12,8 @@ public static class VoxelData
     public const int SeaLevel = 45; // Minecraft = 62
 
     // Lighting Values
-    public static float MinLightLevel = 0.15f;
-    public static float MaxLightLevel = 1.0f;
+    public static readonly float MinLightLevel = 0.15f;
+    public static readonly float MaxLightLevel = 1.0f;
 
     // Light is handled as float (0-1) byt Minecraft stores light as a byte (0-15),
     // so we need to know how much of that float a single light level represents.
@@ -128,8 +128,7 @@ public static class VoxelData
         }
 
         // 2. Try to parse the string as an integer.
-        int parsedSeed;
-        if (int.TryParse(seedText, out parsedSeed))
+        if (int.TryParse(seedText, out int parsedSeed))
         {
             Debug.Log($"VoxelData.CalculateSeed | Using integer seed: {parsedSeed}");
             return parsedSeed; // Return the parsed integer directly.

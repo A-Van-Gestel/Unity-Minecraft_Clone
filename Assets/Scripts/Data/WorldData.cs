@@ -17,13 +17,13 @@ namespace Data
         public int seed;
 
         [NonSerialized]
-        public Dictionary<Vector2Int, ChunkData> chunks = new Dictionary<Vector2Int, ChunkData>();
+        public Dictionary<Vector2Int, ChunkData> Chunks = new Dictionary<Vector2Int, ChunkData>();
 
         [NonSerialized]
-        public HashSet<ChunkData> modifiedChunks = new HashSet<ChunkData>();
+        public HashSet<ChunkData> ModifiedChunks = new HashSet<ChunkData>();
 
         [NonSerialized]
-        public HashSet<Vector2Int> sunlightRecalculationQueue = new HashSet<Vector2Int>();
+        public HashSet<Vector2Int> SunlightRecalculationQueue = new HashSet<Vector2Int>();
 
         #region Constructors
 
@@ -47,14 +47,14 @@ namespace Data
         {
             ChunkData c;
 
-            if (chunks.TryGetValue(coord, out ChunkData chunk))
+            if (Chunks.TryGetValue(coord, out ChunkData chunk))
                 c = chunk;
             else if (!create)
                 c = null;
             else
             {
                 LoadChunk(coord);
-                c = chunks[coord];
+                c = Chunks[coord];
             }
 
             return c;
@@ -63,7 +63,7 @@ namespace Data
         public void LoadChunk(Vector2Int coord)
         {
             // Nothing needs to be loaded if the chunk is already loaded.
-            if (chunks.ContainsKey(coord))
+            if (Chunks.ContainsKey(coord))
                 return;
 
             // Load Chunk from File
@@ -72,7 +72,7 @@ namespace Data
                 ChunkData chunk = SaveSystem.LoadChunk(worldName, coord);
                 if (chunk != null)
                 {
-                    chunks.Add(coord, chunk);
+                    Chunks.Add(coord, chunk);
                     return;
                 }
             }
@@ -81,7 +81,7 @@ namespace Data
             // We do NOT create it here. We add a "placeholder" ChunkData object.
             // The asynchronous job system is responsible for populating it.
             // This prevents race conditions.
-            chunks.Add(coord, new ChunkData(coord));
+            Chunks.Add(coord, new ChunkData(coord));
         }
 
         // This method is called by a modification that needs a chunk which may not exist yet.
@@ -90,11 +90,11 @@ namespace Data
         {
             if (!IsVoxelInWorld(pos)) return;
             Vector2Int chunkCoord = GetChunkCoordFor(pos);
-            if (!chunks.ContainsKey(chunkCoord))
+            if (!Chunks.ContainsKey(chunkCoord))
             {
                 // Create the placeholder and schedule its generation
-                chunks.Add(chunkCoord, new ChunkData(chunkCoord));
-                World.Instance.ScheduleGeneration(new ChunkCoord(pos));
+                Chunks.Add(chunkCoord, new ChunkData(chunkCoord));
+                World.Instance.JobManager.ScheduleGeneration(new ChunkCoord(pos));
             }
         }
 
@@ -152,12 +152,12 @@ namespace Data
         private void QueueNeighborRebuild(Vector2Int neighborV2Coord)
         {
             // Try to get the neighbor's chunk data.
-            if (chunks.TryGetValue(neighborV2Coord, out ChunkData neighborData))
+            if (Chunks.TryGetValue(neighborV2Coord, out ChunkData neighborData))
             {
                 // If the chunk object exists, request a rebuild.
-                if (neighborData.chunk != null)
+                if (neighborData.Chunk != null)
                 {
-                    World.Instance.RequestChunkMeshRebuild(neighborData.chunk, true);
+                    World.Instance.RequestChunkMeshRebuild(neighborData.Chunk, true);
                 }
             }
         }
@@ -191,7 +191,7 @@ namespace Data
 
             Vector2Int chunkV2Coord = GetChunkCoordFor(globalPos);
 
-            if (chunks.TryGetValue(chunkV2Coord, out ChunkData chunkData) && chunkData.isPopulated)
+            if (Chunks.TryGetValue(chunkV2Coord, out ChunkData chunkData) && chunkData.IsPopulated)
             {
                 // Add the *modified block's position* to the chunk's internal light queue.
                 Vector3Int localPos = GetLocalVoxelPositionInChunk(globalPos);
@@ -201,19 +201,19 @@ namespace Data
                     chunkData.AddToSunLightQueue(localPos, oldLightLevel);
 
                 // Mark the target chunk as needing a lighting update.
-                chunkData.hasLightChangesToProcess = true;
+                chunkData.HasLightChangesToProcess = true;
             }
         }
 
         public void QueueSunlightRecalculation(Vector2Int columnPos)
         {
-            sunlightRecalculationQueue.Add(columnPos);
+            SunlightRecalculationQueue.Add(columnPos);
 
             // Mark the target chunk as needing a lighting update.
             Vector2Int chunkV2Coord = GetChunkCoordFor(new Vector3(columnPos.x, 0, columnPos.y));
-            if (chunks.TryGetValue(chunkV2Coord, out ChunkData chunkData))
+            if (Chunks.TryGetValue(chunkV2Coord, out ChunkData chunkData))
             {
-                chunkData.hasLightChangesToProcess = true;
+                chunkData.HasLightChangesToProcess = true;
             }
         }
 

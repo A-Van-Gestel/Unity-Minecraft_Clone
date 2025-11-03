@@ -7,67 +7,69 @@ using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Profiling;
 
+[RequireComponent(typeof(Player))]
+[RequireComponent(typeof(Transform))]
 [RequireComponent(typeof(TextMeshProUGUI))]
 public class DebugScreen : MonoBehaviour
 {
     // --- Serialized Fields (Assigned in Inspector) ---
     [Header("Component References")]
     [SerializeField]
-    private Player player;
+    private Player _player;
 
     [SerializeField]
-    private Transform playerCamera;
+    private Transform _playerCamera;
 
     [Header("Update Rates")]
     [Tooltip("How many times per second the frame rate counter will be updated.")]
     [SerializeField]
-    private float frameRateUpdateRate = 0.25f;
+    private float _frameRateUpdateRate = 0.25f;
 
     [Tooltip("How many times per second expensive debug info is updated.")]
     [SerializeField]
-    private float infrequentUpdateRate = 0.2f;
+    private float _infrequentUpdateRate = 0.2f;
 
     // --- Private Fields ---
-    private World world;
-    private TextMeshProUGUI text;
-    private readonly StringBuilder debugTextBuilder = new StringBuilder();
+    private World _world;
+    private TextMeshProUGUI _text;
+    private readonly StringBuilder _debugTextBuilder = new StringBuilder();
 
     // --- Profiler Recorders ---
     // CPU Timings
-    private ProfilerRecorder mainThreadTimeRecorder;
-    private ProfilerRecorder renderThreadTimeRecorder;
+    private ProfilerRecorder _mainThreadTimeRecorder;
+    private ProfilerRecorder _renderThreadTimeRecorder;
 
     // Memory
-    private ProfilerRecorder gcAllocatedInFrameRecorder;
-    private ProfilerRecorder systemUsedMemoryRecorder;
-    private ProfilerRecorder gcReservedMemoryRecorder;
+    private ProfilerRecorder _gcAllocatedInFrameRecorder;
+    private ProfilerRecorder _systemUsedMemoryRecorder;
+    private ProfilerRecorder _gcReservedMemoryRecorder;
 
-    private bool profilerRecordersAreValid;
-    private bool didIEnableTheProfiler = false;
+    private bool _profilerRecordersAreValid;
+    private bool _didIEnableTheProfiler = false;
 
     // --- Cached Data (updated periodically) ---
-    private float frameRate;
-    private VoxelState? groundVoxelState;
-    private Vector3Int? groundVoxelPos;
-    private VoxelState? targetVoxelState;
-    private Vector3Int? targetVoxelPos;
+    private float _frameRate;
+    private VoxelState? _groundVoxelState;
+    private Vector3Int? _groundVoxelPos;
+    private VoxelState? _targetVoxelState;
+    private Vector3Int? _targetVoxelPos;
 
     [CanBeNull]
-    private Chunk currentChunk;
+    private Chunk _currentChunk;
 
     // Profiler data
-    private long mainThreadTime;
-    private long renderThreadTime;
-    private long gcAllocatedInFrame;
-    private long systemUsedMemory;
-    private long gcReservedMemory;
+    private long _mainThreadTime;
+    private long _renderThreadTime;
+    private long _gcAllocatedInFrame;
+    private long _systemUsedMemory;
+    private long _gcReservedMemory;
 
     // --- Timers ---
-    private float frameRateTimer;
-    private float infrequentUpdateTimer;
+    private float _frameRateTimer;
+    private float _infrequentUpdateTimer;
 
     // OnEnable is called when the object becomes enabled and active.
-    void OnEnable()
+    private void OnEnable()
     {
         // For ProfilerRecorder to work, the Profiler needs to be enabled.
         // This is often disabled in the editor unless the Profiler window is open.
@@ -75,71 +77,70 @@ public class DebugScreen : MonoBehaviour
         if (!Profiler.enabled)
         {
             Profiler.enabled = true;
-            didIEnableTheProfiler = true;
+            _didIEnableTheProfiler = true;
         }
 
-
         // Initialize CPU Recorders
-        mainThreadTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Main Thread Frame Time");
-        renderThreadTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Render Thread Frame Time");
+        _mainThreadTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Main Thread Frame Time");
+        _renderThreadTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Render Thread Frame Time");
 
         // Initialize Memory Recorders
-        gcAllocatedInFrameRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame");
-        systemUsedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "System Used Memory");
-        gcReservedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Reserved Memory");
+        _gcAllocatedInFrameRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame");
+        _systemUsedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "System Used Memory");
+        _gcReservedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Reserved Memory");
 
         // Check that the main recorders were created successfully. They might not be in certain build types.
-        profilerRecordersAreValid = mainThreadTimeRecorder.Valid && systemUsedMemoryRecorder.Valid;
+        _profilerRecordersAreValid = _mainThreadTimeRecorder.Valid && _systemUsedMemoryRecorder.Valid;
     }
 
     // OnDisable is called when the behaviour becomes disabled or inactive.
-    void OnDisable()
+    private void OnDisable()
     {
         // Clean up the recorders when the object is disabled to prevent memory leaks.
-        mainThreadTimeRecorder.Dispose();
-        renderThreadTimeRecorder.Dispose();
-        gcAllocatedInFrameRecorder.Dispose();
-        systemUsedMemoryRecorder.Dispose();
-        gcReservedMemoryRecorder.Dispose();
+        _mainThreadTimeRecorder.Dispose();
+        _renderThreadTimeRecorder.Dispose();
+        _gcAllocatedInFrameRecorder.Dispose();
+        _systemUsedMemoryRecorder.Dispose();
+        _gcReservedMemoryRecorder.Dispose();
 
         // Only disable the profiler if this script was the one that enabled it.
         // This prevents the script from turning off the profiler if the user has the Profiler Window open.
-        if (didIEnableTheProfiler)
+        if (_didIEnableTheProfiler)
         {
             Profiler.enabled = false;
-            didIEnableTheProfiler = false;
+            _didIEnableTheProfiler = false;
         }
     }
 
-    void Start()
+    private void Start()
     {
         // Get references once.
-        world = World.Instance;
-        text = GetComponent<TextMeshProUGUI>();
+        _world = World.Instance;
+        _text = GetComponent<TextMeshProUGUI>();
 
         // Fail-safe if references aren't set in the inspector
-        if (!player)
-            player = FindFirstObjectByType<Player>(); // Slower fallback
-        if (!playerCamera && Camera.main)
-            playerCamera = Camera.main.transform; // Common fallback
+        if (!_player)
+            _player = FindFirstObjectByType<Player>(); // Slower fallback
+        if (!_playerCamera && Camera.main)
+            _playerCamera = Camera.main.transform; // Common fallback
     }
 
-    void Update()
+    private void Update()
     {
         // --- Timed Updates ---
         // Update expensive data on a timer to reduce per-frame cost.
-        frameRateTimer += Time.unscaledDeltaTime;
-        if (frameRateTimer >= frameRateUpdateRate)
+        _frameRateTimer += Time.unscaledDeltaTime;
+        if (_frameRateTimer >= _frameRateUpdateRate)
         {
             UpdateFrameRate();
-            frameRateTimer = 0;
+            _frameRateTimer = 0;
         }
 
-        infrequentUpdateTimer += Time.deltaTime;
-        if (infrequentUpdateTimer >= infrequentUpdateRate)
+        _infrequentUpdateTimer += Time.deltaTime;
+        if (_infrequentUpdateTimer >= _infrequentUpdateRate)
         {
             UpdateInfrequentData();
-            infrequentUpdateTimer = 0;
+            _infrequentUpdateTimer = 0;
         }
 
         // --- Build the debug string every frame using StringBuilder ---
@@ -151,7 +152,7 @@ public class DebugScreen : MonoBehaviour
     /// </summary>
     private void UpdateFrameRate()
     {
-        frameRate = (1f / Time.unscaledDeltaTime);
+        _frameRate = 1f / Time.unscaledDeltaTime;
     }
 
     /// <summary>
@@ -159,26 +160,26 @@ public class DebugScreen : MonoBehaviour
     /// </summary>
     private void UpdateInfrequentData()
     {
-        Vector3 playerPos = player.transform.position;
+        Vector3 playerPos = _player.transform.position;
         // Update Ground Voxel State
         Vector3 groundVoxelPosVector3 = playerPos + Vector3.down;
-        groundVoxelState = world.GetVoxelState(groundVoxelPosVector3);
-        groundVoxelPos = (groundVoxelPosVector3).ToVector3Int();
+        _groundVoxelState = _world.GetVoxelState(groundVoxelPosVector3);
+        _groundVoxelPos = groundVoxelPosVector3.ToVector3Int();
 
         // Update Target Voxel State (for Inspector)
         UpdateTargetVoxel();
 
         // Update Current Chunk
-        currentChunk = world.worldData.IsVoxelInWorld(playerPos) ? world.GetChunkFromVector3(playerPos) : null;
+        _currentChunk = _world.worldData.IsVoxelInWorld(playerPos) ? _world.GetChunkFromVector3(playerPos) : null;
 
         // Update CPU times
-        gcAllocatedInFrame = mainThreadTimeRecorder.LastValue;
-        renderThreadTime = renderThreadTimeRecorder.LastValue;
+        _gcAllocatedInFrame = _mainThreadTimeRecorder.LastValue;
+        _renderThreadTime = _renderThreadTimeRecorder.LastValue;
 
         // Update Memory
-        gcAllocatedInFrame = gcAllocatedInFrameRecorder.LastValue;
-        gcReservedMemory = gcReservedMemoryRecorder.LastValue;
-        systemUsedMemory = systemUsedMemoryRecorder.LastValue;
+        _gcAllocatedInFrame = _gcAllocatedInFrameRecorder.LastValue;
+        _gcReservedMemory = _gcReservedMemoryRecorder.LastValue;
+        _systemUsedMemory = _systemUsedMemoryRecorder.LastValue;
     }
 
     /// <summary>
@@ -186,134 +187,134 @@ public class DebugScreen : MonoBehaviour
     /// </summary>
     private void UpdateTargetVoxel()
     {
-        Player.VoxelRaycastResult result = player.RaycastForVoxel();
+        Player.VoxelRaycastResult result = _player.RaycastForVoxel();
 
-        if (result.didHit)
+        if (result.DidHit)
         {
-            targetVoxelPos = result.hitPosition;
-            targetVoxelState = world.GetVoxelState(result.hitPosition);
+            _targetVoxelPos = result.HitPosition;
+            _targetVoxelState = _world.GetVoxelState(result.HitPosition);
         }
         else
         {
             // If we didn't hit anything, clear the data.
-            targetVoxelPos = null;
-            targetVoxelState = null;
+            _targetVoxelPos = null;
+            _targetVoxelState = null;
         }
     }
 
     private void BuildDebugString()
     {
         // Clear the builder from the previous frame.
-        debugTextBuilder.Clear();
+        _debugTextBuilder.Clear();
 
-        Vector3 playerPosition = player.transform.position;
+        Vector3 playerPosition = _player.transform.position;
         Vector2 lookingDirection = GetLookingAngles();
 
         // --- General Info ---
-        debugTextBuilder.AppendLine("Minecraft Clone based on b3agz' Code a Game Like Minecraft in Unity");
-        debugTextBuilder.AppendLine();
+        _debugTextBuilder.AppendLine("Minecraft Clone based on b3agz' Code a Game Like Minecraft in Unity");
+        _debugTextBuilder.AppendLine();
 
         // --- Performance Info ---
-        debugTextBuilder.AppendLine("PERFORMANCE:");
-        debugTextBuilder.Append(Mathf.RoundToInt(frameRate)).AppendLine(" fps");
+        _debugTextBuilder.AppendLine("PERFORMANCE:");
+        _debugTextBuilder.Append(Mathf.RoundToInt(_frameRate)).AppendLine(" fps");
 
         // Display profiler status and memory info
-        if (profilerRecordersAreValid)
+        if (_profilerRecordersAreValid)
         {
             // Display CPU times
-            debugTextBuilder.Append("CPU Main: ").AppendLine(FormatMilliseconds(mainThreadTime));
-            debugTextBuilder.Append("CPU Render: ").AppendLine(FormatMilliseconds(renderThreadTime));
+            _debugTextBuilder.Append("CPU Main: ").AppendLine(FormatMilliseconds(_mainThreadTime));
+            _debugTextBuilder.Append("CPU Render: ").AppendLine(FormatMilliseconds(_renderThreadTime));
 
             // Display Memory
-            debugTextBuilder.Append("GC Alloc/frame: ").AppendLine(FormatBytes(gcAllocatedInFrame));
-            debugTextBuilder.Append("GC Reserved Memory: ").AppendLine(FormatBytes(gcReservedMemory));
-            debugTextBuilder.Append("System Memory: ").AppendLine(FormatBytes(systemUsedMemory));
+            _debugTextBuilder.Append("GC Alloc/frame: ").AppendLine(FormatBytes(_gcAllocatedInFrame));
+            _debugTextBuilder.Append("GC Reserved Memory: ").AppendLine(FormatBytes(_gcReservedMemory));
+            _debugTextBuilder.Append("System Memory: ").AppendLine(FormatBytes(_systemUsedMemory));
         }
         else
         {
-            debugTextBuilder.AppendLine("Profiler recorders are invalid.");
+            _debugTextBuilder.AppendLine("Profiler recorders are invalid.");
         }
 
         // Self-diagnostic line
-        debugTextBuilder.Append("Profiler Status: ").AppendLine(BoolToString(Profiler.enabled));
-        debugTextBuilder.AppendLine();
+        _debugTextBuilder.Append("Profiler Status: ").AppendLine(BoolToString(Profiler.enabled));
+        _debugTextBuilder.AppendLine();
 
         // --- World & Orientation Info ---
-        debugTextBuilder.AppendLine("WORLD:");
-        debugTextBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
+        _debugTextBuilder.AppendLine("WORLD:");
+        _debugTextBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
-        debugTextBuilder.Append(" | Eye Level: ").AppendFormat("{0:F2}", (playerPosition.y + player.playerHeight * 0.9f)).AppendLine();
+        _debugTextBuilder.Append(" | Eye Level: ").AppendFormat("{0:F2}", playerPosition.y + _player.playerHeight * 0.9f).AppendLine();
 
-        debugTextBuilder.Append("Looking Angle H / V: ").AppendFormat("{0:F2} / {1:F2}", lookingDirection.x, lookingDirection.y)
+        _debugTextBuilder.Append("Looking Angle H / V: ").AppendFormat("{0:F2} / {1:F2}", lookingDirection.x, lookingDirection.y)
             .Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
 
-        debugTextBuilder.Append("Chunk: ").Append(world.playerChunkCoord.X).Append(" / ").Append(world.playerChunkCoord.Z).AppendLine();
-        debugTextBuilder.Append("Seed: ").Append(world.worldData.seed).AppendLine();
-        debugTextBuilder.AppendLine();
+        _debugTextBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
+        _debugTextBuilder.Append("Seed: ").Append(_world.worldData.seed).AppendLine();
+        _debugTextBuilder.AppendLine();
 
         // --- Player & Speed Info ---
-        debugTextBuilder.AppendLine("PLAYER:");
-        debugTextBuilder.Append("isGrounded: ").Append(player.isGrounded)
-            .Append(" | isFlying: ").Append(player.isFlying)
-            .Append(" | isNoclipping: ").Append(player.isNoclipping)
-            .Append(" | showHighlight: ").Append(player.showHighlightBlocks).AppendLine();
+        _debugTextBuilder.AppendLine("PLAYER:");
+        _debugTextBuilder.Append("isGrounded: ").Append(_player.isGrounded)
+            .Append(" | isFlying: ").Append(_player.isFlying)
+            .Append(" | isNoclipping: ").Append(_player.isNoclipping)
+            .Append(" | showHighlight: ").Append(_player.showHighlightBlocks).AppendLine();
 
-        debugTextBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", player.moveSpeed)
-            .Append(" | Flying: ").AppendFormat("{0:F1}", player.flyingSpeed).AppendLine();
+        _debugTextBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", _player.MoveSpeed)
+            .Append(" | Flying: ").AppendFormat("{0:F1}", _player.flyingSpeed).AppendLine();
 
-        debugTextBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", player.velocity.x, player.velocity.y, player.velocity.z).AppendLine();
-        debugTextBuilder.AppendLine();
+        _debugTextBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", _player.Velocity.x, _player.Velocity.y, _player.Velocity.z).AppendLine();
+        _debugTextBuilder.AppendLine();
 
         // --- Ground Voxel Inspector ---
-        debugTextBuilder.AppendLine("GROUND VOXEL:");
-        if (groundVoxelState.HasValue && groundVoxelPos.HasValue)
+        _debugTextBuilder.AppendLine("GROUND VOXEL:");
+        if (_groundVoxelState.HasValue && _groundVoxelPos.HasValue)
         {
-            VoxelState state = groundVoxelState.Value;
-            Vector3Int voxelPos = groundVoxelPos.Value;
-            debugTextBuilder.Append("Name: ").AppendLine(state.Properties.blockName);
-            debugTextBuilder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
-            debugTextBuilder.Append("Light Levels (Sun / Block / Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.light).AppendLine();
-            debugTextBuilder.Append("Orientation: ").AppendLine(state.orientation.ToString());
+            VoxelState state = _groundVoxelState.Value;
+            Vector3Int voxelPos = _groundVoxelPos.Value;
+            _debugTextBuilder.Append("Name: ").AppendLine(state.Properties.blockName);
+            _debugTextBuilder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
+            _debugTextBuilder.Append("Light Levels (Sun / Block / Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.light).AppendLine();
+            _debugTextBuilder.Append("Orientation: ").AppendLine(state.orientation.ToString());
         }
         else
         {
-            debugTextBuilder.AppendLine("None");
+            _debugTextBuilder.AppendLine("None");
         }
-        debugTextBuilder.AppendLine();
+        _debugTextBuilder.AppendLine();
 
         // --- Target Voxel Inspector ---
-        debugTextBuilder.AppendLine("TARGET VOXEL:");
-        if (targetVoxelState.HasValue && targetVoxelPos.HasValue)
+        _debugTextBuilder.AppendLine("TARGET VOXEL:");
+        if (_targetVoxelState.HasValue && _targetVoxelPos.HasValue)
         {
-            VoxelState state = targetVoxelState.Value;
-            Vector3Int voxelPos = targetVoxelPos.Value;
-            debugTextBuilder.Append("Name: ").AppendLine(state.Properties.blockName);
-            debugTextBuilder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
-            debugTextBuilder.Append("Light Levels (Sun / Block / Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.light).AppendLine();
-            debugTextBuilder.Append("Orientation: ").AppendLine(state.orientation.ToString());
+            VoxelState state = _targetVoxelState.Value;
+            Vector3Int voxelPos = _targetVoxelPos.Value;
+            _debugTextBuilder.Append("Name: ").AppendLine(state.Properties.blockName);
+            _debugTextBuilder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
+            _debugTextBuilder.Append("Light Levels (Sun / Block / Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.light).AppendLine();
+            _debugTextBuilder.Append("Orientation: ").AppendLine(state.orientation.ToString());
         }
         else
         {
-            debugTextBuilder.AppendLine("None");
+            _debugTextBuilder.AppendLine("None");
         }
-        debugTextBuilder.AppendLine();
+        _debugTextBuilder.AppendLine();
 
         // --- Chunk Info ---
-        debugTextBuilder.AppendLine("CHUNK:");
-        string activeBlockBehaviorVoxelsCount = currentChunk != null ? currentChunk.GetActiveVoxelCount().ToString() : "NULL";
-        string activeChunksCount = currentChunk != null ? world.GetActiveChunksCount().ToString() : "NULL";
-        string chunksToBuildMeshCount = currentChunk != null ? world.GetChunksToBuildMeshCount().ToString() : "NULL";
+        _debugTextBuilder.AppendLine("CHUNK:");
+        string activeBlockBehaviorVoxelsCount = _currentChunk != null ? _currentChunk.GetActiveVoxelCount().ToString() : "NULL";
+        string activeChunksCount = _currentChunk != null ? _world.GetActiveChunksCount().ToString() : "NULL";
+        string chunksToBuildMeshCount = _currentChunk != null ? _world.GetChunksToBuildMeshCount().ToString() : "NULL";
         // string chunksWithLightUpdatesCount = currentChunk != null ? world.GetChunksWithLightUpdatesCount().ToString() : "NULL";
-        string voxelModificationsCount = currentChunk != null ? world.GetVoxelModificationsCount().ToString() : "NULL";
-        debugTextBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
-        debugTextBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount);
-        debugTextBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshCount);
+        string voxelModificationsCount = _currentChunk != null ? _world.GetVoxelModificationsCount().ToString() : "NULL";
+        _debugTextBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
+        _debugTextBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount);
+        _debugTextBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshCount);
         // debugTextBuilder.Append("Total Chunks to Update Light: ").AppendLine(chunksWithLightUpdatesCount);
-        debugTextBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
+        _debugTextBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
 
         // Finally, set the text property once.
-        text.text = debugTextBuilder.ToString();
+        _text.text = _debugTextBuilder.ToString();
     }
 
     /// <summary>
@@ -331,9 +332,15 @@ public class DebugScreen : MonoBehaviour
     /// </summary>
     private static string FormatBytes(long bytes)
     {
-        if (bytes > 1024 * 1024) return $"{(bytes / (1024f * 1024f)):F2} MB";
-        if (bytes > 1024) return $"{(bytes / 1024f):F1} KB";
-        return $"{bytes} B";
+        switch (bytes)
+        {
+            case > 1024 * 1024:
+                return $"{bytes / (1024f * 1024f):F2} MB";
+            case > 1024:
+                return $"{bytes / 1024f:F1} KB";
+            default:
+                return $"{bytes} B";
+        }
     }
 
     /// <summary>
@@ -342,10 +349,10 @@ public class DebugScreen : MonoBehaviour
     private Vector2 GetLookingAngles()
     {
         // Normalize Yaw to be 0-360
-        float hAngle = player.transform.eulerAngles.y;
+        float hAngle = _player.transform.eulerAngles.y;
 
         // Pitch is simpler if you get it from the camera's local euler angles
-        float vAngle = playerCamera.localEulerAngles.x;
+        float vAngle = _playerCamera.localEulerAngles.x;
         // Convert from (0-360) to (-180-180) for a more intuitive display
         if (vAngle > 180) vAngle -= 360;
 

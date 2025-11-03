@@ -15,45 +15,45 @@ namespace Jobs
         #region Input Data
 
         // The map for the central chunk, which is the only one we can write to.
-        public NativeArray<uint> map;
+        public NativeArray<uint> Map;
 
-        public Vector2Int chunkPosition;
+        public Vector2Int ChunkPosition;
 
         // Queues of initial changes to process
-        public NativeQueue<LightQueueNode> sunlightBfsQueue;
-        public NativeQueue<LightQueueNode> blocklightBfsQueue;
-        public NativeQueue<Vector2Int> sunlightColumnRecalcQueue;
+        public NativeQueue<LightQueueNode> SunlightBfsQueue;
+        public NativeQueue<LightQueueNode> BlocklightBfsQueue;
+        public NativeQueue<Vector2Int> SunlightColumnRecalcQueue;
 
         // Read-only heightmap & maps for all 8 neighbors.
         [ReadOnly]
-        public NativeArray<byte> heightmap;
+        public NativeArray<byte> Heightmap;
 
         [ReadOnly]
-        public NativeArray<uint> neighborN; // North (+Z)
+        public NativeArray<uint> NeighborN; // North (+Z)
 
         [ReadOnly]
-        public NativeArray<uint> neighborE; // East (+X)
+        public NativeArray<uint> NeighborE; // East (+X)
 
         [ReadOnly]
-        public NativeArray<uint> neighborS; // South (-Z)
+        public NativeArray<uint> NeighborS; // South (-Z)
 
         [ReadOnly]
-        public NativeArray<uint> neighborW; // West (-X)
+        public NativeArray<uint> NeighborW; // West (-X)
 
         [ReadOnly]
-        public NativeArray<uint> neighborNE; // North-East
+        public NativeArray<uint> NeighborNE; // North-East
 
         [ReadOnly]
-        public NativeArray<uint> neighborSE; // South-East
+        public NativeArray<uint> NeighborSE; // South-East
 
         [ReadOnly]
-        public NativeArray<uint> neighborSW; // South-West
+        public NativeArray<uint> NeighborSW; // South-West
 
         [ReadOnly]
-        public NativeArray<uint> neighborNW; // North-West
+        public NativeArray<uint> NeighborNW; // North-West
 
         [ReadOnly]
-        public NativeArray<BlockTypeJobData> blockTypes;
+        public NativeArray<BlockTypeJobData> BlockTypes;
 
         #endregion
 
@@ -62,10 +62,10 @@ namespace Jobs
         #region Output Data
 
         // A list of modifications for neighbor chunks. The job calculates these but can't apply them directly.
-        public NativeList<LightModification> crossChunkLightMods;
+        public NativeList<LightModification> CrossChunkLightMods;
 
         // A flag to indicate if the lighting in the central chunk has stabilized.
-        public NativeArray<bool> isStable;
+        public NativeArray<bool> IsStable;
 
         #endregion
 
@@ -79,29 +79,29 @@ namespace Jobs
 
             // --- PASS 0: SEEDING ---
             // Seed the queues with initial changes from the main thread.
-            while (sunlightColumnRecalcQueue.TryDequeue(out Vector2Int column))
+            while (SunlightColumnRecalcQueue.TryDequeue(out Vector2Int column))
             {
                 RecalculateSunlightForColumn(column.x, column.y, sunlightPlacementQueue, sunlightRemovalQueue);
             }
 
-            while (sunlightBfsQueue.TryDequeue(out LightQueueNode node))
+            while (SunlightBfsQueue.TryDequeue(out LightQueueNode node))
             {
-                uint currentPacked = GetPackedData(node.position);
+                uint currentPacked = GetPackedData(node.Position);
                 byte currentLight = BurstVoxelDataBitMapping.GetSunlight(currentPacked);
-                if (currentLight < node.oldLightLevel)
-                    sunlightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.position, LightLevel = node.oldLightLevel });
-                else if (currentLight > node.oldLightLevel)
-                    sunlightPlacementQueue.Enqueue(node.position);
+                if (currentLight < node.OldLightLevel)
+                    sunlightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.Position, LightLevel = node.OldLightLevel });
+                else if (currentLight > node.OldLightLevel)
+                    sunlightPlacementQueue.Enqueue(node.Position);
             }
 
-            while (blocklightBfsQueue.TryDequeue(out LightQueueNode node))
+            while (BlocklightBfsQueue.TryDequeue(out LightQueueNode node))
             {
-                uint currentPacked = GetPackedData(node.position);
+                uint currentPacked = GetPackedData(node.Position);
                 byte currentLight = BurstVoxelDataBitMapping.GetBlocklight(currentPacked);
-                if (currentLight > node.oldLightLevel)
-                    blocklightPlacementQueue.Enqueue(node.position);
-                else if (currentLight < node.oldLightLevel)
-                    blocklightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.position, LightLevel = node.oldLightLevel });
+                if (currentLight > node.OldLightLevel)
+                    blocklightPlacementQueue.Enqueue(node.Position);
+                else if (currentLight < node.OldLightLevel)
+                    blocklightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.Position, LightLevel = node.OldLightLevel });
             }
 
             // --- LIGHTING PASSES ---
@@ -118,9 +118,9 @@ namespace Jobs
 
             // --- FINAL STEP ---
             // The lighting is stable if no more work was generated during this pass, AND no work was passed to neighbors.
-            isStable[0] = sunlightRemovalQueue.IsEmpty() && sunlightPlacementQueue.IsEmpty() &&
+            IsStable[0] = sunlightRemovalQueue.IsEmpty() && sunlightPlacementQueue.IsEmpty() &&
                           blocklightRemovalQueue.IsEmpty() && blocklightPlacementQueue.IsEmpty() &&
-                          crossChunkLightMods.Length == 0;
+                          CrossChunkLightMods.Length == 0;
 
             // --- CLEANUP ---
             sunlightRemovalQueue.Dispose();
@@ -139,7 +139,7 @@ namespace Jobs
                 uint neighborPacked = GetPackedData(neighborPos);
                 if (neighborPacked == uint.MaxValue) continue;
 
-                byte neighborLight = (channel == LightChannel.Sun) ? BurstVoxelDataBitMapping.GetSunlight(neighborPacked) : BurstVoxelDataBitMapping.GetBlocklight(neighborPacked);
+                byte neighborLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunlight(neighborPacked) : BurstVoxelDataBitMapping.GetBlocklight(neighborPacked);
 
                 if (neighborLight > 0)
                 {
@@ -161,8 +161,8 @@ namespace Jobs
             uint sourcePacked = GetPackedData(pos);
             if (sourcePacked == uint.MaxValue) return;
 
-            byte sourceLight = (channel == LightChannel.Sun) ? BurstVoxelDataBitMapping.GetSunlight(sourcePacked) : BurstVoxelDataBitMapping.GetBlocklight(sourcePacked);
-            BlockTypeJobData sourceProps = blockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
+            byte sourceLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunlight(sourcePacked) : BurstVoxelDataBitMapping.GetBlocklight(sourcePacked);
+            BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
 
             // An opaque block cannot propagate sunlight to its neighbors.
             // It might have sunlight level 15 from InitialSunlightJob, but it stops there.
@@ -174,8 +174,8 @@ namespace Jobs
                 uint neighborPacked = GetPackedData(neighborPos);
                 if (neighborPacked == uint.MaxValue) continue;
 
-                byte neighborLight = (channel == LightChannel.Sun) ? BurstVoxelDataBitMapping.GetSunlight(neighborPacked) : BurstVoxelDataBitMapping.GetBlocklight(neighborPacked);
-                BlockTypeJobData neighborProps = blockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
+                byte neighborLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunlight(neighborPacked) : BurstVoxelDataBitMapping.GetBlocklight(neighborPacked);
+                BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
 
                 // This special case allows sunlight to travel down columns of air without diminishing.
                 bool isVerticalSunlight = channel == LightChannel.Sun && sourceLight == 15 && sourceProps.IsFullyTransparentToLight && VoxelData.FaceChecks[i].y == -1 && neighborProps.IsFullyTransparentToLight;
@@ -197,7 +197,7 @@ namespace Jobs
                 else
                 {
                     // The light value is reduced by 1 for distance, plus the opacity of the block it's entering.
-                    lightToPropagate = (byte)Mathf.Max(0, sourceLight - 1 - neighborProps.opacity);
+                    lightToPropagate = (byte)Mathf.Max(0, sourceLight - 1 - neighborProps.Opacity);
 
                     if (isVerticalSunlight)
                     {
@@ -218,7 +218,7 @@ namespace Jobs
         {
             // Use the heightmap to find the Y-level of the highest block that has any opacity.
             int heightmapIndex = x + VoxelData.ChunkWidth * z;
-            byte highestBlockY = heightmap[heightmapIndex];
+            byte highestBlockY = Heightmap[heightmapIndex];
 
             // --- PASS 1: Above the highest block ---
             // Everything above this point is transparent to the sky and should be fully sunlit.
@@ -243,7 +243,7 @@ namespace Jobs
             // This remains a key optimization. We check for horizontal shadow casting at the highest point.
             Vector3Int shadowCasterPos = new Vector3Int(x, highestBlockY, z);
             uint shadowCasterPacked = GetPackedData(shadowCasterPos);
-            if (blockTypes[BurstVoxelDataBitMapping.GetId(shadowCasterPacked)].IsOpaque)
+            if (BlockTypes[BurstVoxelDataBitMapping.GetId(shadowCasterPacked)].IsOpaque)
             {
                 // Check horizontal neighbors (N, E, S, W).
                 for (int i = 0; i < 6; i++)
@@ -272,7 +272,7 @@ namespace Jobs
                 var currentPos = new Vector3Int(x, y, z);
                 uint currentPacked = GetPackedData(currentPos);
                 byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(currentPacked);
-                BlockTypeJobData props = blockTypes[BurstVoxelDataBitMapping.GetId(currentPacked)];
+                BlockTypeJobData props = BlockTypes[BurstVoxelDataBitMapping.GetId(currentPacked)];
 
                 // Update the current block in the column based on the light from above.
                 if (oldSunlight != lightFromSky)
@@ -288,7 +288,7 @@ namespace Jobs
                 if (lightFromSky == 0) continue;
 
                 // Attenuate light for the next block down in the column.
-                lightFromSky = (byte)Mathf.Max(0, lightFromSky - props.opacity);
+                lightFromSky = (byte)Mathf.Max(0, lightFromSky - props.Opacity);
             }
         }
 
@@ -313,16 +313,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = neighborSW;
+                    targetMap = NeighborSW;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = neighborNW;
+                    targetMap = NeighborNW;
                 }
                 else
                 {
-                    targetMap = neighborW;
+                    targetMap = NeighborW;
                 }
             }
             else if (pos.x >= VoxelData.ChunkWidth) // East side
@@ -331,16 +331,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = neighborSE;
+                    targetMap = NeighborSE;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = neighborNE;
+                    targetMap = NeighborNE;
                 }
                 else
                 {
-                    targetMap = neighborE;
+                    targetMap = NeighborE;
                 }
             }
             else // Center column
@@ -348,16 +348,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = neighborS;
+                    targetMap = NeighborS;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = neighborN;
+                    targetMap = NeighborN;
                 }
                 else
                 {
-                    targetMap = map;
+                    targetMap = Map;
                 }
             }
 
@@ -372,17 +372,17 @@ namespace Jobs
             {
                 // Voxel is in the central chunk, we can write to its map directly.
                 int index = pos.x + VoxelData.ChunkWidth * (pos.y + VoxelData.ChunkHeight * pos.z);
-                uint packedData = map[index];
-                uint newPackedData = (channel == LightChannel.Sun)
+                uint packedData = Map[index];
+                uint newPackedData = channel == LightChannel.Sun
                     ? BurstVoxelDataBitMapping.SetSunLight(packedData, lightLevel)
                     : BurstVoxelDataBitMapping.SetBlockLight(packedData, lightLevel);
-                map[index] = newPackedData;
+                Map[index] = newPackedData;
             }
             else
             {
                 // Voxel is in a neighbor chunk, add a modification request to the output list.
-                Vector3Int globalPos = new Vector3Int(pos.x + chunkPosition.x, pos.y, pos.z + chunkPosition.y);
-                crossChunkLightMods.Add(new LightModification { GlobalPosition = globalPos, LightLevel = lightLevel, Channel = channel });
+                Vector3Int globalPos = new Vector3Int(pos.x + ChunkPosition.x, pos.y, pos.z + ChunkPosition.y);
+                CrossChunkLightMods.Add(new LightModification { GlobalPosition = globalPos, LightLevel = lightLevel, Channel = channel });
             }
         }
 
@@ -406,6 +406,6 @@ namespace Jobs
     public enum LightChannel : byte
     {
         Sun,
-        Block
+        Block,
     }
 }

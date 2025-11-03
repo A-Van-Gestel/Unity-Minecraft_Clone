@@ -54,6 +54,6 @@ namespace Data
         /// <summary>
         /// A common override: only allow placement if the target block is Air.
         /// </summary>
-        OnlyReplaceAir
+        OnlyReplaceAir,
     }
 }

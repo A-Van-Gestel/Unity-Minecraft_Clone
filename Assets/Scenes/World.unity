@@ -1977,6 +1977,8 @@ GameObject:
   - component: {fileID: 1080100304}
   - component: {fileID: 1080100303}
   - component: {fileID: 1080100307}
+  - component: {fileID: 1080100309}
+  - component: {fileID: 1080100308}
   m_Layer: 5
   m_Name: Canvas
   m_TagString: Untagged
@@ -2083,9 +2085,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 99602ec723f737d4c9c25f748c871c6b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  cursorSlot: {fileID: 1559195428}
-  m_Raycaster: {fileID: 1080100303}
-  m_EventSystem: {fileID: 749848861}
+  _cursorSlot: {fileID: 1559195428}
+  _m_Raycaster: {fileID: 0}
+  _m_EventSystem: {fileID: 0}
+--- !u!114 &1080100308
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1080100302}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 76c392e42b5098c458856cdf6ecaaaa1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.EventSystems.EventSystem
+  m_FirstSelected: {fileID: 0}
+  m_sendNavigationEvents: 1
+  m_DragThreshold: 10
+--- !u!114 &1080100309
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1080100302}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b93e701e49c72624ebf0ea0edb68c0ce, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UIItemSlot
+  isLinked: 0
+  slotImage: {fileID: 0}
+  slotIcon: {fileID: 0}
+  slotAmount: {fileID: 0}
 --- !u!1001 &1218605646
 PrefabInstance:
   m_ObjectHideFlags: 0

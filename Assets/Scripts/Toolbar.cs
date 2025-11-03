@@ -8,7 +8,7 @@ public class Toolbar : MonoBehaviour
     public UIItemSlot[] slots;
     public int slotIndex = 0;
 
-    private KeyCode[] keyCodes =
+    private readonly KeyCode[] _keyCodes =
     {
         KeyCode.Alpha1,
         KeyCode.Alpha2,
@@ -55,9 +55,9 @@ public class Toolbar : MonoBehaviour
 
         
         // NUMBER KEYS
-        for (int i = 0; i < keyCodes.Length; i++)
+        for (int i = 0; i < _keyCodes.Length; i++)
         {
-            if (Input.GetKeyDown(keyCodes[i]))
+            if (Input.GetKeyDown(_keyCodes[i]))
             {
                 slotIndex = i;
                 SetItemSlot();

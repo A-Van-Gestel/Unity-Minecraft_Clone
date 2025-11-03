@@ -29,15 +29,15 @@ public static class Structure
 
         // LEAVES
         // Example: By setting the rule to `OnlyReplaceAir`, we guarantee that leaves will never overwrite part of the trunk or any other existing solid block.
-        var leafMod = new VoxelMod { id = 15 /*, rule = ReplacementRule.OnlyReplaceAir */ };
+        var leafMod = new VoxelMod { ID = 15 /*, rule = ReplacementRule.OnlyReplaceAir */ };
 
         for (int x = -2; x < 3; x++)
         {
             for (int z = -2; z < 3; z++)
             {
-                leafMod.globalPosition = new Vector3Int(position.x + x, position.y + height - 2, position.z + z);
+                leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height - 2, position.z + z);
                 queue.Enqueue(leafMod);
-                leafMod.globalPosition = new Vector3Int(position.x + x, position.y + height - 3, position.z + z);
+                leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height - 3, position.z + z);
                 queue.Enqueue(leafMod);
             }
         }
@@ -46,7 +46,7 @@ public static class Structure
         {
             for (int z = -1; z < 2; z++)
             {
-                leafMod.globalPosition = new Vector3Int(position.x + x, position.y + height - 1, position.z + z);
+                leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height - 1, position.z + z);
                 queue.Enqueue(leafMod);
             }
         }
@@ -56,12 +56,12 @@ public static class Structure
             if (x == 0)
                 for (int z = -1; z < 2; z++)
                 {
-                    leafMod.globalPosition = new Vector3Int(position.x + x, position.y + height, position.z + z);
+                    leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height, position.z + z);
                     queue.Enqueue(leafMod);
                 }
             else
             {
-                leafMod.globalPosition = new Vector3Int(position.x + x, position.y + height, position.z);
+                leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height, position.z);
                 queue.Enqueue(leafMod);
             }
         }

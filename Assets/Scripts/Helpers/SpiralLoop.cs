@@ -30,7 +30,7 @@ namespace Helpers
                 return;
             }
 
-            if (Mathf.Abs(X - 0.5f) > Mathf.Abs(Z) && Mathf.Abs(X) > (-Z + 0.5f))
+            if (Mathf.Abs(X - 0.5f) > Mathf.Abs(Z) && Mathf.Abs(X) > -Z + 0.5f)
                 Z += (int)Mathf.Sign(X);
             else
                 X -= (int)Mathf.Sign(Z);

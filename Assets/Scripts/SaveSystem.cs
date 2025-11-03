@@ -1,11 +1,10 @@
 using System.Collections.Generic;
-using UnityEngine;
 using System.IO;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Threading;
 using Data;
 using JetBrains.Annotations;
-
+using UnityEngine;
 
 public static class SaveSystem
 {
@@ -33,13 +32,13 @@ public static class SaveSystem
     public static void SaveChunks(WorldData world)
     {
         // Copy modified chunks into a new list and clear the old one to prevent chunks being added to list while it is saving.
-        List<ChunkData> chunks = new List<ChunkData>(world.modifiedChunks);
-        world.modifiedChunks.Clear();
+        List<ChunkData> chunks = new List<ChunkData>(world.ModifiedChunks);
+        world.ModifiedChunks.Clear();
         
         int count = 0;
         foreach (ChunkData chunk in chunks)
         {
-            SaveSystem.SaveChunk(chunk, world.worldName);
+            SaveChunk(chunk, world.worldName);
             count++;
         }
         

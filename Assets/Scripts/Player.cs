@@ -13,8 +13,8 @@ public class Player : MonoBehaviour
     public bool isGrounded;
     public bool isSprinting;
 
-    private Transform playerCamera;
-    private World world;
+    private Transform _playerCamera;
+    private World _world;
 
     [Header("Speed modifiers")]
     public float walkSpeed = 3f;
@@ -38,30 +38,30 @@ public class Player : MonoBehaviour
     [Tooltip("The height of the player")]
     public float playerHeight = 1.8f;
 
-    private float horizontal;
-    private float vertical;
-    private float verticalFlying;
-    private float mouseHorizontal;
-    private float mouseVertical;
-    internal Vector3 velocity;
-    private float verticalMomentum = 0;
-    internal float moveSpeed;
-    private float lastMoveSpeed;
-    private bool jumpRequest;
+    private float _horizontal;
+    private float _vertical;
+    private float _verticalFlying;
+    private float _mouseHorizontal;
+    private float _mouseVertical;
+    internal Vector3 Velocity; // TODO: Should be private, and be accessed publicly using readOnly property. External modifications should be done in a separate method.
+    private float _verticalMomentum = 0;
+    internal float MoveSpeed; // TODO: Should be private, and be accessed publicly using readOnly property. External modifications should be done in a separate method.
+    private float _lastMoveSpeed;
+    private bool _jumpRequest;
 
     public byte orientation;
 
     [Header("Block Destroy & Placement properties")]
     public bool showHighlightBlocks = true;
 
-    private Transform highlightBlocksParent;
+    private Transform _highlightBlocksParent;
     public Transform highlightBlock;
     public Transform placeBlock;
 
     /// <summary>
     /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
     /// </summary>
-    private bool blockPlaceable;
+    private bool _blockPlaceable;
 
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
@@ -74,17 +74,17 @@ public class Player : MonoBehaviour
     // A struct to hold the results of our voxel raycast.
     public struct VoxelRaycastResult
     {
-        public bool didHit;
-        public Vector3Int hitPosition;
-        public Vector3Int placePosition;
+        public bool DidHit;
+        public Vector3Int HitPosition;
+        public Vector3Int PlacePosition;
     }
 
 
     private void Start()
     {
-        playerCamera = GameObject.Find("Main Camera").transform;
-        world = World.Instance;
-        highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
+        _playerCamera = GameObject.Find("Main Camera").transform;
+        _world = World.Instance;
+        _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
 
         // Scale playerBody to match the width and height settings.
         if (playerBody)
@@ -95,18 +95,18 @@ public class Player : MonoBehaviour
             playerBody.localPosition = playerBodyLocalPosition;
         }
 
-        world.inUI = false;
+        _world.inUI = false;
     }
 
     private void FixedUpdate()
     {
-        if (!world.inUI)
+        if (!_world.inUI)
         {
             CalculateVelocity();
-            if (jumpRequest && !isFlying)
+            if (_jumpRequest && !isFlying)
                 Jump();
 
-            transform.Translate(velocity, Space.World);
+            transform.Translate(Velocity, Space.World);
         }
     }
 
@@ -114,34 +114,34 @@ public class Player : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.I))
         {
-            world.inUI = !world.inUI;
+            _world.inUI = !_world.inUI;
         }
 
-        if (!world.inUI)
+        if (!_world.inUI)
         {
             GetPlayerInputs();
             PlaceCursorBlocks();
 
             // Rotates the player on the X axis
-            transform.Rotate(Vector3.up * (mouseHorizontal * Time.timeScale * world.settings.mouseSensitivityX));
+            transform.Rotate(Vector3.up * (_mouseHorizontal * Time.timeScale * _world.settings.mouseSensitivityX));
 
             // Rotates the camera on the Y axis
-            float angle = (playerCamera.localEulerAngles.x - mouseVertical * Time.timeScale * world.settings.mouseSensitivityY + 360) % 360;
+            float angle = (_playerCamera.localEulerAngles.x - _mouseVertical * Time.timeScale * _world.settings.mouseSensitivityY + 360) % 360;
             if (angle > 180)
                 angle -= 360;
 
             angle = Mathf.Clamp(angle, -90, 90);
-            playerCamera.localEulerAngles = Vector3.right * angle;
+            _playerCamera.localEulerAngles = Vector3.right * angle;
         }
 
         // TODO: Merge with lookingDirection from debug script.
-        Vector3 XZDirection = transform.forward;
-        XZDirection.y = 0;
-        if (Vector3.Angle(XZDirection, Vector3.forward) <= 45)
+        Vector3 xzDirection = transform.forward;
+        xzDirection.y = 0;
+        if (Vector3.Angle(xzDirection, Vector3.forward) <= 45)
             orientation = 0; // Player is facing north.
-        else if (Vector3.Angle(XZDirection, Vector3.right) <= 45)
+        else if (Vector3.Angle(xzDirection, Vector3.right) <= 45)
             orientation = 5; // Player is facing east.
-        else if (Vector3.Angle(XZDirection, Vector3.back) <= 45)
+        else if (Vector3.Angle(xzDirection, Vector3.back) <= 45)
             orientation = 1; // Player is facing south.
         else
             orientation = 4; // Player is facing west.
@@ -149,9 +149,9 @@ public class Player : MonoBehaviour
 
     private void Jump()
     {
-        verticalMomentum = jumpForce;
+        _verticalMomentum = jumpForce;
         isGrounded = false;
-        jumpRequest = false;
+        _jumpRequest = false;
     }
 
     private void CalculateVelocity()
@@ -160,66 +160,66 @@ public class Player : MonoBehaviour
         if (!isFlying)
         {
             // Only start accelerating downwards when falling of a block.
-            if (isGrounded && verticalMomentum < 0)
-                verticalMomentum = 0f;
+            if (isGrounded && _verticalMomentum < 0)
+                _verticalMomentum = 0f;
 
             // Affect vertical momentum with gravity.
-            if (verticalMomentum > gravity)
-                verticalMomentum += Time.fixedDeltaTime * gravity;
+            if (_verticalMomentum > gravity)
+                _verticalMomentum += Time.fixedDeltaTime * gravity;
         }
         else
         {
-            if (verticalFlying != 0)
-                verticalMomentum += Time.fixedDeltaTime * verticalFlying * flyingAscendSpeed;
+            if (_verticalFlying != 0)
+                _verticalMomentum += Time.fixedDeltaTime * _verticalFlying * flyingAscendSpeed;
             else
-                verticalMomentum = 0;
+                _verticalMomentum = 0;
         }
 
 
         // FORWARD & HORIZONTAL VELOCITY
-        moveSpeed = walkSpeed;
+        MoveSpeed = walkSpeed;
         // If we're sprinting, use the sprint multiplier
         if (isSprinting)
-            moveSpeed = sprintSpeed;
+            MoveSpeed = sprintSpeed;
 
         // Only change moveSpeed multiplier when on the ground or when flying
         if (isGrounded && !isFlying)
-            lastMoveSpeed = moveSpeed;
+            _lastMoveSpeed = MoveSpeed;
         else if (isFlying)
         {
-            lastMoveSpeed = flyingSpeed;
-            moveSpeed = lastMoveSpeed;
+            _lastMoveSpeed = flyingSpeed;
+            MoveSpeed = _lastMoveSpeed;
         }
         else
-            moveSpeed = lastMoveSpeed;
+            MoveSpeed = _lastMoveSpeed;
 
         Transform playerTransform = transform;
-        velocity = (playerTransform.forward * vertical) + (playerTransform.right * horizontal);
+        Velocity = playerTransform.forward * _vertical + playerTransform.right * _horizontal;
 
         // Normalized movement so that you don't move faster diagonally only when total velocity is higher than 1.0 (allow slower-than-maximum motion)
-        if (velocity.magnitude > 1.0f)
-            velocity.Normalize();
+        if (Velocity.magnitude > 1.0f)
+            Velocity.Normalize();
 
-        velocity *= (Time.fixedDeltaTime * moveSpeed);
+        Velocity *= Time.fixedDeltaTime * MoveSpeed;
 
         // Apply vertical momentum (falling / jumping)
-        velocity += Vector3.up * (verticalMomentum * Time.fixedDeltaTime);
+        Velocity += Vector3.up * (_verticalMomentum * Time.fixedDeltaTime);
 
 
         // COLLISION (Only apply if not Noclipping)
         if (!isNoclipping)
         {
-            if ((velocity.z > 0 && Front) || (velocity.z < 0 && Back))
-                velocity.z = 0;
+            if ((Velocity.z > 0 && Front) || (Velocity.z < 0 && Back))
+                Velocity.z = 0;
 
-            if ((velocity.x > 0 && Right) || (velocity.x < 0 && Left))
-                velocity.x = 0;
+            if ((Velocity.x > 0 && Right) || (Velocity.x < 0 && Left))
+                Velocity.x = 0;
 
-            if (velocity.y < 0)
-                velocity.y = CheckDownSpeed(velocity.y);
+            if (Velocity.y < 0)
+                Velocity.y = CheckDownSpeed(Velocity.y);
 
-            if (velocity.y > 0)
-                velocity.y = CheckUpSpeed(velocity.y);
+            if (Velocity.y > 0)
+                Velocity.y = CheckUpSpeed(Velocity.y);
         }
     }
 
@@ -230,10 +230,10 @@ public class Player : MonoBehaviour
             Application.Quit();
 
         // MOVEMENT & CAMERA
-        horizontal = Input.GetAxis("Horizontal");
-        vertical = Input.GetAxis("Vertical");
-        mouseHorizontal = Input.GetAxis("Mouse X");
-        mouseVertical = Input.GetAxis("Mouse Y");
+        _horizontal = Input.GetAxis("Horizontal");
+        _vertical = Input.GetAxis("Vertical");
+        _mouseHorizontal = Input.GetAxis("Mouse X");
+        _mouseVertical = Input.GetAxis("Mouse Y");
 
         // SPRINTING
         if (Input.GetButtonDown("Sprint"))
@@ -260,13 +260,13 @@ public class Player : MonoBehaviour
         if (!isFlying)
         {
             if (isGrounded && Input.GetButton("Jump"))
-                jumpRequest = true;
+                _jumpRequest = true;
         }
         else
         {
             float flyingUp = Input.GetAxis("Jump");
             float flyingDown = Input.GetAxis("Crouch");
-            verticalFlying = flyingUp - flyingDown;
+            _verticalFlying = flyingUp - flyingDown;
 
             float scroll = Input.GetAxis("Mouse ScrollWheel");
             if (Input.GetKey(KeyCode.LeftAlt) && scroll != 0)
@@ -287,16 +287,16 @@ public class Player : MonoBehaviour
 
         // TOGGLE CHUNK BORDERS
         if (Input.GetKeyDown(KeyCode.F5))
-            world.settings.showChunkBorders = !world.settings.showChunkBorders;
+            _world.settings.showChunkBorders = !_world.settings.showChunkBorders;
 
         if (highlightBlock.gameObject.activeSelf)
         {
             // Destroy block.
             if (Input.GetMouseButtonDown(0))
             {
-                world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: 0)
+                _world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: 0)
                 {
-                    ImmediateUpdate = true
+                    ImmediateUpdate = true,
                 });
             }
 
@@ -304,15 +304,15 @@ public class Player : MonoBehaviour
             if (Input.GetMouseButtonDown(1))
             {
                 // Don't place blocks inside the player or other voxels or when current itemSlot is empty by returning early.
-                if (!blockPlaceable) return;
+                if (!_blockPlaceable) return;
 
                 UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
-                world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), blockId: itemSlot.itemSlot.stack.id)
+                _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), blockId: itemSlot.ItemSlot.Stack.ID)
                 {
-                    orientation = orientation,
-                    ImmediateUpdate = true
+                    Orientation = orientation,
+                    ImmediateUpdate = true,
                 });
-                itemSlot.itemSlot.Take(1);
+                itemSlot.ItemSlot.Take(1);
             }
         }
     }
@@ -327,50 +327,50 @@ public class Player : MonoBehaviour
 
         while (step < reach)
         {
-            Vector3 pos = playerCamera.position + (playerCamera.forward * step);
+            Vector3 pos = _playerCamera.position + _playerCamera.forward * step;
 
-            if (world.CheckForVoxel(pos))
+            if (_world.CheckForVoxel(pos))
             {
-                VoxelRaycastResult result = new VoxelRaycastResult { didHit = true };
+                VoxelRaycastResult result = new VoxelRaycastResult { DidHit = true };
 
                 // DESTROY HIGHLIGHT BLOCK
-                result.hitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
+                result.HitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
 
                 // PLACE HIGHLIGHT BLOCK
                 // Calculate place block position based on smallest x, y, z value, using HitPosition position as your origin.
                 float xCheck = pos.x % 1;
                 if (xCheck > 0.5f)
-                    xCheck = xCheck - 1;
+                    xCheck -= 1;
                 float yCheck = pos.y % 1;
                 if (yCheck > 0.5f)
-                    yCheck = yCheck - 1;
+                    yCheck -= 1;
                 float zCheck = pos.z % 1;
                 if (zCheck > 0.5f)
-                    zCheck = zCheck - 1;
+                    zCheck -= 1;
 
                 if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
                 {
                     // place block on x-axis
                     if (xCheck < 0)
-                        result.placePosition = result.hitPosition + Vector3Int.right;
+                        result.PlacePosition = result.HitPosition + Vector3Int.right;
                     else
-                        result.placePosition = result.hitPosition + Vector3Int.left;
+                        result.PlacePosition = result.HitPosition + Vector3Int.left;
                 }
                 else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
                 {
                     // place block on z axis
                     if (zCheck < 0)
-                        result.placePosition = result.hitPosition + Vector3Int.forward;
+                        result.PlacePosition = result.HitPosition + Vector3Int.forward;
                     else
-                        result.placePosition = result.hitPosition + Vector3Int.back;
+                        result.PlacePosition = result.HitPosition + Vector3Int.back;
                 }
                 else
                 {
                     // place block on y-axis by default
                     if (yCheck < 0)
-                        result.placePosition = result.hitPosition + Vector3Int.up;
+                        result.PlacePosition = result.HitPosition + Vector3Int.up;
                     else
-                        result.placePosition = result.hitPosition + Vector3Int.down;
+                        result.PlacePosition = result.HitPosition + Vector3Int.down;
                 }
 
                 return result;
@@ -380,33 +380,33 @@ public class Player : MonoBehaviour
         }
 
         // If we get here, we didn't hit anything.
-        return new VoxelRaycastResult { didHit = false };
+        return new VoxelRaycastResult { DidHit = false };
     }
 
     private void PlaceCursorBlocks()
     {
         VoxelRaycastResult result = RaycastForVoxel();
 
-        if (result.didHit)
+        if (result.DidHit)
         {
-            highlightBlock.position = result.hitPosition;
-            placeBlock.position = result.placePosition;
+            highlightBlock.position = result.HitPosition;
+            placeBlock.position = result.PlacePosition;
 
             // Check if the placement position is valid.
             Vector3 playerPosition = transform.position;
             Vector3Int playerCoord = new Vector3Int(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
 
-            blockPlaceable =
-                result.placePosition != playerCoord && // Not inside player's feet
-                result.placePosition != (playerCoord + Vector3Int.up) && // Not inside player's head
-                world.worldData.IsVoxelInWorld(result.placePosition) &&
-                !world.CheckForVoxel(result.placePosition) &&
-                toolbar.slots[toolbar.slotIndex].itemSlot.HasItem;
+            _blockPlaceable =
+                result.PlacePosition != playerCoord && // Not inside player's feet
+                result.PlacePosition != playerCoord + Vector3Int.up && // Not inside player's head
+                _world.worldData.IsVoxelInWorld(result.PlacePosition) &&
+                !_world.CheckForVoxel(result.PlacePosition) &&
+                toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem;
 
             // Set highlight objects active state
-            highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
+            _highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
             highlightBlock.gameObject.SetActive(true);
-            placeBlock.gameObject.SetActive(blockPlaceable);
+            placeBlock.gameObject.SetActive(_blockPlaceable);
         }
         else
         {
@@ -419,10 +419,10 @@ public class Player : MonoBehaviour
     private float CheckDownSpeed(float downSpeed)
     {
         // Check from the center from the player, from the radius on all 4 corners if a solid voxel is below the player, which will stop the player from falling
-        if ((world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + downSpeed, transform.position.z - playerWidth)) && (!Left && !Back)) ||
-            (world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + downSpeed, transform.position.z - playerWidth)) && (!Right && !Back)) ||
-            (world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + downSpeed, transform.position.z + playerWidth)) && (!Right && !Front)) ||
-            (world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + downSpeed, transform.position.z + playerWidth)) && (!Left && !Front)))
+        if ((_world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + downSpeed, transform.position.z - playerWidth)) && !Left && !Back) ||
+            (_world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + downSpeed, transform.position.z - playerWidth)) && !Right && !Back) ||
+            (_world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + downSpeed, transform.position.z + playerWidth)) && !Right && !Front) ||
+            (_world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + downSpeed, transform.position.z + playerWidth)) && !Left && !Front))
         {
             isGrounded = true;
             return 0;
@@ -437,12 +437,12 @@ public class Player : MonoBehaviour
     private float CheckUpSpeed(float upSpeed)
     {
         // Check from the center from the player, from the radius on all 4 corners if a solid voxel is above the player, which will stop the player from jumping.
-        if ((world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth)) && (!Left && !Back)) ||
-            (world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth)) && (!Right && !Back)) ||
-            (world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth)) && (!Right && !Front)) ||
-            (world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth)) && (!Left && !Front)))
+        if ((_world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth)) && !Left && !Back) ||
+            (_world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth)) && !Right && !Back) ||
+            (_world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth)) && !Right && !Front) ||
+            (_world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth)) && !Left && !Front))
         {
-            verticalMomentum = 0; // set to 0 so the player falls when their head hits a block while jumping
+            _verticalMomentum = 0; // set to 0 so the player falls when their head hits a block while jumping
             return 0;
         }
         else
@@ -454,22 +454,22 @@ public class Player : MonoBehaviour
     // ReSharper disable ArrangeAccessorOwnerBody
     public bool Front =>
         // Check from the center from the player, at both feet and head level if a solid voxel is in front of the player, which will stop the player from moving into it.
-        world.CheckForCollision(new Vector3(transform.position.x, transform.position.y, transform.position.z + playerWidth)) ||
-        world.CheckForCollision(new Vector3(transform.position.x, transform.position.y + 1f, transform.position.z + playerWidth));
+        _world.CheckForCollision(new Vector3(transform.position.x, transform.position.y, transform.position.z + playerWidth)) ||
+        _world.CheckForCollision(new Vector3(transform.position.x, transform.position.y + 1f, transform.position.z + playerWidth));
 
     public bool Back =>
         // Check from the center from the player, at both feet and head level if a solid voxel is behind of the player, which will stop the player from moving into it.
-        world.CheckForCollision(new Vector3(transform.position.x, transform.position.y, transform.position.z - playerWidth)) ||
-        world.CheckForCollision(new Vector3(transform.position.x, transform.position.y + 1f, transform.position.z - playerWidth));
+        _world.CheckForCollision(new Vector3(transform.position.x, transform.position.y, transform.position.z - playerWidth)) ||
+        _world.CheckForCollision(new Vector3(transform.position.x, transform.position.y + 1f, transform.position.z - playerWidth));
 
     public bool Left =>
         // Check from the center from the player, at both feet and head level if a solid voxel is to the left of the player, which will stop the player from moving into it.
-        world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y, transform.position.z)) ||
-        world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + 1f, transform.position.z));
+        _world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y, transform.position.z)) ||
+        _world.CheckForCollision(new Vector3(transform.position.x - playerWidth, transform.position.y + 1f, transform.position.z));
 
     public bool Right =>
         // Check from the center from the player, at both feet and head level if a solid voxel is to the right of the player, which will stop the player from moving into it.
-        world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y, transform.position.z)) ||
-        world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + 1f, transform.position.z));
+        _world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y, transform.position.z)) ||
+        _world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + 1f, transform.position.z));
     // ReSharper restore ArrangeAccessorOwnerBody
 }

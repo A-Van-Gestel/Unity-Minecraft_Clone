@@ -19,7 +19,7 @@ namespace Helpers
             { 0, 1, 2, 3 }, // Top Face
             { 0, 1, 2, 3 }, // Bottom Face
             { 1, 3, 0, 2 }, // Left Face
-            { 0, 2, 1, 3 } // Right Face
+            { 0, 2, 1, 3 }, // Right Face
         };
 
         /// <summary>
@@ -28,7 +28,7 @@ namespace Helpers
         private static void AddTexture(int textureID, Vector2 uv, ref NativeList<Vector2> uvs)
         {
             float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
-            float x = textureID - (y * VoxelData.TextureAtlasSizeInBlocks);
+            float x = textureID - y * VoxelData.TextureAtlasSizeInBlocks;
 
             x *= VoxelData.NormalizedBlockTextureSize;
             y *= VoxelData.NormalizedBlockTextureSize;
@@ -112,15 +112,15 @@ namespace Helpers
             bool isTransparent)
         {
             CustomMeshData meshData = customMeshes[customMeshIndex];
-            CustomFaceData faceData = customFaces[meshData.faceStartIndex + faceIndex];
+            CustomFaceData faceData = customFaces[meshData.FaceStartIndex + faceIndex];
 
             int startVertCount = vertexIndex;
 
             // Add vertices and their data
-            for (int i = 0; i < faceData.vertCount; i++)
+            for (int i = 0; i < faceData.VertCount; i++)
             {
-                CustomVertData vertData = customVerts[faceData.vertStartIndex + i];
-                Vector3 vertPos = vertData.position;
+                CustomVertData vertData = customVerts[faceData.VertStartIndex + i];
+                Vector3 vertPos = vertData.Position;
 
                 // Rotate the vertex around the block's center (0.5, 0.5, 0.5)
                 Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
@@ -131,26 +131,26 @@ namespace Helpers
 
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]); // Assuming one normal per face for custom meshes
                 colors.Add(new Color(0, 0, 0, lightLevel));
-                AddTexture(textureID, vertData.uv, ref uvs);
+                AddTexture(textureID, vertData.UV, ref uvs);
             }
 
             // Add triangles to the correct list based on transparency.
             if (isTransparent)
             {
-                for (int i = 0; i < faceData.triCount; i++)
+                for (int i = 0; i < faceData.TriCount; i++)
                 {
-                    transparentTriangles.Add(startVertCount + customTris[faceData.triStartIndex + i]);
+                    transparentTriangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
                 }
             }
             else
             {
-                for (int i = 0; i < faceData.triCount; i++)
+                for (int i = 0; i < faceData.TriCount; i++)
                 {
-                    triangles.Add(startVertCount + customTris[faceData.triStartIndex + i]);
+                    triangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
                 }
             }
 
-            vertexIndex += faceData.vertCount;
+            vertexIndex += faceData.VertCount;
         }
 
 
@@ -176,7 +176,7 @@ namespace Helpers
             OptionalVoxelState above = neighbors[8], below = neighbors[9];
 
             // --- 1. DETERMINE SHADER FLAGS ---
-            float liquidType = props.fluidShaderID;
+            float liquidType = props.FluidShaderID;
             float shorelineFlag = 0.0f;
 
             // Check horizontal neighbors (N, E, S, W) for "shoreline" effect
@@ -184,10 +184,10 @@ namespace Helpers
             {
                 OptionalVoxelState neighbor = neighbors[i];
                 // Neighboring voxels need to be solid...
-                if (neighbor.hasValue && blockTypes[neighbor.state.id].isSolid && blockTypes[neighbor.state.id].fluidType == FluidType.None)
+                if (neighbor.HasValue && blockTypes[neighbor.State.id].IsSolid && blockTypes[neighbor.State.id].FluidType == FluidType.None)
                 {
                     // But voxel above should not be a fluid
-                    if (above.hasValue && blockTypes[above.state.id].fluidType != FluidType.None) continue;
+                    if (above.HasValue && blockTypes[above.State.id].FluidType != FluidType.None) continue;
 
                     shorelineFlag = 1.0f;
                     break;
@@ -208,7 +208,7 @@ namespace Helpers
 
 
             // Then, if above voxel is not a fluid of the same type, calculate heights based on current fluid level and neighbors
-            if (!above.hasValue || blockTypes[above.state.id].fluidType != props.fluidType)
+            if (!above.HasValue || blockTypes[above.State.id].FluidType != props.FluidType)
             {
                 height_tr = GetSmoothedCornerHeight(props, fluidLevel, n_N, n_E, n_NE, in templates, in blockTypes); // Top-Right
                 height_tl = GetSmoothedCornerHeight(props, fluidLevel, n_N, n_W, n_NW, in templates, in blockTypes); // Top-Left
@@ -219,14 +219,14 @@ namespace Helpers
             // --- 3. GENERATE FACES ---
             // --- 3A. Top Face ---
             // Only draw top face if above neighboring voxel is transparent and a different fluid.
-            if (!above.hasValue || blockTypes[above.state.id].IsTransparentForMesh && blockTypes[above.state.id].fluidType != props.fluidType)
+            if (!above.HasValue || blockTypes[above.State.id].IsTransparentForMesh && blockTypes[above.State.id].FluidType != props.FluidType)
             {
                 vertices.Add(pos + new Vector3(0, height_bl, 0)); // Back-Left
                 vertices.Add(pos + new Vector3(0, height_tl, 1)); // Front-Left
                 vertices.Add(pos + new Vector3(1, height_br, 0)); // Back-Right
                 vertices.Add(pos + new Vector3(1, height_tr, 1)); // Front-Right
 
-                float lightLevel = above.hasValue ? above.state.lightAsFloat : 1.0f;
+                float lightLevel = above.HasValue ? above.State.lightAsFloat : 1.0f;
                 Color vertexColor = new Color(liquidType, shorelineFlag, 0.0f, lightLevel);
 
                 for (int i = 0; i < 4; i++)
@@ -260,10 +260,10 @@ namespace Helpers
                 }
 
                 // Rule 1: Don't draw if neighbor is a higher or equal fluid block.
-                if (neighbor.hasValue && blockTypes[neighbor.state.id].fluidType == props.fluidType && templates[neighbor.state.FluidLevel] >= topHeight) continue;
+                if (neighbor.HasValue && blockTypes[neighbor.State.id].FluidType == props.FluidType && templates[neighbor.State.FluidLevel] >= topHeight) continue;
 
                 // Rule 2: Don't draw if neighbor is an opaque solid block (like stone).
-                if (neighbor.hasValue && !blockTypes[neighbor.state.id].IsTransparentForMesh) continue;
+                if (neighbor.HasValue && !blockTypes[neighbor.State.id].IsTransparentForMesh) continue;
 
                 int v1 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 0];
                 int v2 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 1];
@@ -285,7 +285,7 @@ namespace Helpers
                 vertices.Add(pos + p3);
                 vertices.Add(pos + p4);
 
-                float lightLevel = neighbor.hasValue ? neighbor.state.lightAsFloat : 1.0f;
+                float lightLevel = neighbor.HasValue ? neighbor.State.lightAsFloat : 1.0f;
                 Color vertexColor = new Color(liquidType, shorelineFlag, 0.0f, lightLevel);
 
                 for (int j = 0; j < 4; j++)
@@ -306,14 +306,14 @@ namespace Helpers
 
             // --- 3C. Bottom Face ---
             // Only draw bottom face if below neighboring voxel is transparent or a different fluid.
-            if (!below.hasValue || blockTypes[below.state.id].IsTransparentForMesh && blockTypes[below.state.id].fluidType != props.fluidType)
+            if (!below.HasValue || blockTypes[below.State.id].IsTransparentForMesh && blockTypes[below.State.id].FluidType != props.FluidType)
             {
                 vertices.Add(pos + new Vector3(0, 0, 0)); // Back-Left   (0)
                 vertices.Add(pos + new Vector3(0, 0, 1)); // Front-Left  (1)
                 vertices.Add(pos + new Vector3(1, 0, 0)); // Back-Right  (2)
                 vertices.Add(pos + new Vector3(1, 0, 1)); // Front-Right (3)
 
-                float lightLevel = below.hasValue ? below.state.lightAsFloat : 1.0f;
+                float lightLevel = below.HasValue ? below.State.lightAsFloat : 1.0f;
                 Color vertexColor = new Color(liquidType, shorelineFlag, 0.0f, lightLevel);
 
                 for (int i = 0; i < 4; i++)
@@ -339,21 +339,21 @@ namespace Helpers
             float totalHeight = templates[centerLevel];
             int count = 1;
 
-            if (n1.hasValue && blockTypes[n1.state.id].fluidType == centerProps.fluidType)
+            if (n1.HasValue && blockTypes[n1.State.id].FluidType == centerProps.FluidType)
             {
-                totalHeight += templates[n1.state.FluidLevel];
+                totalHeight += templates[n1.State.FluidLevel];
                 count++;
             }
 
-            if (n2.hasValue && blockTypes[n2.state.id].fluidType == centerProps.fluidType)
+            if (n2.HasValue && blockTypes[n2.State.id].FluidType == centerProps.FluidType)
             {
-                totalHeight += templates[n2.state.FluidLevel];
+                totalHeight += templates[n2.State.FluidLevel];
                 count++;
             }
 
-            if (nDiag.hasValue && blockTypes[nDiag.state.id].fluidType == centerProps.fluidType)
+            if (nDiag.HasValue && blockTypes[nDiag.State.id].FluidType == centerProps.FluidType)
             {
-                totalHeight += templates[nDiag.state.FluidLevel];
+                totalHeight += templates[nDiag.State.FluidLevel];
                 count++;
             }
 

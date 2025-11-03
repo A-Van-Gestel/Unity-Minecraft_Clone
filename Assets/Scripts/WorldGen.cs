@@ -24,7 +24,7 @@ public static class WorldGen
 
         for (int i = 0; i < biomes.Length; i++)
         {
-            float weight = Noise.Get2DPerlin(new Vector2(pos.x, pos.z), biomes[i].offset, biomes[i].scale);
+            float weight = Noise.Get2DPerlin(new Vector2(pos.x, pos.z), biomes[i].Offset, biomes[i].Scale);
 
             // Keep track of which weight is strongest.
             if (weight > strongestWeight)
@@ -34,7 +34,7 @@ public static class WorldGen
             }
 
             // Get the height of the terrain (for the current biome) and multiply it by its weight.
-            float height = biomes[i].terrainHeight * Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biomes[i].terrainScale) * weight;
+            float height = biomes[i].TerrainHeight * Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biomes[i].TerrainScale) * weight;
 
             // If the height value is greater than 0, add it to the sum of heights.
             if (height > 0)
@@ -52,15 +52,15 @@ public static class WorldGen
         int terrainHeight = Mathf.FloorToInt(sumOfHeights + VoxelData.SolidGroundHeight);
 
         // ----- BASIC TERRAIN PASS -----
-        byte voxelValue = 0;
+        byte voxelValue;
 
         if (yPos == terrainHeight)
         {
-            voxelValue = biome.surfaceBlock; // Grass
+            voxelValue = biome.SurfaceBlock; // Grass
         }
         else if (yPos < terrainHeight && yPos > terrainHeight - 4)
         {
-            voxelValue = biome.subSurfaceBlock; // Dirt
+            voxelValue = biome.SubSurfaceBlock; // Dirt
         }
         else if (yPos > terrainHeight)
         {
@@ -79,13 +79,13 @@ public static class WorldGen
         {
             {
                 // Loop through the correct slice of the flattened lode array
-                for(int i = 0; i < biome.lodeCount; i++)
+                for(int i = 0; i < biome.LodeCount; i++)
                 {
-                    LodeJobData lode = allLodes[biome.lodeStartIndex + i];
-                    if (yPos > lode.minHeight && yPos < lode.maxHeight)
+                    LodeJobData lode = allLodes[biome.LodeStartIndex + i];
+                    if (yPos > lode.MinHeight && yPos < lode.MaxHeight)
                     {
-                        if (Noise.Get3DPerlin(pos, lode.noiseOffset, lode.scale, lode.threshold))
-                            voxelValue = lode.blockID;
+                        if (Noise.Get3DPerlin(pos, lode.NoiseOffset, lode.Scale, lode.Threshold))
+                            voxelValue = lode.BlockID;
                     }
                 }
             }

@@ -12,55 +12,55 @@ namespace Jobs
     public struct MeshGenerationJob : IJob
     {
         [ReadOnly]
-        public NativeArray<uint> map;
+        public NativeArray<uint> Map;
 
         [ReadOnly]
-        public NativeArray<BlockTypeJobData> blockTypes;
+        public NativeArray<BlockTypeJobData> BlockTypes;
 
         [ReadOnly]
-        public NativeArray<CustomMeshData> customMeshes;
+        public NativeArray<CustomMeshData> CustomMeshes;
 
         [ReadOnly]
-        public NativeArray<CustomFaceData> customFaces;
+        public NativeArray<CustomFaceData> CustomFaces;
 
         [ReadOnly]
-        public NativeArray<CustomVertData> customVerts;
+        public NativeArray<CustomVertData> CustomVerts;
 
         [ReadOnly]
-        public NativeArray<int> customTris;
+        public NativeArray<int> CustomTris;
 
         [ReadOnly]
-        public Vector3 chunkPosition;
+        public Vector3 ChunkPosition;
 
         // Neighboring chunk data for face culling at borders
         [ReadOnly]
-        public NativeArray<uint> neighborBack;
+        public NativeArray<uint> NeighborBack;
 
         [ReadOnly]
-        public NativeArray<uint> neighborFront;
+        public NativeArray<uint> NeighborFront;
 
         [ReadOnly]
-        public NativeArray<uint> neighborLeft;
+        public NativeArray<uint> NeighborLeft;
 
         [ReadOnly]
-        public NativeArray<uint> neighborRight;
+        public NativeArray<uint> NeighborRight;
         // Top and Bottom neighbors are not needed as chunks are only horizontal neighbors
 
         // --- FLUID DATA TEMPLATES ---
         [ReadOnly]
-        public NativeArray<float> waterVertexTemplates;
+        public NativeArray<float> WaterVertexTemplates;
 
         [ReadOnly]
-        public NativeArray<float> lavaVertexTemplates;
+        public NativeArray<float> LavaVertexTemplates;
 
         // --- OUTPUT ---
-        public MeshDataJobOutput output;
+        public MeshDataJobOutput Output;
 
-        private int vertexIndex;
+        private int _vertexIndex;
 
         public void Execute()
         {
-            vertexIndex = 0;
+            _vertexIndex = 0;
 
             for (int y = 0; y < VoxelData.ChunkHeight; y++)
             {
@@ -69,11 +69,11 @@ namespace Jobs
                     for (int z = 0; z < VoxelData.ChunkWidth; z++)
                     {
                         int mapIndex = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-                        uint packedData = map[mapIndex];
+                        uint packedData = Map[mapIndex];
                         byte id = BurstVoxelDataBitMapping.GetId(packedData);
-                        BlockTypeJobData props = blockTypes[id];
+                        BlockTypeJobData props = BlockTypes[id];
 
-                        if (props.isSolid)
+                        if (props.IsSolid)
                         {
                             GenerateVoxelMeshData(new Vector3Int(x, y, z), packedData, props);
                         }
@@ -92,10 +92,10 @@ namespace Jobs
 
 
             // Case 1: The block is a fluid.
-            if (voxelProps.fluidType != FluidType.None)
+            if (voxelProps.FluidType != FluidType.None)
             {
                 // Select the correct vertex height templates based on fluid type.
-                NativeArray<float> templates = (voxelProps.fluidType == FluidType.WaterLike) ? waterVertexTemplates : lavaVertexTemplates;
+                NativeArray<float> templates = voxelProps.FluidType == FluidType.WaterLike ? WaterVertexTemplates : LavaVertexTemplates;
 
                 // Gather all 9 required neighbors for fluid meshing.
                 var neighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
@@ -103,7 +103,7 @@ namespace Jobs
                 {
                     new Vector3Int(0, 0, 1), new Vector3Int(1, 0, 0), new Vector3Int(0, 0, -1), new Vector3Int(-1, 0, 0),
                     new Vector3Int(1, 0, 1), new Vector3Int(1, 0, -1), new Vector3Int(-1, 0, -1), new Vector3Int(-1, 0, 1),
-                    new Vector3Int(0, 1, 0), new Vector3Int(0, -1, 0)
+                    new Vector3Int(0, 1, 0), new Vector3Int(0, -1, 0),
                 };
 
                 for (int i = 0; i < neighborOffsets.Length; i++)
@@ -116,27 +116,27 @@ namespace Jobs
                 }
 
                 // Call the unified helper method.
-                VoxelMeshHelper.GenerateFluidMeshData(pos, packedData, voxelProps, in templates, in blockTypes, in neighbors,
-                    ref vertexIndex, ref output.vertices, ref output.fluidTriangles, ref output.uvs, ref output.colors, ref output.normals);
+                VoxelMeshHelper.GenerateFluidMeshData(pos, packedData, voxelProps, in templates, in BlockTypes, in neighbors,
+                    ref _vertexIndex, ref Output.Vertices, ref Output.FluidTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals);
 
                 // Dispose the temporary native array.
                 neighbors.Dispose();
             }
 
             // Case 2: The block has a custom mesh.
-            else if (voxelProps.customMeshIndex > -1)
+            else if (voxelProps.CustomMeshIndex > -1)
             {
                 byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
                 float rotation = VoxelHelper.GetRotationAngle(orientation);
 
                 //: Get the specific mesh data to access its face count
-                CustomMeshData meshData = customMeshes[voxelProps.customMeshIndex];
+                CustomMeshData meshData = CustomMeshes[voxelProps.CustomMeshIndex];
 
                 // Iterate through all 6 WORLD directions, same as a standard cube.
                 for (int p = 0; p < 6; p++)
                 {
                     // Safety check: If the custom mesh asset doesn't define this face, skip it.
-                    if (p >= meshData.faceCount) continue;
+                    if (p >= meshData.FaceCount) continue;
 
                     // Check the neighbor in the current WORLD direction.
                     VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
@@ -152,9 +152,9 @@ namespace Jobs
 
                         // Call the helper, passing the TRANSLATED face index so it generates the correct set of vertices from the VoxelMeshData asset.
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, lightLevel, pos, rotation,
-                            voxelProps.customMeshIndex, ref customMeshes, ref customFaces, ref customVerts, ref customTris,
-                            ref vertexIndex, ref output.vertices, ref output.triangles, ref output.transparentTriangles, ref output.uvs,
-                            ref output.colors, ref output.normals, voxelProps.renderNeighborFaces);
+                            voxelProps.CustomMeshIndex, ref CustomMeshes, ref CustomFaces, ref CustomVerts, ref CustomTris,
+                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
+                            ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
                     }
                 }
             }
@@ -181,9 +181,9 @@ namespace Jobs
 
                         // Call the new helper for standard cubes
                         VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, pos, rotation,
-                            ref vertexIndex, ref output.vertices, ref output.triangles, ref output.transparentTriangles,
-                            ref output.uvs, ref output.colors, ref output.normals,
-                            voxelProps.renderNeighborFaces);
+                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                            ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                            voxelProps.RenderNeighborFaces);
                     }
                 }
             }
@@ -199,14 +199,14 @@ namespace Jobs
             if (!neighborVoxel.HasValue) // If the neighbor is outside the world, always draw.
                 return true;
 
-            BlockTypeJobData neighborProps = blockTypes[neighborVoxel.Value.id];
+            BlockTypeJobData neighborProps = BlockTypes[neighborVoxel.Value.id];
 
             // If this block is transparent, draw if the neighbor is not solid OR also transparent.
-            if (voxelProps.renderNeighborFaces)
-                return !neighborProps.isSolid || neighborProps.renderNeighborFaces;
+            if (voxelProps.RenderNeighborFaces)
+                return !neighborProps.IsSolid || neighborProps.RenderNeighborFaces;
 
             // If this block is solid, draw if the neighbor is transparent OR not solid.
-            return neighborProps.renderNeighborFaces || !neighborProps.isSolid;
+            return neighborProps.RenderNeighborFaces || !neighborProps.IsSolid;
         }
 
 
@@ -231,16 +231,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = neighborBack;
+                    targetMap = NeighborBack;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = neighborFront;
+                    targetMap = NeighborFront;
                 } // ERROR: Was neighborNW
                 else
                 {
-                    targetMap = neighborLeft;
+                    targetMap = NeighborLeft;
                 }
             }
             else if (pos.x >= VoxelData.ChunkWidth) // East side
@@ -249,16 +249,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = neighborBack;
+                    targetMap = NeighborBack;
                 } // ERROR: Was neighborSE
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = neighborFront;
+                    targetMap = NeighborFront;
                 }
                 else
                 {
-                    targetMap = neighborRight;
+                    targetMap = NeighborRight;
                 }
             }
             else // Center column (X is within bounds)
@@ -266,16 +266,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = neighborBack;
+                    targetMap = NeighborBack;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = neighborFront;
+                    targetMap = NeighborFront;
                 }
                 else
                 {
-                    targetMap = map;
+                    targetMap = Map;
                 }
             }
 
@@ -297,7 +297,7 @@ namespace Jobs
         private void AddTexture(int textureID, Vector2 uv)
         {
             float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
-            float x = textureID - (y * VoxelData.TextureAtlasSizeInBlocks);
+            float x = textureID - y * VoxelData.TextureAtlasSizeInBlocks;
 
             x *= VoxelData.NormalizedBlockTextureSize;
             y *= VoxelData.NormalizedBlockTextureSize;
@@ -308,20 +308,20 @@ namespace Jobs
             x += VoxelData.NormalizedBlockTextureSize * uv.x;
             y += VoxelData.NormalizedBlockTextureSize * uv.y;
 
-            output.uvs.Add(new Vector2(x, y));
+            Output.Uvs.Add(new Vector2(x, y));
         }
 
         private int GetTextureID(byte blockId, int faceIndex)
         {
-            BlockTypeJobData props = blockTypes[blockId];
+            BlockTypeJobData props = BlockTypes[blockId];
             switch (faceIndex)
             {
-                case 0: return props.backFaceTexture;
-                case 1: return props.frontFaceTexture;
-                case 2: return props.topFaceTexture;
-                case 3: return props.bottomFaceTexture;
-                case 4: return props.leftFaceTexture;
-                case 5: return props.rightFaceTexture;
+                case 0: return props.BackFaceTexture;
+                case 1: return props.FrontFaceTexture;
+                case 2: return props.TopFaceTexture;
+                case 3: return props.BottomFaceTexture;
+                case 4: return props.LeftFaceTexture;
+                case 5: return props.RightFaceTexture;
                 default: return 0;
             }
         }

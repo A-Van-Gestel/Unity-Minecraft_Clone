@@ -4,9 +4,9 @@ public static class Noise
 {
     public static float Get2DPerlin(Vector2 position, float offset, float scale)
     {
-        position.x += (offset + VoxelData.Seed + 0.1f);
-        position.y += (offset + VoxelData.Seed + 0.1f);
-        return Mathf.PerlinNoise((position.x) / VoxelData.ChunkWidth * scale, (position.y) / VoxelData.ChunkWidth * scale);
+        position.x += offset + VoxelData.Seed + 0.1f;
+        position.y += offset + VoxelData.Seed + 0.1f;
+        return Mathf.PerlinNoise(position.x / VoxelData.ChunkWidth * scale, position.y / VoxelData.ChunkWidth * scale);
     }
 
     public static bool Get3DPerlin(Vector3 position, float offset, float scale, float threshold)

@@ -8,37 +8,37 @@ namespace Data
     /// </summary>
     public struct OptionalVoxelState
     {
-        public VoxelState state;
-        public bool hasValue;
+        public VoxelState State;
+        public readonly bool HasValue;
 
         public OptionalVoxelState(VoxelState state)
         {
-            this.state = state;
-            this.hasValue = true;
+            State = state;
+            HasValue = true;
         }
     }
     
     /// A job-safe representation of BiomeAttributes
     public struct BiomeAttributesJobData
     {
-        public int offset;
-        public float scale;
-        public int terrainHeight;
-        public float terrainScale;
-        public byte surfaceBlock;
-        public byte subSurfaceBlock;
-        public bool placeMajorFlora;
-        public int majorFloraIndex;
-        public float majorFloraZoneScale;
-        public float majorFloraZoneThreshold;
-        public float majorFloraPlacementScale;
-        public float majorFloraPlacementThreshold;
-        public int maxHeight;
-        public int minHeight;
+        public readonly int Offset;
+        public readonly float Scale;
+        public readonly int TerrainHeight;
+        public readonly float TerrainScale;
+        public readonly byte SurfaceBlock;
+        public readonly byte SubSurfaceBlock;
+        public readonly bool PlaceMajorFlora;
+        public readonly int MajorFloraIndex;
+        public readonly float MajorFloraZoneScale;
+        public readonly float MajorFloraZoneThreshold;
+        public readonly float MajorFloraPlacementScale;
+        public readonly float MajorFloraPlacementThreshold;
+        public int MaxHeight;
+        public int MinHeight;
 
 
-        public int lodeStartIndex;
-        public int lodeCount;
+        public readonly int LodeStartIndex;
+        public readonly int LodeCount;
 
         /// <summary>
         /// Constructor that creates BiomeAttributesJobData from a BiomeAttributes class.
@@ -48,36 +48,36 @@ namespace Data
         public BiomeAttributesJobData(BiomeAttributes biomeAttributes, int currentLodeIndex)
         {
             // Biome attributes
-            offset = biomeAttributes.offset;
-            scale = biomeAttributes.scale;
-            terrainHeight = biomeAttributes.terrainHeight;
-            terrainScale = biomeAttributes.terrainScale;
-            surfaceBlock = biomeAttributes.surfaceBlock;
-            subSurfaceBlock = biomeAttributes.subSurfaceBlock;
-            placeMajorFlora = biomeAttributes.placeMajorFlora;
-            majorFloraIndex = biomeAttributes.majorFloraIndex;
-            majorFloraZoneScale = biomeAttributes.majorFloraZoneScale;
-            majorFloraZoneThreshold = biomeAttributes.majorFloraZoneThreshold;
-            majorFloraPlacementScale = biomeAttributes.majorFloraPlacementScale;
-            majorFloraPlacementThreshold = biomeAttributes.majorFloraPlacementThreshold;
-            maxHeight = biomeAttributes.maxHeight;
-            minHeight = biomeAttributes.minHeight;
+            Offset = biomeAttributes.offset;
+            Scale = biomeAttributes.scale;
+            TerrainHeight = biomeAttributes.terrainHeight;
+            TerrainScale = biomeAttributes.terrainScale;
+            SurfaceBlock = biomeAttributes.surfaceBlock;
+            SubSurfaceBlock = biomeAttributes.subSurfaceBlock;
+            PlaceMajorFlora = biomeAttributes.placeMajorFlora;
+            MajorFloraIndex = biomeAttributes.majorFloraIndex;
+            MajorFloraZoneScale = biomeAttributes.majorFloraZoneScale;
+            MajorFloraZoneThreshold = biomeAttributes.majorFloraZoneThreshold;
+            MajorFloraPlacementScale = biomeAttributes.majorFloraPlacementScale;
+            MajorFloraPlacementThreshold = biomeAttributes.majorFloraPlacementThreshold;
+            MaxHeight = biomeAttributes.maxHeight;
+            MinHeight = biomeAttributes.minHeight;
 
             // Metadata
-            lodeStartIndex = currentLodeIndex;
-            lodeCount = biomeAttributes.lodes.Length;
+            LodeStartIndex = currentLodeIndex;
+            LodeCount = biomeAttributes.lodes.Length;
         }
     }
 
     /// A job-safe representation of Lode
     public struct LodeJobData
     {
-        public byte blockID;
-        public int minHeight;
-        public int maxHeight;
-        public float scale;
-        public float threshold;
-        public float noiseOffset;
+        public readonly byte BlockID;
+        public readonly int MinHeight;
+        public readonly int MaxHeight;
+        public readonly float Scale;
+        public readonly float Threshold;
+        public readonly float NoiseOffset;
 
         /// <summary>
         /// Constructor that creates LodeJobData from a Lode class.
@@ -85,12 +85,12 @@ namespace Data
         /// <param name="lode">The Lode to copy properties from.</param>
         public LodeJobData(Lode lode)
         {
-            blockID = lode.blockID;
-            minHeight = lode.minHeight;
-            maxHeight = lode.maxHeight;
-            scale = lode.scale;
-            threshold = lode.threshold;
-            noiseOffset = lode.noiseOffset;
+            BlockID = lode.blockID;
+            MinHeight = lode.minHeight;
+            MaxHeight = lode.maxHeight;
+            Scale = lode.scale;
+            Threshold = lode.threshold;
+            NoiseOffset = lode.noiseOffset;
         }
     }
     
@@ -99,8 +99,8 @@ namespace Data
     /// </summary>
     public struct CustomVertData
     {
-        public Vector3 position;
-        public Vector2 uv;
+        public Vector3 Position;
+        public Vector2 UV;
     }
 
     /// <summary>
@@ -108,10 +108,10 @@ namespace Data
     /// </summary>
     public struct CustomFaceData
     {
-        public int vertStartIndex;
-        public int vertCount;
-        public int triStartIndex;
-        public int triCount;
+        public int VertStartIndex;
+        public int VertCount;
+        public int TriStartIndex;
+        public int TriCount;
     }
 
     /// <summary>
@@ -119,38 +119,38 @@ namespace Data
     /// </summary>
     public struct CustomMeshData
     {
-        public int faceStartIndex;
-        public int faceCount;
+        public int FaceStartIndex;
+        public int FaceCount;
     }
 
     /// A job-safe representation of BlockType properties needed for meshing and lighting
     public struct BlockTypeJobData
     {
         // Block properties
-        public bool isSolid;
-        public bool renderNeighborFaces;
-        public int customMeshIndex; // -1 if not a custom mesh
+        public readonly bool IsSolid;
+        public readonly bool RenderNeighborFaces;
+        public readonly int CustomMeshIndex; // -1 if not a custom mesh
 
         // Fluid properties
-        public FluidType fluidType;
-        public byte fluidShaderID;
-        public byte fluidLevel;
-        public byte flowLevels;
+        public readonly FluidType FluidType;
+        public readonly byte FluidShaderID;
+        public readonly byte FluidLevel;
+        public byte FlowLevels;
 
         // Lighting properties
-        public byte opacity;
-        public byte lightEmission;
+        public readonly byte Opacity;
+        public readonly byte LightEmission;
 
         // Block behavior
-        public bool isActive;
+        public bool IsActive;
 
         // Texture ID's
-        public int backFaceTexture;
-        public int frontFaceTexture;
-        public int topFaceTexture;
-        public int bottomFaceTexture;
-        public int leftFaceTexture;
-        public int rightFaceTexture;
+        public readonly int BackFaceTexture;
+        public readonly int FrontFaceTexture;
+        public readonly int TopFaceTexture;
+        public readonly int BottomFaceTexture;
+        public readonly int LeftFaceTexture;
+        public readonly int RightFaceTexture;
 
         #region Constructors
 
@@ -162,30 +162,30 @@ namespace Data
         public BlockTypeJobData(BlockType blockType, int customMeshIdx = -1)
         {
             // Block properties
-            isSolid = blockType.isSolid;
-            renderNeighborFaces = blockType.renderNeighborFaces;
-            customMeshIndex = customMeshIdx;
+            IsSolid = blockType.isSolid;
+            RenderNeighborFaces = blockType.renderNeighborFaces;
+            CustomMeshIndex = customMeshIdx;
 
             // Fluid properties
-            fluidType = blockType.fluidType;
-            fluidShaderID = blockType.fluidShaderID;
-            fluidLevel = blockType.fluidLevel;
-            flowLevels = blockType.flowLevels;
+            FluidType = blockType.fluidType;
+            FluidShaderID = blockType.fluidShaderID;
+            FluidLevel = blockType.fluidLevel;
+            FlowLevels = blockType.flowLevels;
 
             // Lighting properties
-            opacity = blockType.opacity;
-            lightEmission = blockType.lightEmission;
+            Opacity = blockType.opacity;
+            LightEmission = blockType.lightEmission;
 
             // Block behavior
-            isActive = blockType.isActive;
+            IsActive = blockType.isActive;
 
             // Texture ID's
-            backFaceTexture = blockType.backFaceTexture;
-            frontFaceTexture = blockType.frontFaceTexture;
-            topFaceTexture = blockType.topFaceTexture;
-            bottomFaceTexture = blockType.bottomFaceTexture;
-            leftFaceTexture = blockType.leftFaceTexture;
-            rightFaceTexture = blockType.rightFaceTexture;
+            BackFaceTexture = blockType.backFaceTexture;
+            FrontFaceTexture = blockType.frontFaceTexture;
+            TopFaceTexture = blockType.topFaceTexture;
+            BottomFaceTexture = blockType.bottomFaceTexture;
+            LeftFaceTexture = blockType.leftFaceTexture;
+            RightFaceTexture = blockType.rightFaceTexture;
         }
 
         #endregion
@@ -197,28 +197,28 @@ namespace Data
         /// <summary>
         /// Returns true if the block has maximum opacity, effectively blocking all light.
         /// </summary>
-        public bool IsOpaque => opacity >= 15;
+        public bool IsOpaque => Opacity >= 15;
 
         /// <summary>
         /// Returns true if the block has an opacity, and thus has an effect on the light.
         /// </summary>
-        public bool IsLightObstructing => opacity > 0;
+        public bool IsLightObstructing => Opacity > 0;
 
         /// <summary>
         /// Returns true if the block has zero opacity, allowing light to pass through without reduction.
         /// </summary>
-        public bool IsFullyTransparentToLight => opacity == 0;
+        public bool IsFullyTransparentToLight => Opacity == 0;
 
         /// <summary>
         /// Returns true if the block emits its own light.
         /// </summary>
-        public bool IsLightSource => lightEmission > 0;
+        public bool IsLightSource => LightEmission > 0;
 
         /// <summary>
         /// Returns true if the block is considered transparent for meshing purposes,
         /// meaning it does not cull the faces of adjacent solid blocks.
         /// </summary>
-        public bool IsTransparentForMesh => !isSolid || renderNeighborFaces;
+        public bool IsTransparentForMesh => !IsSolid || RenderNeighborFaces;
 
         // --- Texture Helper Properties ---
 
@@ -234,7 +234,7 @@ namespace Data
             {
                 // An array is used for easier iteration.
                 // This array exists only on the stack and will be optimized by the compiler.
-                int[] textures = { leftFaceTexture, rightFaceTexture, backFaceTexture, frontFaceTexture };
+                int[] textures = { LeftFaceTexture, RightFaceTexture, BackFaceTexture, FrontFaceTexture };
 
                 // Default to the first texture in case all are unique.
                 int mostFrequentTexture = textures[0];
@@ -271,34 +271,34 @@ namespace Data
     public struct MeshDataJobOutput
     {
         // Using NativeLists because we don't know the size beforehand
-        public NativeList<Vector3> vertices;
-        public NativeList<int> triangles;
-        public NativeList<int> transparentTriangles;
-        public NativeList<int> fluidTriangles;
-        public NativeList<Vector2> uvs;
-        public NativeList<Color> colors;
-        public NativeList<Vector3> normals;
+        public NativeList<Vector3> Vertices;
+        public NativeList<int> Triangles;
+        public NativeList<int> TransparentTriangles;
+        public NativeList<int> FluidTriangles;
+        public NativeList<Vector2> Uvs;
+        public NativeList<Color> Colors;
+        public NativeList<Vector3> Normals;
 
         public MeshDataJobOutput(Allocator allocator)
         {
-            vertices = new NativeList<Vector3>(allocator);
-            triangles = new NativeList<int>(allocator);
-            transparentTriangles = new NativeList<int>(allocator);
-            fluidTriangles = new NativeList<int>(allocator);
-            uvs = new NativeList<Vector2>(allocator);
-            colors = new NativeList<Color>(allocator);
-            normals = new NativeList<Vector3>(allocator);
+            Vertices = new NativeList<Vector3>(allocator);
+            Triangles = new NativeList<int>(allocator);
+            TransparentTriangles = new NativeList<int>(allocator);
+            FluidTriangles = new NativeList<int>(allocator);
+            Uvs = new NativeList<Vector2>(allocator);
+            Colors = new NativeList<Color>(allocator);
+            Normals = new NativeList<Vector3>(allocator);
         }
 
         public void Dispose()
         {
-            vertices.Dispose();
-            triangles.Dispose();
-            transparentTriangles.Dispose();
-            fluidTriangles.Dispose();
-            uvs.Dispose();
-            colors.Dispose();
-            normals.Dispose();
+            Vertices.Dispose();
+            Triangles.Dispose();
+            TransparentTriangles.Dispose();
+            FluidTriangles.Dispose();
+            Uvs.Dispose();
+            Colors.Dispose();
+            Normals.Dispose();
         }
     }
 }

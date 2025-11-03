@@ -7,51 +7,51 @@ public class Clouds : MonoBehaviour
     public int cloudDepth = 4;
 
     [SerializeField]
-    private Texture2D cloudPattern = null;
+    private Texture2D _cloudPattern = null;
 
     [SerializeField]
-    private Material cloudMaterial = null;
+    private Material _cloudMaterial = null;
 
     [SerializeField]
-    private World world = null;
+    private World _world = null;
 
-    private bool[,] cloudData; // Array of bools representing where cloud is.
-    private int cloudTexWidth;
-    private int cloudTileSize;
-    private Vector3Int offset;
+    private bool[,] _cloudData; // Array of bools representing where cloud is.
+    private int _cloudTexWidth;
+    private int _cloudTileSize;
+    private Vector3Int _offset;
 
-    private Dictionary<Vector2Int, GameObject> clouds = new Dictionary<Vector2Int, GameObject>();
+    private readonly Dictionary<Vector2Int, GameObject> _clouds = new Dictionary<Vector2Int, GameObject>();
 
     // A flag to ensure we don't try to update before we're ready.
-    private bool isInitialized = false;
+    private bool _isInitialized = false;
 
     // Awake() for dependencies that don't rely on other scripts' Start()
     private void Awake()
     {
         // Null check is important here for build vs editor asset handling
-        if (cloudPattern == null)
+        if (_cloudPattern == null)
         {
             Debug.LogError("Cloud Pattern Texture is not assigned in the Inspector!");
-            this.enabled = false; // Disable the script if texture is missing.
+            enabled = false; // Disable the script if texture is missing.
             return;
         }
 
-        cloudTexWidth = cloudPattern.width;
-        cloudTileSize = VoxelData.ChunkWidth;
-        offset = new Vector3Int(-(cloudTexWidth / 2), 0, -(cloudTexWidth / 2));
+        _cloudTexWidth = _cloudPattern.width;
+        _cloudTileSize = VoxelData.ChunkWidth;
+        _offset = new Vector3Int(-(_cloudTexWidth / 2), 0, -(_cloudTexWidth / 2));
         transform.position = new Vector3(VoxelData.WorldCentre, cloudHeight, VoxelData.WorldCentre);
     }
 
     // This is our new public initialization method.
     public void Initialize()
     {
-        if (isInitialized) return;
+        if (_isInitialized) return;
 
         LoadCloudData();
         CreateClouds();
 
         // Initialization is done.
-        isInitialized = true;
+        _isInitialized = true;
 
         // Update clouds to set initial positions.
         UpdateClouds();
@@ -60,37 +60,37 @@ public class Clouds : MonoBehaviour
     private void LoadCloudData()
     {
         // Ensure the texture is readable. If not, disable clouds to prevent errors.
-        if (!cloudPattern.isReadable)
+        if (!_cloudPattern.isReadable)
         {
             Debug.LogError("Cloud Pattern texture is not marked as Read/Write Enabled in its import settings. Cannot load cloud data.");
-            this.enabled = false; // Disable clouds if we can't read the texture.
+            enabled = false; // Disable clouds if we can't read the texture.
             return;
         }
 
-        cloudData = new bool[cloudTexWidth, cloudTexWidth];
-        Color[] cloudTex = cloudPattern.GetPixels();
+        _cloudData = new bool[_cloudTexWidth, _cloudTexWidth];
+        Color[] cloudTex = _cloudPattern.GetPixels();
 
         // Loop through color array and set bools depending on opacity of color.
-        for (int x = 0; x < cloudTexWidth; x++)
+        for (int x = 0; x < _cloudTexWidth; x++)
         {
-            for (int y = 0; y < cloudTexWidth; y++)
+            for (int y = 0; y < _cloudTexWidth; y++)
             {
-                cloudData[x, y] = (cloudTex[y * cloudTexWidth + x].a > 0);
+                _cloudData[x, y] = cloudTex[y * _cloudTexWidth + x].a > 0;
             }
         }
     }
 
     private void CreateClouds()
     {
-        if (world.settings.clouds == CloudStyle.Off)
+        if (_world.settings.clouds == CloudStyle.Off)
             return;
 
-        for (int x = 0; x < cloudTexWidth; x += cloudTileSize)
+        for (int x = 0; x < _cloudTexWidth; x += _cloudTileSize)
         {
-            for (int y = 0; y < cloudTexWidth; y += cloudTileSize)
+            for (int y = 0; y < _cloudTexWidth; y += _cloudTileSize)
             {
                 Mesh cloudMesh;
-                switch (world.settings.clouds)
+                switch (_world.settings.clouds)
                 {
                     case CloudStyle.Fast:
                         cloudMesh = CreateFastCloudMesh(x, y);
@@ -116,7 +116,7 @@ public class Clouds : MonoBehaviour
                 // position += transform.position - new Vector3(cloudTexWidth / 2f, 0, cloudTexWidth / 2f);
                 // position.y = cloudHeight;
 
-                clouds.Add(CloudTilePosFromVector3(position), CreateCloudTile(cloudMesh, position));
+                _clouds.Add(CloudTilePosFromVector3(position), CreateCloudTile(cloudMesh, position));
             }
         }
     }
@@ -124,19 +124,19 @@ public class Clouds : MonoBehaviour
     public void UpdateClouds()
     {
         // Don't run if not initialized or clouds are off.
-        if (!isInitialized || world.settings.clouds == CloudStyle.Off)
+        if (!_isInitialized || _world.settings.clouds == CloudStyle.Off)
             return;
 
-        for (int x = 0; x < cloudTexWidth; x += cloudTileSize)
+        for (int x = 0; x < _cloudTexWidth; x += _cloudTileSize)
         {
-            for (int y = 0; y < cloudTexWidth; y += cloudTileSize)
+            for (int y = 0; y < _cloudTexWidth; y += _cloudTileSize)
             {
-                Vector3 position = world.player.transform.position + new Vector3(x, 0, y) + offset;
+                Vector3 position = _world.player.transform.position + new Vector3(x, 0, y) + _offset;
                 position = new Vector3(RoundToCloud(position.x), cloudHeight, RoundToCloud(position.z));
                 Vector2Int cloudPosition = CloudTilePosFromVector3(position);
 
                 // Check to prevent "KeyNotFoundException", though it shouldn't happen now.
-                if (clouds.TryGetValue(cloudPosition, out GameObject cloud))
+                if (_clouds.TryGetValue(cloudPosition, out GameObject cloud))
                 {
                     cloud.transform.position = position;
                 }
@@ -146,7 +146,7 @@ public class Clouds : MonoBehaviour
 
     private int RoundToCloud(float value)
     {
-        return Mathf.FloorToInt(value / cloudTileSize) * cloudTileSize;
+        return Mathf.FloorToInt(value / _cloudTileSize) * _cloudTileSize;
     }
 
     private Mesh CreateFastCloudMesh(int x, int z)
@@ -156,14 +156,14 @@ public class Clouds : MonoBehaviour
         List<Vector3> normals = new List<Vector3>();
         int vertCount = 0;
 
-        for (int xIncrement = 0; xIncrement < cloudTileSize; xIncrement++)
+        for (int xIncrement = 0; xIncrement < _cloudTileSize; xIncrement++)
         {
-            for (int zIncrement = 0; zIncrement < cloudTileSize; zIncrement++)
+            for (int zIncrement = 0; zIncrement < _cloudTileSize; zIncrement++)
             {
                 int xVal = x + xIncrement;
                 int zVal = z + zIncrement;
 
-                if (cloudData[xVal, zVal])
+                if (_cloudData[xVal, zVal])
                 {
                     // Add 4 vertices for cloud face.
                     vertices.Add(new Vector3(xIncrement, 0, zIncrement));
@@ -205,14 +205,14 @@ public class Clouds : MonoBehaviour
         List<Vector3> normals = new List<Vector3>();
         int vertCount = 0;
 
-        for (int xIncrement = 0; xIncrement < cloudTileSize; xIncrement++)
+        for (int xIncrement = 0; xIncrement < _cloudTileSize; xIncrement++)
         {
-            for (int zIncrement = 0; zIncrement < cloudTileSize; zIncrement++)
+            for (int zIncrement = 0; zIncrement < _cloudTileSize; zIncrement++)
             {
                 int xVal = x + xIncrement;
                 int zVal = z + zIncrement;
 
-                if (cloudData[xVal, zVal])
+                if (_cloudData[xVal, zVal])
                 {
                     // Loop though neighbour points using faceCheck array.
                     for (int p = 0; p < 6; p++)
@@ -265,12 +265,12 @@ public class Clouds : MonoBehaviour
         int z = point.z;
 
         // If the x or z value is outside the cloudData range, wrap it around.
-        if (point.x < 0) x = cloudTexWidth - 1;
-        if (point.x > cloudTexWidth - 1) x = 0;
-        if (point.z < 0) z = cloudTexWidth - 1;
-        if (point.z > cloudTexWidth - 1) z = 0;
+        if (point.x < 0) x = _cloudTexWidth - 1;
+        if (point.x > _cloudTexWidth - 1) x = 0;
+        if (point.z < 0) z = _cloudTexWidth - 1;
+        if (point.z > _cloudTexWidth - 1) z = 0;
 
-        return cloudData[x, z];
+        return _cloudData[x, z];
     }
 
     private GameObject CreateCloudTile(Mesh mesh, Vector3 position)
@@ -282,7 +282,7 @@ public class Clouds : MonoBehaviour
         MeshFilter mF = newCloudTile.AddComponent<MeshFilter>();
         MeshRenderer mR = newCloudTile.AddComponent<MeshRenderer>();
 
-        mR.material = cloudMaterial;
+        mR.material = _cloudMaterial;
         mF.mesh = mesh;
 
         return newCloudTile;
@@ -295,9 +295,9 @@ public class Clouds : MonoBehaviour
 
     private int CloudTileCoordFromFloat(float value)
     {
-        float a = value / cloudTexWidth; // Gets the position using cloudTexture width as units.
+        float a = value / _cloudTexWidth; // Gets the position using cloudTexture width as units.
         a -= Mathf.FloorToInt(a); // Subtract whole nums to get a 0-1 value representing position in cloud texture.
-        int b = Mathf.FloorToInt(cloudTexWidth * a); // Multiply cloud texture width by a to get position in texture globally.
+        int b = Mathf.FloorToInt(_cloudTexWidth * a); // Multiply cloud texture width by 'a' to get position in texture globally.
 
         return b;
     }
@@ -307,5 +307,5 @@ public enum CloudStyle
 {
     Off,
     Fast,
-    Fancy
+    Fancy,
 }

@@ -5,44 +5,47 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
+[RequireComponent(typeof(UIItemSlot))]
+[RequireComponent(typeof(GraphicRaycaster))]
+[RequireComponent(typeof(EventSystem))]
 public class DragAndDropHandler : MonoBehaviour
 {
-    [SerializeField] private UIItemSlot cursorSlot = null;
-    private ItemSlot cursorItemSlot;
-    private UIItemSlot lastClickedSlot = null;
+    [SerializeField] private UIItemSlot _cursorSlot;
+    private ItemSlot _cursorItemSlot;
+    private UIItemSlot _lastClickedSlot;
 
-    [SerializeField] private GraphicRaycaster m_Raycaster = null;
-    private PointerEventData m_PointerEventData;
-    [SerializeField] private EventSystem m_EventSystem = null;
+    [SerializeField] private GraphicRaycaster _m_Raycaster;
+    private PointerEventData _m_PointerEventData;
+    [SerializeField] private EventSystem _m_EventSystem;
 
-    private World world;
+    private World _world;
 
-    private CreativeInventory creativeInventory = null;
+    private CreativeInventory _creativeInventory;
 
     private void Start()
     {
-        world = GameObject.Find("World").GetComponent<World>();
+        _world = GameObject.Find("World").GetComponent<World>();
 
-        cursorItemSlot = new ItemSlot(cursorSlot);
+        _cursorItemSlot = new ItemSlot(_cursorSlot);
     }
 
     private void Update()
     {
         // UI is closed and cursor slot is empty, do nothing.
-        if (!world.inUI && !cursorSlot.HasItem)
+        if (!_world.inUI && !_cursorSlot.HasItem)
             return;
 
-        if (creativeInventory == null)
-            creativeInventory = GameObject.Find("CreativeInventory").GetComponent<CreativeInventory>();
+        if (_creativeInventory == null)
+            _creativeInventory = GameObject.Find("CreativeInventory").GetComponent<CreativeInventory>();
 
         // UI is closed and cursor slot still has item, place item back to original place.
-        if (!world.inUI && cursorSlot.HasItem)
+        if (!_world.inUI && _cursorSlot.HasItem)
         {
-            PlaceStackToLastLocation(cursorSlot);
+            PlaceStackToLastLocation(_cursorSlot);
             return;
         }
 
-        cursorSlot.transform.position = Input.mousePosition;
+        _cursorSlot.transform.position = Input.mousePosition;
 
         // Left click behavior: Take full stack, place full stack, swap stack if different items
         if (Input.GetMouseButtonDown(0))
@@ -63,60 +66,60 @@ public class DragAndDropHandler : MonoBehaviour
             return;
 
         // Save last clicked slot for later use to reset slot back to last known position.
-        lastClickedSlot = clickedSlot;
+        _lastClickedSlot = clickedSlot;
 
         // Both cursor & clicked slots are empty, nothing can be done.
-        if (!cursorSlot.HasItem && !clickedSlot.HasItem)
+        if (!_cursorSlot.HasItem && !clickedSlot.HasItem)
             return;
 
         // In Creative inventory, take stack without removing it from inventory.
-        if (clickedSlot.itemSlot.isCreative)
+        if (clickedSlot.ItemSlot.IsCreative)
         {
-            cursorItemSlot.EmptySlot();
-            cursorItemSlot.InsertStack(clickedSlot.itemSlot.stack);
+            _cursorItemSlot.EmptySlot();
+            _cursorItemSlot.InsertStack(clickedSlot.ItemSlot.Stack);
             return;
         }
 
         // Cursor slot is empty but clicked slot has items, move items to cursor slot.
-        if (!cursorSlot.HasItem && clickedSlot.HasItem)
+        if (!_cursorSlot.HasItem && clickedSlot.HasItem)
         {
-            cursorItemSlot.InsertStack(clickedSlot.itemSlot.TakeAll());
+            _cursorItemSlot.InsertStack(clickedSlot.ItemSlot.TakeAll());
             return;
         }
 
         // Cursor slot has items but clicked slot is empty, move items to clicked slot.
-        if (cursorSlot.HasItem && !clickedSlot.HasItem)
+        if (_cursorSlot.HasItem && !clickedSlot.HasItem)
         {
-            clickedSlot.itemSlot.InsertStack(cursorItemSlot.TakeAll());
+            clickedSlot.ItemSlot.InsertStack(_cursorItemSlot.TakeAll());
             return;
         }
 
         // Both cursor & clicked slots have items, ...
-        if (cursorSlot.HasItem && clickedSlot.HasItem)
+        if (_cursorSlot.HasItem && clickedSlot.HasItem)
         {
             // Both slots contain different items, swap them.
-            if (cursorSlot.itemSlot.stack.id != clickedSlot.itemSlot.stack.id)
+            if (_cursorSlot.ItemSlot.Stack.ID != clickedSlot.ItemSlot.Stack.ID)
             {
-                SwapStacks(clickedSlot, cursorSlot);
+                SwapStacks(clickedSlot, _cursorSlot);
                 return;
             }
 
             // Both slots contain the same item, combine item amount based on stack size
-            int maxStackSize = world.blockTypes[cursorSlot.itemSlot.stack.id].stackSize;
-            int oldCursorSlotStackAmount = cursorSlot.itemSlot.stack.amount;
-            int oldClickedSlotStackAmount = clickedSlot.itemSlot.stack.amount;
+            int maxStackSize = _world.blockTypes[_cursorSlot.ItemSlot.Stack.ID].stackSize;
+            int oldCursorSlotStackAmount = _cursorSlot.ItemSlot.Stack.Amount;
+            int oldClickedSlotStackAmount = clickedSlot.ItemSlot.Stack.Amount;
             int combinedStackAmount = oldClickedSlotStackAmount + oldCursorSlotStackAmount;
 
             // Both stack amounts combined greater than max stack size and clicked slot is full, swap them.
             if (combinedStackAmount > maxStackSize && oldClickedSlotStackAmount == maxStackSize)
             {
-                SwapStacks(clickedSlot, cursorSlot);
+                SwapStacks(clickedSlot, _cursorSlot);
                 return;
             }
 
             // Combine both stacks into one stack on clicked slot, place potentially remaining stack into cursor slot.
-            ItemStack remainingStack = CombineStacks(clickedSlot.itemSlot, cursorSlot.itemSlot.stack);
-            cursorItemSlot.InsertStack(remainingStack);
+            ItemStack remainingStack = CombineStacks(clickedSlot.ItemSlot, _cursorSlot.ItemSlot.Stack);
+            _cursorItemSlot.InsertStack(remainingStack);
         }
     }
 
@@ -130,67 +133,66 @@ public class DragAndDropHandler : MonoBehaviour
             return;
 
         // Save last clicked slot for later use to reset slot back to last known position.
-        lastClickedSlot = clickedSlot;
+        _lastClickedSlot = clickedSlot;
 
         // Both cursor & clicked slots are empty, nothing can be done.
-        if (!cursorSlot.HasItem && !clickedSlot.HasItem)
+        if (!_cursorSlot.HasItem && !clickedSlot.HasItem)
             return;
 
         // Cursor slot is empty but clicked slot has items, move items to cursor slot.
-        if (!cursorSlot.HasItem && clickedSlot.HasItem)
+        if (!_cursorSlot.HasItem && clickedSlot.HasItem)
         {
-            cursorItemSlot.InsertStack(clickedSlot.itemSlot.TakeHalve());
+            _cursorItemSlot.InsertStack(clickedSlot.ItemSlot.TakeHalve());
             return;
         }
 
         // Cursor slot has items but clicked slot is empty, move items to clicked slot.
-        if (cursorSlot.HasItem && !clickedSlot.HasItem)
+        if (_cursorSlot.HasItem && !clickedSlot.HasItem)
         {
-            clickedSlot.itemSlot.InsertStack(cursorItemSlot.Take(1));
+            clickedSlot.ItemSlot.InsertStack(_cursorItemSlot.Take(1));
             return;
         }
 
         // Both cursor & clicked slots have items, ...
-        if (cursorSlot.HasItem && clickedSlot.HasItem)
+        if (_cursorSlot.HasItem && clickedSlot.HasItem)
         {
             // Both slots contain different items, do nothing.
-            if (cursorSlot.itemSlot.stack.id != clickedSlot.itemSlot.stack.id)
+            if (_cursorSlot.ItemSlot.Stack.ID != clickedSlot.ItemSlot.Stack.ID)
                 return;
 
             // Both slots contain the same item, place one item into clicked slot based on stack size
-            int maxStackSize = world.blockTypes[cursorSlot.itemSlot.stack.id].stackSize;
+            int maxStackSize = _world.blockTypes[_cursorSlot.ItemSlot.Stack.ID].stackSize;
 
             // Clicked slot is full, do nothing.
-            if (clickedSlot.itemSlot.stack.amount + 1 > maxStackSize) return;
+            if (clickedSlot.ItemSlot.Stack.Amount + 1 > maxStackSize) return;
 
             // Clicked slot isn't full, add one item from cursor slot.
-            clickedSlot.itemSlot.stack.amount += cursorSlot.itemSlot.Take(1).amount;
-            clickedSlot.itemSlot.InsertStack(clickedSlot.itemSlot.stack);
-            return;
+            clickedSlot.ItemSlot.Stack.Amount += _cursorSlot.ItemSlot.Take(1).Amount;
+            clickedSlot.ItemSlot.InsertStack(clickedSlot.ItemSlot.Stack);
         }
     }
 
-    private static void SwapStacks(UIItemSlot _clickedSlot, UIItemSlot _cursorSlot)
+    private static void SwapStacks(UIItemSlot clickedSlot, UIItemSlot cursorSlot)
     {
-        ItemStack oldCursorSlot = _cursorSlot.itemSlot.TakeAll();
-        ItemStack oldClickedSlot = _clickedSlot.itemSlot.TakeAll();
+        ItemStack oldCursorSlot = cursorSlot.ItemSlot.TakeAll();
+        ItemStack oldClickedSlot = clickedSlot.ItemSlot.TakeAll();
 
-        _clickedSlot.itemSlot.InsertStack(oldCursorSlot);
-        _cursorSlot.itemSlot.InsertStack(oldClickedSlot);
+        clickedSlot.ItemSlot.InsertStack(oldCursorSlot);
+        cursorSlot.ItemSlot.InsertStack(oldClickedSlot);
     }
 
     [CanBeNull]
-    private ItemStack CombineStacks(ItemSlot _slotA, ItemStack _stack)
+    private ItemStack CombineStacks(ItemSlot slotA, ItemStack stack)
     {
-        int maxStackSize = world.blockTypes[_stack.id].stackSize;
-        int oldSlotAStackAmount = _slotA.stack.amount;
-        int combinedStackAmount = oldSlotAStackAmount + _stack.amount;
+        int maxStackSize = _world.blockTypes[stack.ID].stackSize;
+        int oldSlotAStackAmount = slotA.Stack.Amount;
+        int combinedStackAmount = oldSlotAStackAmount + stack.Amount;
 
         // Both stack amounts combined is less than or equals max stack size and slot A isn't full, combine both into one stack.
         if (combinedStackAmount <= maxStackSize)
         {
-            _stack.amount = combinedStackAmount;
-            _slotA.InsertStack(_stack);
+            stack.Amount = combinedStackAmount;
+            slotA.InsertStack(stack);
             return null;
         }
 
@@ -200,83 +202,82 @@ public class DragAndDropHandler : MonoBehaviour
             int stackAmountRemaining = combinedStackAmount - maxStackSize;
 
             // Full Clicked Slot
-            _slotA.stack.amount = maxStackSize;
-            _slotA.InsertStack(_slotA.stack);
+            slotA.Stack.Amount = maxStackSize;
+            slotA.InsertStack(slotA.Stack);
 
             // Remaining Cursor Slot
-            _stack.amount = stackAmountRemaining;
-            return _stack;
+            stack.Amount = stackAmountRemaining;
+            return stack;
         }
 
         return null;
     }
 
-    private void PlaceStackToLastLocation(UIItemSlot _cursorSlot)
+    private void PlaceStackToLastLocation(UIItemSlot cursorSlot)
     {
         // Last clicked slot is empty, move cursor items to slot.
-        if (!lastClickedSlot.HasItem)
+        if (!_lastClickedSlot.HasItem)
         {
-            lastClickedSlot.itemSlot.InsertStack(_cursorSlot.itemSlot.TakeAll());
+            _lastClickedSlot.ItemSlot.InsertStack(cursorSlot.ItemSlot.TakeAll());
             return;
         }
 
-        if (lastClickedSlot.itemSlot.stack.id != _cursorSlot.itemSlot.stack.id || lastClickedSlot.itemSlot.isCreative)
+        if (_lastClickedSlot.ItemSlot.Stack.ID != cursorSlot.ItemSlot.Stack.ID || _lastClickedSlot.ItemSlot.IsCreative)
         {
             // TODO: Better full inventory fallback
-            PlaceStackToAvailableInventorySlot(_cursorSlot);
+            PlaceStackToAvailableInventorySlot(cursorSlot);
             return;
         }
 
         // TODO: Create separate CombineStack function, returning new stack if needed.
         // Last clicked slot isn't empty, combine stacks.
         // Combine both stacks into one stack on clicked slot, place potentially remaining stack into cursor slot.
-        ItemStack remainingStack = CombineStacks(lastClickedSlot.itemSlot, cursorSlot.itemSlot.stack);
-        _cursorSlot.itemSlot.InsertStack(remainingStack);
+        ItemStack remainingStack = CombineStacks(_lastClickedSlot.ItemSlot, _cursorSlot.ItemSlot.Stack);
+        cursorSlot.ItemSlot.InsertStack(remainingStack);
 
-        if (!_cursorSlot.HasItem)
+        if (!cursorSlot.HasItem)
             return;
 
         // TODO: Better full inventory fallback
-        PlaceStackToAvailableInventorySlot(_cursorSlot);
-        return;
+        PlaceStackToAvailableInventorySlot(cursorSlot);
     }
 
-    private bool PlaceStackToAvailableInventorySlot(UIItemSlot _uiItemSlot)
+    private bool PlaceStackToAvailableInventorySlot(UIItemSlot uiItemSlot)
     {
-        if (!_uiItemSlot.HasItem)
+        if (!uiItemSlot.HasItem)
             return true;
 
-        int maxStackSize = world.blockTypes[_uiItemSlot.itemSlot.stack.id].stackSize;
+        int maxStackSize = _world.blockTypes[uiItemSlot.ItemSlot.Stack.ID].stackSize;
 
         // First fill slots in inventory with same item.
-        foreach (ItemSlot slot in creativeInventory.slots.Where(slot => !slot.isCreative && slot.HasItem && slot.stack.id == _uiItemSlot.itemSlot.stack.id && slot.stack.amount < maxStackSize))
+        foreach (ItemSlot slot in _creativeInventory.Slots.Where(slot => !slot.IsCreative && slot.HasItem && slot.Stack.ID == uiItemSlot.ItemSlot.Stack.ID && slot.Stack.Amount < maxStackSize))
         {
-            ItemStack remainingStack = CombineStacks(slot, _uiItemSlot.itemSlot.stack);
-            _uiItemSlot.itemSlot.InsertStack(remainingStack);
-            if (PlaceStackToAvailableInventorySlot(_uiItemSlot))
+            ItemStack remainingStack = CombineStacks(slot, uiItemSlot.ItemSlot.Stack);
+            uiItemSlot.ItemSlot.InsertStack(remainingStack);
+            if (PlaceStackToAvailableInventorySlot(uiItemSlot))
                 return true;
         }
 
         // After that, fill remaining empty slots
-        foreach (ItemSlot slot in creativeInventory.slots.Where(slot => !slot.isCreative && !slot.HasItem))
+        foreach (ItemSlot slot in _creativeInventory.Slots.Where(slot => !slot.IsCreative && !slot.HasItem))
         {
-            slot.InsertStack(_uiItemSlot.itemSlot.TakeAll());
+            slot.InsertStack(uiItemSlot.ItemSlot.TakeAll());
             return true;
         }
 
         // Inventory is full
-        Debug.Log($"Inventory is full, remaining stack: ID = {_uiItemSlot.itemSlot.stack.id}, amount = {_uiItemSlot.itemSlot.stack.amount}");
+        Debug.Log($"Inventory is full, remaining stack: ID = {uiItemSlot.ItemSlot.Stack.ID}, amount = {uiItemSlot.ItemSlot.Stack.Amount}");
         return false;
     }
 
     [CanBeNull]
     private UIItemSlot CheckForSlot()
     {
-        m_PointerEventData = new PointerEventData(m_EventSystem);
-        m_PointerEventData.position = Input.mousePosition;
+        _m_PointerEventData = new PointerEventData(_m_EventSystem);
+        _m_PointerEventData.position = Input.mousePosition;
 
         List<RaycastResult> results = new List<RaycastResult>();
-        m_Raycaster.Raycast(m_PointerEventData, results);
+        _m_Raycaster.Raycast(_m_PointerEventData, results);
 
         foreach (RaycastResult result in results)
         {

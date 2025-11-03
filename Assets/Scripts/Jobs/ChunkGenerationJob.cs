@@ -16,19 +16,19 @@ namespace Jobs
         #region Input Data
 
         [ReadOnly]
-        public int seed;
+        public int Seed;
 
         [ReadOnly]
-        public Vector2Int chunkPosition;
+        public Vector2Int ChunkPosition;
         
         [ReadOnly]
-        public NativeArray<BlockTypeJobData> blockTypes;
+        public NativeArray<BlockTypeJobData> BlockTypes;
 
         [ReadOnly]
-        public NativeArray<BiomeAttributesJobData> biomes;
+        public NativeArray<BiomeAttributesJobData> Biomes;
 
         [ReadOnly]
-        public NativeArray<LodeJobData> allLodes;
+        public NativeArray<LodeJobData> AllLodes;
 
         #endregion
 
@@ -36,9 +36,9 @@ namespace Jobs
 
         #region Output Data
 
-        public NativeArray<uint> outputMap;
-        public NativeArray<byte> outputHeightMap;
-        public NativeQueue<VoxelMod>.ParallelWriter modifications;
+        public NativeArray<uint> OutputMap;
+        public NativeArray<byte> OutputHeightMap;
+        public NativeQueue<VoxelMod>.ParallelWriter Modifications;
 
         #endregion
 
@@ -55,24 +55,24 @@ namespace Jobs
                     // Loop from the top of the chunk downwards
                     for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
                     {
-                        Vector3Int globalPos = new Vector3Int(x + chunkPosition.x, y, z + chunkPosition.y);
+                        Vector3Int globalPos = new Vector3Int(x + ChunkPosition.x, y, z + ChunkPosition.y);
 
-                        byte voxelID = WorldGen.GetVoxel(globalPos, seed, biomes, allLodes);
-                        BlockTypeJobData voxelProps = blockTypes[voxelID];
+                        byte voxelID = WorldGen.GetVoxel(globalPos, Seed, Biomes, AllLodes);
+                        BlockTypeJobData voxelProps = BlockTypes[voxelID];
                         // --- Populate the main voxel map ---
                         
                         int index = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-                        outputMap[index] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.lightEmission, 1, voxelProps.fluidLevel);
+                        OutputMap[index] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.LightEmission, 1, voxelProps.FluidLevel);
 
                         // --- Populate the heightmap ---
                         // If we haven't found the highest block in this column yet, check if this one is light-obstructing.
                         if (!highestBlockFound)
                         {
                             // Check the opacity from the blockTypes array.
-                            if (blockTypes[voxelID].IsLightObstructing)
+                            if (BlockTypes[voxelID].IsLightObstructing)
                             {
                                 int heightmapIndex = x + VoxelData.ChunkWidth * z;
-                                outputHeightMap[heightmapIndex] = (byte)y;
+                                OutputHeightMap[heightmapIndex] = (byte)y;
                                 highestBlockFound = true;
                             }
                         }
@@ -80,20 +80,20 @@ namespace Jobs
                         // --- Major Flora Pass (Tree Generation) ---
                         // We can't call Structure.GenerateMajorFlora directly as it's not job-safe.
                         // Instead, we replicate the noise check here and queue the modification.
-                        if (y == GetTerrainHeight(globalPos, biomes))
+                        if (y == GetTerrainHeight(globalPos, Biomes))
                         {
-                            BiomeAttributesJobData biome = GetStrongestBiome(globalPos, biomes);
-                            if (biome.placeMajorFlora)
+                            BiomeAttributesJobData biome = GetStrongestBiome(globalPos, Biomes);
+                            if (biome.PlaceMajorFlora)
                             {
-                                if (Noise.Get2DPerlin(new Vector2(globalPos.x, globalPos.z), 0, biome.majorFloraZoneScale) > biome.majorFloraZoneThreshold)
+                                if (Noise.Get2DPerlin(new Vector2(globalPos.x, globalPos.z), 0, biome.MajorFloraZoneScale) > biome.MajorFloraZoneThreshold)
                                 {
-                                    if (Noise.Get2DPerlin(new Vector2(globalPos.x, globalPos.z), 2500, biome.majorFloraPlacementScale) > biome.majorFloraPlacementThreshold)
+                                    if (Noise.Get2DPerlin(new Vector2(globalPos.x, globalPos.z), 2500, biome.MajorFloraPlacementScale) > biome.MajorFloraPlacementThreshold)
                                     {
                                         // We can't generate the whole structure here, but we can queue a "request"
                                         // to generate it on the main thread later.
                                         // For simplicity here, we'll queue the *base* of the structure.
                                         // The main thread will then expand this into the full tree.
-                                        modifications.Enqueue(new VoxelMod(globalPos, blockId: (byte)biome.majorFloraIndex));
+                                        Modifications.Enqueue(new VoxelMod(globalPos, blockId: (byte)biome.MajorFloraIndex));
                                     }
                                 }
                             }
@@ -104,21 +104,21 @@ namespace Jobs
                     if (!highestBlockFound)
                     {
                         int heightmapIndex = x + VoxelData.ChunkWidth * z;
-                        outputHeightMap[heightmapIndex] = 0;
+                        OutputHeightMap[heightmapIndex] = 0;
                     }
                 }
             }
         }
 
         // Helper to get terrain height for flora placement. Duplicated from GetVoxel to avoid re-calculating everything.
-        private int GetTerrainHeight(Vector3 pos, NativeArray<BiomeAttributesJobData> biomeArray)
+        private static int GetTerrainHeight(Vector3 pos, NativeArray<BiomeAttributesJobData> biomeArray)
         {
             float sumOfHeights = 0f;
             int count = 0;
             for (int i = 0; i < biomeArray.Length; i++)
             {
-                float weight = Noise.Get2DPerlin(new Vector2(pos.x, pos.z), biomeArray[i].offset, biomeArray[i].scale);
-                float height = biomeArray[i].terrainHeight * Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biomeArray[i].terrainScale) * weight;
+                float weight = Noise.Get2DPerlin(new Vector2(pos.x, pos.z), biomeArray[i].Offset, biomeArray[i].Scale);
+                float height = biomeArray[i].TerrainHeight * Noise.Get2DPerlin(new Vector2(pos.x, pos.z), 0, biomeArray[i].TerrainScale) * weight;
                 if (height > 0)
                 {
                     sumOfHeights += height;
@@ -126,17 +126,17 @@ namespace Jobs
                 }
             }
 
-            return Mathf.FloorToInt((sumOfHeights / count) + VoxelData.SolidGroundHeight);
+            return Mathf.FloorToInt(sumOfHeights / count + VoxelData.SolidGroundHeight);
         }
 
         // Helper to get the strongest biome
-        private BiomeAttributesJobData GetStrongestBiome(Vector3 pos, NativeArray<BiomeAttributesJobData> biomeArray)
+        private static BiomeAttributesJobData GetStrongestBiome(Vector3 pos, NativeArray<BiomeAttributesJobData> biomeArray)
         {
             float strongestWeight = 0f;
             int strongestBiomeIndex = 0;
             for (int i = 0; i < biomeArray.Length; i++)
             {
-                float weight = Noise.Get2DPerlin(new Vector2(pos.x, pos.z), biomeArray[i].offset, biomeArray[i].scale);
+                float weight = Noise.Get2DPerlin(new Vector2(pos.x, pos.z), biomeArray[i].Offset, biomeArray[i].Scale);
                 if (weight > strongestWeight)
                 {
                     strongestWeight = weight;

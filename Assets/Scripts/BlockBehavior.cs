@@ -10,7 +10,7 @@ using UnityEngine;
 public static class BlockBehavior
 {
     // A reusable list to avoid allocating new memory every time Behave is called.
-    private static readonly List<VoxelMod> _mods = new List<VoxelMod>();
+    private static readonly List<VoxelMod> Mods = new List<VoxelMod>();
 
 
     // --- Public Methods ---
@@ -63,7 +63,7 @@ public static class BlockBehavior
 
             // Reason 1: The block below is not solid or is a different fluid type.
             VoxelState? belowState = chunkData.GetState(pos + Vector3Int.down);
-            if (!belowState.HasValue || (!belowState.Value.Properties.isSolid || belowState.Value.Properties.fluidType != props.fluidType))
+            if (!belowState.HasValue || !belowState.Value.Properties.isSolid || belowState.Value.Properties.fluidType != props.fluidType)
             {
                 return true; // Must be active to fall or interact.
             }
@@ -104,7 +104,7 @@ public static class BlockBehavior
     [CanBeNull]
     public static List<VoxelMod> Behave(ChunkData chunkData, Vector3Int localPos)
     {
-        _mods.Clear(); // Clear the reusable list before use.
+        Mods.Clear(); // Clear the reusable list before use.
         VoxelState voxel = chunkData.VoxelFromV3Int(localPos);
         BlockType props = voxel.Properties;
         byte id = voxel.id;
@@ -117,8 +117,8 @@ public static class BlockBehavior
             {
                 Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
                 VoxelMod voxelMod = new VoxelMod(globalPos, blockId: 3);
-                _mods.Add(voxelMod);
-                return _mods;
+                Mods.Add(voxelMod);
+                return Mods;
             }
 
             // Condition 2: Attempt to spread, using a GC-friendly method.
@@ -137,7 +137,7 @@ public static class BlockBehavior
                 VoxelData.FaceChecks[0] + VoxelData.FaceChecks[2],
                 VoxelData.FaceChecks[1] + VoxelData.FaceChecks[2],
                 VoxelData.FaceChecks[4] + VoxelData.FaceChecks[2],
-                VoxelData.FaceChecks[5] + VoxelData.FaceChecks[2]
+                VoxelData.FaceChecks[5] + VoxelData.FaceChecks[2],
             };
 
             // Check standard spread locations
@@ -161,7 +161,7 @@ public static class BlockBehavior
                 VoxelData.FaceChecks[0],
                 VoxelData.FaceChecks[1],
                 VoxelData.FaceChecks[4],
-                VoxelData.FaceChecks[5]
+                VoxelData.FaceChecks[5],
             };
             foreach (var vec in airCheckVectors)
             {
@@ -185,7 +185,7 @@ public static class BlockBehavior
                 {
                     // Modify the single, randomly chosen candidate.
                     Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.position.y);
-                    _mods.Add(new VoxelMod(chosenCandidateGlobalPos, blockId: 2));
+                    Mods.Add(new VoxelMod(chosenCandidateGlobalPos, blockId: 2));
                 }
             }
         }
@@ -197,7 +197,7 @@ public static class BlockBehavior
         }
 
         // Return the list of modifications.
-        return _mods.Count > 0 ? _mods : null;
+        return Mods.Count > 0 ? Mods : null;
     }
 
     #endregion
@@ -262,13 +262,13 @@ public static class BlockBehavior
             // Replace the block below with a new source block of this fluid.
             // This creates waterfalls and ensures fluid columns fill up from the bottom.
             Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
-            _mods.Add(new VoxelMod(globalBelowPos, blockId:  currentId)); // Place a new source block below
+            Mods.Add(new VoxelMod(globalBelowPos, blockId:  currentId)); // Place a new source block below
 
             // If the current block was a flowing block (not a source), it has now flowed away
             // and should be replaced with air. Source blocks are infinite and remain.
             if (currentLevel > 0)
             {
-                _mods.Add(new VoxelMod(globalPos, blockId: 0)); // Replace self with air
+                Mods.Add(new VoxelMod(globalPos, blockId: 0)); // Replace self with air
             }
 
             return; // Fluid has moved down, no further action this tick.
@@ -295,10 +295,10 @@ public static class BlockBehavior
                     Vector3Int globalNeighborPos = new Vector3Int(neighborPos.x + chunkData.position.x, neighborPos.y, neighborPos.z + chunkData.position.y);
                     VoxelMod mod = new VoxelMod(globalNeighborPos, blockId: currentId)
                     {
-                        fluidLevel = newLevel,
+                        FluidLevel = newLevel,
                     };
-                    mod.fluidLevel = newLevel; // Set fluid level
-                    _mods.Add(mod);
+                    mod.FluidLevel = newLevel; // Set fluid level
+                    Mods.Add(mod);
                 }
             }
         }

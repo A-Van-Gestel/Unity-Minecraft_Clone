@@ -8,29 +8,29 @@ namespace Data
     /// </summary>
     public struct VoxelMod : IEquatable<VoxelMod>
     {
-        public Vector3Int globalPosition;
-        public byte id;
-        public byte orientation;
-        public byte fluidLevel;
+        public Vector3Int GlobalPosition;
+        public byte ID;
+        public byte Orientation;
+        public byte FluidLevel;
         public bool ImmediateUpdate;
 
         /// <summary>
         /// An override rule for placement logic. Defaults to 'Default', which uses the Block Tag system.
         /// </summary>
-        public ReplacementRule rule;
+        public ReplacementRule Rule;
 
         // --- Constructors ---
 
         #region Constructors
 
-        public VoxelMod(Vector3Int _globalPosition, byte blockId)
+        public VoxelMod(Vector3Int globalPosition, byte blockId)
         {
-            globalPosition = _globalPosition;
-            id = blockId;
-            orientation = 1; // Default to Front / North (1)
-            fluidLevel = 0; // Default to source (0)
+            GlobalPosition = globalPosition;
+            ID = blockId;
+            Orientation = 1; // Default to Front / North (1)
+            FluidLevel = 0; // Default to source (0)
             ImmediateUpdate = false; // Default to false
-            rule = ReplacementRule.Default; // Use the block's default placement rules.
+            Rule = ReplacementRule.Default; // Use the block's default placement rules.
         }
 
         #endregion
@@ -41,7 +41,7 @@ namespace Data
 
         public bool Equals(VoxelMod other)
         {
-            return globalPosition.Equals(other.globalPosition) && id == other.id && orientation == other.orientation && fluidLevel == other.fluidLevel && ImmediateUpdate == other.ImmediateUpdate;
+            return GlobalPosition.Equals(other.GlobalPosition) && ID == other.ID && Orientation == other.Orientation && FluidLevel == other.FluidLevel && ImmediateUpdate == other.ImmediateUpdate;
         }
 
         public override bool Equals(object obj)
@@ -51,12 +51,12 @@ namespace Data
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(globalPosition, id, orientation, fluidLevel, ImmediateUpdate);
+            return HashCode.Combine(GlobalPosition, ID, Orientation, FluidLevel, ImmediateUpdate);
         }
 
         public override string ToString()
         {
-            return $"VoxelMod: {{ Global Position = {globalPosition}, ID = {id}, Orientation = {orientation}, Fluid Level = {fluidLevel}, Immediate Update = {ImmediateUpdate} }}";
+            return $"VoxelMod: {{ Global Position = {GlobalPosition}, ID = {ID}, Orientation = {Orientation}, Fluid Level = {FluidLevel}, Immediate Update = {ImmediateUpdate} }}";
         }
 
         #endregion

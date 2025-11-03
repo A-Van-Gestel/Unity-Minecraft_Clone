@@ -1,11 +1,11 @@
 public class ItemStack
 {
-    public byte id;
-    public int amount;
+    public readonly byte ID;
+    public int Amount;
 
-    public ItemStack(byte _id, int _amount)
+    public ItemStack(byte id, int amount)
     {
-        id = _id;
-        amount = _amount;
+        ID = id;
+        Amount = amount;
     }
 }
