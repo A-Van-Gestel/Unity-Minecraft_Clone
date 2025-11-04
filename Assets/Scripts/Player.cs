@@ -1,9 +1,12 @@
-using Data;
-using MyBox;
 using UnityEngine;
 
+[RequireComponent(typeof(PlayerInteraction))]
 public class Player : MonoBehaviour
 {
+    internal PlayerInteraction PlayerInteraction;
+    private Transform _playerCamera;
+    private World _world;
+
     [Tooltip("Makes the player not be affected by gravity.")]
     public bool isFlying = false;
 
@@ -12,9 +15,6 @@ public class Player : MonoBehaviour
 
     public bool isGrounded;
     public bool isSprinting;
-
-    private Transform _playerCamera;
-    private World _world;
 
     [Header("Speed modifiers")]
     public float walkSpeed = 3f;
@@ -51,40 +51,12 @@ public class Player : MonoBehaviour
 
     public byte orientation;
 
-    [Header("Block Destroy & Placement properties")]
-    public bool showHighlightBlocks = true;
-
-    private Transform _highlightBlocksParent;
-    public Transform highlightBlock;
-    public Transform placeBlock;
-
-    /// <summary>
-    /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
-    /// </summary>
-    private bool _blockPlaceable;
-
-    [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
-    public float checkIncrement = 0.05f;
-
-    [Tooltip("Maximum distance the player can place and delete blocks from.")]
-    public float reach = 8f;
-
-    public Toolbar toolbar;
-
-    // A struct to hold the results of our voxel raycast.
-    public struct VoxelRaycastResult
-    {
-        public bool DidHit;
-        public Vector3Int HitPosition;
-        public Vector3Int PlacePosition;
-    }
-
 
     private void Start()
     {
+        PlayerInteraction = GetComponent<PlayerInteraction>();
         _playerCamera = GameObject.Find("Main Camera").transform;
         _world = World.Instance;
-        _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
 
         // Scale playerBody to match the width and height settings.
         if (playerBody)
@@ -120,7 +92,6 @@ public class Player : MonoBehaviour
         if (!_world.inUI)
         {
             GetPlayerInputs();
-            PlaceCursorBlocks();
 
             // Rotates the player on the X axis
             transform.Rotate(Vector3.up * (_mouseHorizontal * Time.timeScale * _world.settings.mouseSensitivityX));
@@ -241,14 +212,13 @@ public class Player : MonoBehaviour
         if (Input.GetButtonUp("Sprint"))
             isSprinting = false;
 
-
+        // --- DEBUG ---
         // FLYING
         if (Input.GetKeyDown(KeyCode.F1))
         {
             isFlying = !isFlying;
             if (!isFlying) isNoclipping = false; // Disable noclip when flight is disabled
         }
-
 
         // NOCLIP (GHOST MODE)
         if (Input.GetKeyDown(KeyCode.F6))
@@ -281,139 +251,9 @@ public class Player : MonoBehaviour
             }
         }
 
-        // PLACING & DESTROYING BLOCKS
-        if (Input.GetKeyDown(KeyCode.F2))
-            showHighlightBlocks = !showHighlightBlocks;
-
         // TOGGLE CHUNK BORDERS
         if (Input.GetKeyDown(KeyCode.F5))
             _world.settings.showChunkBorders = !_world.settings.showChunkBorders;
-
-        if (highlightBlock.gameObject.activeSelf)
-        {
-            // Destroy block.
-            if (Input.GetMouseButtonDown(0))
-            {
-                _world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: 0)
-                {
-                    ImmediateUpdate = true,
-                });
-            }
-
-            // Place block.
-            if (Input.GetMouseButtonDown(1))
-            {
-                // Don't place blocks inside the player or other voxels or when current itemSlot is empty by returning early.
-                if (!_blockPlaceable) return;
-
-                UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
-                _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), blockId: itemSlot.ItemSlot.Stack.ID)
-                {
-                    Orientation = orientation,
-                    ImmediateUpdate = true,
-                });
-                itemSlot.ItemSlot.Take(1);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Centralized method to cast a ray from the player's camera to find a voxel.
-    /// </summary>
-    /// <returns>A VoxelRaycastResult struct containing information about the hit.</returns>
-    public VoxelRaycastResult RaycastForVoxel()
-    {
-        float step = checkIncrement;
-
-        while (step < reach)
-        {
-            Vector3 pos = _playerCamera.position + _playerCamera.forward * step;
-
-            if (_world.CheckForVoxel(pos))
-            {
-                VoxelRaycastResult result = new VoxelRaycastResult { DidHit = true };
-
-                // DESTROY HIGHLIGHT BLOCK
-                result.HitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
-
-                // PLACE HIGHLIGHT BLOCK
-                // Calculate place block position based on smallest x, y, z value, using HitPosition position as your origin.
-                float xCheck = pos.x % 1;
-                if (xCheck > 0.5f)
-                    xCheck -= 1;
-                float yCheck = pos.y % 1;
-                if (yCheck > 0.5f)
-                    yCheck -= 1;
-                float zCheck = pos.z % 1;
-                if (zCheck > 0.5f)
-                    zCheck -= 1;
-
-                if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
-                {
-                    // place block on x-axis
-                    if (xCheck < 0)
-                        result.PlacePosition = result.HitPosition + Vector3Int.right;
-                    else
-                        result.PlacePosition = result.HitPosition + Vector3Int.left;
-                }
-                else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
-                {
-                    // place block on z axis
-                    if (zCheck < 0)
-                        result.PlacePosition = result.HitPosition + Vector3Int.forward;
-                    else
-                        result.PlacePosition = result.HitPosition + Vector3Int.back;
-                }
-                else
-                {
-                    // place block on y-axis by default
-                    if (yCheck < 0)
-                        result.PlacePosition = result.HitPosition + Vector3Int.up;
-                    else
-                        result.PlacePosition = result.HitPosition + Vector3Int.down;
-                }
-
-                return result;
-            }
-
-            step += checkIncrement;
-        }
-
-        // If we get here, we didn't hit anything.
-        return new VoxelRaycastResult { DidHit = false };
-    }
-
-    private void PlaceCursorBlocks()
-    {
-        VoxelRaycastResult result = RaycastForVoxel();
-
-        if (result.DidHit)
-        {
-            highlightBlock.position = result.HitPosition;
-            placeBlock.position = result.PlacePosition;
-
-            // Check if the placement position is valid.
-            Vector3 playerPosition = transform.position;
-            Vector3Int playerCoord = new Vector3Int(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
-
-            _blockPlaceable =
-                result.PlacePosition != playerCoord && // Not inside player's feet
-                result.PlacePosition != playerCoord + Vector3Int.up && // Not inside player's head
-                _world.worldData.IsVoxelInWorld(result.PlacePosition) &&
-                !_world.CheckForVoxel(result.PlacePosition) &&
-                toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem;
-
-            // Set highlight objects active state
-            _highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
-            highlightBlock.gameObject.SetActive(true);
-            placeBlock.gameObject.SetActive(_blockPlaceable);
-        }
-        else
-        {
-            // If we didn't hit a block, hide the highlights.
-            highlightBlock.gameObject.SetActive(false);
-            placeBlock.gameObject.SetActive(false);
-        }
     }
 
     private float CheckDownSpeed(float downSpeed)

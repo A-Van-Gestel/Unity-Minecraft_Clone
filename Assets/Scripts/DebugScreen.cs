@@ -7,8 +7,6 @@ using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Profiling;
 
-[RequireComponent(typeof(Player))]
-[RequireComponent(typeof(Transform))]
 [RequireComponent(typeof(TextMeshProUGUI))]
 public class DebugScreen : MonoBehaviour
 {
@@ -187,7 +185,7 @@ public class DebugScreen : MonoBehaviour
     /// </summary>
     private void UpdateTargetVoxel()
     {
-        Player.VoxelRaycastResult result = _player.RaycastForVoxel();
+        VoxelRaycastResult result = _player.PlayerInteraction.RaycastForVoxel();
 
         if (result.DidHit)
         {
@@ -258,7 +256,7 @@ public class DebugScreen : MonoBehaviour
         _debugTextBuilder.Append("isGrounded: ").Append(_player.isGrounded)
             .Append(" | isFlying: ").Append(_player.isFlying)
             .Append(" | isNoclipping: ").Append(_player.isNoclipping)
-            .Append(" | showHighlight: ").Append(_player.showHighlightBlocks).AppendLine();
+            .Append(" | showHighlight: ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
 
         _debugTextBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", _player.MoveSpeed)
             .Append(" | Flying: ").AppendFormat("{0:F1}", _player.flyingSpeed).AppendLine();

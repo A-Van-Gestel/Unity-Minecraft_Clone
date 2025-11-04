@@ -129,6 +129,7 @@ GameObject:
   m_Component:
   - component: {fileID: 151001797}
   - component: {fileID: 151001798}
+  - component: {fileID: 151001799}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -180,6 +181,18 @@ MonoBehaviour:
   playerWidth: 0.4
   playerHeight: 1.8
   orientation: 0
+--- !u!114 &151001799
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 151001796}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bf29a3884e8d47a2951c2ee8fddd5a63, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerInteraction
   showHighlightBlocks: 0
   highlightBlock: {fileID: 1989252701}
   placeBlock: {fileID: 1073421876}
@@ -1526,9 +1539,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   cloudHeight: 100
   cloudDepth: 4
-  cloudPattern: {fileID: 2800000, guid: 97e640f4781f6834a931ea9191f853b5, type: 3}
-  cloudMaterial: {fileID: 2100000, guid: 861bcc19e949283479bc12c433ad1e22, type: 2}
-  world: {fileID: 1731500968}
+  _cloudPattern: {fileID: 2800000, guid: 97e640f4781f6834a931ea9191f853b5, type: 3}
+  _cloudMaterial: {fileID: 2100000, guid: 861bcc19e949283479bc12c433ad1e22, type: 2}
+  _world: {fileID: 1731500968}
 --- !u!4 &806419710
 Transform:
   m_ObjectHideFlags: 0
@@ -1726,10 +1739,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5cf91c34e0b43354db138f1299d1b594, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  player: {fileID: 151001798}
-  playerCamera: {fileID: 963194228}
-  frameRateUpdateRate: 0.25
-  infrequentUpdateRate: 0.2
+  _player: {fileID: 151001798}
+  _playerCamera: {fileID: 963194228}
+  _frameRateUpdateRate: 0.25
+  _infrequentUpdateRate: 0.2
 --- !u!1 &886881814
 GameObject:
   m_ObjectHideFlags: 0
