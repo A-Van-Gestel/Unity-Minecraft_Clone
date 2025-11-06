@@ -18,7 +18,7 @@ namespace Data
             HasValue = true;
         }
     }
-    
+
     /// A job-safe representation of BiomeAttributes
     public struct BiomeAttributesJobData
     {
@@ -94,7 +94,7 @@ namespace Data
             NoiseOffset = lode.noiseOffset;
         }
     }
-    
+
     /// <summary>
     /// A job-safe representation of a custom mesh vertex.
     /// </summary>
@@ -128,8 +128,12 @@ namespace Data
     public struct BlockTypeJobData
     {
         // Block properties
-        [MarshalAs(UnmanagedType.U1)] public readonly bool IsSolid;
-        [MarshalAs(UnmanagedType.U1)] public readonly bool RenderNeighborFaces;
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool IsSolid;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool RenderNeighborFaces;
+
         public readonly int CustomMeshIndex; // -1 if not a custom mesh
 
         // Fluid properties
@@ -143,7 +147,8 @@ namespace Data
         public readonly byte LightEmission;
 
         // Block behavior
-        [MarshalAs(UnmanagedType.U1)] public bool IsActive;
+        [MarshalAs(UnmanagedType.U1)]
+        public bool IsActive;
 
         // Texture ID's
         public readonly int BackFaceTexture;
@@ -229,39 +234,51 @@ namespace Data
         /// It finds the most frequent texture among the 5 faces (left, right, back, front) without memory allocations.
         /// It omits topFaceTexture & bottomFaceTexture.
         /// </summary>
+        /// <returns>The integer ID of the most common side texture.</returns>
+        /// <remarks>
+        /// <para><b>Tie-Breaking Logic:</b></para>
+        /// In a situation where frequencies are tied (e.g., two of texture A and two of texture B),
+        /// a texture that appears earlier in the sequence (Left, then Right, then Back) is given priority.
+        ///
+        /// <para><b>Default Behavior:</b></para>
+        /// If all four side textures are unique, <c>LeftFaceTexture</c> is returned as a deterministic default.
+        /// </remarks>
         public int SideFaceTexture
         {
             get
             {
-                // An array is used for easier iteration.
-                // This array exists only on the stack and will be optimized by the compiler.
-                int[] textures = { LeftFaceTexture, RightFaceTexture, BackFaceTexture, FrontFaceTexture };
+                // Assign face textures to local variables. This can improve readability
+                // and makes the logic below cleaner.
+                int left = LeftFaceTexture;
+                int right = RightFaceTexture;
+                int back = BackFaceTexture;
+                int front = FrontFaceTexture;
 
-                // Default to the first texture in case all are unique.
-                int mostFrequentTexture = textures[0];
-                int maxCount = 0;
-
-                // Iterate through each texture to see how many times it appears.
-                foreach (int tOuter in textures)
+                // --- Early Exit Checks ---
+                // The structure of these checks establishes a clear priority.
+                // We check for duplicates of 'left' first. If found, it's the winner.
+                if (left == right || left == back || left == front)
                 {
-                    int currentCount = 0;
-                    foreach (int tInner in textures)
-                    {
-                        if (tInner == tOuter)
-                        {
-                            currentCount++;
-                        }
-                    }
-
-                    // If the texture we just counted is more frequent than our previous winner, update it.
-                    if (currentCount > maxCount)
-                    {
-                        maxCount = currentCount;
-                        mostFrequentTexture = tOuter;
-                    }
+                    return left;
                 }
 
-                return mostFrequentTexture;
+                // If 'left' was unique, we proceed to check for duplicates of 'right'.
+                if (right == back || right == front)
+                {
+                    return right;
+                }
+
+                // Finally, check the last remaining pair for a match.
+                if (back == front)
+                {
+                    // It doesn't matter if we return 'back' or 'front' since they are equal.
+                    return back;
+                }
+
+                // --- Fallback Case ---
+                // If we reach this point, it means no duplicates were found.
+                // We return the first texture as a consistent, predictable fallback.
+                return left;
             }
         }
 

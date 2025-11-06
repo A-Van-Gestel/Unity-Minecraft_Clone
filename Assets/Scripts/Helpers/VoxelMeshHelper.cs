@@ -19,7 +19,7 @@ namespace Helpers
             0, 1, 2, 3, // Top Face
             0, 1, 2, 3, // Bottom Face
             1, 3, 0, 2, // Left Face
-            0, 2, 1, 3  // Right Face
+            0, 2, 1, 3, // Right Face
         };
 
         /// <summary>
@@ -275,10 +275,10 @@ namespace Helpers
                 Vector3 p3 = BurstVoxelData.VoxelVerts.Data[v3];
                 Vector3 p4 = BurstVoxelData.VoxelVerts.Data[v4];
 
-                p1.y = p1.y > 0.5f ? GetVertexHeightForCorner(p1, height_tl, height_tr, height_bl, height_br) : 0;
-                p2.y = p2.y > 0.5f ? GetVertexHeightForCorner(p2, height_tl, height_tr, height_bl, height_br) : 0;
-                p3.y = p3.y > 0.5f ? GetVertexHeightForCorner(p3, height_tl, height_tr, height_bl, height_br) : 0;
-                p4.y = p4.y > 0.5f ? GetVertexHeightForCorner(p4, height_tl, height_tr, height_bl, height_br) : 0;
+                p1.y = p1.y > 0.5f ? GetVertexHeightForCorner(in p1, height_tl, height_tr, height_bl, height_br) : 0;
+                p2.y = p2.y > 0.5f ? GetVertexHeightForCorner(in p2, height_tl, height_tr, height_bl, height_br) : 0;
+                p3.y = p3.y > 0.5f ? GetVertexHeightForCorner(in p3, height_tl, height_tr, height_bl, height_br) : 0;
+                p4.y = p4.y > 0.5f ? GetVertexHeightForCorner(in p4, height_tl, height_tr, height_bl, height_br) : 0;
 
                 vertices.Add(pos + p1);
                 vertices.Add(pos + p2);
@@ -360,7 +360,7 @@ namespace Helpers
             return totalHeight / count;
         }
 
-        private static float GetVertexHeightForCorner(Vector3 vertPos, float h_tl, float h_tr, float h_bl, float h_br)
+        private static float GetVertexHeightForCorner(in Vector3 vertPos, float h_tl, float h_tr, float h_bl, float h_br)
         {
             if (vertPos.x > 0.5f) // Right side
                 return vertPos.z > 0.5f ? h_tr : h_br;

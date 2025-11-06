@@ -17,7 +17,7 @@ public class Chunk
 
     private readonly Material[] _materials = new Material[3];
 
-    public Vector3 ChunkPosition;
+    public readonly Vector3 ChunkPosition;
 
     private bool _isActive;
 
@@ -269,7 +269,7 @@ public class ChunkCoord : IEquatable<ChunkCoord>
     }
 
     #endregion
-    
+
     #region Type Conversion
 
     public Vector2Int ToVector2Int()
@@ -281,9 +281,9 @@ public class ChunkCoord : IEquatable<ChunkCoord>
     {
         return new Vector2Int(coord.X, coord.Z);
     }
-    
+
     #endregion
-    
+
     #region Overides
 
     public override int GetHashCode()
@@ -304,11 +304,11 @@ public class ChunkCoord : IEquatable<ChunkCoord>
 
         return other.X == X && other.Z == Z;
     }
-    
+
     public override string ToString()
     {
         return $"ChunkCoord({X}, {Z})";
     }
-    
+
     #endregion
 }

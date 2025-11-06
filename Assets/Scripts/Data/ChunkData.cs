@@ -47,10 +47,10 @@ namespace Data
         public bool HasLightChangesToProcess = false;
 
         [NonSerialized]
-        private Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
+        private readonly Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
 
         [NonSerialized]
-        private Queue<LightQueueNode> _blocklightBfsQueue = new Queue<LightQueueNode>();
+        private readonly Queue<LightQueueNode> _blocklightBfsQueue = new Queue<LightQueueNode>();
 
         public int SunLightQueueCount => _sunlightBfsQueue.Count;
         public int BlockLightQueueCount => _blocklightBfsQueue.Count;

@@ -8,7 +8,7 @@ using UnityEngine;
 
 namespace Jobs
 {
-    [BurstCompile]
+    [BurstCompile(FloatPrecision = FloatPrecision.Standard, FloatMode = FloatMode.Fast)]
     public struct MeshGenerationJob : IJob
     {
         [ReadOnly]
@@ -57,7 +57,7 @@ namespace Jobs
         public MeshDataJobOutput Output;
 
         private int _vertexIndex;
-        
+
         // --- HELPERS ---
         private static readonly Vector3Int[] FluidNeighborOffsets =
         {
