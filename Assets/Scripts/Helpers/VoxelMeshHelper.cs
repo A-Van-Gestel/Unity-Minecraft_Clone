@@ -12,14 +12,14 @@ namespace Helpers
     {
         // This array correctly maps the vertex order for each face to the UV coordinate order.
         // This is the key to fixing the 3D preview textures and ensuring correct runtime textures.
-        private static readonly int[,] FaceUvOrder = new int[6, 4]
+        private static readonly int[] FaceUvOrder = new int[24]
         {
-            { 0, 1, 2, 3 }, // Back Face
-            { 2, 3, 0, 1 }, // Front Face
-            { 0, 1, 2, 3 }, // Top Face
-            { 0, 1, 2, 3 }, // Bottom Face
-            { 1, 3, 0, 2 }, // Left Face
-            { 0, 2, 1, 3 }, // Right Face
+            0, 1, 2, 3, // Back Face
+            2, 3, 0, 1, // Front Face
+            0, 1, 2, 3, // Top Face
+            0, 1, 2, 3, // Bottom Face
+            1, 3, 0, 2, // Left Face
+            0, 2, 1, 3  // Right Face
         };
 
         /// <summary>
@@ -46,7 +46,7 @@ namespace Helpers
         /// </summary>
         [BurstCompile]
         public static void GenerateStandardCubeFace(
-            int faceIndex, int textureID, float lightLevel, Vector3Int position, float rotation,
+            int faceIndex, int textureID, float lightLevel, in Vector3Int position, float rotation,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
             ref NativeList<Vector2> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
@@ -68,7 +68,7 @@ namespace Helpers
                 colors.Add(new Color(0, 0, 0, lightLevel));
 
                 // Use the FaceUvOrder array to get the correct UV for this vertex.
-                int uvIndex = FaceUvOrder[faceIndex, i];
+                int uvIndex = FaceUvOrder[faceIndex * 4 + i];
                 AddTexture(textureID, BurstVoxelData.VoxelUvs.Data[uvIndex], ref uvs);
             }
 
@@ -100,7 +100,7 @@ namespace Helpers
         /// </summary>
         [BurstCompile]
         public static void GenerateCustomMeshFace(
-            int faceIndex, int textureID, float lightLevel, Vector3Int position, float rotation,
+            int faceIndex, int textureID, float lightLevel, in Vector3Int position, float rotation,
             int customMeshIndex,
             [ReadOnly] ref NativeArray<CustomMeshData> customMeshes,
             [ReadOnly] ref NativeArray<CustomFaceData> customFaces,
@@ -160,9 +160,9 @@ namespace Helpers
         /// </summary>
         [BurstCompile]
         public static void GenerateFluidMeshData(
-            Vector3Int pos,
+            in Vector3Int pos,
             uint packedData,
-            BlockTypeJobData props,
+            in BlockTypeJobData props,
             in NativeArray<float> templates,
             in NativeArray<BlockTypeJobData> blockTypes,
             [ReadOnly] in NativeArray<OptionalVoxelState> neighbors, // 9 neighbors: N, E, S, W, NE, SE, SW, NW, Above, Below
@@ -210,10 +210,10 @@ namespace Helpers
             // Then, if above voxel is not a fluid of the same type, calculate heights based on current fluid level and neighbors
             if (!above.HasValue || blockTypes[above.State.id].FluidType != props.FluidType)
             {
-                height_tr = GetSmoothedCornerHeight(props, fluidLevel, n_N, n_E, n_NE, in templates, in blockTypes); // Top-Right
-                height_tl = GetSmoothedCornerHeight(props, fluidLevel, n_N, n_W, n_NW, in templates, in blockTypes); // Top-Left
-                height_br = GetSmoothedCornerHeight(props, fluidLevel, n_S, n_E, n_SE, in templates, in blockTypes); // Bottom-Right
-                height_bl = GetSmoothedCornerHeight(props, fluidLevel, n_S, n_W, n_SW, in templates, in blockTypes); // Bottom-Left
+                height_tr = GetSmoothedCornerHeight(in props, fluidLevel, n_N, n_E, n_NE, in templates, in blockTypes); // Top-Right
+                height_tl = GetSmoothedCornerHeight(in props, fluidLevel, n_N, n_W, n_NW, in templates, in blockTypes); // Top-Left
+                height_br = GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_E, n_SE, in templates, in blockTypes); // Bottom-Right
+                height_bl = GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_W, n_SW, in templates, in blockTypes); // Bottom-Left
             }
 
             // --- 3. GENERATE FACES ---
@@ -334,7 +334,7 @@ namespace Helpers
             }
         }
 
-        private static float GetSmoothedCornerHeight(BlockTypeJobData centerProps, byte centerLevel, OptionalVoxelState n1, OptionalVoxelState n2, OptionalVoxelState nDiag, in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
+        private static float GetSmoothedCornerHeight(in BlockTypeJobData centerProps, byte centerLevel, OptionalVoxelState n1, OptionalVoxelState n2, OptionalVoxelState nDiag, in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
         {
             float totalHeight = templates[centerLevel];
             int count = 1;

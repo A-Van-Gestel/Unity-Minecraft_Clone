@@ -1,4 +1,5 @@
-﻿using Unity.Collections;
+﻿using System.Runtime.InteropServices;
+using Unity.Collections;
 using UnityEngine;
 
 namespace Data
@@ -127,8 +128,8 @@ namespace Data
     public struct BlockTypeJobData
     {
         // Block properties
-        public readonly bool IsSolid;
-        public readonly bool RenderNeighborFaces;
+        [MarshalAs(UnmanagedType.U1)] public readonly bool IsSolid;
+        [MarshalAs(UnmanagedType.U1)] public readonly bool RenderNeighborFaces;
         public readonly int CustomMeshIndex; // -1 if not a custom mesh
 
         // Fluid properties
@@ -142,7 +143,7 @@ namespace Data
         public readonly byte LightEmission;
 
         // Block behavior
-        public bool IsActive;
+        [MarshalAs(UnmanagedType.U1)] public bool IsActive;
 
         // Texture ID's
         public readonly int BackFaceTexture;

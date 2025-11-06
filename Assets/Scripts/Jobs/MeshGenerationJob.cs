@@ -57,6 +57,14 @@ namespace Jobs
         public MeshDataJobOutput Output;
 
         private int _vertexIndex;
+        
+        // --- HELPERS ---
+        private static readonly Vector3Int[] FluidNeighborOffsets =
+        {
+            new Vector3Int(0, 0, 1), new Vector3Int(1, 0, 0), new Vector3Int(0, 0, -1), new Vector3Int(-1, 0, 0),
+            new Vector3Int(1, 0, 1), new Vector3Int(1, 0, -1), new Vector3Int(-1, 0, -1), new Vector3Int(-1, 0, 1),
+            new Vector3Int(0, 1, 0), new Vector3Int(0, -1, 0),
+        };
 
         public void Execute()
         {
@@ -99,16 +107,10 @@ namespace Jobs
 
                 // Gather all 9 required neighbors for fluid meshing.
                 var neighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
-                Vector3Int[] neighborOffsets =
-                {
-                    new Vector3Int(0, 0, 1), new Vector3Int(1, 0, 0), new Vector3Int(0, 0, -1), new Vector3Int(-1, 0, 0),
-                    new Vector3Int(1, 0, 1), new Vector3Int(1, 0, -1), new Vector3Int(-1, 0, -1), new Vector3Int(-1, 0, 1),
-                    new Vector3Int(0, 1, 0), new Vector3Int(0, -1, 0),
-                };
 
-                for (int i = 0; i < neighborOffsets.Length; i++)
+                for (int i = 0; i < FluidNeighborOffsets.Length; i++)
                 {
-                    VoxelState? neighborState = GetVoxelStateFromLocalPos(pos + neighborOffsets[i]);
+                    VoxelState? neighborState = GetVoxelStateFromLocalPos(pos + FluidNeighborOffsets[i]);
                     if (neighborState.HasValue)
                     {
                         neighbors[i] = new OptionalVoxelState(neighborState.Value);
@@ -116,7 +118,7 @@ namespace Jobs
                 }
 
                 // Call the unified helper method.
-                VoxelMeshHelper.GenerateFluidMeshData(pos, packedData, voxelProps, in templates, in BlockTypes, in neighbors,
+                VoxelMeshHelper.GenerateFluidMeshData(in pos, packedData, in voxelProps, in templates, in BlockTypes, in neighbors,
                     ref _vertexIndex, ref Output.Vertices, ref Output.FluidTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals);
 
                 // Dispose the temporary native array.
@@ -180,7 +182,7 @@ namespace Jobs
                         float lightLevel = neighborVoxel?.lightAsFloat ?? 1.0f;
 
                         // Call the new helper for standard cubes
-                        VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, pos, rotation,
+                        VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
                             ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                             voxelProps.RenderNeighborFaces);
