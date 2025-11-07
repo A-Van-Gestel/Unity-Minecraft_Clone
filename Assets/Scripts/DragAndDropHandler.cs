@@ -5,9 +5,6 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-[RequireComponent(typeof(UIItemSlot))]
-[RequireComponent(typeof(GraphicRaycaster))]
-[RequireComponent(typeof(EventSystem))]
 public class DragAndDropHandler : MonoBehaviour
 {
     [SerializeField] private UIItemSlot _cursorSlot;
