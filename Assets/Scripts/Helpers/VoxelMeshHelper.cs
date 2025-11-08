@@ -339,19 +339,26 @@ namespace Helpers
             float totalHeight = templates[centerLevel];
             int count = 1;
 
-            if (n1.HasValue && blockTypes[n1.State.id].FluidType == centerProps.FluidType)
+            // Track if adjacent neighbors are fluids to determine if the diagonal path is open ---
+            bool n1IsFluid = n1.HasValue && blockTypes[n1.State.id].FluidType == centerProps.FluidType;
+            bool n2IsFluid = n2.HasValue && blockTypes[n2.State.id].FluidType == centerProps.FluidType;
+
+            if (n1IsFluid)
             {
                 totalHeight += templates[n1.State.FluidLevel];
                 count++;
             }
 
-            if (n2.HasValue && blockTypes[n2.State.id].FluidType == centerProps.FluidType)
+            if (n2IsFluid)
             {
                 totalHeight += templates[n2.State.FluidLevel];
                 count++;
             }
 
-            if (nDiag.HasValue && blockTypes[nDiag.State.id].FluidType == centerProps.FluidType)
+            // Only consider the diagonal neighbor for smoothing if at least one of the
+            // adjacent neighbors is also a fluid. This prevents height smoothing "through" solid corners.
+            bool nDiagIsFluid = nDiag.HasValue && blockTypes[nDiag.State.id].FluidType == centerProps.FluidType;
+            if ((n1IsFluid || n2IsFluid) && nDiagIsFluid)
             {
                 totalHeight += templates[nDiag.State.FluidLevel];
                 count++;
