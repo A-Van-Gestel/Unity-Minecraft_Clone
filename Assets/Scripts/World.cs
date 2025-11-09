@@ -906,11 +906,28 @@ public class World : MonoBehaviour
                 }
 
                 // --- 3. If chunk is ready, Apply Modification ---
-                // Get the local position within the chunk.
                 Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.GlobalPosition);
-
-                // Call the authoritative ModifyVoxel method in ChunkData, passing the entire mod struct.
                 chunkData.ModifyVoxel(localPos, v);
+                
+                // --- 4. Neighbor Activation ---
+                // After any modification, the World is now responsible for waking up all 6 neighbors.
+                for (int i = 0; i < 6; i++)
+                {
+                    // Get the global position of the neighbor.
+                    Vector3Int neighborPos = v.GlobalPosition + VoxelData.FaceChecks[i];
+                    VoxelState? neighborState = worldData.GetVoxelState(neighborPos);
+
+                    // If the neighbor exists and has behavior, ensure it's active.
+                    if (neighborState.HasValue && neighborState.Value.Properties.isActive)
+                    {
+                        Chunk neighborChunk = GetChunkFromVector3(neighborPos);
+                        if (neighborChunk != null)
+                        {
+                            Vector3Int localPosInNeighbor = neighborChunk.GetVoxelPositionInChunkFromGlobalVector3(neighborPos);
+                            neighborChunk.AddActiveVoxel(localPosInNeighbor);
+                        }
+                    }
+                }
             }
 
             // If part of the batch failed, we already re-queued it.

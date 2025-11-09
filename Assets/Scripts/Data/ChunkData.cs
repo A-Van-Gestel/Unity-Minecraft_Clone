@@ -196,36 +196,6 @@ namespace Data
                     Chunk.RemoveActiveVoxel(localPos);
             }
 
-            // --- WAKE UP NEIGHBORS ---
-            // After any modification, check all 6 neighbors. If a neighbor is a stable fluid block,
-            // force it into the active list so it can check if it needs to flow.
-            for (int i = 0; i < 6; i++)
-            {
-                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[i];
-                VoxelState? neighborState = GetState(neighborPos); // Use GetState to handle cross-chunk checks
-
-                if (neighborState.HasValue && neighborState.Value.id == 19) // If neighbor is water
-                {
-                    // If the neighbor is in this chunk, add it directly.
-                    if (IsVoxelInChunk(neighborPos))
-                    {
-                        Chunk?.AddActiveVoxel(neighborPos);
-                    }
-                    else // If it's in another chunk, we need to find that chunk and add it.
-                    {
-                        Vector3 globalPos = new Vector3(neighborPos.x + position.x, neighborPos.y, neighborPos.z + position.y);
-                        Chunk neighborChunk = World.Instance.GetChunkFromVector3(globalPos);
-
-                        // If the neighbor chunk exists, add the neighbor voxel to its active list.
-                        if (neighborChunk != null)
-                        {
-                            Vector3Int localPosInNeighbor = neighborChunk.GetVoxelPositionInChunkFromGlobalVector3(globalPos);
-                            neighborChunk.AddActiveVoxel(localPosInNeighbor);
-                        }
-                    }
-                }
-            }
-
             World.Instance.worldData.ModifiedChunks.Add(this);
         }
 

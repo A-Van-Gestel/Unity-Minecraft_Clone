@@ -4,7 +4,11 @@ This document outlines known bugs related to fluid behavior and simulation.
 
 ## 1. Cross chunk fluid simulation
 
-Fluid simulation (or block behavior in general) is currently not fully cross chunk-aware, meaning that fluids can only flow one block into a neighbouring chunk, it then stops behaving or updating. This can lead to unexpected behavior and visual artifacts.
+Fluid simulation (or block behavior in general) is currently not fully cross chunk-aware, meaning that fluids can only flow one block into a neighbouring chunk B, it then stops behaving or updating. This can lead to unexpected behavior and visual artifacts where the fluid just suddenly stops.
+
+Looking at the debug screen, the new "*should be active*" fluid voxel is not added to the active voxels list of the neighbouring chunk B.
+
+NOTE: I am standing in chunk B and breaking the solid voxel in chunk B so that the fluid from chunk A flows into chunk B. So both chunks are fully loaded.
 
 ## 2. Side face rendering
 

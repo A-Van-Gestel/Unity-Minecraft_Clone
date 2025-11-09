@@ -77,7 +77,7 @@ public static class BlockBehavior
                 return false; // Max flow distance reached, it is stable.
             }
 
-            // Reason 4: Check if any horizontal neighbor is a valid flow target.
+            // Reason 4: Check if any horizontal neighbor is a valid flow target (a place to flow TO).
             for (int i = 0; i < 4; i++)
             {
                 Vector3Int neighborPos = pos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
@@ -90,6 +90,22 @@ public static class BlockBehavior
 
                 // If neighbor is the same fluid type and has a lower fluid level (higher level value), we can flow to level it out.
                 if (neighborState.Value.Properties.fluidType == props.fluidType && neighborState.Value.FluidLevel > voxel.FluidLevel + 1) return true;
+            }
+
+            // Reason 5: Check if any horizontal neighbor is a valid source (a place to flow FROM)
+            // A flowing block (level > 0) must remain active if it is connected to a source block or another fluid block with a lower fluid level number.
+            // This ensures it will drain away if the source is removed.
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3Int neighborPos = pos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                VoxelState? neighborState = chunkData.GetState(neighborPos);
+
+                if (neighborState.HasValue &&
+                    neighborState.Value.Properties.fluidType == props.fluidType &&
+                    neighborState.Value.FluidLevel < voxel.FluidLevel)
+                {
+                    return true;
+                }
             }
         }
 
