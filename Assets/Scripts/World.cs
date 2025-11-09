@@ -1210,6 +1210,20 @@ public class World : MonoBehaviour
     {
         return _modifications.Count;
     }
+    
+    public int GetTotalActiveVoxelsInWorld()
+    {
+        int total = 0;
+
+        foreach (ChunkCoord coord in _activeChunks)
+        {
+            if (chunks[coord.X, coord.Z] != null)
+            {
+                total += chunks[coord.X, coord.Z].GetActiveVoxelCount();
+            }
+        }
+        return total;
+    }
 
     #endregion
 }

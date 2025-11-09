@@ -206,6 +206,23 @@ public class Chunk
     }
 
     #endregion
+    
+    #region Debug Information Methods
+
+    /// <summary>
+    /// Checks if a voxel is active in this chunk.
+    /// </summary>
+    /// <param name="localPos">The local position of the voxel in the given chunk.</param>
+    /// <returns>True if the voxel is active, false otherwise.</returns>
+    public bool IsVoxelActive(Vector3Int localPos)
+    {
+        if (_activeVoxels.Count == 0)
+            return false;
+        
+        return _activeVoxels.Contains(localPos);
+    }
+
+    #endregion
 
 
     #region Bonus Stuff
