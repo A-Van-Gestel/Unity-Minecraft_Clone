@@ -6,6 +6,7 @@ using System.Linq;
 using Data;
 using Data.JobData;
 using Data.NativeData;
+using DebugVisualizations;
 using Helpers;
 using JetBrains.Annotations;
 using Jobs;
@@ -82,6 +83,7 @@ public class World : MonoBehaviour
 
     [Header("World Data")]
     public WorldData worldData;
+
     public WorldJobManager JobManager;
 
     [Header("Paths")]
@@ -91,6 +93,15 @@ public class World : MonoBehaviour
     [Header("Debug")]
     [Tooltip("The prefab to use for chunk borders.")]
     public GameObject chunkBorderPrefab;
+
+    [Tooltip("The VoxelVisualizer object in the scene.")]
+    public VoxelVisualizer voxelVisualizer;
+
+    [Tooltip("Selects which voxel state to visualize in the world.")]
+    public DebugVisualizationMode visualizationMode;
+
+    private DebugVisualizationMode _lastVisualizationMode;
+    private readonly HashSet<ChunkCoord> _chunksToUpdateVisualization = new HashSet<ChunkCoord>();
 
     // --- Shader Properties ---
     private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
@@ -411,6 +422,9 @@ public class World : MonoBehaviour
             _lastChunkBordersState = settings.showChunkBorders;
         }
 
+        // Debug: Voxel Visualization Management
+        HandleVisualization();
+
         _playerLastChunkCoord = PlayerChunkCoord;
 
         // --- Process Job System ---
@@ -644,6 +658,9 @@ public class World : MonoBehaviour
             QueueNeighborRebuild(chunkPos + new Vector2Int(0, -VoxelData.ChunkWidth), immediate);
         else if (localVoxelPos.z == VoxelData.ChunkWidth - 1)
             QueueNeighborRebuild(chunkPos + new Vector2Int(0, VoxelData.ChunkWidth), immediate);
+
+        // Debug: Update visualization for this chunk.
+        _chunksToUpdateVisualization.Add(new ChunkCoord(chunkPos));
     }
 
     private void QueueNeighborRebuild(Vector2Int neighborV2Coord, bool immediate = false)
@@ -908,7 +925,7 @@ public class World : MonoBehaviour
                 // --- 3. If chunk is ready, Apply Modification ---
                 Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.GlobalPosition);
                 chunkData.ModifyVoxel(localPos, v);
-                
+
                 // --- 4. Neighbor Activation ---
                 // After any modification, the World is now responsible for waking up all 6 neighbors.
                 for (int i = 0; i < 6; i++)
@@ -1034,6 +1051,10 @@ public class World : MonoBehaviour
             }
 
             chunks[c.X, c.Z].isActive = false;
+
+            // Debug: Clear visualization.
+            if (voxelVisualizer != null)
+                voxelVisualizer.ClearChunkVisualization(c);
         }
 
         // Activate chunks that have entered view.
@@ -1085,6 +1106,128 @@ public class World : MonoBehaviour
         _chunkBorders.Add(coord, borderObject);
     }
 
+    private void HandleVisualization()
+    {
+        // If the visualizer isn't set, do nothing.
+        if (voxelVisualizer == null) return;
+
+        // --- 1. Check if the visualization mode has changed ---        if (_lastVisualizationMode != visualizationMode)
+        {
+            voxelVisualizer.ClearAll(); // Clear any previous visualization.
+
+            // If the new mode is not 'None', request an update for all currently active chunks.
+            if (visualizationMode != DebugVisualizationMode.None)
+            {
+                foreach (ChunkCoord coord in _activeChunks)
+                {
+                    _chunksToUpdateVisualization.Add(coord);
+                }
+            }
+
+            _lastVisualizationMode = visualizationMode;
+        }
+
+        // --- 2. Process any pending visualization updates ---
+        if (visualizationMode != DebugVisualizationMode.None && _chunksToUpdateVisualization.Count > 0)
+        {
+            // Pre-cache all required data in one go
+            var chunkDataCache = new Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>>();
+            foreach (ChunkCoord coord in _chunksToUpdateVisualization)
+            {
+                if (chunks[coord.X, coord.Z] != null)
+                {
+                    chunkDataCache[coord] = GetVoxelDataForVisualization(chunks[coord.X, coord.Z]);
+                }
+            }
+
+            // Iterate through the cached data to draw meshes
+            foreach (var cachedChunk in chunkDataCache)
+            {
+                ChunkCoord coord = cachedChunk.Key;
+
+                // Get neighbor data from the cache, or null if not available.
+                chunkDataCache.TryGetValue(new ChunkCoord(coord.X, coord.Z + 1), out var northData);
+                chunkDataCache.TryGetValue(new ChunkCoord(coord.X, coord.Z - 1), out var southData);
+                chunkDataCache.TryGetValue(new ChunkCoord(coord.X + 1, coord.Z), out var eastData);
+                chunkDataCache.TryGetValue(new ChunkCoord(coord.X - 1, coord.Z), out var westData);
+
+                // Call the visualizer method with all neighbor data.
+                voxelVisualizer.UpdateChunkVisualization(coord, cachedChunk.Value, northData, southData, eastData, westData);
+            }
+
+            _chunksToUpdateVisualization.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Gathers the positions and colors of voxels to be visualized for a given chunk,
+    /// based on the current visualization mode.
+    /// </summary>
+    private Dictionary<Vector3Int, Color> GetVoxelDataForVisualization(Chunk chunk)
+    {
+        var voxelsToDraw = new Dictionary<Vector3Int, Color>();
+        if (chunk == null || !chunk.ChunkData.IsPopulated) return voxelsToDraw;
+
+        switch (visualizationMode)
+        {
+            case DebugVisualizationMode.ActiveVoxels:
+                // Instead of checking every voxel, iterate only through the known active list.
+                foreach (var localPos in chunk.ActiveVoxels)
+                {
+                    voxelsToDraw[localPos] = new Color(1f, 0f, 0f, 0.7f); // Red for active
+                }
+
+                break;
+
+            // For other modes, we iterate but now skip air blocks.
+            case DebugVisualizationMode.Sunlight:
+            case DebugVisualizationMode.Blocklight:
+            case DebugVisualizationMode.FluidLevel:
+                for (int i = 0; i < chunk.ChunkData.map.Length; i++)
+                {
+                    // --- OPTIMIZATION: Get ID first and skip if it's air ---
+                    uint packedData = chunk.ChunkData.map[i];
+                    if (BurstVoxelDataBitMapping.GetId(packedData) == 0)
+                    {
+                        continue; // Skip air blocks entirely.
+                    }
+
+                    // Convert flat index to 3D position only when needed.
+                    int x = i % VoxelData.ChunkWidth;
+                    int y = i / VoxelData.ChunkWidth % VoxelData.ChunkHeight;
+                    int z = i / (VoxelData.ChunkWidth * VoxelData.ChunkHeight);
+                    var localPos = new Vector3Int(x, y, z);
+
+                    var state = new VoxelState(packedData);
+                    Color? color = null;
+
+                    if (visualizationMode == DebugVisualizationMode.Sunlight && state.Sunlight > 0)
+                    {
+                        color = new Color(1f, 1f, 0f, state.Sunlight / 15f * 0.8f); // Yellow
+                    }
+                    else if (visualizationMode == DebugVisualizationMode.Blocklight && state.Blocklight > 0)
+                    {
+                        color = new Color(1f, 0.5f, 0f, state.Blocklight / 15f * 0.8f); // Orange
+                    }
+                    else if (visualizationMode == DebugVisualizationMode.FluidLevel && state.Properties.fluidType != FluidType.None)
+                    {
+                        // Make color fade from bright blue (level 0) to dark blue
+                        float levelRatio = (15 - state.FluidLevel) / 15f;
+                        color = new Color(0f, levelRatio * 0.7f, 1f, 0.7f);
+                    }
+
+                    if (color.HasValue)
+                    {
+                        voxelsToDraw[localPos] = color.Value;
+                    }
+                }
+
+                break;
+        }
+
+        return voxelsToDraw;
+    }
+
     #endregion
 
     /// <summary>
@@ -1133,6 +1276,7 @@ public class World : MonoBehaviour
             Debug.Log($"Highest voxel in chunk {thisChunk.X} / {thisChunk.Z} is {highestVoxel}.");
             return highestVoxel;
         }
+
         Debug.Log($"Chunk {thisChunk.X} / {thisChunk.Z} is not created, accurate result is not possible.");
 
         // Chunk is not created, calculate the highest voxel using expensive world generation code.
@@ -1210,7 +1354,7 @@ public class World : MonoBehaviour
     {
         return _modifications.Count;
     }
-    
+
     public int GetTotalActiveVoxelsInWorld()
     {
         int total = 0;
@@ -1222,6 +1366,7 @@ public class World : MonoBehaviour
                 total += chunks[coord.X, coord.Z].GetActiveVoxelCount();
             }
         }
+
         return total;
     }
 

@@ -206,7 +206,16 @@ public class Chunk
     }
 
     #endregion
-    
+
+    #region Public Getters
+
+    /// <summary>
+    /// Gets the list of active voxels in this chunk.
+    /// </summary>
+    public List<Vector3Int> ActiveVoxels => _activeVoxels;
+
+    #endregion
+
     #region Debug Information Methods
 
     /// <summary>
@@ -218,7 +227,7 @@ public class Chunk
     {
         if (_activeVoxels.Count == 0)
             return false;
-        
+
         return _activeVoxels.Contains(localPos);
     }
 
