@@ -659,8 +659,22 @@ public class World : MonoBehaviour
         else if (localVoxelPos.z == VoxelData.ChunkWidth - 1)
             QueueNeighborRebuild(chunkPos + new Vector2Int(0, VoxelData.ChunkWidth), immediate);
 
-        // Debug: Update visualization for this chunk.
-        _chunksToUpdateVisualization.Add(new ChunkCoord(chunkPos));
+        // --- Debug Visualization ---
+        // Update visualization for this chunk.
+        AddChunksToUpdateVisualization(new ChunkCoord(chunkPos));
+
+        // If the modification happened on a border, queue the neighbor for visualization.
+        // Check X-axis borders
+        if (localVoxelPos.x == 0)
+            AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(-VoxelData.ChunkWidth, 0)));
+        else if (localVoxelPos.x == VoxelData.ChunkWidth - 1)
+            AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(VoxelData.ChunkWidth, 0)));
+
+        // Check Z-axis borders
+        if (localVoxelPos.z == 0)
+            AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(0, -VoxelData.ChunkWidth)));
+        else if (localVoxelPos.z == VoxelData.ChunkWidth - 1)
+            AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(0, VoxelData.ChunkWidth)));
     }
 
     private void QueueNeighborRebuild(Vector2Int neighborV2Coord, bool immediate = false)
@@ -1076,6 +1090,13 @@ public class World : MonoBehaviour
                 chunks[c.X, c.Z].isActive = true;
                 RequestChunkMeshRebuild(chunks[c.X, c.Z]);
             }
+
+            // If the chunk has no light changes to process, update its visualization.
+            if (!chunks[c.X, c.Z].ChunkData.HasLightChangesToProcess)
+            {
+                // Debug: Update visualization for this chunk.
+                AddChunksToUpdateVisualization(c);
+            }
         }
 
         // Update the master activeChunks set.
@@ -1106,12 +1127,22 @@ public class World : MonoBehaviour
         _chunkBorders.Add(coord, borderObject);
     }
 
+    /// <summary>
+    /// Adds a chunk to the list of chunks to update visualization for.
+    /// </summary>
+    /// <param name="chunkCoord">The chunk coordinate.</param>
+    public void AddChunksToUpdateVisualization(ChunkCoord chunkCoord)
+    {
+        _chunksToUpdateVisualization.Add(chunkCoord);
+    }
+
     private void HandleVisualization()
     {
         // If the visualizer isn't set, do nothing.
         if (voxelVisualizer == null) return;
 
-        // --- 1. Check if the visualization mode has changed ---        if (_lastVisualizationMode != visualizationMode)
+        // --- 1. Check if the visualization mode has changed ---
+        if (_lastVisualizationMode != visualizationMode)
         {
             voxelVisualizer.ClearAll(); // Clear any previous visualization.
 
@@ -1120,7 +1151,7 @@ public class World : MonoBehaviour
             {
                 foreach (ChunkCoord coord in _activeChunks)
                 {
-                    _chunksToUpdateVisualization.Add(coord);
+                    AddChunksToUpdateVisualization(coord);
                 }
             }
 
@@ -1130,9 +1161,23 @@ public class World : MonoBehaviour
         // --- 2. Process any pending visualization updates ---
         if (visualizationMode != DebugVisualizationMode.None && _chunksToUpdateVisualization.Count > 0)
         {
-            // Pre-cache all required data in one go
-            var chunkDataCache = new Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>>();
+            var chunksReadyForVisualization = new List<ChunkCoord>();
+            // Identify which chunks are actually ready to be visualized.
             foreach (ChunkCoord coord in _chunksToUpdateVisualization)
+            {
+                Chunk chunk = chunks[coord.X, coord.Z];
+                // A chunk is ready if it exists, is not currently processing a lighting job,
+                // and has no pending lighting changes on the main thread.
+                if (chunk != null && !JobManager.lightingJobs.ContainsKey(coord) && !chunk.ChunkData.HasLightChangesToProcess)
+                {
+                    chunksReadyForVisualization.Add(coord);
+                }
+            }
+
+
+            // Pre-cache all required data in one go for chunks that are ready
+            var chunkDataCache = new Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>>();
+            foreach (ChunkCoord coord in chunksReadyForVisualization)
             {
                 if (chunks[coord.X, coord.Z] != null)
                 {
@@ -1155,7 +1200,12 @@ public class World : MonoBehaviour
                 voxelVisualizer.UpdateChunkVisualization(coord, cachedChunk.Value, northData, southData, eastData, westData);
             }
 
-            _chunksToUpdateVisualization.Clear();
+            // Remove only the processed chunks from the update set.
+            // Chunks that were not ready will remain in the set to be checked next frame.
+            foreach (var coord in chunksReadyForVisualization)
+            {
+                _chunksToUpdateVisualization.Remove(coord);
+            }
         }
     }
 
