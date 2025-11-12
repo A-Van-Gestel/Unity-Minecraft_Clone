@@ -287,9 +287,9 @@ public class DebugScreen : MonoBehaviour
         // --- Player & Speed Info ---
         _topLeftBuilder.AppendLine("PLAYER:");
         _topLeftBuilder.Append("isGrounded: ").Append(_player.isGrounded)
-            .Append(" | isFlying: ").Append(_player.isFlying)
-            .Append(" | isNoclipping: ").Append(_player.isNoclipping)
-            .Append(" | showHighlight: ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
+            .Append($" | isFlying ({_player.toggleFlyingKey.ToString()}): ").Append(_player.isFlying)
+            .Append($" | isNoclipping ({_player.toggleNoclipKey.ToString()}): ").Append(_player.isNoclipping)
+            .Append($" | showHighlight ({_player.toggleBlockHighlightKey.ToString()}): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
         _topLeftBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", _player.MoveSpeed)
             .Append(" | Flying: ").AppendFormat("{0:F1}", _player.flyingSpeed).AppendLine();
         _topLeftBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", _player.Velocity.x, _player.Velocity.y, _player.Velocity.z).AppendLine();
@@ -350,6 +350,11 @@ public class DebugScreen : MonoBehaviour
 
         // Self-diagnostic line
         _topRightBuilder.Append("Profiler Status: ").AppendLine(BoolToEnabledDisabledString(Profiler.enabled));
+        _topRightBuilder.AppendLine();
+
+        // --- Display Current Visualization Mode ---
+        _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
+        _topRightBuilder.Append($"Mode ({_player.cycleVisModeKey.ToString()} to cycle): ").AppendLine(_world.visualizationMode.ToString());
         _topRightBuilder.AppendLine();
     }
 

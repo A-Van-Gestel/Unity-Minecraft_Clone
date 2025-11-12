@@ -526,13 +526,6 @@ public class World : MonoBehaviour
         {
             ChunksToDraw.Dequeue().CreateMesh();
         }
-
-        // UI - DEBUG SCREEN
-        if (Input.GetKeyDown(KeyCode.F3))
-            debugScreen.SetActive(!debugScreen.activeSelf);
-
-        if (Input.GetKeyDown(KeyCode.F4))
-            SaveSystem.SaveWorld(worldData);
     }
 
     // --- JOB-RELATED METHODS ---
@@ -1409,6 +1402,36 @@ public class World : MonoBehaviour
         return coord.X is >= 0 and < VoxelData.WorldSizeInChunks &&
                coord.Z is >= 0 and < VoxelData.WorldSizeInChunks;
     }
+
+    #region Public Interface Methods
+
+    public void ToggleDebugScreen()
+    {
+        debugScreen.SetActive(!debugScreen.activeSelf);
+    }
+
+    public void SaveWorldData()
+    {
+        SaveSystem.SaveWorld(worldData);
+        Debug.Log("World data saved via keypress.");
+    }
+
+    public void CycleVisualizationMode()
+    {
+        int currentModeIndex = (int)visualizationMode;
+        currentModeIndex++;
+        int modeCount = Enum.GetValues(typeof(DebugVisualizationMode)).Length;
+
+        if (currentModeIndex >= modeCount)
+        {
+            currentModeIndex = 0;
+        }
+
+        visualizationMode = (DebugVisualizationMode)currentModeIndex;
+        Debug.Log($"Voxel Visualization Mode set to: {visualizationMode}");
+    }
+
+    #endregion
 
     #region Debug Information Methods
 

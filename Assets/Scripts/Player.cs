@@ -51,6 +51,28 @@ public class Player : MonoBehaviour
 
     public byte orientation;
 
+    [Header("Debug Keybindings")]
+    [Tooltip("Key to toggle the debug screen. (Defaults to F3)")]
+    public KeyCode toggleDebugScreenKey = KeyCode.F3;
+
+    [Tooltip("Key to toggle flying. (Defaults to F1)")]
+    public KeyCode toggleFlyingKey = KeyCode.F1;
+
+    [Tooltip("Key to toggle noclip. (Defaults to F6)")]
+    public KeyCode toggleNoclipKey = KeyCode.F6;
+
+    [Tooltip("Key to toggle block highlight. (Defaults to F2)")]
+    public KeyCode toggleBlockHighlightKey = KeyCode.F2;
+
+    [Tooltip("Key to save the World on demand. (Defaults to F4)")]
+    public KeyCode saveWorldKey = KeyCode.F4;
+
+    [Tooltip("Key to toggle Chunk Border visualization. (Defaults to F5)")]
+    public KeyCode toggleChunkBordersKey = KeyCode.F5;
+
+    [Tooltip("Key to cycle through the internal VoxelData visualization modes. (Defaults to F7)")]
+    public KeyCode cycleVisModeKey = KeyCode.F7;
+
 
     private void Start()
     {
@@ -212,16 +234,29 @@ public class Player : MonoBehaviour
         if (Input.GetButtonUp("Sprint"))
             isSprinting = false;
 
-        // --- DEBUG ---
+        // --- DEBUG ACTIONS ---
+        if (Input.GetKeyDown(toggleDebugScreenKey))
+            _world.ToggleDebugScreen();
+
+        if (Input.GetKeyDown(saveWorldKey))
+            _world.SaveWorldData();
+
+        if (Input.GetKeyDown(toggleChunkBordersKey))
+            _world.settings.showChunkBorders = !_world.settings.showChunkBorders;
+
+        if (Input.GetKeyDown(cycleVisModeKey))
+            _world.CycleVisualizationMode();
+
+
         // FLYING
-        if (Input.GetKeyDown(KeyCode.F1))
+        if (Input.GetKeyDown(toggleFlyingKey))
         {
             isFlying = !isFlying;
             if (!isFlying) isNoclipping = false; // Disable noclip when flight is disabled
         }
 
         // NOCLIP (GHOST MODE)
-        if (Input.GetKeyDown(KeyCode.F6))
+        if (Input.GetKeyDown(toggleNoclipKey))
         {
             isNoclipping = !isNoclipping;
             if (isNoclipping) isFlying = true; // Noclip requires flying
@@ -250,10 +285,6 @@ public class Player : MonoBehaviour
                     flyingSpeed = 1f;
             }
         }
-
-        // TOGGLE CHUNK BORDERS
-        if (Input.GetKeyDown(KeyCode.F5))
-            _world.settings.showChunkBorders = !_world.settings.showChunkBorders;
     }
 
     private float CheckDownSpeed(float downSpeed)

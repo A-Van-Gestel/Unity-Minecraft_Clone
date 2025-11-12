@@ -10,10 +10,11 @@ public class PlayerInteraction : MonoBehaviour
 
     [Header("Block Interaction")]
     public bool showHighlightBlocks = true;
+
     public Transform highlightBlock;
     public Transform placeBlock;
     private Transform _highlightBlocksParent;
-    
+
     /// <summary>
     /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
     /// </summary>
@@ -21,6 +22,7 @@ public class PlayerInteraction : MonoBehaviour
 
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
+
     [Tooltip("Maximum distance the player can interact with blocks.")]
     public float reach = 8f;
 
@@ -50,7 +52,7 @@ public class PlayerInteraction : MonoBehaviour
     private void HandleBlockModificationInput()
     {
         // PLACING & DESTROYING BLOCKS
-        if (Input.GetKeyDown(KeyCode.F2))
+        if (Input.GetKeyDown(_player.toggleBlockHighlightKey))
             showHighlightBlocks = !showHighlightBlocks;
 
         if (highlightBlock.gameObject.activeSelf)
@@ -80,7 +82,6 @@ public class PlayerInteraction : MonoBehaviour
             }
         }
     }
-
 
 
     /// <summary>
