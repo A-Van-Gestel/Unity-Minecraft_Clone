@@ -9,7 +9,7 @@ using UnityEngine;
 // [BurstCompile] 
 namespace Jobs
 {
-    public struct ChunkGenerationJob : IJob
+    public struct ChunkGenerationJob : IJobFor
     {
         // --- Input Data ---
 
@@ -20,7 +20,7 @@ namespace Jobs
 
         [ReadOnly]
         public Vector2Int ChunkPosition;
-        
+
         [ReadOnly]
         public NativeArray<BlockTypeJobData> BlockTypes;
 
@@ -36,77 +36,80 @@ namespace Jobs
 
         #region Output Data
 
+        [WriteOnly] // We only write to this array, never read from it inside the job.
+        [NativeDisableParallelForRestriction]
         public NativeArray<uint> OutputMap;
+
+        [WriteOnly]
         public NativeArray<byte> OutputHeightMap;
+
+        [WriteOnly]
         public NativeQueue<VoxelMod>.ParallelWriter Modifications;
 
         #endregion
 
-        public void Execute()
+        // The Execute method now takes an index, which will represent one X/Z column in the chunk.
+        public void Execute(int index)
         {
-            // The loop order is column-major (X -> Z -> Y)
-            // This is efficient for calculating a heightmap.
-            for (int x = 0; x < VoxelData.ChunkWidth; x++)
+            // The loop order is now column-major, processed in parallel.
+            int x = index % VoxelData.ChunkWidth;
+            int z = index / VoxelData.ChunkWidth;
+
+            bool highestBlockFound = false;
+
+            // Loop from the top of the chunk downwards for this specific column.
+            for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
             {
-                for (int z = 0; z < VoxelData.ChunkWidth; z++)
+                Vector3Int globalPos = new Vector3Int(x + ChunkPosition.x, y, z + ChunkPosition.y);
+
+                byte voxelID = WorldGen.GetVoxel(globalPos, Seed, Biomes, AllLodes);
+                BlockTypeJobData voxelProps = BlockTypes[voxelID];
+                // --- Populate the main voxel map ---
+
+                int mapIndex = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
+                OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.LightEmission, 1, voxelProps.FluidLevel);
+
+                // --- Populate the heightmap ---
+                // If we haven't found the highest block in this column yet, check if this one is light-obstructing.
+                if (!highestBlockFound)
                 {
-                    bool highestBlockFound = false;
-
-                    // Loop from the top of the chunk downwards
-                    for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
-                    {
-                        Vector3Int globalPos = new Vector3Int(x + ChunkPosition.x, y, z + ChunkPosition.y);
-
-                        byte voxelID = WorldGen.GetVoxel(globalPos, Seed, Biomes, AllLodes);
-                        BlockTypeJobData voxelProps = BlockTypes[voxelID];
-                        // --- Populate the main voxel map ---
-                        
-                        int index = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-                        OutputMap[index] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.LightEmission, 1, voxelProps.FluidLevel);
-
-                        // --- Populate the heightmap ---
-                        // If we haven't found the highest block in this column yet, check if this one is light-obstructing.
-                        if (!highestBlockFound)
-                        {
-                            // Check the opacity from the blockTypes array.
-                            if (BlockTypes[voxelID].IsLightObstructing)
-                            {
-                                int heightmapIndex = x + VoxelData.ChunkWidth * z;
-                                OutputHeightMap[heightmapIndex] = (byte)y;
-                                highestBlockFound = true;
-                            }
-                        }
-
-                        // --- Major Flora Pass (Tree Generation) ---
-                        // We can't call Structure.GenerateMajorFlora directly as it's not job-safe.
-                        // Instead, we replicate the noise check here and queue the modification.
-                        if (y == GetTerrainHeight(globalPos, Biomes))
-                        {
-                            BiomeAttributesJobData biome = GetStrongestBiome(globalPos, Biomes);
-                            if (biome.PlaceMajorFlora)
-                            {
-                                if (Noise.Get2DPerlin(new Vector2(globalPos.x, globalPos.z), 0, biome.MajorFloraZoneScale) > biome.MajorFloraZoneThreshold)
-                                {
-                                    if (Noise.Get2DPerlin(new Vector2(globalPos.x, globalPos.z), 2500, biome.MajorFloraPlacementScale) > biome.MajorFloraPlacementThreshold)
-                                    {
-                                        // We can't generate the whole structure here, but we can queue a "request"
-                                        // to generate it on the main thread later.
-                                        // For simplicity here, we'll queue the *base* of the structure.
-                                        // The main thread will then expand this into the full tree.
-                                        Modifications.Enqueue(new VoxelMod(globalPos, blockId: (byte)biome.MajorFloraIndex));
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // If after checking the whole column, no opaque block was found, set height to 0.
-                    if (!highestBlockFound)
+                    // Check the opacity from the blockTypes array.
+                    if (BlockTypes[voxelID].IsLightObstructing)
                     {
                         int heightmapIndex = x + VoxelData.ChunkWidth * z;
-                        OutputHeightMap[heightmapIndex] = 0;
+                        OutputHeightMap[heightmapIndex] = (byte)y;
+                        highestBlockFound = true;
                     }
                 }
+
+                // --- Major Flora Pass (Tree Generation) ---
+                // We can't call Structure.GenerateMajorFlora directly as it's not job-safe.
+                // Instead, we replicate the noise check here and queue the modification.
+                if (y == GetTerrainHeight(globalPos, Biomes))
+                {
+                    BiomeAttributesJobData biome = GetStrongestBiome(globalPos, Biomes);
+                    if (biome.PlaceMajorFlora)
+                    {
+                        if (Noise.Get2DPerlin(new Vector2(globalPos.x, globalPos.z), 0, biome.MajorFloraZoneScale) > biome.MajorFloraZoneThreshold)
+                        {
+                            if (Noise.Get2DPerlin(new Vector2(globalPos.x, globalPos.z), 2500, biome.MajorFloraPlacementScale) > biome.MajorFloraPlacementThreshold)
+                            {
+                                // We can't generate the whole structure here, but we can queue a "request"
+                                // to generate it on the main thread later.
+                                // For simplicity here, we'll queue the *base* of the structure.
+                                // The main thread will then expand this into the full tree.
+                                Modifications.Enqueue(new VoxelMod(globalPos, blockId: (byte)biome.MajorFloraIndex));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If after checking the whole column, no opaque block was found, set height to 0.
+            if (!highestBlockFound)
+            {
+                int heightmapIndex = x + VoxelData.ChunkWidth * z;
+                OutputHeightMap[heightmapIndex] = 0;
             }
         }
 

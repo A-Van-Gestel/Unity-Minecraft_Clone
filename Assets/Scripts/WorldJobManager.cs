@@ -54,7 +54,9 @@ public class WorldJobManager
             Modifications = modificationsQueue.AsParallelWriter(),
         };
 
-        JobHandle handle = job.Schedule();
+        // Schedule the IJobFor using the new parallel scheduling method.
+        // We run it for all 16x16 columns, with a batch size of 8 because each column is a heavy operation.
+        JobHandle handle = job.ScheduleParallelByRef(VoxelData.ChunkWidth * VoxelData.ChunkWidth, 8, default);
 
         // Store the handle and ALL associated native containers together.
         // --- Prepare Data for the Job ---

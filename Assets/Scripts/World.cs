@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using Data;
@@ -16,6 +17,7 @@ using MyBox;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
 public class World : MonoBehaviour
@@ -212,7 +214,7 @@ public class World : MonoBehaviour
         }
 
 #if !UNITY_EDITOR
-        string jsonImport = File.ReadAllText(settingFilePath);
+        string jsonImport = File.ReadAllText(_settingFilePath);
         settings = JsonUtility.FromJson<Settings>(jsonImport);
 # endif
 
@@ -245,13 +247,25 @@ public class World : MonoBehaviour
 
         // --- STEP 2: SYNCHRONOUSLY GENERATE ALL DATA ---
         Debug.Log("--- Generating all data within load distance ---");
+
+        Stopwatch stopwatch = new Stopwatch(); // Create stopwatch to measure time taken for initial data generation.
+        stopwatch.Start();
+
         // 1. First, just schedule generation for everything in the load radius.
-        LoadChunksInDataPass();
+        int loadedChunks = LoadChunksInDataPass();
 
         // 2. Force complete ONLY the data-related jobs (generation and lighting).
         //    Now, instead of a blocking call, we yield to (wait for) another coroutine.
         //    The code will PAUSE here and will not continue until ForceCompleteDataJobsCoroutine is finished.
         yield return StartCoroutine(ForceCompleteDataJobsCoroutine());
+
+        stopwatch.Stop();
+        long totalMilliseconds = stopwatch.ElapsedMilliseconds;
+        float avgTime = (float)totalMilliseconds / loadedChunks;
+        Debug.Log($"Initial data generation took {totalMilliseconds} ms for {loadedChunks} chunks (Load distance: {Instance.settings.loadDistance})");
+        Debug.Log($"Average time per chunk {avgTime} ms");
+
+        stopwatch.Reset();
 
         // --- STEP 3: ASYNCHRONOUSLY ACTIVATE AND MESH ---
         // We are now DONE with the synchronous part of Start().
@@ -276,8 +290,13 @@ public class World : MonoBehaviour
         Debug.Log("--- Startup complete ---");
     }
 
-    private void LoadChunksInDataPass()
+    /// <summary>
+    /// Loads all chunks in the data pass.
+    /// </summary>
+    /// <returns>The number of chunks loaded.</returns>
+    private int LoadChunksInDataPass()
     {
+        int loadedChunks = 0;
         int loadDist = settings.loadDistance;
         // We don't need the spiral loop here, a simple square loop is fine for startup.
         for (int x = -loadDist; x <= loadDist; x++)
@@ -289,9 +308,12 @@ public class World : MonoBehaviour
                 {
                     // This just schedules the generation job.
                     JobManager.ScheduleGeneration(coord);
+                    loadedChunks++;
                 }
             }
         }
+
+        return loadedChunks;
     }
 
     private IEnumerator ForceCompleteDataJobsCoroutine()
