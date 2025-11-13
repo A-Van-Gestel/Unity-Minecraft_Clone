@@ -23,37 +23,49 @@ public static class BlockBehavior
     /// change their state are added to the active update loop.
     /// </summary>
     /// <param name="chunkData">The data grid containing the voxel.</param>
-    /// <param name="pos">The local position of the voxel within the chunk.</param>
+    /// <param name="localPos">The local position of the voxel within the chunk.</param>
     /// <returns>True if the voxel needs to be ticked; otherwise, false.</returns>
-    public static bool Active(ChunkData chunkData, Vector3Int pos)
+    public static bool Active(ChunkData chunkData, Vector3Int localPos)
     {
         // Get the voxel's ID. If the position is invalid, this will throw an error,
         // which is intended as this should only be called for valid, active voxels.
-        VoxelState voxel = chunkData.VoxelFromV3Int(pos);
+        VoxelState? voxelNullable = chunkData.VoxelFromV3Int(localPos);
+
+        // If the voxel is null (eg: outside the world), it is not active.
+        if (!voxelNullable.HasValue)
+        {
+            return false;
+        }
+
+        // Convert voxel to non-nullable
+        VoxelState voxel = voxelNullable.Value;
+
+        // Get the voxel's properties & ID
         BlockType props = voxel.Properties;
         byte id = voxel.id;
 
+        // --- Grass Block ---
         if (id == 2) // Grass Block
         {
             // A grass block is active if there is an adjacent dirt block that it can spread to.
             // We must check all possible spread locations.
             // Check adjacent (cardinal directions)
-            if (IsConvertibleDirt(chunkData, pos + VoxelData.FaceChecks[0])) return true; // Back
-            if (IsConvertibleDirt(chunkData, pos + VoxelData.FaceChecks[1])) return true; // Front
-            if (IsConvertibleDirt(chunkData, pos + VoxelData.FaceChecks[4])) return true; // Left
-            if (IsConvertibleDirt(chunkData, pos + VoxelData.FaceChecks[5])) return true; // Right
+            if (IsConvertibleDirt(chunkData, localPos + VoxelData.FaceChecks[0])) return true; // Back
+            if (IsConvertibleDirt(chunkData, localPos + VoxelData.FaceChecks[1])) return true; // Front
+            if (IsConvertibleDirt(chunkData, localPos + VoxelData.FaceChecks[4])) return true; // Left
+            if (IsConvertibleDirt(chunkData, localPos + VoxelData.FaceChecks[5])) return true; // Right
 
             // Check one block above adjacent
-            if (IsConvertibleDirt(chunkData, pos + VoxelData.FaceChecks[0] + VoxelData.FaceChecks[2])) return true; // Back, Up
-            if (IsConvertibleDirt(chunkData, pos + VoxelData.FaceChecks[1] + VoxelData.FaceChecks[2])) return true; // Front, Up
-            if (IsConvertibleDirt(chunkData, pos + VoxelData.FaceChecks[4] + VoxelData.FaceChecks[2])) return true; // Left, Up
-            if (IsConvertibleDirt(chunkData, pos + VoxelData.FaceChecks[5] + VoxelData.FaceChecks[2])) return true; // Right, Up
+            if (IsConvertibleDirt(chunkData, localPos + VoxelData.FaceChecks[0] + VoxelData.FaceChecks[2])) return true; // Back, Up
+            if (IsConvertibleDirt(chunkData, localPos + VoxelData.FaceChecks[1] + VoxelData.FaceChecks[2])) return true; // Front, Up
+            if (IsConvertibleDirt(chunkData, localPos + VoxelData.FaceChecks[4] + VoxelData.FaceChecks[2])) return true; // Left, Up
+            if (IsConvertibleDirt(chunkData, localPos + VoxelData.FaceChecks[5] + VoxelData.FaceChecks[2])) return true; // Right, Up
 
             // Check one block below adjacent (for spreading "down" onto dirt next to an air block)
-            if (IsDirtNextToAir(chunkData, pos + VoxelData.FaceChecks[0])) return true; // Back
-            if (IsDirtNextToAir(chunkData, pos + VoxelData.FaceChecks[1])) return true; // Front
-            if (IsDirtNextToAir(chunkData, pos + VoxelData.FaceChecks[4])) return true; // Left
-            if (IsDirtNextToAir(chunkData, pos + VoxelData.FaceChecks[5])) return true; // Right
+            if (IsDirtNextToAir(chunkData, localPos + VoxelData.FaceChecks[0])) return true; // Back
+            if (IsDirtNextToAir(chunkData, localPos + VoxelData.FaceChecks[1])) return true; // Front
+            if (IsDirtNextToAir(chunkData, localPos + VoxelData.FaceChecks[4])) return true; // Left
+            if (IsDirtNextToAir(chunkData, localPos + VoxelData.FaceChecks[5])) return true; // Right
         }
 
         // --- Generic Fluid Activation Logic ---
@@ -62,7 +74,7 @@ public static class BlockBehavior
             // A fluid block is active if it has any potential to flow.
 
             // Reason 1: The block below is not solid or is a different fluid type.
-            VoxelState? belowState = chunkData.GetState(pos + Vector3Int.down);
+            VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
             if (!belowState.HasValue || !belowState.Value.Properties.isSolid || belowState.Value.Properties.fluidType != props.fluidType)
             {
                 return true; // Must be active to fall or interact.
@@ -80,7 +92,7 @@ public static class BlockBehavior
             // Reason 4: Check if any horizontal neighbor is a valid flow target (a place to flow TO).
             for (int i = 0; i < 4; i++)
             {
-                Vector3Int neighborPos = pos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
                 VoxelState? neighborState = chunkData.GetState(neighborPos);
 
                 if (!neighborState.HasValue) continue; // Edge of loaded world, cannot flow.
@@ -97,7 +109,7 @@ public static class BlockBehavior
             // This ensures it will drain away if the source is removed.
             for (int i = 0; i < 4; i++)
             {
-                Vector3Int neighborPos = pos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
                 VoxelState? neighborState = chunkData.GetState(neighborPos);
 
                 if (neighborState.HasValue &&
@@ -116,15 +128,31 @@ public static class BlockBehavior
     /// <summary>
     /// Performs block behavior and returns a list of VoxelMods to be applied by the World.
     /// </summary>
+    /// <param name="chunkData">The data grid containing the voxel.</param>
+    /// <param name="localPos">The local position of the voxel within the chunk.</param>
     /// <returns>A list of VoxelMod structs, or null if no changes occurred.</returns>
     [CanBeNull]
     public static List<VoxelMod> Behave(ChunkData chunkData, Vector3Int localPos)
     {
         Mods.Clear(); // Clear the reusable list before use.
-        VoxelState voxel = chunkData.VoxelFromV3Int(localPos);
+
+        // Get the voxel
+        VoxelState? voxelNullable = chunkData.VoxelFromV3Int(localPos);
+
+        // If the voxel is null (eg: outside the world), it can not behave.
+        if (!voxelNullable.HasValue)
+        {
+            return null;
+        }
+
+        // Convert voxel to non-nullable
+        VoxelState voxel = voxelNullable.Value;
+
+        // Get the voxel's properties & ID
         BlockType props = voxel.Properties;
         byte id = voxel.id;
 
+        // --- Grass Block ---
         if (id == 2) // Grass Block
         {
             // Condition 1: If there is a solid block on top, grass turns to dirt.
@@ -278,7 +306,7 @@ public static class BlockBehavior
             // Replace the block below with a new source block of this fluid.
             // This creates waterfalls and ensures fluid columns fill up from the bottom.
             Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
-            Mods.Add(new VoxelMod(globalBelowPos, blockId:  currentId)); // Place a new source block below
+            Mods.Add(new VoxelMod(globalBelowPos, blockId: currentId)); // Place a new source block below
 
             // If the current block was a flowing block (not a source), it has now flowed away
             // and should be replaced with air. Source blocks are infinite and remain.
@@ -304,7 +332,7 @@ public static class BlockBehavior
             if (neighborState.HasValue && (!neighborState.Value.Properties.isSolid || neighborState.Value.Properties.fluidType != FluidType.None))
             {
                 byte newLevel = (byte)(currentLevel + 1);
-                
+
                 // Flow into air or a fluid block with a lower level
                 if (neighborState.Value.id == 0 || (neighborState.Value.id == currentId && neighborState.Value.FluidLevel > newLevel))
                 {

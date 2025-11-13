@@ -288,18 +288,28 @@ namespace Data
         #region Helper Methods
 
         /// Get the index of a voxel to access it in the flat voxel map from a 3D local chunk position.
+        /// <param name="x">Local X coordinate</param>
+        /// <param name="y">Local Y coordinate</param>
+        /// <param name="z">Local Z coordinate</param>
+        /// <returns>Index of voxel</returns>
         private int GetIndexFromPosition(int x, int y, int z)
         {
             return x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
         }
 
         /// Jobs helper method for providing data to jobs
+        /// <param name="allocator">The allocator to use for the native array</param>
+        /// <returns>Jobs compatible array of voxels</returns>
         public NativeArray<uint> GetMapForJob(Allocator allocator)
         {
             return new NativeArray<uint>(map, allocator);
         }
 
         /// Check if a local voxel position is within the bounds of this chunk.
+        /// <param name="x">Local X coordinate</param>
+        /// <param name="y">Local Y coordinate</param>
+        /// <param name="z">Local Z coordinate</param>
+        /// <returns>True if voxel is in chunk</returns>
         public bool IsVoxelInChunk(int x, int y, int z)
         {
             return x is >= 0 and < VoxelData.ChunkWidth &&
@@ -307,33 +317,45 @@ namespace Data
                    z is >= 0 and < VoxelData.ChunkWidth;
         }
 
-        /// Check if voxel is in chunk from local position.
-        public bool IsVoxelInChunk(Vector3Int pos)
+        /// Check if a local voxel position is within the bounds of this chunk.
+        /// <param name="localPos">Local position</param>
+        /// <returns>True if voxel is in chunk</returns>
+        public bool IsVoxelInChunk(Vector3Int localPos)
         {
-            return IsVoxelInChunk(pos.x, pos.y, pos.z);
+            return IsVoxelInChunk(localPos.x, localPos.y, localPos.z);
         }
 
         /// Gets a VoxelState struct from a local position.
         /// Handles lookups that are outside this chunk by asking the world.
-        public VoxelState? GetState(Vector3Int pos)
+        /// <param name="localPos">Local position</param>
+        /// <returns>VoxelState struct or null if voxel is not in chunk</returns>
+        [CanBeNull]
+        public VoxelState? GetState(Vector3Int localPos)
         {
-            if (IsVoxelInChunk(pos.x, pos.y, pos.z))
+            if (IsVoxelInChunk(localPos.x, localPos.y, localPos.z))
             {
-                int index = GetIndexFromPosition(pos.x, pos.y, pos.z);
+                int index = GetIndexFromPosition(localPos.x, localPos.y, localPos.z);
                 uint packedData = map[index];
                 return new VoxelState(packedData);
             }
 
             // If it's not in this chunk, ask the world.
-            Vector3 globalPos = new Vector3(pos.x + position.x, pos.y, pos.z + position.y);
+            Vector3 globalPos = new Vector3(localPos.x + position.x, localPos.y, localPos.z + position.y);
             return World.Instance.worldData.GetVoxelState(globalPos);
         }
 
         /// Gets a VoxelState struct from a local position
-        /// NOTE: Make sure to check if voxel is in chunk first.
-        public VoxelState VoxelFromV3Int(Vector3Int pos)
+        /// <param name="localPos">Local position</param>
+        /// <returns>VoxelState struct or null if voxel is not in chunk</returns>
+        [CanBeNull]
+        public VoxelState? VoxelFromV3Int(Vector3Int localPos)
         {
-            uint packedData = map[GetIndexFromPosition(pos.x, pos.y, pos.z)];
+            if (!IsVoxelInChunk(localPos))
+            {
+                return null;
+            }
+
+            uint packedData = map[GetIndexFromPosition(localPos.x, localPos.y, localPos.z)];
             return new VoxelState(packedData);
         }
 
@@ -341,13 +363,14 @@ namespace Data
         /// Gets the highest voxel in a column in the chunk of the given position.
         /// If no solid voxels are found, returns the world height.
         /// </summary>
-        /// <param name="pos">Local position</param>
-        /// <returns></returns>
-        public Vector3Int GetHighestVoxel(Vector3Int pos)
+        /// <param name="localPos">Local position</param>
+        /// <returns>Local position of highest voxel</returns>
+        public Vector3Int GetHighestVoxel(Vector3Int localPos)
         {
+            // TODO: I believe this can be optimized by using the Chunk Height map, although not sure that the height map keeps track of structures.
             const int yMax = VoxelData.ChunkHeight - 1;
-            int x = pos.x;
-            int z = pos.z;
+            int x = localPos.x;
+            int z = localPos.z;
 
             for (int y = yMax; y > 0; y--)
             {

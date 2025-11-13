@@ -995,6 +995,8 @@ public class World : MonoBehaviour
     /// Adds a chunk to the queue to have its mesh rebuilt.
     /// For priority, add it to the front of the list.
     /// </summary>
+    /// <param name="chunk">The chunk to rebuild</param>
+    /// <param name="immediate">If true, rebuild the chunk as soon as possible</param>
     public void RequestChunkMeshRebuild([CanBeNull] Chunk chunk, bool immediate = false)
     {
         // We only add it if it's not already in the list to avoid redundant processing.
@@ -1006,10 +1008,15 @@ public class World : MonoBehaviour
             _chunksToBuildMesh.Add(chunk);
     }
 
-    private static ChunkCoord GetChunkCoordFromVector3(Vector3 pos)
+    /// <summary>
+    /// Returns the chunk coordinates for a given world position.
+    /// </summary>
+    /// <param name="worldPos">The world position</param>
+    /// <returns>The chunk coordinates for the given world position</returns>
+    private static ChunkCoord GetChunkCoordFromVector3(Vector3 worldPos)
     {
-        int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth);
-        int z = Mathf.FloorToInt(pos.z / VoxelData.ChunkWidth);
+        int x = Mathf.FloorToInt(worldPos.x / VoxelData.ChunkWidth);
+        int z = Mathf.FloorToInt(worldPos.z / VoxelData.ChunkWidth);
 
         return new ChunkCoord(x, z);
     }
@@ -1020,12 +1027,18 @@ public class World : MonoBehaviour
         int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth);
         int z = Mathf.FloorToInt(pos.z / VoxelData.ChunkWidth);
 
-        if (x == 0 && z == 0)
-            Debug.Log($"Getting chunk for position: {pos}, Chunk: {x}, {z}");
+        // "Is in World" bounds check before accessing the array.
+        if (!IsChunkInWorld(x, z))
+        {
+            return null; // Return null if the coordinate is outside the world.
+        }
 
         return chunks[x, z];
     }
 
+    /// <summary>
+    /// Checks the view distance and updates the active chunks.
+    /// </summary>
     private void CheckViewDistance()
     {
         clouds.UpdateClouds();
@@ -1121,10 +1134,10 @@ public class World : MonoBehaviour
     #region Debug Methods
 
     /// <summary>
-    /// Creates a visualisation of the chunk border.
+    /// Creates a visualization of the chunk border.
     /// </summary>
-    /// <param name="coord">The chunk coordinate.</param>
-    private void CreateChunkBorder(ChunkCoord coord)
+    /// <param name="chunkCoord">The chunk coordinate.</param>
+    private void CreateChunkBorder(ChunkCoord chunkCoord)
     {
         if (chunkBorderPrefab == null)
         {
@@ -1132,14 +1145,14 @@ public class World : MonoBehaviour
             return;
         }
 
-        if (_chunkBorders.ContainsKey(coord)) return;
+        if (_chunkBorders.ContainsKey(chunkCoord)) return;
 
         GameObject borderObject = Instantiate(chunkBorderPrefab, _chunkBorderParent);
-        borderObject.name = $"Border {coord.X}, {coord.Z}";
-        borderObject.transform.position = new Vector3(coord.X * VoxelData.ChunkWidth, 0, coord.Z * VoxelData.ChunkWidth);
+        borderObject.name = $"Border {chunkCoord.X}, {chunkCoord.Z}";
+        borderObject.transform.position = new Vector3(chunkCoord.X * VoxelData.ChunkWidth, 0, chunkCoord.Z * VoxelData.ChunkWidth);
 
         borderObject.SetActive(settings.showChunkBorders);
-        _chunkBorders.Add(coord, borderObject);
+        _chunkBorders.Add(chunkCoord, borderObject);
     }
 
     /// <summary>
@@ -1148,9 +1161,16 @@ public class World : MonoBehaviour
     /// <param name="chunkCoord">The chunk coordinate.</param>
     public void AddChunksToUpdateVisualization(ChunkCoord chunkCoord)
     {
-        _chunksToUpdateVisualization.Add(chunkCoord);
+        // Ensure we never add an out-of-bounds coordinate.
+        if (IsChunkInWorld(chunkCoord))
+        {
+            _chunksToUpdateVisualization.Add(chunkCoord);
+        }
     }
 
+    /// <summary>
+    /// Handles the visualization of the internal voxel state.
+    /// </summary>
     private void HandleVisualization()
     {
         // If the visualizer isn't set, do nothing.
@@ -1228,6 +1248,8 @@ public class World : MonoBehaviour
     /// Gathers the positions and colors of voxels to be visualized for a given chunk,
     /// based on the current visualization mode.
     /// </summary>
+    /// <param name="chunk">The chunk to gather voxel data from.</param>
+    /// <returns>A dictionary of voxel positions and their visualization colors.</returns>
     private Dictionary<Vector3Int, Color> GetVoxelDataForVisualization(Chunk chunk)
     {
         var voxelsToDraw = new Dictionary<Vector3Int, Color>();
@@ -1361,9 +1383,10 @@ public class World : MonoBehaviour
         return worldHeight;
     }
 
-    public bool CheckForVoxel(Vector3 pos)
+    /// Returns true when voxel is solid.
+    public bool CheckForVoxel(Vector3 worldPos)
     {
-        VoxelState? voxel = worldData.GetVoxelState(pos);
+        VoxelState? voxel = worldData.GetVoxelState(worldPos);
         return voxel.HasValue && blockDatabase.blockTypes[voxel.Value.id].isSolid;
     }
 
@@ -1374,9 +1397,10 @@ public class World : MonoBehaviour
         return voxel.HasValue && voxel.Value.Properties.isSolid && voxel.Value.Properties.fluidType == FluidType.None;
     }
 
-    public VoxelState? GetVoxelState(Vector3 pos)
+    /// Returns the voxel state at the given world position, or null if out of bounds.
+    public VoxelState? GetVoxelState(Vector3 worldPos)
     {
-        return worldData.GetVoxelState(pos);
+        return worldData.GetVoxelState(worldPos);
     }
 
     public bool inUI
@@ -1397,10 +1421,18 @@ public class World : MonoBehaviour
         }
     }
 
-    private static bool IsChunkInWorld(ChunkCoord coord)
+    /// Returns true when chunk is in world, otherwise false.
+    private static bool IsChunkInWorld(ChunkCoord chunkCoord)
     {
-        return coord.X is >= 0 and < VoxelData.WorldSizeInChunks &&
-               coord.Z is >= 0 and < VoxelData.WorldSizeInChunks;
+        return chunkCoord.X is >= 0 and < VoxelData.WorldSizeInChunks &&
+               chunkCoord.Z is >= 0 and < VoxelData.WorldSizeInChunks;
+    }
+
+    /// Returns true when chunk is in world, otherwise false.
+    private static bool IsChunkInWorld(int x, int z)
+    {
+        return x is >= 0 and < VoxelData.WorldSizeInChunks &&
+               z is >= 0 and < VoxelData.WorldSizeInChunks;
     }
 
     #region Public Interface Methods
