@@ -181,6 +181,13 @@ MonoBehaviour:
   playerWidth: 0.4
   playerHeight: 1.8
   orientation: 0
+  toggleDebugScreenKey: 284
+  toggleFlyingKey: 282
+  toggleNoclipKey: 287
+  toggleBlockHighlightKey: 283
+  saveWorldKey: 285
+  toggleChunkBordersKey: 286
+  cycleVisModeKey: 288
 --- !u!114 &151001799
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -613,6 +620,7 @@ GameObject:
   m_Component:
   - component: {fileID: 370022898}
   - component: {fileID: 370022897}
+  - component: {fileID: 370022899}
   m_Layer: 0
   m_Name: BenchmarkRunner
   m_TagString: Untagged
@@ -654,6 +662,25 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &370022899
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 370022896}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c21ea255961f4b50a20211c8f5dd7e49, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Benchmarks.MeshGenerationBenchmark
+  _benchmarkEnabled: 1
+  _chunksToMesh: 512
+  _mode: 1
+  _dataType: 1
+  _useBlockingWait: 1
+  _runOnStart: 1
+  _triggerKey: 109
 --- !u!1 &439044754
 GameObject:
   m_ObjectHideFlags: 0

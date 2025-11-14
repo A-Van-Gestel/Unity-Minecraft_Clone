@@ -21,8 +21,8 @@ public class WorldJobManager
     {
         _world = world;
     }
-    
-    
+
+
     public void ScheduleGeneration(ChunkCoord coord)
     {
         // Don't schedule if a job is already running for it.
@@ -68,7 +68,7 @@ public class WorldJobManager
             HeightMap = outputHeightMap,
             Mods = modificationsQueue,
         };
-        
+
         generationJobs.Add(coord, jobData);
     }
 
@@ -94,29 +94,49 @@ public class WorldJobManager
 
         // 1. Allocate all input maps with TempJob. They will be used and then disposed.
         var map = _world.worldData.GetChunkMapForJob(new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth), Allocator.TempJob);
-        var back = _world.worldData.GetChunkMapForJob(new Vector2Int(coord.X * VoxelData.ChunkWidth, (coord.Z - 1) * VoxelData.ChunkWidth), Allocator.TempJob);
-        var front = _world.worldData.GetChunkMapForJob(new Vector2Int(coord.X * VoxelData.ChunkWidth, (coord.Z + 1) * VoxelData.ChunkWidth), Allocator.TempJob);
-        var left = _world.worldData.GetChunkMapForJob(new Vector2Int((coord.X - 1) * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth), Allocator.TempJob);
-        var right = _world.worldData.GetChunkMapForJob(new Vector2Int((coord.X + 1) * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth), Allocator.TempJob);
+
+        // Fetch all 8 neighbors for robust corner meshing
+        Vector2Int p = new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth);
+        const int w = VoxelData.ChunkWidth;
+
+        // Cardinal Neighbors
+        var back = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, -w), Allocator.TempJob);
+        var front = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, w), Allocator.TempJob);
+        var left = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, 0), Allocator.TempJob);
+        var right = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, 0), Allocator.TempJob);
+        // Diagonal Neighbors
+        var frontRight = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, w), Allocator.TempJob);
+        var backRight = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, -w), Allocator.TempJob);
+        var backLeft = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, -w), Allocator.TempJob);
+        var frontLeft = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, w), Allocator.TempJob);
 
         // The output data must be persistent, as it lives until processed on the main thread.
         MeshDataJobOutput meshOutput = new MeshDataJobOutput(Allocator.Persistent);
 
         MeshGenerationJob job = new MeshGenerationJob
         {
+            // --- Input data ---
             Map = map,
             BlockTypes = _world.JobDataManager.BlockTypesJobData,
             ChunkPosition = chunk.ChunkPosition,
+            // Cardinal neighbors
             NeighborBack = back,
             NeighborFront = front,
             NeighborLeft = left,
             NeighborRight = right,
+            // Diagonal neighbors
+            NeighborFrontRight = frontRight,
+            NeighborBackRight = backRight,
+            NeighborBackLeft = backLeft,
+            NeighborFrontLeft = frontLeft,
+            // Custom data
             CustomMeshes = _world.JobDataManager.CustomMeshesJobData,
             CustomFaces = _world.JobDataManager.CustomFacesJobData,
             CustomVerts = _world.JobDataManager.CustomVertsJobData,
             CustomTris = _world.JobDataManager.CustomTrisJobData,
             WaterVertexTemplates = _world.FluidVertexTemplates.WaterVertexTemplates,
             LavaVertexTemplates = _world.FluidVertexTemplates.LavaVertexTemplates,
+            // --- Output ----
             Output = meshOutput,
         };
 
@@ -125,12 +145,16 @@ public class WorldJobManager
 
         // 3. Create a NativeArray to hold all the disposal handles, and make them dependent on the main job's handle.
         //    This means "Don't dispose of 'map' until 'meshJobHandle' is complete".
-        var disposalHandles = new NativeArray<JobHandle>(5, Allocator.TempJob);
+        var disposalHandles = new NativeArray<JobHandle>(9, Allocator.TempJob);
         disposalHandles[0] = map.Dispose(meshJobHandle);
         disposalHandles[1] = back.Dispose(meshJobHandle);
         disposalHandles[2] = front.Dispose(meshJobHandle);
         disposalHandles[3] = left.Dispose(meshJobHandle);
         disposalHandles[4] = right.Dispose(meshJobHandle);
+        disposalHandles[5] = frontRight.Dispose(meshJobHandle);
+        disposalHandles[6] = backRight.Dispose(meshJobHandle);
+        disposalHandles[7] = backLeft.Dispose(meshJobHandle);
+        disposalHandles[8] = frontLeft.Dispose(meshJobHandle);
 
         // 4. Combine all the disposal handles into a single final handle.
         //    This handle will be complete only after the mesh job AND all its input disposal jobs are done.
@@ -193,10 +217,12 @@ public class WorldJobManager
         var heightmap = new NativeArray<byte>(chunk.ChunkData.heightMap, Allocator.TempJob);
         Vector2Int p = chunk.ChunkData.position;
         const int w = VoxelData.ChunkWidth;
+        // Cardinal Neighbors
         var neighborN = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, w), Allocator.TempJob);
         var neighborE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, 0), Allocator.TempJob);
         var neighborS = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, -w), Allocator.TempJob);
         var neighborW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, 0), Allocator.TempJob);
+        // Diagonal Neighbors
         var neighborNE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, w), Allocator.TempJob);
         var neighborSE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, -w), Allocator.TempJob);
         var neighborSW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, -w), Allocator.TempJob);

@@ -46,6 +46,20 @@ namespace Jobs
         public NativeArray<uint> NeighborRight;
         // Top and Bottom neighbors are not needed as chunks are only horizontal neighbors
 
+        // TODO: Are these diagonal neighbor's truly needed for correct meshing? I can only think of the fluids where this might be needed (eg: corner smoothing). As if not, we can remove them to reduce the data flow.
+        // Diagonal neighbors for correct corner meshing
+        [ReadOnly]
+        public NativeArray<uint> NeighborFrontRight; // North-East
+
+        [ReadOnly]
+        public NativeArray<uint> NeighborBackRight; // South-East
+
+        [ReadOnly]
+        public NativeArray<uint> NeighborBackLeft; // South-West
+
+        [ReadOnly]
+        public NativeArray<uint> NeighborFrontLeft; // North-West
+
         // --- FLUID DATA TEMPLATES ---
         [ReadOnly]
         public NativeArray<float> WaterVertexTemplates;
@@ -219,6 +233,7 @@ namespace Jobs
         /// </summary>
         /// <param name="pos">The local position to check (e.g., (-1, 10, 16)).</param>
         /// <returns>A VoxelState if the position is in a loaded neighbor chunk, otherwise null.</returns>
+        // TODO: I don't believe this is fully cross chunk compatible, as there are small gaps between chunks where different fluid level's are not fully smoothed out.
         private VoxelState? GetVoxelStateFromLocalPos(Vector3Int pos)
         {
             if (pos.y < 0 || pos.y >= VoxelData.ChunkHeight) return null;
@@ -233,13 +248,13 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = NeighborBack;
+                    targetMap = NeighborBackLeft;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = NeighborFront;
-                } // ERROR: Was neighborNW
+                    targetMap = NeighborFrontLeft;
+                }
                 else
                 {
                     targetMap = NeighborLeft;
@@ -251,12 +266,12 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = NeighborBack;
-                } // ERROR: Was neighborSE
+                    targetMap = NeighborBackRight;
+                }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = NeighborFront;
+                    targetMap = NeighborFrontRight;
                 }
                 else
                 {
