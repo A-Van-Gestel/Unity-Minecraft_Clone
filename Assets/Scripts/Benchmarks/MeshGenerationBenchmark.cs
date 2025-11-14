@@ -102,7 +102,11 @@ namespace Benchmarks
 
             // --- Setup ---
             var jobHandles = new NativeArray<JobHandle>(_chunksToMesh, Allocator.Persistent);
-            var meshDataToDispose = new List<MeshDataJobOutput>(_chunksToMesh);
+
+            // Lists to track all allocated memory
+            var inputDataToDispose = new List<BenchmarkVoxelData>(_chunksToMesh);
+            var outputDataToDispose = new List<MeshDataJobOutput>(_chunksToMesh);
+
             var stopwatch = new Stopwatch();
 
             // Generate the source data ONCE. All jobs will read from this same data
@@ -116,14 +120,15 @@ namespace Benchmarks
 
                 for (int i = 0; i < _chunksToMesh; i++)
                 {
-                    // *** FIX 1: Create a NEW temporary data container for EACH job. ***
-                    var tempJobData = new BenchmarkVoxelData(Allocator.TempJob);
-                    tempJobData.CopyFrom(benchmarkData); // Copy the persistent data into the temporary container.
+                    // For each job, create its input data with Allocator.Persistent
+                    var jobInputData = new BenchmarkVoxelData(Allocator.Persistent);
+                    jobInputData.CopyFrom(benchmarkData);
+                    inputDataToDispose.Add(jobInputData); // Track it for cleanup
 
-                    // Schedule the job using this unique temporary data. The job system will now correctly manage its disposal.
-                    var jobInfo = ScheduleBenchmarkMeshing(tempJobData);
+                    // Schedule the job
+                    var jobInfo = ScheduleBenchmarkMeshing(jobInputData);
                     jobHandles[i] = jobInfo.handle;
-                    meshDataToDispose.Add(jobInfo.output);
+                    outputDataToDispose.Add(jobInfo.output); // Track output for cleanup
                 }
 
                 Debug.Log($"Scheduled all {_chunksToMesh} jobs. Waiting for completion...");
@@ -148,12 +153,6 @@ namespace Benchmarks
                 // At this point, all jobs are 100% finished. It is now safe to handle their output data.
                 stopwatch.Stop();
 
-                // *** FIX 2: Dispose of the OUTPUT data here, AFTER Complete() and before exiting the 'try' block. ***
-                foreach (var data in meshDataToDispose)
-                {
-                    data.Dispose();
-                }
-
                 // --- Results ---
                 long totalMilliseconds = stopwatch.ElapsedMilliseconds;
                 float avgTime = (float)totalMilliseconds / _chunksToMesh;
@@ -173,6 +172,17 @@ namespace Benchmarks
                 // Dispose of the original persistent source data.
                 benchmarkData.Dispose();
 
+                // Dispose of all tracked input and output data
+                foreach (var data in inputDataToDispose)
+                {
+                    data.Dispose();
+                }
+
+                foreach (var data in outputDataToDispose)
+                {
+                    data.Dispose();
+                }
+
                 _isBenchmarking = false;
             }
         }
@@ -186,8 +196,8 @@ namespace Benchmarks
 
             // Create an empty array for the unused diagonal slots if needed.
             // We must dispose of this ourselves now.
-            var emptyArray = _mode == BenchmarkMode.CardinalsOnly 
-                ? new NativeArray<uint>(0, Allocator.TempJob) 
+            var emptyArray = _mode == BenchmarkMode.CardinalsOnly
+                ? new NativeArray<uint>(0, Allocator.TempJob)
                 : default;
 
             var job = new MeshGenerationJob
@@ -214,37 +224,14 @@ namespace Benchmarks
                 Output = meshOutput,
             };
 
-            JobHandle meshJobHandle = job.Schedule();
-
-            // The disposal chain must now handle up to 10 arrays (Center, 8 neighbors, 1 empty)
-            int neighborCount = _mode == BenchmarkMode.WithDiagonals ? 8 : 4;
-            var disposalHandles = new NativeArray<JobHandle>(neighborCount + 2, Allocator.TempJob); // +2 for Center and emptyArray
-
-            // ALWAYS dispose the center map
-            disposalHandles[0] = data.Center.Dispose(meshJobHandle);
-
-            // Dispose cardinal neighbors
-            disposalHandles[1] = data.Back.Dispose(meshJobHandle);
-            disposalHandles[2] = data.Front.Dispose(meshJobHandle);
-            disposalHandles[3] = data.Left.Dispose(meshJobHandle);
-            disposalHandles[4] = data.Right.Dispose(meshJobHandle);
-
-            if (_mode == BenchmarkMode.WithDiagonals)
+            // Schedule the job and, if we created an empty array, schedule its disposal dependent on the job.
+            JobHandle handle = job.Schedule();
+            if (emptyArray.IsCreated)
             {
-                disposalHandles[5] = data.FrontRight.Dispose(meshJobHandle);
-                disposalHandles[6] = data.BackRight.Dispose(meshJobHandle);
-                disposalHandles[7] = data.BackLeft.Dispose(meshJobHandle);
-                disposalHandles[8] = data.FrontLeft.Dispose(meshJobHandle);
+                handle = emptyArray.Dispose(handle);
             }
 
-            // ALWAYS dispose the empty array we created
-            disposalHandles[neighborCount + 1] = emptyArray.Dispose(meshJobHandle);
-
-            JobHandle combinedDisposalHandle = JobHandle.CombineDependencies(disposalHandles);
-            // The final handle now correctly represents the completion of the mesh job AND the cleanup of ALL its temporary data.
-            JobHandle finalHandle = disposalHandles.Dispose(combinedDisposalHandle);
-
-            return (finalHandle, meshOutput);
+            return (handle, meshOutput);
         }
 
         /// <summary>
