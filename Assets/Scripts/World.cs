@@ -652,44 +652,53 @@ public class World : MonoBehaviour
         _modifications.Enqueue(singleModQueue);
     }
 
+    /// <summary>
+    /// The central handler for voxel modifications. This method queues mesh rebuilds and debug visualization updates
+    /// for the source chunk and all affected cardinal and diagonal neighbors.
+    /// </summary>
+    /// <param name="chunkPos">The world-space coordinate of the chunk where the modification occurred.</param>
+    /// <param name="localVoxelPos">The position of the modified voxel within its own chunk, used for border detection.</param>
+    /// <param name="immediate">If true, the mesh rebuild requests are prioritized to be processed as soon as possible.</param>
     public void NotifyChunkModified(Vector2Int chunkPos, Vector3Int localVoxelPos, bool immediate)
     {
-        // 1. The chunk that was modified always needs a rebuild.
+        // --- 1. Queue Mesh Rebuilds ---
+
+        // The chunk that was directly modified always needs a rebuild.
         ChunkCoord coord = new ChunkCoord(chunkPos);
         if (chunks[coord.X, coord.Z] != null)
         {
             RequestChunkMeshRebuild(chunks[coord.X, coord.Z], immediate);
         }
 
-        // 2. If the modification happened on a border, queue the neighbor with the same priority.
-        // Check X-axis borders
-        if (localVoxelPos.x == 0)
-            QueueNeighborRebuild(chunkPos + new Vector2Int(-VoxelData.ChunkWidth, 0), immediate);
-        else if (localVoxelPos.x == VoxelData.ChunkWidth - 1)
-            QueueNeighborRebuild(chunkPos + new Vector2Int(VoxelData.ChunkWidth, 0), immediate);
+        // Determine which borders the modification is on for efficient neighbor updates.
+        bool onWestBorder = localVoxelPos.x == 0;
+        bool onEastBorder = localVoxelPos.x == VoxelData.ChunkWidth - 1;
+        bool onSouthBorder = localVoxelPos.z == 0;
+        bool onNorthBorder = localVoxelPos.z == VoxelData.ChunkWidth - 1;
 
-        // Check Z-axis borders
-        if (localVoxelPos.z == 0)
-            QueueNeighborRebuild(chunkPos + new Vector2Int(0, -VoxelData.ChunkWidth), immediate);
-        else if (localVoxelPos.z == VoxelData.ChunkWidth - 1)
-            QueueNeighborRebuild(chunkPos + new Vector2Int(0, VoxelData.ChunkWidth), immediate);
+        // Queue rebuilds for cardinal neighbors.
+        if (onWestBorder) QueueNeighborRebuild(chunkPos + new Vector2Int(-VoxelData.ChunkWidth, 0), immediate);
+        if (onEastBorder) QueueNeighborRebuild(chunkPos + new Vector2Int(VoxelData.ChunkWidth, 0), immediate);
+        if (onSouthBorder) QueueNeighborRebuild(chunkPos + new Vector2Int(0, -VoxelData.ChunkWidth), immediate);
+        if (onNorthBorder) QueueNeighborRebuild(chunkPos + new Vector2Int(0, VoxelData.ChunkWidth), immediate);
 
-        // --- Debug Visualization ---
-        // Update visualization for this chunk.
+        // Queue rebuilds for diagonal neighbors if the modification was on a corner.
+        // This is critical for seamless fluid mesh smoothing.
+        if (onWestBorder && onSouthBorder) QueueNeighborRebuild(chunkPos + new Vector2Int(-VoxelData.ChunkWidth, -VoxelData.ChunkWidth), immediate);
+        if (onEastBorder && onSouthBorder) QueueNeighborRebuild(chunkPos + new Vector2Int(VoxelData.ChunkWidth, -VoxelData.ChunkWidth), immediate);
+        if (onWestBorder && onNorthBorder) QueueNeighborRebuild(chunkPos + new Vector2Int(-VoxelData.ChunkWidth, VoxelData.ChunkWidth), immediate);
+        if (onEastBorder && onNorthBorder) QueueNeighborRebuild(chunkPos + new Vector2Int(VoxelData.ChunkWidth, VoxelData.ChunkWidth), immediate);
+
+        // --- 2. Queue Debug Visualization Updates ---
+
+        // Always update the visualization for the directly modified chunk.
         AddChunksToUpdateVisualization(new ChunkCoord(chunkPos));
 
-        // If the modification happened on a border, queue the neighbor for visualization.
-        // Check X-axis borders
-        if (localVoxelPos.x == 0)
-            AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(-VoxelData.ChunkWidth, 0)));
-        else if (localVoxelPos.x == VoxelData.ChunkWidth - 1)
-            AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(VoxelData.ChunkWidth, 0)));
-
-        // Check Z-axis borders
-        if (localVoxelPos.z == 0)
-            AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(0, -VoxelData.ChunkWidth)));
-        else if (localVoxelPos.z == VoxelData.ChunkWidth - 1)
-            AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(0, VoxelData.ChunkWidth)));
+        // Queue updates for cardinal neighbors. As analyzed, diagonal updates are not needed for visualization.
+        if (onWestBorder) AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(-VoxelData.ChunkWidth, 0)));
+        if (onEastBorder) AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(VoxelData.ChunkWidth, 0)));
+        if (onSouthBorder) AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(0, -VoxelData.ChunkWidth)));
+        if (onNorthBorder) AddChunksToUpdateVisualization(new ChunkCoord(chunkPos + new Vector2Int(0, VoxelData.ChunkWidth)));
     }
 
     private void QueueNeighborRebuild(Vector2Int neighborV2Coord, bool immediate = false)

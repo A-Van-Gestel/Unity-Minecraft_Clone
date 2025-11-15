@@ -46,8 +46,8 @@ namespace Jobs
         public NativeArray<uint> NeighborRight;
         // Top and Bottom neighbors are not needed as chunks are only horizontal neighbors
 
-        // TODO: Are these diagonal neighbor's truly needed for correct meshing? I can only think of the fluids where this might be needed (eg: corner smoothing). As if not, we can remove them to reduce the data flow.
-        // Diagonal neighbors for correct corner meshing
+        // Diagonal neighbors are required for correct fluid mesh corner smoothing.
+        // Benchmarking confirmed that conditionally removing them provides no significant performance gain, so they are always included for simplicity.
         [ReadOnly]
         public NativeArray<uint> NeighborFrontRight; // North-East
 
@@ -233,7 +233,6 @@ namespace Jobs
         /// </summary>
         /// <param name="pos">The local position to check (e.g., (-1, 10, 16)).</param>
         /// <returns>A VoxelState if the position is in a loaded neighbor chunk, otherwise null.</returns>
-        // TODO: I don't believe this is fully cross chunk compatible, as there are small gaps between chunks where different fluid level's are not fully smoothed out.
         private VoxelState? GetVoxelStateFromLocalPos(Vector3Int pos)
         {
             if (pos.y < 0 || pos.y >= VoxelData.ChunkHeight) return null;
