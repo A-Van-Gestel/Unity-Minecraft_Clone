@@ -4,8 +4,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
 
-// This job CANNOT be Burst compiled because WorldGen.GetVoxel uses Mathf.PerlinNoise,
-// which is managed code. The performance gain comes from multithreading, not Burst.
+// TODO: This job CANNOT be Burst compiled because WorldGen.GetVoxel uses Mathf.PerlinNoise, which is managed code.
 // [BurstCompile] 
 namespace Jobs
 {
