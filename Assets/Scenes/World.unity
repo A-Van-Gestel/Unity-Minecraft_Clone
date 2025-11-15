@@ -641,10 +641,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DebugVisualizations.ChunkGenerationBenchmark
   _benchMarkEnabled: 0
+  _runFullComparison: 1
+  _benchmarkRuns: 50
   _chunksToGenerate: 256
   _mode: 1
   _parallelBatchSize: 8
-  _useBlockingWait: 0
+  _useBlockingWait: 1
   _runOnStart: 0
   _triggerKey: 98
 --- !u!4 &370022898
@@ -674,12 +676,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c21ea255961f4b50a20211c8f5dd7e49, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Benchmarks.MeshGenerationBenchmark
-  _benchmarkEnabled: 1
+  _benchMarkEnabled: 0
+  _runFullComparison: 1
+  _benchmarkRuns: 50
   _chunksToMesh: 512
   _mode: 1
   _dataType: 1
   _useBlockingWait: 1
-  _runOnStart: 1
+  _runOnStart: 0
   _triggerKey: 109
 --- !u!1 &439044754
 GameObject:
