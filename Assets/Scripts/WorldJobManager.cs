@@ -394,9 +394,17 @@ public class WorldJobManager
             {
                 jobEntry.Value.Handle.Complete();
                 LightingJobData jobData = jobEntry.Value;
-                bool isChunkStable = jobData.IsStable[0];
 
                 ChunkData chunkData = _world.worldData.RequestChunk(new Vector2Int(jobEntry.Key.X * VoxelData.ChunkWidth, jobEntry.Key.Z * VoxelData.ChunkWidth), false);
+
+                // Flag this chunk to prevent neighbors from meshing until its results are fully processed.
+                if (chunkData != null)
+                {
+                    chunkData.IsAwaitingMainThreadProcess = true;
+                }
+
+                bool isChunkStable = jobData.IsStable[0];
+
                 if (chunkData != null && chunkData.IsPopulated)
                 {
                     // 1. Copy the modified map back to the central chunk.
@@ -477,6 +485,10 @@ public class WorldJobManager
                     // We re-assert the flag to ensure the scheduler picks it up next frame.
                     if (chunkData != null) chunkData.HasLightChangesToProcess = true;
                 }
+
+                // All results for this chunk have been processed and propagated.
+                // It is now safe for neighbors to consider this chunk's data stable for meshing.
+                if (chunkData != null) chunkData.IsAwaitingMainThreadProcess = false;
 
                 // 4. Dispose of all the job's persistent data.
                 jobData.Dispose();

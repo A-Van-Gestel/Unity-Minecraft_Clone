@@ -46,6 +46,12 @@ namespace Data
         [NonSerialized]
         public bool HasLightChangesToProcess = false;
 
+        /// <summary>
+        /// A transient flag indicating that a lighting job for this chunk has completed, but its results (e.g., cross-chunk modifications) are still pending processing on the main thread.
+        /// </summary>
+        [NonSerialized]
+        public bool IsAwaitingMainThreadProcess = false;
+
         [NonSerialized]
         private readonly Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
 

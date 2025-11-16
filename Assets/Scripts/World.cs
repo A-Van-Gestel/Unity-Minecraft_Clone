@@ -754,13 +754,20 @@ public class World : MonoBehaviour
         return true;
     }
 
-    public bool AreNeighborsReadyAndLit(ChunkCoord coord)
+    /// <summary>
+    /// Checks if all of a chunk's cardinal neighbors have finished generating their data and have a stable lighting state.
+    /// A neighbor is considered "ready" if no generation or lighting job is running for it, and it has no pending
+    /// lighting updates on the main thread. This is a prerequisite for scheduling a mesh generation job.
+    /// </summary>
+    /// <param name="chunkCoord">The coordinate of the central chunk whose neighbors are to be checked.</param>
+    /// <returns>True if all neighbors are fully generated and lit; otherwise, false.</returns>
+    public bool AreNeighborsReadyAndLit(ChunkCoord chunkCoord)
     {
         // Check all 4 horizontal neighbors
         foreach (int faceIndex in VoxelData.HorizontalFaceChecksIndices)
         {
             Vector3Int offset = VoxelData.FaceChecks[faceIndex];
-            ChunkCoord neighborCoord = new ChunkCoord(coord.X + offset.x, coord.Z + offset.z);
+            ChunkCoord neighborCoord = new ChunkCoord(chunkCoord.X + offset.x, chunkCoord.Z + offset.z);
 
             if (IsChunkInWorld(neighborCoord))
             {
@@ -776,11 +783,20 @@ public class World : MonoBehaviour
                     return false; // Neighbor is still calculating light, we must wait.
                 }
 
-                // Also check the main-thread flag for the neighbor.
                 Vector2Int neighborV2Pos = new Vector2Int(neighborCoord.X * VoxelData.ChunkWidth, neighborCoord.Z * VoxelData.ChunkWidth);
-                if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData) && neighborData.HasLightChangesToProcess)
+                if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData))
                 {
-                    return false; // Neighbor has pending light changes that haven't even been scheduled yet.
+                    // Does the neighbor have pending light changes that haven't even been scheduled yet?
+                    if (neighborData.HasLightChangesToProcess)
+                    {
+                        return false; // Neighbor has pending light changes that haven't even been scheduled yet, we must wait.
+                    }
+
+                    // Is the neighbor waiting for its completed lighting job to be processed on the main thread?
+                    if (neighborData.IsAwaitingMainThreadProcess)
+                    {
+                        return false; // Neighbor is in a transitional state, we must wait.
+                    }
                 }
             }
         }
