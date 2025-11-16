@@ -181,9 +181,30 @@ public class WorldJobManager
         }
 
         // --- Prepare Data for the Job ---
-        // Persistent data that the main thread needs to access after the job is done.
-        LightingJobData jobData = new LightingJobData
+
+        // --- 1. ALLOCATE INPUT DATA ---
+        var inputData = new LightingJobInputData();
+        
+        // Get all 8 Neighbor Maps and the heightmap (Read-Only, disposed by job dependency)
+        Vector2Int p = chunk.ChunkData.position;
+        const int w = VoxelData.ChunkWidth;
+
+        inputData.Heightmap = new NativeArray<byte>(chunk.ChunkData.heightMap, Allocator.Persistent);
+        // Cardinal Neighbors
+        inputData.NeighborN = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, w), Allocator.Persistent);
+        inputData.NeighborE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, 0), Allocator.Persistent);
+        inputData.NeighborS = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, -w), Allocator.Persistent);
+        inputData.NeighborW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, 0), Allocator.Persistent);
+        // Diagonal Neighbors
+        inputData.NeighborNE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, w), Allocator.Persistent);
+        inputData.NeighborSE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, -w), Allocator.Persistent);
+        inputData.NeighborSW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, -w), Allocator.Persistent);
+        inputData.NeighborNW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, w), Allocator.Persistent);
+
+        // --- 2. ALLOCATE OUTPUT DATA ---
+        var jobData = new LightingJobData
         {
+            Input = inputData, // Store the input data for later disposal
             Map = new NativeArray<uint>(chunk.ChunkData.map, Allocator.Persistent),
             Mods = new NativeList<LightModification>(Allocator.Persistent),
             IsStable = new NativeArray<bool>(1, Allocator.Persistent),
@@ -213,21 +234,6 @@ public class WorldJobManager
             _world.worldData.SunlightRecalculationQueue.Remove(col);
         }
 
-        // Get all 8 Neighbor Maps and the heightmap (Read-Only, disposed by job dependency)
-        var heightmap = new NativeArray<byte>(chunk.ChunkData.heightMap, Allocator.TempJob);
-        Vector2Int p = chunk.ChunkData.position;
-        const int w = VoxelData.ChunkWidth;
-        // Cardinal Neighbors
-        var neighborN = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, w), Allocator.TempJob);
-        var neighborE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, 0), Allocator.TempJob);
-        var neighborS = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, -w), Allocator.TempJob);
-        var neighborW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, 0), Allocator.TempJob);
-        // Diagonal Neighbors
-        var neighborNE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, w), Allocator.TempJob);
-        var neighborSE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, -w), Allocator.TempJob);
-        var neighborSW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, -w), Allocator.TempJob);
-        var neighborNW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, w), Allocator.TempJob);
-
         NeighborhoodLightingJob job = new NeighborhoodLightingJob
         {
             // Writable data for the central chunk
@@ -238,9 +244,11 @@ public class WorldJobManager
             SunlightColumnRecalcQueue = jobData.SunLightRecalcQueue,
 
             // Read-only heightmap & neighbor data
-            Heightmap = heightmap,
-            NeighborN = neighborN, NeighborE = neighborE, NeighborS = neighborS, NeighborW = neighborW,
-            NeighborNE = neighborNE, NeighborSE = neighborSE, NeighborSW = neighborSW, NeighborNW = neighborNW,
+            Heightmap = jobData.Input.Heightmap,
+            NeighborN = jobData.Input.NeighborN, NeighborE = jobData.Input.NeighborE,
+            NeighborS = jobData.Input.NeighborS, NeighborW = jobData.Input.NeighborW,
+            NeighborNE = jobData.Input.NeighborNE, NeighborSE = jobData.Input.NeighborSE,
+            NeighborSW = jobData.Input.NeighborSW, NeighborNW = jobData.Input.NeighborNW,
 
             BlockTypes = _world.JobDataManager.BlockTypesJobData,
 
@@ -249,29 +257,13 @@ public class WorldJobManager
             IsStable = jobData.IsStable,
         };
 
-        // Schedule the main job
-        JobHandle jobHandle = job.Schedule();
-
-        // Create a dependency chain to dispose all the TempJob neighbor arrays after the main job is complete.
-        var disposalHandles = new NativeArray<JobHandle>(9, Allocator.TempJob);
-        disposalHandles[0] = heightmap.Dispose(jobHandle);
-        disposalHandles[0] = neighborN.Dispose(jobHandle);
-        disposalHandles[1] = neighborE.Dispose(jobHandle);
-        disposalHandles[2] = neighborS.Dispose(jobHandle);
-        disposalHandles[3] = neighborW.Dispose(jobHandle);
-        disposalHandles[4] = neighborNE.Dispose(jobHandle);
-        disposalHandles[5] = neighborSE.Dispose(jobHandle);
-        disposalHandles[6] = neighborSW.Dispose(jobHandle);
-        disposalHandles[7] = neighborNW.Dispose(jobHandle);
-
-        // Combine all disposal jobs into one handle.
-        JobHandle combinedDisposalHandle = JobHandle.CombineDependencies(disposalHandles);
-        jobData.Handle = disposalHandles.Dispose(combinedDisposalHandle);
+        // Schedule the job.
+        jobData.Handle = job.Schedule();
 
         // Reset the flag, because we are now scheduling a job to process these changes.
         chunk.ChunkData.HasLightChangesToProcess = false;
 
-        // Store the handle and all persistent data that needs to be processed and disposed of later.
+        // Store the handle and all persistent data (input and output) that needs to be processed and disposed of later.
         lightingJobs.Add(coord, jobData);
     }
 
