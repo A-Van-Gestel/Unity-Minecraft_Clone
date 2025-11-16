@@ -318,7 +318,8 @@ public class WorldJobManager
                 // --- STAGE 3: Now that the chunk has its final form, calculate lighting ---
                 if (_world.settings.enableLighting)
                 {
-                    chunkData.RecalculateSunLightLight();
+                    // Set the flag to indicate that the chunk needs initial lighting.
+                    chunkData.NeedsInitialLighting = true;
                 }
                 else
                 {

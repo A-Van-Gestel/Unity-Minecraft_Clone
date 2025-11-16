@@ -43,6 +43,15 @@ namespace Data
         public bool IsPopulated;
 
         // --- lighting ---
+        /// <summary>
+        /// A transient flag indicating that the chunk's data has been populated, but it has not yet undergone its initial, mandatory lighting calculation.
+        /// </summary>
+        [NonSerialized]
+        public bool NeedsInitialLighting = false;
+
+        /// <summary>
+        /// A transient flag indicating that the chunk has pending general light changes that need to be processed on the main thread.
+        /// </summary>
         [NonSerialized]
         public bool HasLightChangesToProcess = false;
 

@@ -318,16 +318,45 @@ public class World : MonoBehaviour
 
     private IEnumerator ForceCompleteDataJobsCoroutine()
     {
+        // TODO: The maxIterations value should be higher for larger view distances (eg: 20+), so I believe this should be calculated based on the set view / load distance, possible passed as a parameter.
         int safetyBreak = 0;
         const int maxIterations = 5_000; // Should be more than enough for startup, this should be higher for (mush) larger view distances (eg: 20+).
 
-        while (JobManager.generationJobs.Count > 0 || JobManager.lightingJobs.Count > 0 || HasPendingLightChangesOnMainThread())
+        // Continue until all generation jobs are complete, all lighting jobs are complete, and there are no pending light changes on the main thread.
+        while (JobManager.generationJobs.Count > 0 || JobManager.lightingJobs.Count > 0 || HasPendingLightChangesOnMainThread() || HasPendingInitialLighting())
         {
-            // Complete any finished generation jobs
+            // Complete any finished generation jobs. This may set `NeedsInitialLighting = true` on chunks.
             JobManager.ProcessGenerationJobs();
             ApplyModifications();
 
-            // Try to schedule lighting for chunks that are ready
+            // --- INITIAL LIGHTING ---
+            // This logic is a synchronous version of what the Update() loop does asynchronously.
+            if (HasPendingInitialLighting())
+            {
+                // Iterate through a copy to prevent modification-during-iteration issues.
+                foreach (ChunkData chunkData in worldData.Chunks.Values.ToList())
+                {
+                    if (chunkData.IsPopulated && chunkData.NeedsInitialLighting)
+                    {
+                        ChunkCoord coord = new ChunkCoord(chunkData.position);
+
+                        // We must still ensure neighbors have their terrain data ready before lighting.
+                        if (AreNeighborsDataReady(coord))
+                        {
+                            // This chunk is ready. Trigger its full sunlight recalculation, which sets
+                            // `HasLightChangesToProcess = true` and populates the light queues.
+                            chunkData.RecalculateSunLightLight();
+
+                            // The request for an *initial* light pass has now been fulfilled.
+                            chunkData.NeedsInitialLighting = false;
+                        }
+                    }
+                }
+            }
+
+            // --- REGULAR LIGHTING ---
+            // Now that the initial light requests have been processed, the regular lighting scheduler
+            // can pick them up in the same coroutine iteration.
             foreach (ChunkData chunkData in worldData.Chunks.Values)
             {
                 if (chunkData.IsPopulated && chunkData.HasLightChangesToProcess)
@@ -335,13 +364,15 @@ public class World : MonoBehaviour
                     ChunkCoord coord = new ChunkCoord(chunkData.position);
                     if (!JobManager.lightingJobs.ContainsKey(coord) && AreNeighborsDataReady(coord))
                     {
+                        // A temporary Chunk object is created because the job manager expects one,
+                        // but we don't need a real GameObject for this startup logic.
                         Chunk tempChunk = new Chunk(coord, false);
                         JobManager.ScheduleLightingUpdate(tempChunk);
                     }
                 }
             }
 
-            // Complete all scheduled lighting jobs
+            // Force-complete all lighting jobs that were just scheduled in this iteration.
             CompleteAndProcessLightingJobs();
 
             // --- Safety Break ---
@@ -360,19 +391,23 @@ public class World : MonoBehaviour
         Debug.Log("All generation and lighting jobs are complete!");
     }
 
-    // Renamed from HasPendingLightChanges to be more specific.
-    // It now iterates over the master data source, not the GameObjects.
+    /// <summary>
+    /// Checks if there are any chunks in the world that have been generated but are still waiting for their initial lighting pass.
+    /// This is primarily used by the startup coroutine to ensure all chunks are lit before proceeding.
+    /// </summary>
+    /// <returns>True if any chunk has the `NeedsInitialLighting` flag set; otherwise, false.</returns>
+    private bool HasPendingInitialLighting()
+    {
+        return worldData.Chunks.Values.Any(chunkData => chunkData != null && chunkData.NeedsInitialLighting);
+    }
+
+    /// <summary>
+    /// Checks if there are any chunks in the world that have pending general light changes that need to be processed on the main thread.
+    /// </summary>
+    /// <returns>True if any chunk has the `HasLightChangesToProcess` flag set; otherwise, false.</returns>
     private bool HasPendingLightChangesOnMainThread()
     {
-        foreach (var chunkData in worldData.Chunks.Values)
-        {
-            if (chunkData != null && chunkData.HasLightChangesToProcess)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return worldData.Chunks.Values.Any(chunkData => chunkData != null && chunkData.HasLightChangesToProcess);
     }
 
     private void CompleteAndProcessLightingJobs()
@@ -470,7 +505,6 @@ public class World : MonoBehaviour
             _tempActiveChunkList.Clear();
 
             // 2. Populate the persistent list with the current active chunks.
-            //    This does NOT create a new list, it just adds to the existing one.
             foreach (ChunkCoord coord in _activeChunks)
             {
                 _tempActiveChunkList.Add(coord);
@@ -483,13 +517,33 @@ public class World : MonoBehaviour
 
                 Chunk chunkToUpdate = chunks[chunkCoord.X, chunkCoord.Z];
 
-                // If chunk is valid, has pending changes, and no job is currently running for it...
-                if (chunkToUpdate != null && chunkToUpdate.ChunkData.HasLightChangesToProcess && !JobManager.lightingJobs.ContainsKey(chunkToUpdate.Coord))
+                // If chunk is valid, and no job is currently running for it...
+                if (chunkToUpdate != null && !JobManager.lightingJobs.ContainsKey(chunkToUpdate.Coord))
                 {
-                    // NOTE: jobManager.ScheduleLightingUpdate might indirectly modify the 'activeChunks' set
-                    // by affecting neighbor states. This pattern protects against that.
-                    JobManager.ScheduleLightingUpdate(chunkToUpdate);
-                    lightJobsScheduled++;
+                    // --- Prioritize initial lighting ---
+                    if (chunkToUpdate.ChunkData.NeedsInitialLighting)
+                    {
+                        // Before scheduling, we must still ensure neighbors have their data ready.
+                        if (AreNeighborsDataReady(chunkToUpdate.Coord))
+                        {
+                            // This is the first lighting pass, so we trigger the full recalculation.
+                            chunkToUpdate.ChunkData.RecalculateSunLightLight();
+                            JobManager.ScheduleLightingUpdate(chunkToUpdate);
+
+                            // The request has been fulfilled, so clear the flag.
+                            chunkToUpdate.ChunkData.NeedsInitialLighting = false;
+                            lightJobsScheduled++;
+                        }
+                    }
+                    // --- Regular lighting updates ---
+                    // If no initial lighting is needed, check for regular updates.
+                    else if (chunkToUpdate.ChunkData.HasLightChangesToProcess)
+                    {
+                        // NOTE: jobManager.ScheduleLightingUpdate might indirectly modify the 'activeChunks' set
+                        //       by affecting neighbor states. This pattern protects against that.
+                        JobManager.ScheduleLightingUpdate(chunkToUpdate);
+                        lightJobsScheduled++;
+                    }
                 }
             }
         }
