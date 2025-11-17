@@ -245,24 +245,26 @@ public class World : MonoBehaviour
         _playerTransform.position = spawnPosition;
         PlayerChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
 
-        // --- STEP 2: SYNCHRONOUSLY GENERATE ALL DATA ---
-        Debug.Log("--- Generating all data within load distance ---");
+        // --- STEP 2: SYNCHRONOUSLY GENERATE INITIAL DATA ---
+        Debug.Log("--- Generating all data within initial load distance ---");
 
         Stopwatch stopwatch = new Stopwatch(); // Create stopwatch to measure time taken for initial data generation.
         stopwatch.Start();
 
         // 1. First, just schedule generation for everything in the load radius.
-        int loadedChunks = LoadChunksInDataPass();
+        //    This ensures the initial "blocking" load is fast, even with high view distance settings.
+        int initialLoadRadius = Mathf.Min(settings.loadDistance, settings.maxInitialLoadRadius);
+        int loadedChunks = LoadChunksInDataPass(initialLoadRadius);
 
         // 2. Force complete ONLY the data-related jobs (generation and lighting).
         //    Now, instead of a blocking call, we yield to (wait for) another coroutine.
         //    The code will PAUSE here and will not continue until ForceCompleteDataJobsCoroutine is finished.
-        yield return StartCoroutine(ForceCompleteDataJobsCoroutine());
+        yield return StartCoroutine(ForceCompleteDataJobsCoroutine(initialLoadRadius));
 
         stopwatch.Stop();
         long totalMilliseconds = stopwatch.ElapsedMilliseconds;
         float avgTime = (float)totalMilliseconds / loadedChunks;
-        Debug.Log($"Initial data generation took {totalMilliseconds} ms for {loadedChunks} chunks (Load distance: {Instance.settings.loadDistance})");
+        Debug.Log($"Initial data generation took {totalMilliseconds} ms for {loadedChunks} chunks (Initial Load Radius: {initialLoadRadius})");
         Debug.Log($"Average time per chunk {avgTime} ms");
 
         stopwatch.Reset();
@@ -291,17 +293,18 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Loads all chunks in the data pass.
+    /// Schedules generation jobs for all chunks within a given radius around the player's starting position.
     /// </summary>
-    /// <returns>The number of chunks loaded.</returns>
-    private int LoadChunksInDataPass()
+    /// <param name="loadRadius">The radius of chunks to load.</param>
+    /// <returns>The total number of chunks for which generation was scheduled.</returns>
+    private int LoadChunksInDataPass(int loadRadius)
     {
         int loadedChunks = 0;
-        int loadDist = settings.loadDistance;
+
         // We don't need the spiral loop here, a simple square loop is fine for startup.
-        for (int x = -loadDist; x <= loadDist; x++)
+        for (int x = -loadRadius; x <= loadRadius; x++)
         {
-            for (int z = -loadDist; z <= loadDist; z++)
+            for (int z = -loadRadius; z <= loadRadius; z++)
             {
                 ChunkCoord coord = new ChunkCoord(PlayerChunkCoord.X + x, PlayerChunkCoord.Z + z);
                 if (IsChunkInWorld(coord))
@@ -316,11 +319,23 @@ public class World : MonoBehaviour
         return loadedChunks;
     }
 
-    private IEnumerator ForceCompleteDataJobsCoroutine()
+    /// <summary>
+    /// A startup coroutine that forces the completion of all initial generation and lighting jobs.
+    /// It runs in a tight loop, processing job results and scheduling dependent jobs until the entire
+    /// initial world area is fully generated and lit. It includes a dynamic safety break to prevent infinite loops.
+    /// </summary>
+    /// <param name="initialLoadRadius">The radius of chunks being loaded, used to calculate a safe iteration limit.</param>
+    private IEnumerator ForceCompleteDataJobsCoroutine(int initialLoadRadius)
     {
-        // TODO: The maxIterations value should be higher for larger view distances (eg: 20+), so I believe this should be calculated based on the set view / load distance, possible passed as a parameter.
         int safetyBreak = 0;
-        const int maxIterations = 5_000; // Should be more than enough for startup, this should be higher for (mush) larger view distances (eg: 20+).
+
+        // --- Dynamically calculate maxIterations ---
+        // The maximum number of iterations should be proportional to the number of chunks being processed.
+        // A generous multiplier (e.g., 10) accounts for the multiple states each chunk passes through
+        // (generation, lighting passes, neighbor interactions).
+        int loadDiameter = initialLoadRadius * 2 + 1;
+        int totalChunksToProcess = loadDiameter * loadDiameter;
+        int maxIterations = totalChunksToProcess * 10;
 
         // Continue until all generation jobs are complete, all lighting jobs are complete, and there are no pending light changes on the main thread.
         while (JobManager.generationJobs.Count > 0 || JobManager.lightingJobs.Count > 0 || HasPendingLightChangesOnMainThread() || HasPendingInitialLighting())
@@ -379,8 +394,9 @@ public class World : MonoBehaviour
             safetyBreak++;
             if (safetyBreak > maxIterations)
             {
-                Debug.LogError("ForceCompleteDataJobsCoroutine exceeded max iterations. Forcing exit.");
-                Debug.LogError($"Remaining chunks in generation job: {JobManager.generationJobs.Count} | lighting job: {JobManager.lightingJobs.Count}");
+                Debug.LogError($"ForceCompleteDataJobsCoroutine exceeded max iterations ({maxIterations}). Forcing exit. " +
+                               $"This may indicate a deadlock or an issue in the job dependency chain.");
+                Debug.LogError($"Remaining jobs: Generation({JobManager.generationJobs.Count}) | Lighting({JobManager.lightingJobs.Count})");
                 yield break; // Exit the coroutine
             }
 
@@ -1610,12 +1626,20 @@ public class Settings
     /// </summary>
     public int loadDistance => viewDistance + DATA_LOAD_BUFFER;
 
+    /// <summary>
+    /// A cap on the load distance specifically for the initial world startup.
+    /// This prevents extremely long load times if the player has a very high viewDistance set,
+    /// ensuring a responsive start. The world will continue to load to the full loadDistance asynchronously after startup.
+    /// </summary>
+    [Tooltip("Caps the load distance for the initial startup to prevent long freezes. Set to a high value to disable.")]
+    public int maxInitialLoadRadius = 10;
+
     // --- LIGHTING ---
     [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame. Prevents performance drops from lighting cascades.")]
     public int maxLightJobsPerFrame = 8;
 
     [InitializationField]
-    [Tooltip("PERFORMANCE INTENSIVE - Enable the lighting system, on large caves this can cause the game to hang for a couple of seconds.")]
+    [Tooltip("PERFORMANCE INTENSIVE - Enable the lighting system, this can cause the game to hang for a couple of seconds under rare circumstances.")]
     public bool enableLighting = true;
 
     // --- RENDERING ---
