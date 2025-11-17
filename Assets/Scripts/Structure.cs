@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using Data;
 using UnityEngine;
 
-// TODO: VoxelMod check for which blocks it can replace. (eg: Now leave blocks could break logs, this should not be the case)
 public static class Structure
 {
     public static Queue<VoxelMod> GenerateMajorFlora(int index, Vector3Int position, int minTrunkHeight, int maxTrunkHeight)

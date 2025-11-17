@@ -1582,20 +1582,35 @@ public class World : MonoBehaviour
 [Serializable]
 public class Settings
 {
+    // --- GAME DATA ---
     [Header("Game Data")]
     public string version = "0.0.01";
 
-
+    // --- SAVE SYSTEM ---
     [Header("Save System")]
     public bool loadSaveDataOnStartup = false;
 
 
+    // --- PERFORMANCE ---
     [Header("Performance")]
-    // TODO: Meke loadDistance dynamic based on considered viewDistance (eg: viewDistance + 2)
-    public int loadDistance = 7;
-
+    // --- CHUNK LOADING ---
+    [Tooltip("The radius of chunks around the player that will be visible and rendered.")]
     public int viewDistance = 5;
 
+    /// <summary>
+    /// The additional radius of chunks beyond the viewDistance where data will be generated but not rendered.
+    /// This buffer is crucial for systems that need neighbor data, such as lighting, face culling, and preventing
+    /// structures (e.g., trees) from suddenly appearing at the edge of the view.
+    /// </summary>
+    private const int DATA_LOAD_BUFFER = 2;
+
+    /// <summary>
+    /// Gets the total radius of chunks around the player for which voxel data will be loaded and generated.
+    /// This is a calculated property, dynamically derived from the viewDistance plus a safe buffer.
+    /// </summary>
+    public int loadDistance => viewDistance + DATA_LOAD_BUFFER;
+
+    // --- LIGHTING ---
     [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame. Prevents performance drops from lighting cascades.")]
     public int maxLightJobsPerFrame = 8;
 
@@ -1603,8 +1618,11 @@ public class Settings
     [Tooltip("PERFORMANCE INTENSIVE - Enable the lighting system, on large caves this can cause the game to hang for a couple of seconds.")]
     public bool enableLighting = true;
 
+    // --- RENDERING ---
+    [Tooltip("The style of clouds to render.")]
     public CloudStyle clouds = CloudStyle.Fancy;
 
+    // --- CONTROLS ---
     [Header("Controls")]
     [Range(0.1f, 10f)]
     public float mouseSensitivityX = 1.2f;
@@ -1612,7 +1630,7 @@ public class Settings
     [Range(0.1f, 10f)]
     public float mouseSensitivityY = 1.2f;
 
-
+    // --- WORLD GENERATION ---
     [Header("World Generation")]
     [InitializationField]
     [Tooltip("Second Pass: Lode generation")]
@@ -1622,10 +1640,11 @@ public class Settings
     [Tooltip("Structure Pass: Tree generation")]
     public bool enableMajorFloraPass = true;
 
-
+    // --- BONUS STUFF ---
     [Header("Bonus Stuff")]
     public bool enableChunkLoadAnimations = false;
 
+    // --- DEBUG ---
     [Header("Debug")]
     [Tooltip("Visualize chunk borders in the scene view.")]
     public bool showChunkBorders = false;
