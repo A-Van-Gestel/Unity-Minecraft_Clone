@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using Data;
 using Data.JobData;
 using Data.NativeData;
@@ -327,6 +328,12 @@ public class World : MonoBehaviour
     /// <param name="initialLoadRadius">The radius of chunks being loaded, used to calculate a safe iteration limit.</param>
     private IEnumerator ForceCompleteDataJobsCoroutine(int initialLoadRadius)
     {
+        // --- Profiling Setup ---
+        var totalStopwatch = Stopwatch.StartNew();
+        var generationProcessingWatch = new Stopwatch();
+        var lightingSchedulingWatch = new Stopwatch();
+        var lightingCompletionWatch = new Stopwatch();
+
         int safetyBreak = 0;
 
         // --- Dynamically calculate maxIterations ---
@@ -337,42 +344,58 @@ public class World : MonoBehaviour
         int totalChunksToProcess = loadDiameter * loadDiameter;
         int maxIterations = totalChunksToProcess * 10;
 
-        // Continue until all generation jobs are complete, all lighting jobs are complete, and there are no pending light changes on the main thread.
-        while (JobManager.generationJobs.Count > 0 || JobManager.lightingJobs.Count > 0 || HasPendingLightChangesOnMainThread() || HasPendingInitialLighting())
+        // --- PHASE 1: Complete all terrain generation first ---
+        // This is fast and linear, but we profile it for completeness.
+        generationProcessingWatch.Start();
+        while (JobManager.generationJobs.Count > 0)
         {
             // Complete any finished generation jobs. This may set `NeedsInitialLighting = true` on chunks.
             JobManager.ProcessGenerationJobs();
             ApplyModifications();
 
-            // --- INITIAL LIGHTING ---
-            // This logic is a synchronous version of what the Update() loop does asynchronously.
-            if (HasPendingInitialLighting())
+            safetyBreak++;
+            if (safetyBreak > maxIterations)
             {
-                // Iterate through a copy to prevent modification-during-iteration issues.
-                foreach (ChunkData chunkData in worldData.Chunks.Values.ToList())
+                Debug.LogError($"ForceCompleteDataJobsCoroutine timed out during Generation Phase. Forcing exit.");
+                yield break; // Exit the coroutine
+            }
+
+            yield return null; // Wait a frame
+        }
+
+        generationProcessingWatch.Stop();
+
+        // --- PHASE 2: Complete all lighting calculations ---
+        List<ChunkData> chunksInLoadArea = worldData.Chunks.Values.ToList();
+        int lightingLoopIterations = 0;
+
+        // This logic is a synchronous version of what the Update() loop does asynchronously.
+        while (HasPendingInitialLighting(chunksInLoadArea) || HasPendingLightChangesOnMainThread(chunksInLoadArea) || JobManager.lightingJobs.Count > 0)
+        {
+            lightingLoopIterations++;
+
+            // --- Step 2a: Trigger Initial Lighting Requests ---
+            lightingSchedulingWatch.Start();
+            // Iterate through a copy to prevent modification-during-iteration issues.
+            foreach (ChunkData chunkData in chunksInLoadArea)
+            {
+                if (chunkData.IsPopulated && chunkData.NeedsInitialLighting)
                 {
-                    if (chunkData.IsPopulated && chunkData.NeedsInitialLighting)
+                    // We must still ensure neighbors have their terrain data ready before lighting.
+                    if (AreNeighborsDataReady(new ChunkCoord(chunkData.position)))
                     {
-                        ChunkCoord coord = new ChunkCoord(chunkData.position);
+                        // This chunk is ready. Trigger its full sunlight recalculation, which sets `HasLightChangesToProcess = true` and populates the light queues.
+                        chunkData.RecalculateSunLightLight();
 
-                        // We must still ensure neighbors have their terrain data ready before lighting.
-                        if (AreNeighborsDataReady(coord))
-                        {
-                            // This chunk is ready. Trigger its full sunlight recalculation, which sets
-                            // `HasLightChangesToProcess = true` and populates the light queues.
-                            chunkData.RecalculateSunLightLight();
-
-                            // The request for an *initial* light pass has now been fulfilled.
-                            chunkData.NeedsInitialLighting = false;
-                        }
+                        // The request for an *initial* light pass has now been fulfilled.
+                        chunkData.NeedsInitialLighting = false;
                     }
                 }
             }
 
-            // --- REGULAR LIGHTING ---
-            // Now that the initial light requests have been processed, the regular lighting scheduler
-            // can pick them up in the same coroutine iteration.
-            foreach (ChunkData chunkData in worldData.Chunks.Values)
+            // --- Step 2b: Schedule Lighting Jobs ---
+            // Now that the initial light requests have been processed, the regular lighting scheduler can pick them up in the same coroutine iteration.
+            foreach (ChunkData chunkData in chunksInLoadArea)
             {
                 if (chunkData.IsPopulated && chunkData.HasLightChangesToProcess)
                 {
@@ -382,48 +405,80 @@ public class World : MonoBehaviour
                         // A temporary Chunk object is created because the job manager expects one,
                         // but we don't need a real GameObject for this startup logic.
                         Chunk tempChunk = new Chunk(coord, false);
-                        JobManager.ScheduleLightingUpdate(tempChunk);
+                        // CRITICAL OPTIMIZATION: Use TempJob allocator.
+                        // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
+                        JobManager.ScheduleLightingUpdate(tempChunk, Allocator.TempJob);
                     }
                 }
             }
 
-            // Force-complete all lighting jobs that were just scheduled in this iteration.
+            lightingSchedulingWatch.Stop();
+
+            // --- Step 2c: Force-complete and process all scheduled jobs ---
+            lightingCompletionWatch.Start();
             CompleteAndProcessLightingJobs();
+            lightingCompletionWatch.Stop();
 
             // --- Safety Break ---
             safetyBreak++;
             if (safetyBreak > maxIterations)
             {
-                Debug.LogError($"ForceCompleteDataJobsCoroutine exceeded max iterations ({maxIterations}). Forcing exit. " +
-                               $"This may indicate a deadlock or an issue in the job dependency chain.");
-                Debug.LogError($"Remaining jobs: Generation({JobManager.generationJobs.Count}) | Lighting({JobManager.lightingJobs.Count})");
+                Debug.LogError($"ForceCompleteDataJobsCoroutine exceeded max iterations ({maxIterations}) during Lighting Phase. Forcing exit.");
+                Debug.LogError($"Remaining jobs: Lighting({JobManager.lightingJobs.Count}). Pending chunks: InitialLight({chunksInLoadArea.Count(c => c.NeedsInitialLighting)}), LightChanges({chunksInLoadArea.Count(c => c.HasLightChangesToProcess)})");
                 yield break; // Exit the coroutine
             }
 
-            // Wait a frame
-            yield return null;
+            yield return null; // Wait a frame
         }
 
+        totalStopwatch.Stop();
         Debug.Log("All generation and lighting jobs are complete!");
+
+        // --- Generate and Print Profiling Report ---
+        var report = new StringBuilder();
+        report.AppendLine($"<color=yellow><b>--- Startup Coroutine Profile Report (Load Radius: {initialLoadRadius}) ---</b></color>");
+        report.AppendLine($"<b>Total Time: {totalStopwatch.ElapsedMilliseconds} ms</b>");
+        report.AppendLine($"Total Main Loop Iterations: {safetyBreak} (Lighting Phase took {lightingLoopIterations} iterations)");
+        report.AppendLine();
+        report.AppendLine("<b>--- Phase Timings ---</b>");
+
+        long genTime = generationProcessingWatch.ElapsedMilliseconds;
+        long lightScheduleTime = lightingSchedulingWatch.ElapsedMilliseconds;
+        long lightCompleteTime = lightingCompletionWatch.ElapsedMilliseconds;
+        long totalPhaseTime = genTime + lightScheduleTime + lightCompleteTime;
+
+        report.AppendLine($"  - Generation Processing: {genTime,5} ms ({genTime * 100f / totalPhaseTime:F1}%)");
+        report.AppendLine($"  - Lighting Scheduling:   {lightScheduleTime,5} ms ({lightScheduleTime * 100f / totalPhaseTime:F1}%)");
+        report.AppendLine($"  - Lighting Completion:   {lightCompleteTime,5} ms ({lightCompleteTime * 100f / totalPhaseTime:F1}%)");
+        report.AppendLine();
+        report.AppendLine("<b>--- Averages Per Lighting Iteration ---</b>");
+        if (lightingLoopIterations > 0)
+        {
+            report.AppendLine($"  - Avg Scheduling Time / Iteration: {lightScheduleTime / (float)lightingLoopIterations:F2} ms");
+            report.AppendLine($"  - Avg Completion Time / Iteration: {lightCompleteTime / (float)lightingLoopIterations:F2} ms");
+        }
+
+        Debug.Log(report.ToString());
     }
 
     /// <summary>
-    /// Checks if there are any chunks in the world that have been generated but are still waiting for their initial lighting pass.
-    /// This is primarily used by the startup coroutine to ensure all chunks are lit before proceeding.
+    /// Checks a specific list of chunks for any that are waiting for their initial lighting pass.
     /// </summary>
-    /// <returns>True if any chunk has the `NeedsInitialLighting` flag set; otherwise, false.</returns>
-    private bool HasPendingInitialLighting()
+    /// <param name="chunkList">The list of chunks to check.</param>
+    /// <returns>True if any chunk in the list has the `NeedsInitialLighting` flag set; otherwise, false.</returns>
+    private bool HasPendingInitialLighting(List<ChunkData> chunkList)
     {
-        return worldData.Chunks.Values.Any(chunkData => chunkData != null && chunkData.NeedsInitialLighting);
+        return chunkList.Any(chunkData => chunkData != null && chunkData.NeedsInitialLighting);
     }
 
     /// <summary>
-    /// Checks if there are any chunks in the world that have pending general light changes that need to be processed on the main thread.
+    /// Checks a specific list of chunks for any that have pending lighting updates.
     /// </summary>
-    /// <returns>True if any chunk has the `HasLightChangesToProcess` flag set; otherwise, false.</returns>
-    private bool HasPendingLightChangesOnMainThread()
+    /// <param name="chunkList">The list of chunks to check.</param>
+    /// <returns>True if any chunk in the list has the `HasLightChangesToProcess` flag set; otherwise, false.</returns>
+    private bool HasPendingLightChangesOnMainThread(List<ChunkData> chunkList)
     {
-        return worldData.Chunks.Values.Any(chunkData => chunkData != null && chunkData.HasLightChangesToProcess);
+        return chunkList.Any(chunkData => chunkData != null && chunkData.HasLightChangesToProcess);
     }
 
     private void CompleteAndProcessLightingJobs()

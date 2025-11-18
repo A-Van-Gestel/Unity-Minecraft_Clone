@@ -17,12 +17,21 @@ public class WorldJobManager
     public Dictionary<ChunkCoord, LightingJobData> lightingJobs { get; } = new Dictionary<ChunkCoord, LightingJobData>();
 
     // --- Constructor ---
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WorldJobManager"/> class.
+    /// </summary>
+    /// <param name="world">The main World instance that owns this manager.</param>
     public WorldJobManager(World world)
     {
         _world = world;
     }
 
 
+    /// <summary>
+    /// Schedules a background job to generate the voxel data (terrain and biome) for a specific chunk coordinate.
+    /// If a job is already running or the data already exists, this method returns without scheduling.
+    /// </summary>
+    /// <param name="coord">The coordinate of the chunk to generate.</param>
     public void ScheduleGeneration(ChunkCoord coord)
     {
         // Don't schedule if a job is already running for it.
@@ -72,7 +81,12 @@ public class WorldJobManager
         generationJobs.Add(coord, jobData);
     }
 
-    /// Returns a bool indicating success
+    /// <summary>
+    /// Attempts to schedule a mesh generation job for the specified chunk.
+    /// Checks dependencies (neighbor data existence and lighting stability) before scheduling.
+    /// </summary>
+    /// <param name="chunk">The chunk to generate a mesh for.</param>
+    /// <returns>True if the job was scheduled or was already running; false if dependencies were not met (e.g., waiting for lighting).</returns>
     public bool ScheduleMeshing(Chunk chunk)
     {
         ChunkCoord coord = chunk.Coord;
@@ -167,7 +181,13 @@ public class WorldJobManager
         return true;
     }
 
-    public void ScheduleLightingUpdate(Chunk chunk)
+    /// <summary>
+    /// Schedules a neighborhood lighting job to propagate sunlight and blocklight changes.
+    /// Manages the allocation of persistent input data required for the job.
+    /// </summary>
+    /// <param name="chunk">The central chunk to update lighting for.</param>
+    /// <param name="allocator">The allocator to use for job data (Allocator.TempJob for startup, Allocator.Persistent for runtime).</param>
+    public void ScheduleLightingUpdate(Chunk chunk, Allocator allocator = Allocator.Persistent)
     {
         ChunkCoord coord = chunk.Coord;
         if (lightingJobs.ContainsKey(coord)) return; // Job already running for this chunk
@@ -183,34 +203,38 @@ public class WorldJobManager
         // --- Prepare Data for the Job ---
 
         // --- 1. ALLOCATE INPUT DATA ---
+        // Use the passed allocator (TempJob for startup, Persistent for runtime)
         var inputData = new LightingJobInputData();
-        
+
         // Get all 8 Neighbor Maps and the heightmap (Read-Only, disposed by job dependency)
         Vector2Int p = chunk.ChunkData.position;
         const int w = VoxelData.ChunkWidth;
 
-        inputData.Heightmap = new NativeArray<byte>(chunk.ChunkData.heightMap, Allocator.Persistent);
+        inputData.Heightmap = new NativeArray<byte>(chunk.ChunkData.heightMap, allocator);
         // Cardinal Neighbors
-        inputData.NeighborN = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, w), Allocator.Persistent);
-        inputData.NeighborE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, 0), Allocator.Persistent);
-        inputData.NeighborS = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, -w), Allocator.Persistent);
-        inputData.NeighborW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, 0), Allocator.Persistent);
+        inputData.NeighborN = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, w), allocator);
+        inputData.NeighborE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, 0), allocator);
+        inputData.NeighborS = _world.worldData.GetChunkMapForJob(p + new Vector2Int(0, -w), allocator);
+        inputData.NeighborW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, 0), allocator);
         // Diagonal Neighbors
-        inputData.NeighborNE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, w), Allocator.Persistent);
-        inputData.NeighborSE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, -w), Allocator.Persistent);
-        inputData.NeighborSW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, -w), Allocator.Persistent);
-        inputData.NeighborNW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, w), Allocator.Persistent);
+        inputData.NeighborNE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, w), allocator);
+        inputData.NeighborSE = _world.worldData.GetChunkMapForJob(p + new Vector2Int(w, -w), allocator);
+        inputData.NeighborSW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, -w), allocator);
+        inputData.NeighborNW = _world.worldData.GetChunkMapForJob(p + new Vector2Int(-w, w), allocator);
 
         // --- 2. ALLOCATE OUTPUT DATA ---
         var jobData = new LightingJobData
         {
-            Input = inputData, // Store the input data for later disposal
-            Map = new NativeArray<uint>(chunk.ChunkData.map, Allocator.Persistent),
-            Mods = new NativeList<LightModification>(Allocator.Persistent),
-            IsStable = new NativeArray<bool>(1, Allocator.Persistent),
-            SunLightQueue = chunk.ChunkData.GetSunlightQueueForJob(Allocator.Persistent),
-            BlockLightQueue = chunk.ChunkData.GetBlocklightQueueForJob(Allocator.Persistent),
-            SunLightRecalcQueue = new NativeQueue<Vector2Int>(Allocator.Persistent),
+            Input = inputData,
+            // The output arrays also use the faster allocator
+            Map = new NativeArray<uint>(chunk.ChunkData.map, allocator),
+            Mods = new NativeList<LightModification>(allocator),
+            IsStable = new NativeArray<bool>(1, allocator),
+
+            // Note: These queues come from ChunkData. internal copies must match the allocator life cycle
+            SunLightQueue = chunk.ChunkData.GetSunlightQueueForJob(allocator),
+            BlockLightQueue = chunk.ChunkData.GetBlocklightQueueForJob(allocator),
+            SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator),
         };
 
         // Consume sunlight recalculation requests from the global queue for this chunk
@@ -267,6 +291,10 @@ public class WorldJobManager
         lightingJobs.Add(coord, jobData);
     }
 
+    /// <summary>
+    /// Checks for completed generation jobs, populates chunk data, generates structures,
+    /// and flags chunks for their initial lighting pass.
+    /// </summary>
     public void ProcessGenerationJobs()
     {
         // Using a temporary list to avoid modifying dictionary while iterating
@@ -341,6 +369,9 @@ public class WorldJobManager
         }
     }
 
+    /// <summary>
+    /// Checks for completed mesh generation jobs and applies the resulting mesh data to the chunk GameObjects.
+    /// </summary>
     public void ProcessMeshJobs()
     {
         // Using a temporary list to avoid modifying dictionary while iterating
@@ -373,6 +404,10 @@ public class WorldJobManager
         }
     }
 
+    /// <summary>
+    /// Checks for completed lighting jobs, applies light changes to chunk data,
+    /// processes cross-chunk light modifications, and triggers mesh rebuilds for affected chunks.
+    /// </summary>
     public void ProcessLightingJobs()
     {
         if (lightingJobs.Count == 0) return;
