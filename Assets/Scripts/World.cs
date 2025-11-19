@@ -122,6 +122,12 @@ public class World : MonoBehaviour
     private Transform _chunkBorderParent;
     private bool _lastChunkBordersState;
 
+    // --- Transient flags ---
+    /// <summary>
+    /// Indicates whether the world startup process has completed and the world is ready to be used.
+    /// </summary>
+    private bool _isWorldLoaded = false;
+
     #region Singleton pattern
 
     public static World Instance { get; private set; }
@@ -255,16 +261,19 @@ public class World : MonoBehaviour
         // 1. First, just schedule generation for everything in the load radius.
         //    This ensures the initial "blocking" load is fast, even with high view distance settings.
         int initialLoadRadius = Mathf.Min(settings.loadDistance, settings.maxInitialLoadRadius);
-        int loadedChunks = LoadChunksInDataPass(initialLoadRadius);
+
+        // Capture the specific list of chunks we are loading.
+        List<ChunkCoord> initialChunks = LoadChunksInDataPass(initialLoadRadius);
+        int loadedChunks = initialChunks.Count;
 
         // 2. Force complete ONLY the data-related jobs (generation and lighting).
         //    Now, instead of a blocking call, we yield to (wait for) another coroutine.
         //    The code will PAUSE here and will not continue until ForceCompleteDataJobsCoroutine is finished.
-        yield return StartCoroutine(ForceCompleteDataJobsCoroutine(initialLoadRadius));
+        yield return StartCoroutine(ForceCompleteDataJobsCoroutine(initialChunks));
 
         stopwatch.Stop();
         long totalMilliseconds = stopwatch.ElapsedMilliseconds;
-        float avgTime = (float)totalMilliseconds / loadedChunks;
+        float avgTime = (float)totalMilliseconds / Mathf.Max(1, loadedChunks);
         Debug.Log($"Initial data generation took {totalMilliseconds} ms for {loadedChunks} chunks (Initial Load Radius: {initialLoadRadius})");
         Debug.Log($"Average time per chunk {avgTime} ms");
 
@@ -291,16 +300,19 @@ public class World : MonoBehaviour
 
         Debug.Log("World initialization complete.");
         Debug.Log("--- Startup complete ---");
+
+        // Enable world loading logic
+        _isWorldLoaded = true;
     }
 
     /// <summary>
     /// Schedules generation jobs for all chunks within a given radius around the player's starting position.
     /// </summary>
     /// <param name="loadRadius">The radius of chunks to load.</param>
-    /// <returns>The total number of chunks for which generation was scheduled.</returns>
-    private int LoadChunksInDataPass(int loadRadius)
+    /// <returns>The list of chunk coordinates for which generation was scheduled.</returns>
+    private List<ChunkCoord> LoadChunksInDataPass(int loadRadius)
     {
-        int loadedChunks = 0;
+        List<ChunkCoord> loadedChunks = new List<ChunkCoord>();
 
         // We don't need the spiral loop here, a simple square loop is fine for startup.
         for (int x = -loadRadius; x <= loadRadius; x++)
@@ -312,7 +324,7 @@ public class World : MonoBehaviour
                 {
                     // This just schedules the generation job.
                     JobManager.ScheduleGeneration(coord);
-                    loadedChunks++;
+                    loadedChunks.Add(coord);
                 }
             }
         }
@@ -325,8 +337,8 @@ public class World : MonoBehaviour
     /// It runs in a tight loop, processing job results and scheduling dependent jobs until the entire
     /// initial world area is fully generated and lit. It includes a dynamic safety break to prevent infinite loops.
     /// </summary>
-    /// <param name="initialLoadRadius">The radius of chunks being loaded, used to calculate a safe iteration limit.</param>
-    private IEnumerator ForceCompleteDataJobsCoroutine(int initialLoadRadius)
+    /// <param name="initialChunks">The list of chunks being loaded to monitor.</param>
+    private IEnumerator ForceCompleteDataJobsCoroutine(List<ChunkCoord> initialChunks)
     {
         // --- Profiling Setup ---
         var totalStopwatch = Stopwatch.StartNew();
@@ -340,8 +352,7 @@ public class World : MonoBehaviour
         // The maximum number of iterations should be proportional to the number of chunks being processed.
         // A generous multiplier (e.g., 10) accounts for the multiple states each chunk passes through
         // (generation, lighting passes, neighbor interactions).
-        int loadDiameter = initialLoadRadius * 2 + 1;
-        int totalChunksToProcess = loadDiameter * loadDiameter;
+        int totalChunksToProcess = initialChunks.Count;
         int maxIterations = totalChunksToProcess * 10;
 
         // --- PHASE 1: Complete all terrain generation first ---
@@ -366,7 +377,15 @@ public class World : MonoBehaviour
         generationProcessingWatch.Stop();
 
         // --- PHASE 2: Complete all lighting calculations ---
-        List<ChunkData> chunksInLoadArea = worldData.Chunks.Values.ToList();
+        // Optimization: Convert Coord list to Data list once
+        List<ChunkData> chunksInLoadArea = new List<ChunkData>();
+        foreach (var coord in initialChunks)
+        {
+            // We can use the dictionary directly as we know they were requested
+            Vector2Int pos = new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth);
+            if (worldData.Chunks.TryGetValue(pos, out ChunkData cd)) chunksInLoadArea.Add(cd);
+        }
+
         int lightingLoopIterations = 0;
 
         // This logic is a synchronous version of what the Update() loop does asynchronously.
@@ -436,7 +455,7 @@ public class World : MonoBehaviour
 
         // --- Generate and Print Profiling Report ---
         var report = new StringBuilder();
-        report.AppendLine($"<color=yellow><b>--- Startup Coroutine Profile Report (Load Radius: {initialLoadRadius}) ---</b></color>");
+        report.AppendLine($"<color=yellow><b>--- Startup Coroutine Profile Report (Load Radius: {initialChunks.Count}) ---</b></color>");
         report.AppendLine($"<b>Total Time: {totalStopwatch.ElapsedMilliseconds} ms</b>");
         report.AppendLine($"Total Main Loop Iterations: {safetyBreak} (Lighting Phase took {lightingLoopIterations} iterations)");
         report.AppendLine();
@@ -527,6 +546,9 @@ public class World : MonoBehaviour
 
     private void Update()
     {
+        // Prevent normal generation logic from interfering with the startup coroutine
+        if (!_isWorldLoaded) return;
+        
         PlayerChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
 
         // Only update the chunks if the player has moved from the chunk they were previously on.

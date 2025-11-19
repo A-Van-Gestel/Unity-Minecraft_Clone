@@ -23,7 +23,7 @@ namespace Data
         public HashSet<ChunkData> ModifiedChunks = new HashSet<ChunkData>();
 
         [NonSerialized]
-        public HashSet<Vector2Int> SunlightRecalculationQueue = new HashSet<Vector2Int>();
+        public Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue = new Dictionary<Vector2Int, HashSet<Vector2Int>>();
 
         #region Constructors
 
@@ -234,11 +234,17 @@ namespace Data
         /// <param name="columnPos">The column position</param>
         public void QueueSunlightRecalculation(Vector2Int columnPos)
         {
-            SunlightRecalculationQueue.Add(columnPos);
+            Vector2Int chunkPos = GetChunkCoordFor(new Vector3(columnPos.x, 0, columnPos.y));
+
+            if (!SunlightRecalculationQueue.ContainsKey(chunkPos))
+            {
+                SunlightRecalculationQueue[chunkPos] = new HashSet<Vector2Int>();
+            }
+
+            SunlightRecalculationQueue[chunkPos].Add(columnPos);
 
             // Mark the target chunk as needing a lighting update.
-            Vector2Int chunkV2Coord = GetChunkCoordFor(new Vector3(columnPos.x, 0, columnPos.y));
-            if (Chunks.TryGetValue(chunkV2Coord, out ChunkData chunkData))
+            if (Chunks.TryGetValue(chunkPos, out ChunkData chunkData))
             {
                 chunkData.HasLightChangesToProcess = true;
             }

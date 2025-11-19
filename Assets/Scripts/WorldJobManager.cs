@@ -238,24 +238,17 @@ public class WorldJobManager
         };
 
         // Consume sunlight recalculation requests from the global queue for this chunk
-        // Use a temporary list to store columns that we are consuming for this job.
-        List<Vector2Int> consumedColumns = new List<Vector2Int>();
-        foreach (Vector2Int col in _world.worldData.SunlightRecalculationQueue)
+        // Optimized: Direct bucket lookup instead of global iteration
+        if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunk.ChunkData.position, out HashSet<Vector2Int> columns))
         {
-            // Check if the global column position belongs to the current chunk.
-            if (_world.worldData.GetChunkCoordFor(new Vector3(col.x, 0, col.y)) == chunk.ChunkData.position)
+            foreach (Vector2Int col in columns)
             {
                 // Convert global column position to local and add to the job's queue.
                 jobData.SunLightRecalcQueue.Enqueue(new Vector2Int(col.x - chunk.ChunkData.position.x, col.y - chunk.ChunkData.position.y));
-                consumedColumns.Add(col);
             }
-        }
 
-        // After iterating, remove ONLY the consumed items from the global HashSet.
-        // This prevents us from deleting requests meant for other world.chunks.
-        foreach (Vector2Int col in consumedColumns)
-        {
-            _world.worldData.SunlightRecalculationQueue.Remove(col);
+            // After iterating, remove the entire bucket for this chunk as we've consumed the requests.
+            _world.worldData.SunlightRecalculationQueue.Remove(chunk.ChunkData.position);
         }
 
         NeighborhoodLightingJob job = new NeighborhoodLightingJob
