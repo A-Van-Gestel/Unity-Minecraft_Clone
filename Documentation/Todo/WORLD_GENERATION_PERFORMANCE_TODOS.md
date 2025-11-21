@@ -1,130 +1,167 @@
-﻿# World Generation Performance TODO's
+﻿# World Generation Performance TODOs
 
-This document outlines planned improvements to the world generation system. The primary goal is to make the entire pipeline, especially the `ChunkGenerationJob`, fully Burst-compatible for a significant performance increase. Secondary optimizations are also listed for further
-refinement.
+This document outlines planned improvements to the world generation system. The primary goal is to make the entire pipeline, especially the `ChunkGenerationJob`, fully Burst-compatible for a 5-10x performance increase.
 
 ## 1. Making `ChunkGenerationJob` Burst-Compatible
 
-The current `ChunkGenerationJob` provides a minor performance uplift by multithreading the generation of voxel columns. However, it cannot be compiled with the Burst compiler, which prevents a 5-10x performance gain. The changes outlined below are the steps required to enable
-Burst compilation.
+The current `ChunkGenerationJob` provides a minor performance uplift by multithreading the generation of voxel columns. However, it is limited by managed code dependencies. To unlock Burst compilation, we must remove these dependencies.
 
-**Breaking Change Notice:** Implementing these changes will alter the noise algorithm. As a result, worlds generated with the same seed integer **will not be the same** as worlds generated before this change. This work should be scheduled for a major version update where breaking
-changes are permissible.
+> **Breaking Change Notice:** Implementing these changes will alter the noise algorithm. Worlds generated with the same seed **will not match** previous versions. This work should be scheduled for a major version update.
 
 ### The Core Problem: `Mathf.PerlinNoise`
 
-The single blocker for Burst compatibility is the use of `Mathf.PerlinNoise()` within the `Noise.cs` and `WorldGen.cs` static classes. This is a managed API call from the `UnityEngine` namespace and is inaccessible to Burst-compiled jobs.
+`Mathf.PerlinNoise` is a managed Unity API. It cannot be called from Burst. Furthermore, standard Unity noise lacks the variety (Cellular, Cubic, White Noise) required for complex biomes.
 
 ### Implementation Steps
 
-The migration process involves replacing the noise source and updating the code that consumes it.
+#### Step 1: Choose and Integrate a Burst-Compatible Noise Library
 
-#### Step 1: Integrate a Burst-Compatible Noise Library
+We need a raw C# or High-Performance C# (HPC#) noise solution. There are two primary paths:
 
-A Burst-compatible noise library is required. Two excellent options are:
+1. **Unity.Mathematics.noise (Built-in):**
 
-1. **Unity.Mathematics.noise:** Unity's built-in noise library. It is highly optimized for Burst and provides functions like `noise.snoise()` (Simplex Noise), which is a high-quality alternative to Perlin noise. This is the recommended, dependency-free approach.
-2. **Third-Party Libraries:** A library like a Burst-compatible port of FastNoise can be used if specific noise types (e.g., Cellular, Worley) are desired.
+* *Pros:* Zero dependencies, highly optimized intrinsics.
+* *Cons:* Limited noise types (mostly Perlin/Simplex), no fractal/cellular features out of the box.
 
-#### Step 2: Create a New, Burst-Safe Noise Helper
+2. **FastNoiseLite (Burst Port)** - *Selected Strategy*:
 
-The existing `Noise.cs` should be left as-is for legacy compatibility if needed, or deprecated. A new, clean static class must be created. This class will use the `Unity.Mathematics` library and its associated types (`float2`, `float3`, `math`).
+* *Pros:* Extensive features (Cellular, Domain Warp, Fractal Ridged), identical algorithm to standard C++ FastNoise.
+* *Implementation:* We will implement a custom port using `SharedStatic` to handle lookup tables safely within Burst.
+
+#### Step 2: Create a `BurstNoise` Abstraction Layer
+
+To keep the code clean and allow for easy switching of noise algorithms later without rewriting the Jobs, we will create a static helper class. This class acts as the API for our jobs.
 
 **Example: `Assets/Scripts/Jobs/BurstData/BurstNoise.cs`**
 
 ```csharp
 using Unity.Mathematics;
-using static Unity.Mathematics.noise;
 
+/// <summary>
+/// Static Burst-compatible wrapper for noise generation.
+/// Abstracts the underlying library (FastNoiseLite) from the logic.
+/// </summary>
 public static class BurstNoise
 {
-    /// <summary>
-    /// A Burst-compatible 2D Simplex noise function.
-    /// </summary>
-    public static float Get2D(float2 position, float offset, float scale)
+    // We can hold a default configuration or pass it in.
+    // For pure Burst, we usually pass the state in, but static helpers are useful for math.
+
+    public static float GetTerrainNoise(FastNoiseLite noise, float2 pos, float scale, float offset)
     {
-        // Note: Unity.Mathematics.noise does not require a seed/offset to be added manually.
-        // It's often better to offset the input position.
-        position += offset; 
-        return snoise(position / scale);
+        // Unity Mathematics optimization: avoid heavy division in loops if possible, 
+        // but here we prioritize readability for the example.
+        float2 p = (pos + offset) * scale;
+        return noise.GetNoise(p.x, p.y);
     }
 
-    /// <summary>
-    /// A Burst-compatible 3D Simplex noise function.
-    /// </summary>
-    public static bool Get3D(float3 position, float offset, float scale, float threshold)
+    public static float Get3DMask(FastNoiseLite noise, float3 pos, float scale, int seedOffset)
     {
-        position += offset;
-        position *= scale;
-
-        // A common 3D noise technique using Simplex noise.
-        float noiseVal = (snoise(position) + snoise(position + new float3(100.3f, 203.1f, 50.7f))) / 2f;
+        // Create a local copy to modify seed without affecting the main state
+        var localNoise = noise; 
+        localNoise.SetSeed(noise.mSeed + seedOffset);
         
-        return noiseVal > threshold;
+        return localNoise.GetNoise(pos.x * scale, pos.y * scale, pos.z * scale);
     }
 }
 ```
 
-#### Step 3: Refactor `WorldGen.cs`
+#### Step 3: Pass Noise State via Job Data
 
-The `WorldGen.GetVoxel` method must be updated to call the new `BurstNoise` helper instead of the old `Noise` class.
-
-**Example Change:**
+We cannot access global static fields inside a Job. We must pass the noise configuration struct into the job.
 
 ```csharp
-// In WorldGen.cs
-
-// BEFORE:
-float weight = Noise.Get2DPerlin(new Vector2(pos.x, pos.z), biomes[i].Offset, biomes[i].Scale);
-
-// AFTER:
-float weight = BurstNoise.Get2D(new float2(pos.x, pos.z), biomes[i].Offset, biomes[i].Scale);
-```
-
-#### Step 4: Enable Burst on `ChunkGenerationJob`
-
-Once all managed code references are removed, the `[BurstCompile]` attribute can be added to the job struct in `ChunkGenerationJob.cs`. This is the final step that unlocks the massive performance gain.
-
-```csharp
-// In Assets/Scripts/Jobs/ChunkGenerationJob.cs
-
+// The Job Definition
 [BurstCompile]
 public struct ChunkGenerationJob : IJobFor
 {
-    // ... job contents
+    // Inputs
+    [ReadOnly] public FastNoiseLite NoiseState; // Passed by Value (it's a struct)
+    [ReadOnly] public NativeArray<BiomeData> Biomes;
+    
+    // Outputs
+    [WriteOnly] public NativeArray<BlockType> OutputVoxels;
+
+    public void Execute(int index)
+    {
+        // ... Calculation logic
+        // float noiseVal = BurstNoise.GetTerrainNoise(NoiseState, pos.xz, 0.01f, 0);
+    }
 }
 ```
 
+#### Step 4: Refactor `WorldGen.GetVoxel`
+
+The logic inside `WorldGen.GetVoxel` must be moved inside the Job struct (inline) or into the `BurstNoise` static helper. The dependency on `UnityEngine.Vector3` must be replaced with `Unity.Mathematics.float3`.
+
 ---
 
-## 2. Other Potential Performance Improvements
+## 2. Algorithmic Optimizations (Logic)
 
-These are additional optimizations that can be explored independently of the Burst compatibility migration.
+These improvements focus on *what* we calculate, ensuring we don't waste cycles on invisible blocks.
 
-### A. Pre-calculating a Biome Map
+### A. Heightmap Early Exit (The "Sky Skip" Optimization)
 
-* **Problem:** The current `ChunkGenerationJob` calculates the biome for every single voxel column by looping through all biome types and evaluating their noise weights. This is inefficient, especially as more biomes are added.
-* **Solution:** Introduce a preceding, lightweight "Biome Job". This job would run first and generate a low-resolution 2D `NativeArray<byte>` representing the biome for each column in a chunk. The main `ChunkGenerationJob` would then simply read from this pre-calculated map
-  instead of running the expensive biome selection loop for every column.
-* **Benefit:** Decouples biome selection from voxel generation and reduces redundant noise calculations, leading to a faster `ChunkGenerationJob`.
+* **Problem:** Currently, we loop `y` from 0 to `ChunkHeight` (e.g., 128) for every column. We calculate expensive 3D noise for air blocks high in the sky, which is wasteful.
+* **Solution:**
+    1. Calculate a cheap 2D "Terrain Height" first: `int height = GetHeight2D(x, z);`
+    2. **Below Height (0 to height):** Run the full 3D Noise logic (Density check). This ensures we generate Stone, Dirt, or **Caves** (air pockets underground).
+    3. **Above Height (height to 128):** Skip 3D noise entirely. Simply fill with Water (if below sea level) or Air.
+* **Benefit:** Reduces noise calculations from **O(Volume)** to **O(Surface Area)** for the sky portion (approx. 40-60% reduction in math).
+* **Critical Logic:** You must *not* simply fill `0` to `height` with solid blocks, or you will lose caves. The loop below the heightmap must still check density.
+* **Complexity:** Moderate. Requires separating 2D terrain logic from 3D cave/overhang logic.
 
-### B. Generating Structures Directly in a Job
+### B. Pre-calculated Biome Map
 
-* **Problem:** Currently, the `ChunkGenerationJob` only identifies a *location* for a tree and enqueues a `VoxelMod`. The main thread then has to process this mod and run the `Structure.MakeTree` logic, which generates a large queue of new `VoxelMod`s. This moves significant work
-  back to the main thread and adds overhead through the modification queue.
-* **Solution (Advanced):** Create a dedicated "Structure Generation Job" that runs after the main terrain generation. This job would take the generated `OutputMap` as input. When it identifies a location for a tree, it would directly write the log and leaf block IDs into the
-  `NativeArray<uint>`.
-* **Benefit:** Keeps the entire structure generation process off the main thread, significantly reducing frame hitches when new chunks with many trees are generated.
-* **Complexity:** This is a more complex task, as it requires careful handling of writes that cross chunk boundaries.
+* **Problem:** We currently calculate the biome type for every voxel column inside the main generation loop. This involves checking temperature/humidity noise repeatedly.
+* **Solution:** Run a lightweight "Biome Job" *before* the Chunk Generation Job. This produces a `NativeArray<byte>` (size 16x16) representing the biome ID for each column.
+* **Benefit:** The heavy 3D generation job simply reads `BiomeMap[x + z * 16]` (O(1) lookup) instead of recalculating noise weights.
+* **Complexity:** Low.
 
-### C. Chaining Jobs with Dependencies
+---
 
-* **Problem:** The current `WorldJobManager` uses the `Update` loop to check if jobs are complete and then schedule the next ones (e.g., check if generation is done, then schedule lighting). This can introduce a 1-frame delay between dependent stages.
-* **Solution:** Refactor the `WorldJobManager` to use `JobHandle` dependencies. When a generation job is scheduled, its `JobHandle` can be passed to the `Schedule()` call of the lighting job.
+## 3. Architectural Improvements (The Pipeline)
+
+### A. Job Chaining (Internal Dependencies)
+
+* **Problem:** The `WorldJobManager` uses `Update()` to check if jobs are done, introducing latency.
+* **Solution:** Use `JobHandle` chaining for dependent *internal* steps of generation.
+
   ```csharp
-  // Conceptual example
-  JobHandle generationHandle = generationJob.Schedule();
-  JobHandle lightingHandle = lightingJob.Schedule(generationHandle);
+  // 1. Biome Job
+  JobHandle biomeHandle = biomeJob.Schedule();
+  
+  // 2. Voxel Gen Job (depends on Biome data)
+  JobHandle voxelHandle = voxelJob.Schedule(biomeHandle);
   ```
-* **Benefit:** This allows the Job System to automatically start the lighting job as soon as the generation job is complete, without waiting for the main thread to intervene. It improves job throughput and reduces the latency from generation to a fully-meshed chunk appearing on
-  screen.
+
+* **Constraint:** You generally **cannot** chain the `MeshingJob` directly to the `GenerationJob` of the same chunk. Meshing requires neighbor data (for occlusion culling), so the Meshing Job must wait for a "batch" of neighbors to complete generation first.
+* **Benefit:** Increases throughput. The CPU never waits for the Main Thread to tell it to start the next task.
+* **Complexity:** Low to Moderate. Requires refactoring the JobManager.
+
+### B. Deferred Structure Generation
+
+* **Problem:** Trees are generated on the Main Thread via `VoxelMod` queues to avoid cross-chunk threading issues (e.g., a tree modifying a chunk that isn't loaded yet).
+* **Solution:**
+
+1. **Gen Pass:** Generate terrain only. If a block is a valid tree spot, write coordinates to a `NativeList<float3> TreePoints`.
+2. **Decoration Pass:** A separate system processes `TreePoints` only after the chunk *and its neighbors* are loaded.
+
+* **Benefit:** Removes the massive Main Thread spikes caused by `Structure.MakeTree`.
+* **Complexity:** High. Requires a state machine to track "Chunk Loaded" vs "Neighbors Loaded".
+
+---
+
+## 4. Micro-Optimizations (Math)
+
+### A. SIMD / Vectorization
+
+* **Observation:** Noise libraries often support calculating noise for 4 points at once (`float4`) using AVX/SSE instructions.
+* **Plan:** If possible, rewrite the inner Y-loop to process `y, y+1, y+2, y+3` simultaneously.
+* **Benefit:** Potential 4x speedup on the noise calculation portion.
+* **Complexity:** High. Makes code harder to read. Only do this if the standard Burst optimization isn't fast enough.
+
+### B. Look Up Tables (LUT)
+
+* **Observation:** We use trig functions (`Mathf.Sin`, `cos`) for biome blending and offsets.
+* **Plan:** Bake these values into a `static readonly NativeArray<float>` or use `SharedStatic` arrays if the math is complex and a possible precision loss is acceptable.
+* **Benefit:** Memory lookup is often faster than transcendental math instructions.
