@@ -33,13 +33,13 @@ namespace Data
 
         public byte Sunlight
         {
-            get => BurstVoxelDataBitMapping.GetSunlight(_packedData);
+            get => BurstVoxelDataBitMapping.GetSunLight(_packedData);
             set => _packedData = BurstVoxelDataBitMapping.SetSunLight(_packedData, value);
         }
 
         public byte Blocklight
         {
-            get => BurstVoxelDataBitMapping.GetBlocklight(_packedData);
+            get => BurstVoxelDataBitMapping.GetBlockLight(_packedData);
             set => _packedData = BurstVoxelDataBitMapping.SetBlockLight(_packedData, value);
         }
 

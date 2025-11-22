@@ -130,8 +130,8 @@ namespace Data
 
             // --- Capture Old State for Lighting ---
             byte oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
-            byte oldBlocklight = BurstVoxelDataBitMapping.GetBlocklight(oldPackedData);
-            byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(oldPackedData);
+            byte oldBlocklight = BurstVoxelDataBitMapping.GetBlockLight(oldPackedData);
+            byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
             BlockType oldProps = World.Instance.blockTypes[oldId];
 
             // --- Update The Map ---
@@ -179,11 +179,11 @@ namespace Data
                 {
                     uint neighborPacked = map[GetIndexFromPosition(neighborPos.x, neighborPos.y, neighborPos.z)];
 
-                    byte neighborSunlight = BurstVoxelDataBitMapping.GetSunlight(neighborPacked);
+                    byte neighborSunlight = BurstVoxelDataBitMapping.GetSunLight(neighborPacked);
                     if (neighborSunlight > 0)
                         AddToSunLightQueue(neighborPos, 0);
 
-                    byte neighborBlocklight = BurstVoxelDataBitMapping.GetBlocklight(neighborPacked);
+                    byte neighborBlocklight = BurstVoxelDataBitMapping.GetBlockLight(neighborPacked);
                     if (neighborBlocklight > 0)
                         AddToBlockLightQueue(neighborPos, 0);
                 }

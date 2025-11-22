@@ -69,17 +69,17 @@ namespace Jobs.BurstData
         /// </summary>
         public static byte GetLight(uint packedData)
         {
-            uint sunlightLevel = GetSunlight(packedData);
-            uint blocklightLevel = GetBlocklight(packedData);
-            return (byte)math.max(sunlightLevel, blocklightLevel);
+            uint sunLightLevel = GetSunLight(packedData);
+            uint blockLightLevel = GetBlockLight(packedData);
+            return (byte)math.max(sunLightLevel, blockLightLevel);
         }
 
-        public static byte GetSunlight(uint packedData)
+        public static byte GetSunLight(uint packedData)
         {
             return (byte)((packedData & SUNLIGHT_MASK) >> SUNLIGHT_SHIFT);
         }
 
-        public static byte GetBlocklight(uint packedData)
+        public static byte GetBlockLight(uint packedData)
         {
             return (byte)((packedData & BLOCKLIGHT_MASK) >> BLOCKLIGHT_SHIFT);
         }

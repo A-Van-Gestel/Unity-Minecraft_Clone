@@ -621,6 +621,7 @@ GameObject:
   - component: {fileID: 370022898}
   - component: {fileID: 370022897}
   - component: {fileID: 370022899}
+  - component: {fileID: 370022900}
   m_Layer: 0
   m_Name: BenchmarkRunner
   m_TagString: Untagged
@@ -685,6 +686,26 @@ MonoBehaviour:
   _useBlockingWait: 1
   _runOnStart: 0
   _triggerKey: 109
+--- !u!114 &370022900
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 370022896}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ed82d6aae8a442a2a254ee693deddfd4, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Benchmarks.LightingBenchmark
+  _benchMarkEnabled: 0
+  _runFullComparison: 1
+  _benchmarkRuns: 50
+  _jobsToRun: 512
+  _scenario: 1
+  _useBlockingWait: 1
+  _runOnStart: 0
+  _triggerKey: 108
 --- !u!1 &439044754
 GameObject:
   m_ObjectHideFlags: 0

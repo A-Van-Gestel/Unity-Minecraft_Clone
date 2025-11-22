@@ -87,7 +87,7 @@ namespace Jobs
             while (SunlightBfsQueue.TryDequeue(out LightQueueNode node))
             {
                 uint currentPacked = GetPackedData(node.Position);
-                byte currentLight = BurstVoxelDataBitMapping.GetSunlight(currentPacked);
+                byte currentLight = BurstVoxelDataBitMapping.GetSunLight(currentPacked);
                 if (currentLight < node.OldLightLevel)
                     sunlightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.Position, LightLevel = node.OldLightLevel });
                 else if (currentLight > node.OldLightLevel)
@@ -97,7 +97,7 @@ namespace Jobs
             while (BlocklightBfsQueue.TryDequeue(out LightQueueNode node))
             {
                 uint currentPacked = GetPackedData(node.Position);
-                byte currentLight = BurstVoxelDataBitMapping.GetBlocklight(currentPacked);
+                byte currentLight = BurstVoxelDataBitMapping.GetBlockLight(currentPacked);
                 if (currentLight > node.OldLightLevel)
                     blocklightPlacementQueue.Enqueue(node.Position);
                 else if (currentLight < node.OldLightLevel)
@@ -139,7 +139,7 @@ namespace Jobs
                 uint neighborPacked = GetPackedData(neighborPos);
                 if (neighborPacked == uint.MaxValue) continue;
 
-                byte neighborLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunlight(neighborPacked) : BurstVoxelDataBitMapping.GetBlocklight(neighborPacked);
+                byte neighborLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunLight(neighborPacked) : BurstVoxelDataBitMapping.GetBlockLight(neighborPacked);
 
                 if (neighborLight > 0)
                 {
@@ -161,8 +161,8 @@ namespace Jobs
             uint sourcePacked = GetPackedData(pos);
             if (sourcePacked == uint.MaxValue) return;
 
-            byte sourceLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunlight(sourcePacked) : BurstVoxelDataBitMapping.GetBlocklight(sourcePacked);
-            BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
+            byte sourceLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunLight(sourcePacked) : BurstVoxelDataBitMapping.GetBlockLight(sourcePacked);
+            BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)]; // <-- Line 165: Index out of range error here
 
             // An opaque block cannot propagate sunlight to its neighbors.
             // It might have sunlight level 15 from InitialSunlightJob, but it stops there.
@@ -174,7 +174,7 @@ namespace Jobs
                 uint neighborPacked = GetPackedData(neighborPos);
                 if (neighborPacked == uint.MaxValue) continue;
 
-                byte neighborLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunlight(neighborPacked) : BurstVoxelDataBitMapping.GetBlocklight(neighborPacked);
+                byte neighborLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunLight(neighborPacked) : BurstVoxelDataBitMapping.GetBlockLight(neighborPacked);
                 BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
 
                 // This special case allows sunlight to travel down columns of air without diminishing.
@@ -226,7 +226,7 @@ namespace Jobs
             {
                 var currentPos = new Vector3Int(x, y, z);
                 uint currentPacked = GetPackedData(currentPos);
-                byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(currentPacked);
+                byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(currentPacked);
 
                 // Update the current block in the column to be fully lit.
                 if (oldSunlight != 15)
@@ -253,7 +253,7 @@ namespace Jobs
                     uint neighborPacked = GetPackedData(neighborPos);
                     if (neighborPacked == uint.MaxValue) continue;
 
-                    byte neighborSunlight = BurstVoxelDataBitMapping.GetSunlight(neighborPacked);
+                    byte neighborSunlight = BurstVoxelDataBitMapping.GetSunLight(neighborPacked);
 
                     // If the neighbor has sunlight BUT NOT FULL SUNLIGHT, it needs to be re-evaluated.
                     // A neighbor with level 15 has its own direct sky access and should be ignored.
@@ -271,7 +271,7 @@ namespace Jobs
             {
                 var currentPos = new Vector3Int(x, y, z);
                 uint currentPacked = GetPackedData(currentPos);
-                byte oldSunlight = BurstVoxelDataBitMapping.GetSunlight(currentPacked);
+                byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(currentPacked);
                 BlockTypeJobData props = BlockTypes[BurstVoxelDataBitMapping.GetId(currentPacked)];
 
                 // Update the current block in the column based on the light from above.

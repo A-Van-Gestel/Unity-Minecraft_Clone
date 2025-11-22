@@ -990,12 +990,12 @@ public class World : MonoBehaviour
             // Use the channel to call the correct setter
             if (channel == LightChannel.Sun)
             {
-                if (BurstVoxelDataBitMapping.GetSunlight(oldPackedData) == lightValue) return; // No change needed
+                if (BurstVoxelDataBitMapping.GetSunLight(oldPackedData) == lightValue) return; // No change needed
                 newPackedData = BurstVoxelDataBitMapping.SetSunLight(oldPackedData, lightValue);
             }
             else // Blocklight
             {
-                if (BurstVoxelDataBitMapping.GetBlocklight(oldPackedData) == lightValue) return; // No change needed
+                if (BurstVoxelDataBitMapping.GetBlockLight(oldPackedData) == lightValue) return; // No change needed
                 newPackedData = BurstVoxelDataBitMapping.SetBlockLight(oldPackedData, lightValue);
             }
 
@@ -1712,11 +1712,11 @@ public class Settings
     public int maxInitialLoadRadius = 10;
 
     // --- LIGHTING ---
-    [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame. Prevents performance drops from lighting cascades.")]
+    [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame.")]
     public int maxLightJobsPerFrame = 8;
 
     [InitializationField]
-    [Tooltip("PERFORMANCE INTENSIVE - Enable the lighting system, this can cause the game to hang for a couple of seconds under rare circumstances.")]
+    [Tooltip("Enable the lighting system.")]
     public bool enableLighting = true;
 
     // --- RENDERING ---

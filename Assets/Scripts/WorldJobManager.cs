@@ -455,7 +455,7 @@ public class WorldJobManager
                         // Determine which light channel to modify based on the modification request.
                         if (mod.Channel == LightChannel.Sun)
                         {
-                            byte currentSunlight = BurstVoxelDataBitMapping.GetSunlight(oldPackedData);
+                            byte currentSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
 
                             // If the block already has full sunlight (15), and this modification would decrease it, ignore the modification.
                             // This prevents a job using stale data from overwriting a correct value set by another job.
@@ -464,12 +464,12 @@ public class WorldJobManager
                                 continue; // Skip this modification
                             }
 
-                            oldLightLevel = BurstVoxelDataBitMapping.GetSunlight(oldPackedData);
+                            oldLightLevel = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
                             newPackedData = BurstVoxelDataBitMapping.SetSunLight(oldPackedData, mod.LightLevel);
                         }
                         else // Blocklight
                         {
-                            oldLightLevel = BurstVoxelDataBitMapping.GetBlocklight(oldPackedData);
+                            oldLightLevel = BurstVoxelDataBitMapping.GetBlockLight(oldPackedData);
                             newPackedData = BurstVoxelDataBitMapping.SetBlockLight(oldPackedData, mod.LightLevel);
                         }
 
