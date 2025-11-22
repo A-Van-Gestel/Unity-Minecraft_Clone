@@ -3954,6 +3954,14 @@ PrefabInstance:
       propertyPath: settings.maxInitialLoadRadius
       value: 25
       objectReference: {fileID: 0}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: settings.maxLightJobsPerFrame
+      value: 32
+      objectReference: {fileID: 0}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: settings.maxMeshRebuildsPerFrame
+      value: 10
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []

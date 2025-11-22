@@ -548,7 +548,7 @@ public class World : MonoBehaviour
     {
         // Prevent normal generation logic from interfering with the startup coroutine
         if (!_isWorldLoaded) return;
-        
+
         PlayerChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
 
         // Only update the chunks if the player has moved from the chunk they were previously on.
@@ -647,23 +647,30 @@ public class World : MonoBehaviour
         // 6. Schedule NEW mesh jobs for chunks that now need them.
         if (_chunksToBuildMesh.Count > 0)
         {
-            for (int i = _chunksToBuildMesh.Count - 1; i >= 0; i--)
+            int meshJobsScheduled = 0;
+            // Iterate forwards to respect priority (Index 0 is highest priority).
+            // Using a while loop or adjusting index after removal to handle list modification.
+            for (int i = 0; i < _chunksToBuildMesh.Count; i++)
             {
+                if (meshJobsScheduled >= settings.maxMeshRebuildsPerFrame) break;
+
                 Chunk chunk = _chunksToBuildMesh[i];
                 if (chunk != null)
                 {
-                    // jobManager.ScheduleMeshing will any lighting changes jobs are running and if neighbors are ready.
-                    // If any lighting jobs are running, it will return false.
-                    // If neighbors are ready, it will schedule the job, and we can remove this from the list.
+                    // JobManager.ScheduleMeshing will return false if deps (neighbors/lighting) aren't ready.
+                    // In that case, we leave the chunk in the list (at index i) and check the next one.
                     if (JobManager.ScheduleMeshing(chunk))
                     {
                         _chunksToBuildMesh.RemoveAt(i);
+                        i--; // Decrement index so we don't skip the next element which shifted down
+                        meshJobsScheduled++;
                     }
                 }
                 else
                 {
                     // Remove null chunks from the list.
                     _chunksToBuildMesh.RemoveAt(i);
+                    i--;
                 }
             }
         }
@@ -1713,11 +1720,15 @@ public class Settings
 
     // --- LIGHTING ---
     [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame.")]
-    public int maxLightJobsPerFrame = 8;
+    public int maxLightJobsPerFrame = 32;
 
     [InitializationField]
     [Tooltip("Enable the lighting system.")]
     public bool enableLighting = true;
+
+    // --- MESHING ---
+    [Tooltip("The maximum number of chunks that can be meshed (rebuilt) in a single frame.")]
+    public int maxMeshRebuildsPerFrame = 10;
 
     // --- RENDERING ---
     [Tooltip("The style of clouds to render.")]
