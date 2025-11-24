@@ -558,7 +558,7 @@ namespace Benchmarks
                 uint currentPacked = data.Center[idx];
 
                 // If solid (and not the source itself), stop.
-                byte id = BurstVoxelDataBitMapping.GetId(currentPacked);
+                ushort id = BurstVoxelDataBitMapping.GetId(currentPacked);
                 if (id == 1) continue; // Stone
 
                 // If current light is already higher/equal, skip (simple visited check logic)

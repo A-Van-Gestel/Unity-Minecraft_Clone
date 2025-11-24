@@ -1,4 +1,5 @@
 ﻿using Data;
+using Helpers;
 using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Jobs;
@@ -50,7 +51,7 @@ namespace Jobs
         // The Execute method now takes an index, which will represent one X/Z column in the chunk.
         public void Execute(int index)
         {
-            // The loop order is now column-major, processed in parallel.
+            // Column-major iteration (X, Z)
             int x = index % VoxelData.ChunkWidth;
             int z = index / VoxelData.ChunkWidth;
 
@@ -65,10 +66,10 @@ namespace Jobs
                 BlockTypeJobData voxelProps = BlockTypes[voxelID];
                 // --- Populate the main voxel map ---
 
-                int mapIndex = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
+                int mapIndex = ChunkMath.GetFlattenedIndex(x, y, z);
                 OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.LightEmission, 1, voxelProps.FluidLevel);
 
-                // --- Populate the heightmap ---
+                // --- Populate Heightmap ---
                 // If we haven't found the highest block in this column yet, check if this one is light-obstructing.
                 if (!highestBlockFound)
                 {

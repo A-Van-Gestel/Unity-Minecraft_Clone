@@ -344,7 +344,7 @@ namespace Benchmarks
         /// </summary>
         /// <param name="type">The data pattern type.</param>
         /// <param name="index">The flat array index of the voxel.</param>
-        /// <returns>The byte ID of the block to place.</returns>
+        /// <returns>The ushort ID of the block to place.</returns>
         private byte GetVoxelIDForPattern(ChunkDataType type, int index)
         {
             switch (type)

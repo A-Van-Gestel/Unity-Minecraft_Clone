@@ -14,7 +14,7 @@ namespace Data
 
         #region Packed Data Properties
 
-        public byte id
+        public ushort id
         {
             get => BurstVoxelDataBitMapping.GetId(_packedData);
             set => _packedData = BurstVoxelDataBitMapping.SetId(_packedData, value); // Direct set, handle consequences elsewhere (like ModifyVoxel)

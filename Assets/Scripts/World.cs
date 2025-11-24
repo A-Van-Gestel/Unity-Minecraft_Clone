@@ -989,9 +989,9 @@ public class World : MonoBehaviour
         ChunkData chunkData = worldData.RequestChunk(worldData.GetChunkCoordFor(globalPos), false);
         if (chunkData != null && chunkData.IsPopulated)
         {
+            // Get data from the chunk
             Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(globalPos);
-            int index = localPos.x + VoxelData.ChunkWidth * (localPos.y + VoxelData.ChunkHeight * localPos.z);
-            uint oldPackedData = chunkData.map[index];
+            uint oldPackedData = chunkData.GetVoxel(localPos.x, localPos.y, localPos.z);
             uint newPackedData;
 
             // Use the channel to call the correct setter
@@ -1006,7 +1006,8 @@ public class World : MonoBehaviour
                 newPackedData = BurstVoxelDataBitMapping.SetBlockLight(oldPackedData, lightValue);
             }
 
-            chunkData.map[index] = newPackedData;
+            // Write data back
+            chunkData.SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData);
         }
     }
 
@@ -1445,46 +1446,61 @@ public class World : MonoBehaviour
 
                 break;
 
-            // For other modes, we iterate but now skip air blocks.
+            // For other modes, we iterate sections to efficiently skip empty space.
             case DebugVisualizationMode.Sunlight:
             case DebugVisualizationMode.Blocklight:
             case DebugVisualizationMode.FluidLevel:
-                for (int i = 0; i < chunk.ChunkData.map.Length; i++)
+
+                // Loop through all sections in the chunk
+                for (int s = 0; s < chunk.ChunkData.sections.Length; s++)
                 {
-                    // --- OPTIMIZATION: Get ID first and skip if it's air ---
-                    uint packedData = chunk.ChunkData.map[i];
-                    if (BurstVoxelDataBitMapping.GetId(packedData) == 0)
-                    {
-                        continue; // Skip air blocks entirely.
-                    }
+                    ChunkSection section = chunk.ChunkData.sections[s];
 
-                    // Convert flat index to 3D position only when needed.
-                    int x = i % VoxelData.ChunkWidth;
-                    int y = i / VoxelData.ChunkWidth % VoxelData.ChunkHeight;
-                    int z = i / (VoxelData.ChunkWidth * VoxelData.ChunkHeight);
-                    var localPos = new Vector3Int(x, y, z);
+                    // Optimization: Skip null or empty sections entirely
+                    if (section == null || section.IsEmpty) continue;
 
-                    var state = new VoxelState(packedData);
-                    Color? color = null;
+                    int startY = s * ChunkSection.SIZE;
 
-                    if (visualizationMode == DebugVisualizationMode.Sunlight && state.Sunlight > 0)
+                    // Loop through the voxels in this specific section
+                    for (int i = 0; i < section.voxels.Length; i++)
                     {
-                        color = new Color(1f, 1f, 0f, state.Sunlight / 15f * 0.8f); // Yellow
-                    }
-                    else if (visualizationMode == DebugVisualizationMode.Blocklight && state.Blocklight > 0)
-                    {
-                        color = new Color(1f, 0.5f, 0f, state.Blocklight / 15f * 0.8f); // Orange
-                    }
-                    else if (visualizationMode == DebugVisualizationMode.FluidLevel && state.Properties.fluidType != FluidType.None)
-                    {
-                        // Make color fade from bright blue (level 0) to dark blue
-                        float levelRatio = (15 - state.FluidLevel) / 15f;
-                        color = new Color(0f, levelRatio * 0.7f, 1f, 0.7f);
-                    }
+                        uint packedData = section.voxels[i];
 
-                    if (color.HasValue)
-                    {
-                        voxelsToDraw[localPos] = color.Value;
+                        // --- OPTIMIZATION: Get ID first and skip if it's air ---
+                        if (BurstVoxelDataBitMapping.GetId(packedData) == 0)
+                        {
+                            continue;
+                        }
+
+                        // Convert section index to 3D position
+                        int x = i % ChunkSection.SIZE;
+                        int yOffset = (i / ChunkSection.SIZE) % ChunkSection.SIZE;
+                        int z = i / (ChunkSection.SIZE * ChunkSection.SIZE);
+
+                        var localPos = new Vector3Int(x, startY + yOffset, z);
+
+                        var state = new VoxelState(packedData);
+                        Color? color = null;
+
+                        if (visualizationMode == DebugVisualizationMode.Sunlight && state.Sunlight > 0)
+                        {
+                            color = new Color(1f, 1f, 0f, state.Sunlight / 15f * 0.8f); // Yellow
+                        }
+                        else if (visualizationMode == DebugVisualizationMode.Blocklight && state.Blocklight > 0)
+                        {
+                            color = new Color(1f, 0.5f, 0f, state.Blocklight / 15f * 0.8f); // Orange
+                        }
+                        else if (visualizationMode == DebugVisualizationMode.FluidLevel && state.Properties.fluidType != FluidType.None)
+                        {
+                            // Make color fade from bright blue (level 0) to dark blue
+                            float levelRatio = (15 - state.FluidLevel) / 15f;
+                            color = new Color(0f, levelRatio * 0.7f, 1f, 0.7f);
+                        }
+
+                        if (color.HasValue)
+                        {
+                            voxelsToDraw[localPos] = color.Value;
+                        }
                     }
                 }
 

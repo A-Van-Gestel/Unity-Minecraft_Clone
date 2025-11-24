@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Helpers;
 using JetBrains.Annotations;
 using Jobs.BurstData;
 using Unity.Collections;
@@ -27,7 +28,7 @@ namespace Data
         }
 
         [HideInInspector]
-        public uint[] map = new uint[VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth];
+        public ChunkSection[] sections; // For 128 height, this array has length 8.
 
         /// <summary>
         /// The heightmap for this chunk. Stores the Y-level of the highest opaque block for each column.
@@ -76,22 +77,74 @@ namespace Data
         public ChunkData(Vector2Int pos)
         {
             position = pos;
+            InitializeSections();
         }
 
         public ChunkData(int x, int y)
         {
             _x = x;
             _y = y;
+            InitializeSections();
+        }
+
+        private void InitializeSections()
+        {
+            int sectionCount = VoxelData.ChunkHeight / ChunkSection.SIZE;
+            sections = new ChunkSection[sectionCount];
         }
 
         /// Populate the chunk with voxels from the world generator.
         public void Populate(NativeArray<uint> jobOutputMap, NativeArray<byte> jobOutputHeightMap)
         {
-            jobOutputMap.CopyTo(map);
+            // Transfer data from the flat job array to the sections
+            PopulateFromFlattened(jobOutputMap);
+
             jobOutputHeightMap.CopyTo(heightMap);
             IsPopulated = true;
 
             World.Instance.worldData.ModifiedChunks.Add(this);
+        }
+
+        /// <summary>
+        /// Populates the ChunkSections from a flat NativeArray.
+        /// Used when receiving data back from Jobs (Generation, Lighting).
+        /// </summary>
+        public void PopulateFromFlattened(NativeArray<uint> flatData)
+        {
+            int sectionVoxelCount = ChunkSection.SIZE * ChunkSection.SIZE * ChunkSection.SIZE;
+
+            for (int i = 0; i < sections.Length; i++)
+            {
+                int startIndex = i * sectionVoxelCount;
+
+                // Optimization: We could check if the slice is empty before creating a section,
+                // but for now we ensure the section exists if we are writing data.
+                // A more advanced implementation would check if the flatData slice contains only 0s.
+
+                if (sections[i] == null)
+                {
+                    // Check if we actually need to create a section (is there any data in this slice?)
+                    bool hasData = false;
+                    for (int j = 0; j < sectionVoxelCount; j++)
+                    {
+                        if (flatData[startIndex + j] != 0)
+                        {
+                            hasData = true;
+                            break;
+                        }
+                    }
+
+                    if (!hasData) continue; // Skip empty sections
+
+                    sections[i] = new ChunkSection();
+                }
+
+                // Copy the slice from NativeArray to the Section's managed array
+                NativeArray<uint>.Copy(flatData, startIndex, sections[i].voxels, 0, sectionVoxelCount);
+
+                // Recalculate NonAirCount
+                sections[i].RecalculateNonAirCount();
+            }
         }
 
         #endregion
@@ -114,9 +167,8 @@ namespace Data
             if (!IsVoxelInChunk(localPos)) return;
             if (World.Instance is null) return;
 
-            // Get the current state of the voxel from the flat voxel map
-            int index = GetIndexFromPosition(localPos.x, localPos.y, localPos.z);
-            uint oldPackedData = map[index];
+            // Get the current state of the voxel using the new Section system
+            uint oldPackedData = GetVoxel(localPos.x, localPos.y, localPos.z);
 
             // --- Create the new voxel data from the modification ---
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
@@ -129,13 +181,13 @@ namespace Data
                 return;
 
             // --- Capture Old State for Lighting ---
-            byte oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
+            ushort oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
             byte oldBlocklight = BurstVoxelDataBitMapping.GetBlockLight(oldPackedData);
             byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
             BlockType oldProps = World.Instance.blockTypes[oldId];
 
-            // --- Update The Map ---
-            map[index] = newPackedData;
+            // --- Update The Map (Sections) ---
+            SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData);
 
             // --- MAINTAIN HEIGHTMAP ---
             int heightmapIndex = localPos.x + VoxelData.ChunkWidth * localPos.z;
@@ -153,8 +205,8 @@ namespace Data
                 byte newHeight = 0;
                 for (int y = localPos.y - 1; y >= 0; y--)
                 {
-                    int checkIndex = GetIndexFromPosition(localPos.x, y, localPos.z);
-                    byte checkId = BurstVoxelDataBitMapping.GetId(map[checkIndex]);
+                    uint checkPacked = GetVoxel(localPos.x, y, localPos.z);
+                    ushort checkId = BurstVoxelDataBitMapping.GetId(checkPacked);
                     if (World.Instance.blockTypes[checkId].IsOpaque)
                     {
                         newHeight = (byte)y;
@@ -177,7 +229,7 @@ namespace Data
                 Vector3Int neighborPos = localPos + VoxelData.FaceChecks[i];
                 if (IsVoxelInChunk(neighborPos))
                 {
-                    uint neighborPacked = map[GetIndexFromPosition(neighborPos.x, neighborPos.y, neighborPos.z)];
+                    uint neighborPacked = GetVoxel(neighborPos.x, neighborPos.y, neighborPos.z);
 
                     byte neighborSunlight = BurstVoxelDataBitMapping.GetSunLight(neighborPacked);
                     if (neighborSunlight > 0)
@@ -212,6 +264,68 @@ namespace Data
             }
 
             World.Instance.worldData.ModifiedChunks.Add(this);
+        }
+
+        #endregion
+
+        // --- Chunk Section Methods ---
+
+        #region Chunk Section Methods
+
+        /// <summary>
+        /// Sets the packed voxel data at the specified local coordinates.
+        /// Automatically handles the creation of ChunkSections if they don't exist.
+        /// </summary>
+        /// <param name="x">Local X (0-15)</param>
+        /// <param name="y">Local Y (0-ChunkHeight)</param>
+        /// <param name="z">Local Z (0-15)</param>
+        /// <param name="value">The packed uint data.</param>
+        public void SetVoxel(int x, int y, int z, uint value)
+        {
+            int sectionY = y / ChunkSection.SIZE;
+            int localY = y % ChunkSection.SIZE;
+
+            // Create section if it doesn't exist (on write)
+            if (sections[sectionY] == null)
+            {
+                // If writing "Air" to a null section, don't bother creating it
+                if (value == 0) return;
+                sections[sectionY] = new ChunkSection();
+            }
+
+            // Index logic: 16x16x16
+            // Note: We manually calculate the local section index here because ChunkSection.Voxels is only 4096 long.
+            // We cannot use ChunkMath.GetFlattenedIndex here because that returns the global index (e.g. 5000+).
+            int index = x + (localY * ChunkSection.SIZE) + (z * ChunkSection.SIZE * ChunkSection.SIZE);
+
+            // Handle NonAirCount for optimization
+            uint oldValue = sections[sectionY].voxels[index];
+            if (oldValue == 0 && value != 0) sections[sectionY].nonAirCount++;
+            else if (oldValue != 0 && value == 0) sections[sectionY].nonAirCount--;
+
+            sections[sectionY].voxels[index] = value;
+
+            // Optional: If NonAirCount drops to 0, set Sections[sectionY] = null to free memory
+        }
+
+        /// <summary>
+        /// Gets the packed voxel data at the specified local coordinates.
+        /// Returns 0 (Air) if the ChunkSection is null.
+        /// </summary>
+        /// <param name="x">Local X (0-15)</param>
+        /// <param name="y">Local Y (0-ChunkHeight)</param>
+        /// <param name="z">Local Z (0-15)</param>
+        /// <returns>The packed uint data.</returns>
+        public uint GetVoxel(int x, int y, int z)
+        {
+            int sectionY = y / ChunkSection.SIZE;
+
+            // If section is null, it's implicitly Air
+            if (sections[sectionY] == null) return 0;
+
+            int localY = y % ChunkSection.SIZE;
+            int index = x + (localY * ChunkSection.SIZE) + (z * ChunkSection.SIZE * ChunkSection.SIZE);
+            return sections[sectionY].voxels[index];
         }
 
         #endregion
@@ -317,7 +431,23 @@ namespace Data
         /// <returns>Jobs compatible array of voxels</returns>
         public NativeArray<uint> GetMapForJob(Allocator allocator)
         {
-            return new NativeArray<uint>(map, allocator);
+            // Flatten sections into a single NativeArray
+            int totalVoxels = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
+            var jobArray = new NativeArray<uint>(totalVoxels, allocator);
+
+            int sectionVoxelCount = ChunkMath.SECTION_VOLUME;
+
+            for (int i = 0; i < sections.Length; i++)
+            {
+                if (sections[i] != null)
+                {
+                    // Copy managed section array to native job array at correct offset
+                    NativeArray<uint>.Copy(sections[i].voxels, 0, jobArray, i * sectionVoxelCount, sectionVoxelCount);
+                }
+                // If section is null, the jobArray already contains 0 (Air) from initialization
+            }
+
+            return jobArray;
         }
 
         /// Check if a local voxel position is within the bounds of this chunk.
@@ -349,8 +479,7 @@ namespace Data
         {
             if (IsVoxelInChunk(localPos.x, localPos.y, localPos.z))
             {
-                int index = GetIndexFromPosition(localPos.x, localPos.y, localPos.z);
-                uint packedData = map[index];
+                uint packedData = GetVoxel(localPos.x, localPos.y, localPos.z);
                 return new VoxelState(packedData);
             }
 
@@ -370,7 +499,7 @@ namespace Data
                 return null;
             }
 
-            uint packedData = map[GetIndexFromPosition(localPos.x, localPos.y, localPos.z)];
+            uint packedData = GetVoxel(localPos.x, localPos.y, localPos.z);
             return new VoxelState(packedData);
         }
 
@@ -389,8 +518,8 @@ namespace Data
 
             for (int y = yMax; y > 0; y--)
             {
-                int index = GetIndexFromPosition(x, y, z);
-                byte id = BurstVoxelDataBitMapping.GetId(map[index]);
+                uint packedData = GetVoxel(x, y, z);
+                ushort id = BurstVoxelDataBitMapping.GetId(packedData);
                 // Debug.Log($"Y: {y:D2} | VoxelState: {World.Instance.blockTypes[id]}");
 
                 if (World.Instance.blockTypes[id].isSolid)

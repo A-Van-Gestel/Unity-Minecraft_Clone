@@ -90,9 +90,9 @@ namespace Jobs
                 {
                     for (int z = 0; z < VoxelData.ChunkWidth; z++)
                     {
-                        int mapIndex = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
+                        int mapIndex = ChunkMath.GetFlattenedIndex(x, y, z);
                         uint packedData = Map[mapIndex];
-                        byte id = BurstVoxelDataBitMapping.GetId(packedData);
+                        ushort id = BurstVoxelDataBitMapping.GetId(packedData);
                         BlockTypeJobData props = BlockTypes[id];
 
                         if (props.IsSolid)
@@ -110,7 +110,7 @@ namespace Jobs
         /// </summary>
         private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps)
         {
-            byte id = BurstVoxelDataBitMapping.GetId(packedData);
+            ushort id = BurstVoxelDataBitMapping.GetId(packedData);
 
 
             // Case 1: The block is a fluid.
@@ -297,7 +297,7 @@ namespace Jobs
 
             if (!targetMap.IsCreated || targetMap.Length == 0) return null;
 
-            int mapIndex = localPos.x + VoxelData.ChunkWidth * (localPos.y + VoxelData.ChunkHeight * localPos.z);
+            int mapIndex = ChunkMath.GetFlattenedIndex(localPos.x, localPos.y, localPos.z);
 
             // This check prevents the job from crashing if the logic is ever incorrect.
             if (mapIndex < 0 || mapIndex >= targetMap.Length) return null;
@@ -327,7 +327,7 @@ namespace Jobs
             Output.Uvs.Add(new Vector2(x, y));
         }
 
-        private int GetTextureID(byte blockId, int faceIndex)
+        private int GetTextureID(ushort blockId, int faceIndex)
         {
             BlockTypeJobData props = BlockTypes[blockId];
             switch (faceIndex)

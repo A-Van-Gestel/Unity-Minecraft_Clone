@@ -9,7 +9,7 @@ namespace Data
     public struct VoxelMod : IEquatable<VoxelMod>
     {
         public Vector3Int GlobalPosition;
-        public byte ID;
+        public ushort ID;
         public byte Orientation;
         public byte FluidLevel;
         public bool ImmediateUpdate;
@@ -23,7 +23,7 @@ namespace Data
 
         #region Constructors
 
-        public VoxelMod(Vector3Int globalPosition, byte blockId)
+        public VoxelMod(Vector3Int globalPosition, ushort blockId)
         {
             GlobalPosition = globalPosition;
             ID = blockId;

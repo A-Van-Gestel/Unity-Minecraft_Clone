@@ -5,63 +5,96 @@ namespace Jobs.BurstData
 {
     /// <summary>
     /// This class contains an exact copy of the bit-packing logic from VoxelData.
-    /// It is separated into its own file to ensure it contains NO managed static fields
-    /// (like arrays), which would prevent it from being used by a Burst-compiled job.
+    /// It implements the "Context-Sensitive Metadata" pattern, allowing for 16-bit IDs
+    /// and shared storage for Fluid/Orientation states.
     /// </summary>
     [BurstCompile]
     public static class BurstVoxelDataBitMapping
     {
         // --- Constants for Bit Packing ---
         // Using Hex for clarity with bit positions
-        private const uint ID_MASK = 0x000000FF; // Bits 0-7  (8-bits, Values 0-256)
-        private const uint SUNLIGHT_MASK = 0x00000F00; // Bits 8-11 (4-bits, Values 0-15)
-        private const uint BLOCKLIGHT_MASK = 0x0000F000; // Bits 12-15 (4-bits, Values 0-15)
-        private const uint ORIENTATION_MASK = 0x00030000; // Bits 16-17 (2-bits, Values 0-3)
-        private const uint FLUID_LEVEL_MASK = 0x003C0000; // Bits 18-21 (4-bits, Values 0-15)
-        // Bits 22-32 are reserved
+        private const uint ID_MASK = 0x0000FFFF; // Bits 0-15  (16-bits, Values 0-65,535)
+        private const uint SUNLIGHT_MASK = 0x000F0000; // Bits 16-19 (4-bits, Values 0-15)
+        private const uint BLOCKLIGHT_MASK = 0x00F00000; // Bits 20-23 (4-bits, Values 0-15)
+        private const uint META_MASK = 0xFF000000; // Bits 24-31 (8-bits, Values 0-255)
+        // All 32 bits are used.
 
         private const int ID_SHIFT = 0;
-        private const int SUNLIGHT_SHIFT = 8;
-        private const int BLOCKLIGHT_SHIFT = 12;
-        private const int ORIENTATION_SHIFT = 16;
-        private const int FLUID_LEVEL_SHIFT = 18;
+        private const int SUNLIGHT_SHIFT = 16;
+        private const int BLOCKLIGHT_SHIFT = 20;
+        private const int META_SHIFT = 24;
 
-        // Inverse map for packing
+        // --- Internal Masks within the 8-bit Metadata field ---
+        // These apply AFTER shifting the meta bits down to 0.
+        private const byte META_VAL_FLUID_MASK = 0xF; // 4 bits (0-15)
+        private const byte META_VAL_ORIENT_MASK = 0x7; // 3 bits (0-7)
+
+        // --- Helpers ---
+
+        /// Maps World Orientation (Face Index) -> Internal Storage Index (0-5)
         private static byte GetOrientationIndex(byte orientation)
         {
+            // Standard VoxelData.FaceChecks indices:
+            // 0=Back, 1=Front, 2=Top, 3=Bottom, 4=Left, 5=Right
             switch (orientation)
             {
-                case 1: return 0; // Front/North maps to index 0
+                case 1: return 0; // Front/North maps to index 0 (Default)
                 case 0: return 1; // Back/South maps to index 1
                 case 4: return 2; // Left/West  maps to index 2
                 case 5: return 3; // Right/East maps to index 3
+                case 2: return 4; // Top        maps to index 4
+                case 3: return 5; // Bottom     maps to index 5
                 default: return 0; // Default to index 0 (Front) for any invalid orientation
             }
         }
 
         // --- Packing ---
-        // Creates the initial packed value
-        public static uint PackVoxelData(byte id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel)
+
+        /// <summary>
+        /// Packs all component data into a single uint.
+        /// Orientation and FluidLevel now share the same 8-bit Metadata space.
+        /// </summary>
+        public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel)
         {
             uint packedData = 0;
-            packedData |= (uint)((id & 0xFF) << ID_SHIFT); // ID: Ensure only 8 bits
-            packedData |= (uint)((sunLight & 0xF) << SUNLIGHT_SHIFT); // Sunlight Level: Ensure only 4 bits
-            packedData |= (uint)((blockLight & 0xF) << BLOCKLIGHT_SHIFT); // Blocklight Level: Ensure only 4 bits
+            packedData |= (uint)((id) << ID_SHIFT); // ID: 16 bits
+            packedData |= (uint)((sunLight & 0xF) << SUNLIGHT_SHIFT); // Sunlight: 4 bits
+            packedData |= (uint)((blockLight & 0xF) << BLOCKLIGHT_SHIFT); // Blocklight: 4 bits
 
-            // Pack Orientation by getting its index from our helper method
-            byte orientationIndex = GetOrientationIndex(orientation);
-            packedData |= (uint)((orientationIndex & 0x3) << ORIENTATION_SHIFT); // Orientation: Ensure only 2 bits
+            // Metadata Logic:
+            // Since Fluid and Orientation share the same bits, we prioritize FluidLevel if it exists.
+            // A block defined as a Fluid in BlockTypes should use FluidLevel.
+            // A block defined as Solid should use Orientation.
+            // Here we combine them, assuming the caller sends 0 for the unused property.
 
-            // Pack Fluid Level
-            packedData |= (uint)((fluidLevel & 0xF) << FLUID_LEVEL_SHIFT); // Fluid Level: Ensure only 4 bits
+            byte meta = 0;
+            if (fluidLevel > 0)
+            {
+                meta = (byte)(fluidLevel & META_VAL_FLUID_MASK);
+            }
+            else
+            {
+                meta = GetOrientationIndex(orientation);
+            }
+
+            packedData |= (uint)((meta) << META_SHIFT); // Meta: 8 bits
 
             return packedData;
         }
 
         // --- Unpacking / Getters ---
-        public static byte GetId(uint packedData)
+
+        public static ushort GetId(uint packedData)
         {
-            return (byte)((packedData & ID_MASK) >> ID_SHIFT);
+            return (ushort)((packedData & ID_MASK) >> ID_SHIFT);
+        }
+
+        /// <summary>
+        /// Returns the raw 8-bit metadata value.
+        /// </summary>
+        public static byte GetMeta(uint packedData)
+        {
+            return (byte)((packedData & META_MASK) >> META_SHIFT);
         }
 
         /// <summary>
@@ -69,6 +102,7 @@ namespace Jobs.BurstData
         /// </summary>
         public static byte GetLight(uint packedData)
         {
+            // NOTE: Actual types are byte, but we use uint here to make sure the math.max function works correctly.
             uint sunLightLevel = GetSunLight(packedData);
             uint blockLightLevel = GetBlockLight(packedData);
             return (byte)math.max(sunLightLevel, blockLightLevel);
@@ -84,29 +118,47 @@ namespace Jobs.BurstData
             return (byte)((packedData & BLOCKLIGHT_MASK) >> BLOCKLIGHT_SHIFT);
         }
 
-        // Here we replace the array lookup with a Burst-compatible switch statement.
+        /// <summary>
+        /// Extracts orientation from the Metadata bits.
+        /// </summary>
         public static byte GetOrientation(uint packedData)
         {
-            byte orientationIndex = (byte)((packedData & ORIENTATION_MASK) >> ORIENTATION_SHIFT);
+            // Extract the raw meta byte
+            byte meta = GetMeta(packedData);
+
+            // Mask the first 3 bits for orientation index
+            byte orientationIndex = (byte)(meta & META_VAL_ORIENT_MASK);
+
+            // Inverse mapping: Storage Index -> World Orientation
             switch (orientationIndex)
             {
-                case 0: return 1; // Index 0 maps to Orientation 1 (Front/North)
-                case 1: return 0; // Index 1 maps to Orientation 0 (Back/South)
-                case 2: return 4; // Index 2 maps to Orientation 4 (Left/West)
-                case 3: return 5; // Index 3 maps to Orientation 5 (Right/East)
-                default: return 1; // Fallback to Front/North
+                case 0: return 1; // Index 0 -> Front (North)
+                case 1: return 0; // Index 1 -> Back (South)
+                case 2: return 4; // Index 2 -> Left (West)
+                case 3: return 5; // Index 3 -> Right (East)
+                case 4: return 2; // Index 4 -> Top
+                case 5: return 3; // Index 5 -> Bottom
+                default: return 1; // Fallback to Front
             }
         }
 
+        /// <summary>
+        /// Extracts fluid level from the Metadata bits.
+        /// </summary>
         public static byte GetFluidLevel(uint packedData)
         {
-            return (byte)((packedData & FLUID_LEVEL_MASK) >> FLUID_LEVEL_SHIFT);
+            // Extract the raw meta byte
+            byte meta = GetMeta(packedData);
+
+            // Mask the first 4 bits for fluid level
+            return (byte)(meta & META_VAL_FLUID_MASK);
         }
 
         // --- Packing / Setters ---
-        public static uint SetId(uint packedData, byte id)
+
+        public static uint SetId(uint packedData, ushort id)
         {
-            return (packedData & ~ID_MASK) | (uint)((id & 0xFF) << ID_SHIFT);
+            return (packedData & ~ID_MASK) | (uint)((id) << ID_SHIFT);
         }
 
         public static uint SetSunLight(uint packedData, byte sunLightLevel)
@@ -119,15 +171,55 @@ namespace Jobs.BurstData
             return (packedData & ~BLOCKLIGHT_MASK) | (uint)((blockLightLevel & 0xF) << BLOCKLIGHT_SHIFT);
         }
 
-        public static uint SetOrientation(uint packedData, byte orientation)
+        /// <summary>
+        /// Sets the full 8-bit metadata field directly.
+        /// </summary>
+        public static uint SetMeta(uint packedData, byte meta)
         {
-            byte orientationIndex = GetOrientationIndex(orientation);
-            return (packedData & ~ORIENTATION_MASK) | (uint)((orientationIndex & 0x3) << ORIENTATION_SHIFT);
+            return (packedData & ~META_MASK) | (uint)((meta) << META_SHIFT);
         }
 
+        /// <summary>
+        /// Sets the orientation bits within the metadata field.
+        /// Note: This blindly overwrites the lower 3 bits of the metadata.
+        /// </summary>
+        public static uint SetOrientation(uint packedData, byte orientation)
+        {
+            // 1. Get current meta
+            byte currentMeta = GetMeta(packedData);
+
+            // 2. Calculate new orientation index
+            byte orientationIndex = GetOrientationIndex(orientation);
+
+            // 3. Clear the orientation bits (0-2) in the current meta, preserving bits 3-7
+            //    ~(0x7) = 11111000
+            byte preservedMeta = (byte)(currentMeta & ~META_VAL_ORIENT_MASK);
+
+            // 4. Combine
+            byte newMeta = (byte)(preservedMeta | (orientationIndex & META_VAL_ORIENT_MASK));
+
+            // 5. Write back
+            return SetMeta(packedData, newMeta);
+        }
+
+        /// <summary>
+        /// Sets the fluid level bits within the metadata field.
+        /// Note: This blindly overwrites the lower 4 bits of the metadata.
+        /// </summary>
         public static uint SetFluidLevel(uint packedData, byte fluidLevel)
         {
-            return (packedData & ~FLUID_LEVEL_MASK) | (uint)((fluidLevel & 0xF) << FLUID_LEVEL_SHIFT);
+            // 1. Get current meta
+            byte currentMeta = GetMeta(packedData);
+
+            // 2. Clear the fluid bits (0-3) in the current meta, preserving bits 4-7
+            //    ~(0xF) = 11110000
+            byte preservedMeta = (byte)(currentMeta & ~META_VAL_FLUID_MASK);
+
+            // 3. Combine
+            byte newMeta = (byte)(preservedMeta | (fluidLevel & META_VAL_FLUID_MASK));
+
+            // 4. Write back
+            return SetMeta(packedData, newMeta);
         }
     }
 }

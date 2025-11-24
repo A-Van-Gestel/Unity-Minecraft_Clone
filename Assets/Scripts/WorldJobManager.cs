@@ -227,7 +227,7 @@ public class WorldJobManager
         {
             Input = inputData,
             // The output arrays also use the faster allocator
-            Map = new NativeArray<uint>(chunk.ChunkData.map, allocator),
+            Map = _world.worldData.GetChunkMapForJob(p, allocator),
             Mods = new NativeList<LightModification>(allocator),
             IsStable = new NativeArray<bool>(1, allocator),
 
@@ -337,9 +337,17 @@ public class WorldJobManager
                 else
                 {
                     // If lighting is off, set all blocks to full brightness.
-                    for (int i = 0; i < chunkData.map.Length; i++)
+                    for (int y = 0; y < VoxelData.ChunkHeight; y++)
                     {
-                        chunkData.map[i] = BurstVoxelDataBitMapping.SetSunLight(chunkData.map[i], 15);
+                        for (int x = 0; x < VoxelData.ChunkWidth; x++)
+                        {
+                            for (int z = 0; z < VoxelData.ChunkWidth; z++)
+                            {
+                                uint packed = chunkData.GetVoxel(x, y, z);
+                                packed = BurstVoxelDataBitMapping.SetSunLight(packed, 15);
+                                chunkData.SetVoxel(x, y, z, packed);
+                            }
+                        }
                     }
                 }
 
@@ -428,8 +436,8 @@ public class WorldJobManager
 
                 if (chunkData != null && chunkData.IsPopulated)
                 {
-                    // 1. Copy the modified map back to the central chunk.
-                    jobData.Map.CopyTo(chunkData.map);
+                    // 1. Populate sections from the flat map returned by the job
+                    chunkData.PopulateFromFlattened(jobData.Map);
 
                     // 2. Process cross-chunk modifications calculated by the job.
                     foreach (LightModification mod in jobData.Mods)
@@ -443,12 +451,8 @@ public class WorldJobManager
 
                         // Get the local position and flat array index for the voxel in the neighbor chunk.
                         Vector3Int localPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
-                        int index = localPos.x + VoxelData.ChunkWidth * (localPos.y + VoxelData.ChunkHeight * localPos.z);
 
-                        // It's crucial to check if the index is valid for the neighbor's map.
-                        if (index < 0 || index >= neighborChunk.map.Length) continue;
-
-                        uint oldPackedData = neighborChunk.map[index];
+                        uint oldPackedData = neighborChunk.GetVoxel(localPos.x, localPos.y, localPos.z);
                         byte oldLightLevel;
                         uint newPackedData;
 
@@ -476,8 +480,8 @@ public class WorldJobManager
                         // Only proceed if the light level is actually changing to avoid redundant work.
                         if (oldLightLevel != mod.LightLevel)
                         {
-                            // 1. Apply the new light value directly to the neighbor's map data.
-                            neighborChunk.map[index] = newPackedData;
+                            // 1. Apply the new light value directly to the neighbor's chunk data.
+                            neighborChunk.SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData);
 
                             // 2. Queue an update for the neighbor's *next* lighting pass.
                             //    This correctly seeds the propagation algorithm for the neighbor.

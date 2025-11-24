@@ -1,4 +1,5 @@
 ﻿using Data;
+using Helpers;
 using Jobs.BurstData;
 using Unity.Burst;
 using Unity.Collections;
@@ -87,6 +88,7 @@ namespace Jobs
             while (SunlightBfsQueue.TryDequeue(out LightQueueNode node))
             {
                 uint currentPacked = GetPackedData(node.Position);
+                if (currentPacked == uint.MaxValue) continue;
                 byte currentLight = BurstVoxelDataBitMapping.GetSunLight(currentPacked);
                 if (currentLight < node.OldLightLevel)
                     sunlightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.Position, LightLevel = node.OldLightLevel });
@@ -97,6 +99,7 @@ namespace Jobs
             while (BlocklightBfsQueue.TryDequeue(out LightQueueNode node))
             {
                 uint currentPacked = GetPackedData(node.Position);
+                if (currentPacked == uint.MaxValue) continue;
                 byte currentLight = BurstVoxelDataBitMapping.GetBlockLight(currentPacked);
                 if (currentLight > node.OldLightLevel)
                     blocklightPlacementQueue.Enqueue(node.Position);
@@ -162,7 +165,7 @@ namespace Jobs
             if (sourcePacked == uint.MaxValue) return;
 
             byte sourceLight = channel == LightChannel.Sun ? BurstVoxelDataBitMapping.GetSunLight(sourcePacked) : BurstVoxelDataBitMapping.GetBlockLight(sourcePacked);
-            BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)]; // <-- Line 165: Index out of range error here
+            BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
 
             // An opaque block cannot propagate sunlight to its neighbors.
             // It might have sunlight level 15 from InitialSunlightJob, but it stops there.
@@ -362,26 +365,29 @@ namespace Jobs
             }
 
             if (!targetMap.IsCreated || targetMap.Length == 0) return uint.MaxValue;
-            return targetMap[localPos.x + VoxelData.ChunkWidth * (localPos.y + VoxelData.ChunkHeight * localPos.z)];
+
+            int mapIndex = ChunkMath.GetFlattenedIndex(localPos.x, localPos.y, localPos.z);
+            return targetMap[mapIndex];
         }
 
         /// SetLight writes to the central map directly, but adds modifications for neighbors to the `crossChunkLightMods` list.
-        private void SetLight(Vector3Int pos, byte lightLevel, LightChannel channel)
+        private void SetLight(Vector3Int localPos, byte lightLevel, LightChannel channel)
         {
-            if (pos.x is >= 0 and < VoxelData.ChunkWidth && pos.z is >= 0 and < VoxelData.ChunkWidth)
+            if (localPos.x is >= 0 and < VoxelData.ChunkWidth && localPos.z is >= 0 and < VoxelData.ChunkWidth)
             {
                 // Voxel is in the central chunk, we can write to its map directly.
-                int index = pos.x + VoxelData.ChunkWidth * (pos.y + VoxelData.ChunkHeight * pos.z);
-                uint packedData = Map[index];
+                int mapIndex = ChunkMath.GetFlattenedIndex(localPos.x, localPos.y, localPos.z);
+
+                uint packedData = Map[mapIndex];
                 uint newPackedData = channel == LightChannel.Sun
                     ? BurstVoxelDataBitMapping.SetSunLight(packedData, lightLevel)
                     : BurstVoxelDataBitMapping.SetBlockLight(packedData, lightLevel);
-                Map[index] = newPackedData;
+                Map[mapIndex] = newPackedData;
             }
             else
             {
                 // Voxel is in a neighbor chunk, add a modification request to the output list.
-                Vector3Int globalPos = new Vector3Int(pos.x + ChunkPosition.x, pos.y, pos.z + ChunkPosition.y);
+                Vector3Int globalPos = new Vector3Int(localPos.x + ChunkPosition.x, localPos.y, localPos.z + ChunkPosition.y);
                 CrossChunkLightMods.Add(new LightModification { GlobalPosition = globalPos, LightLevel = lightLevel, Channel = channel });
             }
         }

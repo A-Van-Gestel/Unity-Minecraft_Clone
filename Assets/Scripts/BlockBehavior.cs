@@ -42,7 +42,7 @@ public static class BlockBehavior
 
         // Get the voxel's properties & ID
         BlockType props = voxel.Properties;
-        byte id = voxel.id;
+        ushort id = voxel.id;
 
         // --- Grass Block ---
         if (id == 2) // Grass Block
@@ -150,7 +150,7 @@ public static class BlockBehavior
 
         // Get the voxel's properties & ID
         BlockType props = voxel.Properties;
-        byte id = voxel.id;
+        ushort id = voxel.id;
 
         // --- Grass Block ---
         if (id == 2) // Grass Block
@@ -291,7 +291,7 @@ public static class BlockBehavior
     private static void HandleFluidFlow(ChunkData chunkData, Vector3Int localPos, VoxelState fluidState)
     {
         BlockType props = fluidState.Properties;
-        byte currentId = fluidState.id;
+        ushort currentId = fluidState.id;
         byte currentLevel = fluidState.FluidLevel;
         Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
 

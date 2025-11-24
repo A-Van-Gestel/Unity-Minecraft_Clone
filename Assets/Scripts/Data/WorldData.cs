@@ -188,14 +188,29 @@ namespace Data
         public NativeArray<uint> GetChunkMapForJob(Vector2Int chunkVector2Coord, Allocator allocator)
         {
             ChunkData chunk = RequestChunk(chunkVector2Coord, false);
+
+            // Allocate the full height array for the job
+            var jobArray = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, allocator);
+
             if (chunk != null)
             {
-                return chunk.GetMapForJob(allocator);
+                // Copy sections into the flat native array
+                int sectionSize = 16 * 16 * 16;
+                for (int i = 0; i < chunk.sections.Length; i++)
+                {
+                    if (chunk.sections[i] != null)
+                    {
+                        // Fast native copy
+                        NativeArray<uint>.Copy(
+                            chunk.sections[i].voxels, 0,
+                            jobArray, i * sectionSize,
+                            sectionSize);
+                    }
+                    // If null, the jobArray already contains 0 (Air) from initialization
+                }
             }
 
-            // Return an empty array if chunk doesn't exist.
-            // The mesh job will check IsCreated.
-            return new NativeArray<uint>(0, allocator);
+            return jobArray;
         }
 
         #endregion

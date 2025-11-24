@@ -63,19 +63,29 @@ public class Chunk
     public void OnDataPopulated()
     {
         // Now that the data is here, we can scan for active voxels.
-        for (int i = 0; i < ChunkData.map.Length; i++)
+        // Optimization: Iterate through sections first to skip empty ones.
+        for (int s = 0; s < ChunkData.sections.Length; s++)
         {
-            uint packedData = ChunkData.map[i];
-            byte id = BurstVoxelDataBitMapping.GetId(packedData);
+            ChunkSection section = ChunkData.sections[s];
+            if (section == null || section.IsEmpty) continue;
 
-            if (World.Instance.blockTypes[id].isActive)
+            int startY = s * ChunkSection.SIZE;
+
+            // Iterate only within this non-empty section
+            for (int i = 0; i < section.voxels.Length; i++)
             {
-                // Convert flat index back to 3D position
-                int x = i % VoxelData.ChunkWidth;
-                int y = i / VoxelData.ChunkWidth % VoxelData.ChunkHeight;
-                int z = i / (VoxelData.ChunkWidth * VoxelData.ChunkHeight);
+                uint packedData = section.voxels[i];
+                ushort id = BurstVoxelDataBitMapping.GetId(packedData);
 
-                AddActiveVoxel(new Vector3Int(x, y, z));
+                if (World.Instance.blockTypes[id].isActive)
+                {
+                    // Convert section index back to 3D position
+                    int x = i % ChunkSection.SIZE; // Assuming standard size 16
+                    int yOffset = (i / ChunkSection.SIZE) % ChunkSection.SIZE;
+                    int z = i / (ChunkSection.SIZE * ChunkSection.SIZE);
+
+                    AddActiveVoxel(new Vector3Int(x, startY + yOffset, z));
+                }
             }
         }
     }
