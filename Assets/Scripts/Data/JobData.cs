@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Unity.Collections;
 using UnityEngine;
 
@@ -203,28 +204,48 @@ namespace Data
         /// <summary>
         /// Returns true if the block has maximum opacity, effectively blocking all light.
         /// </summary>
-        public bool IsOpaque => Opacity >= 15;
+        public bool IsOpaque
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Opacity >= 15;
+        }
 
         /// <summary>
         /// Returns true if the block has an opacity, and thus has an effect on the light.
         /// </summary>
-        public bool IsLightObstructing => Opacity > 0;
+        public bool IsLightObstructing
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Opacity > 0;
+        }
 
         /// <summary>
         /// Returns true if the block has zero opacity, allowing light to pass through without reduction.
         /// </summary>
-        public bool IsFullyTransparentToLight => Opacity == 0;
+        public bool IsFullyTransparentToLight
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Opacity == 0;
+        }
 
         /// <summary>
         /// Returns true if the block emits its own light.
         /// </summary>
-        public bool IsLightSource => LightEmission > 0;
+        public bool IsLightSource
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => LightEmission > 0;
+        }
 
         /// <summary>
         /// Returns true if the block is considered transparent for meshing purposes,
         /// meaning it does not cull the faces of adjacent solid blocks.
         /// </summary>
-        public bool IsTransparentForMesh => !IsSolid || RenderNeighborFaces;
+        public bool IsTransparentForMesh
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => !IsSolid || RenderNeighborFaces;
+        }
 
         // --- Texture Helper Properties ---
 

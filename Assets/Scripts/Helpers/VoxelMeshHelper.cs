@@ -1,7 +1,9 @@
-﻿using Data;
+﻿using System.Runtime.CompilerServices;
+using Data;
 using Jobs;
 using Jobs.BurstData;
 using Unity.Burst;
+using Unity.Burst.CompilerServices;
 using Unity.Collections;
 using UnityEngine;
 
@@ -25,6 +27,7 @@ namespace Helpers
         /// <summary>
         /// A helper to add texture coordinates to the UV list.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] // Inlined as it's a simple math helper called frequently
         private static void AddTexture(int textureID, Vector2 uv, ref NativeList<Vector2> uvs)
         {
             float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
@@ -45,6 +48,7 @@ namespace Helpers
         /// Generates a single face of a standard cube voxel.
         /// </summary>
         [BurstCompile]
+        [SkipLocalsInit] // Optimization: Skip zeroing local variables (Vector3s, Colors) as we overwrite them immediately.
         public static void GenerateStandardCubeFace(
             int faceIndex, int textureID, float lightLevel, in Vector3Int position, float rotation,
             ref int vertexIndex,
@@ -99,6 +103,7 @@ namespace Helpers
         /// Generates a single face of a custom mesh voxel.
         /// </summary>
         [BurstCompile]
+        [SkipLocalsInit] // Optimization: Skip zeroing local variables.
         public static void GenerateCustomMeshFace(
             int faceIndex, int textureID, float lightLevel, in Vector3Int position, float rotation,
             int customMeshIndex,
@@ -159,6 +164,7 @@ namespace Helpers
         /// and the levels of its neighbors. This method uses pre-computed vertex height templates for high performance.
         /// </summary>
         [BurstCompile]
+        [SkipLocalsInit] // Optimization: Fluid generation uses many local floats/vectors. Skipping init saves cycles.
         public static void GenerateFluidMeshData(
             in Vector3Int pos,
             uint packedData,

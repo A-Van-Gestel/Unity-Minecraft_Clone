@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using MyBox;
 using UnityEngine;
 using UnityEngine.Serialization;
@@ -119,28 +120,48 @@ namespace Data
         /// <summary>
         /// Returns true if the block has maximum opacity, effectively blocking all light.
         /// </summary>
-        public bool IsOpaque => opacity >= 15;
+        public bool IsOpaque
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => opacity >= 15;
+        }
 
         /// <summary>
         /// Returns true if the block has an opacity, and thus has an effect on the light.
         /// </summary>
-        public bool IsLightObstructing => opacity > 0;
+        public bool IsLightObstructing
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => opacity > 0;
+        }
 
         /// <summary>
         /// Returns true if the block has zero opacity, allowing light to pass through without reduction.
         /// </summary>
-        public bool IsFullyTransparentToLight => opacity == 0;
+        public bool IsFullyTransparentToLight
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => opacity == 0;
+        }
 
         /// <summary>
         /// Returns true if the block emits its own light.
         /// </summary>
-        public bool IsLightSource => lightEmission > 0;
+        public bool IsLightSource
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => lightEmission > 0;
+        }
 
         /// <summary>
         /// Returns true if the block is considered transparent for meshing purposes,
         /// meaning it does not cull the faces of adjacent solid blocks.
         /// </summary>
-        public bool IsTransparentForMesh => !isSolid || renderNeighborFaces;
+        public bool IsTransparentForMesh
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => !isSolid || renderNeighborFaces;
+        }
 
         public override string ToString()
         {

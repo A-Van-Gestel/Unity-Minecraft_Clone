@@ -1,4 +1,5 @@
-﻿using Unity.Burst;
+﻿using System.Runtime.CompilerServices;
+using Unity.Burst;
 using Unity.Mathematics;
 
 namespace Jobs.BurstData
@@ -32,6 +33,7 @@ namespace Jobs.BurstData
         // --- Helpers ---
 
         /// Maps World Orientation (Face Index) -> Internal Storage Index (0-5)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte GetOrientationIndex(byte orientation)
         {
             // Standard VoxelData.FaceChecks indices:
@@ -54,6 +56,7 @@ namespace Jobs.BurstData
         /// Packs all component data into a single uint.
         /// Orientation and FluidLevel now share the same 8-bit Metadata space.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel)
         {
             uint packedData = 0;
@@ -84,6 +87,7 @@ namespace Jobs.BurstData
 
         // --- Unpacking / Getters ---
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ushort GetId(uint packedData)
         {
             return (ushort)((packedData & ID_MASK) >> ID_SHIFT);
@@ -92,6 +96,7 @@ namespace Jobs.BurstData
         /// <summary>
         /// Returns the raw 8-bit metadata value.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetMeta(uint packedData)
         {
             return (byte)((packedData & META_MASK) >> META_SHIFT);
@@ -100,6 +105,7 @@ namespace Jobs.BurstData
         /// <summary>
         /// Returns the highest light level between sunlight and blocklight
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetLight(uint packedData)
         {
             // NOTE: Actual types are byte, but we use uint here to make sure the math.max function works correctly.
@@ -108,11 +114,13 @@ namespace Jobs.BurstData
             return (byte)math.max(sunLightLevel, blockLightLevel);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetSunLight(uint packedData)
         {
             return (byte)((packedData & SUNLIGHT_MASK) >> SUNLIGHT_SHIFT);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetBlockLight(uint packedData)
         {
             return (byte)((packedData & BLOCKLIGHT_MASK) >> BLOCKLIGHT_SHIFT);
@@ -121,6 +129,7 @@ namespace Jobs.BurstData
         /// <summary>
         /// Extracts orientation from the Metadata bits.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetOrientation(uint packedData)
         {
             // Extract the raw meta byte
@@ -145,6 +154,7 @@ namespace Jobs.BurstData
         /// <summary>
         /// Extracts fluid level from the Metadata bits.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetFluidLevel(uint packedData)
         {
             // Extract the raw meta byte
@@ -156,16 +166,19 @@ namespace Jobs.BurstData
 
         // --- Packing / Setters ---
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetId(uint packedData, ushort id)
         {
             return (packedData & ~ID_MASK) | (uint)((id) << ID_SHIFT);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetSunLight(uint packedData, byte sunLightLevel)
         {
             return (packedData & ~SUNLIGHT_MASK) | (uint)((sunLightLevel & 0xF) << SUNLIGHT_SHIFT);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetBlockLight(uint packedData, byte blockLightLevel)
         {
             return (packedData & ~BLOCKLIGHT_MASK) | (uint)((blockLightLevel & 0xF) << BLOCKLIGHT_SHIFT);
@@ -174,6 +187,7 @@ namespace Jobs.BurstData
         /// <summary>
         /// Sets the full 8-bit metadata field directly.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetMeta(uint packedData, byte meta)
         {
             return (packedData & ~META_MASK) | (uint)((meta) << META_SHIFT);
@@ -183,6 +197,7 @@ namespace Jobs.BurstData
         /// Sets the orientation bits within the metadata field.
         /// Note: This blindly overwrites the lower 3 bits of the metadata.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetOrientation(uint packedData, byte orientation)
         {
             // 1. Get current meta
@@ -206,6 +221,7 @@ namespace Jobs.BurstData
         /// Sets the fluid level bits within the metadata field.
         /// Note: This blindly overwrites the lower 4 bits of the metadata.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetFluidLevel(uint packedData, byte fluidLevel)
         {
             // 1. Get current meta

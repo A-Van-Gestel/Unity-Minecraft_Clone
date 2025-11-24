@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using Jobs.BurstData;
 
 namespace Data
@@ -16,36 +17,50 @@ namespace Data
 
         public ushort id
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => BurstVoxelDataBitMapping.GetId(_packedData);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set => _packedData = BurstVoxelDataBitMapping.SetId(_packedData, value); // Direct set, handle consequences elsewhere (like ModifyVoxel)
         }
 
         public byte orientation
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => BurstVoxelDataBitMapping.GetOrientation(_packedData);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set => _packedData = BurstVoxelDataBitMapping.SetOrientation(_packedData, value); // Direct set
         }
 
         /// <summary>
         /// Returns the highest light level between sunlight and blocklight
         /// </summary>
-        public byte light => BurstVoxelDataBitMapping.GetLight(_packedData);
+        public byte light
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => BurstVoxelDataBitMapping.GetLight(_packedData);
+        }
 
         public byte Sunlight
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => BurstVoxelDataBitMapping.GetSunLight(_packedData);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set => _packedData = BurstVoxelDataBitMapping.SetSunLight(_packedData, value);
         }
 
         public byte Blocklight
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => BurstVoxelDataBitMapping.GetBlockLight(_packedData);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set => _packedData = BurstVoxelDataBitMapping.SetBlockLight(_packedData, value);
         }
 
         public byte FluidLevel
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => BurstVoxelDataBitMapping.GetFluidLevel(_packedData);
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             set => _packedData = BurstVoxelDataBitMapping.SetFluidLevel(_packedData, value);
         }
 
@@ -74,6 +89,7 @@ namespace Data
         }
 
         /// Create a new voxel state from its raw packed data.
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public VoxelState(uint packedData)
         {
             _packedData = packedData;
@@ -87,17 +103,23 @@ namespace Data
         /// <summary>
         /// Returns the highest light level between sunlight and blocklight as a float between 0 and 1.
         /// </summary>
-        public float lightAsFloat => light * VoxelData.UnitOfLight;
+        public float lightAsFloat
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => light * VoxelData.UnitOfLight;
+        }
 
         // --- Operator Overloads for comparison ---
 
         #region Overides
-        
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator ==(VoxelState a, VoxelState b)
         {
             return a._packedData == b._packedData;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool operator !=(VoxelState a, VoxelState b)
         {
             return a._packedData != b._packedData;

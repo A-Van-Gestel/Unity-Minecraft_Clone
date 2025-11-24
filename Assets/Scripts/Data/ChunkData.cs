@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using Helpers;
 using JetBrains.Annotations;
 using Jobs.BurstData;
@@ -416,16 +417,6 @@ namespace Data
 
         #region Helper Methods
 
-        /// Get the index of a voxel to access it in the flat voxel map from a 3D local chunk position.
-        /// <param name="x">Local X coordinate</param>
-        /// <param name="y">Local Y coordinate</param>
-        /// <param name="z">Local Z coordinate</param>
-        /// <returns>Index of voxel</returns>
-        private int GetIndexFromPosition(int x, int y, int z)
-        {
-            return x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-        }
-
         /// Jobs helper method for providing data to jobs
         /// <param name="allocator">The allocator to use for the native array</param>
         /// <returns>Jobs compatible array of voxels</returns>
@@ -455,6 +446,7 @@ namespace Data
         /// <param name="y">Local Y coordinate</param>
         /// <param name="z">Local Z coordinate</param>
         /// <returns>True if voxel is in chunk</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsVoxelInChunk(int x, int y, int z)
         {
             return x is >= 0 and < VoxelData.ChunkWidth &&
@@ -465,6 +457,7 @@ namespace Data
         /// Check if a local voxel position is within the bounds of this chunk.
         /// <param name="localPos">Local position</param>
         /// <returns>True if voxel is in chunk</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsVoxelInChunk(Vector3Int localPos)
         {
             return IsVoxelInChunk(localPos.x, localPos.y, localPos.z);
