@@ -366,7 +366,7 @@ namespace Jobs
 
             if (!targetMap.IsCreated || targetMap.Length == 0) return uint.MaxValue;
 
-            int mapIndex = ChunkMath.GetFlattenedIndex(localPos.x, localPos.y, localPos.z);
+            int mapIndex = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
             return targetMap[mapIndex];
         }
 
@@ -376,7 +376,7 @@ namespace Jobs
             if (localPos.x is >= 0 and < VoxelData.ChunkWidth && localPos.z is >= 0 and < VoxelData.ChunkWidth)
             {
                 // Voxel is in the central chunk, we can write to its map directly.
-                int mapIndex = ChunkMath.GetFlattenedIndex(localPos.x, localPos.y, localPos.z);
+                int mapIndex = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
 
                 uint packedData = Map[mapIndex];
                 uint newPackedData = channel == LightChannel.Sun

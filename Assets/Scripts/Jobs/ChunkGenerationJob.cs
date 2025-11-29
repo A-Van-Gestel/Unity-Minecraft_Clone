@@ -66,7 +66,7 @@ namespace Jobs
                 BlockTypeJobData voxelProps = BlockTypes[voxelID];
                 // --- Populate the main voxel map ---
 
-                int mapIndex = ChunkMath.GetFlattenedIndex(x, y, z);
+                int mapIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
                 OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.LightEmission, 1, voxelProps.FluidLevel);
 
                 // --- Populate Heightmap ---

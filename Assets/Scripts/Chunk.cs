@@ -1,28 +1,22 @@
 using System;
 using System.Collections.Generic;
 using Data;
+using Helpers;
 using Jobs.BurstData;
+using Unity.Burst;
 using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
-using UnityEngine.Rendering;
 
 public class Chunk
 {
     public readonly ChunkCoord Coord;
-
-    private readonly GameObject _chunkObject;
-    private readonly MeshRenderer _meshRenderer;
-    private readonly MeshFilter _meshFilter;
-
-
-    private readonly Material[] _materials = new Material[3];
-
     public readonly Vector3 ChunkPosition;
+    public readonly ChunkData ChunkData;
+    private readonly SectionRenderer[] _sectionRenderers;
+    private readonly GameObject _chunkObject;
 
     private bool _isActive;
-
-    public readonly ChunkData ChunkData;
-
     private List<Vector3Int> _activeVoxels = new List<Vector3Int>();
 
     #region Constructor
@@ -33,26 +27,23 @@ public class Chunk
         Vector3 worldPos = new Vector3(Coord.X * VoxelData.ChunkWidth, 0f, Coord.Z * VoxelData.ChunkWidth);
         ChunkPosition = worldPos;
 
-        if (createGameObject)
-        {
-            _chunkObject = new GameObject();
-            _meshFilter = _chunkObject.AddComponent<MeshFilter>();
-            _meshRenderer = _chunkObject.AddComponent<MeshRenderer>();
-
-            _materials[0] = World.Instance.opaqueMaterial;
-            _materials[1] = World.Instance.transparentMaterial;
-            _materials[2] = World.Instance.liquidMaterial;
-            _meshRenderer.materials = _materials;
-
-            _meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;
-            _chunkObject.transform.SetParent(World.Instance.transform);
-            _chunkObject.transform.position = worldPos;
-            _chunkObject.name = $"Chunk {Coord.X}, {Coord.Z}";
-        }
-
-        // Request the ChunkData object. The data inside it will be populated asynchronously by a job.
         ChunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)ChunkPosition.x, (int)ChunkPosition.z), true);
         ChunkData.Chunk = this;
+
+        if (createGameObject)
+        {
+            _chunkObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
+            _chunkObject.transform.SetParent(World.Instance.transform);
+            _chunkObject.transform.position = worldPos;
+
+            // Initialize Section Renderers
+            int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+            _sectionRenderers = new SectionRenderer[sectionCount];
+            for (int i = 0; i < sectionCount; i++)
+            {
+                _sectionRenderers[i] = new SectionRenderer(_chunkObject.transform, i);
+            }
+        }
     }
 
     #endregion
@@ -69,7 +60,7 @@ public class Chunk
             ChunkSection section = ChunkData.sections[s];
             if (section == null || section.IsEmpty) continue;
 
-            int startY = s * ChunkSection.SIZE;
+            int startY = s * ChunkMath.SECTION_SIZE;
 
             // Iterate only within this non-empty section
             for (int i = 0; i < section.voxels.Length; i++)
@@ -80,9 +71,9 @@ public class Chunk
                 if (World.Instance.blockTypes[id].isActive)
                 {
                     // Convert section index back to 3D position
-                    int x = i % ChunkSection.SIZE; // Assuming standard size 16
-                    int yOffset = (i / ChunkSection.SIZE) % ChunkSection.SIZE;
-                    int z = i / (ChunkSection.SIZE * ChunkSection.SIZE);
+                    int x = i % ChunkMath.SECTION_SIZE;
+                    int yOffset = (i / ChunkMath.SECTION_SIZE) % ChunkMath.SECTION_SIZE;
+                    int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
 
                     AddActiveVoxel(new Vector3Int(x, startY + yOffset, z));
                 }
@@ -165,7 +156,7 @@ public class Chunk
             if (_chunkObject != null)
             {
                 _chunkObject.SetActive(value);
-                PlayChunkLoadAnimation();
+                if (value) PlayChunkLoadAnimation();
             }
         }
     }
@@ -184,23 +175,114 @@ public class Chunk
 
     #region Mesh Generation
 
+    // Burst Job to adjust vertex positions (Global Y -> Local Section Y) and triangle indices (Global Index -> Local Index)
+    [BurstCompile]
+    private struct PostProcessMeshJob : IJob
+    {
+        public NativeList<Vector3> Vertices;
+        public NativeList<int> OpaqueTris;
+        public NativeList<int> TransparentTris;
+        public NativeList<int> FluidTris;
+
+        [ReadOnly]
+        public NativeArray<MeshSectionStats> Stats;
+
+        public int SectionHeight;
+
+        public void Execute()
+        {
+            // We iterate sections inside the job to avoid overhead of scheduling many tiny jobs
+            for (int i = 0; i < Stats.Length; i++)
+            {
+                MeshSectionStats s = Stats[i];
+                if (s.VertexCount == 0) continue;
+
+                float yOffset = i * SectionHeight;
+                int vertStart = s.VertexStartIndex;
+
+                // 1. Adjust Vertices: Subtract section Y offset so they are local to the Section GameObject
+                for (int v = 0; v < s.VertexCount; v++)
+                {
+                    int index = vertStart + v;
+                    Vector3 pos = Vertices[index];
+                    pos.y -= yOffset;
+                    Vertices[index] = pos;
+                }
+
+                // 2. Adjust Indices: Relativize indices to start at 0 for this section
+                // The indices currently point to the 'allVerts' array. 
+                // We need them to point to the start of the section slice.
+                int offset = -vertStart;
+
+                AdjustIndices(OpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount, offset);
+                AdjustIndices(TransparentTris, s.TransparentTriStartIndex, s.TransparentTriCount, offset);
+                AdjustIndices(FluidTris, s.FluidTriStartIndex, s.FluidTriCount, offset);
+            }
+        }
+
+        private void AdjustIndices(NativeList<int> indices, int start, int count, int offset)
+        {
+            for (int k = 0; k < count; k++)
+            {
+                indices[start + k] += offset;
+            }
+        }
+    }
+
     // This is called by World.cs when a mesh job for this chunk is complete.
     public void ApplyMeshData(MeshDataJobOutput meshData)
     {
-        Mesh mesh = new Mesh();
-        mesh.vertices = meshData.Vertices.ToArray(Allocator.Temp).ToArray();
-        mesh.subMeshCount = 3;
-        mesh.SetTriangles(meshData.Triangles.ToArray(Allocator.Temp).ToArray(), 0);
-        mesh.SetTriangles(meshData.TransparentTriangles.ToArray(Allocator.Temp).ToArray(), 1);
-        mesh.SetTriangles(meshData.FluidTriangles.ToArray(Allocator.Temp).ToArray(), 2);
-        mesh.uv = meshData.Uvs.ToArray(Allocator.Temp).ToArray();
-        mesh.colors = meshData.Colors.ToArray(Allocator.Temp).ToArray();
-        mesh.normals = meshData.Normals.ToArray(Allocator.Temp).ToArray();
+        // 1. Run a fast Burst job on the main thread to adjust coordinate spaces from Chunk-Space to Section-Space.
+        // This modifies the data in-place efficiently.
+        var postProcessJob = new PostProcessMeshJob
+        {
+            Vertices = meshData.Vertices,
+            OpaqueTris = meshData.Triangles,
+            TransparentTris = meshData.TransparentTriangles,
+            FluidTris = meshData.FluidTriangles,
+            Stats = meshData.SectionStats,
+            SectionHeight = ChunkMath.SECTION_SIZE
+        };
 
-        mesh.RecalculateBounds();
-        _meshFilter.mesh = mesh;
+        postProcessJob.Schedule().Complete();
 
-        // Dispose the native lists now that we're done with them.
+        // 2. Pass the data to the renderers using zero-allocation NativeArray views.
+        NativeArray<MeshSectionStats> stats = meshData.SectionStats;
+
+        // Obtain raw NativeArray views from the lists
+        var allVerts = meshData.Vertices.AsArray();
+        var allUvs = meshData.Uvs.AsArray();
+        var allColors = meshData.Colors.AsArray();
+        var allNormals = meshData.Normals.AsArray();
+        var allOpaqueTris = meshData.Triangles.AsArray();
+        var allTransTris = meshData.TransparentTriangles.AsArray();
+        var allFluidTris = meshData.FluidTriangles.AsArray();
+
+        for (int i = 0; i < _sectionRenderers.Length; i++)
+        {
+            MeshSectionStats s = stats[i];
+
+            if (s.VertexCount == 0)
+            {
+                // Pass empty data to clear mesh / disable object
+                _sectionRenderers[i].UpdateMeshNative(
+                    default, default, default, default, 0, 0,
+                    default, 0, 0,
+                    default, 0, 0,
+                    default, 0, 0
+                );
+                continue;
+            }
+
+            _sectionRenderers[i].UpdateMeshNative(
+                allVerts, allUvs, allColors, allNormals, s.VertexStartIndex, s.VertexCount,
+                allOpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount,
+                allTransTris, s.TransparentTriStartIndex, s.TransparentTriCount,
+                allFluidTris, s.FluidTriStartIndex, s.FluidTriCount
+            );
+        }
+
+        // Dispose native memory
         meshData.Dispose();
 
         // Add to the draw queue to be enabled on the main thread

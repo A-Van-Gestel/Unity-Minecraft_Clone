@@ -106,7 +106,21 @@ public class WorldJobManager
             return false; // A neighbor is generating or lighting, wait.
         }
 
-        // 1. Allocate all input maps with TempJob. They will be used and then disposed.
+        // 1. Prepare Section Data for CENTER chunk
+        int sectionCount = chunk.ChunkData.sections.Length;
+        var sectionData = new NativeArray<SectionJobData>(sectionCount, Allocator.TempJob);
+
+        for (int i = 0; i < sectionCount; i++)
+        {
+            var s = chunk.ChunkData.sections[i];
+            sectionData[i] = new SectionJobData
+            {
+                IsEmpty = s == null || s.IsEmpty,
+                IsFullySolid = s != null && s.IsFullySolid,
+            };
+        }
+
+        // 2. Allocate all input maps with TempJob. They will be used and then disposed.
         var map = _world.worldData.GetChunkMapForJob(new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth), Allocator.TempJob);
 
         // Fetch all 8 neighbors for robust corner meshing
@@ -131,6 +145,8 @@ public class WorldJobManager
         {
             // --- Input data ---
             Map = map,
+            SectionData = sectionData,
+
             BlockTypes = _world.JobDataManager.BlockTypesJobData,
             ChunkPosition = chunk.ChunkPosition,
             // Cardinal neighbors
@@ -154,28 +170,29 @@ public class WorldJobManager
             Output = meshOutput,
         };
 
-        // 2. Schedule the main mesh generation job. It has no dependencies yet.
+        // 3. Schedule the main mesh generation job. It has no dependencies yet.
         JobHandle meshJobHandle = job.Schedule();
 
-        // 3. Create a NativeArray to hold all the disposal handles, and make them dependent on the main job's handle.
+        // 4. Create a NativeArray to hold all the disposal handles, and make them dependent on the main job's handle.
         //    This means "Don't dispose of 'map' until 'meshJobHandle' is complete".
-        var disposalHandles = new NativeArray<JobHandle>(9, Allocator.TempJob);
+        var disposalHandles = new NativeArray<JobHandle>(10, Allocator.TempJob);
         disposalHandles[0] = map.Dispose(meshJobHandle);
-        disposalHandles[1] = back.Dispose(meshJobHandle);
-        disposalHandles[2] = front.Dispose(meshJobHandle);
-        disposalHandles[3] = left.Dispose(meshJobHandle);
-        disposalHandles[4] = right.Dispose(meshJobHandle);
-        disposalHandles[5] = frontRight.Dispose(meshJobHandle);
-        disposalHandles[6] = backRight.Dispose(meshJobHandle);
-        disposalHandles[7] = backLeft.Dispose(meshJobHandle);
-        disposalHandles[8] = frontLeft.Dispose(meshJobHandle);
+        disposalHandles[1] = sectionData.Dispose(meshJobHandle);
+        disposalHandles[2] = back.Dispose(meshJobHandle);
+        disposalHandles[3] = front.Dispose(meshJobHandle);
+        disposalHandles[4] = left.Dispose(meshJobHandle);
+        disposalHandles[5] = right.Dispose(meshJobHandle);
+        disposalHandles[6] = frontRight.Dispose(meshJobHandle);
+        disposalHandles[7] = backRight.Dispose(meshJobHandle);
+        disposalHandles[8] = backLeft.Dispose(meshJobHandle);
+        disposalHandles[9] = frontLeft.Dispose(meshJobHandle);
 
-        // 4. Combine all the disposal handles into a single final handle.
+        // 5. Combine all the disposal handles into a single final handle.
         //    This handle will be complete only after the mesh job AND all its input disposal jobs are done.
         JobHandle combinedDisposalHandle = JobHandle.CombineDependencies(disposalHandles);
         JobHandle finalHandle = disposalHandles.Dispose(combinedDisposalHandle);
 
-        // 5. Store this final, all-encompassing handle in our tracking dictionary.
+        // 6. Store this final, all-encompassing handle in our tracking dictionary.
         meshJobs.Add(coord, (finalHandle, meshOutput));
 
         return true;

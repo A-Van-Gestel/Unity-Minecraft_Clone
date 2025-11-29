@@ -90,7 +90,7 @@ namespace Data
 
         private void InitializeSections()
         {
-            int sectionCount = VoxelData.ChunkHeight / ChunkSection.SIZE;
+            int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
             sections = new ChunkSection[sectionCount];
         }
 
@@ -112,39 +112,46 @@ namespace Data
         /// </summary>
         public void PopulateFromFlattened(NativeArray<uint> flatData)
         {
-            int sectionVoxelCount = ChunkSection.SIZE * ChunkSection.SIZE * ChunkSection.SIZE;
+            int sectionVoxelCount = ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
 
             for (int i = 0; i < sections.Length; i++)
             {
                 int startIndex = i * sectionVoxelCount;
 
-                // Optimization: We could check if the slice is empty before creating a section,
-                // but for now we ensure the section exists if we are writing data.
-                // A more advanced implementation would check if the flatData slice contains only 0s.
-
-                if (sections[i] == null)
+                // Create or reset section
+                if (sections[i] == null) sections[i] = new ChunkSection();
+                else
                 {
-                    // Check if we actually need to create a section (is there any data in this slice?)
-                    bool hasData = false;
-                    for (int j = 0; j < sectionVoxelCount; j++)
-                    {
-                        if (flatData[startIndex + j] != 0)
-                        {
-                            hasData = true;
-                            break;
-                        }
-                    }
-
-                    if (!hasData) continue; // Skip empty sections
-
-                    sections[i] = new ChunkSection();
+                    // Reset data if reusing (though currently we construct new chunks usually)
+                    Array.Clear(sections[i].voxels, 0, sections[i].voxels.Length);
                 }
 
-                // Copy the slice from NativeArray to the Section's managed array
+                bool hasData = false;
+
+                // Copy data first
+                // Note: We could optimize by checking for non-zero in flatData before copying,
+                // but NativeArray.Copy is very fast.
                 NativeArray<uint>.Copy(flatData, startIndex, sections[i].voxels, 0, sectionVoxelCount);
 
-                // Recalculate NonAirCount
-                sections[i].RecalculateNonAirCount();
+                // Check if slice was empty to determine if we keep the section
+                for (int j = 0; j < sectionVoxelCount; j++)
+                {
+                    if (sections[i].voxels[j] != 0)
+                    {
+                        hasData = true;
+                        break;
+                    }
+                }
+
+                if (!hasData)
+                {
+                    sections[i] = null; // Discard empty section
+                }
+                else
+                {
+                    // Recalculate counts so IsFullySolid works correctly for meshing
+                    sections[i].RecalculateCounts(World.Instance.blockTypes);
+                }
             }
         }
 
@@ -188,7 +195,7 @@ namespace Data
             BlockType oldProps = World.Instance.blockTypes[oldId];
 
             // --- Update The Map (Sections) ---
-            SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData);
+            SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData, newProps, oldProps);
 
             // --- MAINTAIN HEIGHTMAP ---
             int heightmapIndex = localPos.x + VoxelData.ChunkWidth * localPos.z;
@@ -281,10 +288,12 @@ namespace Data
         /// <param name="y">Local Y (0-ChunkHeight)</param>
         /// <param name="z">Local Z (0-15)</param>
         /// <param name="value">The packed uint data.</param>
-        public void SetVoxel(int x, int y, int z, uint value)
+        /// <param name="newBlockProperties">The properties of the block being set (can be null).</param>
+        /// <param name="oldBlockProperties">The properties of the block being replaced (can be null).</param>
+        public void SetVoxel(int x, int y, int z, uint value, [CanBeNull] BlockType newBlockProperties, [CanBeNull] BlockType oldBlockProperties)
         {
-            int sectionY = y / ChunkSection.SIZE;
-            int localY = y % ChunkSection.SIZE;
+            int sectionY = y / ChunkMath.SECTION_SIZE;
+            int localY = y % ChunkMath.SECTION_SIZE;
 
             // Create section if it doesn't exist (on write)
             if (sections[sectionY] == null)
@@ -297,16 +306,34 @@ namespace Data
             // Index logic: 16x16x16
             // Note: We manually calculate the local section index here because ChunkSection.Voxels is only 4096 long.
             // We cannot use ChunkMath.GetFlattenedIndex here because that returns the global index (e.g. 5000+).
-            int index = x + (localY * ChunkSection.SIZE) + (z * ChunkSection.SIZE * ChunkSection.SIZE);
-
-            // Handle NonAirCount for optimization
+            int index = x + (localY * ChunkMath.SECTION_SIZE) + (z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
             uint oldValue = sections[sectionY].voxels[index];
+
+            // -- Update Counts --
+            // Handle NonAirCount for optimization
             if (oldValue == 0 && value != 0) sections[sectionY].nonAirCount++;
             else if (oldValue != 0 && value == 0) sections[sectionY].nonAirCount--;
 
+            // Handle OpaqueCount for meshing optimization
+            bool isNewOpaque = newBlockProperties != null && newBlockProperties.IsOpaque;
+            bool wasOldOpaque = oldBlockProperties != null && oldBlockProperties.IsOpaque;
+
+            if (!wasOldOpaque && isNewOpaque) sections[sectionY].opaqueCount++;
+            else if (wasOldOpaque && !isNewOpaque) sections[sectionY].opaqueCount--;
+
+            // Set voxel
             sections[sectionY].voxels[index] = value;
 
             // Optional: If NonAirCount drops to 0, set Sections[sectionY] = null to free memory
+        }
+
+        /// <summary>
+        /// Simplified SetVoxel for raw data setting where properties are unknown or assumed consistent (e.g. generation).
+        /// Warning: This does NOT update OpaqueCount correctly. Use with caution or call RecalculateCounts afterwards.
+        /// </summary>
+        public void SetVoxel(int x, int y, int z, uint value)
+        {
+            SetVoxel(x, y, z, value, null, null);
         }
 
         /// <summary>
@@ -319,13 +346,13 @@ namespace Data
         /// <returns>The packed uint data.</returns>
         public uint GetVoxel(int x, int y, int z)
         {
-            int sectionY = y / ChunkSection.SIZE;
+            int sectionY = y / ChunkMath.SECTION_SIZE;
 
             // If section is null, it's implicitly Air
             if (sections[sectionY] == null) return 0;
 
-            int localY = y % ChunkSection.SIZE;
-            int index = x + (localY * ChunkSection.SIZE) + (z * ChunkSection.SIZE * ChunkSection.SIZE);
+            int localY = y % ChunkMath.SECTION_SIZE;
+            int index = x + (localY * ChunkMath.SECTION_SIZE) + (z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
             return sections[sectionY].voxels[index];
         }
 

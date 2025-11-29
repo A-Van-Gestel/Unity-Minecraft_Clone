@@ -1459,7 +1459,7 @@ public class World : MonoBehaviour
                     // Optimization: Skip null or empty sections entirely
                     if (section == null || section.IsEmpty) continue;
 
-                    int startY = s * ChunkSection.SIZE;
+                    int startY = s * ChunkMath.SECTION_SIZE;
 
                     // Loop through the voxels in this specific section
                     for (int i = 0; i < section.voxels.Length; i++)
@@ -1473,9 +1473,9 @@ public class World : MonoBehaviour
                         }
 
                         // Convert section index to 3D position
-                        int x = i % ChunkSection.SIZE;
-                        int yOffset = (i / ChunkSection.SIZE) % ChunkSection.SIZE;
-                        int z = i / (ChunkSection.SIZE * ChunkSection.SIZE);
+                        int x = i % ChunkMath.SECTION_SIZE;
+                        int yOffset = (i / ChunkMath.SECTION_SIZE) % ChunkMath.SECTION_SIZE;
+                        int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
 
                         var localPos = new Vector3Int(x, startY + yOffset, z);
 

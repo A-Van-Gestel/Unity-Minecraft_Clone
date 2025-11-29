@@ -295,3 +295,112 @@ void HandleError() { /* Expensive string formatting */ }
 
 3. **Unity Profiler:**
     * **Warning:** "Deep Profile" mode adds massive overhead to every method call. It distorts timing data, making small, frequent functions look like bottlenecks. Use **Standard Profiling** first. Only use Deep Profile if you are completely lost.
+
+---
+
+## 7. Advanced High-Performance C# (The "Danger Zone")
+
+This section covers optimization techniques that bypass standard C# safety mechanisms (Bounds Checks, Garbage Collection) to achieve C++ levels of performance.
+**Use these only in "Hot Paths" (code running thousands of times per frame, e.g., Voxel Meshing, Pathfinding).**
+
+### 7.1. Stack Allocation (`stackalloc` & `Span<T>`)
+
+Standard arrays (`new int[1024]`) are allocated on the **Heap**. This causes Garbage Collection (GC) pressure and CPU overhead to find free memory.
+**Stack Memory** is pre-allocated and extremely fast (L1 Cache friendly).
+
+**The Technique:**
+Use `stackalloc` to create temporary arrays that exist *only* for the duration of the method.
+
+```csharp
+// BAD: Allocates GC memory every time the method is called
+public void ProcessData() {
+    int[] tempBuffer = new int[1024]; 
+    // ... use buffer ...
+}
+
+// GOOD: Zero GC, instant allocation
+public void ProcessData() {
+    // Span<T> wraps the raw memory safely
+    Span<int> tempBuffer = stackalloc int[1024];
+    // ... use buffer ...
+}
+```
+
+**⚠️ CRITICAL WARNINGS:**
+
+1. **StackOverflowException:** The Stack is small (usually 1MB). If you `stackalloc` too much (e.g., `stackalloc byte[1000000]`), the game will crash instantly.
+    * *Rule of Thumb:* Keep allocations under **4KB - 16KB**.
+    * *Solution:* If you need more, use a shared `ArrayPool<T>` (Heap) instead.
+2. **Scope Safety:** You **cannot** return a `Span` created via `stackalloc` from a method. The memory is destroyed as soon as the method returns.
+
+### 7.2. Unsafe Pointers & Bounds Check Bypassing
+
+C# arrays force a "Bounds Check" on every access to ensure you don't read outside the array.
+
+* `arr[i]` -> checks `if (i < arr.Length)` -> returns value.
+
+In a loop running 4096 times, that's 4096 useless checks if you already know the logic is correct.
+
+**The Technique:**
+Use `unsafe` and `fixed` pointers to iterate raw memory.
+
+```csharp
+public unsafe void FastIterate(int[] largeArray)
+{
+    // "fixed" pins the array in memory so the GC doesn't move it while we read it.
+    fixed (int* pArray = largeArray)
+    {
+        int* ptr = pArray;
+        int* end = pArray + largeArray.Length;
+
+        // Pointer addition is faster than array indexing
+        while (ptr < end)
+        {
+            int value = *ptr; // Read value
+            // ... process ...
+            ptr++; // Move to next integer
+        }
+    }
+}
+```
+
+**⚠️ CRITICAL WARNINGS:**
+
+1. **Memory Corruption:** If you read past `end`, you will read garbage data. If you *write* past `end`, you might overwrite variables belonging to other classes, causing random bugs that are nearly impossible to debug.
+2. **Editor Crashes:** Accessing invalid memory usually crashes the entire Unity Editor instantly. Save your work before running unsafe code.
+
+### 7.3. Bitmasks & Passability Maps
+
+When processing voxels, storing data in `bool[]` is wasteful. A `bool` takes 1 byte (8 bits), but we only need 1 bit.
+Compressing data into `uint` bitmasks fits more data into the CPU Cache (L1), drastically speeding up algorithms like Flood Fill.
+
+**The Technique:**
+Store 32 boolean states in a single `uint`.
+
+```csharp
+// Indexing into a bitmask
+int index = ...; 
+int intIndex = index >> 5;      // Divide by 32 (fast bitshift)
+uint bitMask = 1u << (index & 31); // Modulo 32 (fast bitwise AND)
+
+// Set True
+passableMap[intIndex] |= bitMask;
+
+// Check True
+bool isTrue = (passableMap[intIndex] & bitMask) != 0;
+```
+
+### 7.4. Algorithmic Inversion (Solving the Reverse Problem)
+
+Sometimes checking for the *presence* of something is slow (e.g., "Is this section opaque?").
+It is often faster to check for the *absence* of the opposite (e.g., "Can Air NOT flow through this section?").
+
+**Case Study: Visible Opacity**
+Instead of checking every combination of opaque blocks (complex):
+
+1. Assume the section is a solid block of air.
+2. Mark actual blocks as "Obstacles".
+3. Pour "Virtual Water" (Flood Fill) from the top.
+4. If the water doesn't reach the bottom, the section is **Visibly Opaque**.
+
+This transforms a complex 3D shape analysis problem into a standard connectivity algorithm (BFS/DFS), which can be highly optimized with the Bitmasks and Stack Allocation described above.
