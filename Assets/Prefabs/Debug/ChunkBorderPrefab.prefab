@@ -46,4 +46,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::ChunkBorderVisualizer
   borderMaterial: {fileID: 2100000, guid: 4243b12c3f3ae9d488bd347b8b83ec0c, type: 2}
   gridMaterial: {fileID: 2100000, guid: 0946102ed0e41ec48b76ebf0ed0744a8, type: 2}
+  sectionMaterial: {fileID: 2100000, guid: 766f2247cd4156d41952eef4d067c327, type: 2}
   gridInterval: 4
+  renderSectionsInternalCross: 1
