@@ -1,12 +1,22 @@
 using System.Collections.Generic;
 using Helpers;
 using UnityEngine;
-using UnityEngine.Rendering;
 
 namespace DebugVisualizations
 {
+    /// <summary>
+    /// Visualizes the boundaries, internal grid, and vertical sections of a Chunk.
+    /// <para>
+    /// <b>Optimization Note:</b> To maintain high performance with high render distances, this script 
+    /// generates a single static <see cref="Mesh"/> that is shared across all chunk instances. 
+    /// This reduces memory overhead and CPU cost for generation to near-zero after the first chunk is loaded.
+    /// </para>
+    /// </summary>
+    [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
     public class ChunkBorderVisualizer : MonoBehaviour
     {
+        #region Inspector Settings
+
         [Header("Visual Settings")]
         [Tooltip("The material to use for the red chunk border lines.")]
         public Material borderMaterial;
@@ -15,15 +25,29 @@ namespace DebugVisualizations
         public Material gridMaterial;
 
         [Tooltip("The material to use for the green section division lines.")]
-        public Material sectionMaterial; // New field for section visualization
+        public Material sectionMaterial;
 
         [Tooltip("The interval in blocks at which to draw the grid lines.")]
         public int gridInterval = 4;
-        
-        [Tooltip("If true, an internal cross sections of sections will be rendered.")]
+
+        [Tooltip("If true, an internal cross (X) will be drawn within each section layer for better visibility.")]
         public bool renderSectionsInternalCross = true;
 
-        private LineRenderer _borderLineRenderer;
+        #endregion
+
+        #region Static Cache
+
+        // --- Static Caching ---
+        // We cache the mesh so we don't regenerate it for every single chunk (since they are all identical 16x128x16 size).
+        // This dramatically reduces memory pressure and instantiation time.
+        private static Mesh _cachedMesh;
+
+        // We track the settings used to generate the cached mesh. 
+        // If the inspector settings change, we detect it and rebuild the static mesh.
+        private static int _cachedGridInterval;
+        private static bool _cachedCrossSectionSetting;
+
+        #endregion
 
         private void Start()
         {
@@ -34,191 +58,191 @@ namespace DebugVisualizations
                 return;
             }
 
-            // 1. Main Border (Red)
-            _borderLineRenderer = gameObject.AddComponent<LineRenderer>();
-            SetupBorderLineRenderer();
-            DrawBorders();
+            // Check if we need to build (or rebuild) the shared mesh.
+            // This happens on the very first chunk load, or if the developer changes settings in the Inspector at runtime.
+            if (_cachedMesh == null || _cachedGridInterval != gridInterval || _cachedCrossSectionSetting != renderSectionsInternalCross)
+            {
+                RebuildSharedMesh();
+            }
 
-            // 2. Grid (Yellow)
-            GameObject gridObject = new GameObject("Grid");
-            gridObject.transform.SetParent(transform, false);
-            SetupMeshRenderer(gridObject, gridMaterial);
-            DrawGrid(gridObject);
+            // Apply the shared mesh. This is a lightweight reference copy.
+            GetComponent<MeshFilter>().sharedMesh = _cachedMesh;
 
-            // 3. Sections (Green)
-            GameObject sectionObject = new GameObject("Sections");
-            sectionObject.transform.SetParent(transform, false);
-            SetupMeshRenderer(sectionObject, sectionMaterial);
-            DrawSections(sectionObject);
+            // Assign materials. The order matches the subMesh indices defined in RebuildSharedMesh:
+            // 0: Border, 1: Grid, 2: Sections
+            GetComponent<MeshRenderer>().sharedMaterials = new Material[] { borderMaterial, gridMaterial, sectionMaterial };
         }
 
-        #region Border Methods
-
-        private void SetupBorderLineRenderer()
+        /// <summary>
+        /// Generates the geometry for the chunk visualization. 
+        /// This creates a single Mesh with 3 SubMeshes (one for each visualization type).
+        /// </summary>
+        private void RebuildSharedMesh()
         {
-            _borderLineRenderer.material = borderMaterial;
-            _borderLineRenderer.startWidth = 0.15f;
-            _borderLineRenderer.endWidth = 0.15f;
-            _borderLineRenderer.positionCount = 16;
-            _borderLineRenderer.useWorldSpace = false;
-            _borderLineRenderer.loop = false;
+            // Update cache trackers
+            _cachedGridInterval = gridInterval;
+            _cachedCrossSectionSetting = renderSectionsInternalCross;
+
+            // Clean up old mesh if it existed to prevent memory leaks in Editor
+            if (_cachedMesh != null) Destroy(_cachedMesh);
+
+            _cachedMesh = new Mesh();
+            _cachedMesh.name = "SharedChunkBorderMesh";
+
+            // Pre-allocate lists to avoid resizing overhead during generation.
+            // Vertices are shared across all submeshes to minimize memory footprint.
+            List<Vector3> allVertices = new List<Vector3>(2048);
+
+            // Indices are separated by submesh (Material).
+            List<int> borderIndices = new List<int>(24); // 12 lines * 2 indices per line
+            List<int> gridIndices = new List<int>(512); // Approx estimate
+            List<int> sectionIndices = new List<int>(128); // Approx estimate
+
+            // --- 1. Generate Border (SubMesh 0) ---
+            GenerateBorder(allVertices, borderIndices);
+
+            // --- 2. Generate Grid (SubMesh 1) ---
+            GenerateGrid(allVertices, gridIndices);
+
+            // --- 3. Generate Sections (SubMesh 2) ---
+            GenerateSections(allVertices, sectionIndices);
+
+            // --- Apply to Mesh ---
+            // Set vertices once
+            _cachedMesh.SetVertices(allVertices);
+
+            // Define 3 SubMeshes using Line Topology (lighter than Triangle strips for wireframes)
+            _cachedMesh.subMeshCount = 3;
+            _cachedMesh.SetIndices(borderIndices, MeshTopology.Lines, 0);
+            _cachedMesh.SetIndices(gridIndices, MeshTopology.Lines, 1);
+            _cachedMesh.SetIndices(sectionIndices, MeshTopology.Lines, 2);
+
+            // Bounds are static 16x128x16
+            _cachedMesh.RecalculateBounds();
+
+            // Optimization: Upload to GPU and mark no longer readable.
+            // Since we never modify this mesh after generation, this frees up system memory.
+            _cachedMesh.UploadMeshData(false);
         }
 
-        private void DrawBorders()
+        /// <summary>
+        /// Generates the outer 12 edges of the chunk column (The Red Box).
+        /// </summary>
+        private void GenerateBorder(List<Vector3> verts, List<int> indices)
         {
-            const int w = VoxelData.ChunkWidth;
-            const int h = VoxelData.ChunkHeight;
+            float w = VoxelData.ChunkWidth;
+            float h = VoxelData.ChunkHeight;
 
-            var p = new Vector3[16];
+            // Helper to add a line segment (2 verts, 2 indices)
+            void AddLine(Vector3 start, Vector3 end)
+            {
+                indices.Add(verts.Count); // Start index
+                verts.Add(start);
+                indices.Add(verts.Count); // End index
+                verts.Add(end);
+            }
 
-            // This sequence draws all 12 edges of a cube with one non-looping line strip
-            p[0] = new Vector3(0, 0, 0);
-            p[1] = new Vector3(w, 0, 0);
-            p[2] = new Vector3(w, 0, w);
-            p[3] = new Vector3(0, 0, w);
-            p[4] = new Vector3(0, 0, 0); // Close bottom loop
-            p[5] = new Vector3(0, h, 0); // Go up from corner 1
-            p[6] = new Vector3(w, h, 0); // Start top loop
-            p[7] = new Vector3(w, 0, 0); // Go down to corner 2
-            p[8] = new Vector3(w, h, 0); // Go back up
-            p[9] = new Vector3(w, h, w);
-            p[10] = new Vector3(w, 0, w); // Go down to corner 3
-            p[11] = new Vector3(w, h, w); // Go back up
-            p[12] = new Vector3(0, h, w);
-            p[13] = new Vector3(0, 0, w); // Go down to corner 4
-            p[14] = new Vector3(0, h, w); // Go back up
-            p[15] = new Vector3(0, h, 0); // Close top loop
+            // 1. Vertical Pillars (Corners)
+            AddLine(new Vector3(0, 0, 0), new Vector3(0, h, 0));
+            AddLine(new Vector3(w, 0, 0), new Vector3(w, h, 0));
+            AddLine(new Vector3(w, 0, w), new Vector3(w, h, w));
+            AddLine(new Vector3(0, 0, w), new Vector3(0, h, w));
 
-            _borderLineRenderer.SetPositions(p);
+            // 2. Bottom Square Cap
+            AddLine(new Vector3(0, 0, 0), new Vector3(w, 0, 0)); // Back
+            AddLine(new Vector3(w, 0, 0), new Vector3(w, 0, w)); // Right
+            AddLine(new Vector3(w, 0, w), new Vector3(0, 0, w)); // Front
+            AddLine(new Vector3(0, 0, w), new Vector3(0, 0, 0)); // Left
+
+            // 3. Top Square Cap
+            AddLine(new Vector3(0, h, 0), new Vector3(w, h, 0)); // Back
+            AddLine(new Vector3(w, h, 0), new Vector3(w, h, w)); // Right
+            AddLine(new Vector3(w, h, w), new Vector3(0, h, w)); // Front
+            AddLine(new Vector3(0, h, w), new Vector3(0, h, 0)); // Left
         }
 
-        #endregion
-
-        #region Mesh Generation Methods
-
-        private void SetupMeshRenderer(GameObject obj, Material mat)
-        {
-            obj.AddComponent<MeshFilter>();
-            MeshRenderer mr = obj.AddComponent<MeshRenderer>();
-            mr.material = mat;
-            mr.shadowCastingMode = ShadowCastingMode.Off;
-            mr.receiveShadows = false;
-        }
-
-        private void DrawGrid(GameObject gridObject)
+        /// <summary>
+        /// Generates the internal grid lines based on the gridInterval.
+        /// </summary>
+        private void GenerateGrid(List<Vector3> verts, List<int> indices)
         {
             if (gridInterval <= 0) return;
 
-            var vertices = new List<Vector3>();
-            var indices = new List<int>();
-            int currentIndex = 0;
+            float w = VoxelData.ChunkWidth;
+            float h = VoxelData.ChunkHeight;
 
-            const int w = VoxelData.ChunkWidth;
-            const int h = VoxelData.ChunkHeight;
-
-            // Helper function to add a line segment
             void AddLine(Vector3 start, Vector3 end)
             {
-                vertices.Add(start);
-                vertices.Add(end);
-                indices.Add(currentIndex++);
-                indices.Add(currentIndex++);
+                indices.Add(verts.Count);
+                verts.Add(start);
+                indices.Add(verts.Count);
+                verts.Add(end);
             }
 
-            // --- Generate the unique set of grid lines ---
+            // Lines parallel to the X axis (horizontal)
+            // We skip lines that would overlap with the Section dividers to avoid Z-fighting/visual clutter.
+            for (float i = gridInterval; i < h; i += gridInterval)
+            {
+                if (i % ChunkMath.SECTION_SIZE == 0) continue; // Skip overlap with sections
+
+                AddLine(new Vector3(0, i, 0), new Vector3(w, i, 0)); // Back Face
+                AddLine(new Vector3(0, i, w), new Vector3(w, i, w)); // Front Face
+                AddLine(new Vector3(0, i, 0), new Vector3(0, i, w)); // Left Face
+                AddLine(new Vector3(w, i, 0), new Vector3(w, i, w)); // Right Face
+            }
 
             // Lines parallel to the Y axis (vertical)
             for (float i = gridInterval; i < w; i += gridInterval)
             {
-                AddLine(new Vector3(i, 0, 0), new Vector3(i, h, 0)); // Back
-                AddLine(new Vector3(i, 0, w), new Vector3(i, h, w)); // Front
-                AddLine(new Vector3(0, 0, i), new Vector3(0, h, i)); // Left
-                AddLine(new Vector3(w, 0, i), new Vector3(w, h, i)); // Right
+                AddLine(new Vector3(i, 0, 0), new Vector3(i, h, 0)); // Back Face
+                AddLine(new Vector3(i, 0, w), new Vector3(i, h, w)); // Front Face
+                AddLine(new Vector3(0, 0, i), new Vector3(0, h, i)); // Left Face
+                AddLine(new Vector3(w, 0, i), new Vector3(w, h, i)); // Right Face
             }
 
-            // Lines parallel to the X axis (horizontal)
-            for (float i = gridInterval; i < h; i += gridInterval)
-            {
-                // Skip lines that overlap with section borders to avoid Z-fighting, 
-                // assuming gridInterval fits into SectionSize (e.g. 4 fits into 16).
-                if (i % ChunkMath.SECTION_SIZE == 0) continue;
-
-                AddLine(new Vector3(0, i, 0), new Vector3(w, i, 0)); // Back
-                AddLine(new Vector3(0, i, w), new Vector3(w, i, w)); // Front
-            }
-
+            // Lines parallel to the Z axis (depth caps on Top and Bottom)
             for (float i = gridInterval; i < w; i += gridInterval)
             {
-                AddLine(new Vector3(0, 0, i), new Vector3(w, 0, i)); // Bottom
-                AddLine(new Vector3(0, h, i), new Vector3(w, h, i)); // Top
+                AddLine(new Vector3(0, 0, i), new Vector3(w, 0, i)); // Bottom Face
+                AddLine(new Vector3(0, h, i), new Vector3(w, h, i)); // Top Face
+                AddLine(new Vector3(i, 0, 0), new Vector3(i, 0, w)); // Bottom Face
+                AddLine(new Vector3(i, h, 0), new Vector3(i, h, w)); // Top Face
             }
-
-            // Lines parallel to the Z axis (depth)
-            for (float i = gridInterval; i < h; i += gridInterval)
-            {
-                if (i % ChunkMath.SECTION_SIZE == 0) continue;
-
-                AddLine(new Vector3(0, i, 0), new Vector3(0, i, w)); // Left
-                AddLine(new Vector3(w, i, 0), new Vector3(w, i, w)); // Right
-            }
-
-            for (float i = gridInterval; i < w; i += gridInterval)
-            {
-                AddLine(new Vector3(i, 0, 0), new Vector3(i, 0, w)); // Bottom
-                AddLine(new Vector3(i, h, 0), new Vector3(i, h, w)); // Top
-            }
-
-            ApplyMesh(gridObject, vertices, indices);
         }
 
-        private void DrawSections(GameObject sectionObject)
+        /// <summary>
+        /// Generates horizontal frames indicating where ChunkSections start and end.
+        /// </summary>
+        private void GenerateSections(List<Vector3> verts, List<int> indices)
         {
-            var vertices = new List<Vector3>();
-            var indices = new List<int>();
-            int currentIndex = 0;
-
-            const int w = VoxelData.ChunkWidth;
-            const int h = VoxelData.ChunkHeight;
-            const int sectionSize = ChunkMath.SECTION_SIZE;
+            float w = VoxelData.ChunkWidth;
+            float h = VoxelData.ChunkHeight;
+            float sectionSize = ChunkMath.SECTION_SIZE;
 
             void AddLine(Vector3 start, Vector3 end)
             {
-                vertices.Add(start);
-                vertices.Add(end);
-                indices.Add(currentIndex++);
-                indices.Add(currentIndex++);
+                indices.Add(verts.Count);
+                verts.Add(start);
+                indices.Add(verts.Count);
+                verts.Add(end);
             }
 
-            // Draw horizontal frames at every section interval (0, 16, 32, ..., 128)
-            // We skip 0 and 128 if we want to avoid overlapping the red border, 
-            // but drawing them ensures the section visualizer is complete on its own.
-            for (int y = 0; y <= h; y += sectionSize)
+            // Iterate vertically by section height (e.g., 0, 16, 32...)
+            for (float y = 0; y <= h; y += sectionSize)
             {
-                // Draw a horizontal square at height Y
-                AddLine(new Vector3(0, y, 0), new Vector3(w, y, 0)); // Back edge
-                AddLine(new Vector3(w, y, 0), new Vector3(w, y, w)); // Right edge
-                AddLine(new Vector3(w, y, w), new Vector3(0, y, w)); // Front edge
-                AddLine(new Vector3(0, y, w), new Vector3(0, y, 0)); // Left edge
+                // Draw a horizontal square frame at height Y
+                AddLine(new Vector3(0, y, 0), new Vector3(w, y, 0)); // Back
+                AddLine(new Vector3(w, y, 0), new Vector3(w, y, w)); // Right
+                AddLine(new Vector3(w, y, w), new Vector3(0, y, w)); // Front
+                AddLine(new Vector3(0, y, w), new Vector3(0, y, 0)); // Left
 
-                // Draw internal cross for better section visibility (Optional)
+                // Optionally draw an internal cross (X) to make the floor of the section visible from above/below
                 if (renderSectionsInternalCross)
                 {
-                    AddLine(new Vector3(0, y, 0), new Vector3(w, y, w)); 
-                    AddLine(new Vector3(w, y, 0), new Vector3(0, y, w));
+                    AddLine(new Vector3(0, y, 0), new Vector3(w, y, w)); // Diagonal 1
+                    AddLine(new Vector3(w, y, 0), new Vector3(0, y, w)); // Diagonal 2
                 }
             }
-
-            ApplyMesh(sectionObject, vertices, indices);
         }
-
-        private void ApplyMesh(GameObject obj, List<Vector3> verts, List<int> indices)
-        {
-            Mesh mesh = new Mesh();
-            mesh.SetVertices(verts);
-            mesh.SetIndices(indices.ToArray(), MeshTopology.Lines, 0);
-            obj.GetComponent<MeshFilter>().mesh = mesh;
-        }
-
-        #endregion
     }
 }
