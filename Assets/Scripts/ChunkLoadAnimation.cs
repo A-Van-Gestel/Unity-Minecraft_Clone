@@ -2,48 +2,48 @@ using UnityEngine;
 
 public class ChunkLoadAnimation : MonoBehaviour
 {
-    private readonly float speed = 3f;
-    private Vector3 targetPos;
+    private readonly float _speed = 3f;
+    private Vector3 _targetPos;
 
     /// Random delay for each chunk before playing animation.
-    private bool useRandomDelay = false;
-    private float waitTimer;
-    private float timer;
+    private bool _useRandomDelay = false;
+    private float _waitTimer;
+    private float _timer;
 
     /// Ensure that the chunks are rendered before playing animation.
-    private readonly bool waitUntilMeshCreated = true;
-    private MeshFilter meshFilter;
+    private bool _waitUntilMeshCreated = true;
+    private MeshFilter _meshFilter;
 
     private void Start()
     {
-        if (useRandomDelay)
-            waitTimer = Random.Range(0f, 3f);
+        if (_useRandomDelay)
+            _waitTimer = Random.Range(0f, 3f);
         
-        targetPos = transform.position;
-        transform.position = new Vector3(targetPos.x, -VoxelData.ChunkHeight, targetPos.z);
+        _targetPos = transform.position;
+        transform.position = new Vector3(_targetPos.x, -VoxelData.ChunkHeight, _targetPos.z);
 
-        if (waitUntilMeshCreated)
-            meshFilter = gameObject.GetComponent<MeshFilter>();
+        if (_waitUntilMeshCreated)
+            _meshFilter = gameObject.GetComponent<MeshFilter>();
         
     }
 
     private void Update()
     {
         // Random delay for each chunk before playing animation.
-        if (useRandomDelay && timer < waitTimer)
+        if (_useRandomDelay && _timer < _waitTimer)
         {
-            timer += Time.deltaTime;
+            _timer += Time.deltaTime;
             return;
         }
 
         // Ensure that the chunks are rendered before playing animation.
-        if (waitUntilMeshCreated && meshFilter.mesh.vertices.Length == 0)
+        if (_waitUntilMeshCreated && _meshFilter.mesh.vertices.Length == 0)
             return;
         
-        transform.position = Vector3.Lerp(transform.position, targetPos, Time.deltaTime * speed);
-        if ((targetPos.y - transform.position.y) < 0.05f)
+        transform.position = Vector3.Lerp(transform.position, _targetPos, Time.deltaTime * _speed);
+        if (_targetPos.y - transform.position.y < 0.05f)
         {
-            transform.position = targetPos;
+            transform.position = _targetPos;
             Destroy(this);
         }
     }

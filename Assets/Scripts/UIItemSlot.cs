@@ -5,50 +5,50 @@ using UnityEngine.UI;
 public class UIItemSlot : MonoBehaviour
 {
     public bool isLinked = false;
-    public ItemSlot itemSlot;
+    public ItemSlot ItemSlot;
     public Image slotImage;
     public Image slotIcon;
     public TextMeshProUGUI slotAmount;
 
-    private World world;
+    private World _world;
 
     private void Awake()
     {
-        world = GameObject.Find("World").GetComponent<World>();
+        _world = GameObject.Find("World").GetComponent<World>();
     }
 
     public bool HasItem
     {
         get
         {
-            if (itemSlot == null)
+            if (ItemSlot == null)
                 return false;
             else
-                return itemSlot.HasItem;
+                return ItemSlot.HasItem;
         }
     }
 
-    public void Link(ItemSlot _itemSlot)
+    public void Link(ItemSlot itemSlot)
     {
-        itemSlot = _itemSlot;
+        ItemSlot = itemSlot;
         isLinked = true;
-        itemSlot.LinkUISlot(this);
+        ItemSlot.LinkUISlot(this);
         UpdateSlot();
     }
 
     public void Unlink()
     {
-        itemSlot.UnlinkUISlot();
-        itemSlot = null;
+        ItemSlot.UnlinkUISlot();
+        ItemSlot = null;
         UpdateSlot();
     }
 
     public void UpdateSlot()
     {
-        if (itemSlot != null && itemSlot.HasItem)
+        if (ItemSlot != null && ItemSlot.HasItem)
         {
-            slotIcon.sprite = world.blockTypes[itemSlot.stack.id].icon;
-            slotAmount.text = itemSlot.stack.amount.ToString();
+            slotIcon.sprite = _world.blockTypes[ItemSlot.Stack.ID].icon;
+            slotAmount.text = ItemSlot.Stack.Amount.ToString();
             slotIcon.enabled = true;
             slotAmount.enabled = true;
         }
@@ -70,74 +70,74 @@ public class UIItemSlot : MonoBehaviour
     {
         if (isLinked)
         {
-            itemSlot.UnlinkUISlot();
+            ItemSlot.UnlinkUISlot();
         }
     }
 }
 
 public class ItemSlot
 {
-    public ItemStack stack = null;
-    private UIItemSlot uiItemSlot = null;
-    public bool isCreative;
+    public ItemStack Stack = null;
+    private UIItemSlot _uiItemSlot = null;
+    public bool IsCreative;
 
-    public ItemSlot(UIItemSlot _uiItemSlot)
+    public ItemSlot(UIItemSlot uiItemSlot)
     {
-        stack = null;
-        uiItemSlot = _uiItemSlot;
-        uiItemSlot.Link(this);
+        Stack = null;
+        _uiItemSlot = uiItemSlot;
+        _uiItemSlot.Link(this);
     }
 
-    public ItemSlot(UIItemSlot _uiItemSlot, ItemStack _stack)
+    public ItemSlot(UIItemSlot uiItemSlot, ItemStack stack)
     {
-        stack = _stack;
-        uiItemSlot = _uiItemSlot;
-        uiItemSlot.Link(this);
+        Stack = stack;
+        _uiItemSlot = uiItemSlot;
+        _uiItemSlot.Link(this);
     }
 
     public void LinkUISlot(UIItemSlot uiSlot)
     {
-        uiItemSlot = uiSlot;
+        _uiItemSlot = uiSlot;
     }
 
     public void UnlinkUISlot()
     {
-        uiItemSlot = null;
+        _uiItemSlot = null;
     }
 
     public void EmptySlot()
     {
-        stack = null;
-        if (uiItemSlot != null)
+        Stack = null;
+        if (_uiItemSlot != null)
         {
-            uiItemSlot.UpdateSlot();
+            _uiItemSlot.UpdateSlot();
         }
     }
 
     public ItemStack Take(int amount)
     {
         // Asked more than amount available, return amount available and empty slot. Or asked exactly amount available, return asked amount and empty slot.
-        if (amount >= stack.amount)
-            return uiItemSlot.itemSlot.TakeAll();
+        if (amount >= Stack.Amount)
+            return _uiItemSlot.ItemSlot.TakeAll();
         
         // Asked less than amount available, return asked amount and reduce stack amount.
-        ItemStack handOver = new ItemStack(stack.id, amount);
+        ItemStack handOver = new ItemStack(Stack.ID, amount);
 
         // Don't update slot info when slot is creative
-        if (isCreative) return handOver;
+        if (IsCreative) return handOver;
         
-        stack.amount -= amount;
-        uiItemSlot.UpdateSlot();
+        Stack.Amount -= amount;
+        _uiItemSlot.UpdateSlot();
 
         return handOver;
     }
 
     public ItemStack TakeAll()
     {
-        ItemStack handOver = new ItemStack(stack.id, stack.amount);
+        ItemStack handOver = new ItemStack(Stack.ID, Stack.Amount);
         
         // Don't update slot info when slot is creative
-        if (isCreative) return handOver;
+        if (IsCreative) return handOver;
         
         EmptySlot();
         return handOver;
@@ -145,41 +145,41 @@ public class ItemSlot
 
     public ItemStack TakeHalve()
     {
-        int halveAmount = Mathf.CeilToInt(stack.amount / 2.0f);
-        ItemStack halveStack = new ItemStack(stack.id, halveAmount);
+        int halveAmount = Mathf.CeilToInt(Stack.Amount / 2.0f);
+        ItemStack halveStack = new ItemStack(Stack.ID, halveAmount);
 
         // Don't update slot info when slot is creative
-        if (isCreative) return halveStack;
+        if (IsCreative) return halveStack;
         
         
-        stack.amount -= halveAmount;
+        Stack.Amount -= halveAmount;
         
         // If remaining stack amount is 0, remove stack from slot. Else update slot with new amount.
-        if (stack.amount == 0)
+        if (Stack.Amount == 0)
             EmptySlot();
         else
-            uiItemSlot.UpdateSlot();
+            _uiItemSlot.UpdateSlot();
 
         return halveStack;
     }
 
-    public void InsertStack(ItemStack _stack)
+    public void InsertStack(ItemStack stack)
     {
-        if (_stack == null)
+        if (stack == null)
         {
           EmptySlot();
           return;
         }
         
-        stack = _stack;
-        uiItemSlot.UpdateSlot();
+        Stack = stack;
+        _uiItemSlot.UpdateSlot();
     }
 
     public bool HasItem
     {
         get
         {
-            if (stack != null)
+            if (Stack != null)
                 return true;
             else
                 return false;

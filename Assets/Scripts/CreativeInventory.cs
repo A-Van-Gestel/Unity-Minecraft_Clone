@@ -9,13 +9,13 @@ public class CreativeInventory : MonoBehaviour
     public int itemColumnCount = 9;
     public int itemRowCount = 7;
 
-    private World world;
+    private World _world;
 
-    internal List<ItemSlot> slots = new List<ItemSlot>();
+    internal readonly List<ItemSlot> Slots = new List<ItemSlot>();
 
-    void Start()
+    private void Start()
     {
-        world = GameObject.Find("World").GetComponent<World>();
+        _world = GameObject.Find("World").GetComponent<World>();
 
         // Dynamically set the size of the creative inventory based of the column & row count and prefab size.
         RectTransform canvasRectTransform = gameObject.GetComponent<RectTransform>();
@@ -25,23 +25,22 @@ public class CreativeInventory : MonoBehaviour
         canvasGridLayoutGroup.cellSize = prefabSize;
 
         // Calculate how many rows the different block types will fill.
-        int creativeSlotRows = Mathf.CeilToInt((float)world.blockTypes.Length / itemColumnCount);
-        if ((world.blockTypes.Length - 1) % itemColumnCount == 0)
-            creativeSlotRows--;
+        int itemCount = _world.blockTypes.Length - 1; // Exclude Air (blockTypes[0]) 
+        int creativeSlotRows = Mathf.CeilToInt((float)itemCount / itemColumnCount);
 
         // Fill in the slots.
         for (int i = 1; i <= itemColumnCount * itemRowCount; i++)
         {
             GameObject newSlot = Instantiate(slotPrefab, transform);
-            int currentRow = Mathf.CeilToInt((float)(i) / itemColumnCount);
+            int currentRow = Mathf.CeilToInt((float)i / itemColumnCount);
 
             // First fill with creative menu with all block types.
-            if (i < world.blockTypes.Length)
+            if (i < _world.blockTypes.Length)
             {
-                ItemStack stack = new ItemStack((byte)i, world.blockTypes[i].stackSize);
+                ItemStack stack = new ItemStack((byte)i, _world.blockTypes[i].stackSize);
                 ItemSlot slot = new ItemSlot(newSlot.GetComponent<UIItemSlot>(), stack);
-                slot.isCreative = true;
-                slots.Add(slot);
+                slot.IsCreative = true;
+                Slots.Add(slot);
             }
             // Create one row spacer between creative blocks and empty slots by disabling created slot.
             else if (currentRow <= creativeSlotRows + 1)
@@ -53,7 +52,7 @@ public class CreativeInventory : MonoBehaviour
             else
             {
                 ItemSlot slot = new ItemSlot(newSlot.GetComponent<UIItemSlot>());
-                slots.Add(slot);
+                Slots.Add(slot);
             }
         }
     }

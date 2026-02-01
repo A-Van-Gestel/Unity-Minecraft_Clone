@@ -914,7 +914,6 @@ MonoBehaviour:
   mouseSensitivitySlider: {fileID: 1117237759}
   mouseSensitivityText: {fileID: 359885491}
   cloudStyleDropdown: {fileID: 1295068068}
-  threadingToggle: {fileID: 0}
   chunkAnimationToggle: {fileID: 681407828}
 --- !u!4 &992233201
 Transform:

@@ -1,7 +1,7 @@
 {
     "AutoSaveEnabled": true,
     "CleanEmptyDirectoriesFeature": false,
-    "PrepareOnPlaymode": false,
+    "PrepareOnPlaymode": true,
     "EnableSOCheck": false,
     "CheckForUpdates": true
 }

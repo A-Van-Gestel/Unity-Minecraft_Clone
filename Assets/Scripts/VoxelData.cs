@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using UnityEngine;
 using Random = System.Random;
 
@@ -13,8 +12,8 @@ public static class VoxelData
     public const int SeaLevel = 45; // Minecraft = 62
 
     // Lighting Values
-    public static float MinLightLevel = 0.15f;
-    public static float MaxLightLevel = 1.0f;
+    public static readonly float MinLightLevel = 0.15f;
+    public static readonly float MaxLightLevel = 1.0f;
 
     // Light is handled as float (0-1) byt Minecraft stores light as a byte (0-15),
     // so we need to know how much of that float a single light level represents.
@@ -58,7 +57,10 @@ public static class VoxelData
         new Vector3Int(1, 0, 0), // Right Face
     };
 
-    public static readonly int[] revFaceChecksIndex = new int[6]
+    /// <summary>
+    /// Checks for all faces (front, back, top, bottom, right, left).
+    /// </summary>
+    public static readonly int[] RevFaceChecksIndices = new int[6]
     {
         1, // Front Face
         0, // Back Face
@@ -68,17 +70,38 @@ public static class VoxelData
         4, // Left Face
     };
 
-    public static readonly int[,] VoxelTris = new int[6, 4]
+    /// <summary>
+    /// Checks for only the horizontal faces (front, back, right, left).
+    /// </summary>
+    public static readonly int[] HorizontalFaceChecksIndices = new int[4]
+    {
+        1, // Front Face
+        0, // Back Face
+        5, // Right Face
+        4, // Left Face
+    };
+
+    /// <summary>
+    /// Checks for only the vertical faces (bottom, top).
+    /// </summary>
+    public static readonly int[] VerticalFaceChecksIndices = new int[2]
+    {
+        3, // Bottom Face
+        2, // Top Face
+    };
+
+    // Should be accessed like this: VoxelTris[face * 4 + vert].
+    public static readonly int[] VoxelTris = new int[24]
     {
         // Vertex Index order (with duplicates)
         // Back, Front, Top, Bottom, Left, Right
         //  0      1     2     2       1     3
-        { 0, 3, 1, 2 }, // Back Face
-        { 5, 6, 4, 7 }, // Front Face
-        { 3, 7, 2, 6 }, // Top Face
-        { 1, 5, 0, 4 }, // Bottom Face
-        { 4, 7, 0, 3 }, // Left Face
-        { 1, 2, 5, 6 }, // Right Face
+        0, 3, 1, 2, // Back Face
+        5, 6, 4, 7, // Front Face
+        3, 7, 2, 6, // Top Face
+        1, 5, 0, 4, // Bottom Face
+        4, 7, 0, 3, // Left Face
+        1, 2, 5, 6, // Right Face
     };
 
     public static readonly Vector2[] VoxelUvs = new Vector2[4]
@@ -91,98 +114,32 @@ public static class VoxelData
 
     public static int CalculateSeed(string seedText)
     {
-        if (string.IsNullOrEmpty(seedText) || seedText.Length <= 1) // TextMeshPro empty string has Length of 1 -_-
+        // Trim ZERO WIDTH SPACE (U+8203) from the string that TextMeshPro always adds -_-.
+        seedText = seedText.Trim((char)8203);
+
+        // 1. Handle null or empty strings by generating a random seed.
+        if (string.IsNullOrEmpty(seedText))
         {
             int randomSeed = new Random().Next(int.MinValue, int.MaxValue);
-            Debug.Log($"VoxelData.CalculateSeed | Using Random seed: {randomSeed}");
-            seedText = randomSeed.ToString();
+            int hashCode = randomSeed.ToString().GetHashCode();
+            int safeHashCode = Mathf.Abs(hashCode) / 10000; // TODO: This is a hack to make the make the world generation not shit itself.
+            Debug.Log($"VoxelData.CalculateSeed | Using Random seed: {randomSeed} | Actual seed: {safeHashCode}");
+            return safeHashCode;
         }
 
-        return Mathf.Abs(seedText.GetHashCode()) / 10000;
-    }
-
-    // --- Constants for Bit Packing ---
-    // Using Hex for clarity with bit positions
-    private const ushort ID_MASK = 0x00FF; // Bits 0-7   (00000000 11111111) (8-bits, Values 0-256)
-    private const ushort LIGHT_MASK = 0x0F00; // Bits 8-11 (00001111 00000000) (4-bits, Values 0-15)
-    private const ushort ORIENTATION_MASK = 0x3000; // Bits 12-13 (00110000 00000000) (2-bits, Values 0-3)
-    // Bits 14-15 are reserved (0xC000)
-
-    private const int ID_SHIFT = 0;
-    private const int LIGHT_SHIFT = 8;
-    private const int ORIENTATION_SHIFT = 12;
-
-    // Maps the 2-bit stored value back to the orientation int used elsewhere
-    private static readonly byte[] OrientationMap =
-    {
-        1, // Index 0 maps to Orientation 1 (Front)
-        0, // Index 1 maps to Orientation 0 (Back)
-        4, // Index 2 maps to Orientation 4 (Left)
-        5 // Index 3 maps to Orientation 5 (Right)
-    };
-
-    // Inverse map for packing
-    private static readonly Dictionary<byte, byte> OrientationToIndexMap = new Dictionary<byte, byte>()
-    {
-        { 1, 0 }, { 0, 1 }, { 4, 2 }, { 5, 3 }
-    };
-
-    // --- Packing ---
-    // Creates the initial packed value
-    public static ushort PackVoxelData(byte id, byte lightLevel, byte orientation)
-    {
-        ushort packedData = 0;
-        packedData |= (ushort)((id & 0xFF) << ID_SHIFT); // ID: Ensure only 8 bits
-        packedData |= (ushort)((lightLevel & 0xF) << LIGHT_SHIFT); // Light Level: Ensure only 4 bits
-
-        // Pack Orientation (Find index in map)
-        if (!OrientationToIndexMap.TryGetValue(orientation, out byte orientationIndex))
+        // 2. Try to parse the string as an integer.
+        if (int.TryParse(seedText, out int parsedSeed))
         {
-            orientationIndex = 0; // Default to Front if invalid orientation provided
-            Debug.LogWarning($"Invalid orientation {orientation} provided for packing. Defaulting to Front (1).");
+            Debug.Log($"VoxelData.CalculateSeed | Using integer seed: {parsedSeed}");
+            return parsedSeed; // Return the parsed integer directly.
         }
-        packedData |= (ushort)((orientationIndex & 0x3) << ORIENTATION_SHIFT); // Orientation: Ensure only 2 bits
-
-        return packedData;
-    }
-
-    // --- Unpacking ---
-    public static byte GetId(ushort packedData)
-    {
-        return (byte)((packedData & ID_MASK) >> ID_SHIFT);
-    }
-
-    public static byte GetLight(ushort packedData)
-    {
-        return (byte)((packedData & LIGHT_MASK) >> LIGHT_SHIFT);
-    }
-
-    public static byte GetOrientation(ushort packedData)
-    {
-        byte orientationIndex = (byte)((packedData & ORIENTATION_MASK) >> ORIENTATION_SHIFT);
-        // Safely get orientation from map, default to Front (index 0) if somehow out of bounds
-        return (orientationIndex < OrientationMap.Length) ? OrientationMap[orientationIndex] : OrientationMap[0];
-    }
-
-    // --- Setters (Return new packed value) ---
-    public static ushort SetId(ushort packedData, byte id)
-    {
-        return (ushort)((packedData & ~ID_MASK) | (id & 0xFF)); // Clear old, OR in new
-    }
-
-    public static ushort SetLight(ushort packedData, byte lightLevel)
-    {
-        return (ushort)((packedData & ~LIGHT_MASK) | ((lightLevel & 0xF) << LIGHT_SHIFT)); // Clear old, OR in new (masked+shifted)
-    }
-
-    public static ushort SetOrientation(ushort packedData, byte orientation)
-    {
-        if (!OrientationToIndexMap.TryGetValue(orientation, out byte orientationIndex))
+        // 3. Seed was string (e.g., "hello world").
+        else
         {
-            orientationIndex = 0; // Default to Front
-            Debug.LogWarning($"Invalid orientation {orientation} provided for setting. Defaulting to Front (1).");
+            int hashCode = seedText.GetHashCode();
+            int safeHashCode = Mathf.Abs(hashCode) / 10000; // TODO: This is a hack to make the make the world generation not shit itself.
+            Debug.Log($"VoxelData.CalculateSeed | Using hash of string \"{seedText}\" | Actual seed: {safeHashCode}");
+            return safeHashCode;
         }
-
-        return (ushort)((packedData & ~ORIENTATION_MASK) | ((orientationIndex & 0x3) << ORIENTATION_SHIFT)); // Clear old, OR in new (masked+shifted)
     }
 }

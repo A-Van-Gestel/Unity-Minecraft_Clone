@@ -2,7 +2,7 @@ using System;
 using UnityEngine;
 using UnityEngine.Serialization;
 
-[CreateAssetMenu(fileName = "BiomeAttributes", menuName = "MinecraftTutorial/Biome Attributes")]
+[CreateAssetMenu(fileName = "BiomeAttributes", menuName = "Minecraft/Biome Attributes")]
 public class BiomeAttributes : ScriptableObject
 {
     [Header("Biome Terrain")]

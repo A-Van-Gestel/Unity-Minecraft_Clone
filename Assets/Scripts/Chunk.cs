@@ -2,130 +2,149 @@ using System;
 using System.Collections.Generic;
 using Data;
 using Helpers;
+using Jobs.BurstData;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
-using UnityEngine.Rendering;
 
 public class Chunk
 {
-    public ChunkCoord coord;
-
-    private GameObject chunkObject;
-    private MeshRenderer meshRenderer;
-    private MeshFilter meshFilter;
-
-    private int vertexIndex = 0;
-    private List<Vector3> vertices = new List<Vector3>();
-    private List<int> triangles = new List<int>();
-    private List<int> transparentTriangles = new List<int>();
-    private List<int> waterTriangles = new List<int>();
-    private Material[] materials = new Material[3];
-    private List<Vector2> uvs = new List<Vector2>();
-    private List<Color> colors = new List<Color>();
-    private List<Vector3> normals = new List<Vector3>();
-
-    public Vector3 chunkPosition;
+    public readonly ChunkCoord Coord;
+    public readonly Vector3 ChunkPosition;
+    public readonly ChunkData ChunkData;
+    private readonly SectionRenderer[] _sectionRenderers;
+    private readonly GameObject _chunkObject;
 
     private bool _isActive;
-
-    private ChunkData chunkData;
-
-    private List<Vector3Int> activeVoxels = new List<Vector3Int>();
+    private List<Vector3Int> _activeVoxels = new List<Vector3Int>();
 
     #region Constructor
-    public Chunk(ChunkCoord _coord)
+
+    public Chunk(ChunkCoord coord, bool createGameObject = true)
     {
-        coord = _coord;
-        chunkObject = new GameObject();
-        meshFilter = chunkObject.AddComponent<MeshFilter>();
-        meshRenderer = chunkObject.AddComponent<MeshRenderer>();
+        Coord = coord;
+        Vector3 worldPos = new Vector3(Coord.X * VoxelData.ChunkWidth, 0f, Coord.Z * VoxelData.ChunkWidth);
+        ChunkPosition = worldPos;
 
-        materials[0] = World.Instance.material;
-        materials[1] = World.Instance.transparentMaterial;
-        materials[2] = World.Instance.waterMaterial;
-        meshRenderer.materials = materials;
+        ChunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)ChunkPosition.x, (int)ChunkPosition.z), true);
+        ChunkData.Chunk = this;
 
-        meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided; // Mostly fixes lines in the shadows between voxels.
-        chunkObject.transform.SetParent(World.Instance.transform);
-        chunkObject.transform.position = new Vector3(coord.x * VoxelData.ChunkWidth, 0f, coord.z * VoxelData.ChunkWidth);
-        chunkObject.name = $"Chunk {coord.x}, {coord.z}";
-        chunkPosition = chunkObject.transform.position;
-
-        chunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)chunkPosition.x, (int)chunkPosition.z), true);
-        chunkData.chunk = this;
-
-        // Add active blocks to the active voxel's list.
-        for (int y = 0; y < VoxelData.ChunkHeight; y++)
+        if (createGameObject)
         {
-            for (int x = 0; x < VoxelData.ChunkWidth; x++)
+            _chunkObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
+            _chunkObject.transform.SetParent(World.Instance.transform);
+            _chunkObject.transform.position = worldPos;
+
+            // Initialize Section Renderers
+            int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+            _sectionRenderers = new SectionRenderer[sectionCount];
+            for (int i = 0; i < sectionCount; i++)
             {
-                for (int z = 0; z < VoxelData.ChunkWidth; z++)
+                _sectionRenderers[i] = new SectionRenderer(_chunkObject.transform, i);
+            }
+        }
+    }
+
+    #endregion
+
+    /// <summary>
+    /// A new method to be called by World.cs after the chunk's data has been populated by a job.
+    /// </summary>
+    public void OnDataPopulated()
+    {
+        // Now that the data is here, we can scan for active voxels.
+        // Optimization: Iterate through sections first to skip empty ones.
+        for (int s = 0; s < ChunkData.sections.Length; s++)
+        {
+            ChunkSection section = ChunkData.sections[s];
+            if (section == null || section.IsEmpty) continue;
+
+            int startY = s * ChunkMath.SECTION_SIZE;
+
+            // Iterate only within this non-empty section
+            for (int i = 0; i < section.voxels.Length; i++)
+            {
+                uint packedData = section.voxels[i];
+                ushort id = BurstVoxelDataBitMapping.GetId(packedData);
+
+                if (World.Instance.blockTypes[id].isActive)
                 {
-                    VoxelState voxel = chunkData.map[x, y, z];
-                    if (voxel.Properties.isActive)
-                        AddActiveVoxel(new Vector3Int(x, y, z));
+                    // Convert section index back to 3D position
+                    int x = i % ChunkMath.SECTION_SIZE;
+                    int yOffset = (i / ChunkMath.SECTION_SIZE) % ChunkMath.SECTION_SIZE;
+                    int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
+
+                    AddActiveVoxel(new Vector3Int(x, startY + yOffset, z));
                 }
             }
         }
-
-        World.Instance.AddChunkToUpdate(this);
-
-        PlayChunkLoadAnimation();
     }
-    #endregion
-
 
     /// <summary>
-    /// Updates chunk on the main thread.
-    /// TODO: This function can raise a nullReferenceException.
+    /// Updates chunk using the Unity Jobs System
     /// </summary>
     public void UpdateChunk()
     {
-        ClearMeshData();
+        // The responsibility of meshing is now on the World orchestrator
+        World.Instance.JobManager.ScheduleMeshing(this);
+    }
 
-        for (int y = 0; y < VoxelData.ChunkHeight; y++)
+    #region Block Behavior Methods
+
+    public void TickUpdate()
+    {
+        // A temporary list to avoid modifying the activeVoxels list while iterating.
+        List<Vector3Int> stillActive = new List<Vector3Int>();
+        Queue<VoxelMod> modifications = new Queue<VoxelMod>();
+
+        foreach (Vector3Int pos in _activeVoxels)
         {
-            for (int x = 0; x < VoxelData.ChunkWidth; x++)
+            // Get the list of modifications from the behavior logic.
+            List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
+
+            // If the block is still active, keep it for the next tick.
+            if (BlockBehavior.Active(ChunkData, pos))
             {
-                for (int z = 0; z < VoxelData.ChunkWidth; z++)
+                stillActive.Add(pos);
+            }
+
+            // If the behavior produced any changes, add them to our queue.
+            if (mods != null)
+            {
+                foreach (VoxelMod mod in mods)
                 {
-                    if (chunkData.map[x, y, z].Properties.isSolid)
-                        UpdateMeshData(new Vector3(x, y, z));
+                    modifications.Enqueue(mod);
                 }
             }
         }
 
-        World.Instance.chunksToDraw.Enqueue(this);
-    }
-
-    #region Block Behavior Methods
-    public void TickUpdate()
-    {
-        for (int i = activeVoxels.Count - 1; i >= 0; i--)
+        // If there are any modifications, submit them to the world's global queue.
+        if (modifications.Count > 0)
         {
-            Vector3Int pos = activeVoxels[i];
-            // Pass context to the static BlockBehavior methods
-            if (!BlockBehavior.Active(chunkData, pos))
-                RemoveActiveVoxel(pos);
-            else
-                BlockBehavior.Behave(chunkData, pos);
+            World.Instance.EnqueueVoxelModifications(modifications);
         }
+
+        // Update the active voxel list for the next frame.
+        _activeVoxels = stillActive;
     }
 
     public void AddActiveVoxel(Vector3Int pos)
     {
-        if (!activeVoxels.Contains(pos))
-            activeVoxels.Add(pos);
+        if (!_activeVoxels.Contains(pos))
+            _activeVoxels.Add(pos);
     }
 
     public void RemoveActiveVoxel(Vector3Int pos)
     {
-        activeVoxels.Remove(pos); // List<T>.Remove is efficient enough for this
+        _activeVoxels.Remove(pos); // List<T>.Remove is efficient enough for this
     }
 
     public int GetActiveVoxelCount()
     {
-        return activeVoxels.Count;
+        return _activeVoxels.Count;
     }
+
     #endregion
 
     public bool isActive
@@ -134,10 +153,10 @@ public class Chunk
         set
         {
             _isActive = value;
-            if (chunkObject != null)
+            if (_chunkObject != null)
             {
-                chunkObject.SetActive(value);
-                PlayChunkLoadAnimation();
+                _chunkObject.SetActive(value);
+                if (value) PlayChunkLoadAnimation();
             }
         }
     }
@@ -148,232 +167,162 @@ public class Chunk
         int yCheck = Mathf.FloorToInt(pos.y);
         int zCheck = Mathf.FloorToInt(pos.z);
 
-        xCheck -= Mathf.FloorToInt(chunkPosition.x);
-        zCheck -= Mathf.FloorToInt(chunkPosition.z);
+        xCheck -= Mathf.FloorToInt(ChunkPosition.x);
+        zCheck -= Mathf.FloorToInt(ChunkPosition.z);
 
         return new Vector3Int(xCheck, yCheck, zCheck);
     }
 
-    public VoxelState GetVoxelFromGlobalVector3(Vector3 pos)
+    #region Mesh Generation
+
+    // Burst Job to adjust vertex positions (Global Y -> Local Section Y) and triangle indices (Global Index -> Local Index)
+    [BurstCompile]
+    private struct PostProcessMeshJob : IJob
     {
-        Vector3Int localPos = GetVoxelPositionInChunkFromGlobalVector3(pos);
-        return chunkData.map[localPos.x, localPos.y, localPos.z];
-    }
+        public NativeList<Vector3> Vertices;
+        public NativeList<int> OpaqueTris;
+        public NativeList<int> TransparentTris;
+        public NativeList<int> FluidTris;
 
-    public void EditVoxel(Vector3 pos, byte newID)
-    {
-        int xCheck = Mathf.FloorToInt(pos.x);
-        int yCheck = Mathf.FloorToInt(pos.y);
-        int zCheck = Mathf.FloorToInt(pos.z);
+        [ReadOnly]
+        public NativeArray<MeshSectionStats> Stats;
 
-        xCheck -= Mathf.FloorToInt(chunkPosition.x);
-        zCheck -= Mathf.FloorToInt(chunkPosition.z);
+        public int SectionHeight;
 
-        chunkData.ModifyVoxel(new Vector3Int(xCheck, yCheck, zCheck), newID, World.Instance.player.orientation, true);
-
-        // Update Surrounding Chunks
-        UpdateSurroundingVoxels(xCheck, yCheck, zCheck);
-    }
-
-    private void UpdateSurroundingVoxels(int x, int y, int z)
-    {
-        Vector3 thisVoxel = new Vector3(x, y, z);
-
-        for (int p = 0; p < 6; p++) // p = faceIndex
+        public void Execute()
         {
-            // Skip top (2) and bottom (3) faces, as we don't have chunk neighbors for those
-            if (p == 2 || p == 3) continue;
-            
-            Vector3 currentVoxel = thisVoxel + VoxelData.FaceChecks[p];
-
-            // Relative position of the voxel within chunk
-            int currentVoxelX = (int)currentVoxel.x;
-            int currentVoxelY = (int)currentVoxel.y;
-            int currentVoxelZ = (int)currentVoxel.z;
-
-            // Absolute position of the voxel (because the UpdateSurroundingVoxels() uses the relative position of a voxel within the chunk, not the global voxel position):
-            int currentVoxelWorldPosX = currentVoxelX + (int)chunkPosition.x;
-            int currentVoxelWorldPosZ = currentVoxelZ + (int)chunkPosition.z;
-
-            // If surrounding voxel is outside current chunk and still in the world, update that chunk as well
-            if (!chunkData.IsVoxelInChunk(currentVoxelX, currentVoxelY, currentVoxelZ)
-                && World.Instance.worldData.IsVoxelInWorld(new Vector3(currentVoxelWorldPosX, currentVoxelY, currentVoxelWorldPosZ)))
+            // We iterate sections inside the job to avoid overhead of scheduling many tiny jobs
+            for (int i = 0; i < Stats.Length; i++)
             {
-                Vector3 chunkVector = currentVoxel + chunkPosition;
-                Chunk chunk = World.Instance.GetChunkFromVector3(chunkVector);
+                MeshSectionStats s = Stats[i];
+                if (s.VertexCount == 0) continue;
 
-                // Update current chunk as fast as possible.
-                World.Instance.AddChunkToUpdate(chunk, true);
+                float yOffset = i * SectionHeight;
+                int vertStart = s.VertexStartIndex;
+
+                // 1. Adjust Vertices: Subtract section Y offset so they are local to the Section GameObject
+                for (int v = 0; v < s.VertexCount; v++)
+                {
+                    int index = vertStart + v;
+                    Vector3 pos = Vertices[index];
+                    pos.y -= yOffset;
+                    Vertices[index] = pos;
+                }
+
+                // 2. Adjust Indices: Relativize indices to start at 0 for this section
+                // The indices currently point to the 'allVerts' array. 
+                // We need them to point to the start of the section slice.
+                int offset = -vertStart;
+
+                AdjustIndices(OpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount, offset);
+                AdjustIndices(TransparentTris, s.TransparentTriStartIndex, s.TransparentTriCount, offset);
+                AdjustIndices(FluidTris, s.FluidTriStartIndex, s.FluidTriCount, offset);
+            }
+        }
+
+        private void AdjustIndices(NativeList<int> indices, int start, int count, int offset)
+        {
+            for (int k = 0; k < count; k++)
+            {
+                indices[start + k] += offset;
             }
         }
     }
 
-    #region Mesh Generation
-    private void UpdateMeshData(Vector3 pos)
+    // This is called by World.cs when a mesh job for this chunk is complete.
+    public void ApplyMeshData(MeshDataJobOutput meshData)
     {
-        int x = Mathf.FloorToInt(pos.x);
-        int y = Mathf.FloorToInt(pos.y);
-        int z = Mathf.FloorToInt(pos.z);
-
-        VoxelState voxel = chunkData.map[x, y, z];
-        BlockType voxelProps = voxel.Properties;
-        Vector3 voxelWorldPosition = pos + chunkPosition;
-
-        // Calculate rotation angle based on orientation
-        float rotation = VoxelHelper.GetRotationAngle(voxel.orientation);
-
-        for (int p = 0; p < 6; p++) // p = World Face Direction Index (0=Back, 1=Front, 2=Top, 3=Bottom, 4=Left, 5=Right)
+        // 1. Run a fast Burst job on the main thread to adjust coordinate spaces from Chunk-Space to Section-Space.
+        // This modifies the data in-place efficiently.
+        var postProcessJob = new PostProcessMeshJob
         {
-            // --- Determine Original Face Index (translatedP) ---
-            // This calculation determines which *original* face of the block
-            // ends up pointing in the *world* direction 'p' after rotation.
-            int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, voxel.orientation);
+            Vertices = meshData.Vertices,
+            OpaqueTris = meshData.Triangles,
+            TransparentTris = meshData.TransparentTriangles,
+            FluidTris = meshData.FluidTriangles,
+            Stats = meshData.SectionStats,
+            SectionHeight = ChunkMath.SECTION_SIZE
+        };
 
-            // --- Culling Decision based on the NEIGHBOR matching the ORIGINAL face direction ---
-            VoxelState? neighborVoxel = chunkData.GetState(new Vector3Int(x, y, z) + VoxelData.FaceChecks[p]);
-            BlockType neighborProps = neighborVoxel?.Properties; // Cache absolute neighbor props
+        postProcessJob.Schedule().Complete();
 
-            bool isEdgeOfWorld = !World.Instance.worldData.IsVoxelInWorld(voxelWorldPosition + VoxelData.FaceChecks[p]);
+        // 2. Pass the data to the renderers using zero-allocation NativeArray views.
+        NativeArray<MeshSectionStats> stats = meshData.SectionStats;
 
-            bool shouldDrawFace = false;
-            // Rule 1: Always draw if facing the edge of the loaded world.
-            // Rule 2: Neighbor is null but *inside* the world (e.g., unloaded chunk boundary)
-            if (isEdgeOfWorld || !neighborVoxel.HasValue)
+        // Obtain raw NativeArray views from the lists
+        var allVerts = meshData.Vertices.AsArray();
+        var allUvs = meshData.Uvs.AsArray();
+        var allColors = meshData.Colors.AsArray();
+        var allNormals = meshData.Normals.AsArray();
+        var allOpaqueTris = meshData.Triangles.AsArray();
+        var allTransTris = meshData.TransparentTriangles.AsArray();
+        var allFluidTris = meshData.FluidTriangles.AsArray();
+
+        for (int i = 0; i < _sectionRenderers.Length; i++)
+        {
+            MeshSectionStats s = stats[i];
+
+            if (s.VertexCount == 0)
             {
-                shouldDrawFace = true;
-            }
-            // Neighbor exists within the world
-            else
-            {
-                bool neighborIsTransparent = neighborProps.renderNeighborFaces;
-                bool neighborIsSolid = neighborProps.isSolid;
-                bool neighborIsWater = neighborProps.isWater;
-
-                if (voxelProps.isWater) // Current voxel is Water
-                {
-                    // Water draws face against anything NOT water
-                    shouldDrawFace = !neighborIsWater;
-                }
-                else if (voxelProps.renderNeighborFaces) // Current voxel is Other Transparent (Glass, Leaves)
-                {
-                    // Transparent face draws if neighbor is solid OR if neighbor is a DIFFERENT type of transparent?
-                    // Draw if the neighbor doesn't fully block the view (is not solid opaque)
-                    shouldDrawFace = !neighborIsSolid || neighborIsTransparent;
-                    // TODO: This prevents drawing glass against glass -> Shader should draw backfaces
-                    // if (neighborIsTransparent && neighborProps == voxelProps) shouldDrawFace = false;
-                }
-                else // Current voxel is Solid Opaque
-                {
-                    // Solid face draws if neighbor does NOT block the view
-                    // (i.e., neighbor is transparent like water/glass/leaves OR neighbor is air/non-solid)
-                    shouldDrawFace = neighborIsTransparent || !neighborIsSolid;
-                }
+                // Pass empty data to clear mesh / disable object
+                _sectionRenderers[i].UpdateMeshNative(
+                    default, default, default, default, 0, 0,
+                    default, 0, 0,
+                    default, 0, 0,
+                    default, 0, 0
+                );
+                continue;
             }
 
-            // --- Add Geometry ONLY if this face should be drawn ---
-            if (shouldDrawFace)
-            {
-                // --- Get Mesh Data using the 'translatedP' index ---
-                FaceMeshData faceData = voxelProps.meshData.faces[translatedP];
-                int textureID = voxelProps.GetTextureID(translatedP);
+            _sectionRenderers[i].UpdateMeshNative(
+                allVerts, allUvs, allColors, allNormals, s.VertexStartIndex, s.VertexCount,
+                allOpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount,
+                allTransTris, s.TransparentTriStartIndex, s.TransparentTriCount,
+                allFluidTris, s.FluidTriStartIndex, s.FluidTriCount
+            );
+        }
 
-                // --- Calculate Light using the ACTUAL neighbor's space ('neighborVoxel') ---
-                // If outside the world, neighbor would be null, so use own voxel globalLightPercent in that case.
-                float lightLevel = neighborVoxel?.lightAsFloat ?? voxel.lightAsFloat;
+        // Dispose native memory
+        meshData.Dispose();
 
-                // --- Add Geometry ---
-                int faceVertCount = faceData.vertData.Length;
-                for (int i = 0; i < faceData.vertData.Length; i++)
-                {
-                    VertData vertData = faceData.GetVertData(i);
-
-                    // Rotate the vertex position based on the voxel's orientation
-                    vertices.Add(pos + vertData.GetRotatedPosition(new Vector3(0, rotation, 0)));
-                    // Normal vector always points in the world direction 'p'
-                    normals.Add(VoxelData.FaceChecks[p]);
-                    // Color encodes light level
-                    colors.Add(new Color(0, 0, 0, lightLevel));
-
-                    // Add UVs, potentially transformed or just using the textureID lookup
-                    if (voxelProps.isWater)
-                        uvs.Add(vertData.uv);
-                    else
-                        AddTexture(textureID, vertData.uv); // Use looked-up textureID
-                }
-
-                // --- Assign triangles to the correct submesh based on CURRENT voxel type ---
-                if (voxelProps.isWater)
-                {
-                    foreach (int triangle in faceData.triangles)
-                    {
-                        waterTriangles.Add(vertexIndex + triangle);
-                    }
-                }
-                else if (voxelProps.renderNeighborFaces) // Other transparent blocks
-                {
-                    foreach (int triangle in faceData.triangles)
-                    {
-                        transparentTriangles.Add(vertexIndex + triangle);
-                    }
-                }
-                else // Solid Opaque blocks
-                {
-                    foreach (int triangle in faceData.triangles)
-                    {
-                        triangles.Add(vertexIndex + triangle);
-                    }
-                }
-
-                vertexIndex += faceVertCount;
-            } // End if(shouldDrawFace)
-        } // End for loop (p)
+        // Add to the draw queue to be enabled on the main thread
+        World.Instance.ChunksToDraw.Enqueue(this);
     }
 
-    private void ClearMeshData()
-    {
-        vertexIndex = 0;
-        vertices.Clear();
-        triangles.Clear();
-        transparentTriangles.Clear();
-        waterTriangles.Clear();
-        uvs.Clear();
-        colors.Clear();
-        normals.Clear();
-    }
-
+    // CreateMesh is now just the final step of enabling the renderer after data is applied.
     public void CreateMesh()
     {
-        Mesh mesh = new Mesh();
-        mesh.vertices = vertices.ToArray();
-
-        mesh.subMeshCount = 3;
-        mesh.SetTriangles(triangles.ToArray(), 0);
-        mesh.SetTriangles(transparentTriangles.ToArray(), 1);
-        mesh.SetTriangles(waterTriangles.ToArray(), 2);
-
-        mesh.uv = uvs.ToArray();
-        mesh.colors = colors.ToArray();
-        mesh.normals = normals.ToArray();
-
-        meshFilter.mesh = mesh;
+        // The mesh is already assigned in ApplyMeshData.
+        // This method could be used to enable the GameObject or an animation.
+        PlayChunkLoadAnimation();
     }
 
-    private void AddTexture(int textureID, Vector2 uv)
+    #endregion
+
+    #region Public Getters
+
+    /// <summary>
+    /// Gets the list of active voxels in this chunk.
+    /// </summary>
+    public List<Vector3Int> ActiveVoxels => _activeVoxels;
+
+    #endregion
+
+    #region Debug Information Methods
+
+    /// <summary>
+    /// Checks if a voxel is active in this chunk.
+    /// </summary>
+    /// <param name="localPos">The local position of the voxel in the given chunk.</param>
+    /// <returns>True if the voxel is active, false otherwise.</returns>
+    public bool IsVoxelActive(Vector3Int localPos)
     {
-        float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
-        float x = textureID - (y * VoxelData.TextureAtlasSizeInBlocks);
+        if (_activeVoxels.Count == 0)
+            return false;
 
-        x *= VoxelData.NormalizedBlockTextureSize;
-        y *= VoxelData.NormalizedBlockTextureSize;
-
-        // To start reading the atlas from the top left
-        y = 1f - y - VoxelData.NormalizedBlockTextureSize;
-
-        x += VoxelData.NormalizedBlockTextureSize * uv.x;
-        y += VoxelData.NormalizedBlockTextureSize * uv.y;
-
-        uvs.Add(new Vector2(x, y));
+        return _activeVoxels.Contains(localPos);
     }
+
     #endregion
 
 
@@ -381,8 +330,8 @@ public class Chunk
 
     private void PlayChunkLoadAnimation()
     {
-        if (World.Instance.settings.enableChunkLoadAnimations && chunkObject.GetComponent<ChunkLoadAnimation>() == null)
-            chunkObject.AddComponent<ChunkLoadAnimation>();
+        if (World.Instance.settings.enableChunkLoadAnimations && _chunkObject.GetComponent<ChunkLoadAnimation>() == null)
+            _chunkObject.AddComponent<ChunkLoadAnimation>();
     }
 
     #endregion
@@ -390,34 +339,75 @@ public class Chunk
 
 public class ChunkCoord : IEquatable<ChunkCoord>
 {
-    public readonly int x;
-    public readonly int z;
+    public readonly int X;
+    public readonly int Z;
+
+    #region Constructors
 
     public ChunkCoord()
     {
-        x = 0;
-        z = 0;
+        X = 0;
+        Z = 0;
     }
 
-    public ChunkCoord(int _x, int _z)
+    public ChunkCoord(int x, int z)
     {
-        x = _x;
-        z = _z;
+        X = x;
+        Z = z;
+    }
+
+    public ChunkCoord(Vector2 pos)
+    {
+        int xInt = Mathf.FloorToInt(pos.x);
+        int zInt = Mathf.FloorToInt(pos.y);
+
+        X = xInt / VoxelData.ChunkWidth;
+        Z = zInt / VoxelData.ChunkWidth;
+    }
+
+    public ChunkCoord(Vector2Int pos)
+    {
+        X = pos.x / VoxelData.ChunkWidth;
+        Z = pos.y / VoxelData.ChunkWidth;
     }
 
     public ChunkCoord(Vector3 pos)
     {
-        int xCheck = Mathf.FloorToInt(pos.x);
-        int zCheck = Mathf.FloorToInt(pos.z);
+        int xInt = Mathf.FloorToInt(pos.x);
+        int zInt = Mathf.FloorToInt(pos.z);
 
-        x = xCheck / VoxelData.ChunkWidth;
-        z = zCheck / VoxelData.ChunkWidth;
+        X = xInt / VoxelData.ChunkWidth;
+        Z = zInt / VoxelData.ChunkWidth;
     }
+
+    public ChunkCoord(Vector3Int pos)
+    {
+        X = pos.x / VoxelData.ChunkWidth;
+        Z = pos.z / VoxelData.ChunkWidth;
+    }
+
+    #endregion
+
+    #region Type Conversion
+
+    public Vector2Int ToVector2Int()
+    {
+        return new Vector2Int(X, Z);
+    }
+
+    public static implicit operator Vector2Int(ChunkCoord coord)
+    {
+        return new Vector2Int(coord.X, coord.Z);
+    }
+
+    #endregion
+
+    #region Overides
 
     public override int GetHashCode()
     {
         // Multiply x & y by different constant to differentiate between situations like x=12 & z=13 and x=13 & z=12.
-        return 31 * x + 17 * z;
+        return 31 * X + 17 * Z;
     }
 
     public override bool Equals(object obj)
@@ -430,6 +420,13 @@ public class ChunkCoord : IEquatable<ChunkCoord>
         if (other == null)
             return false;
 
-        return other.x == x && other.z == z;
+        return other.X == X && other.Z == Z;
     }
+
+    public override string ToString()
+    {
+        return $"ChunkCoord({X}, {Z})";
+    }
+
+    #endregion
 }
