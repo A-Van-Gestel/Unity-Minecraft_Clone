@@ -1,6 +1,6 @@
 ﻿# Voxel Engine Project (Minecraft Clone)
 
-![Unity Version](https://img.shields.io/badge/Unity-6000.2-black?logo=unity)
+![Unity Version](https://img.shields.io/badge/Unity-6000.3-black?logo=unity)
 
 A high-performance voxel sandbox engine built in Unity, inspired by Minecraft. This project leverages modern Unity technologies, including the **Job System** and **Burst Compiler**, to create a flexible and efficient procedural world.
 
@@ -16,7 +16,7 @@ A high-performance voxel sandbox engine built in Unity, inspired by Minecraft. T
 *   **Data-Driven Design:** Block properties are managed through a `BlockDatabase` (ScriptableObject), allowing for easy editing and expansion.
 
 ### Gameplay Features
-*   **Infinite Terrain:** Explore a vast world with multiple biomes, caves, and ore generation.
+*   **Infinite Terrain:** Explore a vast world with multiple biomes, caves, and ore generation. (Infinite worlds are WIP, but technically supported)
 *   **Block Interaction:** Place and break blocks to shape the world.
 *   **Player Controller:** A physics-based character controller supporting walking, sprinting, jumping, and flying.
 *   **Creative Mode Inventory:** A full UI for accessing any block in the game.
@@ -39,7 +39,7 @@ This project is built around a data-oriented and multi-threaded philosophy to ha
 
 ### Prerequisites
 *   **Unity Hub**
-*   **Unity 6.2**
+*   **Unity 6.3** (6000.3.6f1 at time of writing)
 *   A code editor like **Visual Studio** or **JetBrains Rider**.
 
 ### Setup
