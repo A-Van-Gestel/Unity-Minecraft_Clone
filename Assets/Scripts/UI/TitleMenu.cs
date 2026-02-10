@@ -2,7 +2,6 @@ using System.IO;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace UI
@@ -14,11 +13,11 @@ namespace UI
         [Header("Menu Objects")]
         public GameObject mainMenuObject;
         public GameObject settingsMenuObject;
+        public GameObject worldSelectMenuObject;
     #endregion
 
     #region Main Menu UI Elements
         [Header("Main Menu UI Elements")]
-        public TextMeshProUGUI seedField;
         public TextMeshProUGUI versionField;
     #endregion
 
@@ -46,6 +45,7 @@ namespace UI
 
         public void Awake()
         {
+            // TODO: Extract settings loading logic into a single Settings class / singleton
             // Create settings file if it doesn't yet exist, after that, load it.
             if (!File.Exists(_settingFilePath) || Application.isEditor)
             {
@@ -68,8 +68,14 @@ namespace UI
 
         public void StartGame()
         {
-            VoxelData.Seed = VoxelData.CalculateSeed(seedField.text);
-            SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single);
+            mainMenuObject.SetActive(false);
+            worldSelectMenuObject.SetActive(true);
+        }
+        
+        public void BackToMainMenu()
+        {
+            worldSelectMenuObject.SetActive(false);
+            mainMenuObject.SetActive(true);
         }
 
 

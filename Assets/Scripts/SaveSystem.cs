@@ -1,110 +1,167 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Runtime.Serialization.Formatters.Binary;
-using System.Threading;
-using Data;
-using JetBrains.Annotations;
+using Serialization;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 public static class SaveSystem
 {
-    public static void SaveWorld(WorldData world)
+    public const int CURRENT_VERSION = 1;
+
+    public static string GetSavePath(string worldName, bool useVolatilePath)
     {
-        // Set our save location and make sure we have a saves folder ready to go.
-        string savePath = $"{World.Instance.appSaveDataPath}/saves/{world.worldName}/";
+        string baseFolder = useVolatilePath
+            ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
+            : Path.Combine(Application.persistentDataPath, "Saves");
 
-        if (!Directory.Exists(savePath))
-            Directory.CreateDirectory(savePath);
-        
-        Debug.Log($"SaveSystem | Saving {world.worldName}");
-
-        BinaryFormatter formatter = new BinaryFormatter();
-        FileStream stream = new FileStream($"{savePath}world.world", FileMode.Create);
-        
-        formatter.Serialize(stream, world);
-        stream.Close();
-
-        Thread thread = new Thread(() => SaveChunks(world));
-        thread.Start();
-
+        return Path.Combine(baseFolder, worldName);
     }
 
-    public static void SaveChunks(WorldData world)
+    public static void SaveWorld(World world)
     {
-        // Copy modified chunks into a new list and clear the old one to prevent chunks being added to list while it is saving.
-        List<ChunkData> chunks = new List<ChunkData>(world.ModifiedChunks);
-        world.ModifiedChunks.Clear();
-        
-        int count = 0;
-        foreach (ChunkData chunk in chunks)
+        string worldName = world.worldData.worldName;
+        bool isVolatile = Application.isEditor && world.settings.enableVolatileSaveData;
+        string path = GetSavePath(worldName, isVolatile);
+
+        if (!Directory.Exists(path)) Directory.CreateDirectory(path);
+
+        // --- 1. Gather Metadata ---
+        WorldSaveData saveData = new WorldSaveData
         {
-            SaveChunk(chunk, world.worldName);
-            count++;
-        }
-        
-        Debug.Log($"SaveSystem | Saved {count} chunks.");
-    }
+            version = CURRENT_VERSION,
+            worldName = worldName,
+            seed = world.worldData.seed,
+            // Assuming World keeps track of time, otherwise use DateTime.Now.Ticks for both
+            creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.Now.Ticks,
+            lastPlayed = DateTime.Now.Ticks,
 
-    public static WorldData LoadWorld(string worldName, int seed = 0)
-    {
-        string loadPath = $"{World.Instance.appSaveDataPath}/saves/{worldName}/";
+            worldState = new WorldStateData
+            {
+                timeOfDay = world.globalLightLevel
+            }
+        };
 
-        if (File.Exists($"{loadPath}world.world"))
+        // --- 2. Gather Player Data ---
+        if (world.player != null)
         {
-            Debug.Log($"SaveSystem | {worldName} found. Loading from save.");
-            
-            BinaryFormatter formatter = new BinaryFormatter();
-            FileStream stream = new FileStream($"{loadPath}world.world", FileMode.Open);
-            
-            WorldData world = formatter.Deserialize(stream) as WorldData;
-            stream.Close();
-            return new WorldData(world);
-        }
-        else
-        {
-            Debug.Log($"SaveSystem | {worldName} not found. Creating new world.");
-            WorldData world = new WorldData(worldName, seed);
-            SaveWorld(world);
+            saveData.player = world.player.GetSaveData();
 
-            return world;
-        }
-    }
-    
-    public static void SaveChunk(ChunkData chunk, string worldName)
-    {
-        string chunkName = $"{chunk.position.x}-{chunk.position.y}";
-        
-        // Set our save location and make sure we have a saves folder ready to go.
-        string savePath = $"{World.Instance.appSaveDataPath}/saves/{worldName}/chunks/";
+            // Gather Inventory
+            Toolbar toolbar = Object.FindFirstObjectByType<Toolbar>();
+            if (toolbar != null)
+            {
+                saveData.player.inventory = toolbar.GetInventoryData();
+            }
 
-        if (!Directory.Exists(savePath))
-            Directory.CreateDirectory(savePath);
+            // Gather Cursor Item
+            DragAndDropHandler cursorHandler = Object.FindFirstObjectByType<DragAndDropHandler>();
+            if (cursorHandler != null)
+            {
+                saveData.player.cursorItem = cursorHandler.GetCursorData();
+            }
 
-        BinaryFormatter formatter = new BinaryFormatter();
-        FileStream stream = new FileStream($"{savePath}{chunkName}.chunk", FileMode.Create);
-        
-        formatter.Serialize(stream, chunk);
-        stream.Close();
-    }
-
-    [CanBeNull]
-    public static ChunkData LoadChunk(string worldName, Vector2Int position)
-    {
-        string chunkName = $"{position.x}-{position.y}";
-        
-        string loadPath = $"{World.Instance.appSaveDataPath}/saves/{worldName}/chunks/{chunkName}.chunk";
-
-        if (File.Exists($"{loadPath}"))
-        {
-            BinaryFormatter formatter = new BinaryFormatter();
-            FileStream stream = new FileStream($"{loadPath}", FileMode.Open);
-            
-            ChunkData chunkData = formatter.Deserialize(stream) as ChunkData;
-            stream.Close();
-            return chunkData;
+            // Refine Rotation to include Camera Pitch
+            // The Player script handles gathering, but we ensure we grab the right vector logic there.
+            // (Implemented in Player.GetSaveData above)
         }
 
-        return null;
+        // --- 3. Write level.dat (JSON) ---
+        string json = JsonUtility.ToJson(saveData, true);
+        File.WriteAllText(Path.Combine(path, "level.dat"), json);
+
+        // --- 4. Trigger Modification Manager Save ---
+        // This saves pending trees/structures for unloaded chunks
+        World.Instance.ModManager.Save(); 
+
+        Debug.Log($"Saved World Metadata to {path}");
     }
-    
+
+    public static WorldSaveData LoadWorldMetadata(string worldName, bool useVolatilePath)
+    {
+        string path = Path.Combine(GetSavePath(worldName, useVolatilePath), "level.dat");
+        if (!File.Exists(path)) return null;
+
+        try
+        {
+            string json = File.ReadAllText(path);
+            return JsonUtility.FromJson<WorldSaveData>(json);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Failed to load level.dat for {worldName}: {e.Message}");
+            return null;
+        }
+    }
+
+    public static void LoadWorldGameState(World world, WorldSaveData data)
+    {
+        if (data == null) return;
+
+        // 1. Apply Global State
+        world.globalLightLevel = data.worldState.timeOfDay;
+        world.SetGlobalLightValue(); // Apply to shader immediately
+
+        // 2. Apply Player State
+        if (world.player != null)
+        {
+            world.player.LoadSaveData(data.player);
+
+            // Apply Inventory
+            Toolbar toolbar = Object.FindFirstObjectByType<Toolbar>();
+            if (toolbar != null)
+            {
+                toolbar.LoadInventoryData(data.player.inventory);
+            }
+
+            // Apply Cursor Item
+            DragAndDropHandler cursorHandler = Object.FindFirstObjectByType<DragAndDropHandler>();
+            if (cursorHandler != null)
+            {
+                cursorHandler.LoadCursorData(data.player.cursorItem);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns a list of metadata for all valid saves found in the save directory.
+    /// </summary>
+    public static List<WorldSaveData> GetAvailableWorlds(bool useVolatilePath)
+    {
+        string baseFolder = useVolatilePath
+            ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
+            : Path.Combine(Application.persistentDataPath, "Saves");
+
+        if (!Directory.Exists(baseFolder)) return new List<WorldSaveData>();
+
+        string[] directories = Directory.GetDirectories(baseFolder);
+        List<WorldSaveData> worlds = new List<WorldSaveData>();
+
+        foreach (string dir in directories)
+        {
+            string worldName = new DirectoryInfo(dir).Name;
+            WorldSaveData data = LoadWorldMetadata(worldName, useVolatilePath);
+
+            // Only add if metadata is valid
+            if (data != null)
+            {
+                worlds.Add(data);
+            }
+        }
+
+        // Sort by Last Played (Newest first)
+        worlds.Sort((a, b) => b.lastPlayed.CompareTo(a.lastPlayed));
+
+        return worlds;
+    }
+
+    public static void DeleteWorld(string worldName, bool useVolatilePath)
+    {
+        string path = GetSavePath(worldName, useVolatilePath);
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, true); // Recursive delete
+            Debug.Log($"Deleted world: {worldName}");
+        }
+    }
 }

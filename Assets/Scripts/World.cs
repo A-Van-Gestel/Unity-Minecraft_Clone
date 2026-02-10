@@ -15,6 +15,7 @@ using Jobs;
 using Jobs.BurstData;
 using Jobs.Data;
 using MyBox;
+using Serialization;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
@@ -59,7 +60,7 @@ public class World : MonoBehaviour
     public Material transparentMaterial => blockDatabase.transparentMaterial;
     public Material liquidMaterial => blockDatabase.liquidMaterial;
 
-    public Chunk[,] chunks { get; } = new Chunk[VoxelData.WorldSizeInChunks, VoxelData.WorldSizeInChunks];
+    private readonly Dictionary<ChunkCoord, Chunk> _chunkMap = new Dictionary<ChunkCoord, Chunk>();
 
     private HashSet<ChunkCoord> _activeChunks = new HashSet<ChunkCoord>();
     private readonly List<ChunkCoord> _tempActiveChunkList = new List<ChunkCoord>(); // Used to avoid modifying activeChunks while iterating, and to avoid GC allocations.
@@ -106,6 +107,11 @@ public class World : MonoBehaviour
     private DebugVisualizationMode _lastVisualizationMode;
     private readonly HashSet<ChunkCoord> _chunksToUpdateVisualization = new HashSet<ChunkCoord>();
 
+    // --- Storage & Serialization ---
+    public ChunkStorageManager StorageManager;
+    public ModificationManager ModManager;
+    public bool IsVolatileMode { get; private set; }
+
     // --- Shader Properties ---
     private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
     private static readonly int ShaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
@@ -149,6 +155,17 @@ public class World : MonoBehaviour
 
         // --- Prepare Job-Safe Data ---
         PrepareJobData();
+    }
+    
+
+    /// Ensures global state (Inventory, Pending Mods) is saved when closing.
+    private void OnApplicationQuit()
+    {
+        // Only save if the world successfully loaded AND persistence is allowed.
+        if (_isWorldLoaded && settings.EnablePersistence)
+        {
+            SaveSystem.SaveWorld(this);
+        }
     }
 
     #endregion
@@ -200,7 +217,6 @@ public class World : MonoBehaviour
     private IEnumerator StartWorld()
     {
         Debug.Log("--- Initializing World ---");
-        Debug.Log($"Generating new world using seed: {VoxelData.Seed}");
 
         // --- Fetch needed components ---
         // Get player transform component
@@ -210,6 +226,7 @@ public class World : MonoBehaviour
         _playerCamera = Camera.main!;
 
         // --- Load / Create Settings ---
+        // TODO: Extract settings loading logic into a single Settings class / singleton
         // Create settings file if it doesn't yet exist, after that, load it.
         if (!File.Exists(_settingFilePath) || Application.isEditor)
         {
@@ -226,11 +243,48 @@ public class World : MonoBehaviour
 # endif
 
         // --- Initialize World settings (from save data / create new world) ---
-        // TODO: Set worldName using UI
-        if (settings.loadSaveDataOnStartup)
-            worldData = SaveSystem.LoadWorld("Prototype", VoxelData.Seed);
-        else
-            worldData = new WorldData("Prototype", VoxelData.Seed);
+        // 1. Determine Mode
+        IsVolatileMode = Application.isEditor && settings.enableVolatileSaveData;
+        // Debug Log for Mode
+        if (!settings.EnablePersistence)
+        {
+            Debug.LogWarning("<b>[Memory Only Mode]</b> Persistence is DISABLED. Chunks will NOT unload or save.");
+        }
+        else if (IsVolatileMode)
+        {
+            Debug.LogWarning("<b>[Volatile Mode]</b> Saves are temporary!");
+        }
+
+        // 2. Initialize Managers
+        string worldName = WorldLaunchState.WorldName;
+        int seed = WorldLaunchState.Seed;
+        bool isNewGame = WorldLaunchState.IsNewGame;
+
+        Debug.Log($"Launching World: {worldName} (Seed: {seed}, New: {isNewGame})");
+
+        worldData = new WorldData(worldName, seed);
+        
+        StorageManager = new ChunkStorageManager(worldName, IsVolatileMode);
+        ModManager = new ModificationManager(worldName, IsVolatileMode);
+
+        // 3. Load Global Metadata (Level.dat & Pending Mods)
+        // Only load if it's NOT a new game AND Persistence is actually enabled.
+        if (!isNewGame && settings.EnablePersistence)
+        {
+            // Load Pending Mods
+            ModManager.Load();
+
+            // Load Level.dat (Player pos, Inventory, Time)
+            var metadata = SaveSystem.LoadWorldMetadata(worldName, IsVolatileMode);
+
+            if (metadata != null)
+            {
+                SaveSystem.LoadWorldGameState(this, metadata);
+                // Update internal seed from save
+                VoxelData.Seed = metadata.seed;
+                worldData.seed = metadata.seed;
+            }
+        }
 
         // Initialize world seed
         Random.InitState(VoxelData.Seed);
@@ -247,16 +301,30 @@ public class World : MonoBehaviour
         _lastChunkBordersState = settings.showChunkBorders;
 
         // --- STEP 1: DETERMINE INITIAL PLAYER POSITION ---
-        // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
-        spawnPosition = new Vector3Int(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1, VoxelData.WorldCentre);
-        _playerTransform.position = spawnPosition;
+        // If we loaded a save, the player position is already set by LoadWorldGameState.
+        // If not, we use the default spawn logic.
+        bool wasSaveLoaded = !isNewGame && settings.EnablePersistence;
+        Vector3 savedPlayerPosition = new Vector3(); // TODO: Prevent player position updates while the world is loading (eg: player falling trough world because chunks aren't loaded yet)
+        if (!wasSaveLoaded)
+        {
+            // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
+            spawnPosition = new Vector3Int(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1, VoxelData.WorldCentre);
+            _playerTransform.position = spawnPosition;
+        }
+        else
+        {
+            // If we loaded a save, update our local 'spawnPosition' to match where the player actually is.
+            spawnPosition = _playerTransform.position;
+            savedPlayerPosition = _playerTransform.position;
+        }
+
         PlayerChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
 
-        // --- STEP 2: SYNCHRONOUSLY GENERATE INITIAL DATA ---
-        Debug.Log("--- Generating all data within initial load distance ---");
+        // --- STEP 2: LOAD INITIAL CHUNKS (Async -> Sync Wait) ---
+        Debug.Log("--- Loading/Generating initial chunks ---");
 
-        Stopwatch stopwatch = new Stopwatch(); // Create stopwatch to measure time taken for initial data generation.
-        stopwatch.Start();
+        // Create stopwatch to measure time taken for initial data generation.
+        Stopwatch stopwatch = Stopwatch.StartNew();
 
         // 1. First, just schedule generation for everything in the load radius.
         //    This ensures the initial "blocking" load is fast, even with high view distance settings.
@@ -266,6 +334,20 @@ public class World : MonoBehaviour
         List<ChunkCoord> initialChunks = LoadChunksInDataPass(initialLoadRadius);
         int loadedChunks = initialChunks.Count;
 
+        // Trigger loading for all of them
+        List<Awaitable> loadTasks = new List<Awaitable>();
+        foreach (var coord in initialChunks)
+        {
+            // Create placeholder if missing
+            worldData.EnsureChunkExists(new Vector3(coord.X * VoxelData.ChunkWidth, 0, coord.Z * VoxelData.ChunkWidth));
+
+            // Start the Load/Gen process
+            loadTasks.Add(LoadOrGenerateChunk(coord));
+        }
+
+        // Wait for all to finish (Data Ready)
+        foreach (var task in loadTasks) yield return task;
+
         // 2. Force complete ONLY the data-related jobs (generation and lighting).
         //    Now, instead of a blocking call, we yield to (wait for) another coroutine.
         //    The code will PAUSE here and will not continue until ForceCompleteDataJobsCoroutine is finished.
@@ -274,7 +356,7 @@ public class World : MonoBehaviour
         stopwatch.Stop();
         long totalMilliseconds = stopwatch.ElapsedMilliseconds;
         float avgTime = (float)totalMilliseconds / Mathf.Max(1, loadedChunks);
-        Debug.Log($"Initial data generation took {totalMilliseconds} ms for {loadedChunks} chunks (Initial Load Radius: {initialLoadRadius})");
+        Debug.Log($"Initial data load / generation took {totalMilliseconds} ms for {loadedChunks} chunks (Initial Load Radius: {initialLoadRadius})");
         Debug.Log($"Average time per chunk {avgTime} ms");
 
         stopwatch.Reset();
@@ -289,8 +371,16 @@ public class World : MonoBehaviour
         // 4. NOW it's safe to get the spawn height, as the data AND mesh colliders exist.
         Debug.Log("--- Finalizing startup ---");
         Debug.Log("Getting spawn position...");
-        spawnPosition = GetHighestVoxel(spawnPosition.ToVector3Int()) + spawnPositionOffset;
-        _playerTransform.position = spawnPosition;
+        if (!wasSaveLoaded)
+        {
+            spawnPosition = GetHighestVoxel(spawnPosition.ToVector3Int()) + spawnPositionOffset;
+            _playerTransform.position = spawnPosition;
+        }
+        else
+        {
+            Debug.Log($"Re-using last player location from loaded save. ({savedPlayerPosition})");
+            _playerTransform.position = savedPlayerPosition;
+        }
 
         Debug.Log("Initializing clouds...");
         clouds?.Initialize();
@@ -320,16 +410,76 @@ public class World : MonoBehaviour
             for (int z = -loadRadius; z <= loadRadius; z++)
             {
                 ChunkCoord coord = new ChunkCoord(PlayerChunkCoord.X + x, PlayerChunkCoord.Z + z);
+                // NOTE: We do NOT schedule generation here. 
+                // We just collect the list. LoadOrGenerateChunk (called later) decides whether to Load or Schedule.
                 if (IsChunkInWorld(coord))
                 {
-                    // This just schedules the generation job.
-                    JobManager.ScheduleGeneration(coord);
                     loadedChunks.Add(coord);
                 }
             }
         }
 
         return loadedChunks;
+    }
+
+    /// <summary>
+    /// The core async pipeline:
+    /// 1. Check Memory (Done by caller usually)
+    /// 2. Check Disk (Async)
+    /// 3. If missing, Schedule Gen (Job)
+    /// </summary>
+    private async Awaitable LoadOrGenerateChunk(ChunkCoord coord)
+    {
+        Vector2Int pos = new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth);
+
+        // We assume placeholder exists in worldData.Chunks[pos]
+        ChunkData data = worldData.Chunks[pos];
+
+        if (data.IsPopulated) return; // Already done
+
+        // 1. Try Load from Disk if allowed
+        if (settings.EnablePersistence) 
+        {
+            ChunkData loaded = await StorageManager.LoadChunkAsync(pos);
+            if (loaded != null)
+            {
+                // Hydrate the placeholder
+                data.PopulateFromSave(loaded);
+                data.Chunk?.OnDataPopulated();
+
+                // Apply Pending Mods (Trees, etc that spilled over)
+                if (ModManager.TryGetModsForChunk(coord, out List<VoxelMod> pendingMods))
+                {
+                    foreach (var mod in pendingMods)
+                    {
+                        // Apply directly to data (fast)
+                        Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
+                        // We use a simplified set here or the standard ModifyVoxel
+                        // ModifyVoxel handles lighting queues automatically
+                        data.ModifyVoxel(localPos, mod);
+                    }
+                }
+
+                // Apply Pending Light Updates
+                if (ModManager.TryGetLightUpdatesForChunk(coord, out HashSet<Vector2Int> lightCols))
+                {
+                    if (worldData.SunlightRecalculationQueue.ContainsKey(pos))
+                        worldData.SunlightRecalculationQueue[pos].UnionWith(lightCols);
+                    else
+                        worldData.SunlightRecalculationQueue[pos] = lightCols;
+
+                    data.HasLightChangesToProcess = true;
+                }
+
+                // If we loaded from disk, we might still need to light it if it was saved in a dark state?
+                // Usually saved data is lit. But we need to update neighbors.
+                // For now, assume loaded data is valid.
+                return;
+            }
+        }
+
+        // 2. Not on disk (or Persistence disabled) -> Generate
+        JobManager.ScheduleGeneration(coord);
     }
 
     /// <summary>
@@ -536,7 +686,10 @@ public class World : MonoBehaviour
         {
             foreach (ChunkCoord coord in _activeChunks)
             {
-                chunks[coord.X, coord.Z].TickUpdate();
+                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                {
+                    chunk.TickUpdate();
+                }
             }
 
             yield return new WaitForSeconds(VoxelData.TickLength);
@@ -608,7 +761,7 @@ public class World : MonoBehaviour
             {
                 if (lightJobsScheduled >= settings.maxLightJobsPerFrame) break; // Respect the throttle
 
-                Chunk chunkToUpdate = chunks[chunkCoord.X, chunkCoord.Z];
+                Chunk chunkToUpdate = _chunkMap.GetValueOrDefault(chunkCoord);
 
                 // If chunk is valid, and no job is currently running for it...
                 if (chunkToUpdate != null && !JobManager.lightingJobs.ContainsKey(chunkToUpdate.Coord))
@@ -819,9 +972,10 @@ public class World : MonoBehaviour
 
         // The chunk that was directly modified always needs a rebuild.
         ChunkCoord coord = new ChunkCoord(chunkPos);
-        if (chunks[coord.X, coord.Z] != null)
+        Chunk chunk = _chunkMap.GetValueOrDefault(coord);
+        if (chunk != null)
         {
-            RequestChunkMeshRebuild(chunks[coord.X, coord.Z], immediate);
+            RequestChunkMeshRebuild(chunk, immediate);
         }
 
         // Determine which borders the modification is on for efficient neighbor updates.
@@ -1202,6 +1356,18 @@ public class World : MonoBehaviour
     }
 
     [CanBeNull]
+    public Chunk GetChunkFromChunkCoord(ChunkCoord chunkCoord)
+    {
+        // "Is in World" bounds check before accessing the array.
+        if (!IsChunkInWorld(chunkCoord))
+        {
+            return null; // Return null if the coordinate is outside the world.
+        }
+
+        return _chunkMap.GetValueOrDefault(chunkCoord);
+    }
+
+    [CanBeNull]
     public Chunk GetChunkFromVector3(Vector3 pos)
     {
         int x = Mathf.FloorToInt(pos.x / VoxelData.ChunkWidth);
@@ -1213,7 +1379,77 @@ public class World : MonoBehaviour
             return null; // Return null if the coordinate is outside the world.
         }
 
-        return chunks[x, z];
+        return _chunkMap.GetValueOrDefault(new ChunkCoord(pos));
+    }
+
+    /// <summary>
+    /// Unloads chunks that are outside the load distance.
+    /// Saves them if modified, destroys the GameObject, and removes data from memory.
+    /// </summary>
+    private void UnloadChunks()
+    {
+        // Guard Chunk Unloading
+        // If Persistence is disabled, we intentionally keep ALL chunks in memory.
+        if (!settings.EnablePersistence) return;
+        
+        List<ChunkCoord> chunksToRemove = new List<ChunkCoord>();
+        int unloadDistance = settings.loadDistance + 2; // Buffer to prevent flickering
+
+        // Iterate over Loaded Data (Memory)
+        foreach (var kvp in worldData.Chunks)
+        {
+            ChunkCoord coord = new ChunkCoord(kvp.Key.x / VoxelData.ChunkWidth, kvp.Key.y / VoxelData.ChunkWidth);
+
+            // Calculate distance check
+            if (Mathf.Abs(coord.X - PlayerChunkCoord.X) > unloadDistance ||
+                Mathf.Abs(coord.Z - PlayerChunkCoord.Z) > unloadDistance)
+            {
+                // Safety: Don't unload if a job is currently touching it
+                bool isJobRunning = JobManager.generationJobs.ContainsKey(coord)
+                                    || JobManager.meshJobs.ContainsKey(coord)
+                                    || JobManager.lightingJobs.ContainsKey(coord);
+
+                if (!isJobRunning) chunksToRemove.Add(coord);
+            }
+        }
+
+        foreach (var coord in chunksToRemove)
+        {
+            Vector2Int pos = new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth);
+
+            if (worldData.Chunks.TryGetValue(pos, out ChunkData data))
+            {
+                // 1. Save if modified
+                if (worldData.ModifiedChunks.Contains(data))
+                {
+                    _ = StorageManager.SaveChunkAsync(data);
+                    worldData.ModifiedChunks.Remove(data);
+                }
+
+                // 2. Destroy Visuals
+                if (_chunkMap.TryGetValue(coord, out Chunk chunkObj))
+                {
+                    // Assuming Chunk class has a way to destroy its GameObject, or we do it here.
+                    // Accessing private _chunkObject via reflection or public method is needed.
+                    // For now, assume we just destroy what we can see.
+                    // Ideally add public void Destroy() to Chunk.cs.
+                    // Destroy(chunkObj.gameObject); // Chunk is not MonoBehavior
+
+                    // Cleanup visualizers
+                    if (voxelVisualizer != null) voxelVisualizer.ClearChunkVisualization(coord);
+                    if (_chunkBorders.TryGetValue(coord, out GameObject b))
+                    {
+                        Destroy(b);
+                        _chunkBorders.Remove(coord);
+                    }
+
+                    _chunkMap.Remove(coord);
+                }
+
+                // 3. Remove Data
+                worldData.Chunks.Remove(pos);
+            }
+        }
     }
 
     /// <summary>
@@ -1244,18 +1480,28 @@ public class World : MonoBehaviour
         // Iterate a specific number of times to cover the whole area
         for (int i = 0; i < chunksToCheck; i++)
         {
-            ChunkCoord thisChunkCoord = new ChunkCoord(playerCurrentChunkCoord.X + spiralLoop.X, playerCurrentChunkCoord.Z + spiralLoop.Z);
+            ChunkCoord chunkCoord = new ChunkCoord(playerCurrentChunkCoord.X + spiralLoop.X, playerCurrentChunkCoord.Z + spiralLoop.Z);
 
-            if (IsChunkInWorld(thisChunkCoord))
+            if (IsChunkInWorld(chunkCoord))
             {
-                // Schedule data generation for all chunks within load distance.
-                JobManager.ScheduleGeneration(thisChunkCoord);
+                Vector2Int pos = new Vector2Int(chunkCoord.X * VoxelData.ChunkWidth, chunkCoord.Z * VoxelData.ChunkWidth);
+
+                // If chunk not in memory at all
+                if (!worldData.Chunks.ContainsKey(pos))
+                {
+                    // Create placeholder
+                    ChunkData placeholder = new ChunkData(pos);
+                    worldData.Chunks.Add(pos, placeholder);
+
+                    // Trigger Async Load
+                    _ = LoadOrGenerateChunk(chunkCoord);
+                }
 
                 // If within view distance, it's a candidate for being active.
-                if (Mathf.Abs(thisChunkCoord.X - playerCurrentChunkCoord.X) <= viewDist &&
-                    Mathf.Abs(thisChunkCoord.Z - playerCurrentChunkCoord.Z) <= viewDist)
+                if (Mathf.Abs(chunkCoord.X - playerCurrentChunkCoord.X) <= viewDist &&
+                    Mathf.Abs(chunkCoord.Z - playerCurrentChunkCoord.Z) <= viewDist)
                 {
-                    currentViewChunks.Add(thisChunkCoord);
+                    currentViewChunks.Add(chunkCoord);
                 }
             }
 
@@ -1264,15 +1510,20 @@ public class World : MonoBehaviour
         }
 
         // Deactivate chunks that are no longer in view.
-        foreach (ChunkCoord c in previouslyActiveChunks.AsParallel().Where(c => !currentViewChunks.Contains(c) && chunks[c.X, c.Z] != null))
+        foreach (ChunkCoord c in previouslyActiveChunks.AsParallel().Where(c => !currentViewChunks.Contains(c)))
         {
+            // Deactivate chunk border visualization
             if (_chunkBorders.TryGetValue(c, out GameObject borderObject))
             {
                 Destroy(borderObject);
                 _chunkBorders.Remove(c);
             }
 
-            chunks[c.X, c.Z].isActive = false;
+            // Deactivate chunk itself
+            if (_chunkMap.TryGetValue(c, out Chunk chunk))
+            {
+                chunk.isActive = false;
+            }
 
             // Debug: Clear visualization.
             if (voxelVisualizer != null)
@@ -1282,33 +1533,37 @@ public class World : MonoBehaviour
         // Activate chunks that have entered view.
         foreach (ChunkCoord c in currentViewChunks)
         {
-            if (chunks[c.X, c.Z] == null)
+            if (!_chunkMap.ContainsKey(c))
             {
-                chunks[c.X, c.Z] = new Chunk(c, createGameObject: true);
+                // Create Chunk Object
+                Chunk newChunk = new Chunk(c, createGameObject: true);
+                _chunkMap.Add(c, newChunk);
                 CreateChunkBorder(c);
-                RequestChunkMeshRebuild(chunks[c.X, c.Z]);
+                RequestChunkMeshRebuild(newChunk);
             }
-            else if (!chunks[c.X, c.Z].isActive)
+            else
             {
-                if (!_chunkBorders.ContainsKey(c))
+                Chunk chunk = _chunkMap[c];
+                if (!chunk.isActive)
                 {
-                    CreateChunkBorder(c);
+                    if (!_chunkBorders.ContainsKey(c))
+                    {
+                        CreateChunkBorder(c);
+                    }
+
+                    chunk.isActive = true;
+                    RequestChunkMeshRebuild(chunk);
                 }
-
-                chunks[c.X, c.Z].isActive = true;
-                RequestChunkMeshRebuild(chunks[c.X, c.Z]);
             }
 
-            // If the chunk has no light changes to process, update its visualization.
-            if (!chunks[c.X, c.Z].ChunkData.HasLightChangesToProcess)
-            {
-                // Debug: Update visualization for this chunk.
-                AddChunksToUpdateVisualization(c);
-            }
+            AddChunksToUpdateVisualization(c);
         }
 
         // Update the master activeChunks set.
         _activeChunks = currentViewChunks;
+
+        // Run cleanup
+        UnloadChunks();
     }
 
     #region Debug Methods
@@ -1380,12 +1635,14 @@ public class World : MonoBehaviour
             // Identify which chunks are actually ready to be visualized.
             foreach (ChunkCoord coord in _chunksToUpdateVisualization)
             {
-                Chunk chunk = chunks[coord.X, coord.Z];
-                // A chunk is ready if it exists, is not currently processing a lighting job,
-                // and has no pending lighting changes on the main thread.
-                if (chunk != null && !JobManager.lightingJobs.ContainsKey(coord) && !chunk.ChunkData.HasLightChangesToProcess)
+                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
                 {
-                    chunksReadyForVisualization.Add(coord);
+                    // A chunk is ready if it exists, is not currently processing a lighting job,
+                    // and has no pending lighting changes on the main thread.
+                    if (!JobManager.lightingJobs.ContainsKey(coord) && !chunk.ChunkData.HasLightChangesToProcess)
+                    {
+                        chunksReadyForVisualization.Add(coord);
+                    }
                 }
             }
 
@@ -1394,9 +1651,9 @@ public class World : MonoBehaviour
             var chunkDataCache = new Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>>();
             foreach (ChunkCoord coord in chunksReadyForVisualization)
             {
-                if (chunks[coord.X, coord.Z] != null)
+                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
                 {
-                    chunkDataCache[coord] = GetVoxelDataForVisualization(chunks[coord.X, coord.Z]);
+                    chunkDataCache[coord] = GetVoxelDataForVisualization(chunk);
                 }
             }
 
@@ -1639,7 +1896,7 @@ public class World : MonoBehaviour
 
     public void SaveWorldData()
     {
-        SaveSystem.SaveWorld(worldData);
+        SaveSystem.SaveWorld(Instance);
         Debug.Log("World data saved via keypress.");
     }
 
@@ -1683,9 +1940,9 @@ public class World : MonoBehaviour
 
         foreach (ChunkCoord coord in _activeChunks)
         {
-            if (chunks[coord.X, coord.Z] != null)
+            if (_chunkMap.TryGetValue(coord, out Chunk chunk))
             {
-                total += chunks[coord.X, coord.Z].GetActiveVoxelCount();
+                total += chunk.GetActiveVoxelCount();
             }
         }
 
@@ -1700,11 +1957,34 @@ public class Settings
 {
     // --- GAME DATA ---
     [Header("Game Data")]
-    public string version = "0.0.01";
+    public string version = "2026-02-08 - Alpha";
 
     // --- SAVE SYSTEM ---
     [Header("Save System")]
-    public bool loadSaveDataOnStartup = false;
+#if UNITY_EDITOR
+    [Tooltip("If true: Chunks are never unloaded and saving/loading is disabled. Use this to verify generation without disk I/O side effects.\nIf false: Standard behavior (Chunk Unloading + Disk Persistence).")]
+    public bool keepChunksInMemory = false; 
+#endif
+
+    [Tooltip("If true and running in Editor, saves will be stored in a temporary folder to keep production saves clean.")]
+    public bool enableVolatileSaveData = true;
+    
+    /// <summary>
+    /// Returns true if the game should behave normally (Save/Load/Unload).
+    /// Returns false if the game is in Editor Debug Mode (Keep everything in RAM, no Disk I/O).
+    /// Always returns true in Builds.
+    /// </summary>
+    public bool EnablePersistence
+    {
+        get
+        {
+#if UNITY_EDITOR
+            return !keepChunksInMemory;
+#else
+            return true;
+#endif
+        }
+    }
 
 
     // --- PERFORMANCE ---

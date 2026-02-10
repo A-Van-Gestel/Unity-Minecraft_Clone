@@ -16,6 +16,9 @@ namespace Data
         [MyBox.ReadOnly]
         public int seed;
 
+        [MyBox.ReadOnly]
+        public long creationDate; 
+
         [NonSerialized]
         public Dictionary<Vector2Int, ChunkData> Chunks = new Dictionary<Vector2Int, ChunkData>();
 
@@ -31,12 +34,14 @@ namespace Data
         {
             this.worldName = worldName;
             this.seed = seed;
+            creationDate = DateTime.Now.Ticks;
         }
 
         public WorldData(WorldData wD)
         {
             worldName = wD.worldName;
             seed = wD.seed;
+            creationDate = wD.creationDate;
         }
 
         #endregion
@@ -67,20 +72,22 @@ namespace Data
                 return;
 
             // Load Chunk from File
-            if (World.Instance.settings.loadSaveDataOnStartup)
+            if (World.Instance.settings.EnablePersistence)
             {
-                ChunkData chunk = SaveSystem.LoadChunk(worldName, chunkVector2Coord);
+                // PHASE 3 TODO: Replace this with ChunkStorageManager.LoadChunkAsync
+                /*
+                ChunkData chunk = SaveSystem.LoadChunk(worldName, chunkVector2Coord); 
                 if (chunk != null)
                 {
                     Chunks.Add(chunkVector2Coord, chunk);
                     return;
                 }
+                */
             }
 
-            // Chunk doesn't exist on disk.
-            // We do NOT create it here. We add a "placeholder" ChunkData object.
+            // Chunk doesn't exist on disk (or loading is disabled/not yet implemented).
+            // We create a "placeholder" ChunkData object.
             // The asynchronous job system is responsible for populating it.
-            // This prevents race conditions.
             Chunks.Add(chunkVector2Coord, new ChunkData(chunkVector2Coord));
         }
 

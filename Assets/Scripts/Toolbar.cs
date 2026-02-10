@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using Serialization;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -31,7 +33,7 @@ public class Toolbar : MonoBehaviour
             index++;
         }
     }
-    
+
     private void Update()
     {
         // SCROLL WHEEL
@@ -53,7 +55,7 @@ public class Toolbar : MonoBehaviour
             SetItemSlot();
         }
 
-        
+
         // NUMBER KEYS
         for (int i = 0; i < _keyCodes.Length; i++)
         {
@@ -69,4 +71,44 @@ public class Toolbar : MonoBehaviour
     {
         highlight.position = slots[slotIndex].slotIcon.transform.position;
     }
+
+    // --- SAVE / LOAD LOGIC ---
+
+    #region Save / Load Logic
+
+    public List<InventoryItemData> GetInventoryData()
+    {
+        var list = new List<InventoryItemData>();
+        for (int i = 0; i < slots.Length; i++)
+        {
+            if (slots[i].ItemSlot.HasItem)
+            {
+                list.Add(new InventoryItemData(
+                    i,
+                    slots[i].ItemSlot.Stack.ID,
+                    slots[i].ItemSlot.Stack.Amount
+                ));
+            }
+        }
+
+        return list;
+    }
+
+    public void LoadInventoryData(List<InventoryItemData> data)
+    {
+        // Clear existing
+        foreach (var slot in slots) slot.ItemSlot.EmptySlot();
+
+        // Fill from save
+        foreach (var item in data)
+        {
+            if (item.slotIndex >= 0 && item.slotIndex < slots.Length)
+            {
+                ItemStack stack = new ItemStack(item.itemID, item.amount);
+                slots[item.slotIndex].ItemSlot.InsertStack(stack);
+            }
+        }
+    }
+
+    #endregion
 }

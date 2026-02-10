@@ -1,3 +1,4 @@
+using Serialization;
 using UnityEngine;
 
 [RequireComponent(typeof(PlayerInteraction))]
@@ -343,4 +344,62 @@ public class Player : MonoBehaviour
         _world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y, transform.position.z)) ||
         _world.CheckForCollision(new Vector3(transform.position.x + playerWidth, transform.position.y + 1f, transform.position.z));
     // ReSharper restore ArrangeAccessorOwnerBody
+
+    // --- SAVE / LOAD LOGIC ---
+
+    #region Save / Load Logic
+
+    public PlayerSaveData GetSaveData()
+    {
+        // Combine Player Yaw (Body Y) and Camera Pitch (Camera X) into one Vector3 for saving.
+        Vector3 combinedRotation = new Vector3(
+            _playerCamera.localEulerAngles.x, // Pitch (Camera X)
+            transform.localEulerAngles.y, // Yaw (Player Y)
+            0f // Roll (Unused)
+        );
+
+        var data = new PlayerSaveData
+        {
+            position = transform.position,
+            rotation = combinedRotation,
+            capabilities = new PlayerCapabilityData
+            {
+                isFlying = isFlying,
+                isNoclipping = isNoclipping
+            }
+        };
+
+        // Note: Inventory and Cursor data are gathered by the SaveSystem 
+        // from the Toolbar/UI scripts and injected into this data structure
+        // before serialization.
+
+        return data;
+    }
+
+    public void LoadSaveData(PlayerSaveData data)
+    {
+        // 1. Position + small Y offset to prevent clipping trough world
+        transform.position = data.position + new Vector3(0, 0.1f, 0);
+
+        // 2. Rotation
+        Vector3 savedRot = data.rotation;
+
+        // Apply Yaw to Body (Y axis)
+        transform.rotation = Quaternion.Euler(0, savedRot.y, 0);
+
+        // Apply Pitch to Camera (X axis)
+        // Ensure camera ref is valid (Load can happen before Start if called manually)
+        if (_playerCamera == null) _playerCamera = GameObject.Find("Main Camera").transform;
+
+        if (_playerCamera != null)
+        {
+            _playerCamera.localEulerAngles = new Vector3(savedRot.x, 0, 0);
+        }
+
+        // 3. Capabilities
+        isFlying = data.capabilities.isFlying;
+        isNoclipping = data.capabilities.isNoclipping;
+    }
+
+    #endregion
 }

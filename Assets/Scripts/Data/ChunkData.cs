@@ -154,6 +154,26 @@ namespace Data
                 }
             }
         }
+        
+        /// <summary>
+        /// Populates this ChunkData instance with data from a loaded save file.
+        /// </summary>
+        public void PopulateFromSave(ChunkData loadedData)
+        {
+            this.heightMap = loadedData.heightMap;
+            this.sections = loadedData.sections;
+            
+            // Recalculate counts for sections (safety check)
+            if (World.Instance != null)
+            {
+                foreach(var section in sections) 
+                    section?.RecalculateCounts(World.Instance.blockTypes);
+            }
+
+            this.IsPopulated = true;
+            
+            // Note: We don't copy position/x/y as they should match.
+        }
 
         #endregion
 

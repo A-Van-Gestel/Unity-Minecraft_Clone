@@ -372,7 +372,7 @@ public class WorldJobManager
                 completedCoords.Add(jobEntry.Key);
 
                 // Now that data is fully ready and lit, the chunk can have its mesh generated.
-                Chunk chunk = _world.chunks[jobEntry.Key.X, jobEntry.Key.Z];
+                Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
                 if (chunk != null && chunk.isActive)
                 {
                     _world.RequestChunkMeshRebuild(chunk);
@@ -400,7 +400,7 @@ public class WorldJobManager
             {
                 jobEntry.Value.handle.Complete();
 
-                Chunk chunk = _world.chunks[jobEntry.Key.X, jobEntry.Key.Z];
+                Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
                 if (chunk != null)
                 {
                     // ApplyMeshData will handle disposing of the NativeLists inside MeshDataJobOutput
@@ -542,9 +542,10 @@ public class WorldJobManager
         // 5. After processing all completed jobs, request mesh rebuilds for all affected world.chunks.
         foreach (ChunkCoord coord in chunksToRebuildMesh)
         {
-            if (_world.chunks[coord.X, coord.Z] != null)
+            Chunk chunk = _world.GetChunkFromChunkCoord(coord);
+            if (chunk != null)
             {
-                _world.RequestChunkMeshRebuild(_world.chunks[coord.X, coord.Z], immediate: true);
+                _world.RequestChunkMeshRebuild(chunk, immediate: true);
             }
         }
 
