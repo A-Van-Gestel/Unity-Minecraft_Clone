@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
@@ -66,6 +67,11 @@ namespace Serialization
                         WriteSection(writer, data.sections[i]);
                     }
                 }
+
+                // Write Lighting Queues ---
+                // We access the raw queues from ChunkData. 
+                WriteLightQueue(writer, data.SunlightBfsQueue);
+                WriteLightQueue(writer, data.BlocklightBfsQueue);
             }
 
             return (int)memoryStream.Position;
@@ -112,6 +118,16 @@ namespace Serialization
                             if ((sectionBitmask & (1 << i)) != 0)
                             {
                                 chunk.sections[i] = ReadSection(reader);
+
+                                // --- Read Lighting Queues ---
+                                ReadLightQueue(reader, chunk.SunlightBfsQueue);
+                                ReadLightQueue(reader, chunk.SunlightBfsQueue);
+                        
+                                // If we loaded pending lights, flag the chunk for processing
+                                if (chunk.SunLightQueueCount > 0 || chunk.BlockLightQueueCount > 0)   
+                                {
+                                    chunk.HasLightChangesToProcess = true;
+                                }
                             }
                         }
 
@@ -124,6 +140,41 @@ namespace Serialization
                         return null;
                     }
                 }
+            }
+        }
+
+        // --- Helpers for Lighting ---
+
+        private static void WriteLightQueue(BinaryWriter writer, Queue<LightQueueNode> queue)
+        {
+            // Write Count
+            writer.Write(queue.Count);
+            
+            // Write Items
+            foreach (var node in queue)
+            {
+                writer.Write(node.Position.x);
+                writer.Write(node.Position.y);
+                writer.Write(node.Position.z);
+                writer.Write(node.OldLightLevel);
+            }
+        }
+
+        private static void ReadLightQueue(BinaryReader reader, Queue<LightQueueNode> queue)
+        {
+            int count = reader.ReadInt32();
+            for (int i = 0; i < count; i++)
+            {
+                int x = reader.ReadInt32();
+                int y = reader.ReadInt32();
+                int z = reader.ReadInt32();
+                byte level = reader.ReadByte();
+                
+                queue.Enqueue(new LightQueueNode 
+                { 
+                    Position = new Vector3Int(x, y, z), 
+                    OldLightLevel = level 
+                });
             }
         }
 

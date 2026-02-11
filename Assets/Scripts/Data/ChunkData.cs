@@ -72,6 +72,9 @@ namespace Data
         public int SunLightQueueCount => _sunlightBfsQueue.Count;
         public int BlockLightQueueCount => _blocklightBfsQueue.Count;
 
+        public Queue<LightQueueNode> SunlightBfsQueue => _sunlightBfsQueue;
+        public Queue<LightQueueNode> BlocklightBfsQueue => _blocklightBfsQueue;
+
 
         #region Constructors and Initializers
 
@@ -163,7 +166,15 @@ namespace Data
             this.heightMap = loadedData.heightMap;
             this.sections = loadedData.sections;
             
-            // Recalculate counts for sections (safety check)
+            // Copy Queues
+            // We move the queues from the loaded object (temp) to this object (live)
+            foreach(var node in loadedData.SunlightBfsQueue) this.AddToSunLightQueue(node.Position, node.OldLightLevel);
+            foreach(var node in loadedData.BlocklightBfsQueue) this.AddToBlockLightQueue(node.Position, node.OldLightLevel);
+
+            // If loaded data had flags, transfer them
+            if (loadedData.HasLightChangesToProcess) this.HasLightChangesToProcess = true;
+
+            // Recalculate counts
             if (World.Instance != null)
             {
                 foreach(var section in sections) 
