@@ -4,6 +4,7 @@ using UnityEngine;
 
 namespace Serialization.Migration
 {
+    // TODO: Currently unused and should be implemented correctly
     public static class MigrationManager
     {
         // Registry of all available migrations.

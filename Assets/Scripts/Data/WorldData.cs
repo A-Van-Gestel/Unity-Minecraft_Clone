@@ -74,7 +74,8 @@ namespace Data
             // Load Chunk from File
             if (World.Instance.settings.EnablePersistence)
             {
-                // PHASE 3 TODO: Replace this with ChunkStorageManager.LoadChunkAsync
+                // PHASE 3 TODO-old: Replace the legacy save-system code below with ChunkStorageManager.LoadChunkAsync
+                // TODO-new: This was the original place where chunks where loaded from disk, I believe this is the correct place (eg: data related), but is currently moved into World class itself.
                 /*
                 ChunkData chunk = SaveSystem.LoadChunk(worldName, chunkVector2Coord); 
                 if (chunk != null)

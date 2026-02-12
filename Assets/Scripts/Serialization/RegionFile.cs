@@ -26,6 +26,7 @@ namespace Serialization
         // Each entry: 3 bytes offset (in sectors), 1 byte size (in sectors).
         private readonly int[] _offsets = new int[TOTAL_CHUNKS];
 
+        // TODO: This fileLock works correctly to prevent save data corruption, but adds massive overhead and possible loading / saving slowdowns, I believe this could be reworked into a more performant, but still thread save system. (eg: section specific lock or something like that?)
         // Thread Safety: FileStream position is not thread-safe, so we need exclusive locking for BOTH reads and writes.
         private readonly object _fileLock = new object();
 

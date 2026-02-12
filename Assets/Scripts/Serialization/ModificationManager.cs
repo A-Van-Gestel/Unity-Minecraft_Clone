@@ -33,6 +33,7 @@ namespace Serialization
 
         #region Voxel Mods
 
+        // TODO: Currently unused and should be implemented correctly
         public void AddPendingMod(ChunkCoord targetChunk, VoxelMod mod)
         {
             if (!_pendingMods.ContainsKey(targetChunk))
@@ -64,6 +65,7 @@ namespace Serialization
         /// </summary>
         /// <param name="targetChunk">The chunk coordinate.</param>
         /// <param name="localColumns">A set of Vector2Ints where x/y are local 0-15 coordinates.</param>
+        /// TODO: Currently unused and should be implemented correctly
         public void AddPendingLightUpdates(ChunkCoord targetChunk, HashSet<Vector2Int> localColumns)
         {
             if (localColumns == null || localColumns.Count == 0) return;
