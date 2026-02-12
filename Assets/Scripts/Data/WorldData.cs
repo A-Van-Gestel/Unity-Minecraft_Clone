@@ -249,6 +249,19 @@ namespace Data
                 // Mark the target chunk as needing a lighting update.
                 chunkData.HasLightChangesToProcess = true;
             }
+            else
+            {
+                // If chunk is unloaded, tell ModManager to mark this area as dirty.
+                // We don't have exact block tracking for unloaded chunks, so we mark the *Column* for recalculation.
+                ChunkCoord coord = new ChunkCoord(chunkV2Coord.x / VoxelData.ChunkWidth, chunkV2Coord.y / VoxelData.ChunkWidth);
+                
+                // Calculate local column (0-15)
+                Vector3Int localPos = GetLocalVoxelPositionInChunk(worldPos);
+                Vector2Int localCol = new Vector2Int(localPos.x, localPos.z);
+                
+                // Add to persistent manager
+                World.Instance.ModManager.AddPendingLightUpdates(coord, new HashSet<Vector2Int> { localCol });
+            }
         }
 
         /// <summary>

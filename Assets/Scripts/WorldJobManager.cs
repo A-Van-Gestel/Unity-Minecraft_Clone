@@ -311,6 +311,7 @@ public class WorldJobManager
         List<ChunkCoord> completedCoords = new List<ChunkCoord>();
         foreach (var jobEntry in generationJobs)
         {
+            // Only continue if the generation job has completed
             if (jobEntry.Value.Handle.IsCompleted)
             {
                 // Complete the job to ensure it's finished and sync memory
@@ -335,17 +336,36 @@ public class WorldJobManager
                     }
                 }
 
-                // If we have any structures, apply them now.
+                // If we have any structures, enqueue them to be applied.
                 if (structureMods.Count > 0)
                 {
                     _world.EnqueueVoxelModifications(structureMods);
-                    _world.ApplyModifications(); // Process it immediately
+                }
+
+                // Check if any neighbors (or previous sessions) left pending mods for THIS chunk while it was unloaded.
+                if (_world.ModManager.TryGetModsForChunk(jobEntry.Key, out List<VoxelMod> pendingMods))
+                {
+                    // We apply these directly to the data now, as the chunk is populated but not yet meshed.
+                    foreach (VoxelMod mod in pendingMods)
+                    {
+                        Vector3Int localPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
+                        chunkData.ModifyVoxel(localPos, mod);
+                    }
+                }
+
+                // Check for pending lighting updates for this chunk
+                if (_world.ModManager.TryGetLightUpdatesForChunk(jobEntry.Key, out HashSet<Vector2Int> lightCols))
+                {
+                    if (!_world.worldData.SunlightRecalculationQueue.TryAdd(chunkData.position, lightCols))
+                        _world.worldData.SunlightRecalculationQueue[chunkData.position].UnionWith(lightCols);
+
+                    chunkData.HasLightChangesToProcess = true;
                 }
 
                 // Dispose of the job's data here, AFTER it has been used
                 jobEntry.Value.Dispose();
 
-                // --- STAGE 3: Now that the chunk has its final form, calculate lighting ---
+                // --- STAGE 3: Lighting ---
                 if (_world.settings.enableLighting)
                 {
                     // Set the flag to indicate that the chunk needs initial lighting.

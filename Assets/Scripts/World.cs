@@ -378,7 +378,7 @@ public class World : MonoBehaviour
         }
         else
         {
-            Debug.Log($"Re-using last player location from loaded save. ({savedPlayerPosition})");
+            Debug.Log($"Re-using last player location from loaded save. {savedPlayerPosition}");
             _playerTransform.position = savedPlayerPosition;
         }
 
@@ -1187,29 +1187,32 @@ public class World : MonoBehaviour
     {
         _applyingModifications = true;
 
-        // A list for modifications that target ungenerated chunks to be re-queued for the next frame.
-        List<Queue<VoxelMod>> deferredModifications = new List<Queue<VoxelMod>>();
-
         while (_modifications.Count > 0)
         {
             Queue<VoxelMod> queue = _modifications.Dequeue();
-            bool batchFailed = false;
 
             while (queue.Count > 0)
             {
                 VoxelMod v = queue.Dequeue();
+                
+                // Calculate which chunk this mod belongs to
+                ChunkCoord targetCoord = GetChunkCoordFromVector3(v.GlobalPosition);
+                Vector2Int targetPos = new Vector2Int(targetCoord.X * VoxelData.ChunkWidth, targetCoord.Z * VoxelData.ChunkWidth);
 
                 // --- 1. Get Chunk Data ---
-                ChunkData chunkData = worldData.RequestChunk(worldData.GetChunkCoordFor(v.GlobalPosition), false);
-
-                // If the chunk doesn't exist or its data hasn't been generated yet, defer this modification.
-                if (chunkData == null || !chunkData.IsPopulated)
+                // We check worldData directly to see if it is loaded/generating
+                bool chunkIsReady = false;
+                if (worldData.Chunks.TryGetValue(targetPos, out ChunkData chunkData))
                 {
-                    var tempList = new List<VoxelMod>(queue);
-                    tempList.Insert(0, v);
-                    deferredModifications.Add(new Queue<VoxelMod>(tempList));
-                    batchFailed = true;
-                    break; // Break from processing this batch and move to the next.
+                    chunkIsReady = chunkData.IsPopulated;
+                }
+
+                // If the chunk is NOT ready to receive mods (not loaded or still generating)
+                if (!chunkIsReady)
+                {
+                    // Send to Persistent Manager
+                    ModManager.AddPendingMod(targetCoord, v);
+                    continue; 
                 }
 
                 // --- 2. Check Placement Rules ---
@@ -1309,15 +1312,6 @@ public class World : MonoBehaviour
                     }
                 }
             }
-
-            // If part of the batch failed, we already re-queued it.
-            if (batchFailed) continue;
-        }
-
-        // After checking all queues, add the deferred ones back for the next frame.
-        foreach (var deferredQueue in deferredModifications)
-        {
-            _modifications.Enqueue(deferredQueue);
         }
 
         _applyingModifications = false;
@@ -1427,6 +1421,8 @@ public class World : MonoBehaviour
                 }
 
                 // 2. Destroy Visuals
+                // TODO-high: Chunks aren't unloaded fully yet (Chunk GameObject remains), this should be fixed to resolve memory "leaks"
+                // TODO-mid: Use a chunk GameObject pool to reduce Garbage Collection pressure by sending unloaded chunks back into the global pool to be re-used
                 if (_chunkMap.TryGetValue(coord, out Chunk chunkObj))
                 {
                     // Assuming Chunk class has a way to destroy its GameObject, or we do it here.
