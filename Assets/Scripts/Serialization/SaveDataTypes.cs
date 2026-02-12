@@ -4,6 +4,14 @@ using UnityEngine;
 
 namespace Serialization
 {
+    public enum CompressionAlgorithm : byte
+    {
+        GZip = 1,
+        Zlib = 2, // Unused currently
+        None = 3,
+        LZ4 = 4 // Reserved for future use
+    }
+
     [Serializable]
     public class WorldSaveData
     {

@@ -13,12 +13,6 @@ namespace Serialization
         private const int CHUNKS_PER_SIDE = 32;
         private const int TOTAL_CHUNKS = CHUNKS_PER_SIDE * CHUNKS_PER_SIDE; // 1024
 
-        // Compression Types (Minecraft Parity)
-        private const byte COMPRESSION_GZIP = 1; // We treat our DeflateStream as Type 1
-        private const byte COMPRESSION_ZLIB = 2;
-        private const byte COMPRESSION_NONE = 3;
-        private const byte COMPRESSION_LZ4 = 4;
-
         private readonly string _filePath;
         private FileStream _fileStream;
 
@@ -88,9 +82,9 @@ namespace Serialization
             }
         }
 
-        public byte[] LoadChunkData(int localX, int localZ)
+        public (byte[] data, CompressionAlgorithm algorithm) LoadChunkData(int localX, int localZ)
         {
-            // CRITICAL FIX: Exclusive lock. 
+            // CRITICAL: Exclusive lock. 
             // FileStream.Seek changes the position for the whole instance.
             // Multiple readers cannot share the stream simultaneously.
             lock (_fileLock)
@@ -99,37 +93,46 @@ namespace Serialization
                 {
                     int index = localX + localZ * CHUNKS_PER_SIDE;
                     int offsetData = _offsets[index];
-                    if (offsetData == 0) return null;
+                    if (offsetData == 0) return (null, CompressionAlgorithm.GZip);
 
                     int sectorOffset = (offsetData >> 8) & 0xFFFFFF;
                     long filePosition = (long)sectorOffset * SECTOR_SIZE;
 
-                    if (filePosition >= _fileStream.Length) return null;
+                    if (filePosition >= _fileStream.Length) 
+                    {
+                        // File truncated or corrupt header
+                        return (null, CompressionAlgorithm.GZip);
+                    }
 
                     _fileStream.Seek(filePosition, SeekOrigin.Begin);
 
                     // 1. Read Length (4 bytes)
                     byte[] lengthBytes = new byte[4];
                     int headerBytesRead = _fileStream.Read(lengthBytes, 0, 4);
-                    if (headerBytesRead < 4) return null;
+                    if (headerBytesRead < 4) return (null, CompressionAlgorithm.GZip);
 
                     // Convert Big Endian (if standard) or Little Endian. 
                     // BinaryWriter matches BitConverter.ToInt32 on the same system.
                     int length = BitConverter.ToInt32(lengthBytes, 0);
 
+                    // Sanity check length (Max 16MB)
                     if (length <= 1 || length > 16 * 1024 * 1024)
                     {
                         Debug.LogWarning($"RegionFile corrupt: Invalid length {length} at {localX},{localZ}");
-                        return null;
+                        return (null, CompressionAlgorithm.GZip);
                     }
 
                     // 2. Read Compression Type (1 byte)
-                    int compressionType = _fileStream.ReadByte();
+                    int compressionByte = _fileStream.ReadByte();
 
-                    if (compressionType != COMPRESSION_GZIP)
+                    // Map byte to Enum
+                    CompressionAlgorithm algo = (CompressionAlgorithm)compressionByte;
+
+                    // Basic validation of supported types
+                    if (!Enum.IsDefined(typeof(CompressionAlgorithm), algo))
                     {
-                        Debug.LogError($"RegionFile: Unsupported compression type {compressionType} at {localX},{localZ}");
-                        return null;
+                        Debug.LogError($"RegionFile: Unsupported compression type {compressionByte} at {localX},{localZ}");
+                        return (null, CompressionAlgorithm.GZip);
                     }
 
                     // 3. Read Payload
@@ -137,30 +140,26 @@ namespace Serialization
                     byte[] data = new byte[payloadLength];
                     int payloadBytesRead = _fileStream.Read(data, 0, payloadLength);
 
-                    if (payloadBytesRead < payloadLength) return null;
+                    if (payloadBytesRead < payloadLength) return (null, CompressionAlgorithm.GZip);
 
-                    return data;
+                    return (data, algo);
                 }
                 catch (Exception e)
                 {
                     Debug.LogError($"RegionFile IO Error: {e.Message}");
-                    return null;
+                    return (null, CompressionAlgorithm.GZip);
                 }
             }
         }
 
-        public void SaveChunkData(int localX, int localZ, byte[] data, int payloadLength)
+        public void SaveChunkData(int localX, int localZ, byte[] data, int payloadLength, CompressionAlgorithm algorithm)
         {
             lock (_fileLock)
             {
                 try
                 {
                     int index = localX + localZ * CHUNKS_PER_SIDE;
-
-                    // Total stored size = Payload + 1 byte (CompressionType)
-                    int totalLength = payloadLength + 1;
-
-                    // Sectors needed = (Length Header 4B + Content) / 4096
+                    int totalLength = payloadLength + 1; // +1 for compression byte
                     int sectorsNeeded = (totalLength + 4 + SECTOR_SIZE - 1) / SECTOR_SIZE;
 
                     if (sectorsNeeded > 255)
@@ -201,30 +200,23 @@ namespace Serialization
 
                     _fileStream.Seek((long)writeSectorStart * SECTOR_SIZE, SeekOrigin.Begin);
 
-                    // 5. Write Data
+                    // 5. Write Header + Compression Byte + Data
                     _fileStream.Write(BitConverter.GetBytes(totalLength), 0, 4);
-                    _fileStream.WriteByte(COMPRESSION_GZIP);
+                    _fileStream.WriteByte((byte)algorithm);
                     _fileStream.Write(data, 0, payloadLength);
 
-                    // 6. Padding (Optional but good for cleanliness)
-                    // If the data doesn't fill the sector(s), we should probably zero it out or just leave it.
-                    // Strictly speaking, not required as the Length header prevents reading garbage,
-                    // but writing zeros is safer if we ever use a tool that expects clean sectors.
-                    // We calculate actual written bytes: 4 + 1 + payloadLength
-                    // Remainder to fill sectors:
-
+                    // 6. Padding (for clean sectors)
                     long writtenBytes = 4 + 1 + payloadLength;
                     long sectorBytes = sectorsNeeded * SECTOR_SIZE;
                     long padding = sectorBytes - writtenBytes;
                     if (padding > 0)
                     {
-                        // Allocate a small zero array or reuse one
+                        // Allocate a small zero array
                         byte[] pad = new byte[padding];
                         _fileStream.Write(pad, 0, pad.Length);
                     }
 
-
-                    // 7. Update Header
+                    // 7. Update Offsets
                     int newOffsetData = (writeSectorStart << 8) | (sectorsNeeded & 0xFF);
                     _offsets[index] = newOffsetData;
 
@@ -254,10 +246,13 @@ namespace Serialization
             }
         }
 
-        // Add a method to perform raw byte replacement without full deserialization overhead
-        public void RawWriteChunk(int localX, int localZ, byte[] data)
+        /// Perform raw byte replacement without full deserialization overhead
+        /// Defaults to GZip compression for legacy migration support
+        public void RawWriteChunk(int localX, int localZ, byte[] data, CompressionAlgorithm algorithm = CompressionAlgorithm.GZip)
         {
-            SaveChunkData(localX, localZ, data, data.Length);
+            // For migration/raw writes, we assume GZip if not specified, or we could overload this.
+            // Keeping GZip as default for legacy compatibility in migrations.
+            SaveChunkData(localX, localZ, data, data.Length, algorithm);
         }
 
         private int FindFreeSectors(int count)

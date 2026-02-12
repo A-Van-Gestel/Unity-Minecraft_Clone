@@ -1964,6 +1964,9 @@ public class Settings
 
     [Tooltip("If true and running in Editor, saves will be stored in a temporary folder to keep production saves clean.")]
     public bool enableVolatileSaveData = true;
+
+    [Tooltip("The compression algorithm used for saving chunks. 'None' is faster but uses more disk space.")]
+    public CompressionAlgorithm saveCompression = CompressionAlgorithm.GZip;
     
     /// <summary>
     /// Returns true if the game should behave normally (Save/Load/Unload).

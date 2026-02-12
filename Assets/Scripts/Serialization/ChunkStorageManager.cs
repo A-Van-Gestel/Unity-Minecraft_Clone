@@ -10,6 +10,7 @@ namespace Serialization
 {
     public class ChunkStorageManager
     {
+        // ... existing code ...
         private readonly string _saveFolderPath;
 
         // Concurrent Dictionary with Lazy to ensure thread-safe, single initialization of RegionFiles
@@ -42,13 +43,13 @@ namespace Serialization
                 if (lx < 0) lx += 32;
                 if (lz < 0) lz += 32;
 
-                // Load raw bytes (Thread safe inside RegionFile)
-                byte[] data = region.LoadChunkData(lx, lz);
+                // Now receiving tuple containing raw bytes and algorithm used
+                var (data, algorithm) = region.LoadChunkData(lx, lz);
 
                 if (data == null) return null;
 
                 // Deserialize (Expensive CPU, kept on background thread)
-                return ChunkSerializer.Deserialize(data);
+                return ChunkSerializer.Deserialize(data, algorithm);
             });
         }
 
@@ -58,13 +59,16 @@ namespace Serialization
         /// </summary>
         public async Task SaveChunkAsync(ChunkData data)
         {
-            // 1. Capture data on Main Thread (or ensure ChunkData is safe to read)
+            // 1. Get Preferred Algorithm from Global Settings
+            CompressionAlgorithm algorithm = World.Instance.settings.saveCompression;
+
+            // 2. Serialize using that algorithm
             byte[] buffer = SerializationBufferPool.Get();
-            int length = ChunkSerializer.Serialize(data, buffer);
+            int length = ChunkSerializer.Serialize(data, buffer, algorithm);
 
             Vector2Int coord = data.position;
 
-            // 2. Offload Write to Disk
+            // 3. Offload Write to Disk
             await Task.Run(() =>
             {
                 try
@@ -76,7 +80,7 @@ namespace Serialization
                     if (lx < 0) lx += 32;
                     if (lz < 0) lz += 32;
 
-                    region.SaveChunkData(lx, lz, buffer, length);
+                    region.SaveChunkData(lx, lz, buffer, length, algorithm);
                 }
                 catch (Exception e)
                 {
@@ -94,7 +98,7 @@ namespace Serialization
         {
             Debug.Log($"Starting Migration: {migration.Description} (v{migration.SourceVersion} -> v{migration.TargetVersion})");
 
-            // 1. Migrate Region Files (Chunks)
+            // 4. Migrate Region Files (Chunks)
             string[] regionFiles = Directory.GetFiles(_saveFolderPath, "r.*.*.bin");
 
             foreach (string regionPath in regionFiles)
@@ -107,7 +111,10 @@ namespace Serialization
                     // Gather all chunks first to avoid modifying the collection while iterating
                     foreach (Vector2Int localCoord in region.GetAllChunkCoords())
                     {
-                        byte[] oldData = region.LoadChunkData(localCoord.x, localCoord.y);
+                        // Migration note: We currently only support migrating the raw GZip bytes in the base class.
+                        // Future migrations might need to become Compression-aware.
+                        // For now, LoadChunkData returns (byte[], algo), we discard algo for the generic migration
+                        var (oldData, _) = region.LoadChunkData(localCoord.x, localCoord.y);
                         if (oldData == null) continue;
 
                         try
