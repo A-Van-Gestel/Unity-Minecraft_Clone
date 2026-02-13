@@ -7,7 +7,7 @@
       "dependencies": {
         "com.unity.ugui": "1.0.0"
       },
-      "hash": "afba2388773b7eeb9fec8ae9841c6db34969a54b"
+      "hash": "998bf300cd676f79f1636324d39caf7641fabd3c"
     },
     "com.unity.2d.common": {
       "version": "12.0.2",
@@ -54,12 +54,12 @@
       "url": "https://packages.unity.com"
     },
     "com.unity.ai.inference": {
-      "version": "2.4.1",
+      "version": "2.5.0",
       "depth": 0,
       "source": "registry",
       "dependencies": {
         "com.unity.burst": "1.8.17",
-        "com.unity.dt.app-ui": "1.3.1",
+        "com.unity.dt.app-ui": "1.3.3",
         "com.unity.collections": "2.4.3",
         "com.unity.nuget.newtonsoft-json": "3.2.1",
         "com.unity.modules.imageconversion": "1.0.0"
