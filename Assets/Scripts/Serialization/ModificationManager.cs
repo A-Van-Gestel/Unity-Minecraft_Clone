@@ -14,11 +14,6 @@ namespace Serialization
         // Value: List of mods for that chunk
         private readonly Dictionary<ChunkCoord, List<VoxelMod>> _pendingMods = new Dictionary<ChunkCoord, List<VoxelMod>>();
 
-        // Pending sunlight recalculations for chunks that aren't loaded yet (or were saved while waiting).
-        // Key: Chunk Coordinate
-        // Value: List of LOCAL column coordinates (0-15, 0-15) stored as Vector2Int
-        private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _pendingLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
-
         public ModificationManager(string worldName, bool useVolatilePath)
         {
             // Determine Save Path
@@ -62,40 +57,6 @@ namespace Serialization
 
         #endregion
 
-        #region Lighting Updates
-
-        /// <summary>
-        /// Adds a set of local column coordinates that need sunlight recalculation to the pending store.
-        /// </summary>
-        /// <param name="targetChunk">The chunk coordinate.</param>
-        /// <param name="localColumns">A set of Vector2Ints where x/y are local 0-15 coordinates.</param>
-        public void AddPendingLightUpdates(ChunkCoord targetChunk, HashSet<Vector2Int> localColumns)
-        {
-            if (localColumns == null || localColumns.Count == 0) return;
-
-            if (!_pendingLightUpdates.ContainsKey(targetChunk))
-            {
-                _pendingLightUpdates[targetChunk] = new HashSet<Vector2Int>();
-            }
-
-            foreach (var col in localColumns)
-            {
-                _pendingLightUpdates[targetChunk].Add(col);
-            }
-        }
-
-        public bool TryGetLightUpdatesForChunk(ChunkCoord coord, out HashSet<Vector2Int> localColumns)
-        {
-            if (_pendingLightUpdates.Remove(coord, out localColumns))
-            {
-                return true;
-            }
-
-            return false;
-        }
-
-        #endregion
-
         public void Save()
         {
             using var stream = new FileStream(_filePath, FileMode.Create);
@@ -119,22 +80,6 @@ namespace Serialization
                     writer.Write(mod.Orientation);
                     writer.Write(mod.FluidLevel);
                     // We don't save "ImmediateUpdate" flag as it's a runtime priority thing
-                }
-            }
-
-            // --- 2. Save Lighting Updates ---
-            writer.Write(_pendingLightUpdates.Count);
-            foreach (var kvp in _pendingLightUpdates)
-            {
-                writer.Write(kvp.Key.X);
-                writer.Write(kvp.Key.Z);
-                writer.Write(kvp.Value.Count);
-
-                foreach (Vector2Int col in kvp.Value)
-                {
-                    // Local columns are 0-15, so we can safely use bytes to save space
-                    writer.Write((byte)col.x);
-                    writer.Write((byte)col.y);
                 }
             }
         }
@@ -172,31 +117,6 @@ namespace Serialization
                 }
 
                 _pendingMods[coord] = mods;
-            }
-
-            // --- 2. Load Lighting Updates ---
-            // Check if stream still has data (for backward compatibility if we update format later)
-            if (stream.Position < stream.Length)
-            {
-                int lightChunkCount = reader.ReadInt32();
-                for (int i = 0; i < lightChunkCount; i++)
-                {
-                    int x = reader.ReadInt32();
-                    int z = reader.ReadInt32();
-                    ChunkCoord coord = new ChunkCoord(x, z);
-
-                    int colCount = reader.ReadInt32();
-                    HashSet<Vector2Int> cols = new HashSet<Vector2Int>();
-
-                    for (int c = 0; c < colCount; c++)
-                    {
-                        byte lx = reader.ReadByte();
-                        byte ly = reader.ReadByte(); // Local Z
-                        cols.Add(new Vector2Int(lx, ly));
-                    }
-
-                    _pendingLightUpdates[coord] = cols;
-                }
             }
         }
     }

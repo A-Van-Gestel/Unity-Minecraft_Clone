@@ -72,7 +72,11 @@ public static class SaveSystem
 
         // --- 4. Trigger Modification Manager Save ---
         // This saves pending trees/structures for unloaded chunks
-        World.Instance.ModManager.Save(); 
+        World.Instance.ModManager.Save();
+
+        // --- 5. Trigger Lighting State Manager Save ---
+        // This saves pending lighting updates for unloaded chunks
+        World.Instance.LightingStateManager.Save();
 
         Debug.Log($"Saved World Metadata to {path}");
     }

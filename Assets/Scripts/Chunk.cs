@@ -7,6 +7,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
 public class Chunk
 {
@@ -47,6 +48,17 @@ public class Chunk
     }
 
     #endregion
+
+    /// <summary>
+    /// Destroys the GameObject this script is attached to.
+    /// </summary>
+    public void Destroy()
+    {
+        if (_chunkObject != null)
+        {
+            Object.Destroy(_chunkObject);
+        }
+    }
 
     /// <summary>
     /// A new method to be called by World.cs after the chunk's data has been populated by a job.

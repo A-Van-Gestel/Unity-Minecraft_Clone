@@ -110,6 +110,7 @@ public class World : MonoBehaviour
     // --- Storage & Serialization ---
     public ChunkStorageManager StorageManager;
     public ModificationManager ModManager;
+    public LightingStateManager LightingStateManager;
     public bool IsVolatileMode { get; private set; }
 
     // --- Shader Properties ---
@@ -266,6 +267,7 @@ public class World : MonoBehaviour
 
         StorageManager = new ChunkStorageManager(worldName, IsVolatileMode);
         ModManager = new ModificationManager(worldName, IsVolatileMode);
+        LightingStateManager = new LightingStateManager(worldName, IsVolatileMode);
 
         // 3. Load Global Metadata (Level.dat & Pending Mods)
         // Only load if it's NOT a new game AND Persistence is actually enabled.
@@ -273,6 +275,7 @@ public class World : MonoBehaviour
         {
             // Load Pending Mods
             ModManager.Load();
+            LightingStateManager.Load();
 
             // Load Level.dat (Player pos, Inventory, Time)
             var metadata = SaveSystem.LoadWorldMetadata(worldName, IsVolatileMode);
@@ -475,19 +478,57 @@ public class World : MonoBehaviour
                 }
 
                 // Apply Pending Light Updates
-                if (ModManager.TryGetLightUpdatesForChunk(coord, out HashSet<Vector2Int> lightCols))
+                if (LightingStateManager.TryGetAndRemove(coord, out HashSet<Vector2Int> localCols))
                 {
+                    HashSet<Vector2Int> globalCols = new HashSet<Vector2Int>();
+                    foreach (var lCol in localCols)
+                    {
+                        globalCols.Add(new Vector2Int(lCol.x + pos.x, lCol.y + pos.y));
+                    }
+
                     if (worldData.SunlightRecalculationQueue.ContainsKey(pos))
-                        worldData.SunlightRecalculationQueue[pos].UnionWith(lightCols);
+                        worldData.SunlightRecalculationQueue[pos].UnionWith(globalCols);
                     else
-                        worldData.SunlightRecalculationQueue[pos] = lightCols;
+                        worldData.SunlightRecalculationQueue[pos] = globalCols;
 
                     data.HasLightChangesToProcess = true;
+
+                    Debug.Log($"[LIGHTING RESTORE] Restored {localCols.Count} pending sunlight columns for chunk {coord}");
                 }
 
-                // If we loaded from disk, we might still need to light it if it was saved in a dark state?
-                // Usually saved data is lit. But we need to update neighbors.
-                // For now, assume loaded data is valid.
+                // Process Initial Lighting Immediately 
+                // If the chunk was saved before initial lighting finished, we must trigger it now.
+                if (data.NeedsInitialLighting)
+                {
+                    Debug.LogWarning($"[LOAD] Chunk {coord} loaded with NeedsInitialLighting=true. Checking neighbors...");
+
+                    if (AreNeighborsDataReady(coord))
+                    {
+                        Debug.Log($"[LOAD] Neighbors ready - triggering initial lighting immediately for {coord}");
+
+                        // 1. Fill the queue (RecalculateSunLightLight populates the queues in data)
+                        data.RecalculateSunLightLight();
+
+                        // 2. Schedule the job immediately
+                        // If the visual Chunk object doesn't exist yet (data-only load), create a temp wrapper.
+                        Chunk chunkObj = data.Chunk;
+                        if (chunkObj == null)
+                        {
+                            chunkObj = new Chunk(coord, false);
+                        }
+
+                        JobManager.ScheduleLightingUpdate(chunkObj);
+
+                        // 3. Clear flag so we don't do this again
+                        data.NeedsInitialLighting = false;
+                    }
+                    else
+                    {
+                        Debug.Log($"[LOAD] Neighbors not ready for {coord}. Lighting deferred to Update loop.");
+                        // The flag remains TRUE, so the Update() loop will catch it later when neighbors are ready.
+                    }
+                }
+
                 return;
             }
         }
@@ -521,7 +562,7 @@ public class World : MonoBehaviour
         int baseIterations = totalChunksToProcess * 15;
         int additionalIterations = Mathf.Max(0, (totalChunksToProcess - 100) * 5);
         int maxIterations = baseIterations + additionalIterations;
-    
+
         // SAFETY: Minimum 500 iterations even for tiny loads
         maxIterations = Mathf.Max(maxIterations, 500);
 
@@ -1142,6 +1183,13 @@ public class World : MonoBehaviour
             Vector3Int offset = VoxelData.FaceChecks[faceIndex];
             ChunkCoord neighborCoord = new ChunkCoord(coord.X + offset.x, coord.Z + offset.z);
 
+            // Skip neighbors outside world bounds
+            if (!IsChunkInWorld(neighborCoord))
+            {
+                // Neighbor is outside the world - treat as "ready" (it will never exist)
+                continue;
+            }
+
             // 1. // Is a generation job for this neighbor still running?
             if (JobManager.generationJobs.ContainsKey(neighborCoord))
             {
@@ -1423,7 +1471,7 @@ public class World : MonoBehaviour
         List<ChunkCoord> chunksToRemove = new List<ChunkCoord>();
         int unloadDistance = settings.loadDistance + 2; // Buffer to prevent flickering
 
-        // Iterate over Loaded Data (Memory)
+        // Step A: Identify candidates
         foreach (var kvp in worldData.Chunks)
         {
             ChunkCoord coord = new ChunkCoord(kvp.Key.x / VoxelData.ChunkWidth, kvp.Key.y / VoxelData.ChunkWidth);
@@ -1432,53 +1480,87 @@ public class World : MonoBehaviour
             if (Mathf.Abs(coord.X - PlayerChunkCoord.X) > unloadDistance ||
                 Mathf.Abs(coord.Z - PlayerChunkCoord.Z) > unloadDistance)
             {
-                // Safety: Don't unload if a job is currently touching it
-                bool isJobRunning = JobManager.generationJobs.ContainsKey(coord)
-                                    || JobManager.meshJobs.ContainsKey(coord)
-                                    || JobManager.lightingJobs.ContainsKey(coord);
-
-                if (!isJobRunning) chunksToRemove.Add(coord);
+                chunksToRemove.Add(coord);
             }
         }
 
+        // Step B: Unload
         foreach (var coord in chunksToRemove)
         {
             Vector2Int pos = new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth);
 
-            if (worldData.Chunks.TryGetValue(pos, out ChunkData data))
+            if (!worldData.Chunks.TryGetValue(pos, out ChunkData data))
+                continue;
+
+            // Safety: Don't unload if a job is currently touching it
+            bool isJobRunning = JobManager.generationJobs.ContainsKey(coord)
+                                || JobManager.meshJobs.ContainsKey(coord)
+                                || JobManager.lightingJobs.ContainsKey(coord);
+
+            // Check data state logic to prevent unloading chunks that have lighting work in the pipeline but no active job.
+            bool isProcessingLight = data.IsAwaitingMainThreadProcess ||
+                                     data.HasLightChangesToProcess;
+
+            if (isJobRunning || isProcessingLight)
             {
-                // 1. Save if modified
-                if (worldData.ModifiedChunks.Contains(data))
-                {
-                    _ = StorageManager.SaveChunkAsync(data);
-                    worldData.ModifiedChunks.Remove(data);
-                }
+                // Skip unload - chunk is still being processed
+                continue;
+            }
 
-                // 2. Destroy Visuals
-                // TODO-high: Chunks aren't unloaded fully yet (Chunk GameObject remains), this should be fixed to resolve memory "leaks"
-                // TODO-mid: Use a chunk GameObject pool to reduce Garbage Collection pressure by sending unloaded chunks back into the global pool to be re-used
-                if (_chunkMap.TryGetValue(coord, out Chunk chunkObj))
-                {
-                    // Assuming Chunk class has a way to destroy its GameObject, or we do it here.
-                    // Accessing private _chunkObject via reflection or public method is needed.
-                    // For now, assume we just destroy what we can see.
-                    // Ideally add public void Destroy() to Chunk.cs.
-                    // Destroy(chunkObj.gameObject); // Chunk is not MonoBehavior
+            // --- DIAGNOSTIC A: Check for Race Condition ---
+            // If pending process flag is true, we are about to save incomplete data.
+            if (data.IsAwaitingMainThreadProcess)
+            {
+                Debug.LogError($"[LIGHTING CRITICAL] Unloading Chunk {coord} while IsAwaitingMainThreadProcess is TRUE! Lighting data will be lost.");
+            }
 
-                    // Cleanup visualizers
-                    if (voxelVisualizer != null) voxelVisualizer.ClearChunkVisualization(coord);
-                    if (_chunkBorders.TryGetValue(coord, out GameObject b))
+            // 1. Persist Orphaned Lighting Queue
+            if (worldData.SunlightRecalculationQueue.TryGetValue(pos, out HashSet<Vector2Int> globalCols))
+            {
+                if (globalCols != null && globalCols.Count > 0)
+                {
+                    // Convert to Local Coordinates (0-15) for storage
+                    HashSet<Vector2Int> localCols = new HashSet<Vector2Int>();
+                    foreach (var gCol in globalCols)
                     {
-                        Destroy(b);
-                        _chunkBorders.Remove(coord);
+                        localCols.Add(new Vector2Int(gCol.x - pos.x, gCol.y - pos.y));
                     }
 
-                    _chunkMap.Remove(coord);
+                    // Save to Persistence
+                    LightingStateManager.AddPending(coord, localCols);
+
+                    Debug.Log($"[LIGHTING RESCUE] Saved {localCols.Count} orphaned sunlight columns for chunk {coord}");
                 }
 
-                // 3. Remove Data
-                worldData.Chunks.Remove(pos);
+                worldData.SunlightRecalculationQueue.Remove(pos);
             }
+
+            // 2. Save if modified
+            if (worldData.ModifiedChunks.Contains(data))
+            {
+                _ = StorageManager.SaveChunkAsync(data);
+                worldData.ModifiedChunks.Remove(data);
+            }
+
+            // 2. Destroy Visuals
+            // TODO-mid: Use a chunk GameObject pool to reduce Garbage Collection pressure by sending unloaded chunks back into the global pool to be re-used
+            if (_chunkMap.TryGetValue(coord, out Chunk chunkObj))
+            {
+                // Cleanup visualizers
+                if (voxelVisualizer != null) voxelVisualizer.ClearChunkVisualization(coord);
+                if (_chunkBorders.TryGetValue(coord, out GameObject b))
+                {
+                    Destroy(b);
+                    _chunkBorders.Remove(coord);
+                }
+
+                // Cleanup chunk object
+                chunkObj.Destroy();
+                _chunkMap.Remove(coord);
+            }
+
+            // 3. Remove Data
+            worldData.Chunks.Remove(pos);
         }
     }
 

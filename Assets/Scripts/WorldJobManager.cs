@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Data;
 using Jobs;
 using Jobs.BurstData;
@@ -354,7 +355,7 @@ public class WorldJobManager
                 }
 
                 // Check for pending lighting updates for this chunk
-                if (_world.ModManager.TryGetLightUpdatesForChunk(jobEntry.Key, out HashSet<Vector2Int> lightCols))
+                if (_world.LightingStateManager.TryGetAndRemove(jobEntry.Key, out HashSet<Vector2Int> lightCols))
                 {
                     if (!_world.worldData.SunlightRecalculationQueue.TryAdd(chunkData.position, lightCols))
                         _world.worldData.SunlightRecalculationQueue[chunkData.position].UnionWith(lightCols);
@@ -454,6 +455,11 @@ public class WorldJobManager
         HashSet<ChunkCoord> chunksToRebuildMesh = new HashSet<ChunkCoord>();
 
         List<ChunkCoord> completedCoords = new List<ChunkCoord>();
+
+        // OPTIMIZATION: Cache for dropped updates to avoid calling LightingStateManager (and allocating HashSets) per voxel.
+        // Key: Neighbor Chunk, Value: Set of columns
+        Dictionary<ChunkCoord, HashSet<Vector2Int>> droppedLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
+
         foreach (var jobEntry in lightingJobs)
         {
             if (jobEntry.Value.Handle.IsCompleted)
@@ -483,8 +489,34 @@ public class WorldJobManager
                         Vector2Int neighborChunkV2Coord = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
                         ChunkData neighborChunk = _world.worldData.RequestChunk(neighborChunkV2Coord, false);
 
-                        // If the neighbor doesn't exist or isn't generated, we can't do anything.
-                        if (neighborChunk == null || !neighborChunk.IsPopulated) continue;
+                        // If the neighbor doesn't exist or isn't generated, save any propagating lighting for that unloaded neighbor
+                        if (neighborChunk == null || !neighborChunk.IsPopulated)
+                        {
+                            // Calculate Chunk Coord
+                            ChunkCoord neighborCoord = new ChunkCoord(neighborChunkV2Coord);
+
+                            // Calculate Local Column
+                            int localX = mod.GlobalPosition.x - neighborChunkV2Coord.x;
+                            int localZ = mod.GlobalPosition.z - neighborChunkV2Coord.y;
+
+                            // Validate range
+                            if (localX < 0 || localX >= VoxelData.ChunkWidth ||
+                                localZ < 0 || localZ >= VoxelData.ChunkWidth)
+                            {
+                                Debug.LogError($"[ProcessLightingJobs] Invalid local column calculation: ({localX}, {localZ}) for global pos {mod.GlobalPosition}");
+                                continue;
+                            }
+
+                            // Add to local batch dictionary instead of immediate manager call
+                            if (!droppedLightUpdates.TryGetValue(neighborCoord, out HashSet<Vector2Int> cols))
+                            {
+                                cols = new HashSet<Vector2Int>();
+                                droppedLightUpdates[neighborCoord] = cols;
+                            }
+
+                            cols.Add(new Vector2Int(localX, localZ));
+                            continue;
+                        }
 
                         // Get the local position and flat array index for the voxel in the neighbor chunk.
                         Vector3Int localPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
@@ -559,7 +591,20 @@ public class WorldJobManager
             }
         }
 
-        // 5. After processing all completed jobs, request mesh rebuilds for all affected world.chunks.
+        // 5. Save vanishing neighbor updates (BATCH)
+        foreach (var kvp in droppedLightUpdates)
+        {
+            _world.LightingStateManager.AddPending(kvp.Key, kvp.Value);
+        }
+
+        // Log summary
+        if (droppedLightUpdates.Count > 0)
+        {
+            int totalColumns = droppedLightUpdates.Values.Sum(set => set.Count);
+            Debug.Log($"[LIGHTING] Processed {completedCoords.Count} jobs. Saved updates for {droppedLightUpdates.Count} unloaded chunks ({totalColumns} columns)");
+        }
+
+        // 6. After processing all completed jobs, request mesh rebuilds for all affected world.chunks.
         foreach (ChunkCoord coord in chunksToRebuildMesh)
         {
             Chunk chunk = _world.GetChunkFromChunkCoord(coord);
@@ -569,7 +614,8 @@ public class WorldJobManager
             }
         }
 
-        // 6. Remove the completed jobs from our tracking dictionary
+
+        // 7. Remove the completed jobs from our tracking dictionary
         foreach (ChunkCoord coord in completedCoords)
         {
             lightingJobs.Remove(coord);

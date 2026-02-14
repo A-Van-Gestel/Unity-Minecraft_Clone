@@ -17,7 +17,7 @@ namespace Data
         public int seed;
 
         [MyBox.ReadOnly]
-        public long creationDate; 
+        public long creationDate;
 
         [NonSerialized]
         public Dictionary<Vector2Int, ChunkData> Chunks = new Dictionary<Vector2Int, ChunkData>();
@@ -77,7 +77,7 @@ namespace Data
                 // PHASE 3 TODO-old: Replace the legacy save-system code below with ChunkStorageManager.LoadChunkAsync
                 // TODO-new: This was the original place where chunks where loaded from disk, I believe this is the correct place (eg: data related), but is currently moved into World class itself.
                 /*
-                ChunkData chunk = SaveSystem.LoadChunk(worldName, chunkVector2Coord); 
+                ChunkData chunk = SaveSystem.LoadChunk(worldName, chunkVector2Coord);
                 if (chunk != null)
                 {
                     Chunks.Add(chunkVector2Coord, chunk);
@@ -254,13 +254,13 @@ namespace Data
                 // If chunk is unloaded, tell ModManager to mark this area as dirty.
                 // We don't have exact block tracking for unloaded chunks, so we mark the *Column* for recalculation.
                 ChunkCoord coord = new ChunkCoord(chunkV2Coord.x / VoxelData.ChunkWidth, chunkV2Coord.y / VoxelData.ChunkWidth);
-                
+
                 // Calculate local column (0-15)
                 Vector3Int localPos = GetLocalVoxelPositionInChunk(worldPos);
                 Vector2Int localCol = new Vector2Int(localPos.x, localPos.z);
-                
+
                 // Add to persistent manager
-                World.Instance.ModManager.AddPendingLightUpdates(coord, new HashSet<Vector2Int> { localCol });
+                World.Instance.LightingStateManager.AddPending(coord, new HashSet<Vector2Int> { localCol });
             }
         }
 
