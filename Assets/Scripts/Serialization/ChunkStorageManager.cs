@@ -49,7 +49,7 @@ namespace Serialization
                 if (data == null) return null;
 
                 // Deserialize (Expensive CPU, kept on background thread)
-                return ChunkSerializer.Deserialize(data, algorithm);
+                return ChunkSerializer.Deserialize(data, algorithm, chunkCoord);
             });
         }
 
@@ -65,6 +65,13 @@ namespace Serialization
             // 2. Serialize using that algorithm
             byte[] buffer = SerializationBufferPool.Get();
             int length = ChunkSerializer.Serialize(data, buffer, algorithm);
+            
+            if (length <= 0) 
+            {
+                SerializationBufferPool.Return(buffer);
+                Debug.LogError($"Serialization failed for chunk {data.position} (Length 0)");
+                return;
+            }
 
             Vector2Int coord = data.position;
 

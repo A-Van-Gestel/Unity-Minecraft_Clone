@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
 using Data;
+using Helpers;
 using UnityEngine;
 
 namespace Serialization
@@ -41,6 +42,7 @@ namespace Serialization
                     using (var writer = new BinaryWriter(compressionStream))
                     {
                         WriteChunkInternal(writer, data);
+                        writer.Flush();
                     }
 
                     break;
@@ -50,6 +52,7 @@ namespace Serialization
                     using (var writer = new BinaryWriter(memoryStream, Encoding.UTF8, true))
                     {
                         WriteChunkInternal(writer, data);
+                        writer.Flush();
                     }
 
                     break;
@@ -68,7 +71,7 @@ namespace Serialization
         /// <summary>
         /// Deserializes a byte array into a ChunkData object based on the specified compression algorithm.
         /// </summary>
-        public static ChunkData Deserialize(ReadOnlySpan<byte> data, CompressionAlgorithm algorithm)
+        public static ChunkData Deserialize(ReadOnlySpan<byte> data, CompressionAlgorithm algorithm, Vector2Int debugCoord)
         {
             if (data.Length == 0) return null;
 
@@ -101,11 +104,11 @@ namespace Serialization
                         }
 
                         using var reader = new BinaryReader(readStream);
-                        return ReadChunkInternal(reader);
+                        return ReadChunkInternal(reader, debugCoord, data.Length);
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"Chunk deserialization exception ({algorithm}): {ex.Message}");
+                        Debug.LogWarning($"Chunk {debugCoord} deserialization failed ({algorithm}). Payload: {data.Length} bytes. Error: {ex.GetType().Name} - {ex.Message}");
                         return null;
                     }
                     finally
@@ -123,6 +126,9 @@ namespace Serialization
             writer.Write(CURRENT_CHUNK_VERSION);
             writer.Write(data.position.x);
             writer.Write(data.position.y); // Z coordinate (Vector2Int.y)
+            
+            // --- State Flags ---
+            writer.Write(data.NeedsInitialLighting);
 
             // --- Height Map ---
             // Heightmap is fixed size (16*16 = 256 bytes)
@@ -157,47 +163,63 @@ namespace Serialization
         }
 
         // --- Internal Read Logic ---
-        private static ChunkData ReadChunkInternal(BinaryReader reader)
+        private static ChunkData ReadChunkInternal(BinaryReader reader, Vector2Int coord, int totalLen)
         {
-            byte version = reader.ReadByte();
-            
-            // Safety check: Don't try to load chunks from the future.
-            if (version > CURRENT_CHUNK_VERSION)
+            // Diagnostics for debugging stream position
+            long startPos = reader.BaseStream.CanSeek ? reader.BaseStream.Position : 0;
+
+            try 
             {
-                Debug.LogError($"Chunk version {version} not supported.");
-                return null;
-            }
+                // --- Chunk Header ---
+                // Safety check: Don't try to load chunks from the future.
+                byte version = reader.ReadByte();
+                if (version > CURRENT_CHUNK_VERSION)
+                    throw new InvalidDataException($"Unsupported Version: {version}");
 
-            int x = reader.ReadInt32();
-            int z = reader.ReadInt32();
+                int x = reader.ReadInt32();
+                int z = reader.ReadInt32();
+                
+                // Sanity check coordinates
+                if (x != coord.x || z != coord.y)
+                    Debug.LogWarning($"Chunk coord mismatch at {coord}. Read: {x},{z}");
 
-            ChunkData chunk = new ChunkData(x, z);
+                ChunkData chunk = new ChunkData(x, z);
+                
+                // --- State Flags ---
+                chunk.NeedsInitialLighting = reader.ReadBoolean();
 
-            // --- Height Map ---
-            chunk.heightMap = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth);
+                // --- Height Map (256 bytes) ---
+                chunk.heightMap = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth);
+                if (chunk.heightMap.Length != VoxelData.ChunkWidth * VoxelData.ChunkWidth)
+                    throw new EndOfStreamException("Heightmap truncated");
 
-            // --- Sections ---
-            int sectionBitmask = reader.ReadInt32();
-            for (int i = 0; i < chunk.sections.Length; i++)
-            {
-                if ((sectionBitmask & (1 << i)) != 0)
+                // --- Sections ---
+                int sectionBitmask = reader.ReadInt32();
+                for (int i = 0; i < chunk.sections.Length; i++)
                 {
-                    chunk.sections[i] = ReadSection(reader);
-
-                    // --- Read Lighting Queues ---
-                    ReadLightQueue(reader, chunk.SunlightBfsQueue);
-                    ReadLightQueue(reader, chunk.BlocklightBfsQueue);
-
-                    // If we loaded pending lights, flag the chunk for processing
-                    if (chunk.SunLightQueueCount > 0 || chunk.BlockLightQueueCount > 0)
-                    {
-                        chunk.HasLightChangesToProcess = true;
-                    }
+                    if ((sectionBitmask & (1 << i)) != 0)
+                        chunk.sections[i] = ReadSection(reader);
                 }
-            }
 
-            chunk.IsPopulated = true;
-            return chunk;
+                // --- Lighting ---
+                ReadLightQueue(reader, chunk.SunlightBfsQueue);
+                ReadLightQueue(reader, chunk.BlocklightBfsQueue);
+
+                // If we loaded pending lights, flag the chunk for processing
+                if (chunk.SunLightQueueCount > 0 || chunk.BlockLightQueueCount > 0)
+                {
+                    chunk.HasLightChangesToProcess = true;
+                }
+
+                chunk.IsPopulated = true;
+                return chunk;
+            }
+            catch (Exception)
+            {
+                long curr = reader.BaseStream.CanSeek ? reader.BaseStream.Position : -1;
+                Debug.LogError($"Deserialize Crash at stream pos {curr}. Expected Payload Size: {totalLen}");
+                throw;
+            }
         }
 
         // --- Helpers for Lighting ---
@@ -220,6 +242,10 @@ namespace Serialization
         private static void ReadLightQueue(BinaryReader reader, Queue<LightQueueNode> queue)
         {
             int count = reader.ReadInt32();
+            // Sanity check to prevent OOM on corrupt data
+            if (count < 0 || count > 100000) 
+                throw new InvalidDataException($"Invalid LightQueue count: {count}");
+
             for (int i = 0; i < count; i++)
             {
                 int x = reader.ReadInt32();
@@ -242,35 +268,45 @@ namespace Serialization
 
             // 2. Write Data (Version 1 Format)
             writer.Write((ushort)section.nonAirCount);
+
+            // Validate size
+            if (section.voxels.Length != ChunkMath.SECTION_VOLUME)
+            {
+                throw new InvalidDataException($"Section voxel array corrupted. Size: {section.voxels.Length}");
+            }
+
             ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(section.voxels.AsSpan());
             writer.Write(bytes);
         }
 
         private static ChunkSection ReadSection(BinaryReader reader)
         {
-            // 1. Read Section Version
+            // Read Section Version
             byte version = reader.ReadByte();
-
-            ChunkSection section = new ChunkSection();
-
-            // 2. Read Data based on Version
             if (version == 1)
             {
+                ChunkSection section = new ChunkSection();
                 section.nonAirCount = reader.ReadUInt16();
 
+                // Robust read for large data blocks
                 Span<byte> bytes = MemoryMarshal.AsBytes(section.voxels.AsSpan());
-                int bytesRead = reader.Read(bytes);
+                int totalBytesToRead = bytes.Length;
+                int bytesReadTotal = 0;
 
-                if (bytesRead != bytes.Length)
-                    throw new EndOfStreamException("Incomplete section data");
-            }
-            else
-            {
-                // Fallback / Error for unknown versions
-                throw new InvalidDataException($"Unknown Section Version: {version}");
+                while (bytesReadTotal < totalBytesToRead)
+                {
+                    int bytesRead = reader.Read(bytes.Slice(bytesReadTotal));
+                    if (bytesRead == 0)
+                        throw new EndOfStreamException($"Section data truncated. Read {bytesReadTotal} of {totalBytesToRead} bytes.");
+
+                    bytesReadTotal += bytesRead;
+                }
+
+                return section;
             }
 
-            return section;
+            // Fallback / Error for unknown versions
+            throw new InvalidDataException($"Unknown Section Version: {version}");
         }
     }
 }

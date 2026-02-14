@@ -156,7 +156,7 @@ public class World : MonoBehaviour
         // --- Prepare Job-Safe Data ---
         PrepareJobData();
     }
-    
+
 
     /// Ensures global state (Inventory, Pending Mods) is saved when closing.
     private void OnApplicationQuit()
@@ -263,7 +263,7 @@ public class World : MonoBehaviour
         Debug.Log($"Launching World: {worldName} (Seed: {seed}, New: {isNewGame})");
 
         worldData = new WorldData(worldName, seed);
-        
+
         StorageManager = new ChunkStorageManager(worldName, IsVolatileMode);
         ModManager = new ModificationManager(worldName, IsVolatileMode);
 
@@ -330,13 +330,27 @@ public class World : MonoBehaviour
         //    This ensures the initial "blocking" load is fast, even with high view distance settings.
         int initialLoadRadius = Mathf.Min(settings.loadDistance, settings.maxInitialLoadRadius);
 
-        // Capture the specific list of chunks we are loading.
-        List<ChunkCoord> initialChunks = LoadChunksInDataPass(initialLoadRadius);
-        int loadedChunks = initialChunks.Count;
+        // Generate an extra ring of chunks (+1 radius).
+        // This ensures that the chunks inside 'initialLoadRadius' have valid neighbors to calculate lighting against.
+        int generationRadius = initialLoadRadius + 1;
 
-        // Trigger loading for all of them
+        // Capture the specific list of chunks we are loading.
+        List<ChunkCoord> allChunksToGenerate = LoadChunksInDataPass(generationRadius);
+        int loadedChunks = allChunksToGenerate.Count;
+
+        // We only wait for the completion of the requested radius, not the buffer ring.
+        List<ChunkCoord> chunksToWaitFor = new List<ChunkCoord>();
+        foreach (ChunkCoord c in allChunksToGenerate)
+        {
+            if (Mathf.Max(Mathf.Abs(c.X - PlayerChunkCoord.X), Mathf.Abs(c.Z - PlayerChunkCoord.Z)) <= initialLoadRadius)
+            {
+                chunksToWaitFor.Add(c);
+            }
+        }
+
+        // Trigger loading for all chunks (including buffer)
         List<Awaitable> loadTasks = new List<Awaitable>();
-        foreach (var coord in initialChunks)
+        foreach (ChunkCoord coord in allChunksToGenerate)
         {
             // Create placeholder if missing
             worldData.EnsureChunkExists(new Vector3(coord.X * VoxelData.ChunkWidth, 0, coord.Z * VoxelData.ChunkWidth));
@@ -351,7 +365,7 @@ public class World : MonoBehaviour
         // 2. Force complete ONLY the data-related jobs (generation and lighting).
         //    Now, instead of a blocking call, we yield to (wait for) another coroutine.
         //    The code will PAUSE here and will not continue until ForceCompleteDataJobsCoroutine is finished.
-        yield return StartCoroutine(ForceCompleteDataJobsCoroutine(initialChunks));
+        yield return StartCoroutine(ForceCompleteDataJobsCoroutine(chunksToWaitFor));
 
         stopwatch.Stop();
         long totalMilliseconds = stopwatch.ElapsedMilliseconds;
@@ -438,7 +452,7 @@ public class World : MonoBehaviour
         if (data.IsPopulated) return; // Already done
 
         // 1. Try Load from Disk if allowed
-        if (settings.EnablePersistence) 
+        if (settings.EnablePersistence)
         {
             ChunkData loaded = await StorageManager.LoadChunkAsync(pos);
             if (loaded != null)
@@ -499,11 +513,17 @@ public class World : MonoBehaviour
         int safetyBreak = 0;
 
         // --- Dynamically calculate maxIterations ---
-        // The maximum number of iterations should be proportional to the number of chunks being processed.
-        // A generous multiplier (e.g., 10) accounts for the multiple states each chunk passes through
-        // (generation, lighting passes, neighbor interactions).
+        // The maximum number of iterations should be proportional to the number of chunks being processed and account
+        // for the multiple states each chunk passes through (generation, lighting passes, neighbor interactions).
+        // - Base iterations: 15x chunk count
+        // - Additional iterations for large loads: +5 per chunk over 100
         int totalChunksToProcess = initialChunks.Count;
-        int maxIterations = totalChunksToProcess * 10;
+        int baseIterations = totalChunksToProcess * 15;
+        int additionalIterations = Mathf.Max(0, (totalChunksToProcess - 100) * 5);
+        int maxIterations = baseIterations + additionalIterations;
+    
+        // SAFETY: Minimum 500 iterations even for tiny loads
+        maxIterations = Mathf.Max(maxIterations, 500);
 
         // --- PHASE 1: Complete all terrain generation first ---
         // This is fast and linear, but we profile it for completeness.
@@ -1122,17 +1142,31 @@ public class World : MonoBehaviour
             Vector3Int offset = VoxelData.FaceChecks[faceIndex];
             ChunkCoord neighborCoord = new ChunkCoord(coord.X + offset.x, coord.Z + offset.z);
 
+            // 1. // Is a generation job for this neighbor still running?
+            if (JobManager.generationJobs.ContainsKey(neighborCoord))
+            {
+                return false; // Neighbor data is not ready yet.
+            }
+
+            // 2. Is the chunk actually in memory and populated?
+            // If the chunk is missing (unloaded) or just a placeholder (not populated), we can't run lighting updates that depend on it.
             if (IsChunkInWorld(neighborCoord))
             {
-                // Is a generation job for this neighbor still running?
-                if (JobManager.generationJobs.ContainsKey(neighborCoord))
+                Vector2Int pos = new Vector2Int(neighborCoord.X * VoxelData.ChunkWidth, neighborCoord.Z * VoxelData.ChunkWidth);
+                if (worldData.Chunks.TryGetValue(pos, out ChunkData neighborData))
                 {
-                    return false; // Neighbor data is not ready yet.
+                    if (!neighborData.IsPopulated) return false;
+                }
+                else
+                {
+                    // Neighbor is valid in world bounds, but not loaded in memory.
+                    // We must wait for it to load to prevent "black wall" lighting artifacts.
+                    return false;
                 }
             }
         }
 
-        // If we get here, all neighbors have finished their data generation.
+        // All neighbors are present and generated.
         return true;
     }
 
@@ -1194,7 +1228,7 @@ public class World : MonoBehaviour
             while (queue.Count > 0)
             {
                 VoxelMod v = queue.Dequeue();
-                
+
                 // Calculate which chunk this mod belongs to
                 ChunkCoord targetCoord = GetChunkCoordFromVector3(v.GlobalPosition);
                 Vector2Int targetPos = new Vector2Int(targetCoord.X * VoxelData.ChunkWidth, targetCoord.Z * VoxelData.ChunkWidth);
@@ -1212,7 +1246,7 @@ public class World : MonoBehaviour
                 {
                     // Send to Persistent Manager
                     ModManager.AddPendingMod(targetCoord, v);
-                    continue; 
+                    continue;
                 }
 
                 // --- 2. Check Placement Rules ---
@@ -1385,7 +1419,7 @@ public class World : MonoBehaviour
         // Guard Chunk Unloading
         // If Persistence is disabled, we intentionally keep ALL chunks in memory.
         if (!settings.EnablePersistence) return;
-        
+
         List<ChunkCoord> chunksToRemove = new List<ChunkCoord>();
         int unloadDistance = settings.loadDistance + 2; // Buffer to prevent flickering
 
@@ -1959,7 +1993,7 @@ public class Settings
     [Header("Save System")]
 #if UNITY_EDITOR
     [Tooltip("If true: Chunks are never unloaded and saving/loading is disabled. Use this to verify generation without disk I/O side effects.\nIf false: Standard behavior (Chunk Unloading + Disk Persistence).")]
-    public bool keepChunksInMemory = false; 
+    public bool keepChunksInMemory = false;
 #endif
 
     [Tooltip("If true and running in Editor, saves will be stored in a temporary folder to keep production saves clean.")]
@@ -1967,7 +2001,7 @@ public class Settings
 
     [Tooltip("The compression algorithm used for saving chunks. 'None' is faster but uses more disk space.")]
     public CompressionAlgorithm saveCompression = CompressionAlgorithm.GZip;
-    
+
     /// <summary>
     /// Returns true if the game should behave normally (Save/Load/Unload).
     /// Returns false if the game is in Editor Debug Mode (Keep everything in RAM, no Disk I/O).
