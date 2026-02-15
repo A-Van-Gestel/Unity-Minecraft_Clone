@@ -157,19 +157,21 @@ namespace Data
                 }
             }
         }
-        
+
         /// <summary>
         /// Populates this ChunkData instance with data from a loaded save file.
         /// </summary>
         public void PopulateFromSave(ChunkData loadedData)
         {
+            Debug.Log($"[PopulateFromSave] Starting for chunk {position}");
+
             heightMap = loadedData.heightMap;
             sections = loadedData.sections;
-            
+
             // Copy Queues
             // We move the queues from the loaded object (temp) to this object (live)
-            foreach(var node in loadedData.SunlightBfsQueue) AddToSunLightQueue(node.Position, node.OldLightLevel);
-            foreach(var node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel);
+            foreach (var node in loadedData.SunlightBfsQueue) AddToSunLightQueue(node.Position, node.OldLightLevel);
+            foreach (var node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel);
 
             // If loaded data had flags, transfer them
             if (loadedData.HasLightChangesToProcess) HasLightChangesToProcess = true;
@@ -179,13 +181,13 @@ namespace Data
             // Recalculate counts
             if (World.Instance != null)
             {
-                foreach (var section in sections) 
+                foreach (var section in sections)
                     section?.RecalculateCounts(World.Instance.blockTypes);
             }
 
             IsPopulated = true;
-            
-            // Note: We don't copy position/x/y as they should match.
+
+            Debug.Log($"[PopulateFromSave] Completed for chunk {position}");
         }
 
         #endregion

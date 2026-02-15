@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Text;
 using Data;
@@ -32,37 +31,16 @@ namespace Serialization
         public static int Serialize(ChunkData data, byte[] outputBuffer, CompressionAlgorithm algorithm)
         {
             // Write to the pre-allocated buffer
-            using var memoryStream = new MemoryStream(outputBuffer);
+            using MemoryStream memoryStream = new MemoryStream(outputBuffer);
 
-            switch (algorithm)
+            // Create wrapper. leaveOpen=true allows us to check position after flush.
+            using (Stream compressionStream = CompressionFactory.CreateOutputStream(memoryStream, algorithm, leaveOpen: true))
             {
-                case CompressionAlgorithm.GZip:
-                    // DeflateStream (GZip style)
-                    using (var compressionStream = new DeflateStream(memoryStream, CompressionMode.Compress, true))
-                    using (var writer = new BinaryWriter(compressionStream))
-                    {
-                        WriteChunkInternal(writer, data);
-                        writer.Flush();
-                    }
-
-                    break;
-
-                case CompressionAlgorithm.None:
-                    // Raw writes
-                    using (var writer = new BinaryWriter(memoryStream, Encoding.UTF8, true))
-                    {
-                        WriteChunkInternal(writer, data);
-                        writer.Flush();
-                    }
-
-                    break;
-
-                // TODO: Future implementation for LZ4:
-                // case CompressionAlgorithm.LZ4: ...
-
-                default:
-                    Debug.LogError($"Unsupported compression algorithm for serialization: {algorithm}");
-                    return 0;
+                // Use UTF8 and leaveOpen=true for the writer too.
+                using (BinaryWriter writer = new BinaryWriter(compressionStream, Encoding.UTF8, true))
+                {
+                    WriteChunkInternal(writer, data);
+                }
             }
 
             return (int)memoryStream.Position;
@@ -80,40 +58,32 @@ namespace Serialization
                 fixed (byte* ptr = data)
                 {
                     using var unmanagedStream = new UnmanagedMemoryStream(ptr, data.Length);
-
-                    // Set up the reader stream based on compression type
-                    Stream readStream = unmanagedStream;
                     Stream decompressionStream = null; // Helper to dispose if created
 
                     try
                     {
-                        switch (algorithm)
-                        {
-                            case CompressionAlgorithm.GZip:
-                                decompressionStream = new DeflateStream(unmanagedStream, CompressionMode.Decompress);
-                                readStream = decompressionStream;
-                                break;
+                        // Explicit leaveOpen=true because we manage the unmanagedStream lifecycle here
+                        decompressionStream = CompressionFactory.CreateInputStream(unmanagedStream, algorithm, leaveOpen: true);
 
-                            case CompressionAlgorithm.None:
-                                // readStream is already unmanagedStream
-                                break;
+                        // Explicitly tell BinaryReader NOT to close the stream (leaveOpen: true).
+                        // This makes the intent clear: "The finally block owns the stream disposal."
+                        using var reader = new BinaryReader(decompressionStream, Encoding.UTF8, leaveOpen: true);
 
-                            default:
-                                Debug.LogError($"Unsupported compression algorithm for deserialization: {algorithm}");
-                                return null;
-                        }
-
-                        using var reader = new BinaryReader(readStream);
                         return ReadChunkInternal(reader, debugCoord, data.Length);
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"Chunk {debugCoord} deserialization failed ({algorithm}). Payload: {data.Length} bytes. Error: {ex.GetType().Name} - {ex.Message}");
+                        Debug.LogWarning($"[Deserialize] Chunk {debugCoord} deserialization failed ({algorithm}). Payload: {data.Length} bytes. Error: {ex.GetType().Name} - {ex.Message}");
                         return null;
                     }
                     finally
                     {
-                        decompressionStream?.Dispose();
+                        // Clean up the wrapper. 
+                        // If it's 'None', it equals unmanagedStream (which is disposed by 'using' above), so we check equality.
+                        if (decompressionStream != null && decompressionStream != unmanagedStream)
+                        {
+                            decompressionStream.Dispose();
+                        }
                     }
                 }
             }
@@ -126,7 +96,7 @@ namespace Serialization
             writer.Write(CURRENT_CHUNK_VERSION);
             writer.Write(data.position.x);
             writer.Write(data.position.y); // Z coordinate (Vector2Int.y)
-            
+
             // --- State Flags ---
             writer.Write(data.NeedsInitialLighting);
 
@@ -165,10 +135,7 @@ namespace Serialization
         // --- Internal Read Logic ---
         private static ChunkData ReadChunkInternal(BinaryReader reader, Vector2Int coord, int totalLen)
         {
-            // Diagnostics for debugging stream position
-            long startPos = reader.BaseStream.CanSeek ? reader.BaseStream.Position : 0;
-
-            try 
+            try
             {
                 // --- Chunk Header ---
                 // Safety check: Don't try to load chunks from the future.
@@ -178,13 +145,13 @@ namespace Serialization
 
                 int x = reader.ReadInt32();
                 int z = reader.ReadInt32();
-                
+
                 // Sanity check coordinates
                 if (x != coord.x || z != coord.y)
-                    Debug.LogWarning($"Chunk coord mismatch at {coord}. Read: {x},{z}");
+                    Debug.LogWarning($"[ReadChunkInternal] Chunk coord mismatch at {coord}. Read: {x},{z}");
 
                 ChunkData chunk = new ChunkData(x, z);
-                
+
                 // --- State Flags ---
                 chunk.NeedsInitialLighting = reader.ReadBoolean();
 
@@ -217,7 +184,7 @@ namespace Serialization
             catch (Exception)
             {
                 long curr = reader.BaseStream.CanSeek ? reader.BaseStream.Position : -1;
-                Debug.LogError($"Deserialize Crash at stream pos {curr}. Expected Payload Size: {totalLen}");
+                Debug.LogError($"[ReadChunkInternal] Deserialize Crash at stream pos {curr}. Expected Payload Size: {totalLen}");
                 throw;
             }
         }
@@ -243,7 +210,7 @@ namespace Serialization
         {
             int count = reader.ReadInt32();
             // Sanity check to prevent OOM on corrupt data
-            if (count < 0 || count > 100000) 
+            if (count < 0 || count > 100_000)
                 throw new InvalidDataException($"Invalid LightQueue count: {count}");
 
             for (int i = 0; i < count; i++)
@@ -275,6 +242,7 @@ namespace Serialization
                 throw new InvalidDataException($"Section voxel array corrupted. Size: {section.voxels.Length}");
             }
 
+            // Fast unsafe write
             ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(section.voxels.AsSpan());
             writer.Write(bytes);
         }

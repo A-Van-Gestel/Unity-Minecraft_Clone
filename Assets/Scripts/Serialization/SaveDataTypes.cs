@@ -6,10 +6,10 @@ namespace Serialization
 {
     public enum CompressionAlgorithm : byte
     {
+        None = 0,
         GZip = 1,
-        Zlib = 2, // Unused currently
-        None = 3,
-        LZ4 = 4 // Reserved for future use
+        LZ4 = 2,
+        // Zlib = 3, // Reserved for future use (e.g. Zstd)
     }
 
     [Serializable]

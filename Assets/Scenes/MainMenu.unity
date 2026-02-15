@@ -1263,6 +1263,10 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 0}
     - target: {fileID: 3906736226576854914, guid: 695da9ed50d482e4e99c89b07e8ed067, type: 3}
+      propertyPath: m_CharacterLimit
+      value: 24
+      objectReference: {fileID: 0}
+    - target: {fileID: 3906736226576854914, guid: 695da9ed50d482e4e99c89b07e8ed067, type: 3}
       propertyPath: m_OnValueChanged.m_PersistentCalls.m_Calls.Array.size
       value: 0
       objectReference: {fileID: 0}

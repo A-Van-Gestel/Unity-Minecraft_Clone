@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Data;
 using Data.JobData;
 using Data.NativeData;
@@ -135,6 +136,9 @@ public class World : MonoBehaviour
     /// </summary>
     private bool _isWorldLoaded = false;
 
+    // --- Cancellation Token for Async Saves ---
+    private CancellationTokenSource _shutdownTokenSource;
+
     #region Singleton pattern
 
     public static World Instance { get; private set; }
@@ -158,6 +162,11 @@ public class World : MonoBehaviour
         PrepareJobData();
     }
 
+    private void OnEnable()
+    {
+        _shutdownTokenSource = new CancellationTokenSource();
+    }
+
 
     /// Ensures global state (Inventory, Pending Mods) is saved when closing.
     private void OnApplicationQuit()
@@ -165,8 +174,37 @@ public class World : MonoBehaviour
         // Only save if the world successfully loaded AND persistence is allowed.
         if (_isWorldLoaded && settings.EnablePersistence)
         {
+            Debug.Log("[OnApplicationQuit] Game Quitting... Saving World.");
+
+            // 1. Cancel any pending async saves to prevent thread conflicts
+            _shutdownTokenSource?.Cancel();
+
+            // 2. Brief delay to let cancellation propagate (Fixes Race Condition)
+            //    This allows background threads to hit the "if (cancelled) return" check
+            //    before we start locking files on the main thread.
+            Thread.Sleep(100);
+
+            Debug.Log($"[OnApplicationQuit] Total chunks in world: {worldData.Chunks.Count}");
+            Debug.Log($"[OnApplicationQuit] Chunks marked as modified: {worldData.ModifiedChunks.Count}");
+
+            // 3. Save all active/modified chunks SYNCHRONOUSLY.
+            SaveAllModifiedChunks(true);
+
+            // 4. Save Metadata and Pending Queues
             SaveSystem.SaveWorld(this);
+
+            // 5. Flush and Close Storage
+            // This ensures all FileStreams write their buffers to the physical disk.
+            if (StorageManager != null)
+            {
+                StorageManager.Dispose();
+                Debug.Log("[OnApplicationQuit] Storage Manager disposed and flushed.");
+            }
+
+            Debug.Log("[OnApplicationQuit] World saved successfully.");
         }
+
+        _shutdownTokenSource?.Dispose();
     }
 
     #endregion
@@ -208,6 +246,21 @@ public class World : MonoBehaviour
 
         // 3. Dispose of fluid vertex templates.
         FluidVertexTemplates.Dispose();
+
+        // --- Save system ---
+        // Ensure storage is flushed even if OnApplicationQuit didn't run
+        if (StorageManager != null)
+        {
+            StorageManager.Dispose();
+            Debug.Log("[World] Storage Manager disposed in OnDestroy.");
+        }
+
+        // Cleanup world data
+        if (worldData != null)
+        {
+            worldData.Chunks.Clear();
+            worldData.ModifiedChunks.Clear();
+        }
     }
 
     private void Start()
@@ -220,10 +273,7 @@ public class World : MonoBehaviour
         Debug.Log("--- Initializing World ---");
 
         // --- Fetch needed components ---
-        // Get player transform component
         _playerTransform = player.GetComponent<Transform>();
-
-        // Get main camera.
         _playerCamera = Camera.main!;
 
         // --- Load / Create Settings ---
@@ -261,6 +311,10 @@ public class World : MonoBehaviour
         int seed = WorldLaunchState.Seed;
         bool isNewGame = WorldLaunchState.IsNewGame;
 
+        // Set static seed IMMEDIATELY
+        // This MUST happen before we create WorldData or schedule any jobs.
+        VoxelData.Seed = seed;
+
         Debug.Log($"Launching World: {worldName} (Seed: {seed}, New: {isNewGame})");
 
         worldData = new WorldData(worldName, seed);
@@ -283,8 +337,7 @@ public class World : MonoBehaviour
             if (metadata != null)
             {
                 SaveSystem.LoadWorldGameState(this, metadata);
-                // Update internal seed from save
-                VoxelData.Seed = metadata.seed;
+                VoxelData.Seed = metadata.seed; // Re-affirm seed from save just in case
                 worldData.seed = metadata.seed;
             }
         }
@@ -460,6 +513,8 @@ public class World : MonoBehaviour
             ChunkData loaded = await StorageManager.LoadChunkAsync(pos);
             if (loaded != null)
             {
+                Debug.Log($"[LoadOrGenerateChunk] Chunk {coord} loaded successfully, calling PopulateFromSave");
+
                 // Hydrate the placeholder
                 data.PopulateFromSave(loaded);
                 data.Chunk?.OnDataPopulated();
@@ -467,6 +522,7 @@ public class World : MonoBehaviour
                 // Apply Pending Mods (Trees, etc that spilled over)
                 if (ModManager.TryGetModsForChunk(coord, out List<VoxelMod> pendingMods))
                 {
+                    Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {coord}");
                     foreach (var mod in pendingMods)
                     {
                         // Apply directly to data (fast)
@@ -477,9 +533,11 @@ public class World : MonoBehaviour
                     }
                 }
 
-                // Apply Pending Light Updates
+                // Restore lighting queues
                 if (LightingStateManager.TryGetAndRemove(coord, out HashSet<Vector2Int> localCols))
                 {
+                    Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {coord}");
+
                     HashSet<Vector2Int> globalCols = new HashSet<Vector2Int>();
                     foreach (var lCol in localCols)
                     {
@@ -492,19 +550,16 @@ public class World : MonoBehaviour
                         worldData.SunlightRecalculationQueue[pos] = globalCols;
 
                     data.HasLightChangesToProcess = true;
-
-                    Debug.Log($"[LIGHTING RESTORE] Restored {localCols.Count} pending sunlight columns for chunk {coord}");
                 }
 
-                // Process Initial Lighting Immediately 
-                // If the chunk was saved before initial lighting finished, we must trigger it now.
+                // Check for initial lighting needs
                 if (data.NeedsInitialLighting)
                 {
-                    Debug.LogWarning($"[LOAD] Chunk {coord} loaded with NeedsInitialLighting=true. Checking neighbors...");
+                    Debug.Log($"[LoadOrGenerateChunk] Chunk {coord} needs initial lighting. Checking neighbors...");
 
                     if (AreNeighborsDataReady(coord))
                     {
-                        Debug.Log($"[LOAD] Neighbors ready - triggering initial lighting immediately for {coord}");
+                        Debug.Log($"[LoadOrGenerateChunk] Neighbors ready - triggering lighting for {coord}");
 
                         // 1. Fill the queue (RecalculateSunLightLight populates the queues in data)
                         data.RecalculateSunLightLight();
@@ -524,13 +579,14 @@ public class World : MonoBehaviour
                     }
                     else
                     {
-                        Debug.Log($"[LOAD] Neighbors not ready for {coord}. Lighting deferred to Update loop.");
-                        // The flag remains TRUE, so the Update() loop will catch it later when neighbors are ready.
+                        Debug.Log($"[LoadOrGenerateChunk] Neighbors not ready - deferring lighting for {coord}");
                     }
                 }
 
                 return;
             }
+
+            Debug.Log($"[LoadOrGenerateChunk] Chunk {coord} not on disk, scheduling generation");
         }
 
         // 2. Not on disk (or Persistence disabled) -> Generate
@@ -1538,7 +1594,8 @@ public class World : MonoBehaviour
             // 2. Save if modified
             if (worldData.ModifiedChunks.Contains(data))
             {
-                _ = StorageManager.SaveChunkAsync(data);
+                // Pass the CancellationToken so this save can be aborted on Quit
+                _ = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
                 worldData.ModifiedChunks.Remove(data);
             }
 
@@ -2006,10 +2063,44 @@ public class World : MonoBehaviour
         debugScreen.SetActive(!debugScreen.activeSelf);
     }
 
+    /// <summary>
+    /// Saves all chunks currently marked as modified.
+    /// </summary>
+    /// <param name="synchronous">
+    /// If true, saves immediately on the main thread (CRITICAL for OnApplicationQuit).
+    /// If false, schedules background tasks (Good for Auto-Save/Manual Save).
+    /// </param>
+    private void SaveAllModifiedChunks(bool synchronous)
+    {
+        if (worldData.ModifiedChunks.Count == 0) return;
+
+        // Snapshot the list to avoid collection modification errors
+        var chunksToSave = new List<ChunkData>(worldData.ModifiedChunks);
+        worldData.ModifiedChunks.Clear();
+
+        Debug.Log($"Saving {chunksToSave.Count} modified chunks (Sync: {synchronous})...");
+
+        foreach (ChunkData data in chunksToSave)
+        {
+            if (synchronous)
+            {
+                StorageManager.SaveChunk(data); // Sync method
+            }
+            else
+            {
+                // Pass the token so manual saves don't keep running if we suddenly quit
+                _ = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
+            }
+        }
+    }
+
     public void SaveWorldData()
     {
+        // For manual/auto saves, use Async to prevent freezing the game
+        SaveAllModifiedChunks(false);
+
         SaveSystem.SaveWorld(Instance);
-        Debug.Log("World data saved via keypress.");
+        Debug.Log("[Manual Save] World data saved successfully.");
     }
 
     public void CycleVisualizationMode()
@@ -2082,7 +2173,7 @@ public class Settings
     public bool enableVolatileSaveData = true;
 
     [Tooltip("The compression algorithm used for saving chunks. 'None' is faster but uses more disk space.")]
-    public CompressionAlgorithm saveCompression = CompressionAlgorithm.GZip;
+    public CompressionAlgorithm saveCompression = CompressionAlgorithm.LZ4;
 
     /// <summary>
     /// Returns true if the game should behave normally (Save/Load/Unload).

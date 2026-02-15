@@ -98,7 +98,7 @@ namespace Serialization
                     int sectorOffset = (offsetData >> 8) & 0xFFFFFF;
                     long filePosition = (long)sectorOffset * SECTOR_SIZE;
 
-                    if (filePosition >= _fileStream.Length) 
+                    if (filePosition >= _fileStream.Length)
                     {
                         // File truncated or corrupt header
                         return (null, CompressionAlgorithm.GZip);
@@ -286,7 +286,22 @@ namespace Serialization
         {
             lock (_fileLock)
             {
-                _fileStream?.Dispose();
+                if (_fileStream != null)
+                {
+                    try
+                    {
+                        // Force all buffered data to disk BEFORE closing
+                        _fileStream.Flush(flushToDisk: true); // Force write to disk
+                        _fileStream.Dispose(); // Close handle
+                        _fileStream = null;
+
+                        Debug.Log($"[RegionFile] Flushed and closed: {Path.GetFileName(_filePath)}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"[RegionFile] Error disposing {_filePath}: {ex.Message}");
+                    }
+                }
             }
         }
     }

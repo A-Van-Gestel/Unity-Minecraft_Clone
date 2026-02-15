@@ -92,18 +92,27 @@ namespace Data
             Chunks.Add(chunkVector2Coord, new ChunkData(chunkVector2Coord));
         }
 
-        // This method is called by a modification that needs a chunk which may not exist yet.
-        // We can't populate it here, but we can make sure the placeholder exists so the mod can be queued.
-        public void EnsureChunkExists(Vector3 worldPos)
+
+        /// <summary>
+        /// This method is called by a modification that needs a chunk which may not exist yet.
+        /// We can't populate it here, but we can make sure the placeholder exists so the mod can be queued.
+        /// </summary>
+        /// <param name="worldPos">The world position</param>
+        /// <returns>Boolean representing if chunk already existed (TRUE), or if a placeholder was created (FALSE) or outside the world (FALSE)</returns>
+        public bool EnsureChunkExists(Vector3 worldPos)
         {
-            if (!IsVoxelInWorld(worldPos)) return;
+            // Outside the world, nothing to do.
+            if (!IsVoxelInWorld(worldPos)) return false;
+
             Vector2Int chunkCoord = GetChunkCoordFor(worldPos);
             if (!Chunks.ContainsKey(chunkCoord))
             {
-                // Create the placeholder and schedule its generation
+                // Create the placeholder
                 Chunks.Add(chunkCoord, new ChunkData(chunkCoord));
-                World.Instance.JobManager.ScheduleGeneration(new ChunkCoord(worldPos));
+                return false;
             }
+
+            return true;
         }
 
         /// Returns the global chunk coordinates for a given world position

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Data;
 using Serialization.Migration;
@@ -10,7 +11,6 @@ namespace Serialization
 {
     public class ChunkStorageManager
     {
-        // ... existing code ...
         private readonly string _saveFolderPath;
 
         // Concurrent Dictionary with Lazy to ensure thread-safe, single initialization of RegionFiles
@@ -45,41 +45,95 @@ namespace Serialization
 
                 // Now receiving tuple containing raw bytes and algorithm used
                 var (data, algorithm) = region.LoadChunkData(lx, lz);
-
-                if (data == null) return null;
+                if (data == null)
+                {
+                    Debug.Log($"[LoadChunkAsync] Chunk {chunkCoord} not on disk -> Will be generated");
+                    return null;
+                }
 
                 // Deserialize (Expensive CPU, kept on background thread)
-                return ChunkSerializer.Deserialize(data, algorithm, chunkCoord);
+                var chunk = ChunkSerializer.Deserialize(data, algorithm, chunkCoord);
+
+                if (data == null)
+                {
+                    Debug.LogWarning($"[LoadChunkAsync] Chunk {chunkCoord} deserialization failed -> Will be (re-)generated");
+
+                    return null;
+                }
+
+                return chunk;
             });
         }
 
         /// <summary>
+        /// Synchronous version of SaveChunk. 
+        /// </summary>
+        public void SaveChunk(ChunkData data)
+        {
+            CompressionAlgorithm algorithm = World.Instance.settings.saveCompression;
+
+            // Get buffer from pool to avoid GC allocation on main thread
+            byte[] buffer = SerializationBufferPool.Get();
+            try
+            {
+                // Serialize
+                int length = ChunkSerializer.Serialize(data, buffer, algorithm);
+                if (length <= 0)
+                {
+                    Debug.LogWarning($"[SaveChunk] Chunk {data.position} serialization returned 0 bytes");
+                    return;
+                }
+
+                // Write to Region
+                Vector2Int coord = data.position;
+                RegionFile region = GetRegion(GetRegionCoord(coord));
+
+                int lx = coord.x % 32;
+                int lz = coord.y % 32;
+                if (lx < 0) lx += 32;
+                if (lz < 0) lz += 32;
+
+                region.SaveChunkData(lx, lz, buffer, length, algorithm);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[SaveChunk] Failed to save chunk {data.position}: {e.Message}");
+            }
+            finally
+            {
+                SerializationBufferPool.Return(buffer);
+            }
+        }
+
+        /// <summary>
         /// Saves a chunk asynchronously.
+        /// Includes CancellationToken support to safely abort if the game quits mid-operation.
         /// Returns a Task so the caller can await completion or catch errors if needed.
         /// </summary>
-        public async Task SaveChunkAsync(ChunkData data)
+        public async Task SaveChunkAsync(ChunkData data, CancellationToken cancellationToken = default)
         {
             // 1. Get Preferred Algorithm from Global Settings
             CompressionAlgorithm algorithm = World.Instance.settings.saveCompression;
 
-            // 2. Serialize using that algorithm
+            // 2. Get Buffer
             byte[] buffer = SerializationBufferPool.Get();
-            int length = ChunkSerializer.Serialize(data, buffer, algorithm);
-            
-            if (length <= 0) 
-            {
-                SerializationBufferPool.Return(buffer);
-                Debug.LogError($"Serialization failed for chunk {data.position} (Length 0)");
-                return;
-            }
 
-            Vector2Int coord = data.position;
-
-            // 3. Offload Write to Disk
-            await Task.Run(() =>
+            try
             {
-                try
+                // Check token before expensive work
+                if (cancellationToken.IsCancellationRequested) return;
+
+                // 2. Offload to Thread Pool
+                await Task.Run(() =>
                 {
+                    // Serialize
+                    int length = ChunkSerializer.Serialize(data, buffer, algorithm);
+
+                    // Check token again before disk write to prevent writing partial/cancelled state
+                    if (length <= 0 || cancellationToken.IsCancellationRequested) return;
+
+                    // Write
+                    Vector2Int coord = data.position;
                     RegionFile region = GetRegion(GetRegionCoord(coord));
 
                     int lx = coord.x % 32;
@@ -88,22 +142,26 @@ namespace Serialization
                     if (lz < 0) lz += 32;
 
                     region.SaveChunkData(lx, lz, buffer, length, algorithm);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"Failed to save chunk {coord}: {e.Message}");
-                }
-                finally
-                {
-                    // Return buffer to pool
-                    SerializationBufferPool.Return(buffer);
-                }
-            });
+                }, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during quit - safe to ignore
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[SaveChunkAsync] Failed to save chunk {data.position}: {e.Message}");
+            }
+            finally
+            {
+                // Always return the buffer to the pool
+                SerializationBufferPool.Return(buffer);
+            }
         }
 
         public void RunMigration(WorldMigration migration)
         {
-            Debug.Log($"Starting Migration: {migration.Description} (v{migration.SourceVersion} -> v{migration.TargetVersion})");
+            Debug.Log($"[RunMigration] Starting Migration: {migration.Description} (v{migration.SourceVersion} -> v{migration.TargetVersion})");
 
             // 4. Migrate Region Files (Chunks)
             string[] regionFiles = Directory.GetFiles(_saveFolderPath, "r.*.*.bin");
@@ -137,17 +195,17 @@ namespace Serialization
                         }
                         catch (Exception e)
                         {
-                            Debug.LogError($"Failed to migrate chunk inside {Path.GetFileName(regionPath)} at {localCoord}: {e.Message}");
+                            Debug.LogError($"[RunMigration] Failed to migrate chunk inside {Path.GetFileName(regionPath)} at {localCoord}: {e.Message}");
                         }
                     }
                 }
                 catch (Exception e)
                 {
-                    Debug.LogError($"Failed to process region file {regionPath} for migration: {e.Message}");
+                    Debug.LogError($"[RunMigration] Failed to process region file {regionPath} for migration: {e.Message}");
                 }
             }
 
-            Debug.Log($"Migration {migration.SourceVersion} -> {migration.TargetVersion} complete.");
+            Debug.Log($"[RunMigration] Migration {migration.SourceVersion} -> {migration.TargetVersion} complete.");
         }
 
         private RegionFile GetRegion(Vector2Int regionCoord)
@@ -171,16 +229,19 @@ namespace Serialization
 
         public void Dispose()
         {
+            Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
+
             foreach (var lazyRegion in _regions.Values)
             {
                 // Only dispose if the file was actually opened
                 if (lazyRegion.IsValueCreated)
                 {
-                    lazyRegion.Value.Dispose();
+                    lazyRegion.Value.Dispose(); // This calls RegionFile.Dispose()
                 }
             }
 
             _regions.Clear();
+            Debug.Log("[ChunkStorageManager] All regions disposed.");
         }
     }
 }
