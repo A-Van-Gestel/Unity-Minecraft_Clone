@@ -1,7 +1,7 @@
 ﻿# Design Document: Infinite World Storage & Serialization Architecture
 
-**Version:** 1.5  
-**Date:** 2026-02-14  
+**Version:** 1.6
+**Date:** 2026-02-15
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.3 (Mono Backend)
 
@@ -14,7 +14,7 @@ The core of this transition involves:
 1. **Data Structure Migration:** Replacing the fixed `Chunk[,]` array with a dynamic Coordinate-Map system.
 2. **Region-Based Storage:** Implementing a file format inspired by Minecraft's Anvil format to group chunks ($32\times32$) into single files.
 3. **Global State Persistence:** Saving player inventory, capabilities (flying/noclip), and pending voxel modifications/lighting updates that target unloaded chunks.
-4. **Custom Binary Serialization:** Abandoning `BinaryFormatter` for a high-performance, versioned binary writer/reader.
+4. **Custom Binary Serialization:** Abandoning `BinaryFormatter` for a high-performance, versioned binary writer/reader with **LZ4 Compression**.
 5. **Asynchronous I/O Pipeline:** Ensuring saving and loading never stalls the Main Thread.
 6. **Lighting State Preservation:** Critical system to prevent "black spots" by preserving lighting calculation state across save/load cycles.
 
@@ -38,11 +38,13 @@ The core of this transition involves:
 A subsystem responsible for the lifecycle of chunk data across memory, disk, and generation.
 
 **Lifecycle Flow:**
+
 1. **Memory Check:** `WorldData.Chunks.TryGetValue(coord)` - instant return if loaded.
 2. **Disk Check:** `ChunkStorageManager.LoadChunkAsync(coord)` - async load from region file.
 3. **Generation:** `WorldJobManager.ScheduleGeneration(coord)` - creates new chunk if not found.
 
 **Implementation Details:**
+
 * Uses `ConcurrentDictionary<Vector2Int, Lazy<RegionFile>>` for thread-safe region file access.
 * Region files are opened lazily and cached for the session.
 * All disk I/O happens on background threads via `Task.Run()`.
@@ -71,6 +73,7 @@ Three separate managers handle state that exists outside individual chunk blobs:
 **File:** `pending_mods.bin`  
 **Location:** `Assets/Scripts/Serialization/ModificationManager.cs`  
 **Key Methods:**
+
 * `AddPendingMod(ChunkCoord, VoxelMod)` - Queue modification for unloaded chunk
 * `TryGetModsForChunk(ChunkCoord, out List<VoxelMod>)` - Retrieve and remove pending mods on load
 
@@ -85,6 +88,7 @@ Three separate managers handle state that exists outside individual chunk blobs:
 **Saves:** Columns from `WorldData.SunlightRecalculationQueue` that belong to unloaded chunks.
 
 **Key Methods:**
+
 * `AddPending(ChunkCoord, HashSet<Vector2Int>)` - Save pending sunlight columns for a chunk
 * `TryGetAndRemove(ChunkCoord, out HashSet<Vector2Int>)` - Restore pending columns on load
 
@@ -92,6 +96,7 @@ Three separate managers handle state that exists outside individual chunk blobs:
 This manager stores *local* column coordinates (0-15), not global positions. This reduces file size and makes data portable if chunk coordinates shift.
 
 **Restoration Flow:**
+
 1. Chunk loads from disk via `LoadChunkAsync()`
 2. `World.LoadOrGenerateChunk()` checks `LightingStateManager`
 3. If pending columns exist, they're converted to global coordinates and re-injected into `WorldData.SunlightRecalculationQueue`
@@ -127,32 +132,44 @@ Without this manager, chunks unloaded during lighting propagation would permanen
 
 ### 3.2. File Structure (Binary)
 
-| Byte Offset     | Size | Description                                                                 |
-|:----------------|:-----|:----------------------------------------------------------------------------|
+| Byte Offset     | Size | Description                                                                                      |
+|:----------------|:-----|:-------------------------------------------------------------------------------------------------|
 | **0 - 4095**    | 4KB  | **Location Table:** 1024 entries (uint: offset, ushort: length, byte: algorithm, byte: reserved) |
-| **4096 - 8191** | 4KB  | **Timestamp Table:** 1024 long entries (DateTime.Ticks)                     |
-| **8192...**     | Var  | **Chunk Data Payload:** Compressed binary blobs                             |
+| **4096 - 8191** | 4KB  | **Timestamp Table:** 1024 long entries (DateTime.Ticks)                                          |
+| **8192...**     | Var  | **Chunk Data Payload:** Compressed binary blobs                                                  |
 
 **Implementation Detail:**  
 Each location table entry is 8 bytes:
+
 * 4 bytes: Offset to chunk data in file
 * 2 bytes: Compressed data length
-* 1 byte: Compression algorithm (0=None, 1=GZip, future: 2=LZ4)
+* 1 byte: Compression algorithm (0=None, 1=GZip, 2=LZ4)
 * 1 byte: Reserved for future use
 
 **File Location:** `Assets/Scripts/Serialization/RegionFile.cs`
 
 ### 3.3. Compression Support
 
-**Current:** Supports `None` and `GZip` compression  
-**Future:** LZ4 support planned for better performance
+**Architecture:** Abstraction via `CompressionFactory` to support multiple algorithms transparently.
 
-**Configuration:** Global setting in `WorldSettings.saveCompression`
+* **Factory:** `Assets/Scripts/Serialization/CompressionFactory.cs`
+* **Default:** **LZ4** (High performance)
+* **Supported Algorithms:**
+    * `None (0)`: Raw bytes. Useful for debugging size overhead.
+    * `GZip (1)`: High compression ratio, slower speed. Uses .NET `DeflateStream`.
+    * `LZ4 (2)`: Low compression ratio, extreme speed. Uses `NativeCompressions` library (Native C++ bindings).
 
-**Performance Note:**
-* `None`: ~4ms save/load per chunk, larger files (~200KB per chunk)
-* `GZip`: ~8ms save/load per chunk, smaller files (~50KB per chunk)
-* Recommendation: Use `GZip` for production, `None` for debugging
+**Implementation Details:**
+
+* The Region File Header stores the algorithm ID for each chunk individually.
+* This allows mixing compression types within the same world (e.g., migrating from GZip to LZ4 incrementally).
+* `ChunkSerializer` requests a stream from `CompressionFactory`, which handles the wrapping (and disposal) of the underlying compression stream.
+* **Safety:** `CompressionFactory` includes a robust `IsLZ4Available` check to fallback to GZip if the native DLL is missing, preventing data loss.
+
+**Performance Profile (LZ4):**
+
+* **Save Time:** ~0.15ms per chunk (vs ~4ms GZip)
+* **Load Time:** ~0.2ms per chunk (vs ~3ms GZip)
 
 ### 3.4. Cubic Chunks Compatibility
 
@@ -182,19 +199,37 @@ JSON file at save folder root containing world metadata and player state.
     "TimeOfDay": 0.5
   },
   "Player": {
-    "Position": { "x": 10.5, "y": 70.0, "z": -5.5 },
-    "Rotation": { "x": 0.0, "y": 90.0, "z": 0.0 },
+    "Position": {
+      "x": 10.5,
+      "y": 70.0,
+      "z": -5.5
+    },
+    "Rotation": {
+      "x": 0.0,
+      "y": 90.0,
+      "z": 0.0
+    },
     "Capabilities": {
       "IsFlying": false,
       "IsNoclipping": false
     },
     "Inventory": [
-      { "Slot": 0, "ID": 14, "Count": 64 },
-      { "Slot": 1, "ID": 3, "Count": 12 }
+      {
+        "Slot": 0,
+        "ID": 14,
+        "Count": 64
+      },
+      {
+        "Slot": 1,
+        "ID": 3,
+        "Count": 12
+      }
     ],
     // Null if empty
     "CursorItem": {
-      "ID": 5, "Count": 64, "OriginSlot": 2
+      "ID": 5,
+      "Count": 64,
+      "OriginSlot": 2
     }
   }
 }
@@ -263,6 +298,7 @@ JSON file at save folder root containing world metadata and player state.
 Binary file storing voxel modifications targeting unloaded chunks.
 
 **Structure:**
+
 ```
 int:  ChunkCount
 FOR EACH CHUNK:
@@ -287,6 +323,7 @@ FOR EACH CHUNK:
 Binary file storing columns that need sunlight recalculation.
 
 **Structure:**
+
 ```
 int:  ChunkCount
 FOR EACH CHUNK:
@@ -315,11 +352,13 @@ All disk I/O is asynchronous to prevent frame hitches.
 ### 5.1. The Save Pipeline
 
 **Trigger Points:**
+
 1. Chunk exits load distance (`World.UnloadChunks()`)
 2. Auto-save interval (configurable)
 3. World shutdown (`OnApplicationQuit()`)
 
 **Save Flow:**
+
 ```
 Main Thread                         Background Thread
 ─────────────────────────────────────────────────────────
@@ -348,6 +387,7 @@ Region files use `lock(this)` on write operations. Multiple chunks in different 
 **Trigger:** `World.LoadOrGenerateChunk()` determines chunk doesn't exist in memory
 
 **Load Flow:**
+
 ```
 Main Thread                         Background Thread
 ─────────────────────────────────────────────────────────
@@ -368,6 +408,7 @@ Main Thread                         Background Thread
 **Critical Restoration Steps:**
 
 **Step 9 - PopulateFromSave:**
+
 ```csharp
 // In ChunkData.cs
 public void PopulateFromSave(ChunkData loadedData)
@@ -393,6 +434,7 @@ public void PopulateFromSave(ChunkData loadedData)
 ```
 
 **Step 11 - Restore Lighting Queues:**
+
 ```csharp
 // In World.LoadOrGenerateChunk()
 if (LightingStateManager.TryGetAndRemove(coord, out HashSet<Vector2Int> localCols))
@@ -435,6 +477,7 @@ If a chunk unloads during states 1-4, critical data is lost, resulting in "black
 ### 6.2. The Solution: Multi-Layered State Tracking
 
 **Layer 1: Per-Chunk Flags (Transient)**
+
 ```csharp
 // In ChunkData.cs
 [NonSerialized]
@@ -448,6 +491,7 @@ public bool IsAwaitingMainThreadProcess = false; // Job done, waiting for apply
 ```
 
 **Layer 2: Per-Chunk Queues (Serialized)**
+
 ```csharp
 // In ChunkData.cs - These ARE saved to disk
 public Queue<LightQueueNode> SunlightBfsQueue;
@@ -455,6 +499,7 @@ public Queue<LightQueueNode> BlocklightBfsQueue;
 ```
 
 **Layer 3: Global Queue (LightingStateManager)**
+
 ```csharp
 // In WorldData.cs - NOT automatically saved
 public Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue;
@@ -606,6 +651,7 @@ Batching reduces what was previously 10,000+ individual save operations down to 
 With a world size limit (e.g., 100×100 chunks), chunks at boundaries (x=0, x=99, z=0, z=99) have fewer than 4 cardinal neighbors.
 
 **Standard Neighbor Check (Broken at Edges):**
+
 ```csharp
 // This fails for edge chunks
 bool AreNeighborsDataReady(ChunkCoord coord)
@@ -685,6 +731,7 @@ An edge chunk at (0, 50) only waits for North (0,51), South (0,49), and East (1,
 ### 8.1. Main Menu Flow
 
 **Implemented:**
+
 1. **Title Screen:** [Play] [Settings] [Quit]
 2. **World Selector:**
     * Scans `Application.persistentDataPath/Saves/`
@@ -697,11 +744,13 @@ An edge chunk at (0, 50) only waits for North (0,51), South (0,49), and East (1,
 ### 8.2. In-Game Saving
 
 **Auto-Save (To Implement):**
+
 * Interval: Configurable (default: 5 minutes)
 * Saves all modified chunks + global state
 * Non-blocking (async)
 
 **Manual Save:**
+
 * Currently: Automatic on world exit
 * Player Controlled: F4 quick-save hotkey
 
@@ -711,13 +760,13 @@ An edge chunk at (0, 50) only waits for North (0,51), South (0,49), and East (1,
 
 ### 9.1. Achieved Metrics
 
-| Operation | Target | Measured | Status |
-|-----------|--------|----------|--------|
-| Chunk Save (Main Thread) | < 1ms | ~0.3ms | ✅ |
-| Chunk Load (Async) | < 5ms | ~3ms | ✅ |
-| Lighting Restoration | < 2ms | ~1ms | ✅ |
-| Memory (Active Chunks) | < 1000 | ~500-800 | ✅ |
-| File Size (Per Chunk, GZip) | < 100KB | ~50KB | ✅ |
+| Operation                   | Target  | Measured | Status |
+|-----------------------------|---------|----------|--------|
+| Chunk Save (Main Thread)    | < 1ms   | ~0.3ms   | ✅      |
+| Chunk Load (Async)          | < 5ms   | ~3ms     | ✅      |
+| Lighting Restoration        | < 2ms   | ~1ms     | ✅      |
+| Memory (Active Chunks)      | < 1000  | ~500-800 | ✅      |
+| File Size (Per Chunk, GZip) | < 100KB | ~50KB    | ✅      |
 
 ### 9.2. Bottleneck Analysis
 
@@ -727,12 +776,10 @@ An edge chunk at (0, 50) only waits for North (0,51), South (0,49), and East (1,
 **Fix:**  
 Batching all updates for a single neighbor chunk into one `AddPending()` call reduced log spam by 99.5% and eliminated frame drops.
 
-**Current Bottleneck:**  
-GZip compression during save. Switching to LZ4 (future) should improve this by 2-3x.
-
 ### 9.3. Memory Management
 
 **Chunk Lifecycle:**
+
 1. **Generation:** ~2ms CPU, allocates ~20KB
 2. **Lighting:** ~3ms CPU, allocates ~10KB temporary buffers
 3. **Meshing:** ~5ms CPU, allocates mesh data
@@ -752,11 +799,13 @@ GZip compression during save. Switching to LZ4 (future) should improve this by 2
 **Symptom:** Chunks reloaded after rapid movement showed completely dark (light level 0) columns.
 
 **Root Cause:** Three separate issues:
+
 1. `NeedsInitialLighting` flag not preserved during `PopulateFromSave()`
 2. Global `SunlightRecalculationQueue` entries lost when chunks unloaded
 3. Cross-chunk light propagation dropped when target neighbor unloaded
 
 **Resolution:**
+
 1. Fixed `ChunkData.PopulateFromSave()` to copy all lighting flags
 2. Implemented `LightingStateManager` to persist global queue entries
 3. Added batched deferred updates in `ProcessLightingJobs()`
@@ -794,24 +843,43 @@ After: 1 message of `[LIGHTING] Saved updates for 1 unloaded chunks (16 columns)
 **Verification Needed:**  
 Load a world, fly to edge (0,0) or (99,99), verify no permanent dark strips.
 
+### 10.4. Chunk Regeneration on Reload (Data Loss) ✅ RESOLVED
+
+**Symptom:** Modifications (e.g., player building) in the initial starting area were lost after quitting and reloading. The chunks appeared to regenerate from seed.
+
+**Root Cause:**
+
+1. **Race Condition:** `EnsureChunkExists` in `WorldData` was implicitly scheduling a Generation Job. In `StartWorld`, this job raced against the async `LoadChunk` task. Often, the Generation Job would finish *after* the disk load, overwriting the saved data with fresh terrain.
+2. **Flush Failure:** `OnApplicationQuit` was writing chunk bytes to the `FileStream` but not explicitly Disposing/Flushing the `StorageManager`. This meant the Region File's **Header Table (Offsets)** was not updated on disk. On reload, the game read the old offsets (0), assumed
+   the chunk didn't exist, and regenerated it.
+
+**Resolution:**
+
+1. Refactored `EnsureChunkExists` to only create the data placeholder, moving the responsibility of scheduling generation to `LoadOrGenerateChunk`.
+2. Added explicit `StorageManager.Dispose()` in `OnApplicationQuit` to force-flush file buffers to physical disk.
+
+### 10.4. Seed Mismatch ✅ RESOLVED
+
+**Symptom:** New worlds were generating with Seed 0 for the first batch of chunks, then switching to the correct random seed for later chunks.
+
+**Root Cause:** `VoxelData.Seed` (static) was being assigned *after* `WorldData` initialization and the first batch of Generation Jobs had already been scheduled.
+
+**Resolution:** Moved `VoxelData.Seed` assignment to the very top of `StartWorld`.
+
+
 ---
 
 ## 11. Future Enhancements
 
 ### 11.1. Short-Term
 
-1. **LZ4 Compression**
-    * Faster than GZip, similar compression ratio
-    * Requires native plugin or managed implementation
-    * Target: 2-3x performance improvement
-
-2. **Chunk Prioritization (partially implemented)**
+1. **Chunk Prioritization (partially implemented)**
     * **Current:** Spiral load around player, starting from player and spiraling further and further away until load distance has been reached.
     * Load chunks nearest to player first ← Implemented
     * Priority queue based on distance + direction of movement
     * Reduces perceived loading time
 
-3. **ProcessPendingInitialLighting in Update**
+2. **ProcessPendingInitialLighting in Update**
     * Currently, chunks with "neighbors not ready" wait indefinitely
     * Add periodic retry system in `World.Update()`
     * Ensures edge chunks eventually light
@@ -839,24 +907,28 @@ Load a world, fly to edge (0,0) or (99,99), verify no permanent dark strips.
 ### 12.1. Test Scenarios
 
 **Scenario 1: Rapid Movement (Circular Flying)**
+
 * Description: Fly in circles to rapidly load/unload chunks
 * Purpose: Stress test lighting state preservation
 * Pass Criteria: No black spots, no crashes, log file < 10MB
 * Status: ✅ PASS
 
 **Scenario 2: World Boundaries**
+
 * Description: Fly to world edge, build, save, reload
 * Purpose: Verify edge chunk lighting works
 * Pass Criteria: No permanent dark borders
 * Status: ⚠️ NEEDS TESTING
 
 **Scenario 3: Long Session**
+
 * Description: 60+ minutes of normal gameplay
 * Purpose: Check for memory leaks, save file growth
 * Pass Criteria: Memory stable, save files reasonable size
 * Status: ⚠️ NEEDS TESTING
 
 **Scenario 4: Crash Recovery**
+
 * Description: Force-quit during chunk generation
 * Purpose: Verify no save corruption
 * Pass Criteria: World loads correctly, no missing chunks
@@ -865,6 +937,7 @@ Load a world, fly to edge (0,0) or (99,99), verify no permanent dark strips.
 ### 12.2. Regression Test Checklist
 
 Before each major release:
+
 - [ ] Circular flying test (10 minutes minimum)
 - [ ] Edge chunk lighting verification
 - [ ] Save file size check (< 100KB per chunk average)
@@ -890,6 +963,9 @@ Before each major release:
 - [x] World boundary neighbor checks
 - [x] World selector UI
 - [x] Volatile mode for editor
+- [x] **LZ4 Compression Support**
+- [x] **Seed Mismatch Fix**
+- [x] **Quit/Flush Reliability Fix**
 
 ### ⚠️ Partial / In Progress
 
@@ -900,7 +976,6 @@ Before each major release:
 
 ### 📋 Planned
 
-- [ ] LZ4 compression support
 - [ ] Increased region file write throughput
 - [ ] Incremental section saves
 - [ ] Chunk streaming/prediction
@@ -912,17 +987,18 @@ Before each major release:
 
 ### A. File Locations Quick Reference
 
-| Component | File Path |
-|-----------|-----------|
-| ChunkSerializer | `Assets/Scripts/Serialization/ChunkSerializer.cs` |
-| ChunkStorageManager | `Assets/Scripts/Serialization/ChunkStorageManager.cs` |
-| RegionFile | `Assets/Scripts/Serialization/RegionFile.cs` |
-| ModificationManager | `Assets/Scripts/Serialization/ModificationManager.cs` |
+| Component            | File Path                                              |
+|----------------------|--------------------------------------------------------|
+| ChunkSerializer      | `Assets/Scripts/Serialization/ChunkSerializer.cs`      |
+| ChunkStorageManager  | `Assets/Scripts/Serialization/ChunkStorageManager.cs`  |
+| RegionFile           | `Assets/Scripts/Serialization/RegionFile.cs`           |
+| ModificationManager  | `Assets/Scripts/Serialization/ModificationManager.cs`  |
 | LightingStateManager | `Assets/Scripts/Serialization/LightingStateManager.cs` |
-| WorldData | `Assets/Scripts/Data/WorldData.cs` |
-| ChunkData | `Assets/Scripts/Data/ChunkData.cs` |
-| World | `Assets/Scripts/World.cs` |
-| WorldJobManager | `Assets/Scripts/WorldJobManager.cs` |
+| CompressionFactory   | `Assets/Scripts/Serialization/CompressionFactory.cs`   |
+| WorldData            | `Assets/Scripts/Data/WorldData.cs`                     |
+| ChunkData            | `Assets/Scripts/Data/ChunkData.cs`                     |
+| World                | `Assets/Scripts/World.cs`                              |
+| WorldJobManager      | `Assets/Scripts/WorldJobManager.cs`                    |
 
 ### B. Save File Structure Example
 
@@ -960,8 +1036,9 @@ Saves/
 * **v1.3** - Documented async I/O pipeline
 * **v1.4** - Status updated to "Implemented (Stable)"
 * **v1.5** - Comprehensive update with all implementation details, bug resolutions, and future plans
+* **v1.6** - Added LZ4 Compression implementation details and documented resolution of Chunk Regeneration bugs
 
 ---
 
-**Last Updated:** 2026-02-14  
-**Next Review:** Before next major feature (LZ4 compression or chunk prioritization)
+**Last Updated:** 2026-02-15  
+**Next Review:** Chunk prioritization or Defragmentation
