@@ -694,12 +694,9 @@ public class World : MonoBehaviour
                     ChunkCoord coord = new ChunkCoord(chunkData.position);
                     if (!JobManager.lightingJobs.ContainsKey(coord) && AreNeighborsDataReady(coord))
                     {
-                        // A temporary Chunk object is created because the job manager expects one,
-                        // but we don't need a real GameObject for this startup logic.
-                        Chunk tempChunk = new Chunk(coord, false);
-                        // CRITICAL OPTIMIZATION: Use TempJob allocator.
+                        // OPTIMIZATION: Use TempJob allocator.
                         // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
-                        JobManager.ScheduleLightingUpdate(tempChunk, Allocator.TempJob);
+                        JobManager.ScheduleLightingUpdate(chunkData, coord, Allocator.TempJob);
                     }
                 }
             }
@@ -865,52 +862,44 @@ public class World : MonoBehaviour
         // 3. Process completed lighting jobs from the PREVIOUS frame.
         JobManager.ProcessLightingJobs();
 
-        // 4. Scan active chunks for lighting work and schedule jobs (New "Pull" system)
+        // 4. Scan all loaded chunks for lighting work and schedule jobs (New "Pull" system)
         if (settings.enableLighting)
         {
             int lightJobsScheduled = 0;
 
-            // 1. Clear the persistent list from the previous frame's use.
-            _tempActiveChunkList.Clear();
-
-            // 2. Populate the persistent list with the current active chunks.
-            foreach (ChunkCoord coord in _activeChunks)
-            {
-                _tempActiveChunkList.Add(coord);
-            }
-
-            // 3. Iterate over the temporary, safe-to-modify list.
-            foreach (ChunkCoord chunkCoord in _tempActiveChunkList)
+            foreach (ChunkData chunkData in worldData.Chunks.Values)
             {
                 if (lightJobsScheduled >= settings.maxLightJobsPerFrame) break; // Respect the throttle
 
-                Chunk chunkToUpdate = _chunkMap.GetValueOrDefault(chunkCoord);
+                // Skip placeholder data that hasn't generated terrain yet
+                if (!chunkData.IsPopulated) continue;
 
-                // If chunk is valid, and no job is currently running for it...
-                if (chunkToUpdate != null && !JobManager.lightingJobs.ContainsKey(chunkToUpdate.Coord))
+                // Create coord from position
+                ChunkCoord coord = new ChunkCoord(chunkData.position);
+
+                // If no job is currently running...
+                if (!JobManager.lightingJobs.ContainsKey(coord))
                 {
                     // --- Prioritize initial lighting ---
-                    if (chunkToUpdate.ChunkData.NeedsInitialLighting)
+                    if (chunkData.NeedsInitialLighting)
                     {
                         // Before scheduling, we must still ensure neighbors have their data ready.
-                        if (AreNeighborsDataReady(chunkToUpdate.Coord))
+                        if (AreNeighborsDataReady(coord))
                         {
                             // This is the first lighting pass, so we trigger the full recalculation.
-                            chunkToUpdate.ChunkData.RecalculateSunLightLight();
-                            JobManager.ScheduleLightingUpdate(chunkToUpdate);
+                            chunkData.RecalculateSunLightLight();
+                            JobManager.ScheduleLightingUpdate(chunkData, coord);
 
                             // The request has been fulfilled, so clear the flag.
-                            chunkToUpdate.ChunkData.NeedsInitialLighting = false;
+                            chunkData.NeedsInitialLighting = false;
                             lightJobsScheduled++;
                         }
                     }
                     // --- Regular lighting updates ---
                     // If no initial lighting is needed, check for regular updates.
-                    else if (chunkToUpdate.ChunkData.HasLightChangesToProcess)
+                    else if (chunkData.HasLightChangesToProcess)
                     {
-                        // NOTE: jobManager.ScheduleLightingUpdate might indirectly modify the 'activeChunks' set
-                        //       by affecting neighbor states. This pattern protects against that.
-                        JobManager.ScheduleLightingUpdate(chunkToUpdate);
+                        JobManager.ScheduleLightingUpdate(chunkData, coord);
                         lightJobsScheduled++;
                     }
                 }
