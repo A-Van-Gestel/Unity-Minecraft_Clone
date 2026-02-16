@@ -20,6 +20,8 @@ public class Chunk
     private bool _isActive;
     private List<Vector3Int> _activeVoxels = new List<Vector3Int>();
 
+    internal GameObject ChunkGameObject => _chunkObject;
+
     #region Constructor
 
     public Chunk(ChunkCoord coord, bool createGameObject = true)

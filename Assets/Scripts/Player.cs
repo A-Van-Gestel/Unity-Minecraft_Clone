@@ -74,6 +74,12 @@ public class Player : MonoBehaviour
     [Tooltip("Key to cycle through the internal VoxelData visualization modes. (Defaults to F7)")]
     public KeyCode cycleVisModeKey = KeyCode.F7;
 
+    [Tooltip("Key to print debug info regarding \"MeshToRebuild\" queue state. (Defaults to F8)")]
+    public KeyCode debugLogMeshQueueStateKey = KeyCode.F8;
+
+    [Tooltip("Key to emergency cleanup \"MeshToRebuild\" queue if desync occurs during development. (Defaults to F9)")]
+    public KeyCode debugCleanMeshQueueKey = KeyCode.F9;
+
 
     private void Start()
     {
@@ -247,6 +253,12 @@ public class Player : MonoBehaviour
 
         if (Input.GetKeyDown(cycleVisModeKey))
             _world.CycleVisualizationMode();
+
+        if (Input.GetKeyDown(debugLogMeshQueueStateKey))
+            _world.DebugLogMeshQueueState();
+
+        if (Input.GetKeyDown(debugCleanMeshQueueKey))
+            _world.DebugCleanMeshQueue();
 
 
         // FLYING

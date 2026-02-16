@@ -66,9 +66,11 @@ public class World : MonoBehaviour
     private HashSet<ChunkCoord> _activeChunks = new HashSet<ChunkCoord>();
     private readonly List<ChunkCoord> _tempActiveChunkList = new List<ChunkCoord>(); // Used to avoid modifying activeChunks while iterating, and to avoid GC allocations.
     public ChunkCoord PlayerChunkCoord;
-    private ChunkCoord _playerLastChunkCoord;
+    private ChunkCoord _playerLastChunkCoord = new ChunkCoord(int.MinValue, int.MinValue);
 
     private readonly List<Chunk> _chunksToBuildMesh = new List<Chunk>();
+    private readonly HashSet<ChunkCoord> _chunksToBuildMeshSet = new HashSet<ChunkCoord>();
+
     public readonly Queue<Chunk> ChunksToDraw = new Queue<Chunk>();
 
     private bool _applyingModifications = false;
@@ -254,6 +256,10 @@ public class World : MonoBehaviour
             StorageManager.Dispose();
             Debug.Log("[World] Storage Manager disposed in OnDestroy.");
         }
+
+        // Cleanup mesh generation lists
+        _chunksToBuildMesh.Clear();
+        _chunksToBuildMeshSet.Clear();
 
         // Cleanup world data
         if (worldData != null)
@@ -921,28 +927,34 @@ public class World : MonoBehaviour
         {
             int meshJobsScheduled = 0;
             // Iterate forwards to respect priority (Index 0 is highest priority).
-            // Using a while loop or adjusting index after removal to handle list modification.
+            // We manipulate 'i' when removing items.
             for (int i = 0; i < _chunksToBuildMesh.Count; i++)
             {
                 if (meshJobsScheduled >= settings.maxMeshRebuildsPerFrame) break;
 
                 Chunk chunk = _chunksToBuildMesh[i];
-                if (chunk != null)
+
+                // Validate chunk state before attempting to mesh.
+                if (chunk == null || !chunk.isActive)
                 {
-                    // JobManager.ScheduleMeshing will return false if deps (neighbors/lighting) aren't ready.
-                    // In that case, we leave the chunk in the list (at index i) and check the next one.
-                    if (JobManager.ScheduleMeshing(chunk))
-                    {
-                        _chunksToBuildMesh.RemoveAt(i);
-                        i--; // Decrement index so we don't skip the next element which shifted down
-                        meshJobsScheduled++;
-                    }
-                }
-                else
-                {
-                    // Remove null chunks from the list.
+                    // Remove from both list and HashSet to keep them in sync
+                    if (chunk != null)
+                        _chunksToBuildMeshSet.Remove(chunk.Coord);
+
                     _chunksToBuildMesh.RemoveAt(i);
-                    i--;
+                    i--; // Adjust index since we removed an element
+                    continue;
+                }
+
+                // JobManager.ScheduleMeshing will return false if deps (neighbors/lighting) aren't ready.
+                // In that case, we leave the chunk in both the list and HashSet to try again next frame.
+                if (JobManager.ScheduleMeshing(chunk))
+                {
+                    // Successfully scheduled - remove from both tracking structures
+                    _chunksToBuildMeshSet.Remove(chunk.Coord);
+                    _chunksToBuildMesh.RemoveAt(i);
+                    i--; // Decrement index
+                    meshJobsScheduled++;
                 }
             }
         }
@@ -1467,8 +1479,15 @@ public class World : MonoBehaviour
     /// <param name="immediate">If true, rebuild the chunk as soon as possible</param>
     public void RequestChunkMeshRebuild([CanBeNull] Chunk chunk, bool immediate = false)
     {
-        // We only add it if it's not already in the list to avoid redundant processing.
-        if (chunk == null || _chunksToBuildMesh.Contains(chunk)) return;
+        // Validate chunk state and check for duplicates using O(1) HashSet.
+        // 1. Don't queue null chunks.
+        // 2. Don't queue inactive chunks (they are out of view or being destroyed).
+        // 3. Don't queue chunks that are already in the queue (prevents duplicates).
+        if (chunk == null || !chunk.isActive || _chunksToBuildMeshSet.Contains(chunk.Coord))
+            return;
+
+        // Add to tracking set (O(1) operation)
+        _chunksToBuildMeshSet.Add(chunk.Coord);
 
         if (immediate)
             _chunksToBuildMesh.Insert(0, chunk); // Insert at the front
@@ -1605,6 +1624,13 @@ public class World : MonoBehaviour
             // TODO-mid: Use a chunk GameObject pool to reduce Garbage Collection pressure by sending unloaded chunks back into the global pool to be re-used
             if (_chunkMap.TryGetValue(coord, out Chunk chunkObj))
             {
+                // Remove from mesh queue before destroying.
+                // This prevents dead chunk references from lingering in the list (Memory Leak / Logic Error).
+                if (_chunksToBuildMeshSet.Remove(coord))
+                {
+                    _chunksToBuildMesh.Remove(chunkObj);
+                }
+
                 // Cleanup visualizers
                 if (voxelVisualizer != null) voxelVisualizer.ClearChunkVisualization(coord);
                 if (_chunkBorders.TryGetValue(coord, out GameObject b))
@@ -1693,6 +1719,13 @@ public class World : MonoBehaviour
             // Deactivate chunk itself
             if (_chunkMap.TryGetValue(c, out Chunk chunk))
             {
+                // Early cleanup - remove from mesh queue immediately when deactivating.
+                // This prevents the queue from holding references to inactive chunks.
+                if (_chunksToBuildMeshSet.Remove(c))
+                {
+                    _chunksToBuildMesh.Remove(chunk);
+                }
+
                 chunk.isActive = false;
             }
 
@@ -1710,6 +1743,7 @@ public class World : MonoBehaviour
                 Chunk newChunk = new Chunk(c, createGameObject: true);
                 _chunkMap.Add(c, newChunk);
                 CreateChunkBorder(c);
+                newChunk.isActive = true;
                 RequestChunkMeshRebuild(newChunk);
             }
             else
@@ -2152,6 +2186,62 @@ public class World : MonoBehaviour
         }
 
         return total;
+    }
+
+    /// <summary>
+    /// DEBUG: Logs detailed information about the current state of _chunksToBuildMesh
+    /// Call this from your DebugScreen or via a keyboard shortcut
+    /// </summary>
+    public void DebugLogMeshQueueState()
+    {
+        Debug.Log($"[Mesh Queue Diagnostic] List Count: {_chunksToBuildMesh.Count} | HashSet Count: {_chunksToBuildMeshSet.Count}");
+
+        if (_chunksToBuildMesh.Count != _chunksToBuildMeshSet.Count)
+        {
+            Debug.LogError("[Mesh Queue Diagnostic] DESYNC DETECTED!");
+        }
+
+        int inactiveCount = 0;
+        foreach (var c in _chunksToBuildMesh)
+        {
+            if (c == null || !c.isActive) inactiveCount++;
+        }
+
+        if (inactiveCount > 0)
+        {
+            Debug.LogWarning($"[Mesh Queue Diagnostic] Found {inactiveCount} inactive/null chunks in queue.");
+        }
+    }
+
+    /// <summary>
+    /// DEBUG: Cleans up the mesh queue by removing all invalid entries
+    /// This is a manual cleanup that should not be necessary after the fix
+    /// </summary>
+    public void DebugCleanMeshQueue()
+    {
+        _chunksToBuildMesh.RemoveAll(c => c == null || !c.isActive);
+        _chunksToBuildMeshSet.Clear();
+        foreach (var c in _chunksToBuildMesh)
+        {
+            _chunksToBuildMeshSet.Add(c.Coord);
+        }
+
+        Debug.Log("[Mesh Queue Diagnostic] Queue cleaned and re-synced.");
+    }
+
+    /// <summary>
+    /// Gets a detailed breakdown of the mesh queue for display in debug UI
+    /// </summary>
+    /// <returns>Formatted string with mesh queue statistics</returns>
+    public string GetMeshQueueDebugInfo()
+    {
+        int active = _chunksToBuildMesh.Count(c => c != null && c.isActive && c.ChunkGameObject != null);
+        int inactive = _chunksToBuildMesh.Count(c => c != null && !c.isActive);
+        int destroyed = _chunksToBuildMesh.Count(c => c != null && c.ChunkGameObject == null);
+        int nullCount = _chunksToBuildMesh.Count(c => c == null);
+
+        return $"{_chunksToBuildMesh.Count} total\n" +
+               $" └ Active: {active}, Inactive: {inactive}, Destroyed: {destroyed}, Null: {nullCount}";
     }
 
     #endregion
