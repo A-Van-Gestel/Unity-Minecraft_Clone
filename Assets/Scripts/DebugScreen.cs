@@ -300,11 +300,14 @@ public class DebugScreen : MonoBehaviour
         string activeBlockBehaviorVoxelsCount = _currentChunk != null ? _currentChunk.GetActiveVoxelCount().ToString() : "NULL";
         string totalActiveVoxels = _world.GetTotalActiveVoxelsInWorld().ToString();
         string activeChunksCount = _world.GetActiveChunksCount().ToString();
+        string activeChunksFromPoolCount = _world.ChunkPool.ActiveCount.ToString();
+        string pooledChunksCount = _world.ChunkPool.PooledCount.ToString();
         string chunksToBuildMeshInfo = World.Instance.GetMeshQueueDebugInfo();
         string voxelModificationsCount = _world.GetVoxelModificationsCount().ToString();
         _topLeftBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
         _topLeftBuilder.Append("Total Active Voxels in World: ").AppendLine(totalActiveVoxels);
-        _topLeftBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount);
+        _topLeftBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount); // TODO: Might be redundant now with detailed pool information below.
+        _topLeftBuilder.AppendLine($" └  Active from Pool: {activeChunksFromPoolCount}, Unused in Pool: {pooledChunksCount}");
         _topLeftBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshInfo);
         _topLeftBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
 

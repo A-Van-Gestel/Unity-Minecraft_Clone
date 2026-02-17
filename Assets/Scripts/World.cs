@@ -117,7 +117,7 @@ public class World : MonoBehaviour
     public bool IsVolatileMode { get; private set; }
 
     // --- Chunk Pooling ---
-    private readonly Stack<Chunk> _chunkPool = new Stack<Chunk>();
+    public ChunkPoolManager ChunkPool { get; private set; }
 
     // --- Shader Properties ---
     private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
@@ -160,7 +160,12 @@ public class World : MonoBehaviour
         {
             Instance = this;
             appSaveDataPath = Application.persistentDataPath;
+
+            // Initialize World Job Manager
             JobManager = new WorldJobManager(this);
+
+            // Initialize Pool Manager
+            ChunkPool = new ChunkPoolManager(transform);
         }
 
         // --- Prepare Job-Safe Data ---
@@ -272,13 +277,11 @@ public class World : MonoBehaviour
         }
 
         // Cleanup chunk pool
+        if (ChunkPool != null) ChunkPool.Clear();
+
+        // Clean active map
         foreach (var chunk in _chunkMap.Values) chunk.Destroy();
         _chunkMap.Clear();
-
-        while (_chunkPool.Count > 0)
-        {
-            _chunkPool.Pop().Destroy();
-        }
     }
 
     private void Start()
@@ -482,41 +485,6 @@ public class World : MonoBehaviour
         // Enable world loading logic
         _isWorldLoaded = true;
     }
-
-    #region Chunk pooling
-
-    /// <summary>
-    /// Gets a Chunk from the pool or creates a new one.
-    /// </summary>
-    public Chunk GetChunkFromPool(ChunkCoord coord)
-    {
-        Chunk chunk;
-        if (_chunkPool.Count > 0)
-        {
-            chunk = _chunkPool.Pop();
-            chunk.Reset(coord);
-        }
-        else
-        {
-            // Constructor now calls Reset internally
-            chunk = new Chunk(coord);
-        }
-
-        return chunk;
-    }
-
-    /// <summary>
-    /// Returns a Chunk to the pool for reuse.
-    /// </summary>
-    public void ReturnChunkToPool(Chunk chunk)
-    {
-        if (chunk == null) return;
-
-        chunk.Release(); // Unlink data, disable GO
-        _chunkPool.Push(chunk);
-    }
-
-    #endregion
 
     /// <summary>
     /// Schedules generation jobs for all chunks within a given radius around the player's starting position.
@@ -1680,7 +1648,7 @@ public class World : MonoBehaviour
                 }
 
                 // Return to pool
-                ReturnChunkToPool(chunkObj);
+                ChunkPool.Return(chunkObj);
                 _chunkMap.Remove(coord);
             }
 
@@ -1768,7 +1736,7 @@ public class World : MonoBehaviour
                 }
 
                 // POOLING: Return chunk to pool instead of just deactivating
-                ReturnChunkToPool(chunk);
+                ChunkPool.Return(chunk);
                 _chunkMap.Remove(c);
             }
 
@@ -1783,10 +1751,10 @@ public class World : MonoBehaviour
             if (!_chunkMap.ContainsKey(c))
             {
                 // POOLING: Get from pool
-                Chunk newChunk = GetChunkFromPool(c);
+                Chunk newChunk = ChunkPool.Get(c);
                 _chunkMap.Add(c, newChunk);
                 CreateChunkBorder(c);
-                
+
                 // Only request a mesh if the data is actually ready.
                 // If IsPopulated is false, the Load/Gen pipeline will trigger the mesh build later.
                 if (newChunk.ChunkData.IsPopulated)
@@ -1806,6 +1774,7 @@ public class World : MonoBehaviour
                     {
                         CreateChunkBorder(c);
                     }
+
                     // If we reactivate a chunk that lost its data (rare/impossible?), don't mesh.
                     if (chunk.ChunkData.IsPopulated)
                     {
@@ -2024,7 +1993,7 @@ public class World : MonoBehaviour
 
         return voxelsToDraw;
     }
-    
+
     /// <summary>
     /// Raycasts for a chunk and logs a comprehensive report on its internal state.
     /// Bind this to a key (e.g., F8) in Player.cs to debug invisible chunks.
@@ -2033,10 +2002,10 @@ public class World : MonoBehaviour
     {
         Transform cam = Camera.main.transform;
         Ray ray = new Ray(cam.position, cam.forward);
-        
+
         // Raycast against a virtual plane or long distance since the chunk might have no collider
         Vector3 targetPoint = cam.position + cam.forward * 10f;
-        
+
         ChunkCoord coord = GetChunkCoordFromVector3(targetPoint);
         Vector2Int pos = new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth);
 
@@ -2052,7 +2021,7 @@ public class World : MonoBehaviour
             sb.AppendLine($"  - IsPopulated: {data.IsPopulated}");
             sb.AppendLine($"  - NeedsInitialLighting: {data.NeedsInitialLighting}");
             sb.AppendLine($"  - HasLightChanges: {data.HasLightChangesToProcess}");
-            
+
             // Check content
             int totalNonAir = 0;
             int totalSections = 0;
@@ -2064,6 +2033,7 @@ public class World : MonoBehaviour
                     totalNonAir += section.nonAirCount;
                 }
             }
+
             sb.AppendLine($"  - Sections: {totalSections} allocated");
             sb.AppendLine($"  - Total Non-Air Voxels: {totalNonAir}");
         }
@@ -2072,7 +2042,7 @@ public class World : MonoBehaviour
         bool hasObj = _chunkMap.TryGetValue(coord, out Chunk chunk);
         sb.AppendLine($"[Visual Layer]");
         sb.AppendLine($"  - In ChunkMap: {hasObj}");
-        
+
         if (hasObj)
         {
             sb.AppendLine($"  - isActive: {chunk.isActive}");
@@ -2083,8 +2053,8 @@ public class World : MonoBehaviour
             // Assuming we can access the GameObject children
             int childCount = chunk.ChunkGameObject.transform.childCount;
             sb.AppendLine($"  - Section Renderers (Children): {childCount}");
-            
-            for(int i=0; i<childCount; i++)
+
+            for (int i = 0; i < childCount; i++)
             {
                 Transform t = chunk.ChunkGameObject.transform.GetChild(i);
                 MeshFilter mf = t.GetComponent<MeshFilter>();
@@ -2108,7 +2078,7 @@ public class World : MonoBehaviour
         bool inMeshQueue = _chunksToBuildMeshSet.Contains(coord);
         bool inLightDict = JobManager.lightingJobs.ContainsKey(coord);
         bool inMeshDict = JobManager.meshJobs.ContainsKey(coord);
-        
+
         sb.AppendLine($"[System State]");
         sb.AppendLine($"  - In Mesh Queue: {inMeshQueue}");
         sb.AppendLine($"  - In Lighting Job: {inLightDict}");
