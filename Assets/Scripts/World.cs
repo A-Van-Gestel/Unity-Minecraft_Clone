@@ -116,6 +116,9 @@ public class World : MonoBehaviour
     public LightingStateManager LightingStateManager;
     public bool IsVolatileMode { get; private set; }
 
+    // --- Chunk Pooling ---
+    private readonly Stack<Chunk> _chunkPool = new Stack<Chunk>();
+
     // --- Shader Properties ---
     private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
     private static readonly int ShaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
@@ -266,6 +269,15 @@ public class World : MonoBehaviour
         {
             worldData.Chunks.Clear();
             worldData.ModifiedChunks.Clear();
+        }
+
+        // Cleanup chunk pool
+        foreach (var chunk in _chunkMap.Values) chunk.Destroy();
+        _chunkMap.Clear();
+
+        while (_chunkPool.Count > 0)
+        {
+            _chunkPool.Pop().Destroy();
         }
     }
 
@@ -471,6 +483,41 @@ public class World : MonoBehaviour
         _isWorldLoaded = true;
     }
 
+    #region Chunk pooling
+
+    /// <summary>
+    /// Gets a Chunk from the pool or creates a new one.
+    /// </summary>
+    public Chunk GetChunkFromPool(ChunkCoord coord)
+    {
+        Chunk chunk;
+        if (_chunkPool.Count > 0)
+        {
+            chunk = _chunkPool.Pop();
+            chunk.Reset(coord);
+        }
+        else
+        {
+            // Constructor now calls Reset internally
+            chunk = new Chunk(coord);
+        }
+
+        return chunk;
+    }
+
+    /// <summary>
+    /// Returns a Chunk to the pool for reuse.
+    /// </summary>
+    public void ReturnChunkToPool(Chunk chunk)
+    {
+        if (chunk == null) return;
+
+        chunk.Release(); // Unlink data, disable GO
+        _chunkPool.Push(chunk);
+    }
+
+    #endregion
+
     /// <summary>
     /// Schedules generation jobs for all chunks within a given radius around the player's starting position.
     /// </summary>
@@ -570,15 +617,8 @@ public class World : MonoBehaviour
                         // 1. Fill the queue (RecalculateSunLightLight populates the queues in data)
                         data.RecalculateSunLightLight();
 
-                        // 2. Schedule the job immediately
-                        // If the visual Chunk object doesn't exist yet (data-only load), create a temp wrapper.
-                        Chunk chunkObj = data.Chunk;
-                        if (chunkObj == null)
-                        {
-                            chunkObj = new Chunk(coord, false);
-                        }
-
-                        JobManager.ScheduleLightingUpdate(chunkObj);
+                        // 2. Schedule the job immediately using Data overload
+                        JobManager.ScheduleLightingUpdate(data, coord);
 
                         // 3. Clear flag so we don't do this again
                         data.NeedsInitialLighting = false;
@@ -586,6 +626,16 @@ public class World : MonoBehaviour
                     else
                     {
                         Debug.Log($"[LoadOrGenerateChunk] Neighbors not ready - deferring lighting for {coord}");
+                    }
+                }
+                else
+                {
+                    // If the chunk is loaded and doesn't need lighting updates (it's stable),
+                    // we must explicitly request the mesh rebuild here. 
+                    // CheckViewDistance skipped it because IsPopulated was false at that time.
+                    if (data.Chunk != null && data.Chunk.isActive)
+                    {
+                        RequestChunkMeshRebuild(data.Chunk);
                     }
                 }
 
@@ -1214,8 +1264,9 @@ public class World : MonoBehaviour
                 Vector2Int neighborV2Pos = new Vector2Int(neighborCoord.X * VoxelData.ChunkWidth, neighborCoord.Z * VoxelData.ChunkWidth);
                 if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData))
                 {
-                    // Does the neighbor have pending light changes that haven't even been scheduled yet?
-                    if (neighborData.HasLightChangesToProcess)
+                    // Does the neighbor have pending light changes that haven't even been scheduled yet,
+                    // OR is waiting for first light is NOT ready to provide lighting data for meshing.
+                    if (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting)
                     {
                         return false; // Neighbor has pending light changes that haven't even been scheduled yet, we must wait.
                     }
@@ -1609,27 +1660,27 @@ public class World : MonoBehaviour
                 worldData.ModifiedChunks.Remove(data);
             }
 
-            // 2. Destroy Visuals
-            // TODO-mid: Use a chunk GameObject pool to reduce Garbage Collection pressure by sending unloaded chunks back into the global pool to be re-used
+            // POOLING: Recycle Visuals
             if (_chunkMap.TryGetValue(coord, out Chunk chunkObj))
             {
-                // Remove from mesh queue before destroying.
+                // Cleanup visualizers
+                if (voxelVisualizer != null) voxelVisualizer.ClearChunkVisualization(coord);
+                if (_chunkBorders.TryGetValue(coord, out GameObject b))
+                {
+                    // TODO-mid: Use a ChunkBorder GameObject pool to reduce Garbage Collection pressure by sending unloaded chunks back into the global pool to be re-used
+                    Destroy(b);
+                    _chunkBorders.Remove(coord);
+                }
+
+                // Remove from mesh queue before returning to pool.
                 // This prevents dead chunk references from lingering in the list (Memory Leak / Logic Error).
                 if (_chunksToBuildMeshSet.Remove(coord))
                 {
                     _chunksToBuildMesh.Remove(chunkObj);
                 }
 
-                // Cleanup visualizers
-                if (voxelVisualizer != null) voxelVisualizer.ClearChunkVisualization(coord);
-                if (_chunkBorders.TryGetValue(coord, out GameObject b))
-                {
-                    Destroy(b);
-                    _chunkBorders.Remove(coord);
-                }
-
-                // Cleanup chunk object
-                chunkObj.Destroy();
+                // Return to pool
+                ReturnChunkToPool(chunkObj);
                 _chunkMap.Remove(coord);
             }
 
@@ -1696,7 +1747,9 @@ public class World : MonoBehaviour
         }
 
         // Deactivate chunks that are no longer in view.
-        foreach (ChunkCoord c in previouslyActiveChunks.AsParallel().Where(c => !currentViewChunks.Contains(c)))
+        var chunksToRemove = previouslyActiveChunks.Where(c => !currentViewChunks.Contains(c)).ToList();
+
+        foreach (ChunkCoord c in chunksToRemove)
         {
             // Deactivate chunk border visualization
             if (_chunkBorders.TryGetValue(c, out GameObject borderObject))
@@ -1708,14 +1761,15 @@ public class World : MonoBehaviour
             // Deactivate chunk itself
             if (_chunkMap.TryGetValue(c, out Chunk chunk))
             {
-                // Early cleanup - remove from mesh queue immediately when deactivating.
-                // This prevents the queue from holding references to inactive chunks.
+                // Remove from mesh queue to prevent processing deactivated chunks
                 if (_chunksToBuildMeshSet.Remove(c))
                 {
                     _chunksToBuildMesh.Remove(chunk);
                 }
 
-                chunk.isActive = false;
+                // POOLING: Return chunk to pool instead of just deactivating
+                ReturnChunkToPool(chunk);
+                _chunkMap.Remove(c);
             }
 
             // Debug: Clear visualization.
@@ -1728,25 +1782,35 @@ public class World : MonoBehaviour
         {
             if (!_chunkMap.ContainsKey(c))
             {
-                // Create Chunk Object
-                Chunk newChunk = new Chunk(c, createGameObject: true);
+                // POOLING: Get from pool
+                Chunk newChunk = GetChunkFromPool(c);
                 _chunkMap.Add(c, newChunk);
                 CreateChunkBorder(c);
-                newChunk.isActive = true;
-                RequestChunkMeshRebuild(newChunk);
+                
+                // Only request a mesh if the data is actually ready.
+                // If IsPopulated is false, the Load/Gen pipeline will trigger the mesh build later.
+                if (newChunk.ChunkData.IsPopulated)
+                {
+                    RequestChunkMeshRebuild(newChunk);
+                }
             }
             else
             {
                 Chunk chunk = _chunkMap[c];
+                // NOTE: Should technically rarely happen if we remove from map on deactivate, 
+                //       but good for safety if logic drifts.
                 if (!chunk.isActive)
                 {
+                    chunk.isActive = true;
                     if (!_chunkBorders.ContainsKey(c))
                     {
                         CreateChunkBorder(c);
                     }
-
-                    chunk.isActive = true;
-                    RequestChunkMeshRebuild(chunk);
+                    // If we reactivate a chunk that lost its data (rare/impossible?), don't mesh.
+                    if (chunk.ChunkData.IsPopulated)
+                    {
+                        RequestChunkMeshRebuild(chunk);
+                    }
                 }
             }
 
@@ -1959,6 +2023,98 @@ public class World : MonoBehaviour
         }
 
         return voxelsToDraw;
+    }
+    
+    /// <summary>
+    /// Raycasts for a chunk and logs a comprehensive report on its internal state.
+    /// Bind this to a key (e.g., F8) in Player.cs to debug invisible chunks.
+    /// </summary>
+    public void DebugRaycastChunkState()
+    {
+        Transform cam = Camera.main.transform;
+        Ray ray = new Ray(cam.position, cam.forward);
+        
+        // Raycast against a virtual plane or long distance since the chunk might have no collider
+        Vector3 targetPoint = cam.position + cam.forward * 10f;
+        
+        ChunkCoord coord = GetChunkCoordFromVector3(targetPoint);
+        Vector2Int pos = new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth);
+
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine($"--- CHUNK REPORT {coord} ---");
+
+        // 1. Check Dictionary & Data
+        bool hasData = worldData.Chunks.TryGetValue(pos, out ChunkData data);
+        sb.AppendLine($"[Data Layer]");
+        sb.AppendLine($"  - In WorldData: {hasData}");
+        if (hasData)
+        {
+            sb.AppendLine($"  - IsPopulated: {data.IsPopulated}");
+            sb.AppendLine($"  - NeedsInitialLighting: {data.NeedsInitialLighting}");
+            sb.AppendLine($"  - HasLightChanges: {data.HasLightChangesToProcess}");
+            
+            // Check content
+            int totalNonAir = 0;
+            int totalSections = 0;
+            foreach (var section in data.sections)
+            {
+                if (section != null)
+                {
+                    totalSections++;
+                    totalNonAir += section.nonAirCount;
+                }
+            }
+            sb.AppendLine($"  - Sections: {totalSections} allocated");
+            sb.AppendLine($"  - Total Non-Air Voxels: {totalNonAir}");
+        }
+
+        // 2. Check Object & Mesh
+        bool hasObj = _chunkMap.TryGetValue(coord, out Chunk chunk);
+        sb.AppendLine($"[Visual Layer]");
+        sb.AppendLine($"  - In ChunkMap: {hasObj}");
+        
+        if (hasObj)
+        {
+            sb.AppendLine($"  - isActive: {chunk.isActive}");
+            sb.AppendLine($"  - GameObject Active: {(chunk.ChunkGameObject ? chunk.ChunkGameObject.activeSelf.ToString() : "NULL")}");
+            sb.AppendLine($"  - Linked Data Match: {(chunk.ChunkData == data ? "YES" : "NO (Desync!)")}");
+
+            // Inspect Renderers (Reflection needed or manual check if fields private)
+            // Assuming we can access the GameObject children
+            int childCount = chunk.ChunkGameObject.transform.childCount;
+            sb.AppendLine($"  - Section Renderers (Children): {childCount}");
+            
+            for(int i=0; i<childCount; i++)
+            {
+                Transform t = chunk.ChunkGameObject.transform.GetChild(i);
+                MeshFilter mf = t.GetComponent<MeshFilter>();
+                if (mf && mf.sharedMesh)
+                {
+                    if (mf.sharedMesh.vertexCount == 0 && t.gameObject.activeSelf)
+                        sb.AppendLine($"    - Section {i}: 0 Vertices (BUT ACTIVE - Warn)");
+                    else if (mf.sharedMesh.vertexCount > 0 && !t.gameObject.activeSelf)
+                        sb.AppendLine($"    - Section {i}: {mf.sharedMesh.vertexCount} Verts (BUT INACTIVE - Error)");
+                    else if (mf.sharedMesh.vertexCount > 0)
+                        sb.AppendLine($"    - Section {i}: {mf.sharedMesh.vertexCount} Verts (OK)");
+                }
+                else
+                {
+                    if (t.gameObject.activeSelf) sb.AppendLine($"    - Section {i}: Missing Mesh (Active)");
+                }
+            }
+        }
+
+        // 3. Check Queue State
+        bool inMeshQueue = _chunksToBuildMeshSet.Contains(coord);
+        bool inLightDict = JobManager.lightingJobs.ContainsKey(coord);
+        bool inMeshDict = JobManager.meshJobs.ContainsKey(coord);
+        
+        sb.AppendLine($"[System State]");
+        sb.AppendLine($"  - In Mesh Queue: {inMeshQueue}");
+        sb.AppendLine($"  - In Lighting Job: {inLightDict}");
+        sb.AppendLine($"  - In Meshing Job: {inMeshDict}");
+
+        Debug.Log(sb.ToString());
     }
 
     #endregion

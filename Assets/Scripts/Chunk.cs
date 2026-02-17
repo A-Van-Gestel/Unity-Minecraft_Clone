@@ -11,56 +11,129 @@ using Object = UnityEngine.Object;
 
 public class Chunk
 {
-    public readonly ChunkCoord Coord;
-    public readonly Vector3 ChunkPosition;
-    public readonly ChunkData ChunkData;
-    private readonly SectionRenderer[] _sectionRenderers;
-    private readonly GameObject _chunkObject;
+    public ChunkCoord Coord;
+    public Vector3 ChunkPosition;
+    public ChunkData ChunkData;
+    private SectionRenderer[] _sectionRenderers;
+    
+    // Expose for pool management validation
+    public readonly GameObject ChunkGameObject;
 
     private bool _isActive;
     private List<Vector3Int> _activeVoxels = new List<Vector3Int>();
 
-    internal GameObject ChunkGameObject => _chunkObject;
-
     #region Constructor
 
-    public Chunk(ChunkCoord coord, bool createGameObject = true)
+    /// <summary>
+    /// Creates a new Chunk Visual. 
+    /// NOTE: Should only be called by the ChunkPool. Use World.GetChunkFromPool() instead.
+    /// </summary>
+    public Chunk(ChunkCoord coord)
     {
         Coord = coord;
-        Vector3 worldPos = new Vector3(Coord.X * VoxelData.ChunkWidth, 0f, Coord.Z * VoxelData.ChunkWidth);
-        ChunkPosition = worldPos;
 
-        ChunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)ChunkPosition.x, (int)ChunkPosition.z), true);
-        ChunkData.Chunk = this;
-
-        if (createGameObject)
-        {
-            _chunkObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
-            _chunkObject.transform.SetParent(World.Instance.transform);
-            _chunkObject.transform.position = worldPos;
+        // Create GameObject hierarchy
+        ChunkGameObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
+        ChunkGameObject.transform.SetParent(World.Instance.transform);
 
             // Initialize Section Renderers
             int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
             _sectionRenderers = new SectionRenderer[sectionCount];
             for (int i = 0; i < sectionCount; i++)
             {
-                _sectionRenderers[i] = new SectionRenderer(_chunkObject.transform, i);
+            _sectionRenderers[i] = new SectionRenderer(ChunkGameObject.transform, i);
             }
-        }
+
+        // Initialize state
+        Reset(coord);
     }
 
     #endregion
 
+    #region Lifecycle
+
     /// <summary>
-    /// Destroys the GameObject this script is attached to.
+    /// Resets the Chunk instance for use at a new coordinate.
+    /// Used by the ChunkPool.
+    /// </summary>
+    public void Reset(ChunkCoord coord)
+    {
+        Coord = coord;
+        ChunkPosition = new Vector3(Coord.X * VoxelData.ChunkWidth, 0f, Coord.Z * VoxelData.ChunkWidth);
+        
+        // Update GameObject identity
+        ChunkGameObject.name = $"Chunk {Coord.X}, {Coord.Z}";
+        ChunkGameObject.transform.position = ChunkPosition;
+        
+        // Reset State
+        _isActive = true;
+        _activeVoxels.Clear();
+        
+        // Calculate World Position Vector2Int for the dictionary lookup.
+        // eg: ChunkCoord (50, 50) -> WorldPos (800, 800)
+        Vector2Int worldPosKey = new Vector2Int((int)ChunkPosition.x, (int)ChunkPosition.z);
+
+        // Link Data
+        // NOTE: We retrieve the existing data (loaded or generated) from WorldData.
+        ChunkData = World.Instance.worldData.RequestChunk(worldPosKey, true);
+        
+        // CRITICAL: Link the Data to this Visual Instance
+        if (ChunkData != null)
+        {
+            ChunkData.Chunk = this;
+        }
+        
+        // Reset Visuals (clears mesh but keeps memory allocated)
+        for (int i = 0; i < _sectionRenderers.Length; i++)
+        {
+            _sectionRenderers[i].Clear();
+        }
+        
+        // Ensure object is active
+        ChunkGameObject.SetActive(true);
+    }
+
+    /// <summary>
+    /// Prepares the chunk to be returned to the pool.
+    /// Unlinks data references to prevent ghost updates.
+    /// </summary>
+    public void Release()
+    {
+        // CRITICAL: Unlink the Data.
+        // If this ChunkData is modified while the Visual is in the pool, 
+        // it shouldn't try to update a disabled GameObject.
+        if (ChunkData != null)
+        {
+            ChunkData.Chunk = null;
+            ChunkData = null;
+        }
+        
+        if (ChunkGameObject != null)
+        {
+            ChunkGameObject.SetActive(false);
+        }
+        
+        _isActive = false;
+    }
+
+    /// <summary>
+    /// Permanently destroys the GameObject. Used when shutting down the pool.
     /// </summary>
     public void Destroy()
     {
-        if (_chunkObject != null)
+        if (ChunkGameObject != null)
         {
-            Object.Destroy(_chunkObject);
+            Object.Destroy(ChunkGameObject);
+        }
+        
+        // Clean up renderers (Meshes)
+        if (_sectionRenderers != null)
+        {
+            foreach (SectionRenderer sr in _sectionRenderers) sr.Destroy();
         }
     }
+
+    #endregion
 
     /// <summary>
     /// A new method to be called by World.cs after the chunk's data has been populated by a job.
@@ -167,9 +240,9 @@ public class Chunk
         set
         {
             _isActive = value;
-            if (_chunkObject != null)
+            if (ChunkGameObject != null)
             {
-                _chunkObject.SetActive(value);
+                ChunkGameObject.SetActive(value);
                 if (value) PlayChunkLoadAnimation();
             }
         }
@@ -344,8 +417,8 @@ public class Chunk
 
     private void PlayChunkLoadAnimation()
     {
-        if (World.Instance.settings.enableChunkLoadAnimations && _chunkObject.GetComponent<ChunkLoadAnimation>() == null)
-            _chunkObject.AddComponent<ChunkLoadAnimation>();
+        if (World.Instance.settings.enableChunkLoadAnimations && ChunkGameObject.GetComponent<ChunkLoadAnimation>() == null)
+            ChunkGameObject.AddComponent<ChunkLoadAnimation>();
     }
 
     #endregion

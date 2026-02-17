@@ -96,7 +96,9 @@ public class WorldJobManager
             return true; // Job is already scheduled, we can remove it from the build list.
 
         // Chunk's own lighting must be stable.
-        if (chunk.ChunkData.HasLightChangesToProcess || lightingJobs.ContainsKey(coord))
+        if (chunk.ChunkData.HasLightChangesToProcess ||
+            chunk.ChunkData.NeedsInitialLighting ||
+            lightingJobs.ContainsKey(coord))
         {
             return false; // This chunk is still processing light, wait.
         }

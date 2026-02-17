@@ -128,9 +128,26 @@ public class SectionRenderer
         _mesh.RecalculateBounds();
     }
 
+    #region Lifecycle
+
+    /// <summary>
+    /// Clears the mesh data and disables the object for pooling.
+    /// Does NOT destroy the mesh or object, preserving memory allocation.
+    /// </summary>
+    public void Clear()
+    {
+        if (_mesh != null) _mesh.Clear();
+        if (GameObject != null) GameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// Destroys the mesh destroys the GameObject, fully removing this section from the scene.
+    /// </summary>
     public void Destroy()
     {
         if (_mesh != null) Object.Destroy(_mesh);
         if (GameObject != null) Object.Destroy(GameObject);
     }
+
+    #endregion
 }
