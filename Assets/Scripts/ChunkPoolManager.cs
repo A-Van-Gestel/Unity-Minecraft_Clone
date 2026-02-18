@@ -5,18 +5,27 @@ public class ChunkPoolManager
 {
     private readonly Transform _worldParent;
 
+    // --- Pools ---
     // Pool for the main Chunk logic/visuals
     private readonly Stack<Chunk> _chunkPool = new Stack<Chunk>();
 
     // Pool for the Debug Border GameObjects
     private readonly Stack<GameObject> _borderPool = new Stack<GameObject>();
 
-    // Statistics
+    // --- Statistics ---
     public int ActiveChunks => _activeChunkCount;
     public int PooledChunks => _chunkPool.Count;
     public int PooledBorders => _borderPool.Count;
 
     private int _activeChunkCount = 0;
+
+    // --- Cleanup Settings ---
+    private int _targetViewDistance;
+    private float _cleanupTimer = 0f;
+    private const float CLEANUP_INTERVAL = 0.05f; // Check 20 times a second
+    private const float POOL_BUFFER_PERCENTAGE = 1.25f; // Keep 25% extra as buffer
+
+    public int targetViewDistance => _targetViewDistance;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChunkPoolManager"/> class.
@@ -25,6 +34,48 @@ public class ChunkPoolManager
     public ChunkPoolManager(Transform worldTransform)
     {
         _worldParent = worldTransform;
+    }
+
+    /// <summary>
+    /// Updates the target view distance used to calculate the ideal pool size.
+    /// Call this when settings change or on startup.
+    /// </summary>
+    public void SetTargetViewDistance(int viewDistance)
+    {
+        _targetViewDistance = viewDistance;
+    }
+
+    /// <summary>
+    /// Processes the "Drip Feed" cleanup. Call this from World.Update().
+    /// </summary>
+    public void Update()
+    {
+        // Don't run every single frame to save micro-cycles, unless pool is MASSIVE
+        _cleanupTimer += Time.deltaTime;
+        if (_cleanupTimer < CLEANUP_INTERVAL) return;
+        _cleanupTimer = 0;
+
+        // Calculate Target
+        // Area = (Dist * 2 + 1)^2. 
+        // We multiply by Buffer to prevent thrashing (destroying then immediately creating).
+        int chunksNeeded = _targetViewDistance * 2 + 1;
+        int maxPoolSize = Mathf.CeilToInt(chunksNeeded * POOL_BUFFER_PERCENTAGE);
+
+        // --- Cleanup Chunks ---
+        if (_chunkPool.Count > maxPoolSize)
+        {
+            // Destroy ONE item per tick to spread the GC cost
+            Chunk c = _chunkPool.Pop();
+            c.Destroy();
+        }
+
+        // --- Cleanup Borders ---
+        // Borders are cheap, but we apply the same logic
+        if (_borderPool.Count > maxPoolSize)
+        {
+            GameObject b = _borderPool.Pop();
+            if (b != null) Object.Destroy(b);
+        }
     }
 
     #region Chunk Logic

@@ -294,6 +294,10 @@ public class World : MonoBehaviour
 
     private void Start()
     {
+        // Initialize Pool Settings
+        ChunkPool.SetTargetViewDistance(settings.viewDistance);
+
+        // Initialize World 
         StartCoroutine(StartWorld());
     }
 
@@ -978,6 +982,16 @@ public class World : MonoBehaviour
         if (ChunksToDraw.Count > 0)
         {
             ChunksToDraw.Dequeue().CreateMesh();
+        }
+
+        // Run Pool Cleanup
+        ChunkPool.Update();
+
+        // Check if settings changed to update pool target
+        // (Optional: You can move this to a dedicated ApplySettings method)
+        if (settings.viewDistance != ChunkPool.targetViewDistance)
+        {
+            ChunkPool.SetTargetViewDistance(settings.viewDistance);
         }
     }
 
