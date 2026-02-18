@@ -4,12 +4,19 @@ using UnityEngine;
 public class ChunkPoolManager
 {
     private readonly Transform _worldParent;
-    private readonly Stack<Chunk> _pool = new Stack<Chunk>();
 
-    // Track statistics for debugging
-    public int ActiveCount => _activeCount;
-    public int PooledCount => _pool.Count;
-    private int _activeCount = 0;
+    // Pool for the main Chunk logic/visuals
+    private readonly Stack<Chunk> _chunkPool = new Stack<Chunk>();
+
+    // Pool for the Debug Border GameObjects
+    private readonly Stack<GameObject> _borderPool = new Stack<GameObject>();
+
+    // Statistics
+    public int ActiveChunks => _activeChunkCount;
+    public int PooledChunks => _chunkPool.Count;
+    public int PooledBorders => _borderPool.Count;
+
+    private int _activeChunkCount = 0;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChunkPoolManager"/> class.
@@ -20,6 +27,8 @@ public class ChunkPoolManager
         _worldParent = worldTransform;
     }
 
+    #region Chunk Logic
+
     /// <summary>
     /// Retrieves a chunk from the pool or creates a new one if the pool is empty.
     /// Resets the chunk state for the new coordinate.
@@ -27,9 +36,9 @@ public class ChunkPoolManager
     public Chunk Get(ChunkCoord coord)
     {
         Chunk chunk;
-        if (_pool.Count > 0)
+        if (_chunkPool.Count > 0)
         {
-            chunk = _pool.Pop();
+            chunk = _chunkPool.Pop();
             chunk.Reset(coord);
         }
         else
@@ -38,7 +47,7 @@ public class ChunkPoolManager
             chunk = new Chunk(coord);
         }
 
-        _activeCount++;
+        _activeChunkCount++;
         return chunk;
     }
 
@@ -50,9 +59,48 @@ public class ChunkPoolManager
         if (chunk == null) return;
 
         chunk.Release(); // Unlink data, disable GameObject
-        _pool.Push(chunk);
-        _activeCount--;
+        _chunkPool.Push(chunk);
+        _activeChunkCount--;
     }
+
+    #endregion
+
+    #region Border Logic
+
+    /// <summary>
+    /// Retrieves a Border GameObject from the pool or instantiates a new one.
+    /// </summary>
+    public GameObject GetBorder(GameObject prefab, Vector3 position, Transform parent)
+    {
+        GameObject border;
+        if (_borderPool.Count > 0)
+        {
+            border = _borderPool.Pop();
+            border.transform.SetParent(parent);
+            border.transform.position = position;
+            border.SetActive(true);
+        }
+        else
+        {
+            border = Object.Instantiate(prefab, position, Quaternion.identity, parent);
+        }
+
+        // Update name for clarity
+        ChunkCoord coord = new ChunkCoord(position);
+        border.name = $"Border {coord.X}, {coord.Z}";
+
+        return border;
+    }
+
+    public void ReturnBorder(GameObject border)
+    {
+        if (border == null) return;
+
+        border.SetActive(false); // Disable before pooling
+        _borderPool.Push(border);
+    }
+
+    #endregion
 
     /// <summary>
     /// Destroys all pooled chunks and cleans up resources.
@@ -60,13 +108,21 @@ public class ChunkPoolManager
     /// </summary>
     public void Clear()
     {
-        while (_pool.Count > 0)
+        // Clear Chunks
+        while (_chunkPool.Count > 0)
         {
-            Chunk c = _pool.Pop();
+            Chunk c = _chunkPool.Pop();
             c.Destroy();
         }
 
-        _activeCount = 0;
+        // Clear Borders
+        while (_borderPool.Count > 0)
+        {
+            GameObject b = _borderPool.Pop();
+            if (b != null) Object.Destroy(b);
+        }
+
+        _activeChunkCount = 0;
         Debug.Log("[ChunkPoolManager] All Chunks in the ChunkPool have been disposed of..");
     }
 }

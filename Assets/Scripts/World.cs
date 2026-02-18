@@ -282,6 +282,14 @@ public class World : MonoBehaviour
         // Clean active map
         foreach (var chunk in _chunkMap.Values) chunk.Destroy();
         _chunkMap.Clear();
+
+        // Clean active borders map
+        foreach (var border in _chunkBorders.Values)
+        {
+            if (border != null) Destroy(border);
+        }
+
+        _chunkBorders.Clear();
     }
 
     private void Start()
@@ -1635,8 +1643,8 @@ public class World : MonoBehaviour
                 if (voxelVisualizer != null) voxelVisualizer.ClearChunkVisualization(coord);
                 if (_chunkBorders.TryGetValue(coord, out GameObject b))
                 {
-                    // TODO-mid: Use a ChunkBorder GameObject pool to reduce Garbage Collection pressure by sending unloaded chunks back into the global pool to be re-used
-                    Destroy(b);
+                    // POOLING: Return to pool
+                    ChunkPool.ReturnBorder(b);
                     _chunkBorders.Remove(coord);
                 }
 
@@ -1722,7 +1730,8 @@ public class World : MonoBehaviour
             // Deactivate chunk border visualization
             if (_chunkBorders.TryGetValue(c, out GameObject borderObject))
             {
-                Destroy(borderObject);
+                // POOLING: Return to pool
+                ChunkPool.ReturnBorder(borderObject);
                 _chunkBorders.Remove(c);
             }
 
@@ -1809,10 +1818,11 @@ public class World : MonoBehaviour
 
         if (_chunkBorders.ContainsKey(chunkCoord)) return;
 
-        GameObject borderObject = Instantiate(chunkBorderPrefab, _chunkBorderParent);
-        borderObject.name = $"Border {chunkCoord.X}, {chunkCoord.Z}";
-        borderObject.transform.position = new Vector3(chunkCoord.X * VoxelData.ChunkWidth, 0, chunkCoord.Z * VoxelData.ChunkWidth);
+        // POOLING: Use ChunkPoolManager
+        Vector3 pos = new Vector3(chunkCoord.X * VoxelData.ChunkWidth, 0, chunkCoord.Z * VoxelData.ChunkWidth);
+        GameObject borderObject = ChunkPool.GetBorder(chunkBorderPrefab, pos, _chunkBorderParent);
 
+        // Ensure state matches setting (Pool might return active object, but setting might be off)
         borderObject.SetActive(settings.showChunkBorders);
         _chunkBorders.Add(chunkCoord, borderObject);
     }
