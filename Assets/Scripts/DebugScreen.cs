@@ -299,15 +299,15 @@ public class DebugScreen : MonoBehaviour
         _topLeftBuilder.AppendLine("CHUNK:");
         string activeBlockBehaviorVoxelsCount = _currentChunk != null ? _currentChunk.GetActiveVoxelCount().ToString() : "NULL";
         string totalActiveVoxels = _world.GetTotalActiveVoxelsInWorld().ToString();
-        string activeChunksCount = _world.GetActiveChunksCount().ToString();
-        string activeChunksFromPoolCount = _world.ChunkPool.ActiveChunks.ToString();
+        string activeChunksCount = _world.ChunkPool.ActiveChunks.ToString();
         string pooledChunksCount = _world.ChunkPool.PooledChunks.ToString();
+        string pooledChunkBordersCount = _world.ChunkPool.PooledBorders.ToString();
         string chunksToBuildMeshInfo = World.Instance.GetMeshQueueDebugInfo();
         string voxelModificationsCount = _world.GetVoxelModificationsCount().ToString();
         _topLeftBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
         _topLeftBuilder.Append("Total Active Voxels in World: ").AppendLine(totalActiveVoxels);
-        _topLeftBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount); // TODO: Might be redundant now with detailed pool information below.
-        _topLeftBuilder.AppendLine($" └  Active from Pool: {activeChunksFromPoolCount}, Unused in Pool: {pooledChunksCount}");
+        _topLeftBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount);
+        _topLeftBuilder.AppendLine($" └  Chunks unused in Pool: {pooledChunksCount} | Borders unused in Pool: {pooledChunkBordersCount}");
         _topLeftBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshInfo);
         _topLeftBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
 
@@ -358,6 +358,8 @@ public class DebugScreen : MonoBehaviour
         // --- Display Current Visualization Mode ---
         _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
         _topRightBuilder.Append($"Mode ({_player.cycleVisModeKey.ToString()} to cycle): ").AppendLine(_world.visualizationMode.ToString());
+        _topRightBuilder.AppendLine($" └  Unused in Pool: {_world.ChunkPool.PooledVisualizers}");
+
         _topRightBuilder.AppendLine();
     }
 

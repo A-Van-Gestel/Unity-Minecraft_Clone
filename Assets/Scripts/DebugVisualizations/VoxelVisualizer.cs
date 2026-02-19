@@ -12,7 +12,7 @@ namespace DebugVisualizations
         [Tooltip("The material using the DebugVoxelShader.")]
         public Material visualizerMaterial;
 
-        // A dictionary to hold the job data and mesh for each chunk visualization.
+        // Dictionary holds references, but objects are managed by Pool
         private readonly Dictionary<ChunkCoord, VisualizerChunkData> _visualizerChunks = new Dictionary<ChunkCoord, VisualizerChunkData>();
         private Transform _visualizerParent;
 
@@ -78,7 +78,8 @@ namespace DebugVisualizations
             // Get or create the GameObject for this chunk's visualization.
             if (!_visualizerChunks.TryGetValue(coord, out var chunkData))
             {
-                chunkData = new VisualizerChunkData(coord, visualizerMaterial, _visualizerParent);
+                // POOLING: Get from World.Instance.ChunkPool
+                chunkData = World.Instance.ChunkPool.GetVisualizer(coord, visualizerMaterial, _visualizerParent);
                 _visualizerChunks[coord] = chunkData;
             }
 
@@ -124,8 +125,8 @@ namespace DebugVisualizations
         {
             if (_visualizerChunks.TryGetValue(coord, out var chunkData))
             {
-                chunkData.JobHandle.Complete();
-                chunkData.Dispose();
+                // POOLING: Return to World.Instance.ChunkPool
+                World.Instance.ChunkPool.ReturnVisualizer(chunkData);
                 _visualizerChunks.Remove(coord);
             }
         }
@@ -137,115 +138,11 @@ namespace DebugVisualizations
         {
             foreach (var chunkData in _visualizerChunks.Values)
             {
-                chunkData.JobHandle.Complete();
-                chunkData.Dispose();
+                // POOLING: Return all
+                World.Instance.ChunkPool.ReturnVisualizer(chunkData);
             }
 
             _visualizerChunks.Clear();
-        }
-
-        /// <summary>
-        /// A helper class to manage the state and data for a single chunk's visualization.
-        /// </summary>
-        private class VisualizerChunkData
-        {
-            public JobHandle JobHandle;
-            public bool IsMeshApplied { get; private set; } // State flag to prevent multiple applications.
-
-            private readonly GameObject _chunkObject;
-            private readonly MeshFilter _meshFilter;
-            private readonly Mesh _mesh;
-
-            // Native data for the job
-            public NativeHashMap<Vector3Int, Color> VoxelsToDraw;
-            public NativeHashMap<Vector3Int, Color> NorthVoxels, SouthVoxels, EastVoxels, WestVoxels;
-            public NativeList<Vector3> Vertices;
-            public NativeList<int> Triangles;
-            public NativeList<Color> Colors;
-            private bool _isJobDataAllocated = false;
-
-            public VisualizerChunkData(ChunkCoord coord, Material mat, Transform parent)
-            {
-                _chunkObject = new GameObject($"Visualizer_{coord.X}_{coord.Z}");
-                _chunkObject.transform.SetParent(parent);
-                _chunkObject.transform.position = new Vector3(coord.X * VoxelData.ChunkWidth, 0, coord.Z * VoxelData.ChunkWidth);
-                _meshFilter = _chunkObject.AddComponent<MeshFilter>();
-                var mr = _chunkObject.AddComponent<MeshRenderer>();
-                mr.material = mat;
-                _mesh = new Mesh();
-                _meshFilter.mesh = _mesh;
-                IsMeshApplied = true; // Initially, there's no pending mesh.
-            }
-
-            public void PrepareJobData(Dictionary<Vector3Int, Color> main, Dictionary<Vector3Int, Color> n, Dictionary<Vector3Int, Color> s, Dictionary<Vector3Int, Color> e, Dictionary<Vector3Int, Color> w)
-            {
-                // Allocate all native containers for the job.
-                VoxelsToDraw = ToNativeHashMap(main, Allocator.TempJob);
-                NorthVoxels = ToNativeHashMap(n, Allocator.TempJob);
-                SouthVoxels = ToNativeHashMap(s, Allocator.TempJob);
-                EastVoxels = ToNativeHashMap(e, Allocator.TempJob);
-                WestVoxels = ToNativeHashMap(w, Allocator.TempJob);
-
-                Vertices = new NativeList<Vector3>(Allocator.TempJob);
-                Triangles = new NativeList<int>(Allocator.TempJob);
-                Colors = new NativeList<Color>(Allocator.TempJob);
-                _isJobDataAllocated = true;
-                IsMeshApplied = false; // A new job is prepared, its mesh is not yet applied.
-            }
-
-            public void ApplyMesh()
-            {
-                if (!_isJobDataAllocated) return;
-
-                _mesh.Clear();
-                _mesh.SetVertices(Vertices.ToArray(Allocator.Temp).ToArray());
-                _mesh.SetTriangles(Triangles.ToArray(Allocator.Temp).ToArray(), 0);
-                _mesh.SetColors(Colors.ToArray(Allocator.Temp).ToArray());
-                _mesh.RecalculateBounds();
-                IsMeshApplied = true; // Mark as applied.
-            }
-
-            public void ClearMesh()
-            {
-                _mesh.Clear();
-                IsMeshApplied = true; // An empty mesh is considered "applied".
-            }
-
-            public void DisposeJobData()
-            {
-                if (!_isJobDataAllocated) return;
-
-                // Dispose all native containers associated with the job.
-                if (VoxelsToDraw.IsCreated) VoxelsToDraw.Dispose();
-                if (NorthVoxels.IsCreated) NorthVoxels.Dispose();
-                if (SouthVoxels.IsCreated) SouthVoxels.Dispose();
-                if (EastVoxels.IsCreated) EastVoxels.Dispose();
-                if (WestVoxels.IsCreated) WestVoxels.Dispose();
-
-                if (Vertices.IsCreated) Vertices.Dispose();
-                if (Triangles.IsCreated) Triangles.Dispose();
-                if (Colors.IsCreated) Colors.Dispose();
-                _isJobDataAllocated = false;
-            }
-
-            public void Dispose()
-            {
-                DisposeJobData();
-                if (_chunkObject != null) Destroy(_chunkObject);
-            }
-
-            private NativeHashMap<Vector3Int, Color> ToNativeHashMap(Dictionary<Vector3Int, Color> dict, Allocator allocator)
-            {
-                if (dict == null || dict.Count == 0) return new NativeHashMap<Vector3Int, Color>(0, allocator);
-
-                var nativeMap = new NativeHashMap<Vector3Int, Color>(dict.Count, allocator);
-                foreach (var kvp in dict)
-                {
-                    nativeMap.Add(kvp.Key, kvp.Value);
-                }
-
-                return nativeMap;
-            }
         }
     }
 

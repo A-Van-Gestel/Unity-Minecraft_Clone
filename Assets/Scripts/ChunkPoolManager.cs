@@ -1,4 +1,5 @@
-﻿using Helpers;
+﻿using DebugVisualizations;
+using Helpers;
 using UnityEngine;
 
 public class ChunkPoolManager
@@ -8,11 +9,13 @@ public class ChunkPoolManager
     // --- Pools ---
     private readonly DynamicPool<Chunk> _chunkPool;
     private readonly DynamicPool<GameObject> _borderPool;
+    private readonly DynamicPool<VisualizerChunkData> _visualizerPool;
 
     // --- Statistics ---
     public int ActiveChunks => _chunkPool.ActiveCount;
     public int PooledChunks => _chunkPool.PooledCount;
     public int PooledBorders => _borderPool.PooledCount;
+    public int PooledVisualizers => _visualizerPool.PooledCount;
 
     // --- Cleanup Settings ---
     private int _targetViewDistance;
@@ -40,8 +43,15 @@ public class ChunkPoolManager
         // that isn't available here. Creation is handled in GetBorder().
         _borderPool = new DynamicPool<GameObject>(
             createFunc: () => null,
-            destroyAction: (go) => Object.Destroy(go),
+            destroyAction: Object.Destroy,
             onReturnAction: (go) => go.SetActive(false)
+        );
+
+        // Initialize Visualizer Pool
+        _visualizerPool = new DynamicPool<VisualizerChunkData>(
+            createFunc: () => null, // Context needed, created in Get method
+            destroyAction: (viz) => viz.Destroy(),
+            onReturnAction: (viz) => viz.Release()
         );
     }
 
@@ -67,7 +77,14 @@ public class ChunkPoolManager
 
         // Delegate cleanup to the generic pools
         _chunkPool.UpdatePruning(maxPoolSize);
-        _borderPool.UpdatePruning(maxPoolSize);
+
+        // Fully cleanup ChunkBorder pool if disabled to free memory allocation
+        int chunkBorderPoolSize = World.Instance.settings.showChunkBorders ? maxPoolSize : 0;
+        _borderPool.UpdatePruning(chunkBorderPoolSize);
+
+        // Fully cleanup visualizer pool if disabled to free memory allocation
+        int voxelVisualizerPoolSize = World.Instance.visualizationMode != DebugVisualizationMode.None ? maxPoolSize : 0;
+        _visualizerPool.UpdatePruning(voxelVisualizerPoolSize);
     }
 
     #region Chunk Logic
@@ -134,6 +151,31 @@ public class ChunkPoolManager
 
     #endregion
 
+    #region Visualizer Logic
+
+    public VisualizerChunkData GetVisualizer(ChunkCoord coord, Material material, Transform parent)
+    {
+        VisualizerChunkData viz = _visualizerPool.Get();
+
+        if (viz == null)
+        {
+            viz = new VisualizerChunkData(coord, material, parent);
+        }
+        else
+        {
+            viz.Reset(coord, material, parent);
+        }
+
+        return viz;
+    }
+
+    public void ReturnVisualizer(VisualizerChunkData viz)
+    {
+        _visualizerPool.Return(viz);
+    }
+
+    #endregion
+
     /// <summary>
     /// Destroys all pooled chunks and cleans up resources.
     /// Call this on World destroy.
@@ -142,7 +184,8 @@ public class ChunkPoolManager
     {
         _chunkPool.Clear();
         _borderPool.Clear();
+        _visualizerPool.Clear();
 
-        Debug.Log("[ChunkPoolManager] All Chunks in the ChunkPool have been disposed of..");
+        Debug.Log("[ChunkPoolManager] All pools [Chunks, ChunkBorders, VoxelVisualizers] in the ChunkPool have been disposed of..");
     }
 }

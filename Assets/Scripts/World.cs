@@ -2204,11 +2204,6 @@ public class World : MonoBehaviour
 
     #region Debug Information Methods
 
-    public int GetActiveChunksCount()
-    {
-        return _activeChunks.Count;
-    }
-
     public int GetChunksToBuildMeshCount()
     {
         return _chunksToBuildMesh.Count;
