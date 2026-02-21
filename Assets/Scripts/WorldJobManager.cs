@@ -8,6 +8,7 @@ using Jobs.Data;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using UnityEngine.Pool;
 
 public class WorldJobManager
 {
@@ -17,6 +18,13 @@ public class WorldJobManager
     public Dictionary<ChunkCoord, GenerationJobData> generationJobs { get; } = new Dictionary<ChunkCoord, GenerationJobData>();
     public Dictionary<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> meshJobs { get; } = new Dictionary<ChunkCoord, (JobHandle, MeshDataJobOutput)>();
     public Dictionary<ChunkCoord, LightingJobData> lightingJobs { get; } = new Dictionary<ChunkCoord, LightingJobData>();
+
+    // --- Cached Collections for GC Optimization ---
+    private readonly List<ChunkCoord> _completedGenJobs = new List<ChunkCoord>();
+    private readonly List<ChunkCoord> _completedMeshJobs = new List<ChunkCoord>();
+    private readonly List<ChunkCoord> _completedLightJobs = new List<ChunkCoord>();
+    private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
+    private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _droppedLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
 
     // --- Constructor ---
     /// <summary>
@@ -319,8 +327,8 @@ public class WorldJobManager
     /// </summary>
     public void ProcessGenerationJobs()
     {
-        // Using a temporary list to avoid modifying dictionary while iterating
-        List<ChunkCoord> completedCoords = new List<ChunkCoord>();
+        // Clear the temp list, we this list to avoid modifying dictionary while iterating
+        _completedGenJobs.Clear();
         foreach (var jobEntry in generationJobs)
         {
             // Only continue if the generation job has completed
@@ -407,8 +415,7 @@ public class WorldJobManager
                     }
                 }
 
-
-                completedCoords.Add(jobEntry.Key);
+                _completedGenJobs.Add(jobEntry.Key);
 
                 // Now that data is fully ready and lit, the chunk can have its mesh generated.
                 Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
@@ -420,7 +427,7 @@ public class WorldJobManager
         }
 
         // Remove the completed jobs from our tracking dictionary
-        foreach (ChunkCoord coord in completedCoords)
+        foreach (ChunkCoord coord in _completedGenJobs)
         {
             generationJobs.Remove(coord);
         }
@@ -431,8 +438,8 @@ public class WorldJobManager
     /// </summary>
     public void ProcessMeshJobs()
     {
-        // Using a temporary list to avoid modifying dictionary while iterating
-        List<ChunkCoord> completedCoords = new List<ChunkCoord>();
+        // Clear the temp list, we this list to avoid modifying dictionary while iterating
+        _completedMeshJobs.Clear();
         foreach (var jobEntry in meshJobs)
         {
             if (jobEntry.Value.handle.IsCompleted)
@@ -451,11 +458,11 @@ public class WorldJobManager
                     jobEntry.Value.meshData.Dispose();
                 }
 
-                completedCoords.Add(jobEntry.Key);
+                _completedMeshJobs.Add(jobEntry.Key);
             }
         }
 
-        foreach (ChunkCoord coord in completedCoords)
+        foreach (ChunkCoord coord in _completedMeshJobs)
         {
             meshJobs.Remove(coord);
         }
@@ -470,13 +477,20 @@ public class WorldJobManager
         if (lightingJobs.Count == 0) return;
 
         // Use a HashSet to track which world.chunks need a mesh rebuild this frame.
-        HashSet<ChunkCoord> chunksToRebuildMesh = new HashSet<ChunkCoord>();
-
-        List<ChunkCoord> completedCoords = new List<ChunkCoord>();
+        // Clear cached collections instead of making new ones
+        _chunksToRebuildMesh.Clear();
+        _completedLightJobs.Clear();
 
         // OPTIMIZATION: Cache for dropped updates to avoid calling LightingStateManager (and allocating HashSets) per voxel.
+        // OPTIMIZATION: Use Unity's Global HashSetPool
         // Key: Neighbor Chunk, Value: Set of columns
-        Dictionary<ChunkCoord, HashSet<Vector2Int>> droppedLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
+        foreach (var set in _droppedLightUpdates.Values)
+        {
+            // Release returns it to the global pool AND automatically calls set.Clear()
+            HashSetPool<Vector2Int>.Release(set);
+        }
+
+        _droppedLightUpdates.Clear();
 
         foreach (var jobEntry in lightingJobs)
         {
@@ -526,10 +540,10 @@ public class WorldJobManager
                             }
 
                             // Add to local batch dictionary instead of immediate manager call
-                            if (!droppedLightUpdates.TryGetValue(neighborCoord, out HashSet<Vector2Int> cols))
+                            if (!_droppedLightUpdates.TryGetValue(neighborCoord, out HashSet<Vector2Int> cols))
                             {
-                                cols = new HashSet<Vector2Int>();
-                                droppedLightUpdates[neighborCoord] = cols;
+                                cols = HashSetPool<Vector2Int>.Get();
+                                _droppedLightUpdates[neighborCoord] = cols;
                             }
 
                             cols.Add(new Vector2Int(localX, localZ));
@@ -578,7 +592,7 @@ public class WorldJobManager
                                 neighborChunk.AddToBlockLightQueue(localPos, oldLightLevel);
 
                             // 3. Mark the neighbor chunk for a mesh rebuild, as its lighting has changed.
-                            chunksToRebuildMesh.Add(new ChunkCoord(neighborChunk.position));
+                            _chunksToRebuildMesh.Add(new ChunkCoord(neighborChunk.position));
                         }
                     }
                 }
@@ -587,7 +601,7 @@ public class WorldJobManager
                 if (isChunkStable)
                 {
                     // The chunk is stable! It's now safe to request a mesh rebuild.
-                    chunksToRebuildMesh.Add(jobEntry.Key);
+                    _chunksToRebuildMesh.Add(jobEntry.Key);
                     // ALSO queue neighbors for a mesh rebuild, as their appearance may have changed.
                     _world.RequestNeighborMeshRebuilds(jobEntry.Key);
                 }
@@ -605,25 +619,28 @@ public class WorldJobManager
                 // 4. Dispose of all the job's persistent data.
                 jobData.Dispose();
 
-                completedCoords.Add(jobEntry.Key);
+                _completedLightJobs.Add(jobEntry.Key);
             }
         }
 
         // 5. Save vanishing neighbor updates (BATCH)
-        foreach (var kvp in droppedLightUpdates)
+        foreach (var kvp in _droppedLightUpdates)
         {
-            _world.LightingStateManager.AddPending(kvp.Key, kvp.Value);
+            if (kvp.Value.Count > 0) // Only add if we actually put data in it this frame
+            {
+                _world.LightingStateManager.AddPending(kvp.Key, kvp.Value);
+            }
         }
 
         // Log summary
-        if (droppedLightUpdates.Count > 0)
+        if (_droppedLightUpdates.Count > 0)
         {
-            int totalColumns = droppedLightUpdates.Values.Sum(set => set.Count);
-            Debug.Log($"[LIGHTING] Processed {completedCoords.Count} jobs. Saved updates for {droppedLightUpdates.Count} unloaded chunks ({totalColumns} columns)");
+            int totalColumns = _droppedLightUpdates.Values.Sum(set => set.Count);
+            Debug.Log($"[LIGHTING] Processed {_completedLightJobs.Count} jobs. Saved updates for {_droppedLightUpdates.Count} unloaded chunks ({totalColumns} columns)");
         }
 
         // 6. After processing all completed jobs, request mesh rebuilds for all affected world.chunks.
-        foreach (ChunkCoord coord in chunksToRebuildMesh)
+        foreach (ChunkCoord coord in _chunksToRebuildMesh)
         {
             Chunk chunk = _world.GetChunkFromChunkCoord(coord);
             if (chunk != null)
@@ -634,7 +651,7 @@ public class WorldJobManager
 
 
         // 7. Remove the completed jobs from our tracking dictionary
-        foreach (ChunkCoord coord in completedCoords)
+        foreach (ChunkCoord coord in _completedLightJobs)
         {
             lightingJobs.Remove(coord);
         }
