@@ -15,7 +15,7 @@ public class Chunk
     public Vector3 ChunkPosition;
     public ChunkData ChunkData;
     private SectionRenderer[] _sectionRenderers;
-    
+
     // Expose for pool management validation
     public readonly GameObject ChunkGameObject;
 
@@ -36,16 +36,16 @@ public class Chunk
         ChunkGameObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
         ChunkGameObject.transform.SetParent(World.Instance.transform);
 
-            // Initialize Section Renderers
-            int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
-            _sectionRenderers = new SectionRenderer[sectionCount];
-            for (int i = 0; i < sectionCount; i++)
-            {
+        // Initialize Section Renderers
+        int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+        _sectionRenderers = new SectionRenderer[sectionCount];
+        for (int i = 0; i < sectionCount; i++)
+        {
             _sectionRenderers[i] = new SectionRenderer(ChunkGameObject.transform, i);
-            }
+        }
 
-        // Initialize state
-        Reset(coord);
+        // Ensure object is inactive until properly Reset/Activated
+        ChunkGameObject.SetActive(false);
     }
 
     #endregion
@@ -60,15 +60,15 @@ public class Chunk
     {
         Coord = coord;
         ChunkPosition = new Vector3(Coord.X * VoxelData.ChunkWidth, 0f, Coord.Z * VoxelData.ChunkWidth);
-        
+
         // Update GameObject identity
         ChunkGameObject.name = $"Chunk {Coord.X}, {Coord.Z}";
         ChunkGameObject.transform.position = ChunkPosition;
-        
+
         // Reset State
         _isActive = true;
         _activeVoxels.Clear();
-        
+
         // Calculate World Position Vector2Int for the dictionary lookup.
         // eg: ChunkCoord (50, 50) -> WorldPos (800, 800)
         Vector2Int worldPosKey = new Vector2Int((int)ChunkPosition.x, (int)ChunkPosition.z);
@@ -76,19 +76,19 @@ public class Chunk
         // Link Data
         // NOTE: We retrieve the existing data (loaded or generated) from WorldData.
         ChunkData = World.Instance.worldData.RequestChunk(worldPosKey, true);
-        
+
         // CRITICAL: Link the Data to this Visual Instance
         if (ChunkData != null)
         {
             ChunkData.Chunk = this;
         }
-        
+
         // Reset Visuals (clears mesh but keeps memory allocated)
         for (int i = 0; i < _sectionRenderers.Length; i++)
         {
             _sectionRenderers[i].Clear();
         }
-        
+
         // Ensure object is active
         ChunkGameObject.SetActive(true);
     }
@@ -107,12 +107,12 @@ public class Chunk
             ChunkData.Chunk = null;
             ChunkData = null;
         }
-        
+
         if (ChunkGameObject != null)
         {
             ChunkGameObject.SetActive(false);
         }
-        
+
         _isActive = false;
     }
 
@@ -125,7 +125,7 @@ public class Chunk
         {
             Object.Destroy(ChunkGameObject);
         }
-        
+
         // Clean up renderers (Meshes)
         if (_sectionRenderers != null)
         {

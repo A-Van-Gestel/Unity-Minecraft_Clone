@@ -1,4 +1,5 @@
-﻿using DebugVisualizations;
+﻿using Data;
+using DebugVisualizations;
 using Helpers;
 using UnityEngine;
 
@@ -8,12 +9,21 @@ public class ChunkPoolManager
 
     // --- Pools ---
     private readonly DynamicPool<Chunk> _chunkPool;
+
+    // Data Pools
+    // NOTE: Accessed by Background Serialization Threads + Main Thread
+    private readonly ConcurrentDynamicPool<ChunkData> _dataPool;
+    private readonly ConcurrentDynamicPool<ChunkSection> _sectionPool;
+
+    // Debug Pools
     private readonly DynamicPool<GameObject> _borderPool;
     private readonly DynamicPool<VisualizerChunkData> _visualizerPool;
 
     // --- Statistics ---
     public int ActiveChunks => _chunkPool.ActiveCount;
     public int PooledChunks => _chunkPool.PooledCount;
+    public int PooledData => _dataPool.PooledCount;
+    public int PooledSections => _sectionPool.PooledCount;
     public int PooledBorders => _borderPool.PooledCount;
     public int PooledVisualizers => _visualizerPool.PooledCount;
 
@@ -36,6 +46,29 @@ public class ChunkPoolManager
             createFunc: () => new Chunk(new ChunkCoord(0, 0)), // Dummy coord, Reset() called later
             destroyAction: (chunk) => chunk.Destroy(),
             onReturnAction: (chunk) => chunk.Release()
+        );
+
+        // Initialize ChunkData Pool
+        _dataPool = new ConcurrentDynamicPool<ChunkData>(
+            createFunc: () => new ChunkData(Vector2Int.zero), // Pos set in Get()
+            destroyAction: (_) =>
+            {
+                /* Data GC handled by runtime */
+            },
+            onReturnAction: (_) =>
+            {
+                /* Reset handled manually in Return logic due to complexity */
+            }
+        );
+
+        // Initialize ChunkSection Pool
+        _sectionPool = new ConcurrentDynamicPool<ChunkSection>(
+            createFunc: () => new ChunkSection(),
+            destroyAction: (_) =>
+            {
+                /* Data GC handled by runtime */
+            },
+            onReturnAction: (sec) => sec.Reset()
         );
 
         // Initialize Border Pool
@@ -78,6 +111,12 @@ public class ChunkPoolManager
         // Delegate cleanup to the generic pools
         _chunkPool.UpdatePruning(maxPoolSize);
 
+        // Data pools can grow larger, maybe 2x chunks for buffer
+        _dataPool.UpdatePruning(maxPoolSize * 2);
+
+        // Sections: 8 per chunk (max). 
+        _sectionPool.UpdatePruning(maxPoolSize * 8);
+
         // Fully cleanup ChunkBorder pool if disabled to free memory allocation
         int chunkBorderPoolSize = World.Instance.settings.showChunkBorders ? maxPoolSize : 0;
         _borderPool.UpdatePruning(chunkBorderPoolSize);
@@ -108,6 +147,38 @@ public class ChunkPoolManager
     public void Return(Chunk chunk)
     {
         _chunkPool.Return(chunk);
+    }
+
+    #endregion
+
+    #region Data Logic
+
+    public ChunkData GetChunkData(Vector2Int pos)
+    {
+        ChunkData data = _dataPool.Get();
+        data.Reset(pos); // We assume Reset handles cleaning internal state
+        return data;
+    }
+
+    public void ReturnChunkData(ChunkData data)
+    {
+        if (data == null) return;
+
+        // NOTE: Reset() is called on Get(), but we also explicitly cleanup sections inside Reset() to return them to the pool immediately.
+        //       We call Reset() here on Return as well to free up Sections immediately so other chunks can use them.
+        data.Reset(Vector2Int.zero);
+
+        _dataPool.Return(data);
+    }
+
+    public ChunkSection GetChunkSection()
+    {
+        return _sectionPool.Get();
+    }
+
+    public void ReturnChunkSection(ChunkSection section)
+    {
+        _sectionPool.Return(section);
     }
 
     #endregion
@@ -183,9 +254,11 @@ public class ChunkPoolManager
     public void Clear()
     {
         _chunkPool.Clear();
+        _dataPool.Clear();
+        _sectionPool.Clear();
         _borderPool.Clear();
         _visualizerPool.Clear();
 
-        Debug.Log("[ChunkPoolManager] All pools [Chunks, ChunkBorders, VoxelVisualizers] in the ChunkPool have been disposed of..");
+        Debug.Log("[ChunkPoolManager] All pools [Chunks, ChunkData, ChunkSections, ChunkBorders, VoxelVisualizers] in the ChunkPool have been disposed of..");
     }
 }

@@ -118,22 +118,24 @@ namespace Serialization
             // 2. Get Buffer
             byte[] buffer = SerializationBufferPool.Get();
 
+            // 3. Create a thread-safe snapshot on the Main Thread (Zero GC via Pooling)
+            ChunkData snapshot = CreateSerializationSnapshot(data);
+
             try
             {
                 // Check token before expensive work
                 if (cancellationToken.IsCancellationRequested) return;
 
-                // 2. Offload to Thread Pool
+                // 4. Offload serialization of the isolated snapshot to Thread Pool
                 await Task.Run(() =>
                 {
                     // Serialize
-                    int length = ChunkSerializer.Serialize(data, buffer, algorithm);
-
+                    int length = ChunkSerializer.Serialize(snapshot, buffer, algorithm);
                     // Check token again before disk write to prevent writing partial/cancelled state
                     if (length <= 0 || cancellationToken.IsCancellationRequested) return;
 
                     // Write
-                    Vector2Int coord = data.position;
+                    Vector2Int coord = snapshot.position;
                     RegionFile region = GetRegion(GetRegionCoord(coord));
 
                     int lx = coord.x % 32;
@@ -156,7 +158,49 @@ namespace Serialization
             {
                 // Always return the buffer to the pool
                 SerializationBufferPool.Return(buffer);
+                // Return snapshot components back to the pool
+                World.Instance.ChunkPool.ReturnChunkData(snapshot);
             }
+        }
+
+        private ChunkData CreateSerializationSnapshot(ChunkData source)
+        {
+            ChunkData snapshot = World.Instance.ChunkPool.GetChunkData(source.position);
+            snapshot.NeedsInitialLighting = source.NeedsInitialLighting;
+
+            // Copy Heightmap
+            if (source.heightMap != null && snapshot.heightMap != null)
+                Array.Copy(source.heightMap, snapshot.heightMap, source.heightMap.Length);
+
+            // Correctly iterate the Section Array
+            for (int i = 0; i < source.sections.Length; i++)
+            {
+                // Check specific section in source array
+                if (source.sections[i] != null && !source.sections[i].IsEmpty)
+                {
+                    ChunkSection snapSec = World.Instance.ChunkPool.GetChunkSection();
+                    snapSec.nonAirCount = source.sections[i].nonAirCount;
+
+                    // Copy voxels
+                    Array.Copy(source.sections[i].voxels, snapSec.voxels, 4096);
+
+                    // Assign to snapshot array
+                    snapshot.sections[i] = snapSec;
+                }
+            }
+
+            // Queue copying (Locking is correct)
+            lock (source.SunlightBfsQueue)
+            {
+                foreach (var item in source.SunlightBfsQueue) snapshot.SunlightBfsQueue.Enqueue(item);
+            }
+
+            lock (source.BlocklightBfsQueue)
+            {
+                foreach (var item in source.BlocklightBfsQueue) snapshot.BlocklightBfsQueue.Enqueue(item);
+            }
+
+            return snapshot;
         }
 
         public void RunMigration(WorldMigration migration)

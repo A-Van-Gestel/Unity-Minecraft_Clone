@@ -89,7 +89,7 @@ namespace Data
             // Chunk doesn't exist on disk (or loading is disabled/not yet implemented).
             // We create a "placeholder" ChunkData object.
             // The asynchronous job system is responsible for populating it.
-            Chunks.Add(chunkVector2Coord, new ChunkData(chunkVector2Coord));
+            Chunks.Add(chunkVector2Coord, World.Instance.ChunkPool.GetChunkData(chunkVector2Coord)); // Create placeholder using POOL
         }
 
 
@@ -108,7 +108,7 @@ namespace Data
             if (!Chunks.ContainsKey(chunkCoord))
             {
                 // Create the placeholder
-                Chunks.Add(chunkCoord, new ChunkData(chunkCoord));
+                Chunks.Add(chunkCoord, World.Instance.ChunkPool.GetChunkData(chunkCoord)); // Create placeholder using POOL
                 return false;
             }
 

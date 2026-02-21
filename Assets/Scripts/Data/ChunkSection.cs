@@ -18,9 +18,21 @@ namespace Data
 
         public ChunkSection()
         {
+            // 4096 * 4 bytes = 16KB allocation
             voxels = new uint[ChunkMath.SECTION_VOLUME];
             nonAirCount = 0;
             opaqueCount = 0;
+        }
+
+        /// <summary>
+        /// Resets the section for reuse in the pool.
+        /// Zeros out the voxel array and resets counts.
+        /// </summary>
+        public void Reset()
+        {
+            nonAirCount = 0;
+            opaqueCount = 0;
+            Array.Clear(voxels, 0, voxels.Length);
         }
 
         public bool IsEmpty => nonAirCount == 0;

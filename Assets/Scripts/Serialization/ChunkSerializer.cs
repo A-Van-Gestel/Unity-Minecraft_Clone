@@ -106,30 +106,39 @@ namespace Serialization
 
             // --- Section Bitmask ---
             int sectionBitmask = 0;
+            // Pre-allocate a safe local array for the background thread
+            ChunkSection[] safeSections = new ChunkSection[data.sections.Length];
+
             for (int i = 0; i < data.sections.Length; i++)
             {
-                if (data.sections[i] != null && !data.sections[i].IsEmpty)
+                // Snapshot the reference. If the main thread nullifies data.sections immediately after this line,
+                // our local 'sec' variable still safely points  to the object in memory, preventing NREs.
+                ChunkSection sec = data.sections[i];
+
+                if (sec != null && !sec.IsEmpty)
                 {
                     sectionBitmask |= (1 << i);
+                    safeSections[i] = sec;
                 }
             }
 
             writer.Write(sectionBitmask);
 
             // --- Write Sections ---
-            for (int i = 0; i < data.sections.Length; i++)
+            for (int i = 0; i < safeSections.Length; i++)
             {
                 // Check bitmask to skip empty sections
                 if ((sectionBitmask & (1 << i)) != 0)
                 {
-                    WriteSection(writer, data.sections[i]);
+                    // Pass our safe reference to the writer
+                    WriteSection(writer, safeSections[i]);
                 }
             }
 
             // --- Write Lighting Queues ---
-            // We access the raw queues from ChunkData. 
-            WriteLightQueue(writer, data.SunlightBfsQueue);
-            WriteLightQueue(writer, data.BlocklightBfsQueue);
+            // Lock queues during serialization to prevent concurrent modification by the Main Thread
+            lock (data.SunlightBfsQueue) WriteLightQueue(writer, data.SunlightBfsQueue);
+            lock (data.BlocklightBfsQueue) WriteLightQueue(writer, data.BlocklightBfsQueue);
         }
 
         // --- Internal Read Logic ---
@@ -150,7 +159,7 @@ namespace Serialization
                 if (x != coord.x || z != coord.y)
                     Debug.LogWarning($"[ReadChunkInternal] Chunk coord mismatch at {coord}. Read: {x},{z}");
 
-                ChunkData chunk = new ChunkData(x, z);
+                ChunkData chunk = World.Instance.ChunkPool.GetChunkData(new Vector2Int(x, z)); // Get from POOL
 
                 // --- State Flags ---
                 chunk.NeedsInitialLighting = reader.ReadBoolean();
@@ -253,7 +262,7 @@ namespace Serialization
             byte version = reader.ReadByte();
             if (version == 1)
             {
-                ChunkSection section = new ChunkSection();
+                ChunkSection section = World.Instance.ChunkPool.GetChunkSection(); // Get from POOL
                 section.nonAirCount = reader.ReadUInt16();
 
                 // Robust read for large data blocks

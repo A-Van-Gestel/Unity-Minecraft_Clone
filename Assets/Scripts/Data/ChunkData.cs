@@ -44,6 +44,9 @@ namespace Data
         [NonSerialized]
         public bool IsPopulated;
 
+        [NonSerialized]
+        public bool IsLoading = false;
+
         // --- lighting ---
         /// <summary>
         /// A transient flag indicating that the chunk's data has been populated, but it has not yet undergone its initial, mandatory lighting calculation.
@@ -97,6 +100,68 @@ namespace Data
             sections = new ChunkSection[sectionCount];
         }
 
+        // --- Pooling Support ---
+
+        #region Pooling Support
+
+        /// <summary>
+        /// Resets the ChunkData for reuse. 
+        /// Returns all contained ChunkSections to the pool and clears internal state.
+        /// </summary>
+        public void Reset(Vector2Int pos)
+        {
+            position = pos;
+            IsPopulated = false;
+            IsLoading = false;
+            Chunk = null; // Unlink visual
+
+            // Lighting flags
+            NeedsInitialLighting = false;
+            HasLightChangesToProcess = false;
+            IsAwaitingMainThreadProcess = false;
+
+            // Clear Queues (retains capacity)
+            _sunlightBfsQueue.Clear();
+            _blocklightBfsQueue.Clear();
+
+            // Clear Heightmap (retains array)
+            Array.Clear(heightMap, 0, heightMap.Length);
+
+            // Recycle Sections
+            // CRITICAL: We must return sections to the pool before we lose the reference.
+            if (World.Instance != null && World.Instance.ChunkPool != null)
+            {
+                for (int i = 0; i < sections.Length; i++)
+                {
+                    if (sections[i] != null)
+                    {
+                        World.Instance.ChunkPool.ReturnChunkSection(sections[i]);
+                        sections[i] = null;
+                    }
+                }
+            }
+            else
+            {
+                // Fallback for shutdown/test scenarios where World might be gone
+                Array.Clear(sections, 0, sections.Length);
+            }
+        }
+
+        /// <summary>
+        /// Helper to get a new section from the pool.
+        /// </summary>
+        private ChunkSection GetNewSection()
+        {
+            if (World.Instance != null)
+            {
+                return World.Instance.ChunkPool.GetChunkSection();
+            }
+
+            return new ChunkSection(); // Fallback
+        }
+
+        #endregion
+
         /// Populate the chunk with voxels from the world generator.
         public void Populate(NativeArray<uint> jobOutputMap, NativeArray<byte> jobOutputHeightMap)
         {
@@ -122,10 +187,11 @@ namespace Data
                 int startIndex = i * sectionVoxelCount;
 
                 // Create or reset section
-                if (sections[i] == null) sections[i] = new ChunkSection();
+                if (sections[i] == null) sections[i] = GetNewSection(); // POOLING
                 else
                 {
-                    // Reset data if reusing (though currently we construct new chunks usually)
+                    // If reusing an existing section in this slot (rare), clear it.
+                    // Usually sections are null until populated.
                     Array.Clear(sections[i].voxels, 0, sections[i].voxels.Length);
                 }
 
@@ -148,7 +214,9 @@ namespace Data
 
                 if (!hasData)
                 {
-                    sections[i] = null; // Discard empty section
+                    // Return unused section to pool
+                    if (World.Instance != null) World.Instance.ChunkPool.ReturnChunkSection(sections[i]);
+                    sections[i] = null;
                 }
                 else
                 {
@@ -165,8 +233,30 @@ namespace Data
         {
             Debug.Log($"[PopulateFromSave] Starting for chunk {position}");
 
-            heightMap = loadedData.heightMap;
-            sections = loadedData.sections;
+            // Copy value types / arrays of value types
+            // Note: heightMap is a fixed size array, so we copy contents, not the reference, just to be safe.
+            Array.Copy(loadedData.heightMap, heightMap, heightMap.Length);
+
+            // CRITICAL: TRANSFER OWNERSHIP OF SECTIONS
+            // We cannot just assign the array reference (sections = loadedData.sections) because loadedData will be returned to the pool,
+            // which would clear the sections we just took. We must steal the section objects and null them out in the source.
+            for (int i = 0; i < sections.Length; i++)
+            {
+                // 1. If 'this' chunk already has a section in this slot (rare, but possible),
+                //    return it to the pool before overwriting it to prevent leaks.
+                if (sections[i] != null)
+                {
+                    World.Instance.ChunkPool.ReturnChunkSection(sections[i]);
+                }
+
+                // 2. Steal the section from the loaded data
+                sections[i] = loadedData.sections[i];
+
+                // 3. IMPORTANT: Nullify the reference in the loaded data.
+                //    This prevents loadedData.Reset() from returning this section to the pool
+                //    when loadedData is recycled in the next step.
+                loadedData.sections[i] = null;
+            }
 
             // Copy Queues
             // We move the queues from the loaded object (temp) to this object (live)
@@ -335,7 +425,7 @@ namespace Data
             {
                 // If writing "Air" to a null section, don't bother creating it
                 if (value == 0) return;
-                sections[sectionY] = new ChunkSection();
+                sections[sectionY] = GetNewSection(); // POOLING
             }
 
             // Index logic: 16x16x16

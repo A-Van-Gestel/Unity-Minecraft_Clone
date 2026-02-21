@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using Data;
+using Helpers;
 using Jobs;
 using Jobs.BurstData;
 using Jobs.Data;
@@ -365,10 +366,17 @@ public class WorldJobManager
                 }
 
                 // Check for pending lighting updates for this chunk
-                if (_world.LightingStateManager.TryGetAndRemove(jobEntry.Key, out HashSet<Vector2Int> lightCols))
+                if (_world.LightingStateManager.TryGetAndRemove(jobEntry.Key, out HashSet<Vector2Int> localLightCols))
                 {
-                    if (!_world.worldData.SunlightRecalculationQueue.TryAdd(chunkData.position, lightCols))
-                        _world.worldData.SunlightRecalculationQueue[chunkData.position].UnionWith(lightCols);
+                    // Convert Local columns to Global Columns before adding to the queue!
+                    HashSet<Vector2Int> globalLightCols = new HashSet<Vector2Int>();
+                    foreach (var lCol in localLightCols)
+                    {
+                        globalLightCols.Add(new Vector2Int(lCol.x + chunkData.position.x, lCol.y + chunkData.position.y));
+                    }
+
+                    if (!_world.worldData.SunlightRecalculationQueue.TryAdd(chunkData.position, globalLightCols))
+                        _world.worldData.SunlightRecalculationQueue[chunkData.position].UnionWith(globalLightCols);
 
                     chunkData.HasLightChangesToProcess = true;
                 }
@@ -489,8 +497,8 @@ public class WorldJobManager
 
                 if (chunkData != null && chunkData.IsPopulated)
                 {
-                    // 1. Populate sections from the flat map returned by the job
-                    chunkData.PopulateFromFlattened(jobData.Map);
+                    // 1. Merge ONLY light bits to prevent overwriting player modifications (TOCTOU fix)
+                    ApplyLightingJobResult(chunkData, jobData.Map);
 
                     // 2. Process cross-chunk modifications calculated by the job.
                     foreach (LightModification mod in jobData.Mods)
@@ -629,6 +637,80 @@ public class WorldJobManager
         foreach (ChunkCoord coord in completedCoords)
         {
             lightingJobs.Remove(coord);
+        }
+    }
+
+    /// <summary>
+    /// Merges the lighting results from a background job into the live ChunkData.
+    /// CRITICAL: This performs a bit-mask merge (only light bits) to avoid overwriting 
+    /// block changes (TOCTOU) made by the player while the job was running.
+    /// </summary>
+    private void ApplyLightingJobResult(ChunkData chunkData, NativeArray<uint> jobMap)
+    {
+        int indexOffset = 0;
+        int sectionVolume = ChunkMath.SECTION_VOLUME; // Cache for slight perf
+
+        for (int s = 0; s < chunkData.sections.Length; s++)
+        {
+            ChunkSection section = chunkData.sections[s];
+            bool sectionHasData = false;
+
+            // 1. If the live section is null, check if the job has light data for this area.
+            // If the job says there is light here, we must create a section to hold it.
+            if (section == null)
+            {
+                bool needsSection = false;
+                for (int i = 0; i < sectionVolume; i++)
+                {
+                    if (jobMap[indexOffset + i] != 0)
+                    {
+                        needsSection = true;
+                        break;
+                    }
+                }
+
+                if (needsSection)
+                {
+                    section = _world.ChunkPool.GetChunkSection();
+                    chunkData.sections[s] = section;
+                }
+            }
+
+            // 2. If we have a section (existing or just created), merge the light bits.
+            if (section != null)
+            {
+                for (int i = 0; i < sectionVolume; i++)
+                {
+                    uint liveData = section.voxels[i];
+                    uint jobVoxel = jobMap[indexOffset + i];
+
+                    // Extract ONLY the calculated light levels from the background job result
+                    byte jobSunlight = BurstVoxelDataBitMapping.GetSunLight(jobVoxel);
+                    byte jobBlocklight = BurstVoxelDataBitMapping.GetBlockLight(jobVoxel);
+
+                    // Apply them to the current LIVE terrain data (preserving Block ID)
+                    liveData = BurstVoxelDataBitMapping.SetSunLight(liveData, jobSunlight);
+                    liveData = BurstVoxelDataBitMapping.SetBlockLight(liveData, jobBlocklight);
+
+                    section.voxels[i] = liveData; // Write back
+
+                    if (liveData != 0) sectionHasData = true;
+                }
+
+                // 3. Cleanup: If the section became empty (air + dark), pool it.
+                if (!sectionHasData)
+                {
+                    _world.ChunkPool.ReturnChunkSection(section);
+                    chunkData.sections[s] = null; // Clear array slot
+                }
+                else
+                {
+                    // Ensure opaque counts are updated since we modified voxel data
+                    section.RecalculateCounts(_world.blockTypes);
+                }
+            }
+
+            indexOffset += sectionVolume;
         }
     }
 }

@@ -272,6 +272,12 @@ public class World : MonoBehaviour
         // Cleanup world data
         if (worldData != null)
         {
+            foreach (var data in worldData.Chunks.Values)
+            {
+                // POOLING: Return data to pool
+                ChunkPool.ReturnChunkData(data);
+            }
+
             worldData.Chunks.Clear();
             worldData.ModifiedChunks.Clear();
         }
@@ -544,12 +550,27 @@ public class World : MonoBehaviour
         if (settings.EnablePersistence)
         {
             ChunkData loaded = await StorageManager.LoadChunkAsync(pos);
+
+            // Ensure the chunk wasn't unloaded or recycled during the "await" above.
+            if (!worldData.Chunks.TryGetValue(pos, out ChunkData currentData) || currentData != data)
+            {
+                // The chunk was unloaded. Recycle the loaded data to prevent a memory leak.
+                if (loaded != null)
+                {
+                    ChunkPool.ReturnChunkData(loaded);
+                }
+
+                return;
+            }
+
+
             if (loaded != null)
             {
                 Debug.Log($"[LoadOrGenerateChunk] Chunk {coord} loaded successfully, calling PopulateFromSave");
 
                 // Hydrate the placeholder
                 data.PopulateFromSave(loaded);
+                ChunkPool.ReturnChunkData(loaded); // Recycle the outer shell of the loaded data now that we've extracted its contents.
                 data.Chunk?.OnDataPopulated();
 
                 // Apply Pending Mods (Trees, etc that spilled over)
@@ -1642,11 +1663,26 @@ public class World : MonoBehaviour
                 worldData.SunlightRecalculationQueue.Remove(pos);
             }
 
+            bool isSaving = false;
+
             // 2. Save if modified
             if (worldData.ModifiedChunks.Contains(data))
             {
-                // Pass the CancellationToken so this save can be aborted on Quit
-                _ = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
+                isSaving = true;
+
+                // Async Save Life-cycle
+                // We start the save task, but we hook a continuation to recycle the data ONLY when done.
+                // This prevents the main thread from clearing the data while the background thread tries to read it.
+                var saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
+
+                saveTask.ContinueWith(t =>
+                {
+                    if (t.IsFaulted) Debug.LogError($"[UnloadChunks] Save failed for {coord}: {t.Exception}");
+
+                    // ConcurrentDynamicPool is thread-safe, so calling Return from ThreadPool is safe.
+                    ChunkPool.ReturnChunkData(data);
+                });
+
                 worldData.ModifiedChunks.Remove(data);
             }
 
@@ -1674,8 +1710,16 @@ public class World : MonoBehaviour
                 _chunkMap.Remove(coord);
             }
 
-            // 3. Remove Data
+            // 3. Remove Data Reference from World
             worldData.Chunks.Remove(pos);
+
+            // 4. Recycle Data (Only if NOT saving)
+            // If we ARE saving, the ContinueWith callback above handles the return.
+            if (!isSaving)
+            {
+                // POOLING: Return data to pool
+                ChunkPool.ReturnChunkData(data);
+            }
         }
     }
 
@@ -1714,13 +1758,18 @@ public class World : MonoBehaviour
                 Vector2Int pos = new Vector2Int(chunkCoord.X * VoxelData.ChunkWidth, chunkCoord.Z * VoxelData.ChunkWidth);
 
                 // If chunk not in memory at all
-                if (!worldData.Chunks.ContainsKey(pos))
+                if (!worldData.Chunks.TryGetValue(pos, out ChunkData data))
                 {
                     // Create placeholder
-                    ChunkData placeholder = new ChunkData(pos);
-                    worldData.Chunks.Add(pos, placeholder);
+                    data = Instance.ChunkPool.GetChunkData(pos);
+                    worldData.Chunks.Add(pos, data);
+                }
 
+                // If it's empty, and not currently fetching from disk, and not currently generating... start the pipeline!
+                if (!data.IsPopulated && !data.IsLoading && !JobManager.generationJobs.ContainsKey(chunkCoord))
+                {
                     // Trigger Async Load
+                    data.IsLoading = true;
                     _ = LoadOrGenerateChunk(chunkCoord);
                 }
 
