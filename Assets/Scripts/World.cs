@@ -2163,7 +2163,26 @@ public class World : MonoBehaviour
 
     public void ToggleDebugScreen()
     {
-        debugScreen.SetActive(!debugScreen.activeSelf);
+        if (!debugScreen.activeSelf)
+        {
+            // State 1: Off -> FPS Only
+            debugScreen.SetActive(true);
+            debugScreen.GetComponent<DebugScreen>().SetMode(DebugScreen.DebugMode.FPSOnly);
+        }
+        else
+        {
+            var dbg = debugScreen.GetComponent<DebugScreen>();
+            if (dbg.CurrentMode == DebugScreen.DebugMode.FPSOnly)
+            {
+                // State 2: FPS Only -> Full Debug
+                dbg.SetMode(DebugScreen.DebugMode.Full);
+            }
+            else
+            {
+                // State 3: Full Debug -> Off
+                debugScreen.SetActive(false);
+            }
+        }
     }
 
     /// <summary>

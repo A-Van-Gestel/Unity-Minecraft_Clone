@@ -43,6 +43,10 @@ public class DebugScreen : MonoBehaviour
 
 
     [Header("Update Rates")]
+    [Tooltip("How many times per second the text UI is rebuilt and rendered (e.g. 0.1 = 10 times a second).")]
+    [SerializeField]
+    private float _textUpdateRate = 0.1f;
+
     [Tooltip("How many times per second the frame rate counter will be updated.")]
     [SerializeField]
     private float _frameRateUpdateRate = 0.25f;
@@ -50,6 +54,15 @@ public class DebugScreen : MonoBehaviour
     [Tooltip("How many times per second expensive debug info is updated.")]
     [SerializeField]
     private float _infrequentUpdateRate = 0.2f;
+
+    // --- Public Fields ---
+    public enum DebugMode
+    {
+        FPSOnly,
+        Full
+    }
+
+    public DebugMode CurrentMode { get; private set; } = DebugMode.Full;
 
     // --- Private Fields ---
     private World _world;
@@ -92,6 +105,7 @@ public class DebugScreen : MonoBehaviour
     private long _gcReservedMemory;
 
     // --- Timers ---
+    private float _textUpdateTimer;
     private float _frameRateTimer;
     private float _infrequentUpdateTimer;
 
@@ -176,8 +190,31 @@ public class DebugScreen : MonoBehaviour
             _infrequentUpdateTimer = 0;
         }
 
-        // Build the debug strings for each text block.
-        BuildDebugStrings();
+        // --- Text UI Update (Throttled for GC Optimization) ---
+        _textUpdateTimer += Time.unscaledDeltaTime;
+        if (_textUpdateTimer >= _textUpdateRate)
+        {
+            // Build the debug strings for each text block.
+            BuildDebugStrings();
+            _textUpdateTimer = 0;
+        }
+    }
+
+    /// <summary>
+    /// Sets the display mode of the debug screen and toggles unused text objects to save rendering overhead.
+    /// </summary>
+    public void SetMode(DebugMode mode)
+    {
+        CurrentMode = mode;
+        _textUpdateTimer = _textUpdateRate; // Force an immediate text update
+
+        // Disable unused TextMeshPro components so they don't consume layout/render time
+        bool isFull = mode == DebugMode.Full;
+        _middleLeftText.gameObject.SetActive(isFull);
+        _bottomLeftText.gameObject.SetActive(isFull);
+        _topRightText.gameObject.SetActive(isFull);
+        _middleRightText.gameObject.SetActive(isFull);
+        _bottomRightText.gameObject.SetActive(isFull);
     }
 
     /// <summary>
@@ -239,14 +276,23 @@ public class DebugScreen : MonoBehaviour
     {
         // Clear builders from the previous frame.
         _topLeftBuilder.Clear();
+        
+        // We ALWAYS populate the top left, as it contains the FPS counter
+        PopulateTopLeftBuilder();
+        _topLeftText.text = _topLeftBuilder.ToString();
+
+        // Skip building the rest of the strings if we are in FPS Only mode
+        if (CurrentMode == DebugMode.FPSOnly) return;
+        
+        // Clear remaining builders from the previous frame.
+        _topLeftBuilder.Clear();
         _middleLeftBuilder.Clear();
         _bottomLeftBuilder.Clear();
         _topRightBuilder.Clear();
         _middleRightBuilder.Clear();
         _bottomRightBuilder.Clear();
 
-        // Populate each builder with its respective data.
-        PopulateTopLeftBuilder();
+        // Populate each remaining builder with its respective data.
         PopulateMiddleLeftBuilder();
         PopulateBottomLeftBuilder();
         PopulateTopRightBuilder();
@@ -254,7 +300,6 @@ public class DebugScreen : MonoBehaviour
         PopulateBottomRightBuilder();
 
         // Set the text property once per UI element.
-        _topLeftText.text = _topLeftBuilder.ToString();
         _middleLeftText.text = _middleLeftBuilder.ToString();
         _bottomLeftText.text = _bottomLeftBuilder.ToString();
         _topRightText.text = _topRightBuilder.ToString();
@@ -267,9 +312,12 @@ public class DebugScreen : MonoBehaviour
         Vector3 playerPosition = _player.transform.position;
         Vector2 lookingDirection = GetLookingAngles();
 
-        // --- General Info ---
+        // --- General Info (Always Show) ---
         _topLeftBuilder.AppendLine("Minecraft Clone in Unity");
         _topLeftBuilder.Append(Mathf.RoundToInt(_frameRate)).AppendLine(" fps");
+        
+        // Skip building the rest of the strings if we are in FPS Only mode
+        if (CurrentMode == DebugMode.FPSOnly) return;
         _topLeftBuilder.AppendLine();
 
         // --- World & Orientation Info ---
