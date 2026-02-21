@@ -19,6 +19,12 @@ MonoBehaviour:
     m_ClosingDefinition: 
     m_OpeningTagArray: 
     m_ClosingTagArray: 
+  - m_Name: Normal - Debug
+    m_HashCode: -91074481
+    m_OpeningDefinition: <mark=#64646426>
+    m_ClosingDefinition: </mark>
+    m_OpeningTagArray: 3c0000006d00000061000000720000006b0000003d0000002300000036000000340000003600000034000000360000003400000032000000360000003e000000
+    m_ClosingTagArray: 3c0000002f0000006d00000061000000720000006b0000003e000000
   - m_Name: H1
     m_HashCode: 2425
     m_OpeningDefinition: <size=2em><b><#40ff80>*

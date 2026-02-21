@@ -188,6 +188,7 @@ MonoBehaviour:
   saveWorldKey: 285
   toggleChunkBordersKey: 286
   cycleVisModeKey: 288
+  debugCodeKey: 289
 --- !u!114 &151001799
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -876,7 +877,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: -1183493901
+  m_TextStyleHashCode: -91074481
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -1649,7 +1650,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: -1183493901
+  m_TextStyleHashCode: -91074481
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -2032,7 +2033,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: -1183493901
+  m_TextStyleHashCode: -91074481
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -2140,7 +2141,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &884714900
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2631,7 +2632,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: -1183493901
+  m_TextStyleHashCode: -91074481
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -2975,7 +2976,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: -1183493901
+  m_TextStyleHashCode: -91074481
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -3112,7 +3113,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: -1183493901
+  m_TextStyleHashCode: -91074481
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2

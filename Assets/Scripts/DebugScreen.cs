@@ -268,7 +268,7 @@ public class DebugScreen : MonoBehaviour
         Vector2 lookingDirection = GetLookingAngles();
 
         // --- General Info ---
-        _topLeftBuilder.AppendLine("Minecraft Clone based on b3agz' Code a Game Like Minecraft in Unity");
+        _topLeftBuilder.AppendLine("Minecraft Clone in Unity");
         _topLeftBuilder.Append(Mathf.RoundToInt(_frameRate)).AppendLine(" fps");
         _topLeftBuilder.AppendLine();
 
@@ -309,7 +309,7 @@ public class DebugScreen : MonoBehaviour
         _topLeftBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
         _topLeftBuilder.Append("Total Active Voxels in World: ").AppendLine(totalActiveVoxels);
         _topLeftBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount);
-        _topLeftBuilder.AppendLine($" └ Chunks unused in Pool: {pooledChunksCount} | Borders unused in Pool: {pooledChunkBordersCount}");
+        _topLeftBuilder.AppendLine($" ├ Chunks unused in Pool: {pooledChunksCount} | Borders unused in Pool: {pooledChunkBordersCount}");
         _topLeftBuilder.AppendLine($" └ Data unused in Pool: {pooledChunkDataCount} | Sections unused in Pool: {pooledChunkSectionsCount}");
         _topLeftBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshInfo);
         _topLeftBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
