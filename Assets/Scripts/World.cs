@@ -1257,36 +1257,38 @@ public class World : MonoBehaviour
         {
             Vector3Int offset = VoxelData.FaceChecks[faceIndex];
             ChunkCoord neighborCoord = new ChunkCoord(chunkCoord.X + offset.x, chunkCoord.Z + offset.z);
+            
+            if (!IsChunkInWorld(neighborCoord)) continue;
 
-            if (IsChunkInWorld(neighborCoord))
+            // Is a terrain generation job for this neighbor still running?
+            if (JobManager.generationJobs.ContainsKey(neighborCoord))
             {
-                // Is a terrain generation job for this neighbor still running?
-                if (JobManager.generationJobs.ContainsKey(neighborCoord))
+                return false; // Neighbor terrain data is not ready.
+            }
+
+            // Is a lighting job for this neighbor currently running?
+            if (JobManager.lightingJobs.ContainsKey(neighborCoord))
+            {
+                return false; // Neighbor is still calculating light, we must wait.
+            }
+
+            Vector2Int neighborV2Pos = new Vector2Int(neighborCoord.X * VoxelData.ChunkWidth, neighborCoord.Z * VoxelData.ChunkWidth);
+            
+            // Only enforce lighting stability checks if the chunk is actually populated with data.
+            // If it's an empty placeholder, it has no light to process anyway.
+            if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData) && neighborData.IsPopulated)
+            {
+                // Does the neighbor have pending light changes that haven't even been scheduled yet,
+                // OR is waiting for first light is NOT ready to provide lighting data for meshing.
+                if (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting)
                 {
-                    return false; // Neighbor terrain data is not ready.
+                    return false; // Neighbor has pending light changes that haven't even been scheduled yet, we must wait.
                 }
 
-                // Is a lighting job for this neighbor currently running?
-                if (JobManager.lightingJobs.ContainsKey(neighborCoord))
+                // Is the neighbor waiting for its completed lighting job to be processed on the main thread?
+                if (neighborData.IsAwaitingMainThreadProcess)
                 {
-                    return false; // Neighbor is still calculating light, we must wait.
-                }
-
-                Vector2Int neighborV2Pos = new Vector2Int(neighborCoord.X * VoxelData.ChunkWidth, neighborCoord.Z * VoxelData.ChunkWidth);
-                if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData))
-                {
-                    // Does the neighbor have pending light changes that haven't even been scheduled yet,
-                    // OR is waiting for first light is NOT ready to provide lighting data for meshing.
-                    if (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting)
-                    {
-                        return false; // Neighbor has pending light changes that haven't even been scheduled yet, we must wait.
-                    }
-
-                    // Is the neighbor waiting for its completed lighting job to be processed on the main thread?
-                    if (neighborData.IsAwaitingMainThreadProcess)
-                    {
-                        return false; // Neighbor is in a transitional state, we must wait.
-                    }
+                    return false; // Neighbor is in a transitional state, we must wait.
                 }
             }
         }
@@ -1315,23 +1317,6 @@ public class World : MonoBehaviour
             if (JobManager.generationJobs.ContainsKey(neighborCoord))
             {
                 return false; // Neighbor data is not ready yet.
-            }
-
-            // 2. Is the chunk actually in memory and populated?
-            // If the chunk is missing (unloaded) or just a placeholder (not populated), we can't run lighting updates that depend on it.
-            if (IsChunkInWorld(neighborCoord))
-            {
-                Vector2Int pos = new Vector2Int(neighborCoord.X * VoxelData.ChunkWidth, neighborCoord.Z * VoxelData.ChunkWidth);
-                if (worldData.Chunks.TryGetValue(pos, out ChunkData neighborData))
-                {
-                    if (!neighborData.IsPopulated) return false;
-                }
-                else
-                {
-                    // Neighbor is valid in world bounds, but not loaded in memory.
-                    // We must wait for it to load to prevent "black wall" lighting artifacts.
-                    return false;
-                }
             }
         }
 
@@ -1663,24 +1648,15 @@ public class World : MonoBehaviour
                 worldData.SunlightRecalculationQueue.Remove(pos);
             }
 
-            bool isSaving = false;
-
             // 2. Save if modified
             if (worldData.ModifiedChunks.Contains(data))
             {
-                isSaving = true;
-
-                // Async Save Life-cycle
-                // We start the save task, but we hook a continuation to recycle the data ONLY when done.
-                // This prevents the main thread from clearing the data while the background thread tries to read it.
+                // Fire and forget (StorageManager handles the Snapshot lifecycle)
                 var saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
 
                 saveTask.ContinueWith(t =>
                 {
                     if (t.IsFaulted) Debug.LogError($"[UnloadChunks] Save failed for {coord}: {t.Exception}");
-
-                    // ConcurrentDynamicPool is thread-safe, so calling Return from ThreadPool is safe.
-                    ChunkPool.ReturnChunkData(data);
                 });
 
                 worldData.ModifiedChunks.Remove(data);
@@ -1713,13 +1689,9 @@ public class World : MonoBehaviour
             // 3. Remove Data Reference from World
             worldData.Chunks.Remove(pos);
 
-            // 4. Recycle Data (Only if NOT saving)
-            // If we ARE saving, the ContinueWith callback above handles the return.
-            if (!isSaving)
-            {
-                // POOLING: Return data to pool
-                ChunkPool.ReturnChunkData(data);
-            }
+            // 4. Recycle Data
+            // POOLING: Return data to pool
+            ChunkPool.ReturnChunkData(data);
         }
     }
 
