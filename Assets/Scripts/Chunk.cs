@@ -424,18 +424,12 @@ public class Chunk
     #endregion
 }
 
-public class ChunkCoord : IEquatable<ChunkCoord>
+public readonly struct ChunkCoord : IEquatable<ChunkCoord>
 {
     public readonly int X;
     public readonly int Z;
 
     #region Constructors
-
-    public ChunkCoord()
-    {
-        X = 0;
-        Z = 0;
-    }
 
     public ChunkCoord(int x, int z)
     {
@@ -445,11 +439,8 @@ public class ChunkCoord : IEquatable<ChunkCoord>
 
     public ChunkCoord(Vector2 pos)
     {
-        int xInt = Mathf.FloorToInt(pos.x);
-        int zInt = Mathf.FloorToInt(pos.y);
-
-        X = xInt / VoxelData.ChunkWidth;
-        Z = zInt / VoxelData.ChunkWidth;
+        X = Mathf.FloorToInt(pos.x) / VoxelData.ChunkWidth;
+        Z = Mathf.FloorToInt(pos.y) / VoxelData.ChunkWidth;
     }
 
     public ChunkCoord(Vector2Int pos)
@@ -460,11 +451,8 @@ public class ChunkCoord : IEquatable<ChunkCoord>
 
     public ChunkCoord(Vector3 pos)
     {
-        int xInt = Mathf.FloorToInt(pos.x);
-        int zInt = Mathf.FloorToInt(pos.z);
-
-        X = xInt / VoxelData.ChunkWidth;
-        Z = zInt / VoxelData.ChunkWidth;
+        X = Mathf.FloorToInt(pos.x) / VoxelData.ChunkWidth;
+        Z = Mathf.FloorToInt(pos.z) / VoxelData.ChunkWidth;
     }
 
     public ChunkCoord(Vector3Int pos)
@@ -489,7 +477,7 @@ public class ChunkCoord : IEquatable<ChunkCoord>
 
     #endregion
 
-    #region Overides
+    #region Overrides
 
     public override int GetHashCode()
     {
@@ -504,9 +492,6 @@ public class ChunkCoord : IEquatable<ChunkCoord>
 
     public bool Equals(ChunkCoord other)
     {
-        if (other == null)
-            return false;
-
         return other.X == X && other.Z == Z;
     }
 
