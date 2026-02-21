@@ -309,8 +309,8 @@ public class DebugScreen : MonoBehaviour
         _topLeftBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
         _topLeftBuilder.Append("Total Active Voxels in World: ").AppendLine(totalActiveVoxels);
         _topLeftBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount);
-        _topLeftBuilder.AppendLine($" └  Chunks unused in Pool: {pooledChunksCount} | Borders unused in Pool: {pooledChunkBordersCount}");
-        _topLeftBuilder.AppendLine($" └  Data unused in Pool: {pooledChunkDataCount} | Sections unused in Pool: {pooledChunkSectionsCount}");
+        _topLeftBuilder.AppendLine($" └ Chunks unused in Pool: {pooledChunksCount} | Borders unused in Pool: {pooledChunkBordersCount}");
+        _topLeftBuilder.AppendLine($" └ Data unused in Pool: {pooledChunkDataCount} | Sections unused in Pool: {pooledChunkSectionsCount}");
         _topLeftBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshInfo);
         _topLeftBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
 
@@ -361,7 +361,7 @@ public class DebugScreen : MonoBehaviour
         // --- Display Current Visualization Mode ---
         _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
         _topRightBuilder.Append($"Mode ({_player.cycleVisModeKey.ToString()} to cycle): ").AppendLine(_world.visualizationMode.ToString());
-        _topRightBuilder.AppendLine($" └  Unused in Pool: {_world.ChunkPool.PooledVisualizers}");
+        _topRightBuilder.AppendLine($" └ Unused in Pool: {_world.ChunkPool.PooledVisualizers}");
 
         _topRightBuilder.AppendLine();
     }

@@ -50,10 +50,17 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 
 ## ✒️ Fonts
 
-* **Monocraft** by [IdreesInc](https://github.com/IdreesInc/Monocraft)
+* [**Monocraft**](https://github.com/IdreesInc/Monocraft) by [IdreesInc](https://github.com/IdreesInc)
+    * *Version:* v4.2.1
     * *License:* SIL Open Font License 1.1
-    * *Source:* `Assets/Fonts/Monocraft.ttf`
+    * *Source:* `Assets/Fonts/Monocraft/Monocraft.ttc`
     * *Notes:* A monospaced font inspired by the Minecraft typeface.
+
+* [**FireCuda**](https://github.com/tonsky/FiraCode) by [tonsky](https://github.com/tonsky)
+    * *Version:* v6.2
+    * *License:* SIL Open Font License 1.1
+    * *Source:* `Assets/Fonts/FireCuda/FireCuda.ttf`
+    * *Notes:* Free monospaced font with programming ligatures. Used as fallback for Monocraft for "Box Drawing" characters.
 
 ## 📄 Shaders & Technical Art
 
