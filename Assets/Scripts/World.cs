@@ -74,7 +74,7 @@ public class World : MonoBehaviour
     public readonly Queue<Chunk> ChunksToDraw = new Queue<Chunk>();
 
     private bool _applyingModifications = false;
-    private readonly Queue<Queue<VoxelMod>> _modifications = new Queue<Queue<VoxelMod>>();
+    private readonly Queue<VoxelMod> _modifications = new Queue<VoxelMod>();
 
     // UI
     [Header("UI")]
@@ -1130,14 +1130,13 @@ public class World : MonoBehaviour
         FluidVertexTemplates = new FluidVertexTemplatesNativeData(fluidTemplates);
     }
 
+    /// <summary>
+    /// Enqueues a voxel modification to be processed.
+    /// </summary>
+    /// <param name="mod">The voxel modification to process.</param>
     public void AddModification(VoxelMod mod)
     {
-        // Create a new queue containing just this single modification
-        Queue<VoxelMod> singleModQueue = new Queue<VoxelMod>();
-        singleModQueue.Enqueue(mod);
-
-        // Add this single-item queue to the main modifications queue
-        _modifications.Enqueue(singleModQueue);
+        _modifications.Enqueue(mod);
     }
 
     /// <summary>
@@ -1257,7 +1256,7 @@ public class World : MonoBehaviour
         {
             Vector3Int offset = VoxelData.FaceChecks[faceIndex];
             ChunkCoord neighborCoord = new ChunkCoord(chunkCoord.X + offset.x, chunkCoord.Z + offset.z);
-            
+
             if (!IsChunkInWorld(neighborCoord)) continue;
 
             // Is a terrain generation job for this neighbor still running?
@@ -1273,7 +1272,7 @@ public class World : MonoBehaviour
             }
 
             Vector2Int neighborV2Pos = new Vector2Int(neighborCoord.X * VoxelData.ChunkWidth, neighborCoord.Z * VoxelData.ChunkWidth);
-            
+
             // Only enforce lighting stability checks if the chunk is actually populated with data.
             // If it's an empty placeholder, it has no light to process anyway.
             if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData) && neighborData.IsPopulated)
@@ -1360,9 +1359,12 @@ public class World : MonoBehaviour
     /// Enqueues a batch of voxel modifications to be processed.
     /// </summary>
     /// <param name="voxelMods">The queue of voxel modifications to process.</param>
-    public void EnqueueVoxelModifications(Queue<VoxelMod> voxelMods)
+    public void EnqueueVoxelModifications(IEnumerable<VoxelMod> voxelMods)
     {
-        _modifications.Enqueue(voxelMods);
+        foreach (VoxelMod mod in voxelMods)
+        {
+            _modifications.Enqueue(mod);
+        }
     }
 
     /// <summary>
@@ -1375,128 +1377,124 @@ public class World : MonoBehaviour
     {
         _applyingModifications = true;
 
+        // Process directly from the single flattened queue
         while (_modifications.Count > 0)
         {
-            Queue<VoxelMod> queue = _modifications.Dequeue();
+            VoxelMod v = _modifications.Dequeue();
 
-            while (queue.Count > 0)
+            // Calculate which chunk this mod belongs to
+            ChunkCoord targetCoord = GetChunkCoordFromVector3(v.GlobalPosition);
+            Vector2Int targetPos = new Vector2Int(targetCoord.X * VoxelData.ChunkWidth, targetCoord.Z * VoxelData.ChunkWidth);
+
+            // --- 1. Get Chunk Data ---
+            // We check worldData directly to see if it is loaded/generating
+            bool chunkIsReady = false;
+            if (worldData.Chunks.TryGetValue(targetPos, out ChunkData chunkData))
             {
-                VoxelMod v = queue.Dequeue();
+                chunkIsReady = chunkData.IsPopulated;
+            }
 
-                // Calculate which chunk this mod belongs to
-                ChunkCoord targetCoord = GetChunkCoordFromVector3(v.GlobalPosition);
-                Vector2Int targetPos = new Vector2Int(targetCoord.X * VoxelData.ChunkWidth, targetCoord.Z * VoxelData.ChunkWidth);
+            // If the chunk is NOT ready to receive mods (not loaded or still generating)
+            if (!chunkIsReady)
+            {
+                // Send to Persistent Manager
+                ModManager.AddPendingMod(targetCoord, v);
+                continue;
+            }
 
-                // --- 1. Get Chunk Data ---
-                // We check worldData directly to see if it is loaded/generating
-                bool chunkIsReady = false;
-                if (worldData.Chunks.TryGetValue(targetPos, out ChunkData chunkData))
+            // --- 2. Check Placement Rules ---
+            // Special Case: If the mod is to place Air (ID 0), it's a "break" action.
+            // We should always allow this, unless the target is unbreakable.
+            if (v.ID == 0)
+            {
+                VoxelState? stateToBreak = worldData.GetVoxelState(v.GlobalPosition);
+                if (stateToBreak.HasValue && (blockDatabase.blockTypes[stateToBreak.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
                 {
-                    chunkIsReady = chunkData.IsPopulated;
+                    continue; // Cannot break an unbreakable block.
                 }
+            }
+            else // This is a "place" action, so run the full rule check.
+            {
+                bool canPlace = true;
+                VoxelState? existingState = worldData.GetVoxelState(v.GlobalPosition);
 
-                // If the chunk is NOT ready to receive mods (not loaded or still generating)
-                if (!chunkIsReady)
+                if (existingState.HasValue)
                 {
-                    // Send to Persistent Manager
-                    ModManager.AddPendingMod(targetCoord, v);
-                    continue;
-                }
-
-                // --- 2. Check Placement Rules ---
-                // Special Case: If the mod is to place Air (ID 0), it's a "break" action.
-                // We should always allow this, unless the target is unbreakable.
-                if (v.ID == 0)
-                {
-                    VoxelState? stateToBreak = worldData.GetVoxelState(v.GlobalPosition);
-                    if (stateToBreak.HasValue && (blockDatabase.blockTypes[stateToBreak.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
+                    switch (v.Rule)
                     {
-                        continue; // Cannot break an unbreakable block.
-                    }
-                }
-                else // This is a "place" action, so run the full rule check.
-                {
-                    bool canPlace = true;
-                    VoxelState? existingState = worldData.GetVoxelState(v.GlobalPosition);
+                        case ReplacementRule.ForcePlace:
+                            // Force placement, but still respect Unbreakable blocks.
+                            if ((blockDatabase.blockTypes[existingState.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
+                                canPlace = false;
+                            break;
 
-                    if (existingState.HasValue)
-                    {
-                        switch (v.Rule)
-                        {
-                            case ReplacementRule.ForcePlace:
-                                // Force placement, but still respect Unbreakable blocks.
-                                if ((blockDatabase.blockTypes[existingState.Value.id].tags & BlockTags.UNBREAKABLE) != 0)
-                                    canPlace = false;
-                                break;
+                        case ReplacementRule.OnlyReplaceAir:
+                            // Only allow placement if the existing block is Air (ID 0).
+                            if (existingState.Value.id != 0)
+                                canPlace = false;
+                            break;
 
-                            case ReplacementRule.OnlyReplaceAir:
-                                // Only allow placement if the existing block is Air (ID 0).
-                                if (existingState.Value.id != 0)
-                                    canPlace = false;
-                                break;
+                        case ReplacementRule.Default:
+                        default:
+                            // --- Use the default Block Tag system ---
+                            BlockType incomingProps = blockDatabase.blockTypes[v.ID];
+                            BlockType existingProps = blockDatabase.blockTypes[existingState.Value.id];
 
-                            case ReplacementRule.Default:
-                            default:
-                                // --- Use the default Block Tag system ---
-                                BlockType incomingProps = blockDatabase.blockTypes[v.ID];
-                                BlockType existingProps = blockDatabase.blockTypes[existingState.Value.id];
-
-                                // Rule A: Nothing can replace an Unbreakable block.
-                                if ((existingProps.tags & BlockTags.UNBREAKABLE) != 0)
+                            // Rule A: Nothing can replace an Unbreakable block.
+                            if ((existingProps.tags & BlockTags.UNBREAKABLE) != 0)
+                            {
+                                canPlace = false;
+                            }
+                            // Rule B: If the incoming block has specific replacement rules...
+                            else if (incomingProps.canReplaceTags != BlockTags.NONE)
+                            {
+                                // ...and the existing block has NO tags that match, it can't be placed.
+                                // The bitwise AND (&) will be 0 if there are no common flags.
+                                if ((existingProps.tags & incomingProps.canReplaceTags) == 0)
                                 {
-                                    canPlace = false;
-                                }
-                                // Rule B: If the incoming block has specific replacement rules...
-                                else if (incomingProps.canReplaceTags != BlockTags.NONE)
-                                {
-                                    // ...and the existing block has NO tags that match, it can't be placed.
-                                    // The bitwise AND (&) will be 0 if there are no common flags.
-                                    if ((existingProps.tags & incomingProps.canReplaceTags) == 0)
+                                    // We make one exception: anything can replace "Air", which we define as a block with NONE tags.
+                                    if (existingProps.tags != BlockTags.NONE)
                                     {
-                                        // We make one exception: anything can replace "Air", which we define as a block with NONE tags.
-                                        if (existingProps.tags != BlockTags.NONE)
-                                        {
-                                            canPlace = false;
-                                        }
+                                        canPlace = false;
                                     }
                                 }
-                                // Rule C: If the incoming block is set to NONE, it means it can only replace Air.
-                                else if (existingProps.tags != BlockTags.NONE)
-                                {
-                                    canPlace = false;
-                                }
+                            }
+                            // Rule C: If the incoming block is set to NONE, it means it can only replace Air.
+                            else if (existingProps.tags != BlockTags.NONE)
+                            {
+                                canPlace = false;
+                            }
 
-                                break;
-                        }
-                    }
-
-                    if (!canPlace)
-                    {
-                        continue; // Skip this VoxelMod, move to the next in the queue.
+                            break;
                     }
                 }
 
-                // --- 3. If chunk is ready, Apply Modification ---
-                Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.GlobalPosition);
-                chunkData.ModifyVoxel(localPos, v);
-
-                // --- 4. Neighbor Activation ---
-                // After any modification, the World is now responsible for waking up all 6 neighbors.
-                for (int i = 0; i < 6; i++)
+                if (!canPlace)
                 {
-                    // Get the global position of the neighbor.
-                    Vector3Int neighborPos = v.GlobalPosition + VoxelData.FaceChecks[i];
-                    VoxelState? neighborState = worldData.GetVoxelState(neighborPos);
+                    continue; // Skip this VoxelMod, move to the next in the queue.
+                }
+            }
 
-                    // If the neighbor exists and has behavior, ensure it's active.
-                    if (neighborState.HasValue && neighborState.Value.Properties.isActive)
+            // --- 3. If chunk is ready, Apply Modification ---
+            Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.GlobalPosition);
+            chunkData.ModifyVoxel(localPos, v);
+
+            // --- 4. Neighbor Activation ---
+            // After any modification, the World is now responsible for waking up all 6 neighbors.
+            for (int i = 0; i < 6; i++)
+            {
+                // Get the global position of the neighbor.
+                Vector3Int neighborPos = v.GlobalPosition + VoxelData.FaceChecks[i];
+                VoxelState? neighborState = worldData.GetVoxelState(neighborPos);
+
+                // If the neighbor exists and has behavior, ensure it's active.
+                if (neighborState.HasValue && neighborState.Value.Properties.isActive)
+                {
+                    Chunk neighborChunk = GetChunkFromVector3(neighborPos);
+                    if (neighborChunk != null)
                     {
-                        Chunk neighborChunk = GetChunkFromVector3(neighborPos);
-                        if (neighborChunk != null)
-                        {
-                            Vector3Int localPosInNeighbor = neighborChunk.GetVoxelPositionInChunkFromGlobalVector3(neighborPos);
-                            neighborChunk.AddActiveVoxel(localPosInNeighbor);
-                        }
+                        Vector3Int localPosInNeighbor = neighborChunk.GetVoxelPositionInChunkFromGlobalVector3(neighborPos);
+                        neighborChunk.AddActiveVoxel(localPosInNeighbor);
                     }
                 }
             }
@@ -2249,6 +2247,10 @@ public class World : MonoBehaviour
         return _chunksToBuildMesh.Count;
     }
 
+    /// <summary>
+    /// Gets the total number of individual voxel modifications currently queued.
+    /// </summary>
+    /// <returns>The number of individual voxel modifications waiting to be processed.</returns>
     public int GetVoxelModificationsCount()
     {
         return _modifications.Count;

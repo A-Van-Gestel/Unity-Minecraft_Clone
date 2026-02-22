@@ -327,7 +327,7 @@ public class WorldJobManager
     /// </summary>
     public void ProcessGenerationJobs()
     {
-        // Clear the temp list, we this list to avoid modifying dictionary while iterating
+        // Clear the temp list, we use this list to avoid modifying dictionary while iterating
         _completedGenJobs.Clear();
         foreach (var jobEntry in generationJobs)
         {
@@ -343,23 +343,11 @@ public class WorldJobManager
                 chunkData.Chunk?.OnDataPopulated();
 
                 // --- STAGE 2: Apply generated modifications (trees, etc.) ---
-                Queue<VoxelMod> structureMods = new Queue<VoxelMod>();
                 while (jobEntry.Value.Mods.TryDequeue(out VoxelMod mod))
                 {
-                    // The VoxelMod from the job just contains the request type and position.
-                    // The main thread expands this into the full structure queue.
-                    Queue<VoxelMod> structureQueue = Structure.GenerateMajorFlora(mod.ID, mod.GlobalPosition, _world.biomes[0].minHeight, _world.biomes[0].maxHeight);
-                    // We add these to a temporary queue.
-                    while (structureQueue.Count > 0)
-                    {
-                        structureMods.Enqueue(structureQueue.Dequeue());
-                    }
-                }
-
-                // If we have any structures, enqueue them to be applied.
-                if (structureMods.Count > 0)
-                {
-                    _world.EnqueueVoxelModifications(structureMods);
+                    // Directly pass the IEnumerable into the world queue, avoiding any intermediate array/list allocations.
+                    IEnumerable<VoxelMod> floraMods = Structure.GenerateMajorFlora(mod.ID, mod.GlobalPosition, _world.biomes[0].minHeight, _world.biomes[0].maxHeight);
+                    _world.EnqueueVoxelModifications(floraMods);
                 }
 
                 // Check if any neighbors (or previous sessions) left pending mods for THIS chunk while it was unloaded.

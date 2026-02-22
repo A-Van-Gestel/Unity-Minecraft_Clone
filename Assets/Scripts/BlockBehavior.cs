@@ -10,8 +10,30 @@ using UnityEngine;
 public static class BlockBehavior
 {
     // A reusable list to avoid allocating new memory every time Behave is called.
-    private static readonly List<VoxelMod> Mods = new List<VoxelMod>();
+    private static readonly List<VoxelMod> s_mods = new List<VoxelMod>();
 
+    // OPTIMIZATION: Cached spread vectors to prevent array allocations every tick
+    private static readonly Vector3Int[] s_grassSpreadVectors =
+    {
+        // Adjacent
+        VoxelData.FaceChecks[0],
+        VoxelData.FaceChecks[1],
+        VoxelData.FaceChecks[4],
+        VoxelData.FaceChecks[5],
+        // Above Adjacent
+        VoxelData.FaceChecks[0] + VoxelData.FaceChecks[2],
+        VoxelData.FaceChecks[1] + VoxelData.FaceChecks[2],
+        VoxelData.FaceChecks[4] + VoxelData.FaceChecks[2],
+        VoxelData.FaceChecks[5] + VoxelData.FaceChecks[2],
+    };
+
+    private static readonly Vector3Int[] s_grassAirCheckVectors =
+    {
+        VoxelData.FaceChecks[0],
+        VoxelData.FaceChecks[1],
+        VoxelData.FaceChecks[4],
+        VoxelData.FaceChecks[5],
+    };
 
     // --- Public Methods ---
 
@@ -134,7 +156,7 @@ public static class BlockBehavior
     [CanBeNull]
     public static List<VoxelMod> Behave(ChunkData chunkData, Vector3Int localPos)
     {
-        Mods.Clear(); // Clear the reusable list before use.
+        s_mods.Clear(); // Clear the reusable list before use.
 
         // Get the voxel
         VoxelState? voxelNullable = chunkData.VoxelFromV3Int(localPos);
@@ -161,31 +183,16 @@ public static class BlockBehavior
             {
                 Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
                 VoxelMod voxelMod = new VoxelMod(globalPos, blockId: 3);
-                Mods.Add(voxelMod);
-                return Mods;
+                s_mods.Add(voxelMod);
+                return s_mods;
             }
 
             // Condition 2: Attempt to spread, using a GC-friendly method.
             int candidateCount = 0;
             Vector3Int chosenCandidateLocalPos = Vector3Int.zero; // A default value
 
-            // Create an array of all possible relative locations to check.
-            Vector3Int[] spreadVectors =
-            {
-                // Adjacent
-                VoxelData.FaceChecks[0],
-                VoxelData.FaceChecks[1],
-                VoxelData.FaceChecks[4],
-                VoxelData.FaceChecks[5],
-                // Above Adjacent
-                VoxelData.FaceChecks[0] + VoxelData.FaceChecks[2],
-                VoxelData.FaceChecks[1] + VoxelData.FaceChecks[2],
-                VoxelData.FaceChecks[4] + VoxelData.FaceChecks[2],
-                VoxelData.FaceChecks[5] + VoxelData.FaceChecks[2],
-            };
-
             // Check standard spread locations
-            foreach (Vector3Int vec in spreadVectors)
+            foreach (Vector3Int vec in s_grassSpreadVectors)
             {
                 Vector3Int checkPos = localPos + vec;
                 if (IsConvertibleDirt(chunkData, checkPos))
@@ -200,14 +207,7 @@ public static class BlockBehavior
             }
 
             // Check "spread down" locations separately
-            Vector3Int[] airCheckVectors =
-            {
-                VoxelData.FaceChecks[0],
-                VoxelData.FaceChecks[1],
-                VoxelData.FaceChecks[4],
-                VoxelData.FaceChecks[5],
-            };
-            foreach (var vec in airCheckVectors)
+            foreach (var vec in s_grassAirCheckVectors)
             {
                 Vector3Int checkPos = localPos + vec;
                 if (IsDirtNextToAir(chunkData, checkPos))
@@ -229,7 +229,7 @@ public static class BlockBehavior
                 {
                     // Modify the single, randomly chosen candidate.
                     Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.position.y);
-                    Mods.Add(new VoxelMod(chosenCandidateGlobalPos, blockId: 2));
+                    s_mods.Add(new VoxelMod(chosenCandidateGlobalPos, blockId: 2));
                 }
             }
         }
@@ -240,8 +240,10 @@ public static class BlockBehavior
             HandleFluidFlow(chunkData, localPos, voxel);
         }
 
-        // Return the list of modifications.
-        return Mods.Count > 0 ? Mods : null;
+        // IMPORTANT: Returns a reference to a shared static list. Callers must
+        // consume the result immediately and must not store the reference, 
+        // as it will be cleared on the next call to Behave().
+        return s_mods.Count > 0 ? s_mods : null;
     }
 
     #endregion
@@ -306,13 +308,13 @@ public static class BlockBehavior
             // Replace the block below with a new source block of this fluid.
             // This creates waterfalls and ensures fluid columns fill up from the bottom.
             Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
-            Mods.Add(new VoxelMod(globalBelowPos, blockId: currentId)); // Place a new source block below
+            s_mods.Add(new VoxelMod(globalBelowPos, blockId: currentId)); // Place a new source block below
 
             // If the current block was a flowing block (not a source), it has now flowed away
             // and should be replaced with air. Source blocks are infinite and remain.
             if (currentLevel > 0)
             {
-                Mods.Add(new VoxelMod(globalPos, blockId: 0)); // Replace self with air
+                s_mods.Add(new VoxelMod(globalPos, blockId: 0)); // Replace self with air
             }
 
             return; // Fluid has moved down, no further action this tick.
@@ -342,7 +344,7 @@ public static class BlockBehavior
                         FluidLevel = newLevel,
                     };
                     mod.FluidLevel = newLevel; // Set fluid level
-                    Mods.Add(mod);
+                    s_mods.Add(mod);
                 }
             }
         }

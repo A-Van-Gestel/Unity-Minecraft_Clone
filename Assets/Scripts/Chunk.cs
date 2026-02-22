@@ -7,6 +7,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using UnityEngine.Pool;
 using Object = UnityEngine.Object;
 
 public class Chunk
@@ -20,7 +21,7 @@ public class Chunk
     public readonly GameObject ChunkGameObject;
 
     private bool _isActive;
-    private List<Vector3Int> _activeVoxels = new List<Vector3Int>();
+    private HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
 
     #region Constructor
 
@@ -181,50 +182,48 @@ public class Chunk
 
     public void TickUpdate()
     {
-        // A temporary list to avoid modifying the activeVoxels list while iterating.
-        List<Vector3Int> stillActive = new List<Vector3Int>();
-        Queue<VoxelMod> modifications = new Queue<VoxelMod>();
+        if (_activeVoxels.Count == 0) return;
+
+        // A temporary, pooled list to track items that need to be removed
+        List<Vector3Int> toRemove = ListPool<Vector3Int>.Get();
 
         foreach (Vector3Int pos in _activeVoxels)
         {
             // Get the list of modifications from the behavior logic.
             List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
 
-            // If the block is still active, keep it for the next tick.
-            if (BlockBehavior.Active(ChunkData, pos))
+            // If the block is NO LONGER active, mark it for removal
+            // TODO: Future refactor could combine Behave and Active logic to save chunk lookups
+            if (!BlockBehavior.Active(ChunkData, pos))
             {
-                stillActive.Add(pos);
+                toRemove.Add(pos);
             }
 
-            // If the behavior produced any changes, add them to our queue.
+            // If the behavior produced any changes, submit them to the world's global queue.
             if (mods != null)
             {
-                foreach (VoxelMod mod in mods)
-                {
-                    modifications.Enqueue(mod);
-                }
+                World.Instance.EnqueueVoxelModifications(mods);
             }
         }
 
-        // If there are any modifications, submit them to the world's global queue.
-        if (modifications.Count > 0)
+        // Remove inactive voxels from the HashSet in O(1) time each
+        foreach (var pos in toRemove)
         {
-            World.Instance.EnqueueVoxelModifications(modifications);
+            _activeVoxels.Remove(pos);
         }
 
-        // Update the active voxel list for the next frame.
-        _activeVoxels = stillActive;
+        // Release the temporary list back to the pool
+        ListPool<Vector3Int>.Release(toRemove);
     }
 
     public void AddActiveVoxel(Vector3Int pos)
     {
-        if (!_activeVoxels.Contains(pos))
-            _activeVoxels.Add(pos);
+        _activeVoxels.Add(pos);
     }
 
     public void RemoveActiveVoxel(Vector3Int pos)
     {
-        _activeVoxels.Remove(pos); // List<T>.Remove is efficient enough for this
+        _activeVoxels.Remove(pos);
     }
 
     public int GetActiveVoxelCount()
@@ -389,9 +388,9 @@ public class Chunk
     #region Public Getters
 
     /// <summary>
-    /// Gets the list of active voxels in this chunk.
+    /// Gets a read-only collection of the active voxels in this chunk.
     /// </summary>
-    public List<Vector3Int> ActiveVoxels => _activeVoxels;
+    public IReadOnlyCollection<Vector3Int> ActiveVoxels => _activeVoxels;
 
     #endregion
 
