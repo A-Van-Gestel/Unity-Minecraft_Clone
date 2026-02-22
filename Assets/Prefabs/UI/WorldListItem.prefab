@@ -62,7 +62,7 @@ MonoBehaviour:
 '
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
-  m_sharedMaterial: {fileID: -7493182185626770997, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
+  m_sharedMaterial: {fileID: 2190747550536846853, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -342,7 +342,7 @@ MonoBehaviour:
   m_text: New World
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
-  m_sharedMaterial: {fileID: -7493182185626770997, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
+  m_sharedMaterial: {fileID: 2190747550536846853, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -366,8 +366,8 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 24
-  m_fontSizeBase: 36
+  m_fontSize: 20
+  m_fontSizeBase: 20
   m_fontWeight: 700
   m_enableAutoSizing: 0
   m_fontSizeMin: 0
@@ -479,7 +479,7 @@ MonoBehaviour:
   m_text: 2023-10-27 14:30
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
-  m_sharedMaterial: {fileID: -7493182185626770997, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
+  m_sharedMaterial: {fileID: 2190747550536846853, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -616,7 +616,7 @@ MonoBehaviour:
   m_text: Survival
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
-  m_sharedMaterial: {fileID: -7493182185626770997, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
+  m_sharedMaterial: {fileID: 2190747550536846853, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
