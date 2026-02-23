@@ -4,6 +4,7 @@ using JetBrains.Annotations;
 using Jobs;
 using Unity.Collections;
 using UnityEngine;
+using UnityEngine.Pool;
 
 namespace Data
 {
@@ -268,8 +269,15 @@ namespace Data
                 Vector3Int localPos = GetLocalVoxelPositionInChunk(worldPos);
                 Vector2Int localCol = new Vector2Int(localPos.x, localPos.z);
 
+                // OPTIMIZATION: Use pool for the temporary set passed to AddPending
+                HashSet<Vector2Int> tempSet = HashSetPool<Vector2Int>.Get();
+                tempSet.Add(localCol);
+
                 // Add to persistent manager
-                World.Instance.LightingStateManager.AddPending(coord, new HashSet<Vector2Int> { localCol });
+                World.Instance.LightingStateManager.AddPending(coord, tempSet);
+
+                // AddPending copies the elements into its own set, so we can immediately release this temp set
+                HashSetPool<Vector2Int>.Release(tempSet);
             }
         }
 
@@ -281,12 +289,14 @@ namespace Data
         {
             Vector2Int chunkPos = GetChunkCoordFor(new Vector3(columnPos.x, 0, columnPos.y));
 
-            if (!SunlightRecalculationQueue.ContainsKey(chunkPos))
+            // OPTIMIZATION: Grab from the global pool
+            if (!SunlightRecalculationQueue.TryGetValue(chunkPos, out HashSet<Vector2Int> columns))
             {
-                SunlightRecalculationQueue[chunkPos] = new HashSet<Vector2Int>();
+                columns = HashSetPool<Vector2Int>.Get();
+                SunlightRecalculationQueue[chunkPos] = columns;
             }
 
-            SunlightRecalculationQueue[chunkPos].Add(columnPos);
+            columns.Add(columnPos);
 
             // Mark the target chunk as needing a lighting update.
             if (Chunks.TryGetValue(chunkPos, out ChunkData chunkData))

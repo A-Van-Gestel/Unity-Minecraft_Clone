@@ -20,6 +20,7 @@ using Serialization;
 using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
@@ -64,7 +65,6 @@ public class World : MonoBehaviour
     private readonly Dictionary<ChunkCoord, Chunk> _chunkMap = new Dictionary<ChunkCoord, Chunk>();
 
     private HashSet<ChunkCoord> _activeChunks = new HashSet<ChunkCoord>();
-    private readonly List<ChunkCoord> _tempActiveChunkList = new List<ChunkCoord>(); // Used to avoid modifying activeChunks while iterating, and to avoid GC allocations.
     public ChunkCoord PlayerChunkCoord;
     private ChunkCoord _playerLastChunkCoord = new ChunkCoord(int.MinValue, int.MinValue);
 
@@ -134,6 +134,10 @@ public class World : MonoBehaviour
     private readonly Dictionary<ChunkCoord, GameObject> _chunkBorders = new Dictionary<ChunkCoord, GameObject>();
     private Transform _chunkBorderParent;
     private bool _lastChunkBordersState;
+
+    // --- Cached Collections for GC Optimization ---
+    private readonly HashSet<ChunkCoord> _currentViewChunks = new HashSet<ChunkCoord>();
+    private readonly List<ChunkCoord> _chunksToRemove = new List<ChunkCoord>();
 
     // --- Transient flags ---
     /// <summary>
@@ -264,6 +268,9 @@ public class World : MonoBehaviour
             StorageManager.Dispose();
             Debug.Log("[World] Storage Manager disposed in OnDestroy.");
         }
+
+        // Ensure orphaned lighting sets are returned to the pool
+        LightingStateManager?.Clear();
 
         // Cleanup mesh generation lists
         _chunksToBuildMesh.Clear();
@@ -1579,7 +1586,8 @@ public class World : MonoBehaviour
         // If Persistence is disabled, we intentionally keep ALL chunks in memory.
         if (!settings.EnablePersistence) return;
 
-        List<ChunkCoord> chunksToRemove = new List<ChunkCoord>();
+        // OPTIMIZATION: Use ListPool to avoid allocations
+        List<ChunkCoord> chunksToRemove = ListPool<ChunkCoord>.Get();
         int unloadDistance = settings.loadDistance + 2; // Buffer to prevent flickering
 
         // Step A: Identify candidates
@@ -1631,7 +1639,7 @@ public class World : MonoBehaviour
                 if (globalCols != null && globalCols.Count > 0)
                 {
                     // Convert to Local Coordinates (0-15) for storage
-                    HashSet<Vector2Int> localCols = new HashSet<Vector2Int>();
+                    HashSet<Vector2Int> localCols = HashSetPool<Vector2Int>.Get(); // POOLING
                     foreach (var gCol in globalCols)
                     {
                         localCols.Add(new Vector2Int(gCol.x - pos.x, gCol.y - pos.y));
@@ -1641,9 +1649,15 @@ public class World : MonoBehaviour
                     LightingStateManager.AddPending(coord, localCols);
 
                     Debug.Log($"[LIGHTING RESCUE] Saved {localCols.Count} orphaned sunlight columns for chunk {coord}");
+
+                    // Release temp set (AddPending makes its own copy)
+                    HashSetPool<Vector2Int>.Release(localCols);
                 }
 
                 worldData.SunlightRecalculationQueue.Remove(pos);
+
+                // CRITICAL: We are removing this set from the active world entirely, so it must be returned to the pool!
+                if (globalCols != null) HashSetPool<Vector2Int>.Release(globalCols);
             }
 
             // 2. Save if modified
@@ -1691,6 +1705,9 @@ public class World : MonoBehaviour
             // POOLING: Return data to pool
             ChunkPool.ReturnChunkData(data);
         }
+
+        // 5. Return temp pools back to pool list
+        ListPool<ChunkCoord>.Release(chunksToRemove); // Free the ListPool
     }
 
     /// <summary>
@@ -1706,8 +1723,8 @@ public class World : MonoBehaviour
         if (playerCurrentChunkCoord.Equals(_playerLastChunkCoord)) return;
         _playerLastChunkCoord = playerCurrentChunkCoord;
 
-        HashSet<ChunkCoord> previouslyActiveChunks = new HashSet<ChunkCoord>(_activeChunks);
-        HashSet<ChunkCoord> currentViewChunks = new HashSet<ChunkCoord>();
+        // OPTIMIZATION: Clear cached sets instead of allocating new ones
+        _currentViewChunks.Clear();
 
         int viewDist = settings.viewDistance;
         int loadDist = settings.loadDistance;
@@ -1747,7 +1764,7 @@ public class World : MonoBehaviour
                 if (Mathf.Abs(chunkCoord.X - playerCurrentChunkCoord.X) <= viewDist &&
                     Mathf.Abs(chunkCoord.Z - playerCurrentChunkCoord.Z) <= viewDist)
                 {
-                    currentViewChunks.Add(chunkCoord);
+                    _currentViewChunks.Add(chunkCoord);
                 }
             }
 
@@ -1756,9 +1773,16 @@ public class World : MonoBehaviour
         }
 
         // Deactivate chunks that are no longer in view.
-        var chunksToRemove = previouslyActiveChunks.Where(c => !currentViewChunks.Contains(c)).ToList();
+        _chunksToRemove.Clear();
+        foreach (ChunkCoord c in _activeChunks)
+        {
+            if (!_currentViewChunks.Contains(c))
+            {
+                _chunksToRemove.Add(c);
+            }
+        }
 
-        foreach (ChunkCoord c in chunksToRemove)
+        foreach (ChunkCoord c in _chunksToRemove)
         {
             // Deactivate chunk border visualization
             if (_chunkBorders.TryGetValue(c, out GameObject borderObject))
@@ -1788,7 +1812,7 @@ public class World : MonoBehaviour
         }
 
         // Activate chunks that have entered view.
-        foreach (ChunkCoord c in currentViewChunks)
+        foreach (ChunkCoord c in _currentViewChunks)
         {
             if (!_chunkMap.ContainsKey(c))
             {
@@ -1829,7 +1853,9 @@ public class World : MonoBehaviour
         }
 
         // Update the master activeChunks set.
-        _activeChunks = currentViewChunks;
+        // OPTIMIZATION: Clear and copy to avoid replacing the reference with a new allocation.
+        _activeChunks.Clear();
+        _activeChunks.UnionWith(_currentViewChunks);
 
         // Run cleanup
         UnloadChunks();
@@ -1901,52 +1927,71 @@ public class World : MonoBehaviour
         // --- 2. Process any pending visualization updates ---
         if (visualizationMode != DebugVisualizationMode.None && _chunksToUpdateVisualization.Count > 0)
         {
-            var chunksReadyForVisualization = new List<ChunkCoord>();
-            // Identify which chunks are actually ready to be visualized.
-            foreach (ChunkCoord coord in _chunksToUpdateVisualization)
+            // Use Pools for tracking collections
+            var chunksReadyForVisualization = ListPool<ChunkCoord>.Get();
+            var chunkDataCache = DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Get();
+
+            try
             {
-                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                // Identify which chunks are actually ready to be visualized.
+                foreach (ChunkCoord coord in _chunksToUpdateVisualization)
                 {
-                    // A chunk is ready if it exists, is not currently processing a lighting job,
-                    // and has no pending lighting changes on the main thread.
-                    if (!JobManager.lightingJobs.ContainsKey(coord) && !chunk.ChunkData.HasLightChangesToProcess)
+                    if (_chunkMap.TryGetValue(coord, out Chunk chunk))
                     {
-                        chunksReadyForVisualization.Add(coord);
+                        // A chunk is ready if it exists, is not currently processing a lighting job,
+                        // and has no pending lighting changes on the main thread.
+                        if (!JobManager.lightingJobs.ContainsKey(coord) && !chunk.ChunkData.HasLightChangesToProcess)
+                        {
+                            chunksReadyForVisualization.Add(coord);
+                        }
                     }
                 }
-            }
 
 
-            // Pre-cache all required data in one go for chunks that are ready
-            var chunkDataCache = new Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>>();
-            foreach (ChunkCoord coord in chunksReadyForVisualization)
-            {
-                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                // Pre-cache all required data in one go for chunks that are ready
+                foreach (ChunkCoord coord in chunksReadyForVisualization)
                 {
-                    chunkDataCache[coord] = GetVoxelDataForVisualization(chunk);
+                    if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                    {
+                        // Explicit Ownership. The caller requests the pooled dictionary and passes it into the helper method to be populated.
+                        var voxelsToDraw = DictionaryPool<Vector3Int, Color>.Get();
+                        GetVoxelDataForVisualization(chunk, voxelsToDraw);
+                        chunkDataCache[coord] = voxelsToDraw;
+                    }
+                }
+
+                // Iterate through the cached data to draw meshes
+                foreach (var cachedChunk in chunkDataCache)
+                {
+                    ChunkCoord coord = cachedChunk.Key;
+
+                    // Get neighbor data from the cache, or null if not available.
+                    chunkDataCache.TryGetValue(new ChunkCoord(coord.X, coord.Z + 1), out var northData);
+                    chunkDataCache.TryGetValue(new ChunkCoord(coord.X, coord.Z - 1), out var southData);
+                    chunkDataCache.TryGetValue(new ChunkCoord(coord.X + 1, coord.Z), out var eastData);
+                    chunkDataCache.TryGetValue(new ChunkCoord(coord.X - 1, coord.Z), out var westData);
+
+                    // Call the visualizer method with all neighbor data.
+                    voxelVisualizer.UpdateChunkVisualization(coord, cachedChunk.Value, northData, southData, eastData, westData);
+                }
+
+                // Remove only the processed chunks from the update set.
+                // Chunks that were not ready will remain in the set to be checked next frame.
+                foreach (var coord in chunksReadyForVisualization)
+                {
+                    _chunksToUpdateVisualization.Remove(coord);
                 }
             }
-
-            // Iterate through the cached data to draw meshes
-            foreach (var cachedChunk in chunkDataCache)
+            finally
             {
-                ChunkCoord coord = cachedChunk.Key;
+                // ALWAYS release pools to prevent memory leaks, even on errors
+                foreach (var dict in chunkDataCache.Values)
+                {
+                    if (dict != null) DictionaryPool<Vector3Int, Color>.Release(dict);
+                }
 
-                // Get neighbor data from the cache, or null if not available.
-                chunkDataCache.TryGetValue(new ChunkCoord(coord.X, coord.Z + 1), out var northData);
-                chunkDataCache.TryGetValue(new ChunkCoord(coord.X, coord.Z - 1), out var southData);
-                chunkDataCache.TryGetValue(new ChunkCoord(coord.X + 1, coord.Z), out var eastData);
-                chunkDataCache.TryGetValue(new ChunkCoord(coord.X - 1, coord.Z), out var westData);
-
-                // Call the visualizer method with all neighbor data.
-                voxelVisualizer.UpdateChunkVisualization(coord, cachedChunk.Value, northData, southData, eastData, westData);
-            }
-
-            // Remove only the processed chunks from the update set.
-            // Chunks that were not ready will remain in the set to be checked next frame.
-            foreach (var coord in chunksReadyForVisualization)
-            {
-                _chunksToUpdateVisualization.Remove(coord);
+                DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Release(chunkDataCache);
+                ListPool<ChunkCoord>.Release(chunksReadyForVisualization);
             }
         }
     }
@@ -1956,11 +2001,10 @@ public class World : MonoBehaviour
     /// based on the current visualization mode.
     /// </summary>
     /// <param name="chunk">The chunk to gather voxel data from.</param>
-    /// <returns>A dictionary of voxel positions and their visualization colors.</returns>
-    private Dictionary<Vector3Int, Color> GetVoxelDataForVisualization(Chunk chunk)
+    /// <param name="voxelsToDraw">The dictionary to populate with the visualization data.</param>
+    private void GetVoxelDataForVisualization(Chunk chunk, Dictionary<Vector3Int, Color> voxelsToDraw)
     {
-        var voxelsToDraw = new Dictionary<Vector3Int, Color>();
-        if (chunk == null || !chunk.ChunkData.IsPopulated) return voxelsToDraw;
+        if (chunk == null || !chunk.ChunkData.IsPopulated) return;
 
         switch (visualizationMode)
         {
@@ -2033,8 +2077,6 @@ public class World : MonoBehaviour
 
                 break;
         }
-
-        return voxelsToDraw;
     }
 
     #endregion
@@ -2272,15 +2314,28 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Gets a detailed breakdown of the mesh queue for display in debug UI
+    /// Gets a detailed breakdown of the mesh queue for display in debug UI.
+    /// Note: Categories evaluate strictly in order. A chunk that is both null and inactive will only increment Null.
     /// </summary>
     /// <returns>Formatted string with mesh queue statistics</returns>
     public string GetMeshQueueDebugInfo()
     {
-        int active = _chunksToBuildMesh.Count(c => c != null && c.isActive && c.ChunkGameObject != null);
-        int inactive = _chunksToBuildMesh.Count(c => c != null && !c.isActive);
-        int destroyed = _chunksToBuildMesh.Count(c => c != null && c.ChunkGameObject == null);
-        int nullCount = _chunksToBuildMesh.Count(c => c == null);
+        int active = 0;
+        int inactive = 0;
+        int destroyed = 0;
+        int nullCount = 0;
+
+        foreach (Chunk c in _chunksToBuildMesh)
+        {
+            if (c == null)
+                nullCount++;
+            else if (c.ChunkGameObject == null)
+                destroyed++;
+            else if (!c.isActive)
+                inactive++;
+            else
+                active++;
+        }
 
         return $"{_chunksToBuildMesh.Count} total\n" +
                $" └ Active: {active}, Inactive: {inactive}, Destroyed: {destroyed}, Null: {nullCount}";

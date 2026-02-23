@@ -278,6 +278,9 @@ public class WorldJobManager
 
             // After iterating, remove the entire bucket for this chunk as we've consumed the requests.
             _world.worldData.SunlightRecalculationQueue.Remove(chunkData.position);
+
+            // OPTIMIZATION: Release fully consumed queue back to the pool
+            HashSetPool<Vector2Int>.Release(columns);
         }
 
         NeighborhoodLightingJob job = new NeighborhoodLightingJob
@@ -365,14 +368,27 @@ public class WorldJobManager
                 if (_world.LightingStateManager.TryGetAndRemove(jobEntry.Key, out HashSet<Vector2Int> localLightCols))
                 {
                     // Convert Local columns to Global Columns before adding to the queue!
-                    HashSet<Vector2Int> globalLightCols = new HashSet<Vector2Int>();
+                    HashSet<Vector2Int> globalLightCols = HashSetPool<Vector2Int>.Get(); // POOLING
                     foreach (var lCol in localLightCols)
                     {
                         globalLightCols.Add(new Vector2Int(lCol.x + chunkData.position.x, lCol.y + chunkData.position.y));
                     }
 
-                    if (!_world.worldData.SunlightRecalculationQueue.TryAdd(chunkData.position, globalLightCols))
-                        _world.worldData.SunlightRecalculationQueue[chunkData.position].UnionWith(globalLightCols);
+                    // We took ownership from TryGetAndRemove, so we must release it now!
+                    HashSetPool<Vector2Int>.Release(localLightCols);
+
+                    // Fix the Memory Leak: Explicitly handle the TryGetValue scenario
+                    if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.position, out var existingQueue))
+                    {
+                        existingQueue.UnionWith(globalLightCols);
+                        // The temp set is now redundant, release it!
+                        HashSetPool<Vector2Int>.Release(globalLightCols);
+                    }
+                    else
+                    {
+                        // Transfer ownership to the dictionary
+                        _world.worldData.SunlightRecalculationQueue[chunkData.position] = globalLightCols;
+                    }
 
                     chunkData.HasLightChangesToProcess = true;
                 }
