@@ -2294,7 +2294,7 @@ public class Settings
 {
     // --- GAME DATA ---
     [Header("Game Data")]
-    public string version = "2026-02-22 - Alpha";
+    public string version = "2026-02-23 - Alpha";
 
     // --- SAVE SYSTEM ---
     [Header("Save System")]
