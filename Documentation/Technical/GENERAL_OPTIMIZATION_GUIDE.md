@@ -10,6 +10,7 @@ This document outlines optimization strategies, common pitfalls, and architectur
 4. [Data Structures & Collections](#4-data-structures--collections)
 5. [Unity & C# Specifics](#5-unity--c-specifics)
 6. [Profiling Strategy](#6-profiling-strategy)
+7. [Advanced High-Performance C# (The "Danger Zone")](#7-advanced-high-performance-c-the-danger-zone)
 
 ---
 
@@ -109,8 +110,9 @@ Chunks and Meshes are heavy objects. Creating and destroying them triggers Garba
 * **Bad:** Calling `Destroy(chunkObject)` when a chunk goes out of view, and `Instantiate()` when a new one appears.
 * **Good:** **Object Pooling**.
     * Disable the GameObject: `chunkObject.SetActive(false)`.
-    * Put it in a `Queue<GameObject>`.
-    * When a new chunk is needed, `Dequeue` one, reset its data/mesh, move it, and `SetActive(true)`.
+    * Return it to a managed pool.
+    * When a new chunk is needed, retrieve one from the pool, reset its data/mesh, move it, and `SetActive(true)`.
+* *(See Section 5 for details on our advanced pooling architectures).*
 
 ---
 
@@ -195,11 +197,51 @@ If a value is expensive to calculate (e.g., `Mathf.PerlinNoise` or World Coordin
 ### Reducing GC Pressure (Garbage Collection)
 
 1. **Avoid `new` in `Update()`:** Do not create temporary classes or arrays inside frequently called methods.
-2. **Reuse Collections:** `Clear()` lists instead of creating new ones.
+2. **Reuse Collections:** `Clear()` lists instead of creating new ones, or use `UnityEngine.Pool`.
 3. **String Concatenation:**
     * **Bad:** `text.text = "Coords: " + x + ", " + y;` (Allocates new strings every frame).
     * **Good:** Use `StringBuilder` for complex strings.
     * **Note:** C# String Interpolation (`$"{x}"`) in .NET Framework (Unity's Mono backend) typically allocates. Avoid in hot paths.
+
+### Advanced Pooling Architectures
+
+To completely eliminate GC Allocations during gameplay, the engine heavily relies on object pooling. We use two distinct types of pools depending on the use case.
+
+#### 1. Custom Domain Pools (`DynamicPool<T>` & `ConcurrentDynamicPool<T>`)
+
+Used for heavy, domain-specific objects like `Chunk`, `ChunkData`, `ChunkSection`, and visualization `GameObjects`.
+
+* **Amortized Cleanup (Pruning):** These pools implement a "drip-feed" pruning system (`UpdatePruning()`). Instead of holding onto memory forever, they slowly destroy excess items over several frames if the pool exceeds a maximum target capacity. This prevents massive GC spikes
+  when the player leaves heavily populated areas or lowers their render distance.
+* **Thread-Safety:** `ConcurrentDynamicPool<T>` utilizes locking to allow background threads (e.g., Chunk Serialization I/O) and the Main Thread to safely exchange memory and data objects without race conditions.
+
+#### 2. Unity Collection Pools (`UnityEngine.Pool`)
+
+Used for temporary, short-lived standard C# collections (`List<T>`, `HashSet<T>`, `Dictionary<TKey, TValue>`).
+
+* **Usage:** Grab a collection for local method logic, use it, and release it as quickly as possible.
+  ```csharp
+  var list = ListPool<ChunkCoord>.Get();
+  try 
+  {
+      // ... populate and process list ...
+  } 
+  finally 
+  {
+      // ALWAYS use finally to ensure memory is returned even if an error occurs
+      ListPool<ChunkCoord>.Release(list);
+  }
+  ```
+* **The "Trapdoor API" Anti-Pattern:** Never return a pooled collection from a method (e.g., `Dictionary<K,V> GetStats()`). The caller won't know they are responsible for releasing it, causing memory leaks.
+    * *Better Design:* Pass the collection as a parameter: `void GetStats(Dictionary<K,V> buffer)`. The caller then controls the full lifecycle (Acquire -> Populate -> Consume -> Release), making ownership crystal clear.
+
+#### 3. The Object Provenance Hazard (**⚠️ CRITICAL WARNING**)
+
+`UnityEngine.Pool` does not track *provenance* (where an object came from).
+
+* **The Hazard:** If you allocate a collection with `new HashSet<T>()` and later pass it into `HashSetPool<T>.Release()`, you have poisoned the pool. If another script or system kept a reference to that original object, both systems now think they own the exact same memory. When
+  the pool auto-clears the collection, it will silently corrupt the other script's data.
+* **The Rule:** **Never mix `new` and `Pool.Release`.** If an object is going to be released to a pool, it *must* have been acquired from that pool via `.Get()`.
 
 ### Method Inlining (`[MethodImpl(MethodImplOptions.AggressiveInlining)]`)
 
