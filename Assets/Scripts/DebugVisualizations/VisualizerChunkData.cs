@@ -86,15 +86,15 @@ namespace DebugVisualizations
         public void PrepareJobData(Dictionary<Vector3Int, Color> main, Dictionary<Vector3Int, Color> n, Dictionary<Vector3Int, Color> s, Dictionary<Vector3Int, Color> e, Dictionary<Vector3Int, Color> w)
         {
             // Allocate all native containers for the job.
-            VoxelsToDraw = ToNativeHashMap(main, Allocator.TempJob);
-            NorthVoxels = ToNativeHashMap(n, Allocator.TempJob);
-            SouthVoxels = ToNativeHashMap(s, Allocator.TempJob);
-            EastVoxels = ToNativeHashMap(e, Allocator.TempJob);
-            WestVoxels = ToNativeHashMap(w, Allocator.TempJob);
+            VoxelsToDraw = ToNativeHashMap(main, Allocator.Persistent);
+            NorthVoxels = ToNativeHashMap(n, Allocator.Persistent);
+            SouthVoxels = ToNativeHashMap(s, Allocator.Persistent);
+            EastVoxels = ToNativeHashMap(e, Allocator.Persistent);
+            WestVoxels = ToNativeHashMap(w, Allocator.Persistent);
 
-            Vertices = new NativeList<Vector3>(Allocator.TempJob);
-            Triangles = new NativeList<int>(Allocator.TempJob);
-            Colors = new NativeList<Color>(Allocator.TempJob);
+            Vertices = new NativeList<Vector3>(Allocator.Persistent);
+            Triangles = new NativeList<int>(Allocator.Persistent);
+            Colors = new NativeList<Color>(Allocator.Persistent);
             _isJobDataAllocated = true;
             IsMeshApplied = false; // A new job is prepared, its mesh is not yet applied.
         }
