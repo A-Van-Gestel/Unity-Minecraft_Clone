@@ -2347,10 +2347,6 @@ public class World : MonoBehaviour
 [Serializable]
 public class Settings
 {
-    // --- GAME DATA ---
-    [Header("Game Data")]
-    public string version = "2026-02-23 - Alpha";
-
     // --- SAVE SYSTEM ---
     [Header("Save System")]
 #if UNITY_EDITOR
