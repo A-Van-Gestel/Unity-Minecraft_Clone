@@ -4,7 +4,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Data;
-using Serialization.Migration;
 using UnityEngine;
 
 namespace Serialization
@@ -201,55 +200,6 @@ namespace Serialization
             }
 
             return snapshot;
-        }
-
-        public void RunMigration(WorldMigration migration)
-        {
-            Debug.Log($"[RunMigration] Starting Migration: {migration.Description} (v{migration.SourceVersion} -> v{migration.TargetVersion})");
-
-            // 4. Migrate Region Files (Chunks)
-            string[] regionFiles = Directory.GetFiles(_saveFolderPath, "r.*.*.bin");
-
-            foreach (string regionPath in regionFiles)
-            {
-                try
-                {
-                    // We open the region file manually here to process it
-                    using var region = new RegionFile(regionPath);
-
-                    // Gather all chunks first to avoid modifying the collection while iterating
-                    foreach (Vector2Int localCoord in region.GetAllChunkCoords())
-                    {
-                        // Migration note: We currently only support migrating the raw GZip bytes in the base class.
-                        // Future migrations might need to become Compression-aware.
-                        // For now, LoadChunkData returns (byte[], algo), we discard algo for the generic migration
-                        var (oldData, _) = region.LoadChunkData(localCoord.x, localCoord.y);
-                        if (oldData == null) continue;
-
-                        try
-                        {
-                            // Execute the migration logic on the raw bytes
-                            byte[] newData = migration.MigrateChunk(oldData);
-
-                            // Only write back if data actually changed
-                            if (newData != oldData)
-                            {
-                                region.RawWriteChunk(localCoord.x, localCoord.y, newData);
-                            }
-                        }
-                        catch (Exception e)
-                        {
-                            Debug.LogError($"[RunMigration] Failed to migrate chunk inside {Path.GetFileName(regionPath)} at {localCoord}: {e.Message}");
-                        }
-                    }
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[RunMigration] Failed to process region file {regionPath} for migration: {e.Message}");
-                }
-            }
-
-            Debug.Log($"[RunMigration] Migration {migration.SourceVersion} -> {migration.TargetVersion} complete.");
         }
 
         private RegionFile GetRegion(Vector2Int regionCoord)

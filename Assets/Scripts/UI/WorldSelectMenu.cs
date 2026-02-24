@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Data;
 using Serialization;
+using Serialization.Migration;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
@@ -20,6 +21,12 @@ namespace UI
         public GameObject selectPanel;
 
         public GameObject createPanel;
+
+        [Header("Migration UI")]
+        public GameObject migrationProgressPanel;
+
+        public Slider progressBar;
+        public TextMeshProUGUI progressText;
 
         [Header("Selection Buttons")]
         public Button loadButton;
@@ -41,8 +48,7 @@ namespace UI
         {
             LoadSettings();
         }
-        
-        
+
 
         // FIX: Centralized and robust settings loading
         private void LoadSettings()
@@ -54,7 +60,7 @@ namespace UI
             if (!File.Exists(_settingFilePath) || Application.isEditor)
             {
                 _settings = new Settings();
-                try 
+                try
                 {
                     string jsonExport = JsonUtility.ToJson(_settings, true);
                     File.WriteAllText(_settingFilePath, jsonExport);
@@ -63,7 +69,7 @@ namespace UI
                 {
                     Debug.LogError($"Failed to create settings file: {e.Message}");
                 }
-                
+
 #if UNITY_EDITOR
                 AssetDatabase.Refresh(); // Refresh Unity's asset database.
 #endif
@@ -104,6 +110,7 @@ namespace UI
                 {
                     if (item != null && item.gameObject != null) Destroy(item.gameObject);
                 }
+
                 _spawnedItems.Clear();
             }
             else
@@ -117,7 +124,7 @@ namespace UI
             {
                 isVolatile = _settings.enableVolatileSaveData;
             }
-            
+
             List<WorldSaveData> worlds = SaveSystem.GetAvailableWorlds(isVolatile);
 
             // 3. Spawn Items
@@ -133,7 +140,7 @@ namespace UI
 
                 GameObject go = Instantiate(worldListItemPrefab, listContentParent);
                 WorldListItem item = go.GetComponent<WorldListItem>();
-                
+
                 // Check if component exists to prevent crash
                 if (item != null)
                 {
@@ -176,16 +183,73 @@ namespace UI
 
         // --- BUTTON EVENTS ---
 
-        public void OnLoadClicked()
+        // ReSharper disable once AsyncVoidMethod
+        public async void OnLoadClicked()
         {
             if (_selectedWorld == null) return;
 
-            // Setup Launch State
-            WorldLaunchState.WorldName = _selectedWorld.worldName;
-            WorldLaunchState.Seed = _selectedWorld.seed;
-            WorldLaunchState.IsNewGame = false;
+            var migrationManager = new MigrationManager();
+            bool migrationSucceeded = false;
 
-            LoadGameScene();
+            try
+            {
+                // 1. Check for Downgrades BEFORE touching UI state
+                if (migrationManager.RequiresMigration(_selectedWorld.version))
+                {
+                    selectPanel.SetActive(false);
+
+                    if (migrationProgressPanel != null)
+                        migrationProgressPanel.SetActive(true);
+
+                    var progress = new Progress<MigrationProgress>(status =>
+                    {
+                        if (progressBar != null)
+                            progressBar.value = status.PercentComplete;
+                        if (progressText != null)
+                            progressText.text = $"{status.CurrentTask} ({status.ProcessedItems}/{status.TotalItems})";
+                    });
+
+                    // 2. AOT Execution
+                    bool isVolatile = Application.isEditor && (_settings != null && _settings.enableVolatileSaveData);
+                    await migrationManager.RunAOTMigrationAsync(
+                        _selectedWorld.worldName,
+                        isVolatile,
+                        _settings.saveCompression, // Explicitly decoupled from World.Instance
+                        _selectedWorld.version,
+                        progress
+                    );
+                }
+
+                // 3. Migration completed (or was not needed). Flag success!
+                migrationSucceeded = true;
+
+                // Setup Launch State
+                WorldLaunchState.WorldName = _selectedWorld.worldName;
+                WorldLaunchState.Seed = _selectedWorld.seed;
+                WorldLaunchState.IsNewGame = false;
+
+                LoadGameScene();
+            }
+            catch (InvalidOperationException downgradeEx)
+            {
+                Debug.LogError(downgradeEx.Message);
+                // TODO: ShowErrorPrompt("Version Error", downgradeEx.Message);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Migration Failed: {ex}");
+                // TODO: ShowErrorPrompt("Migration Failed", $"An error occurred. Your backup is safe.\nError: {ex.Message}");
+            }
+            finally
+            {
+                // 4. ONLY reset the UI if we failed to transition to the World scene.
+                if (!migrationSucceeded)
+                {
+                    if (migrationProgressPanel != null)
+                        migrationProgressPanel.SetActive(false);
+                    selectPanel.SetActive(true);
+                }
+            }
         }
 
         public void OnDeleteClicked()
@@ -200,6 +264,11 @@ namespace UI
         public void OnCreateNewClicked()
         {
             selectPanel.SetActive(false);
+
+            // Explicitly hide the migration panel just in case
+            if (migrationProgressPanel != null)
+                migrationProgressPanel.SetActive(false);
+
             createPanel.SetActive(true);
 
             // Defaults
@@ -231,6 +300,11 @@ namespace UI
         private void SwitchToSelectMode()
         {
             createPanel.SetActive(false);
+
+            // Ensure the migration panel hides when returning to the select menu.
+            if (migrationProgressPanel != null)
+                migrationProgressPanel.SetActive(false);
+
             selectPanel.SetActive(true);
             UpdateButtons();
         }
