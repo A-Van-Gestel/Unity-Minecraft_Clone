@@ -20,6 +20,9 @@ namespace UI
         private WorldSaveData _data;
         private WorldSelectMenu _menu;
 
+        // Expose the data instance for reference equality checks in the Menu
+        public WorldSaveData Data => _data;
+
         public void Setup(WorldSaveData data, WorldSelectMenu menu)
         {
             _data = data;

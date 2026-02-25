@@ -23,6 +23,7 @@ namespace Serialization.Migration.Steps
             // Artificial delay (1 second) so you can clearly see the 
             // "Migrating World Metadata..." phase on your UI.
             Thread.Sleep(1000); 
+            // throw new Exception("Dummy migration failed!"); // Throw fake exception to test error dialog
             return oldJson;
         }
 

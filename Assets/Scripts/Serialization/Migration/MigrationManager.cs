@@ -25,6 +25,9 @@ namespace Serialization.Migration
             new MigrationV1ToV2Dummy()
         };
 
+        // Track the path of the backup we create so we can roll it back if needed.
+        private string _currentBackupPath;
+
         // -------------------------------------------------------------------------
         // Public API
         // -------------------------------------------------------------------------
@@ -37,13 +40,20 @@ namespace Serialization.Migration
             if (savedVersion > SaveSystem.CURRENT_VERSION)
             {
                 throw new InvalidOperationException(
-                    $"World was saved with a newer version of the game (v{savedVersion}), " +
-                    $"but this build only supports up to v{SaveSystem.CURRENT_VERSION}. " +
+                    $"World was saved with a newer version of the games's save-system (v{savedVersion}),\n" +
+                    $"but this build only supports versions up to v{SaveSystem.CURRENT_VERSION}.\n\n" +
                     $"Please update your game to play this world."
                 );
             }
 
-            return savedVersion < SaveSystem.CURRENT_VERSION;
+            if (savedVersion < SaveSystem.CURRENT_VERSION)
+            {
+                Debug.Log($"[MigrationManager] World requires migration from v{savedVersion} to v{SaveSystem.CURRENT_VERSION}");
+                return true;
+            }
+
+            Debug.Log($"[MigrationManager] World is up to date (v{savedVersion})");
+            return false;
         }
 
         /// <summary>
@@ -57,6 +67,8 @@ namespace Serialization.Migration
             int startVersion,
             IProgress<MigrationProgress> progress)
         {
+            Debug.Log($"[MigrationManager] Starting AOT Migration for world '{worldName}' (v{startVersion} -> v{SaveSystem.CURRENT_VERSION})...");
+
             string savePath = SaveSystem.GetSavePath(worldName, useVolatilePath);
 
             // EVALUATE UNITY APIs ON THE MAIN THREAD:
@@ -64,21 +76,24 @@ namespace Serialization.Migration
                 ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
                 : Path.Combine(Application.persistentDataPath, "Saves");
 
-            string backupPath = Path.Combine(basePath, worldName + "_Backup");
+            // Add a timestamp to the backup to guarantee uniqueness and prevent overwrites
+            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            _currentBackupPath = Path.Combine(basePath, $"{worldName}_Backup_v{startVersion}_{timestamp}");
 
             // 1. Manage and Create Immutable Backup
             // Pass the pre-calculated string paths into the background thread
             progress?.Report(new MigrationProgress { CurrentTask = "Creating Backup...", PercentComplete = 0f });
-            await Task.Run(() => CreateAtomicBackup(savePath, backupPath));
+            await Task.Run(() => CreateAtomicBackup(savePath, _currentBackupPath));
 
             // 2. Build Migration Path
             var migrationPath = BuildMigrationPath(startVersion, SaveSystem.CURRENT_VERSION);
+            Debug.Log($"[MigrationManager] Built migration path with {migrationPath.Count} steps.");
 
             // --- Step 1: Atomic Backup ---
             // Offloaded to ThreadPool. We await it so the backup is 100% complete before any migration writes begin.
             // Uses a rename-based swap to prevent a failed copy from overwriting a known-good previous backup.
             progress?.Report(new MigrationProgress { CurrentTask = "Creating Backup...", PercentComplete = 0f });
-            await Task.Run(() => CreateAtomicBackup(savePath, backupPath));
+            await Task.Run(() => CreateAtomicBackup(savePath, _currentBackupPath));
 
             // --- Step 2: Migrate Global Metadata Files ---
             // level.dat, pending_mods.bin, lighting_pending.bin
@@ -95,6 +110,8 @@ namespace Serialization.Migration
             string[] regionFiles = Directory.GetFiles(regionPath, "r.*.*.bin");
             int totalRegions = regionFiles.Length;
             int processedChunksTotal = 0;
+
+            Debug.Log($"[MigrationManager] Found {totalRegions} region files to migrate.");
 
             for (int i = 0; i < totalRegions; i++)
             {
@@ -134,6 +151,38 @@ namespace Serialization.Migration
                 ProcessedItems = processedChunksTotal,
                 TotalItems = processedChunksTotal
             });
+
+            Debug.Log($"[MigrationManager] Migration complete! Successfully processed {totalRegions} regions ({processedChunksTotal} chunks).");
+        }
+
+        /// <summary>
+        /// Deletes the failed migration attempt and restores the backup to the original save path.
+        /// </summary>
+        public void RollbackMigration(string worldName, bool useVolatilePath)
+        {
+            if (string.IsNullOrEmpty(_currentBackupPath) || !Directory.Exists(_currentBackupPath))
+                return;
+
+            string savePath = SaveSystem.GetSavePath(worldName, useVolatilePath);
+
+            try
+            {
+                // 1. Delete the corrupted / half-migrated world
+                if (Directory.Exists(savePath))
+                {
+                    Directory.Delete(savePath, true);
+                }
+
+                // 2. Restore the backup by renaming it back to the original save path
+                // This effectively "deletes" the backup folder by consuming it, leaving the user with a clean slate.
+                Directory.Move(_currentBackupPath, savePath);
+
+                Debug.Log($"[MigrationManager] Successfully rolled back world '{worldName}' to its original state.");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[MigrationManager] CRITICAL: Failed to rollback migration for '{worldName}'. Manual intervention required. Error: {e.Message}");
+            }
         }
 
         // -------------------------------------------------------------------------
@@ -205,6 +254,7 @@ namespace Serialization.Migration
         private void MigrateGlobalFiles(string savePath, List<WorldMigrationStep> path)
         {
             // --- level.dat ---
+            Debug.Log("[MigrationManager] Migrating level.dat...");
             string levelDatPath = Path.Combine(savePath, "level.dat");
             if (File.Exists(levelDatPath))
             {
@@ -222,6 +272,7 @@ namespace Serialization.Migration
             }
 
             // --- pending_mods.bin ---
+            Debug.Log("[MigrationManager] Migrating pending_mods.bin...");
             string modsPath = Path.Combine(savePath, "pending_mods.bin");
             if (File.Exists(modsPath))
             {
@@ -231,6 +282,7 @@ namespace Serialization.Migration
             }
 
             // --- lighting_pending.bin ---
+            Debug.Log("[MigrationManager] Migrating lighting_pending.bin...");
             string lightPath = Path.Combine(savePath, "lighting_pending.bin");
             if (File.Exists(lightPath))
             {
@@ -249,6 +301,7 @@ namespace Serialization.Migration
         /// </summary>
         private void CreateAtomicBackup(string savePath, string backupPath)
         {
+            Debug.Log($"[MigrationManager] Creating backup at: {backupPath}");
             string tempBackupPath = backupPath + "_tmp";
 
             // Clean up any orphaned temp backup from a previous crashed attempt.
@@ -264,6 +317,7 @@ namespace Serialization.Migration
 
             // Step 3: Promote the new backup to the canonical path.
             Directory.Move(tempBackupPath, backupPath);
+            Debug.Log("[MigrationManager] Backup created successfully.");
         }
 
         private static void CopyDirectory(string sourceDir, string destinationDir)

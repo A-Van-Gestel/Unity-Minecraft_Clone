@@ -28,6 +28,12 @@ namespace UI
         public Slider progressBar;
         public TextMeshProUGUI progressText;
 
+        [Header("Error UI")]
+        public GameObject errorPanel;
+
+        public TextMeshProUGUI errorTitleText;
+        public TextMeshProUGUI errorMessageText;
+
         [Header("Selection Buttons")]
         public Button loadButton;
 
@@ -97,7 +103,6 @@ namespace UI
         private void OnEnable()
         {
             LoadSettings();
-            RefreshList();
             SwitchToSelectMode();
         }
 
@@ -166,8 +171,9 @@ namespace UI
             foreach (var item in _spawnedItems)
             {
                 if (item == null) continue;
-                // We compare by reference or name
-                bool match = item.worldNameText.text == data.worldName;
+
+                // We compare by reference to prevent double selection if the world name is not unique.
+                bool match = item.Data == data;
                 item.SetSelected(match);
             }
 
@@ -187,6 +193,10 @@ namespace UI
         public async void OnLoadClicked()
         {
             if (_selectedWorld == null) return;
+
+            // Prevent double clicks
+            if (loadButton != null) loadButton.interactable = false;
+            if (deleteButton != null) deleteButton.interactable = false;
 
             var migrationManager = new MigrationManager();
             bool migrationSucceeded = false;
@@ -232,24 +242,46 @@ namespace UI
             }
             catch (InvalidOperationException downgradeEx)
             {
-                Debug.LogError(downgradeEx.Message);
-                // TODO: ShowErrorPrompt("Version Error", downgradeEx.Message);
+                Debug.LogError($"[UI] Downgrade Exception: {downgradeEx.Message}");
+                ShowErrorPrompt("Incompatible World Version", downgradeEx.Message);
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Migration Failed: {ex}");
-                // TODO: ShowErrorPrompt("Migration Failed", $"An error occurred. Your backup is safe.\nError: {ex.Message}");
+                Debug.LogError($"[UI] Migration Failed: {ex}");
+                ShowErrorPrompt("Migration Failed",
+                    $"An unexpected error occurred while upgrading the world.\n\n" +
+                    $"We have automatically restored your world to its original state.\n\n" +
+                    $"Error Details: {ex.Message}");
             }
             finally
             {
-                // 4. ONLY reset the UI if we failed to transition to the World scene.
                 if (!migrationSucceeded)
                 {
-                    if (migrationProgressPanel != null)
-                        migrationProgressPanel.SetActive(false);
-                    selectPanel.SetActive(true);
+                    // Execute the Rollback automatically
+                    bool isVolatile = Application.isEditor && (_settings != null && _settings.enableVolatileSaveData);
+                    migrationManager.RollbackMigration(_selectedWorld.worldName, isVolatile);
                 }
             }
+        }
+
+        private void ShowErrorPrompt(string title, string message)
+        {
+            if (errorPanel != null)
+            {
+                selectPanel.SetActive(false);
+                errorTitleText.text = title;
+                errorMessageText.text = message;
+                errorPanel.SetActive(true);
+            }
+        }
+
+        // Hook this method up to a "Close" or "Okay" button on your Error Panel!
+        public void CloseErrorPrompt()
+        {
+            if (errorPanel != null)
+                errorPanel.SetActive(false);
+
+            SwitchToSelectMode();
         }
 
         public void OnDeleteClicked()
@@ -264,10 +296,6 @@ namespace UI
         public void OnCreateNewClicked()
         {
             selectPanel.SetActive(false);
-
-            // Explicitly hide the migration panel just in case
-            if (migrationProgressPanel != null)
-                migrationProgressPanel.SetActive(false);
 
             createPanel.SetActive(true);
 
@@ -306,6 +334,7 @@ namespace UI
                 migrationProgressPanel.SetActive(false);
 
             selectPanel.SetActive(true);
+            RefreshList();
             UpdateButtons();
         }
 

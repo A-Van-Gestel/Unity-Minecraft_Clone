@@ -146,11 +146,21 @@ public static class SaveSystem
             string worldName = new DirectoryInfo(dir).Name;
             WorldSaveData data = LoadWorldMetadata(worldName, useVolatilePath);
 
-            // Only add if metadata is valid
-            if (data != null)
+            // Skip invalid worlds
+            if (!IsWorldValid(data))
             {
-                worlds.Add(data);
+                Debug.LogWarning($"Invalid world: {worldName}");
+                continue;
             }
+
+            // Skip backup worlds
+            if (IsWorldBackup(worldName))
+            {
+                Debug.LogWarning($"Backup world: {worldName}");
+                continue;
+            }
+
+            worlds.Add(data);
         }
 
         // Sort by Last Played (Newest first)
@@ -167,5 +177,16 @@ public static class SaveSystem
             Directory.Delete(path, true); // Recursive delete
             Debug.Log($"Deleted world: {worldName}");
         }
+    }
+
+    // --- Helper methods ---
+    private static bool IsWorldBackup(String worldName)
+    {
+        return worldName.Contains("_Backup_v");
+    }
+
+    private static bool IsWorldValid(WorldSaveData data)
+    {
+        return data != null;
     }
 }
