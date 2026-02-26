@@ -1,7 +1,7 @@
 ﻿# Design Document: Infinite World Storage & Serialization Architecture
 
 **Version:** 1.6
-**Date:** 2026-02-15
+**Date:** 2026-02-15  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.3 (Mono Backend)
 
