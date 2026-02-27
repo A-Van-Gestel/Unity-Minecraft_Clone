@@ -20,3 +20,23 @@ NOTE: This is currently done to allow "waterfall" like faces to render properly,
 Fluid voxels do not currently affect the player, meaning that the player can walk through fluid voxels without any interaction.  
 It should slow the player down when walking into fluid voxels. And affect the buoyancy of the player when swimming.  
 A visual on-screen effect should also be applied to indicate that the player is submerged in a fluid.
+
+
+## 4. Downward flow creates infinite source blocks
+
+**Files:** `BlockBehavior.cs` — `HandleFluidFlow` (lines 300–321)
+
+> [!WARNING]
+> **SAVE COMPATIBILITY:** Existing saved waterfalls are composed of source blocks (`FluidLevel = 0`) and would remain unchanged. However, **new** fluid flows after the fix would create non-source "flowing" blocks instead, leading to inconsistent waterfall behavior between old and new terrain in the same world.
+
+When a fluid flows downward into air, it places a **source block** (`FluidLevel = 0` by default) at the position below. This means every block in a waterfall column becomes a full infinite source block, so removing the original source at the top does not stop the waterfall — each block below sustains itself. In Minecraft, downward-flowing water creates "flowing" blocks that dry up when the source is removed.
+
+**Root cause:** The `VoxelMod` created for downward flow does not explicitly set a `FluidLevel`, so it defaults to `0` (source). It should be set to a non-source flowing level (or a dedicated "falling fluid" state).
+
+
+
+## 5. Fluid can flow into blocks of a different fluid type
+
+**Files:** `BlockBehavior.cs` — `HandleFluidFlow` (lines 334–346)
+
+The outer guard condition for horizontal flow allows interaction if the neighbor is non-solid OR is any fluid type. The inner check (line 339) validates that the neighbor is the same fluid type before spreading, but only if the neighbor *is* a fluid. This means water can flow into a position adjacent to lava without any interaction logic (like creating cobblestone/obsidian), because the flow simply doesn't happen — the horizontal spread is silently skipped rather than triggering a reaction.
