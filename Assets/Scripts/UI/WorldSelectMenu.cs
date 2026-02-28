@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using Data;
+using Helpers;
 using Serialization;
 using Serialization.Migration;
 using TMPro;
@@ -33,6 +34,13 @@ namespace UI
 
         public TextMeshProUGUI errorTitleText;
         public TextMeshProUGUI errorMessageText;
+
+        [Header("Info UI")]
+        public GameObject infoPanel;
+
+        public TextMeshProUGUI infoDetailsText;
+        public RawImage minimapImage; // Uses RawImage to display a dynamically generated Texture2D
+        public Button infoButton;
 
         [Header("Selection Buttons")]
         public Button loadButton;
@@ -185,6 +193,7 @@ namespace UI
             bool hasSelection = _selectedWorld != null;
             if (loadButton) loadButton.interactable = hasSelection;
             if (deleteButton) deleteButton.interactable = hasSelection;
+            if (infoButton) infoButton.interactable = hasSelection; // Dynamically toggle Info button
         }
 
         // --- BUTTON EVENTS ---
@@ -341,6 +350,125 @@ namespace UI
         private void LoadGameScene()
         {
             SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single);
+        }
+
+        // -------------------------------------------------------------------------
+        // --- WORLD INFO LOGIC ---
+        // -------------------------------------------------------------------------
+
+        public async void OnInfoClicked()
+        {
+            if (_selectedWorld == null) return;
+
+            selectPanel.SetActive(false);
+
+            if (infoDetailsText != null)
+                infoDetailsText.text = "Loading world data...\nScanning region files...";
+
+            if (minimapImage != null)
+                minimapImage.texture = null;
+
+            infoPanel.SetActive(true);
+
+            bool isVolatile = Application.isEditor && (_settings != null && _settings.enableVolatileSaveData);
+            string savePath = SaveSystem.GetSavePath(_selectedWorld.worldName, isVolatile);
+
+            try
+            {
+                // 1. Fetch data on background thread
+                ParsedWorldInfo info = await WorldInfoUtility.FetchWorldInfoAsync(savePath);
+
+                // 2. Extract Player Chunk Coordinate
+                Vector3 playerPos = _selectedWorld.player.position;
+                Vector2Int playerChunkCoord = new Vector2Int(
+                    Mathf.FloorToInt(playerPos.x / VoxelData.ChunkWidth),
+                    Mathf.FloorToInt(playerPos.z / VoxelData.ChunkWidth)
+                );
+
+                // 3. Generate texture on main thread
+                int maxTextureSize = 256; // Default fallback
+                if (minimapImage != null && minimapImage.rectTransform != null)
+                {
+                    // Get the physical UI bounds of the RawImage
+                    Rect uiRect = minimapImage.rectTransform.rect;
+                    // Use the largest dimension to ensure the map fits perfectly
+                    maxTextureSize = Mathf.CeilToInt(Mathf.Max(uiRect.width, uiRect.height));
+
+                    // Safety clamp to prevent out-of-memory errors if the UI is scaled massively (e.g. 4k resolution full screen)
+                    maxTextureSize = Mathf.Clamp(maxTextureSize, 64, 2048);
+                }
+
+                // ALWAYS call this now, so we get the dark fallback texture for empty worlds
+                MinimapData mapData = WorldInfoUtility.GenerateMinimapTexture(info, playerChunkCoord, maxTextureSize);
+
+                // 4. Format string data
+                string scaleText = info.ChunkCount == 0
+                    ? "<color=#FFA500>N/A (No terrain generated yet)</color>"
+                    : (mapData.ScaleFactor == 1 ? "1 Pixel = 1 Chunk" : $"1 Pixel = {mapData.ScaleFactor}x{mapData.ScaleFactor} Chunks");
+
+                // Convert bytes to MB
+                string sizeMb = (info.TotalSizeBytes / 1024f / 1024f).ToString("F2");
+
+                // Fetch the active compression algorithm
+                string targetCompressionType = _settings != null ? _settings.saveCompression.ToString() : "Unknown";
+
+                // Format Compression Types using the new parsed dictionary
+                List<string> compressionStrings = new List<string>();
+                if (info.CompressionStats != null && info.ChunkCount > 0)
+                {
+                    foreach (var kvp in info.CompressionStats)
+                    {
+                        float percentage = (kvp.Value / (float)info.ChunkCount) * 100f;
+                        compressionStrings.Add($"{kvp.Key} ({percentage:F0}%)");
+                    }
+                }
+
+                string usedCompressionText = compressionStrings.Count > 0
+                    ? string.Join(", ", compressionStrings)
+                    : "None";
+
+                // 5. Update UI Text with Legend & Stats
+                if (infoDetailsText != null)
+                {
+                    infoDetailsText.text =
+                        $"<b>Name:</b> {_selectedWorld.worldName}\n" +
+                        $"<b>Seed:</b> {_selectedWorld.seed}\n" +
+                        $"<b>Save Version:</b> v{_selectedWorld.version}\n" +
+                        $"<b>Compression Target:</b> {targetCompressionType}\n" +
+                        $"<b>Compression Used:</b> {usedCompressionText}\n\n" +
+                        $"<b>Created:</b> {new DateTime(_selectedWorld.creationDate):yyyy-MM-dd HH:mm}\n" +
+                        $"<b>Last Played:</b> {new DateTime(_selectedWorld.lastPlayed):yyyy-MM-dd HH:mm}\n\n" +
+                        $"<b>Region Files:</b> {info.RegionCount} <i>({sizeMb} MB)</i>\n" +
+                        $"<b>Generated Chunks:</b> {info.ChunkCount:N0}\n" +
+                        $"<b>Map Scale:</b> {scaleText}\n\n" +
+                        $"<b>Map Legend:</b>\n" +
+                        $"<color=#32FF32>■</color> Player Location\n" +
+                        $"<color=#FF3232>■</color> World Center ({info.CenterChunkCoord.x},{info.CenterChunkCoord.y})\n" +
+                        $"<color=#FFA500>□</color> Valid World Borders\n" +
+                        $"<color=#50B4FF>■</color> Generated Terrain";
+                }
+
+                // 6. Apply the minimap texture
+                if (minimapImage != null && mapData.Texture != null)
+                {
+                    // Clean up the old texture if there is one to prevent memory leaks
+                    if (minimapImage.texture != null) Destroy(minimapImage.texture);
+
+                    minimapImage.texture = mapData.Texture;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to load world info: {ex}");
+                if (infoDetailsText != null)
+                    infoDetailsText.text = $"Error loading world data:\n{ex.Message}";
+            }
+        }
+
+        public void CloseInfoPanel()
+        {
+            if (infoPanel != null) infoPanel.SetActive(false);
+            SwitchToSelectMode();
         }
     }
 }

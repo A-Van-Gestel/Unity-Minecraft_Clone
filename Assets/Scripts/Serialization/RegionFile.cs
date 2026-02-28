@@ -246,6 +246,49 @@ namespace Serialization
             }
         }
 
+        /// <summary>
+        /// Safely extracts the local coordinates and compression type for all chunks in this region.
+        /// </summary>
+        public List<(Vector2Int localCoord, CompressionAlgorithm algorithm)> GetAllChunkMetadata()
+        {
+            var result = new List<(Vector2Int, CompressionAlgorithm)>();
+
+            // We must lock the file stream while reading to prevent threading collisions
+            lock (_fileLock)
+            {
+                for (int i = 0; i < TOTAL_CHUNKS; i++)
+                {
+                    int offsetData = _offsets[i];
+                    if (offsetData != 0)
+                    {
+                        int localX = i % CHUNKS_PER_SIDE;
+                        int localZ = i / CHUNKS_PER_SIDE;
+
+                        int sectorOffset = (offsetData >> 8) & 0xFFFFFF;
+
+                        // Sector start * 4096 + 4 bytes for the payload length header = The 1-byte compression flag
+                        long compBytePos = (long)sectorOffset * SECTOR_SIZE + 4;
+                        CompressionAlgorithm algo = CompressionAlgorithm.None;
+
+                        if (compBytePos < _fileStream.Length)
+                        {
+                            _fileStream.Seek(compBytePos, SeekOrigin.Begin);
+                            byte compByte = (byte)_fileStream.ReadByte();
+
+                            if (Enum.IsDefined(typeof(CompressionAlgorithm), (CompressionAlgorithm)compByte))
+                            {
+                                algo = (CompressionAlgorithm)compByte;
+                            }
+                        }
+
+                        result.Add((new Vector2Int(localX, localZ), algo));
+                    }
+                }
+            }
+
+            return result;
+        }
+
         /// Perform raw byte replacement without full deserialization overhead
         /// Defaults to GZip compression for legacy migration support
         public void RawWriteChunk(int localX, int localZ, byte[] data, CompressionAlgorithm algorithm = CompressionAlgorithm.GZip)
