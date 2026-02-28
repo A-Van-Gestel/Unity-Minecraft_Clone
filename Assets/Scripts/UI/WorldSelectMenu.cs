@@ -381,10 +381,7 @@ namespace UI
 
                 // 2. Extract Player Chunk Coordinate
                 Vector3 playerPos = _selectedWorld.player.position;
-                Vector2Int playerChunkCoord = new Vector2Int(
-                    Mathf.FloorToInt(playerPos.x / VoxelData.ChunkWidth),
-                    Mathf.FloorToInt(playerPos.z / VoxelData.ChunkWidth)
-                );
+                Vector2Int playerChunkCoord = ChunkCoord.FromWorldPosition(playerPos).ToChunkIndex();
 
                 // 3. Generate texture on main thread
                 int maxTextureSize = 256; // Default fallback

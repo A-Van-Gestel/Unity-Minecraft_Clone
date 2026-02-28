@@ -263,7 +263,7 @@ namespace Data
             {
                 // If chunk is unloaded, tell ModManager to mark this area as dirty.
                 // We don't have exact block tracking for unloaded chunks, so we mark the *Column* for recalculation.
-                ChunkCoord coord = new ChunkCoord(chunkV2Coord.x / VoxelData.ChunkWidth, chunkV2Coord.y / VoxelData.ChunkWidth);
+                ChunkCoord coord = ChunkCoord.FromVoxelOrigin(chunkV2Coord);
 
                 // Calculate local column (0-15)
                 Vector3Int localPos = GetLocalVoxelPositionInChunk(worldPos);

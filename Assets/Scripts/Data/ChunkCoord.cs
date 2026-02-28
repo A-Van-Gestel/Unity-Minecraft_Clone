@@ -33,6 +33,9 @@ namespace Data
     // ── QUICK CONVERSIONS ────────────────────────────────────────
     //   Chunk index  → Voxel origin:  chunkCoord.ToVoxelOrigin()
     //   Voxel origin → Chunk index:   ChunkCoord.FromVoxelOrigin(voxelPos)   or   new ChunkCoord(voxelPos)
+    //   Chunk index  → World pos:     chunkCoord.ToWorldPosition()           →  Vector3(x*16, 0, z*16)
+    //   World pos    → Chunk index:   ChunkCoord.FromWorldPosition(pos)      →  floors then divides
+    //   Neighbor:                      chunkCoord.Neighbor(dx, dz)            →  offset by chunk indices
     //   ChunkCoord   → region math:   use chunkCoord.X / chunkCoord.Z directly
     // ============================================================
 
@@ -46,12 +49,20 @@ namespace Data
 
         #region Constructors
 
+        /// <summary>
+        /// Constructs a ChunkCoord directly from chunk indices.
+        /// <example><c>new ChunkCoord(50, 50)</c> -> <c>ChunkCoord (50, 50)</c></example>
+        /// </summary>
         public ChunkCoord(int x, int z)
         {
             X = x;
             Z = z;
         }
 
+        /// <summary>
+        /// Constructs a ChunkCoord from a 2D world-space position. Floors the coordinates before dividing.
+        /// <example><c>new ChunkCoord(new Vector2(800.5f, 800.5f))</c> -> <c>ChunkCoord (50, 50)</c></example>
+        /// </summary>
         public ChunkCoord(Vector2 pos)
         {
             X = Mathf.FloorToInt(pos.x) / VoxelData.ChunkWidth;
@@ -61,6 +72,7 @@ namespace Data
         /// <summary>
         /// Constructs a ChunkCoord from a voxel-space world origin (e.g. <c>ChunkData.position</c>).
         /// Divides by <c>ChunkWidth</c> to produce chunk indices.
+        /// <example><c>new ChunkCoord(new Vector2Int(800, 800))</c> -> <c>ChunkCoord (50, 50)</c></example>
         /// </summary>
         public ChunkCoord(Vector2Int chunkVoxelPos)
         {
@@ -68,12 +80,20 @@ namespace Data
             Z = chunkVoxelPos.y / VoxelData.ChunkWidth;
         }
 
+        /// <summary>
+        /// Constructs a ChunkCoord from a 3D Unity world-space position. Floors the X and Z coordinates before dividing.
+        /// <example><c>new ChunkCoord(new Vector3(800.5f, 75f, 800.5f))</c> -> <c>ChunkCoord (50, 50)</c></example>
+        /// </summary>
         public ChunkCoord(Vector3 pos)
         {
             X = Mathf.FloorToInt(pos.x) / VoxelData.ChunkWidth;
             Z = Mathf.FloorToInt(pos.z) / VoxelData.ChunkWidth;
         }
 
+        /// <summary>
+        /// Constructs a ChunkCoord from an absolute 3D voxel position. Divides the X and Z coordinates.
+        /// <example><c>new ChunkCoord(new Vector3Int(800, 75, 800))</c> -> <c>ChunkCoord (50, 50)</c></example>
+        /// </summary>
         public ChunkCoord(Vector3Int pos)
         {
             X = pos.x / VoxelData.ChunkWidth;
@@ -88,6 +108,7 @@ namespace Data
         /// Returns the chunk INDEX as a Vector2Int: <c>(X, Z)</c>.
         /// Use this for region arithmetic or loop bounds.
         /// <para>⚠ Do NOT use this when you need the voxel-space world origin — call <see cref="ToVoxelOrigin"/> instead.</para>
+        /// <example><c>ChunkCoord (50, 50)</c> -> <c>ChunkIndex (50, 50)</c></example>
         /// </summary>
         public Vector2Int ToChunkIndex() => new Vector2Int(X, Z);
 
@@ -95,17 +116,57 @@ namespace Data
         /// Returns the voxel-space world origin of this chunk as a Vector2Int.
         /// This is the value stored in <c>ChunkData.position</c>.
         /// <para>Formula: <c>(X * ChunkWidth, Z * ChunkWidth)</c></para>
+        /// <example><c>ChunkCoord (50, 50)</c> -> <c>WorldPos (800, 800)</c></example>
         /// </summary>
         public Vector2Int ToVoxelOrigin() => new Vector2Int(X * VoxelData.ChunkWidth, Z * VoxelData.ChunkWidth);
 
         /// <summary>
+        /// Returns the Unity world-space position of this chunk's origin as a Vector3 (Y = 0).
+        /// Use this for <c>Transform.position</c>, <c>EnsureChunkExists</c>, and similar APIs.
+        /// <para>Formula: <c>(X * ChunkWidth, 0, Z * ChunkWidth)</c></para>
+        /// <example><c>ChunkCoord (50, 50)</c> -> <c>WorldPos (800, 0, 800)</c></example>
+        /// </summary>
+        public Vector3 ToWorldPosition() => new Vector3(X * VoxelData.ChunkWidth, 0, Z * VoxelData.ChunkWidth);
+
+        /// <summary>
         /// Creates a ChunkCoord from a voxel-space world origin.
         /// Equivalent to <c>new ChunkCoord(Vector2Int)</c> but more explicit at the call site.
+        /// <example><c>WorldPos (800, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         /// </summary>
         public static ChunkCoord FromVoxelOrigin(Vector2Int chunkVoxelPos)
         {
             return new ChunkCoord(chunkVoxelPos.x / VoxelData.ChunkWidth, chunkVoxelPos.y / VoxelData.ChunkWidth);
         }
+
+        /// <summary>
+        /// Creates a ChunkCoord from a Unity world-space position (e.g. <c>Transform.position</c>).
+        /// Equivalent to <c>new ChunkCoord(Vector3)</c> but more explicit at the call site.
+        /// <example><c>WorldPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
+        /// </summary>
+        public static ChunkCoord FromWorldPosition(Vector3 worldPos)
+        {
+            return new ChunkCoord(worldPos);
+        }
+
+        #endregion
+
+        #region Neighbor Helpers
+
+        /// <summary>
+        /// Returns a new ChunkCoord offset by the given chunk-index deltas.
+        /// <example><c>coord.Neighbor(1, 0)</c> returns the chunk to the east.</example>
+        /// </summary>
+        public ChunkCoord Neighbor(int dx, int dz) => new ChunkCoord(X + dx, Z + dz);
+
+        #endregion
+
+        #region Operators
+
+        public static ChunkCoord operator +(ChunkCoord a, ChunkCoord b) => new ChunkCoord(a.X + b.X, a.Z + b.Z);
+        public static ChunkCoord operator -(ChunkCoord a, ChunkCoord b) => new ChunkCoord(a.X - b.X, a.Z - b.Z);
+
+        public static bool operator ==(ChunkCoord a, ChunkCoord b) => a.Equals(b);
+        public static bool operator !=(ChunkCoord a, ChunkCoord b) => !a.Equals(b);
 
         #endregion
 

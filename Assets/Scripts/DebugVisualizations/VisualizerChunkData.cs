@@ -31,7 +31,7 @@ namespace DebugVisualizations
         {
             ChunkObject = new GameObject($"Visualizer_{coord.X}_{coord.Z}");
             ChunkObject.transform.SetParent(parent);
-            ChunkObject.transform.position = new Vector3(coord.X * VoxelData.ChunkWidth, 0, coord.Z * VoxelData.ChunkWidth);
+            ChunkObject.transform.position = coord.ToWorldPosition();
 
             _meshFilter = ChunkObject.AddComponent<MeshFilter>();
             var mr = ChunkObject.AddComponent<MeshRenderer>();
@@ -52,7 +52,7 @@ namespace DebugVisualizations
         public void Reset(ChunkCoord coord, Material mat, Transform parent)
         {
             ChunkObject.transform.SetParent(parent);
-            ChunkObject.transform.position = new Vector3(coord.X * VoxelData.ChunkWidth, 0, coord.Z * VoxelData.ChunkWidth);
+            ChunkObject.transform.position = coord.ToWorldPosition();
             ChunkObject.name = $"Visualizer_{coord.X}_{coord.Z}";
             ChunkObject.SetActive(true);
 

@@ -276,7 +276,7 @@ namespace Benchmarks
             var job = new ChunkGenerationJob
             {
                 Seed = VoxelData.Seed,
-                ChunkPosition = new Vector2Int(coord.X * VoxelData.ChunkWidth, coord.Z * VoxelData.ChunkWidth),
+                ChunkPosition = coord.ToVoxelOrigin(),
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 Biomes = _world.JobDataManager.BiomesJobData,
                 AllLodes = _world.JobDataManager.AllLodesJobData,

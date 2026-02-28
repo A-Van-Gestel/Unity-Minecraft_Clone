@@ -59,7 +59,7 @@ public class Chunk
     public void Reset(ChunkCoord coord)
     {
         Coord = coord;
-        ChunkPosition = new Vector3(Coord.X * VoxelData.ChunkWidth, 0f, Coord.Z * VoxelData.ChunkWidth);
+        ChunkPosition = Coord.ToWorldPosition();
 
         // Update GameObject identity
         ChunkGameObject.name = $"Chunk {Coord.X}, {Coord.Z}";
@@ -69,9 +69,7 @@ public class Chunk
         _isActive = true;
         _activeVoxels.Clear();
 
-        // Calculate World Position Vector2Int for the dictionary lookup.
-        // eg: ChunkCoord (50, 50) -> WorldPos (800, 800)
-        Vector2Int worldPosKey = new Vector2Int((int)ChunkPosition.x, (int)ChunkPosition.z);
+        Vector2Int worldPosKey = Coord.ToVoxelOrigin();
 
         // Link Data
         // NOTE: We retrieve the existing data (loaded or generated) from WorldData.
