@@ -738,7 +738,7 @@ public class World : MonoBehaviour
                 if (chunkData.IsPopulated && chunkData.NeedsInitialLighting)
                 {
                     // We must still ensure neighbors have their terrain data ready before lighting.
-                    if (AreNeighborsDataReady(new ChunkCoord(chunkData.position)))
+                    if (AreNeighborsDataReady(ChunkCoord.FromVoxelOrigin(chunkData.position)))
                     {
                         // This chunk is ready. Trigger its full sunlight recalculation, which sets `HasLightChangesToProcess = true` and populates the light queues.
                         chunkData.RecalculateSunLightLight();
@@ -755,7 +755,7 @@ public class World : MonoBehaviour
             {
                 if (chunkData.IsPopulated && chunkData.HasLightChangesToProcess)
                 {
-                    ChunkCoord coord = new ChunkCoord(chunkData.position);
+                    ChunkCoord coord = ChunkCoord.FromVoxelOrigin(chunkData.position);
                     if (!JobManager.lightingJobs.ContainsKey(coord) && AreNeighborsDataReady(coord))
                     {
                         // OPTIMIZATION: Use TempJob allocator.
@@ -1557,7 +1557,7 @@ public class World : MonoBehaviour
     /// <returns>The chunk coordinates for the given world position</returns>
     private static ChunkCoord GetChunkCoordFromVector3(Vector3 worldPos)
     {
-        return new ChunkCoord(worldPos);
+        return ChunkCoord.FromWorldPosition(worldPos);
     }
 
     [CanBeNull]
@@ -2112,7 +2112,7 @@ public class World : MonoBehaviour
 
 
         Vector3Int worldHeight = new Vector3Int(x, yMax, z);
-        ChunkCoord thisChunk = new ChunkCoord(worldPos);
+        ChunkCoord thisChunk = ChunkCoord.FromWorldPosition(worldPos);
 
         // Voxel outside the world, highest voxel is world height.
         if (!worldData.IsVoxelInWorld(worldPos))

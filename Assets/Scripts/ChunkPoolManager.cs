@@ -206,7 +206,7 @@ public class ChunkPoolManager
         border.transform.position = position;
 
         // Update name
-        ChunkCoord coord = new ChunkCoord(position);
+        ChunkCoord coord = ChunkCoord.FromWorldPosition(position);
         border.name = $"Border {coord.X}, {coord.Z}";
 
         // Set active

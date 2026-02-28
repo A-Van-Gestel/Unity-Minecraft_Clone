@@ -59,47 +59,6 @@ namespace Data
             Z = z;
         }
 
-        /// <summary>
-        /// Constructs a ChunkCoord from a 2D world-space position. Floors the coordinates before dividing.
-        /// <example><c>new ChunkCoord(new Vector2(800.5f, 800.5f))</c> -> <c>ChunkCoord (50, 50)</c></example>
-        /// </summary>
-        public ChunkCoord(Vector2 pos)
-        {
-            X = Mathf.FloorToInt(pos.x) / VoxelData.ChunkWidth;
-            Z = Mathf.FloorToInt(pos.y) / VoxelData.ChunkWidth;
-        }
-
-        /// <summary>
-        /// Constructs a ChunkCoord from a voxel-space world origin (e.g. <c>ChunkData.position</c>).
-        /// Divides by <c>ChunkWidth</c> to produce chunk indices.
-        /// <example><c>new ChunkCoord(new Vector2Int(800, 800))</c> -> <c>ChunkCoord (50, 50)</c></example>
-        /// </summary>
-        public ChunkCoord(Vector2Int chunkVoxelPos)
-        {
-            X = chunkVoxelPos.x / VoxelData.ChunkWidth;
-            Z = chunkVoxelPos.y / VoxelData.ChunkWidth;
-        }
-
-        /// <summary>
-        /// Constructs a ChunkCoord from a 3D Unity world-space position. Floors the X and Z coordinates before dividing.
-        /// <example><c>new ChunkCoord(new Vector3(800.5f, 75f, 800.5f))</c> -> <c>ChunkCoord (50, 50)</c></example>
-        /// </summary>
-        public ChunkCoord(Vector3 pos)
-        {
-            X = Mathf.FloorToInt(pos.x) / VoxelData.ChunkWidth;
-            Z = Mathf.FloorToInt(pos.z) / VoxelData.ChunkWidth;
-        }
-
-        /// <summary>
-        /// Constructs a ChunkCoord from an absolute 3D voxel position. Divides the X and Z coordinates.
-        /// <example><c>new ChunkCoord(new Vector3Int(800, 75, 800))</c> -> <c>ChunkCoord (50, 50)</c></example>
-        /// </summary>
-        public ChunkCoord(Vector3Int pos)
-        {
-            X = pos.x / VoxelData.ChunkWidth;
-            Z = pos.z / VoxelData.ChunkWidth;
-        }
-
         #endregion
 
         #region Type Conversion
@@ -130,7 +89,6 @@ namespace Data
 
         /// <summary>
         /// Creates a ChunkCoord from a voxel-space world origin.
-        /// Equivalent to <c>new ChunkCoord(Vector2Int)</c> but more explicit at the call site.
         /// <example><c>WorldPos (800, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         /// </summary>
         public static ChunkCoord FromVoxelOrigin(Vector2Int chunkVoxelPos)
@@ -139,13 +97,32 @@ namespace Data
         }
 
         /// <summary>
+        /// Creates a ChunkCoord from an absolute 3D voxel position.
+        /// <example><c>WorldPos (800, 75, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
+        /// </summary>
+        public static ChunkCoord FromVoxelOrigin(Vector3Int voxelPos)
+        {
+            return new ChunkCoord(voxelPos.x / VoxelData.ChunkWidth, voxelPos.z / VoxelData.ChunkWidth);
+        }
+
+        /// <summary>
         /// Creates a ChunkCoord from a Unity world-space position (e.g. <c>Transform.position</c>).
-        /// Equivalent to <c>new ChunkCoord(Vector3)</c> but more explicit at the call site.
         /// <example><c>WorldPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
         /// </summary>
         public static ChunkCoord FromWorldPosition(Vector3 worldPos)
         {
-            return new ChunkCoord(worldPos);
+            return new ChunkCoord(Mathf.FloorToInt(worldPos.x) / VoxelData.ChunkWidth,
+                Mathf.FloorToInt(worldPos.z) / VoxelData.ChunkWidth);
+        }
+
+        /// <summary>
+        /// Creates a ChunkCoord from a 2D Unity world-space position.
+        /// <example><c>WorldPos (800.5f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
+        /// </summary>
+        public static ChunkCoord FromWorldPosition(Vector2 worldPos)
+        {
+            return new ChunkCoord(Mathf.FloorToInt(worldPos.x) / VoxelData.ChunkWidth,
+                Mathf.FloorToInt(worldPos.y) / VoxelData.ChunkWidth);
         }
 
         #endregion
