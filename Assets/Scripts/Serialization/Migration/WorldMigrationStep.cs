@@ -21,6 +21,12 @@ namespace Serialization.Migration
         /// </summary>
         public abstract string Description { get; }
 
+        /// <summary>
+        /// A short, user-facing description of what this migration fixes or changes.
+        /// Displayed in the UI before the user chooses to load/migrate the world.
+        /// </summary>
+        public abstract string ChangeSummary { get; }
+
         // ── Chunk Format Migration ────────────────────────────────────────────
 
         /// <summary>

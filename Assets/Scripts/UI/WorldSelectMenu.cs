@@ -428,6 +428,32 @@ namespace UI
                     ? string.Join(", ", compressionStrings)
                     : "None";
 
+                string migrationText = "";
+                if (saveVersion < SaveSystem.CURRENT_VERSION)
+                {
+                    try
+                    {
+                        var migrationManager = new MigrationManager();
+                        var steps = migrationManager.GetRequiredMigrations(saveVersion);
+                        if (steps.Count > 0)
+                        {
+                            migrationText = "\n\n<b><color=#FFA500>Pending Migrations:</color></b>";
+                            foreach (var step in steps)
+                            {
+                                migrationText += $"\n• <b>v{step.SourceWorldVersion} → v{step.TargetWorldVersion}:</b> {step.ChangeSummary}";
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        migrationText = $"\n\n<b><color=#FF0000>Migration Error:</color></b>\n{ex.Message}";
+                    }
+                }
+                else if (saveVersion > SaveSystem.CURRENT_VERSION)
+                {
+                    migrationText = $"\n\n<b><color=#FF0000>Unsupported Future Version:</color></b>\nThis world was created in a newer version of the game (v{saveVersion}) and cannot be loaded.";
+                }
+
                 // 5. Update UI Text with Legend & Stats
                 if (infoDetailsText != null)
                 {
@@ -441,7 +467,8 @@ namespace UI
                         $"<b>Last Played:</b> {new DateTime(_selectedWorld.lastPlayed):yyyy-MM-dd HH:mm}\n\n" +
                         $"<b>Region Files:</b> {info.RegionCount} <i>({sizeMb} MB)</i>\n" +
                         $"<b>Generated Chunks:</b> {info.ChunkCount:N0}\n" +
-                        $"<b>Map Scale:</b> {scaleText}\n\n" +
+                        $"<b>Map Scale:</b> {scaleText}" +
+                        migrationText + "\n\n" +
                         $"<b>Map Legend:</b>\n" +
                         $"<color=#32FF32>■</color> Player Location\n" +
                         $"<color=#FF3232>■</color> World Center ({info.CenterChunkCoord.x},{info.CenterChunkCoord.y})\n" +

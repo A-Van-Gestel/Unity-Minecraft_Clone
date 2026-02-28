@@ -10,8 +10,9 @@ namespace Serialization.Migration.Steps
     {
         public override int SourceWorldVersion => 1;
         public override int TargetWorldVersion => 2;
-        
+
         public override string Description => "Testing Migration UI & Repacking Regions...";
+        public override string ChangeSummary => "Dummy migration for testing UI and backup functionality.";
 
         // Leaving this null tells the manager: "The chunk binary layout hasn't changed in v2."
         // The manager will skip calling MigrateChunk, but will STILL iterate all regions 
@@ -22,7 +23,7 @@ namespace Serialization.Migration.Steps
         {
             // Artificial delay (1 second) so you can clearly see the 
             // "Migrating World Metadata..." phase on your UI.
-            Thread.Sleep(1000); 
+            Thread.Sleep(1000);
             // throw new Exception("Dummy migration failed!"); // Throw fake exception to test error dialog
             return oldJson;
         }

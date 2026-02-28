@@ -1,5 +1,6 @@
 ﻿using System;
 using Serialization;
+using Serialization.Migration;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -10,10 +11,15 @@ namespace UI
     {
         [Header("UI References")]
         public TextMeshProUGUI worldNameText;
+
         public TextMeshProUGUI dateText;
         public TextMeshProUGUI modeText;
         public TextMeshProUGUI seedText;
-        
+
+        [Header("Migration UI")]
+        public GameObject migrationWarningObject;
+        public TextMeshProUGUI migrationWarningText;
+
         [Tooltip("Assign the Image component of the child object that acts as the visual highlight.")]
         public Image selectionHighlight;
 
@@ -37,6 +43,44 @@ namespace UI
 
             // Mode text (Creative/Survival placeholder)
             modeText.text = "Creative";
+
+            if (migrationWarningObject != null && migrationWarningText != null)
+            {
+                if (data.version < SaveSystem.CURRENT_VERSION)
+                {
+                    try
+                    {
+                        var migrationManager = new MigrationManager();
+                        var steps = migrationManager.GetRequiredMigrations(data.version);
+                        if (steps.Count > 0)
+                        {
+                            migrationWarningObject.SetActive(true);
+
+                            string migrationWord = steps.Count == 1 ? "migration" : "migrations";
+                            migrationWarningText.text = $"⏵Requires {steps.Count} {migrationWord} (v{data.version} → v{SaveSystem.CURRENT_VERSION})";
+                        }
+                        else
+                        {
+                            migrationWarningObject.SetActive(false);
+                        }
+                    }
+                    catch
+                    {
+                        // In case of unsupported version or missing steps
+                        migrationWarningObject.SetActive(true);
+                        migrationWarningText.text = $"⏵Cannot migrate (v{data.version} → v{SaveSystem.CURRENT_VERSION})";
+                    }
+                }
+                else if (data.version > SaveSystem.CURRENT_VERSION)
+                {
+                    migrationWarningObject.SetActive(true);
+                    migrationWarningText.text = $"⏵Unsupported future version (v{data.version})";
+                }
+                else
+                {
+                    migrationWarningObject.SetActive(false);
+                }
+            }
 
             // Initialize button click
             Button btn = GetComponent<Button>();

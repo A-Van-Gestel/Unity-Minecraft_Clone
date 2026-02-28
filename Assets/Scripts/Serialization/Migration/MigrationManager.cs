@@ -34,6 +34,17 @@ namespace Serialization.Migration
         // -------------------------------------------------------------------------
 
         /// <summary>
+        /// Gets the sequence of migration steps required to bring the given save version up to the current engine version.
+        /// </summary>
+        public List<WorldMigrationStep> GetRequiredMigrations(int savedVersion)
+        {
+            if (savedVersion >= SaveSystem.CURRENT_VERSION)
+                return new List<WorldMigrationStep>();
+
+            return BuildMigrationPath(savedVersion, SaveSystem.CURRENT_VERSION);
+        }
+
+        /// <summary>
         /// Returns true if the save requires migration. Throws if the save is from the future.
         /// </summary>
         public bool RequiresMigration(int savedVersion)

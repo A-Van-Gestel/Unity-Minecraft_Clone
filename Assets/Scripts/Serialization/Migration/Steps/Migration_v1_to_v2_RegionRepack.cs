@@ -54,6 +54,7 @@ namespace Serialization.Migration.Steps
         public override int SourceWorldVersion => 1;
         public override int TargetWorldVersion => 2;
         public override string Description => "Repacking region files (fixing coordinate scale)...";
+        public override string ChangeSummary => "Fixes region file coordinates resulting in significantly smaller save sizes.";
 
         // Chunk binary payload is unchanged in V2 — only the region layout changes.
         public override byte? TargetChunkFormatVersion => null;
