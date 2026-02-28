@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Data;
 using Helpers;
@@ -418,85 +417,6 @@ public class Chunk
     {
         if (World.Instance.settings.enableChunkLoadAnimations && ChunkGameObject.GetComponent<ChunkLoadAnimation>() == null)
             ChunkGameObject.AddComponent<ChunkLoadAnimation>();
-    }
-
-    #endregion
-}
-
-public readonly struct ChunkCoord : IEquatable<ChunkCoord>
-{
-    public readonly int X;
-    public readonly int Z;
-
-    #region Constructors
-
-    public ChunkCoord(int x, int z)
-    {
-        X = x;
-        Z = z;
-    }
-
-    public ChunkCoord(Vector2 pos)
-    {
-        X = Mathf.FloorToInt(pos.x) / VoxelData.ChunkWidth;
-        Z = Mathf.FloorToInt(pos.y) / VoxelData.ChunkWidth;
-    }
-
-    public ChunkCoord(Vector2Int pos)
-    {
-        X = pos.x / VoxelData.ChunkWidth;
-        Z = pos.y / VoxelData.ChunkWidth;
-    }
-
-    public ChunkCoord(Vector3 pos)
-    {
-        X = Mathf.FloorToInt(pos.x) / VoxelData.ChunkWidth;
-        Z = Mathf.FloorToInt(pos.z) / VoxelData.ChunkWidth;
-    }
-
-    public ChunkCoord(Vector3Int pos)
-    {
-        X = pos.x / VoxelData.ChunkWidth;
-        Z = pos.z / VoxelData.ChunkWidth;
-    }
-
-    #endregion
-
-    #region Type Conversion
-
-    public Vector2Int ToVector2Int()
-    {
-        return new Vector2Int(X, Z);
-    }
-
-    public static implicit operator Vector2Int(ChunkCoord coord)
-    {
-        return new Vector2Int(coord.X, coord.Z);
-    }
-
-    #endregion
-
-    #region Overrides
-
-    public override int GetHashCode()
-    {
-        // Multiply x & y by different constant to differentiate between situations like x=12 & z=13 and x=13 & z=12.
-        return 31 * X + 17 * Z;
-    }
-
-    public override bool Equals(object obj)
-    {
-        return obj is ChunkCoord coord && Equals(coord);
-    }
-
-    public bool Equals(ChunkCoord other)
-    {
-        return other.X == X && other.Z == Z;
-    }
-
-    public override string ToString()
-    {
-        return $"ChunkCoord({X}, {Z})";
     }
 
     #endregion

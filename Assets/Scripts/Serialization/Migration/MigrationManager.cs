@@ -22,7 +22,8 @@ namespace Serialization.Migration
         // Add new steps here in ascending version order.
         private readonly List<WorldMigrationStep> _steps = new List<WorldMigrationStep>
         {
-            new MigrationV1ToV2Dummy()
+            // new MigrationV1ToV2Dummy()
+            new MigrationV1ToV2RegionRepack()
         };
 
         // Track the path of the backup we create so we can roll it back if needed.
@@ -40,7 +41,7 @@ namespace Serialization.Migration
             if (savedVersion > SaveSystem.CURRENT_VERSION)
             {
                 throw new InvalidOperationException(
-                    $"World was saved with a newer version of the games's save-system (v{savedVersion}),\n" +
+                    $"World was saved with a newer version of the game's save-system (v{savedVersion}),\n" +
                     $"but this build only supports versions up to v{SaveSystem.CURRENT_VERSION}.\n\n" +
                     $"Please update your game to play this world."
                 );
@@ -71,7 +72,7 @@ namespace Serialization.Migration
 
             string savePath = SaveSystem.GetSavePath(worldName, useVolatilePath);
 
-            // EVALUATE UNITY APIs ON THE MAIN THREAD:
+            // EVALUATE UNITY APIs ON THE MAIN THREAD before offloading anything:
             string basePath = useVolatilePath
                 ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
                 : Path.Combine(Application.persistentDataPath, "Saves");
@@ -80,69 +81,114 @@ namespace Serialization.Migration
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             _currentBackupPath = Path.Combine(basePath, $"{worldName}_Backup_v{startVersion}_{timestamp}");
 
-            // 1. Manage and Create Immutable Backup
-            // Pass the pre-calculated string paths into the background thread
-            progress?.Report(new MigrationProgress { CurrentTask = "Creating Backup...", PercentComplete = 0f });
-            await Task.Run(() => CreateAtomicBackup(savePath, _currentBackupPath));
-
-            // 2. Build Migration Path
-            var migrationPath = BuildMigrationPath(startVersion, SaveSystem.CURRENT_VERSION);
-            Debug.Log($"[MigrationManager] Built migration path with {migrationPath.Count} steps.");
-
             // --- Step 1: Atomic Backup ---
             // Offloaded to ThreadPool. We await it so the backup is 100% complete before any migration writes begin.
-            // Uses a rename-based swap to prevent a failed copy from overwriting a known-good previous backup.
             progress?.Report(new MigrationProgress { CurrentTask = "Creating Backup...", PercentComplete = 0f });
             await Task.Run(() => CreateAtomicBackup(savePath, _currentBackupPath));
 
-            // --- Step 2: Migrate Global Metadata Files ---
+            // --- Step 2: Build Migration Path ---
+            var migrationPath = BuildMigrationPath(startVersion, SaveSystem.CURRENT_VERSION);
+            Debug.Log($"[MigrationManager] Built migration path with {migrationPath.Count} step(s).");
+
+            // --- Step 3: Migrate Global Metadata Files ---
             // level.dat, pending_mods.bin, lighting_pending.bin
-            progress?.Report(new MigrationProgress { CurrentTask = "Migrating World Metadata...", PercentComplete = 0f });
+            progress?.Report(new MigrationProgress { CurrentTask = "Migrating World Metadata...", PercentComplete = 0.05f });
             await Task.Run(() => MigrateGlobalFiles(savePath, migrationPath));
 
-            // --- Step 3: Migrate Region Files (Chunk Payload AOT) ---
+            // --- Step 4: Migrate Region Files ---
             string regionPath = Path.Combine(savePath, "Region");
             string tempRegionPath = Path.Combine(savePath, "Region_TempMigration");
-
-            if (!Directory.Exists(tempRegionPath))
-                Directory.CreateDirectory(tempRegionPath);
-
-            string[] regionFiles = Directory.GetFiles(regionPath, "r.*.*.bin");
-            int totalRegions = regionFiles.Length;
             int processedChunksTotal = 0;
 
-            Debug.Log($"[MigrationManager] Found {totalRegions} region files to migrate.");
+            bool needsLayoutMigration = migrationPath.Any(s => s.RequiresRegionLayoutMigration);
 
-            for (int i = 0; i < totalRegions; i++)
+            if (needsLayoutMigration)
             {
-                string oldFile = regionFiles[i];
-                string fileName = Path.GetFileName(oldFile);
-                string tempFile = Path.Combine(tempRegionPath, fileName);
+                // ── Layout migration: chunks may move between region files ──────────
+                // A dedicated step reads the entire old Region folder and writes a
+                // fully restructured set of new region files into a temp directory.
+                // We then atomically swap the directories.
 
-                // Progress is reported as a fraction of regions completed.
+                if (!Directory.Exists(tempRegionPath))
+                    Directory.CreateDirectory(tempRegionPath);
+
+                foreach (var step in migrationPath.Where(s => s.RequiresRegionLayoutMigration))
+                {
+                    progress?.Report(new MigrationProgress
+                    {
+                        CurrentTask = step.Description,
+                        PercentComplete = 0.1f,
+                    });
+
+                    int chunksFromStep = await Task.Run(() =>
+                        step.PerformRegionLayoutMigration(regionPath, tempRegionPath, targetCompression));
+
+                    processedChunksTotal += chunksFromStep;
+                }
+
                 progress?.Report(new MigrationProgress
                 {
-                    CurrentTask = $"Migrating {fileName}... ({i + 1}/{totalRegions})",
-                    PercentComplete = totalRegions == 0 ? 1f : (float)i / totalRegions,
+                    CurrentTask = "Finalising region layout...",
+                    PercentComplete = 0.95f,
                     ProcessedItems = processedChunksTotal,
-                    TotalItems = totalRegions // Report regions as the unit of total work
+                    TotalItems = processedChunksTotal
                 });
 
-                // Process on a background thread; await ensures sequential, crash-safe writes.
-                int chunksInRegion = await Task.Run(() =>
-                    MigrateSingleRegion(oldFile, tempFile, targetCompression, migrationPath)
-                );
-
-                processedChunksTotal += chunksInRegion;
-
-                // Safe Swap: The new region file is fully written before we touch the original.
-                // If the game is force-closed between these two lines, the temp file is orphaned
-                // and the original is intact. The backup also remains intact.
-                File.Delete(oldFile);
-                File.Move(tempFile, oldFile);
+                // Atomic folder swap:
+                // - The backup is intact.
+                // - The new region folder is fully written.
+                // - If the game crashes between these two lines, the temp folder is orphaned
+                //   and the original (backed-up) region folder still exists.
+                await Task.Run(() =>
+                {
+                    Directory.Delete(regionPath, recursive: true);
+                    Directory.Move(tempRegionPath, regionPath);
+                });
             }
+            else
+            {
+                // ── Format-only migration: chunks stay in the same region files ────
+                // Each file is migrated in-place using a temp-file-then-swap pattern.
 
-            Directory.Delete(tempRegionPath);
+                string[] regionFiles = Directory.GetFiles(regionPath, "r.*.*.bin");
+                int totalRegions = regionFiles.Length;
+
+                Debug.Log($"[MigrationManager] Found {totalRegions} region file(s) to migrate.");
+
+                if (!Directory.Exists(tempRegionPath))
+                    Directory.CreateDirectory(tempRegionPath);
+
+                for (int i = 0; i < totalRegions; i++)
+                {
+                    string oldFile = regionFiles[i];
+                    string fileName = Path.GetFileName(oldFile);
+                    string tempFile = Path.Combine(tempRegionPath, fileName);
+
+                    // Progress is reported as a fraction of regions completed.
+                    progress?.Report(new MigrationProgress
+                    {
+                        CurrentTask = $"Migrating {fileName}... ({i + 1}/{totalRegions})",
+                        PercentComplete = totalRegions == 0 ? 1f : (float)i / totalRegions,
+                        ProcessedItems = processedChunksTotal,
+                        TotalItems = totalRegions // Report regions as the unit of total work
+                    });
+
+                    // Process on a background thread; await ensures sequential, crash-safe writes.
+                    int chunksInRegion = await Task.Run(() =>
+                        MigrateSingleRegion(oldFile, tempFile, targetCompression, migrationPath)
+                    );
+
+                    processedChunksTotal += chunksInRegion;
+
+                    // Safe Swap: The new region file is fully written before we touch the original.
+                    // If the game is force-closed between these two lines, the temp file is orphaned
+                    // and the original is intact. The backup also remains intact.
+                    File.Delete(oldFile);
+                    File.Move(tempFile, oldFile);
+                }
+
+                Directory.Delete(tempRegionPath);
+            }
 
             progress?.Report(new MigrationProgress
             {
@@ -152,7 +198,7 @@ namespace Serialization.Migration
                 TotalItems = processedChunksTotal
             });
 
-            Debug.Log($"[MigrationManager] Migration complete! Successfully processed {totalRegions} regions ({processedChunksTotal} chunks).");
+            Debug.Log($"[MigrationManager] Migration complete! Successfully processed {processedChunksTotal} chunk(s).");
         }
 
         /// <summary>
@@ -173,8 +219,8 @@ namespace Serialization.Migration
                     Directory.Delete(savePath, true);
                 }
 
-                // 2. Restore the backup by renaming it back to the original save path
-                // This effectively "deletes" the backup folder by consuming it, leaving the user with a clean slate.
+                // 2. Restore the backup by renaming it back to the original save path.
+                // This effectively "deletes" the backup folder by consuming it.
                 Directory.Move(_currentBackupPath, savePath);
 
                 Debug.Log($"[MigrationManager] Successfully rolled back world '{worldName}' to its original state.");
@@ -186,7 +232,7 @@ namespace Serialization.Migration
         }
 
         // -------------------------------------------------------------------------
-        // Private: Region Migration
+        // Private: Format-Only Region Migration (single file)
         // -------------------------------------------------------------------------
 
         private int MigrateSingleRegion(
@@ -196,7 +242,7 @@ namespace Serialization.Migration
             List<WorldMigrationStep> path)
         {
             using var oldRegion = new RegionFile(oldFile);
-            // Writing into a fresh RegionFile also defragments it: chunks are written
+            // Writing into a fresh RegionFile defragments it: chunks are written
             // sequentially with no dead sectors, reducing final file size at no extra cost.
             using var newRegion = new RegionFile(tempFile);
             int chunksProcessed = 0;

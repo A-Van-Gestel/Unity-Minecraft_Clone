@@ -21,6 +21,8 @@ namespace Serialization.Migration
         /// </summary>
         public abstract string Description { get; }
 
+        // ── Chunk Format Migration ────────────────────────────────────────────
+
         /// <summary>
         /// Declares the chunk format version this step writes as output.
         /// Return null if this world version bump does not alter the chunk binary layout.
@@ -58,6 +60,54 @@ namespace Serialization.Migration
         public virtual byte[] MigrateChunk(byte[] uncompressedChunkData)
         {
             return uncompressedChunkData;
+        }
+
+        // ── Region Layout Migration ───────────────────────────────────────────
+
+        /// <summary>
+        /// Returns true if this migration step requires a full restructure of the
+        /// region file layout — i.e. chunks need to move to different region files
+        /// or different slots within a region file.
+        ///
+        /// <para>
+        /// When true, <see cref="PerformRegionLayoutMigration"/> is called instead of
+        /// the standard per-file loop. The step is responsible for reading all old
+        /// region files from <c>oldRegionPath</c> and writing the correctly-addressed
+        /// chunks into <c>newRegionPath</c>.
+        /// </para>
+        ///
+        /// <para>
+        /// Example use case: fixing a coordinate scale bug where chunks were stored
+        /// using voxel-space positions instead of chunk-index positions.
+        /// </para>
+        /// </summary>
+        public virtual bool RequiresRegionLayoutMigration => false;
+
+        /// <summary>
+        /// Called once for the entire region folder when <see cref="RequiresRegionLayoutMigration"/>
+        /// is true. Responsible for reading every chunk from <paramref name="oldRegionPath"/>
+        /// and writing each one — with its corrected region address — into <paramref name="newRegionPath"/>.
+        ///
+        /// <para>
+        /// The manager will atomically swap the two directories after this method returns,
+        /// so the step must write ALL chunks before returning.
+        /// </para>
+        ///
+        /// <para>
+        /// Compression: the step should recompress all chunk payloads to
+        /// <paramref name="targetCompression"/> to normalise the save on disk.
+        /// </para>
+        /// </summary>
+        /// <param name="oldRegionPath">Path to the existing (pre-migration) Region folder.</param>
+        /// <param name="newRegionPath">Path to the freshly-created temporary Region folder to write into.</param>
+        /// <param name="targetCompression">The player's currently configured compression algorithm.</param>
+        /// <returns>The number of chunks successfully processed.</returns>
+        public virtual int PerformRegionLayoutMigration(
+            string oldRegionPath,
+            string newRegionPath,
+            CompressionAlgorithm targetCompression)
+        {
+            return 0;
         }
     }
 }

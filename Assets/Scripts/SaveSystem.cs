@@ -7,7 +7,9 @@ using Object = UnityEngine.Object;
 
 public static class SaveSystem
 {
-    public const int CURRENT_VERSION = 1;
+    // v1 → v2: Fixed region file layout (voxel-space → chunk-index-space coordinates).
+    //          All V1 worlds are automatically migrated by MigrationV1ToV2RegionRepack.
+    public const int CURRENT_VERSION = 2;
 
     public static string GetSavePath(string worldName, bool useVolatilePath)
     {
@@ -32,7 +34,6 @@ public static class SaveSystem
             version = CURRENT_VERSION,
             worldName = worldName,
             seed = world.worldData.seed,
-            // Assuming World keeps track of time, otherwise use DateTime.Now.Ticks for both
             creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.Now.Ticks,
             lastPlayed = DateTime.Now.Ticks,
 
@@ -60,10 +61,6 @@ public static class SaveSystem
             {
                 saveData.player.cursorItem = cursorHandler.GetCursorData();
             }
-
-            // Refine Rotation to include Camera Pitch
-            // The Player script handles gathering, but we ensure we grab the right vector logic there.
-            // (Implemented in Player.GetSaveData above)
         }
 
         // --- 3. Write level.dat (JSON) ---
@@ -180,7 +177,7 @@ public static class SaveSystem
     }
 
     // --- Helper methods ---
-    private static bool IsWorldBackup(String worldName)
+    private static bool IsWorldBackup(string worldName)
     {
         return worldName.Contains("_Backup_v");
     }

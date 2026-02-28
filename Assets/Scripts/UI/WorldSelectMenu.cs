@@ -372,11 +372,12 @@ namespace UI
 
             bool isVolatile = Application.isEditor && (_settings != null && _settings.enableVolatileSaveData);
             string savePath = SaveSystem.GetSavePath(_selectedWorld.worldName, isVolatile);
+            int saveVersion = _selectedWorld.version;
 
             try
             {
                 // 1. Fetch data on background thread
-                ParsedWorldInfo info = await WorldInfoUtility.FetchWorldInfoAsync(savePath);
+                ParsedWorldInfo info = await WorldInfoUtility.FetchWorldInfoAsync(savePath, saveVersion);
 
                 // 2. Extract Player Chunk Coordinate
                 Vector3 playerPos = _selectedWorld.player.position;
@@ -433,7 +434,7 @@ namespace UI
                     infoDetailsText.text =
                         $"<b>Name:</b> {_selectedWorld.worldName}\n" +
                         $"<b>Seed:</b> {_selectedWorld.seed}\n" +
-                        $"<b>Save Version:</b> v{_selectedWorld.version}\n" +
+                        $"<b>Save Version:</b> v{saveVersion}\n" +
                         $"<b>Compression Target:</b> {targetCompressionType}\n" +
                         $"<b>Compression Used:</b> {usedCompressionText}\n\n" +
                         $"<b>Created:</b> {new DateTime(_selectedWorld.creationDate):yyyy-MM-dd HH:mm}\n" +

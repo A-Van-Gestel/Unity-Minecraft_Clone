@@ -32,8 +32,16 @@ namespace Helpers
         /// Asynchronously scans a world's save directory to collect region and chunk statistics.
         /// Safe to call from the UI thread (offloads I/O to ThreadPool).
         /// </summary>
-        public static async Task<ParsedWorldInfo> FetchWorldInfoAsync(string savePath)
+        /// <param name="savePath">Absolute path to the world's save folder.</param>
+        /// <param name="saveVersion">
+        /// The version field read from <c>level.dat</c>. Selects the correct region
+        /// address decoder for this save's on-disk format via
+        /// <see cref="RegionAddressCodec.ForVersion"/>.
+        /// </param>
+        public static async Task<ParsedWorldInfo> FetchWorldInfoAsync(string savePath, int saveVersion)
         {
+            IRegionAddressCodec decoder = RegionAddressCodec.ForVersion(saveVersion);
+
             return await Task.Run(() =>
             {
                 Debug.Log($"[WorldInfoUtility] Starting world scan at: {savePath}");
@@ -83,18 +91,15 @@ namespace Helpers
                                     info.CompressionStats[chunkMeta.algorithm] = 1;
 
                                 // 2. Calculate coordinates
-                                // TODO:[BUGGED SAVE SYSTEM COMPATIBILITY]
-                                // The current ChunkStorageManager accidentally uses World Position instead of Chunk Index 
-                                // to calculate region files. To make the minimap render correctly with the currently 
-                                // bugged save files, we reconstruct the World Position here and divide by ChunkWidth 
-                                // to get the actual Chunk Index.
-                                // REVERT THIS once ChunkStorageManager is fixed to use Chunk Indexes. 
-                                // (Once fixed, it should just be: int chunkX = (rX * 32) + chunkMeta.localCoord.x;)
-                                int buggedWorldX = (rX * 32) + chunkMeta.localCoord.x;
-                                int buggedWorldZ = (rZ * 32) + chunkMeta.localCoord.y;
+                                // Decoding is version-specific: the decoder was selected once before
+                                // this Task.Run based on the world's save version.
+                                Vector2Int chunkIndex = decoder.RegionSlotToChunkIndex(
+                                    rX, rZ,
+                                    chunkMeta.localCoord.x,
+                                    chunkMeta.localCoord.y);
 
-                                int chunkX = Mathf.FloorToInt((float)buggedWorldX / VoxelData.ChunkWidth);
-                                int chunkZ = Mathf.FloorToInt((float)buggedWorldZ / VoxelData.ChunkWidth);
+                                int chunkX = chunkIndex.x;
+                                int chunkZ = chunkIndex.y;
 
                                 info.ChunkCoords.Add(new Vector2Int(chunkX, chunkZ));
 

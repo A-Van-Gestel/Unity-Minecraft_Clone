@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using Data;
 using DebugVisualizations.Jobs;
 using Unity.Collections;
 using Unity.Jobs;

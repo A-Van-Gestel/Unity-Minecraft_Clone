@@ -365,7 +365,7 @@ public class World : MonoBehaviour
 
         worldData = new WorldData(worldName, seed);
 
-        StorageManager = new ChunkStorageManager(worldName, IsVolatileMode);
+        StorageManager = new ChunkStorageManager(worldName, IsVolatileMode, SaveSystem.CURRENT_VERSION);
         ModManager = new ModificationManager(worldName, IsVolatileMode);
         LightingStateManager = new LightingStateManager(worldName, IsVolatileMode);
 

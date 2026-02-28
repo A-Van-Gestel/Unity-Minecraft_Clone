@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Data;
+using Helpers;
 using UnityEngine;
 
 namespace Serialization
@@ -11,11 +12,19 @@ namespace Serialization
     public class ChunkStorageManager
     {
         private readonly string _saveFolderPath;
+        private readonly IRegionAddressCodec _codec;
 
         // Concurrent Dictionary with Lazy to ensure thread-safe, single initialization of RegionFiles
         private readonly ConcurrentDictionary<Vector2Int, Lazy<RegionFile>> _regions = new ConcurrentDictionary<Vector2Int, Lazy<RegionFile>>();
 
-        public ChunkStorageManager(string worldName, bool useVolatilePath)
+        /// <param name="worldName">Name of the world being loaded or created.</param>
+        /// <param name="useVolatilePath">True in Editor mode to use a temp save directory.</param>
+        /// <param name="saveVersion">
+        /// The version field read from <c>level.dat</c>. Determines which
+        /// <see cref="IRegionAddressCodec"/> is used for all region address arithmetic.
+        /// Pass <see cref="SaveSystem.CURRENT_VERSION"/> for new worlds.
+        /// </param>
+        public ChunkStorageManager(string worldName, bool useVolatilePath, int saveVersion)
         {
             // Determine Save Path
             string basePath = useVolatilePath
@@ -23,40 +32,37 @@ namespace Serialization
                 : Path.Combine(Application.persistentDataPath, "Saves");
 
             _saveFolderPath = Path.Combine(basePath, worldName, "Region");
+            _codec = RegionAddressCodec.ForVersion(saveVersion);
 
             if (!Directory.Exists(_saveFolderPath)) Directory.CreateDirectory(_saveFolderPath);
         }
 
-        // Returns null if chunk not found on disk
-        public async Task<ChunkData> LoadChunkAsync(Vector2Int chunkCoord)
+        // -------------------------------------------------------------------------
+        // Public API
+        // -------------------------------------------------------------------------
+
+        /// <summary>Returns null if the chunk is not found on disk.</summary>
+        public async Task<ChunkData> LoadChunkAsync(Vector2Int chunkVoxelPos)
         {
             // Run I/O on background thread
             return await Task.Run(() =>
             {
-                // Accessing .Value triggers the file open if not already open
-                RegionFile region = GetRegion(GetRegionCoord(chunkCoord));
+                var (regionCoord, lx, lz) = _codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
+                RegionFile region = GetRegion(regionCoord);
 
-                // Local coordinates inside the region (0-31)
-                int lx = chunkCoord.x % 32;
-                int lz = chunkCoord.y % 32;
-                if (lx < 0) lx += 32;
-                if (lz < 0) lz += 32;
-
-                // Now receiving tuple containing raw bytes and algorithm used
                 var (data, algorithm) = region.LoadChunkData(lx, lz);
                 if (data == null)
                 {
-                    Debug.Log($"[LoadChunkAsync] Chunk {chunkCoord} not on disk -> Will be generated");
+                    Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
                     return null;
                 }
 
                 // Deserialize (Expensive CPU, kept on background thread)
-                var chunk = ChunkSerializer.Deserialize(data, algorithm, chunkCoord);
+                var chunk = ChunkSerializer.Deserialize(data, algorithm, chunkVoxelPos);
 
-                if (data == null)
+                if (chunk == null)
                 {
-                    Debug.LogWarning($"[LoadChunkAsync] Chunk {chunkCoord} deserialization failed -> Will be (re-)generated");
-
+                    Debug.LogWarning($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} deserialization failed -> Will be (re-)generated");
                     return null;
                 }
 
@@ -64,9 +70,7 @@ namespace Serialization
             });
         }
 
-        /// <summary>
-        /// Synchronous version of SaveChunk. 
-        /// </summary>
+        /// <summary>Synchronous save. Blocks the calling thread until the write completes.</summary>
         public void SaveChunk(ChunkData data)
         {
             CompressionAlgorithm algorithm = World.Instance.settings.saveCompression;
@@ -79,24 +83,19 @@ namespace Serialization
                 int length = ChunkSerializer.Serialize(data, buffer, algorithm);
                 if (length <= 0)
                 {
-                    Debug.LogWarning($"[SaveChunk] Chunk {data.position} serialization returned 0 bytes");
+                    Debug.LogWarning($"[SaveChunk] Chunk at voxelPos {data.position} serialization returned 0 bytes");
                     return;
                 }
 
                 // Write to Region
-                Vector2Int coord = data.position;
-                RegionFile region = GetRegion(GetRegionCoord(coord));
-
-                int lx = coord.x % 32;
-                int lz = coord.y % 32;
-                if (lx < 0) lx += 32;
-                if (lz < 0) lz += 32;
+                var (regionCoord, lx, lz) = _codec.ChunkVoxelPosToRegionAddress(data.position);
+                RegionFile region = GetRegion(regionCoord);
 
                 region.SaveChunkData(lx, lz, buffer, length, algorithm);
             }
             catch (Exception e)
             {
-                Debug.LogError($"[SaveChunk] Failed to save chunk {data.position}: {e.Message}");
+                Debug.LogError($"[SaveChunk] Failed to save chunk at voxelPos {data.position}: {e.Message}");
             }
             finally
             {
@@ -105,9 +104,8 @@ namespace Serialization
         }
 
         /// <summary>
-        /// Saves a chunk asynchronously.
-        /// Includes CancellationToken support to safely abort if the game quits mid-operation.
-        /// Returns a Task so the caller can await completion or catch errors if needed.
+        /// Async save. Snapshots chunk data on the calling thread, then serializes and writes on a ThreadPool thread.
+        /// Includes CancellationToken support to safely abort on game quit.
         /// </summary>
         public async Task SaveChunkAsync(ChunkData data, CancellationToken cancellationToken = default)
         {
@@ -134,13 +132,8 @@ namespace Serialization
                     if (length <= 0 || cancellationToken.IsCancellationRequested) return;
 
                     // Write
-                    Vector2Int coord = snapshot.position;
-                    RegionFile region = GetRegion(GetRegionCoord(coord));
-
-                    int lx = coord.x % 32;
-                    int lz = coord.y % 32;
-                    if (lx < 0) lx += 32;
-                    if (lz < 0) lz += 32;
+                    var (regionCoord, lx, lz) = _codec.ChunkVoxelPosToRegionAddress(snapshot.position);
+                    RegionFile region = GetRegion(regionCoord);
 
                     region.SaveChunkData(lx, lz, buffer, length, algorithm);
                 }, cancellationToken);
@@ -151,7 +144,7 @@ namespace Serialization
             }
             catch (Exception e)
             {
-                Debug.LogError($"[SaveChunkAsync] Failed to save chunk {data.position}: {e.Message}");
+                Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {data.position}: {e.Message}");
             }
             finally
             {
@@ -160,6 +153,35 @@ namespace Serialization
                 // Return snapshot components back to the pool
                 World.Instance.ChunkPool.ReturnChunkData(snapshot);
             }
+        }
+
+        public void Dispose()
+        {
+            Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
+            foreach (var lazyRegion in _regions.Values)
+            {
+                // Only dispose if the file was actually opened
+                if (lazyRegion.IsValueCreated)
+                {
+                    lazyRegion.Value.Dispose(); // This calls RegionFile.Dispose()
+                }
+            }
+
+            _regions.Clear();
+            Debug.Log("[ChunkStorageManager] All regions disposed.");
+        }
+
+        // -------------------------------------------------------------------------
+        // Private helpers
+        // -------------------------------------------------------------------------
+
+        private RegionFile GetRegion(Vector2Int regionCoord)
+        {
+            return _regions.GetOrAdd(regionCoord, coord => new Lazy<RegionFile>(() =>
+            {
+                string path = Path.Combine(_saveFolderPath, $"r.{coord.x}.{coord.y}.bin");
+                return new RegionFile(path);
+            })).Value;
         }
 
         private ChunkData CreateSerializationSnapshot(ChunkData source)
@@ -200,42 +222,6 @@ namespace Serialization
             }
 
             return snapshot;
-        }
-
-        private RegionFile GetRegion(Vector2Int regionCoord)
-        {
-            // Use Lazy to guarantee that the RegionFile constructor (which opens the file) 
-            // runs exactly once per region coordinate, even if called concurrently.
-            return _regions.GetOrAdd(regionCoord, coord => new Lazy<RegionFile>(() =>
-            {
-                string path = Path.Combine(_saveFolderPath, $"r.{coord.x}.{coord.y}.bin");
-                return new RegionFile(path);
-            })).Value;
-        }
-
-        private Vector2Int GetRegionCoord(Vector2Int chunkCoord)
-        {
-            return new Vector2Int(
-                Mathf.FloorToInt(chunkCoord.x / 32f),
-                Mathf.FloorToInt(chunkCoord.y / 32f)
-            );
-        }
-
-        public void Dispose()
-        {
-            Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
-
-            foreach (var lazyRegion in _regions.Values)
-            {
-                // Only dispose if the file was actually opened
-                if (lazyRegion.IsValueCreated)
-                {
-                    lazyRegion.Value.Dispose(); // This calls RegionFile.Dispose()
-                }
-            }
-
-            _regions.Clear();
-            Debug.Log("[ChunkStorageManager] All regions disposed.");
         }
     }
 }
