@@ -72,7 +72,7 @@ public class ChunkPoolManager
         );
 
         // Initialize Border Pool
-        // Note: createFunc returns null because Borders require context (prefab/pos) 
+        // Note: createFunc returns null because Borders require context (prefab/pos)
         // that isn't available here. Creation is handled in GetBorder().
         _borderPool = new DynamicPool<GameObject>(
             createFunc: () => null,
@@ -103,7 +103,7 @@ public class ChunkPoolManager
     public void Update()
     {
         // Calculate Target Pool Size
-        // Area = (Dist * 2 + 1)^2. 
+        // Area = (Dist * 2 + 1)^2.
         // We multiply by Buffer to prevent thrashing (destroying then immediately creating).
         int chunksNeeded = _targetViewDistance * 2 + 1;
         int maxPoolSize = Mathf.CeilToInt(chunksNeeded * POOL_BUFFER_PERCENTAGE);
@@ -114,7 +114,7 @@ public class ChunkPoolManager
         // Data pools can grow larger, maybe 2x chunks for buffer
         _dataPool.UpdatePruning(maxPoolSize * 2);
 
-        // Sections: 8 per chunk (max). 
+        // Sections: 8 per chunk (max).
         _sectionPool.UpdatePruning(maxPoolSize * 8);
 
         // Fully cleanup ChunkBorder pool if disabled to free memory allocation
@@ -132,12 +132,13 @@ public class ChunkPoolManager
     /// Retrieves a chunk from the pool or creates a new one if the pool is empty.
     /// Resets the chunk state for the new coordinate.
     /// </summary>
-    public Chunk Get(ChunkCoord coord)
+    public Chunk Get(ChunkCoord chunkCoord)
     {
-        // The Pool.Get() handles the Stack pop. 
+        // The Pool.Get() handles the Stack pop.
         // We handle the Chunk-specific setup (Reset) here.
         Chunk chunk = _chunkPool.Get();
-        chunk.Reset(coord);
+        chunk.Reset(chunkCoord);
+
         return chunk;
     }
 
@@ -206,8 +207,8 @@ public class ChunkPoolManager
         border.transform.position = position;
 
         // Update name
-        ChunkCoord coord = ChunkCoord.FromWorldPosition(position);
-        border.name = $"Border {coord.X}, {coord.Z}";
+        ChunkCoord chunkCoord = ChunkCoord.FromWorldPosition(position);
+        border.name = $"Border {chunkCoord.X}, {chunkCoord.Z}";
 
         // Set active
         border.SetActive(true);
@@ -224,17 +225,17 @@ public class ChunkPoolManager
 
     #region Visualizer Logic
 
-    public VisualizerChunkData GetVisualizer(ChunkCoord coord, Material material, Transform parent)
+    public VisualizerChunkData GetVisualizer(ChunkCoord chunkCoord, Material material, Transform parent)
     {
         VisualizerChunkData viz = _visualizerPool.Get();
 
         if (viz == null)
         {
-            viz = new VisualizerChunkData(coord, material, parent);
+            viz = new VisualizerChunkData(chunkCoord, material, parent);
         }
         else
         {
-            viz.Reset(coord, material, parent);
+            viz.Reset(chunkCoord, material, parent);
         }
 
         return viz;

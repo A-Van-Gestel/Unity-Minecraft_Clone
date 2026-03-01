@@ -33,9 +33,9 @@ namespace Serialization
         /// <summary>
         /// Adds a set of local column coordinates that need sunlight recalculation to the pending store.
         /// </summary>
-        /// <param name="coord">The chunk coordinate.</param>
+        /// <param name="chunkCoord">The chunk coordinate.</param>
         /// <param name="localColumns">A set of Vector2Ints where x/y are local 0-15 coordinates.</param>
-        public void AddPending(ChunkCoord coord, HashSet<Vector2Int> localColumns)
+        public void AddPending(ChunkCoord chunkCoord, HashSet<Vector2Int> localColumns)
         {
             if (localColumns == null || localColumns.Count == 0) return;
 
@@ -45,14 +45,14 @@ namespace Serialization
                 if (col.x < 0 || col.x >= VoxelData.ChunkWidth ||
                     col.y < 0 || col.y >= VoxelData.ChunkWidth)
                 {
-                    Debug.LogError($"[LightingStateManager] Invalid local column {col} for chunk {coord}. Must be 0-15!");
+                    Debug.LogError($"[LightingStateManager] Invalid local column {col} for chunk {chunkCoord}. Must be 0-15!");
                 }
             }
 
-            if (!_pendingRecalcs.TryGetValue(coord, out HashSet<Vector2Int> existingSet))
+            if (!_pendingRecalcs.TryGetValue(chunkCoord, out HashSet<Vector2Int> existingSet))
             {
                 existingSet = HashSetPool<Vector2Int>.Get(); // POOLING
-                _pendingRecalcs[coord] = existingSet;
+                _pendingRecalcs[chunkCoord] = existingSet;
             }
 
             foreach (var col in localColumns)
@@ -61,9 +61,9 @@ namespace Serialization
             }
         }
 
-        public bool TryGetAndRemove(ChunkCoord coord, out HashSet<Vector2Int> localColumns)
+        public bool TryGetAndRemove(ChunkCoord chunkCoord, out HashSet<Vector2Int> localColumns)
         {
-            if (_pendingRecalcs.Remove(coord, out localColumns))
+            if (_pendingRecalcs.Remove(chunkCoord, out localColumns))
             {
                 return true;
             }
@@ -106,7 +106,7 @@ namespace Serialization
                 {
                     int x = reader.ReadInt32();
                     int z = reader.ReadInt32();
-                    ChunkCoord coord = new ChunkCoord(x, z);
+                    ChunkCoord chunkCoord = new ChunkCoord(x, z);
 
                     int colCount = reader.ReadInt32();
                     HashSet<Vector2Int> cols = HashSetPool<Vector2Int>.Get(); // POOLED
@@ -125,7 +125,7 @@ namespace Serialization
                             // (Note: byte is always >= 0, so only upper bounds are checked)
                             if (lx >= VoxelData.ChunkWidth || lz >= VoxelData.ChunkWidth)
                             {
-                                Debug.LogError($"[LightingStateManager] Invalid local column ({lx}, {lz}) loaded for chunk {coord}. Skipping.");
+                                Debug.LogError($"[LightingStateManager] Invalid local column ({lx}, {lz}) loaded for chunk {chunkCoord}. Skipping.");
                                 continue;
                             }
 
@@ -136,21 +136,21 @@ namespace Serialization
                         if (cols.Count > 0)
                         {
                             // Prevent orphaned HashSets if a corrupted file contains duplicate chunk coordinates.
-                            if (_pendingRecalcs.TryGetValue(coord, out HashSet<Vector2Int> existing))
+                            if (_pendingRecalcs.TryGetValue(chunkCoord, out HashSet<Vector2Int> existing))
                             {
                                 existing.UnionWith(cols);
                                 // We leave ownershipTransferred as false so `cols` gets released in the finally block.
                             }
                             else
                             {
-                                _pendingRecalcs[coord] = cols; // Transfer ownership to the dictionary
+                                _pendingRecalcs[chunkCoord] = cols; // Transfer ownership to the dictionary
                                 ownershipTransferred = true;
                             }
                         }
                     }
                     finally
                     {
-                        // EXCEPTION SAFETY: If the read fails mid-loop, or if the set was empty/merged, 
+                        // EXCEPTION SAFETY: If the read fails mid-loop, or if the set was empty/merged,
                         // ownership was never transferred. Return the temporary set safely to the pool.
                         if (!ownershipTransferred)
                         {

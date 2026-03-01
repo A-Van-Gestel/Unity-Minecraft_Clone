@@ -310,7 +310,7 @@ public class World : MonoBehaviour
         // Initialize Pool Settings
         ChunkPool.SetTargetViewDistance(settings.viewDistance);
 
-        // Initialize World 
+        // Initialize World
         StartCoroutine(StartWorld());
     }
 
@@ -444,24 +444,24 @@ public class World : MonoBehaviour
 
         // We only wait for the completion of the requested radius, not the buffer ring.
         List<ChunkCoord> chunksToWaitFor = new List<ChunkCoord>();
-        foreach (ChunkCoord c in allChunksToGenerate)
+        foreach (ChunkCoord chunkCoord in allChunksToGenerate)
         {
-            if (Mathf.Max(Mathf.Abs(c.X - PlayerChunkCoord.X), Mathf.Abs(c.Z - PlayerChunkCoord.Z)) <=
+            if (Mathf.Max(Mathf.Abs(chunkCoord.X - PlayerChunkCoord.X), Mathf.Abs(chunkCoord.Z - PlayerChunkCoord.Z)) <=
                 initialLoadRadius)
             {
-                chunksToWaitFor.Add(c);
+                chunksToWaitFor.Add(chunkCoord);
             }
         }
 
         // Trigger loading for all chunks (including buffer)
         List<Awaitable> loadTasks = new List<Awaitable>();
-        foreach (ChunkCoord coord in allChunksToGenerate)
+        foreach (ChunkCoord chunkCoord in allChunksToGenerate)
         {
             // Create placeholder if missing
-            worldData.EnsureChunkExists(coord.ToWorldPosition());
+            worldData.EnsureChunkExists(chunkCoord.ToWorldPosition());
 
             // Start the Load/Gen process
-            loadTasks.Add(LoadOrGenerateChunk(coord));
+            loadTasks.Add(LoadOrGenerateChunk(chunkCoord));
         }
 
         // Wait for all to finish (Data Ready)
@@ -475,8 +475,7 @@ public class World : MonoBehaviour
         stopwatch.Stop();
         long totalMilliseconds = stopwatch.ElapsedMilliseconds;
         float avgTime = (float)totalMilliseconds / Mathf.Max(1, loadedChunks);
-        Debug.Log(
-            $"Initial data load / generation took {totalMilliseconds} ms for {loadedChunks} chunks (Initial Load Radius: {initialLoadRadius})");
+        Debug.Log($"Initial data load / generation took {totalMilliseconds} ms for {loadedChunks} chunks (Initial Load Radius: {initialLoadRadius})");
         Debug.Log($"Average time per chunk {avgTime} ms");
 
         stopwatch.Reset();
@@ -530,7 +529,7 @@ public class World : MonoBehaviour
             for (int z = -loadRadius; z <= loadRadius; z++)
             {
                 ChunkCoord coord = new ChunkCoord(PlayerChunkCoord.X + x, PlayerChunkCoord.Z + z);
-                // NOTE: We do NOT schedule generation here. 
+                // NOTE: We do NOT schedule generation here.
                 // We just collect the list. LoadOrGenerateChunk (called later) decides whether to Load or Schedule.
                 if (IsChunkInWorld(coord))
                 {
@@ -548,22 +547,22 @@ public class World : MonoBehaviour
     /// 2. Check Disk (Async)
     /// 3. If missing, Schedule Gen (Job)
     /// </summary>
-    private async Awaitable LoadOrGenerateChunk(ChunkCoord coord)
+    private async Awaitable LoadOrGenerateChunk(ChunkCoord chunkCoord)
     {
-        Vector2Int pos = coord.ToVoxelOrigin();
+        Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
-        // We assume placeholder exists in worldData.Chunks[pos]
-        ChunkData data = worldData.Chunks[pos];
+        // We assume placeholder exists in worldData.Chunks[chunkVoxelPos]
+        ChunkData data = worldData.Chunks[chunkVoxelPos];
 
         if (data.IsPopulated) return; // Already done
 
         // 1. Try Load from Disk if allowed
         if (settings.EnablePersistence)
         {
-            ChunkData loaded = await StorageManager.LoadChunkAsync(pos);
+            ChunkData loaded = await StorageManager.LoadChunkAsync(chunkVoxelPos);
 
             // Ensure the chunk wasn't unloaded or recycled during the "await" above.
-            if (!worldData.Chunks.TryGetValue(pos, out ChunkData currentData) || currentData != data)
+            if (!worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData currentData) || currentData != data)
             {
                 // The chunk was unloaded. Recycle the loaded data to prevent a memory leak.
                 if (loaded != null)
@@ -577,7 +576,7 @@ public class World : MonoBehaviour
 
             if (loaded != null)
             {
-                Debug.Log($"[LoadOrGenerateChunk] Chunk {coord} loaded successfully, calling PopulateFromSave");
+                Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} loaded successfully, calling PopulateFromSave");
 
                 // Hydrate the placeholder
                 data.PopulateFromSave(loaded);
@@ -586,34 +585,34 @@ public class World : MonoBehaviour
                 data.Chunk?.OnDataPopulated();
 
                 // Apply Pending Mods (Trees, etc that spilled over)
-                if (ModManager.TryGetModsForChunk(coord, out List<VoxelMod> pendingMods))
+                if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
                 {
-                    Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {coord}");
+                    Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {chunkCoord}");
                     foreach (var mod in pendingMods)
                     {
                         // Apply directly to data (fast)
-                        Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
+                        Vector3Int localVoxelPos = worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
                         // We use a simplified set here or the standard ModifyVoxel
                         // ModifyVoxel handles lighting queues automatically
-                        data.ModifyVoxel(localPos, mod);
+                        data.ModifyVoxel(localVoxelPos, mod);
                     }
                 }
 
                 // Restore lighting queues
-                if (LightingStateManager.TryGetAndRemove(coord, out HashSet<Vector2Int> localCols))
+                if (LightingStateManager.TryGetAndRemove(chunkCoord, out HashSet<Vector2Int> localCols))
                 {
-                    Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {coord}");
+                    Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {chunkCoord}");
 
                     HashSet<Vector2Int> globalCols = new HashSet<Vector2Int>();
                     foreach (var lCol in localCols)
                     {
-                        globalCols.Add(new Vector2Int(lCol.x + pos.x, lCol.y + pos.y));
+                        globalCols.Add(new Vector2Int(lCol.x + chunkVoxelPos.x, lCol.y + chunkVoxelPos.y));
                     }
 
-                    if (worldData.SunlightRecalculationQueue.ContainsKey(pos))
-                        worldData.SunlightRecalculationQueue[pos].UnionWith(globalCols);
+                    if (worldData.SunlightRecalculationQueue.ContainsKey(chunkVoxelPos))
+                        worldData.SunlightRecalculationQueue[chunkVoxelPos].UnionWith(globalCols);
                     else
-                        worldData.SunlightRecalculationQueue[pos] = globalCols;
+                        worldData.SunlightRecalculationQueue[chunkVoxelPos] = globalCols;
 
                     data.HasLightChangesToProcess = true;
                 }
@@ -621,11 +620,11 @@ public class World : MonoBehaviour
                 // Check for initial lighting needs
                 if (data.NeedsInitialLighting)
                 {
-                    Debug.Log($"[LoadOrGenerateChunk] Chunk {coord} needs initial lighting. Checking neighbors...");
+                    Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} needs initial lighting. Checking neighbors...");
 
-                    if (AreNeighborsDataReady(coord))
+                    if (AreNeighborsDataReady(chunkCoord))
                     {
-                        Debug.Log($"[LoadOrGenerateChunk] Neighbors ready - triggering lighting for {coord}");
+                        Debug.Log($"[LoadOrGenerateChunk] Neighbors ready - triggering lighting for {chunkCoord}");
 
                         // 1. Fill the queue (RecalculateSunLightLight populates the queues in data)
                         data.RecalculateSunLightLight();
@@ -638,13 +637,13 @@ public class World : MonoBehaviour
                     }
                     else
                     {
-                        Debug.Log($"[LoadOrGenerateChunk] Neighbors not ready - deferring lighting for {coord}");
+                        Debug.Log($"[LoadOrGenerateChunk] Neighbors not ready - deferring lighting for {chunkCoord}");
                     }
                 }
                 else
                 {
                     // If the chunk is loaded and doesn't need lighting updates (it's stable),
-                    // we must explicitly request the mesh rebuild here. 
+                    // we must explicitly request the mesh rebuild here.
                     // CheckViewDistance skipped it because IsPopulated was false at that time.
                     if (data.Chunk != null && data.Chunk.isActive)
                     {
@@ -655,11 +654,11 @@ public class World : MonoBehaviour
                 return;
             }
 
-            Debug.Log($"[LoadOrGenerateChunk] Chunk {coord} not on disk, scheduling generation");
+            Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} not on disk, scheduling generation");
         }
 
         // 2. Not on disk (or Persistence disabled) -> Generate
-        JobManager.ScheduleGeneration(coord);
+        JobManager.ScheduleGeneration(chunkCoord);
     }
 
     /// <summary>
@@ -715,11 +714,11 @@ public class World : MonoBehaviour
         // --- PHASE 2: Complete all lighting calculations ---
         // Optimization: Convert Coord list to Data list once
         List<ChunkData> chunksInLoadArea = new List<ChunkData>();
-        foreach (var coord in initialChunks)
+        foreach (var chunkCoord in initialChunks)
         {
             // We can use the dictionary directly as we know they were requested
-            Vector2Int pos = coord.ToVoxelOrigin();
-            if (worldData.Chunks.TryGetValue(pos, out ChunkData cd)) chunksInLoadArea.Add(cd);
+            Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
+            if (worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData cd)) chunksInLoadArea.Add(cd);
         }
 
         int lightingLoopIterations = 0;
@@ -755,8 +754,8 @@ public class World : MonoBehaviour
             {
                 if (chunkData.IsPopulated && chunkData.HasLightChangesToProcess)
                 {
-                    ChunkCoord coord = ChunkCoord.FromVoxelOrigin(chunkData.position);
-                    if (!JobManager.lightingJobs.ContainsKey(coord) && AreNeighborsDataReady(coord))
+                    ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.position);
+                    if (!JobManager.lightingJobs.ContainsKey(chunkCoord) && AreNeighborsDataReady(chunkCoord))
                     {
                         // OPTIMIZATION: Use TempJob allocator.
                         // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
@@ -776,10 +775,8 @@ public class World : MonoBehaviour
             safetyBreak++;
             if (safetyBreak > maxIterations)
             {
-                Debug.LogError(
-                    $"ForceCompleteDataJobsCoroutine exceeded max iterations ({maxIterations}) during Lighting Phase. Forcing exit.");
-                Debug.LogError(
-                    $"Remaining jobs: Lighting({JobManager.lightingJobs.Count}). Pending chunks: InitialLight({chunksInLoadArea.Count(c => c.NeedsInitialLighting)}), LightChanges({chunksInLoadArea.Count(c => c.HasLightChangesToProcess)})");
+                Debug.LogError($"ForceCompleteDataJobsCoroutine exceeded max iterations ({maxIterations}) during Lighting Phase. Forcing exit.");
+                Debug.LogError($"Remaining jobs: Lighting({JobManager.lightingJobs.Count}). Pending chunks: InitialLight({chunksInLoadArea.Count(c => c.NeedsInitialLighting)}), LightChanges({chunksInLoadArea.Count(c => c.HasLightChangesToProcess)})");
                 yield break; // Exit the coroutine
             }
 
@@ -876,9 +873,9 @@ public class World : MonoBehaviour
     {
         while (true)
         {
-            foreach (ChunkCoord coord in _activeChunks)
+            foreach (ChunkCoord chunkCoord in _activeChunks)
             {
-                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
                 {
                     chunk.TickUpdate();
                 }
@@ -947,16 +944,16 @@ public class World : MonoBehaviour
                 if (!chunkData.IsPopulated) continue;
 
                 // Create coord from position
-                ChunkCoord coord = ChunkCoord.FromVoxelOrigin(chunkData.position);
+                ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.position);
 
                 // If no job is currently running...
-                if (!JobManager.lightingJobs.ContainsKey(coord))
+                if (!JobManager.lightingJobs.ContainsKey(chunkCoord))
                 {
                     // --- Prioritize initial lighting ---
                     if (chunkData.NeedsInitialLighting)
                     {
                         // Before scheduling, we must still ensure neighbors have their data ready.
-                        if (AreNeighborsDataReady(coord))
+                        if (AreNeighborsDataReady(chunkCoord))
                         {
                             // This is the first lighting pass, so we trigger the full recalculation.
                             chunkData.RecalculateSunLightLight();
@@ -983,7 +980,7 @@ public class World : MonoBehaviour
 
         // 6. Schedule NEW mesh jobs for chunks that now need them.
         //    NOTE: If we have too many jobs already running (e.g. > 20),
-        //          pause scheduling new ones to let the Job System catch up. 
+        //          pause scheduling new ones to let the Job System catch up.
         if (_chunksToBuildMesh.Count > 0 && JobManager.meshJobs.Count < 20)
         {
             int meshJobsScheduled = 0;
@@ -1095,8 +1092,7 @@ public class World : MonoBehaviour
             });
 
             if (meshAsset.faces.Length > 6)
-                Debug.LogWarning(
-                    $"VoxelMeshData asset '{meshAsset.name}' has more than 6 faces. Only the first 6 will be used.");
+                Debug.LogWarning($"VoxelMeshData asset '{meshAsset.name}' has more than 6 faces. Only the first 6 will be used.");
 
             foreach (FaceMeshData faceAsset in meshAsset.faces)
             {
@@ -1166,15 +1162,15 @@ public class World : MonoBehaviour
     /// The central handler for voxel modifications. This method queues mesh rebuilds and debug visualization updates
     /// for the source chunk and all affected cardinal and diagonal neighbors.
     /// </summary>
-    /// <param name="chunkPos">The world-space coordinate of the chunk where the modification occurred.</param>
+    /// <param name="chunkVoxelPos">The world-space coordinate of the chunk where the modification occurred.</param>
     /// <param name="localVoxelPos">The position of the modified voxel within its own chunk, used for border detection.</param>
     /// <param name="immediate">If true, the mesh rebuild requests are prioritized to be processed as soon as possible.</param>
-    public void NotifyChunkModified(Vector2Int chunkPos, Vector3Int localVoxelPos, bool immediate)
+    public void NotifyChunkModified(Vector2Int chunkVoxelPos, Vector3Int localVoxelPos, bool immediate)
     {
         // --- 1. Queue Mesh Rebuilds ---
 
         // The chunk that was directly modified always needs a rebuild.
-        ChunkCoord coord = ChunkCoord.FromVoxelOrigin(chunkPos);
+        ChunkCoord coord = ChunkCoord.FromVoxelOrigin(chunkVoxelPos);
         Chunk chunk = _chunkMap.GetValueOrDefault(coord);
         if (chunk != null)
         {
@@ -1221,22 +1217,22 @@ public class World : MonoBehaviour
         }
     }
 
-    public void RequestNeighborMeshRebuilds(ChunkCoord coord)
+    public void RequestNeighborMeshRebuilds(ChunkCoord chunkCoord)
     {
         // Queue rebuilds for all 4 direct neighbors
-        QueueNeighborRebuild(coord.Neighbor(0, 1)); // North
-        QueueNeighborRebuild(coord.Neighbor(0, -1)); // South
-        QueueNeighborRebuild(coord.Neighbor(1, 0)); // East
-        QueueNeighborRebuild(coord.Neighbor(-1, 0)); // West
+        QueueNeighborRebuild(chunkCoord.Neighbor(0, 1)); // North
+        QueueNeighborRebuild(chunkCoord.Neighbor(0, -1)); // South
+        QueueNeighborRebuild(chunkCoord.Neighbor(1, 0)); // East
+        QueueNeighborRebuild(chunkCoord.Neighbor(-1, 0)); // West
     }
 
-    private bool AreNeighborsReady(ChunkCoord coord)
+    private bool AreNeighborsReady(ChunkCoord chunkCoord)
     {
         // Check all 4 horizontal neighbors
         foreach (int faceIndex in VoxelData.HorizontalFaceChecksIndices)
         {
             Vector3Int offset = VoxelData.FaceChecks[faceIndex];
-            ChunkCoord neighborCoord = coord.Neighbor(offset.x, offset.z);
+            ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
 
             if (IsChunkInWorld(neighborCoord))
             {
@@ -1247,8 +1243,8 @@ public class World : MonoBehaviour
                 }
 
                 // Does the placeholder ChunkData exist in the world dictionary?
-                Vector2Int chunkPos = neighborCoord.ToVoxelOrigin();
-                if (!worldData.Chunks.ContainsKey(chunkPos))
+                Vector2Int chunkVoxelPos = neighborCoord.ToVoxelOrigin();
+                if (!worldData.Chunks.ContainsKey(chunkVoxelPos))
                 {
                     // This case is unlikely with the new CheckViewDistance, but is a good safeguard.
                     return false;
@@ -1402,13 +1398,13 @@ public class World : MonoBehaviour
             VoxelMod v = _modifications.Dequeue();
 
             // Calculate which chunk this mod belongs to
-            ChunkCoord targetCoord = GetChunkCoordFromVector3(v.GlobalPosition);
-            Vector2Int targetPos = targetCoord.ToVoxelOrigin();
+            ChunkCoord chunkCoord = GetChunkCoordFromVector3(v.GlobalPosition);
+            Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
             // --- 1. Get Chunk Data ---
             // We check worldData directly to see if it is loaded/generating
             bool chunkIsReady = false;
-            if (worldData.Chunks.TryGetValue(targetPos, out ChunkData chunkData))
+            if (worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
             {
                 chunkIsReady = chunkData.IsPopulated;
             }
@@ -1417,7 +1413,7 @@ public class World : MonoBehaviour
             if (!chunkIsReady)
             {
                 // Send to Persistent Manager
-                ModManager.AddPendingMod(targetCoord, v);
+                ModManager.AddPendingMod(chunkCoord, v);
                 continue;
             }
 
@@ -1604,28 +1600,28 @@ public class World : MonoBehaviour
         // Step A: Identify candidates
         foreach (var kvp in worldData.Chunks)
         {
-            ChunkCoord coord = ChunkCoord.FromVoxelOrigin(kvp.Key);
+            ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(kvp.Key);
 
             // Calculate distance check
-            if (Mathf.Abs(coord.X - PlayerChunkCoord.X) > unloadDistance ||
-                Mathf.Abs(coord.Z - PlayerChunkCoord.Z) > unloadDistance)
+            if (Mathf.Abs(chunkCoord.X - PlayerChunkCoord.X) > unloadDistance ||
+                Mathf.Abs(chunkCoord.Z - PlayerChunkCoord.Z) > unloadDistance)
             {
-                chunksToRemove.Add(coord);
+                chunksToRemove.Add(chunkCoord);
             }
         }
 
         // Step B: Unload
-        foreach (var coord in chunksToRemove)
+        foreach (var chunkCoord in chunksToRemove)
         {
-            Vector2Int pos = coord.ToVoxelOrigin();
+            Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
-            if (!worldData.Chunks.TryGetValue(pos, out ChunkData data))
+            if (!worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data))
                 continue;
 
             // Safety: Don't unload if a job is currently touching it
-            bool isJobRunning = JobManager.generationJobs.ContainsKey(coord)
-                                || JobManager.meshJobs.ContainsKey(coord)
-                                || JobManager.lightingJobs.ContainsKey(coord);
+            bool isJobRunning = JobManager.generationJobs.ContainsKey(chunkCoord)
+                                || JobManager.meshJobs.ContainsKey(chunkCoord)
+                                || JobManager.lightingJobs.ContainsKey(chunkCoord);
 
             // Check data state logic to prevent unloading chunks that have lighting work in the pipeline but no active job.
             bool isProcessingLight = data.IsAwaitingMainThreadProcess ||
@@ -1641,12 +1637,11 @@ public class World : MonoBehaviour
             // If pending process flag is true, we are about to save incomplete data.
             if (data.IsAwaitingMainThreadProcess)
             {
-                Debug.LogError(
-                    $"[LIGHTING CRITICAL] Unloading Chunk {coord} while IsAwaitingMainThreadProcess is TRUE! Lighting data will be lost.");
+                Debug.LogError($"[LIGHTING CRITICAL] Unloading Chunk {chunkCoord} while IsAwaitingMainThreadProcess is TRUE! Lighting data will be lost.");
             }
 
             // 1. Persist Orphaned Lighting Queue
-            if (worldData.SunlightRecalculationQueue.TryGetValue(pos, out HashSet<Vector2Int> globalCols))
+            if (worldData.SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> globalCols))
             {
                 if (globalCols != null && globalCols.Count > 0)
                 {
@@ -1654,19 +1649,19 @@ public class World : MonoBehaviour
                     HashSet<Vector2Int> localCols = HashSetPool<Vector2Int>.Get(); // POOLING
                     foreach (var gCol in globalCols)
                     {
-                        localCols.Add(new Vector2Int(gCol.x - pos.x, gCol.y - pos.y));
+                        localCols.Add(new Vector2Int(gCol.x - chunkVoxelPos.x, gCol.y - chunkVoxelPos.y));
                     }
 
                     // Save to Persistence
-                    LightingStateManager.AddPending(coord, localCols);
+                    LightingStateManager.AddPending(chunkCoord, localCols);
 
-                    Debug.Log($"[LIGHTING RESCUE] Saved {localCols.Count} orphaned sunlight columns for chunk {coord}");
+                    Debug.Log($"[LIGHTING RESCUE] Saved {localCols.Count} orphaned sunlight columns for chunk {chunkCoord}");
 
                     // Release temp set (AddPending makes its own copy)
                     HashSetPool<Vector2Int>.Release(localCols);
                 }
 
-                worldData.SunlightRecalculationQueue.Remove(pos);
+                worldData.SunlightRecalculationQueue.Remove(chunkVoxelPos);
 
                 // CRITICAL: We are removing this set from the active world entirely, so it must be returned to the pool!
                 if (globalCols != null) HashSetPool<Vector2Int>.Release(globalCols);
@@ -1680,38 +1675,38 @@ public class World : MonoBehaviour
 
                 saveTask.ContinueWith(t =>
                 {
-                    if (t.IsFaulted) Debug.LogError($"[UnloadChunks] Save failed for {coord}: {t.Exception}");
+                    if (t.IsFaulted) Debug.LogError($"[UnloadChunks] Save failed for {chunkCoord}: {t.Exception}");
                 });
 
                 worldData.ModifiedChunks.Remove(data);
             }
 
             // POOLING: Recycle Visuals
-            if (_chunkMap.TryGetValue(coord, out Chunk chunkObj))
+            if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunkObj))
             {
                 // Cleanup visualizers
-                if (voxelVisualizer != null) voxelVisualizer.ClearChunkVisualization(coord);
-                if (_chunkBorders.TryGetValue(coord, out GameObject b))
+                if (voxelVisualizer != null) voxelVisualizer.ClearChunkVisualization(chunkCoord);
+                if (_chunkBorders.TryGetValue(chunkCoord, out GameObject b))
                 {
                     // POOLING: Return to pool
                     ChunkPool.ReturnBorder(b);
-                    _chunkBorders.Remove(coord);
+                    _chunkBorders.Remove(chunkCoord);
                 }
 
                 // Remove from mesh queue before returning to pool.
                 // This prevents dead chunk references from lingering in the list (Memory Leak / Logic Error).
-                if (_chunksToBuildMeshSet.Remove(coord))
+                if (_chunksToBuildMeshSet.Remove(chunkCoord))
                 {
                     _chunksToBuildMesh.Remove(chunkObj);
                 }
 
                 // Return to pool
                 ChunkPool.Return(chunkObj);
-                _chunkMap.Remove(coord);
+                _chunkMap.Remove(chunkCoord);
             }
 
             // 3. Remove Data Reference from World
-            worldData.Chunks.Remove(pos);
+            worldData.Chunks.Remove(chunkVoxelPos);
 
             // 4. Recycle Data
             // POOLING: Return data to pool
@@ -1754,14 +1749,14 @@ public class World : MonoBehaviour
 
             if (IsChunkInWorld(chunkCoord))
             {
-                Vector2Int pos = chunkCoord.ToVoxelOrigin();
+                Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
                 // If chunk not in memory at all
-                if (!worldData.Chunks.TryGetValue(pos, out ChunkData data))
+                if (!worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data))
                 {
                     // Create placeholder
-                    data = Instance.ChunkPool.GetChunkData(pos);
-                    worldData.Chunks.Add(pos, data);
+                    data = Instance.ChunkPool.GetChunkData(chunkVoxelPos);
+                    worldData.Chunks.Add(chunkVoxelPos, data);
                 }
 
                 // If it's empty, and not currently fetching from disk, and not currently generating... start the pipeline!
@@ -1786,52 +1781,52 @@ public class World : MonoBehaviour
 
         // Deactivate chunks that are no longer in view.
         _chunksToRemove.Clear();
-        foreach (ChunkCoord c in _activeChunks)
+        foreach (ChunkCoord chunkCoord in _activeChunks)
         {
-            if (!_currentViewChunks.Contains(c))
+            if (!_currentViewChunks.Contains(chunkCoord))
             {
-                _chunksToRemove.Add(c);
+                _chunksToRemove.Add(chunkCoord);
             }
         }
 
-        foreach (ChunkCoord c in _chunksToRemove)
+        foreach (ChunkCoord chunkCoord in _chunksToRemove)
         {
             // Deactivate chunk border visualization
-            if (_chunkBorders.TryGetValue(c, out GameObject borderObject))
+            if (_chunkBorders.TryGetValue(chunkCoord, out GameObject borderObject))
             {
                 // POOLING: Return to pool
                 ChunkPool.ReturnBorder(borderObject);
-                _chunkBorders.Remove(c);
+                _chunkBorders.Remove(chunkCoord);
             }
 
             // Deactivate chunk itself
-            if (_chunkMap.TryGetValue(c, out Chunk chunk))
+            if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
             {
                 // Remove from mesh queue to prevent processing deactivated chunks
-                if (_chunksToBuildMeshSet.Remove(c))
+                if (_chunksToBuildMeshSet.Remove(chunkCoord))
                 {
                     _chunksToBuildMesh.Remove(chunk);
                 }
 
                 // POOLING: Return chunk to pool instead of just deactivating
                 ChunkPool.Return(chunk);
-                _chunkMap.Remove(c);
+                _chunkMap.Remove(chunkCoord);
             }
 
             // Debug: Clear visualization.
             if (voxelVisualizer != null)
-                voxelVisualizer.ClearChunkVisualization(c);
+                voxelVisualizer.ClearChunkVisualization(chunkCoord);
         }
 
         // Activate chunks that have entered view.
-        foreach (ChunkCoord c in _currentViewChunks)
+        foreach (ChunkCoord chunkCoord in _currentViewChunks)
         {
-            if (!_chunkMap.ContainsKey(c))
+            if (!_chunkMap.ContainsKey(chunkCoord))
             {
                 // POOLING: Get from pool
-                Chunk newChunk = ChunkPool.Get(c);
-                _chunkMap.Add(c, newChunk);
-                CreateChunkBorder(c);
+                Chunk newChunk = ChunkPool.Get(chunkCoord);
+                _chunkMap.Add(chunkCoord, newChunk);
+                CreateChunkBorder(chunkCoord);
 
                 // Only request a mesh if the data is actually ready.
                 // If IsPopulated is false, the Load/Gen pipeline will trigger the mesh build later.
@@ -1842,15 +1837,15 @@ public class World : MonoBehaviour
             }
             else
             {
-                Chunk chunk = _chunkMap[c];
-                // NOTE: Should technically rarely happen if we remove from map on deactivate, 
+                Chunk chunk = _chunkMap[chunkCoord];
+                // NOTE: Should technically rarely happen if we remove from map on deactivate,
                 //       but good for safety if logic drifts.
                 if (!chunk.isActive)
                 {
                     chunk.isActive = true;
-                    if (!_chunkBorders.ContainsKey(c))
+                    if (!_chunkBorders.ContainsKey(chunkCoord))
                     {
-                        CreateChunkBorder(c);
+                        CreateChunkBorder(chunkCoord);
                     }
 
                     // If we reactivate a chunk that lost its data (rare/impossible?), don't mesh.
@@ -1861,7 +1856,7 @@ public class World : MonoBehaviour
                 }
             }
 
-            AddChunksToUpdateVisualization(c);
+            AddChunksToUpdateVisualization(chunkCoord);
         }
 
         // Update the master activeChunks set.
@@ -1978,10 +1973,10 @@ public class World : MonoBehaviour
                     ChunkCoord coord = cachedChunk.Key;
 
                     // Get neighbor data from the cache, or null if not available.
-                    chunkDataCache.TryGetValue(new ChunkCoord(coord.X, coord.Z + 1), out var northData);
-                    chunkDataCache.TryGetValue(new ChunkCoord(coord.X, coord.Z - 1), out var southData);
-                    chunkDataCache.TryGetValue(new ChunkCoord(coord.X + 1, coord.Z), out var eastData);
-                    chunkDataCache.TryGetValue(new ChunkCoord(coord.X - 1, coord.Z), out var westData);
+                    chunkDataCache.TryGetValue(coord.Neighbor(0, 1), out var northData);
+                    chunkDataCache.TryGetValue(coord.Neighbor(0, -1), out var southData);
+                    chunkDataCache.TryGetValue(coord.Neighbor(1, 0), out var eastData);
+                    chunkDataCache.TryGetValue(coord.Neighbor(-1, 0), out var westData);
 
                     // Call the visualizer method with all neighbor data.
                     voxelVisualizer.UpdateChunkVisualization(coord, cachedChunk.Value, northData, southData, eastData,
@@ -2112,7 +2107,7 @@ public class World : MonoBehaviour
 
 
         Vector3Int worldHeight = new Vector3Int(x, yMax, z);
-        ChunkCoord thisChunk = ChunkCoord.FromWorldPosition(worldPos);
+        ChunkCoord chunkCoord = ChunkCoord.FromWorldPosition(worldPos);
 
         // Voxel outside the world, highest voxel is world height.
         if (!worldData.IsVoxelInWorld(worldPos))
@@ -2124,14 +2119,13 @@ public class World : MonoBehaviour
         // Find the chunk data for this position.
         // Requesting the chunk ensures that the data is loaded from disk or generated if it doesn't exist.
         // This is the only reliable way to get voxel data that includes modifications (like trees).
-        Vector2Int chunkCoord = worldData.GetChunkCoordFor(worldPos);
-        ChunkData chunkData = worldData.RequestChunk(chunkCoord, true);
+        Vector2Int chunkVoxelPos = worldData.GetChunkCoordFor(worldPos);
+        ChunkData chunkData = worldData.RequestChunk(chunkVoxelPos, true);
 
         // Chunk is created and editable, calculate the highest voxel using chunkData function.
         if (chunkData != null)
         {
-            Debug.Log(
-                $"Finding highest voxel for chunk {thisChunk.X} / {thisChunk.Z} in wold for X / Z = {x} / {z} using chunk function.");
+            Debug.Log($"Finding highest voxel for chunk {chunkCoord.X} / {chunkCoord.Z} in wold for X / Z = {x} / {z} using chunk function.");
 
             // Get the (highest) local voxel position within the chunk.
             Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(worldPos);
@@ -2139,23 +2133,22 @@ public class World : MonoBehaviour
 
             // Get the world position of the highest voxel.
             Vector3Int highestVoxel = new Vector3Int(x, highestVoxelLocal.y, z);
-            Debug.Log($"Highest voxel in chunk {thisChunk.X} / {thisChunk.Z} is {highestVoxel}.");
+            Debug.Log($"Highest voxel in chunk {chunkCoord.X} / {chunkCoord.Z} is {highestVoxel}.");
             return highestVoxel;
         }
 
-        Debug.Log($"Chunk {thisChunk.X} / {thisChunk.Z} is not created, accurate result is not possible.");
+        Debug.Log($"Chunk {chunkCoord.X} / {chunkCoord.Z} is not created, accurate result is not possible.");
 
         // Chunk is not created, calculate the highest voxel using expensive world generation code.
         // NOTE: This will not include voxel modifications (like trees).
-        Debug.Log(
-            $"Finding highest voxel in wold for X / Z = {x} / {z} using expensive world generation code. This will not include voxel modifications (eg: trees)");
+        Debug.Log($"Finding highest voxel in wold for X / Z = {x} / {z} using expensive world generation code. This will not include voxel modifications (eg: trees)");
         for (int i = yMax; i > 0; i--)
         {
             Vector3Int currentVoxel = new Vector3Int(x, i, z);
             byte voxelBlockId = WorldGen.GetVoxel(currentVoxel, VoxelData.Seed, JobDataManager.BiomesJobData,
                 JobDataManager.AllLodesJobData);
             if (!blockDatabase.blockTypes[voxelBlockId].isSolid) continue;
-            Debug.Log($"Highest voxel in chunk {thisChunk.X} / {thisChunk.Z} is {currentVoxel}.");
+            Debug.Log($"Highest voxel in chunk {chunkCoord.X} / {chunkCoord.Z} is {currentVoxel}.");
             return currentVoxel;
         }
 

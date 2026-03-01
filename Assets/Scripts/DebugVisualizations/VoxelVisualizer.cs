@@ -62,14 +62,14 @@ namespace DebugVisualizations
         /// <summary>
         /// Prepares and schedules a Burst job to generate the visualization mesh.
         /// </summary>
-        /// <param name="coord">The coordinate of the chunk to update.</param>
+        /// <param name="chunkCoord">The coordinate of the chunk to update.</param>
         /// <param name="voxelsToDraw">A dictionary mapping local voxel positions to their desired color.</param>
         /// <param name="northVoxels"></param>
         /// <param name="southVoxels"></param>
         /// <param name="eastVoxels"></param>
         /// <param name="westVoxels"></param>
         public void UpdateChunkVisualization(
-            ChunkCoord coord,
+            ChunkCoord chunkCoord,
             Dictionary<Vector3Int, Color> voxelsToDraw,
             Dictionary<Vector3Int, Color> northVoxels,
             Dictionary<Vector3Int, Color> southVoxels,
@@ -77,11 +77,11 @@ namespace DebugVisualizations
             Dictionary<Vector3Int, Color> westVoxels)
         {
             // Get or create the GameObject for this chunk's visualization.
-            if (!_visualizerChunks.TryGetValue(coord, out var chunkData))
+            if (!_visualizerChunks.TryGetValue(chunkCoord, out var chunkData))
             {
                 // POOLING: Get from World.Instance.ChunkPool
-                chunkData = World.Instance.ChunkPool.GetVisualizer(coord, visualizerMaterial, _visualizerParent);
-                _visualizerChunks[coord] = chunkData;
+                chunkData = World.Instance.ChunkPool.GetVisualizer(chunkCoord, visualizerMaterial, _visualizerParent);
+                _visualizerChunks[chunkCoord] = chunkData;
             }
 
             // If a job for this chunk is already running, complete it before starting a new one.
@@ -122,13 +122,13 @@ namespace DebugVisualizations
         /// <summary>
         /// Clears a specific chunk's visualization mesh.
         /// </summary>
-        public void ClearChunkVisualization(ChunkCoord coord)
+        public void ClearChunkVisualization(ChunkCoord chunkCoord)
         {
-            if (_visualizerChunks.TryGetValue(coord, out var chunkData))
+            if (_visualizerChunks.TryGetValue(chunkCoord, out var chunkData))
             {
                 // POOLING: Return to World.Instance.ChunkPool
                 World.Instance.ChunkPool.ReturnVisualizer(chunkData);
-                _visualizerChunks.Remove(coord);
+                _visualizerChunks.Remove(chunkCoord);
             }
         }
 

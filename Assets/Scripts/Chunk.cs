@@ -28,9 +28,9 @@ public class Chunk
     /// Creates a new Chunk Visual. 
     /// NOTE: Should only be called by the ChunkPool. Use World.GetChunkFromPool() instead.
     /// </summary>
-    public Chunk(ChunkCoord coord)
+    public Chunk(ChunkCoord chunkCoord)
     {
-        Coord = coord;
+        Coord = chunkCoord;
 
         // Create GameObject hierarchy
         ChunkGameObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
@@ -56,9 +56,9 @@ public class Chunk
     /// Resets the Chunk instance for use at a new coordinate.
     /// Used by the ChunkPool.
     /// </summary>
-    public void Reset(ChunkCoord coord)
+    public void Reset(ChunkCoord chunkCoord)
     {
-        Coord = coord;
+        Coord = chunkCoord;
         ChunkPosition = Coord.ToWorldPosition();
 
         // Update GameObject identity
@@ -396,14 +396,14 @@ public class Chunk
     /// <summary>
     /// Checks if a voxel is active in this chunk.
     /// </summary>
-    /// <param name="localPos">The local position of the voxel in the given chunk.</param>
+    /// <param name="localVoxelPos">The local position of the voxel in the given chunk.</param>
     /// <returns>True if the voxel is active, false otherwise.</returns>
-    public bool IsVoxelActive(Vector3Int localPos)
+    public bool IsVoxelActive(Vector3Int localVoxelPos)
     {
         if (_activeVoxels.Count == 0)
             return false;
 
-        return _activeVoxels.Contains(localPos);
+        return _activeVoxels.Contains(localVoxelPos);
     }
 
     #endregion

@@ -41,17 +41,17 @@ public class WorldJobManager
     /// Schedules a background job to generate the voxel data (terrain and biome) for a specific chunk coordinate.
     /// If a job is already running or the data already exists, this method returns without scheduling.
     /// </summary>
-    /// <param name="coord">The coordinate of the chunk to generate.</param>
-    public void ScheduleGeneration(ChunkCoord coord)
+    /// <param name="chunkCoord">The coordinate of the chunk to generate.</param>
+    public void ScheduleGeneration(ChunkCoord chunkCoord)
     {
         // Don't schedule if a job is already running for it.
-        if (generationJobs.ContainsKey(coord))
+        if (generationJobs.ContainsKey(chunkCoord))
             return;
 
-        Vector2Int chunkPos = coord.ToVoxelOrigin();
+        Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
         // Don't schedule if chunk data already exists AND is already populated, in our main thread dictionary.
-        if (_world.worldData.Chunks.TryGetValue(chunkPos, out ChunkData data) && data.IsPopulated)
+        if (_world.worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data) && data.IsPopulated)
         {
             return; // Data is already generated, no need to schedule.
         }
@@ -64,7 +64,7 @@ public class WorldJobManager
         ChunkGenerationJob job = new ChunkGenerationJob
         {
             Seed = VoxelData.Seed,
-            ChunkPosition = chunkPos,
+            ChunkPosition = chunkVoxelPos,
             BlockTypes = _world.JobDataManager.BlockTypesJobData,
             Biomes = _world.JobDataManager.BiomesJobData,
             AllLodes = _world.JobDataManager.AllLodesJobData,
@@ -88,7 +88,7 @@ public class WorldJobManager
             Mods = modificationsQueue,
         };
 
-        generationJobs.Add(coord, jobData);
+        generationJobs.Add(chunkCoord, jobData);
     }
 
     /// <summary>
@@ -99,21 +99,21 @@ public class WorldJobManager
     /// <returns>True if the job was scheduled or was already running; false if dependencies were not met (e.g., waiting for lighting).</returns>
     public bool ScheduleMeshing(Chunk chunk)
     {
-        ChunkCoord coord = chunk.Coord;
+        ChunkCoord chunkCoord = chunk.Coord;
 
-        if (meshJobs.ContainsKey(coord))
+        if (meshJobs.ContainsKey(chunkCoord))
             return true; // Job is already scheduled, we can remove it from the build list.
 
         // Chunk's own lighting must be stable.
         if (chunk.ChunkData.HasLightChangesToProcess ||
             chunk.ChunkData.NeedsInitialLighting ||
-            lightingJobs.ContainsKey(coord))
+            lightingJobs.ContainsKey(chunkCoord))
         {
             return false; // This chunk is still processing light, wait.
         }
 
         // All neighbors' data and LIGHTING must be stable.
-        if (!_world.AreNeighborsReadyAndLit(coord))
+        if (!_world.AreNeighborsReadyAndLit(chunkCoord))
         {
             return false; // A neighbor is generating or lighting, wait.
         }
@@ -133,19 +133,19 @@ public class WorldJobManager
         }
 
         // 2. Allocate all input maps with Persistent. They will be disposed via background jobs.
-        var map = _world.worldData.GetChunkMapForJob(coord.ToVoxelOrigin(), Allocator.Persistent);
+        var map = _world.worldData.GetChunkMapForJob(chunkCoord.ToVoxelOrigin(), Allocator.Persistent);
 
         // Fetch all 8 neighbors for robust corner meshing
         // Cardinal Neighbors
-        var back = _world.worldData.GetChunkMapForJob(coord.Neighbor(0, -1).ToVoxelOrigin(), Allocator.Persistent);
-        var front = _world.worldData.GetChunkMapForJob(coord.Neighbor(0, 1).ToVoxelOrigin(), Allocator.Persistent);
-        var left = _world.worldData.GetChunkMapForJob(coord.Neighbor(-1, 0).ToVoxelOrigin(), Allocator.Persistent);
-        var right = _world.worldData.GetChunkMapForJob(coord.Neighbor(1, 0).ToVoxelOrigin(), Allocator.Persistent);
+        var back = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), Allocator.Persistent);
+        var front = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), Allocator.Persistent);
+        var left = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), Allocator.Persistent);
+        var right = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), Allocator.Persistent);
         // Diagonal Neighbors
-        var frontRight = _world.worldData.GetChunkMapForJob(coord.Neighbor(1, 1).ToVoxelOrigin(), Allocator.Persistent);
-        var backRight = _world.worldData.GetChunkMapForJob(coord.Neighbor(1, -1).ToVoxelOrigin(), Allocator.Persistent);
-        var backLeft = _world.worldData.GetChunkMapForJob(coord.Neighbor(-1, -1).ToVoxelOrigin(), Allocator.Persistent);
-        var frontLeft = _world.worldData.GetChunkMapForJob(coord.Neighbor(-1, 1).ToVoxelOrigin(), Allocator.Persistent);
+        var frontRight = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), Allocator.Persistent);
+        var backRight = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), Allocator.Persistent);
+        var backLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), Allocator.Persistent);
+        var frontLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), Allocator.Persistent);
 
         // The output data must be persistent, as it lives until processed on the main thread.
         MeshDataJobOutput meshOutput = new MeshDataJobOutput(Allocator.Persistent);
@@ -202,7 +202,7 @@ public class WorldJobManager
         JobHandle finalHandle = disposalHandles.Dispose(combinedDisposalHandle);
 
         // 6. Store this final, all-encompassing handle in our tracking dictionary.
-        meshJobs.Add(coord, (finalHandle, meshOutput));
+        meshJobs.Add(chunkCoord, (finalHandle, meshOutput));
 
         return true;
     }
@@ -215,11 +215,11 @@ public class WorldJobManager
     /// <param name="allocator">The allocator to use for job data (Allocator.TempJob for startup, Allocator.Persistent for runtime).</param>
     public void ScheduleLightingUpdate(ChunkData chunkData, Allocator allocator = Allocator.Persistent)
     {
-        ChunkCoord coord = ChunkCoord.FromVoxelOrigin(chunkData.position);
-        if (lightingJobs.ContainsKey(coord)) return; // Job already running for this chunk
+        ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.position);
+        if (lightingJobs.ContainsKey(chunkCoord)) return; // Job already running for this chunk
 
         // Do not schedule a lighting job until all neighbors have finished generating their data.
-        if (!_world.AreNeighborsDataReady(coord))
+        if (!_world.AreNeighborsDataReady(chunkCoord))
         {
             // We can't schedule it now. Mark it so we can try again on the next frame.
             chunkData.HasLightChangesToProcess = true;
@@ -235,15 +235,15 @@ public class WorldJobManager
         // Get all 8 Neighbor Maps and the heightmap (Read-Only, disposed by job dependency)
         inputData.Heightmap = new NativeArray<byte>(chunkData.heightMap, allocator);
         // Cardinal Neighbors
-        inputData.NeighborN = _world.worldData.GetChunkMapForJob(coord.Neighbor(0, 1).ToVoxelOrigin(), allocator);
-        inputData.NeighborE = _world.worldData.GetChunkMapForJob(coord.Neighbor(1, 0).ToVoxelOrigin(), allocator);
-        inputData.NeighborS = _world.worldData.GetChunkMapForJob(coord.Neighbor(0, -1).ToVoxelOrigin(), allocator);
-        inputData.NeighborW = _world.worldData.GetChunkMapForJob(coord.Neighbor(-1, 0).ToVoxelOrigin(), allocator);
+        inputData.NeighborN = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), allocator);
+        inputData.NeighborE = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), allocator);
+        inputData.NeighborS = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), allocator);
+        inputData.NeighborW = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), allocator);
         // Diagonal Neighbors
-        inputData.NeighborNE = _world.worldData.GetChunkMapForJob(coord.Neighbor(1, 1).ToVoxelOrigin(), allocator);
-        inputData.NeighborSE = _world.worldData.GetChunkMapForJob(coord.Neighbor(1, -1).ToVoxelOrigin(), allocator);
-        inputData.NeighborSW = _world.worldData.GetChunkMapForJob(coord.Neighbor(-1, -1).ToVoxelOrigin(), allocator);
-        inputData.NeighborNW = _world.worldData.GetChunkMapForJob(coord.Neighbor(-1, 1).ToVoxelOrigin(), allocator);
+        inputData.NeighborNE = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), allocator);
+        inputData.NeighborSE = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), allocator);
+        inputData.NeighborSW = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), allocator);
+        inputData.NeighborNW = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), allocator);
 
         // --- 2. ALLOCATE OUTPUT DATA ---
         var jobData = new LightingJobData
@@ -307,7 +307,7 @@ public class WorldJobManager
         chunkData.HasLightChangesToProcess = false;
 
         // Store the handle and all persistent data (input and output) that needs to be processed and disposed of later.
-        lightingJobs.Add(coord, jobData);
+        lightingJobs.Add(chunkCoord, jobData);
     }
 
     /// <summary>
@@ -353,8 +353,8 @@ public class WorldJobManager
                     // We apply these directly to the data now, as the chunk is populated but not yet meshed.
                     foreach (VoxelMod mod in pendingMods)
                     {
-                        Vector3Int localPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
-                        chunkData.ModifyVoxel(localPos, mod);
+                        Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
+                        chunkData.ModifyVoxel(localVoxelPos, mod);
                     }
                 }
 
@@ -425,9 +425,9 @@ public class WorldJobManager
         }
 
         // Remove the completed jobs from our tracking dictionary
-        foreach (ChunkCoord coord in _completedGenJobs)
+        foreach (ChunkCoord chunkCoord in _completedGenJobs)
         {
-            generationJobs.Remove(coord);
+            generationJobs.Remove(chunkCoord);
         }
     }
 
@@ -460,9 +460,9 @@ public class WorldJobManager
             }
         }
 
-        foreach (ChunkCoord coord in _completedMeshJobs)
+        foreach (ChunkCoord chunkCoord in _completedMeshJobs)
         {
-            meshJobs.Remove(coord);
+            meshJobs.Remove(chunkCoord);
         }
     }
 
@@ -516,18 +516,18 @@ public class WorldJobManager
                     foreach (LightModification mod in jobData.Mods)
                     {
                         // Find the chunk that this modification affects.
-                        Vector2Int neighborChunkV2Coord = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
-                        ChunkData neighborChunk = _world.worldData.RequestChunk(neighborChunkV2Coord, false);
+                        Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
+                        ChunkData neighborChunk = _world.worldData.RequestChunk(neighborChunkVoxelPos, false);
 
                         // If the neighbor doesn't exist or isn't generated, save any propagating lighting for that unloaded neighbor
                         if (neighborChunk == null || !neighborChunk.IsPopulated)
                         {
                             // Calculate Chunk Coord
-                            ChunkCoord neighborCoord = ChunkCoord.FromVoxelOrigin(neighborChunkV2Coord);
+                            ChunkCoord neighborChunkCoord = ChunkCoord.FromVoxelOrigin(neighborChunkVoxelPos);
 
                             // Calculate Local Column
-                            int localX = mod.GlobalPosition.x - neighborChunkV2Coord.x;
-                            int localZ = mod.GlobalPosition.z - neighborChunkV2Coord.y;
+                            int localX = mod.GlobalPosition.x - neighborChunkVoxelPos.x;
+                            int localZ = mod.GlobalPosition.z - neighborChunkVoxelPos.y;
 
                             // Validate range
                             if (localX < 0 || localX >= VoxelData.ChunkWidth ||
@@ -538,10 +538,10 @@ public class WorldJobManager
                             }
 
                             // Add to local batch dictionary instead of immediate manager call
-                            if (!_droppedLightUpdates.TryGetValue(neighborCoord, out HashSet<Vector2Int> cols))
+                            if (!_droppedLightUpdates.TryGetValue(neighborChunkCoord, out HashSet<Vector2Int> cols))
                             {
                                 cols = HashSetPool<Vector2Int>.Get();
-                                _droppedLightUpdates[neighborCoord] = cols;
+                                _droppedLightUpdates[neighborChunkCoord] = cols;
                             }
 
                             cols.Add(new Vector2Int(localX, localZ));
@@ -549,9 +549,9 @@ public class WorldJobManager
                         }
 
                         // Get the local position and flat array index for the voxel in the neighbor chunk.
-                        Vector3Int localPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
+                        Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
-                        uint oldPackedData = neighborChunk.GetVoxel(localPos.x, localPos.y, localPos.z);
+                        uint oldPackedData = neighborChunk.GetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
                         byte oldLightLevel;
                         uint newPackedData;
 
@@ -580,14 +580,14 @@ public class WorldJobManager
                         if (oldLightLevel != mod.LightLevel)
                         {
                             // 1. Apply the new light value directly to the neighbor's chunk data.
-                            neighborChunk.SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData);
+                            neighborChunk.SetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z, newPackedData);
 
                             // 2. Queue an update for the neighbor's *next* lighting pass.
                             //    This correctly seeds the propagation algorithm for the neighbor.
                             if (mod.Channel == LightChannel.Sun)
-                                neighborChunk.AddToSunLightQueue(localPos, oldLightLevel);
+                                neighborChunk.AddToSunLightQueue(localVoxelPos, oldLightLevel);
                             else
-                                neighborChunk.AddToBlockLightQueue(localPos, oldLightLevel);
+                                neighborChunk.AddToBlockLightQueue(localVoxelPos, oldLightLevel);
 
                             // 3. Mark the neighbor chunk for a mesh rebuild, as its lighting has changed.
                             _chunksToRebuildMesh.Add(ChunkCoord.FromVoxelOrigin(neighborChunk.position));
@@ -638,9 +638,9 @@ public class WorldJobManager
         }
 
         // 6. After processing all completed jobs, request mesh rebuilds for all affected world.chunks.
-        foreach (ChunkCoord coord in _chunksToRebuildMesh)
+        foreach (ChunkCoord chunkCoord in _chunksToRebuildMesh)
         {
-            Chunk chunk = _world.GetChunkFromChunkCoord(coord);
+            Chunk chunk = _world.GetChunkFromChunkCoord(chunkCoord);
             if (chunk != null)
             {
                 _world.RequestChunkMeshRebuild(chunk, immediate: true);
@@ -649,15 +649,15 @@ public class WorldJobManager
 
 
         // 7. Remove the completed jobs from our tracking dictionary
-        foreach (ChunkCoord coord in _completedLightJobs)
+        foreach (ChunkCoord chunkCoord in _completedLightJobs)
         {
-            lightingJobs.Remove(coord);
+            lightingJobs.Remove(chunkCoord);
         }
     }
 
     /// <summary>
     /// Merges the lighting results from a background job into the live ChunkData.
-    /// CRITICAL: This performs a bit-mask merge (only light bits) to avoid overwriting 
+    /// CRITICAL: This performs a bit-mask merge (only light bits) to avoid overwriting
     /// block changes (TOCTOU) made by the player while the job was running.
     /// </summary>
     private void ApplyLightingJobResult(ChunkData chunkData, NativeArray<uint> jobMap)

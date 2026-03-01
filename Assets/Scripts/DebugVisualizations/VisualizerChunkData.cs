@@ -27,11 +27,11 @@ namespace DebugVisualizations
         public NativeList<Color> Colors;
         private bool _isJobDataAllocated = false;
 
-        public VisualizerChunkData(ChunkCoord coord, Material mat, Transform parent)
+        public VisualizerChunkData(ChunkCoord chunkCoord, Material mat, Transform parent)
         {
-            ChunkObject = new GameObject($"Visualizer_{coord.X}_{coord.Z}");
+            ChunkObject = new GameObject($"Visualizer_{chunkCoord.X}_{chunkCoord.Z}");
             ChunkObject.transform.SetParent(parent);
-            ChunkObject.transform.position = coord.ToWorldPosition();
+            ChunkObject.transform.position = chunkCoord.ToWorldPosition();
 
             _meshFilter = ChunkObject.AddComponent<MeshFilter>();
             var mr = ChunkObject.AddComponent<MeshRenderer>();
@@ -49,11 +49,11 @@ namespace DebugVisualizations
         /// <summary>
         /// Resets the visualizer for use at a new coordinate.
         /// </summary>
-        public void Reset(ChunkCoord coord, Material mat, Transform parent)
+        public void Reset(ChunkCoord chunkCoord, Material mat, Transform parent)
         {
             ChunkObject.transform.SetParent(parent);
-            ChunkObject.transform.position = coord.ToWorldPosition();
-            ChunkObject.name = $"Visualizer_{coord.X}_{coord.Z}";
+            ChunkObject.transform.position = chunkCoord.ToWorldPosition();
+            ChunkObject.name = $"Visualizer_{chunkCoord.X}_{chunkCoord.Z}";
             ChunkObject.SetActive(true);
 
             // Ensure material is correct (in case setting changed)

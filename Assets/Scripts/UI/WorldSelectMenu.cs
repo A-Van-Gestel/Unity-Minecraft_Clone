@@ -381,7 +381,7 @@ namespace UI
 
                 // 2. Extract Player Chunk Coordinate
                 Vector3 playerPos = _selectedWorld.player.position;
-                Vector2Int playerChunkCoord = ChunkCoord.FromWorldPosition(playerPos).ToChunkIndex();
+                Vector2Int playerChunkIndex = ChunkCoord.FromWorldPosition(playerPos).ToChunkIndex();
 
                 // 3. Generate texture on main thread
                 int maxTextureSize = 256; // Default fallback
@@ -397,12 +397,14 @@ namespace UI
                 }
 
                 // ALWAYS call this now, so we get the dark fallback texture for empty worlds
-                MinimapData mapData = WorldInfoUtility.GenerateMinimapTexture(info, playerChunkCoord, maxTextureSize);
+                MinimapData mapData = WorldInfoUtility.GenerateMinimapTexture(info, playerChunkIndex, maxTextureSize);
 
                 // 4. Format string data
                 string scaleText = info.ChunkCount == 0
                     ? "<color=#FFA500>N/A (No terrain generated yet)</color>"
-                    : (mapData.ScaleFactor == 1 ? "1 Pixel = 1 Chunk" : $"1 Pixel = {mapData.ScaleFactor}x{mapData.ScaleFactor} Chunks");
+                    : (mapData.ScaleFactor == 1
+                        ? "1 Pixel = 1 Chunk"
+                        : $"1 Pixel = {mapData.ScaleFactor}x{mapData.ScaleFactor} Chunks");
 
                 // Convert bytes to MB
                 string sizeMb = (info.TotalSizeBytes / 1024f / 1024f).ToString("F2");

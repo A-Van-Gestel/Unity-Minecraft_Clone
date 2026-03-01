@@ -163,7 +163,9 @@ namespace Benchmarks
             // Execute the benchmark and capture the average time via a callback.
             yield return StartCoroutine(ExecuteBenchmarkRun(_mode, _parallelBatchSize, result => averageTime = result));
 
-            string modeDetails = _mode == BenchmarkMode.Parallel ? $"Parallel (Batch Size: {_parallelBatchSize})" : "Serial";
+            string modeDetails = _mode == BenchmarkMode.Parallel
+                ? $"Parallel (Batch Size: {_parallelBatchSize})"
+                : "Serial";
             Debug.Log($"<color=lime>--- Single Benchmark Complete ---</color>\n" +
                       $"Configuration: {modeDetails}\n" +
                       $"<b>Average Time over {_benchmarkRuns} runs: {averageTime} ms</b>");
@@ -266,17 +268,17 @@ namespace Benchmarks
         /// <summary>
         /// Schedules a single ChunkGenerationJob and returns its handle and data.
         /// </summary>
-        /// <param name="coord">The coordinate of the chunk to generate.</param>
+        /// <param name="chunkCoord">The coordinate of the chunk to generate.</param>
         /// <param name="benchmarkMode">The scheduling mode to use (Serial or Parallel).</param>
         /// <param name="parallelBatchSize">The batch size to use for a Parallel job.</param>
         /// <returns>A GenerationJobData struct containing the job handle and output data containers.</returns>
-        private GenerationJobData ScheduleBenchmarkGeneration(ChunkCoord coord, BenchmarkMode benchmarkMode, int parallelBatchSize)
+        private GenerationJobData ScheduleBenchmarkGeneration(ChunkCoord chunkCoord, BenchmarkMode benchmarkMode, int parallelBatchSize)
         {
             var modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
             var job = new ChunkGenerationJob
             {
                 Seed = VoxelData.Seed,
-                ChunkPosition = coord.ToVoxelOrigin(),
+                ChunkPosition = chunkCoord.ToVoxelOrigin(),
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 Biomes = _world.JobDataManager.BiomesJobData,
                 AllLodes = _world.JobDataManager.AllLodesJobData,

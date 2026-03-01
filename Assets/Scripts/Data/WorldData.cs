@@ -49,27 +49,27 @@ namespace Data
 
         #region Chunk Management
 
-        public ChunkData RequestChunk(Vector2Int chunkVector2Coord, bool allowChunkDataCreation)
+        public ChunkData RequestChunk(Vector2Int chunkVoxelPos, bool allowChunkDataCreation)
         {
             ChunkData c;
 
-            if (Chunks.TryGetValue(chunkVector2Coord, out ChunkData chunk))
+            if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunk))
                 c = chunk;
             else if (!allowChunkDataCreation)
                 c = null;
             else
             {
-                LoadChunk(chunkVector2Coord);
-                c = Chunks[chunkVector2Coord];
+                LoadChunk(chunkVoxelPos);
+                c = Chunks[chunkVoxelPos];
             }
 
             return c;
         }
 
-        public void LoadChunk(Vector2Int chunkVector2Coord)
+        public void LoadChunk(Vector2Int chunkVoxelPos)
         {
             // Nothing needs to be loaded if the chunk is already loaded.
-            if (Chunks.ContainsKey(chunkVector2Coord))
+            if (Chunks.ContainsKey(chunkVoxelPos))
                 return;
 
             // Load Chunk from File
@@ -90,7 +90,7 @@ namespace Data
             // Chunk doesn't exist on disk (or loading is disabled/not yet implemented).
             // We create a "placeholder" ChunkData object.
             // The asynchronous job system is responsible for populating it.
-            Chunks.Add(chunkVector2Coord, World.Instance.ChunkPool.GetChunkData(chunkVector2Coord)); // Create placeholder using POOL
+            Chunks.Add(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
         }
 
 
@@ -105,11 +105,11 @@ namespace Data
             // Outside the world, nothing to do.
             if (!IsVoxelInWorld(worldPos)) return false;
 
-            Vector2Int chunkCoord = GetChunkCoordFor(worldPos);
-            if (!Chunks.ContainsKey(chunkCoord))
+            Vector2Int chunkVoxelPos = GetChunkCoordFor(worldPos);
+            if (!Chunks.ContainsKey(chunkVoxelPos))
             {
                 // Create the placeholder
-                Chunks.Add(chunkCoord, World.Instance.ChunkPool.GetChunkData(chunkCoord)); // Create placeholder using POOL
+                Chunks.Add(chunkVoxelPos, World.Instance.ChunkPool.GetChunkData(chunkVoxelPos)); // Create placeholder using POOL
                 return false;
             }
 
@@ -132,8 +132,8 @@ namespace Data
         /// <returns>The local voxel position in a chunk for the given world position</returns>
         public Vector3Int GetLocalVoxelPositionInChunk(Vector3 worldPos)
         {
-            Vector2Int chunkCoord = GetChunkCoordFor(worldPos);
-            return new Vector3Int((int)(worldPos.x - chunkCoord.x), (int)worldPos.y, (int)(worldPos.z - chunkCoord.y));
+            Vector2Int chunkVoxelPos = GetChunkCoordFor(worldPos);
+            return new Vector3Int((int)(worldPos.x - chunkVoxelPos.x), (int)worldPos.y, (int)(worldPos.z - chunkVoxelPos.y));
         }
 
         #endregion
@@ -183,11 +183,11 @@ namespace Data
         /// <summary>
         /// Queues a mesh rebuild for the given chunk.
         /// </summary>
-        /// <param name="chunkVector2Coord">The global chunk coordinates of the given chunk</param>
-        private void QueueMeshRebuild(Vector2Int chunkVector2Coord)
+        /// <param name="chunkVoxelPos">The global chunk coordinates of the given chunk</param>
+        private void QueueMeshRebuild(Vector2Int chunkVoxelPos)
         {
             // Try to get the chunk's data.
-            if (Chunks.TryGetValue(chunkVector2Coord, out ChunkData chunkData))
+            if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
             {
                 // If the chunk object exists, request a rebuild.
                 if (chunkData.Chunk != null)
@@ -200,12 +200,12 @@ namespace Data
         /// <summary>
         /// Helper method to get the raw voxel map for jobs.
         /// </summary>
-        /// <param name="chunkVector2Coord">The global chunk coordinates of the given chunk</param>
+        /// <param name="chunkVoxelPos">The global chunk coordinates of the given chunk</param>
         /// <param name="allocator">The allocator to use for the native array</param>
         /// <returns>Jobs compatible array of voxels</returns>
-        public NativeArray<uint> GetChunkMapForJob(Vector2Int chunkVector2Coord, Allocator allocator)
+        public NativeArray<uint> GetChunkMapForJob(Vector2Int chunkVoxelPos, Allocator allocator)
         {
-            ChunkData chunk = RequestChunk(chunkVector2Coord, false);
+            ChunkData chunk = RequestChunk(chunkVoxelPos, false);
 
             // Allocate the full height array for the job
             var jobArray = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, allocator);
@@ -245,16 +245,16 @@ namespace Data
         {
             if (!IsVoxelInWorld(worldPos)) return;
 
-            Vector2Int chunkV2Coord = GetChunkCoordFor(worldPos);
+            Vector2Int chunkVoxelPos = GetChunkCoordFor(worldPos);
 
-            if (Chunks.TryGetValue(chunkV2Coord, out ChunkData chunkData) && chunkData.IsPopulated)
+            if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData) && chunkData.IsPopulated)
             {
                 // Add the *modified block's position* to the chunk's internal light queue.
-                Vector3Int localPos = GetLocalVoxelPositionInChunk(worldPos);
+                Vector3Int localVoxelPos = GetLocalVoxelPositionInChunk(worldPos);
                 if (channel == LightChannel.Block)
-                    chunkData.AddToBlockLightQueue(localPos, oldLightLevel);
+                    chunkData.AddToBlockLightQueue(localVoxelPos, oldLightLevel);
                 else
-                    chunkData.AddToSunLightQueue(localPos, oldLightLevel);
+                    chunkData.AddToSunLightQueue(localVoxelPos, oldLightLevel);
 
                 // Mark the target chunk as needing a lighting update.
                 chunkData.HasLightChangesToProcess = true;
@@ -263,18 +263,18 @@ namespace Data
             {
                 // If chunk is unloaded, tell ModManager to mark this area as dirty.
                 // We don't have exact block tracking for unloaded chunks, so we mark the *Column* for recalculation.
-                ChunkCoord coord = ChunkCoord.FromVoxelOrigin(chunkV2Coord);
+                ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkVoxelPos);
 
                 // Calculate local column (0-15)
-                Vector3Int localPos = GetLocalVoxelPositionInChunk(worldPos);
-                Vector2Int localCol = new Vector2Int(localPos.x, localPos.z);
+                Vector3Int localVoxelPos = GetLocalVoxelPositionInChunk(worldPos);
+                Vector2Int localCol = new Vector2Int(localVoxelPos.x, localVoxelPos.z);
 
                 // OPTIMIZATION: Use pool for the temporary set passed to AddPending
                 HashSet<Vector2Int> tempSet = HashSetPool<Vector2Int>.Get();
                 tempSet.Add(localCol);
 
                 // Add to persistent manager
-                World.Instance.LightingStateManager.AddPending(coord, tempSet);
+                World.Instance.LightingStateManager.AddPending(chunkCoord, tempSet);
 
                 // AddPending copies the elements into its own set, so we can immediately release this temp set
                 HashSetPool<Vector2Int>.Release(tempSet);
@@ -287,19 +287,19 @@ namespace Data
         /// <param name="columnPos">The column position</param>
         public void QueueSunlightRecalculation(Vector2Int columnPos)
         {
-            Vector2Int chunkPos = GetChunkCoordFor(new Vector3(columnPos.x, 0, columnPos.y));
+            Vector2Int chunkVoxelPos = GetChunkCoordFor(new Vector3(columnPos.x, 0, columnPos.y));
 
             // OPTIMIZATION: Grab from the global pool
-            if (!SunlightRecalculationQueue.TryGetValue(chunkPos, out HashSet<Vector2Int> columns))
+            if (!SunlightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> columns))
             {
                 columns = HashSetPool<Vector2Int>.Get();
-                SunlightRecalculationQueue[chunkPos] = columns;
+                SunlightRecalculationQueue[chunkVoxelPos] = columns;
             }
 
             columns.Add(columnPos);
 
             // Mark the target chunk as needing a lighting update.
-            if (Chunks.TryGetValue(chunkPos, out ChunkData chunkData))
+            if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData))
             {
                 chunkData.HasLightChangesToProcess = true;
             }
