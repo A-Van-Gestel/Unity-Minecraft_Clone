@@ -61,6 +61,12 @@ namespace Serialization
             }
         }
 
+        /// <summary>
+        /// Attempts to retrieve and remove the pending local columns for sunlight recalculation in a specific chunk.
+        /// </summary>
+        /// <param name="chunkCoord">The chunk coordinate to query.</param>
+        /// <param name="localColumns">A set of local 0-15 coordinates needing recalculation, if any.</param>
+        /// <returns>True if pending columns were found; otherwise, false.</returns>
         public bool TryGetAndRemove(ChunkCoord chunkCoord, out HashSet<Vector2Int> localColumns)
         {
             if (_pendingRecalcs.Remove(chunkCoord, out localColumns))
@@ -71,6 +77,9 @@ namespace Serialization
             return false;
         }
 
+        /// <summary>
+        /// Saves the pending sunlight recalculation queues to disk.
+        /// </summary>
         public void Save()
         {
             using var stream = new FileStream(_filePath, FileMode.Create);
@@ -92,6 +101,9 @@ namespace Serialization
             }
         }
 
+        /// <summary>
+        /// Loads the pending sunlight recalculation queues from disk.
+        /// </summary>
         public void Load()
         {
             if (!File.Exists(_filePath)) return;

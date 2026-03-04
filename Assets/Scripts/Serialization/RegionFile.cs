@@ -16,7 +16,7 @@ namespace Serialization
         private readonly string _filePath;
         private FileStream _fileStream;
 
-        // Location Table: 1024 entries. 
+        // Location Table: 1024 entries.
         // Each entry: 3 bytes offset (in sectors), 1 byte size (in sectors).
         private readonly int[] _offsets = new int[TOTAL_CHUNKS];
 
@@ -82,9 +82,16 @@ namespace Serialization
             }
         }
 
+        /// <summary>
+        /// Reads and extracts compressed chunk data from the region file.
+        /// </summary>
+        /// <param name="localX">The chunk's local X coordinate index within the region (0-31).</param>
+        /// <param name="localZ">The chunk's local Z coordinate index within the region (0-31).</param>
+        /// <returns>A tuple containing the raw compressed byte payload and the specific <see cref="CompressionAlgorithm"/> used.</returns>
+        /// <example>Chunk Index (33, 33) maps to Region (1, 1) and Local (1, 1). Passed params: <c>localX = 1</c>, <c>localZ = 1</c>.</example>
         public (byte[] data, CompressionAlgorithm algorithm) LoadChunkData(int localX, int localZ)
         {
-            // CRITICAL: Exclusive lock. 
+            // CRITICAL: Exclusive lock.
             // FileStream.Seek changes the position for the whole instance.
             // Multiple readers cannot share the stream simultaneously.
             lock (_fileLock)
@@ -111,7 +118,7 @@ namespace Serialization
                     int headerBytesRead = _fileStream.Read(lengthBytes, 0, 4);
                     if (headerBytesRead < 4) return (null, CompressionAlgorithm.GZip);
 
-                    // Convert Big Endian (if standard) or Little Endian. 
+                    // Convert Big Endian (if standard) or Little Endian.
                     // BinaryWriter matches BitConverter.ToInt32 on the same system.
                     int length = BitConverter.ToInt32(lengthBytes, 0);
 
@@ -152,6 +159,15 @@ namespace Serialization
             }
         }
 
+        /// <summary>
+        /// Writes compressed chunk data into the region file. Manages internal sector fragmentation
+        /// to allocate contiguous free blocks when chunk sizes increase.
+        /// </summary>
+        /// <param name="localX">The chunk's local X coordinate index within the region (0-31).</param>
+        /// <param name="localZ">The chunk's local Z coordinate index within the region (0-31).</param>
+        /// <param name="data">The compressed binary payload.</param>
+        /// <param name="payloadLength">The exact length of the payload array to write.</param>
+        /// <param name="algorithm">The compression algorithm code to record in the region header.</param>
         public void SaveChunkData(int localX, int localZ, byte[] data, int payloadLength, CompressionAlgorithm algorithm)
         {
             lock (_fileLock)
@@ -230,10 +246,14 @@ namespace Serialization
             }
         }
 
+        /// <summary>
+        /// Iterates the location table and yields the local coordinates of every chunk that actually exists inside this region.
+        /// </summary>
+        /// <returns>An enumerable of <see cref="Vector2Int"/> local chunk coordinates (0-31 bounds).</returns>
         public IEnumerable<Vector2Int> GetAllChunkCoords()
         {
             // Reading this array is thread-safe as it's a fixed size int array,
-            // but the values might update during iteration. 
+            // but the values might update during iteration.
             // Since this is usually used for migration (offline), it's acceptable.
             for (int i = 0; i < TOTAL_CHUNKS; i++)
             {
@@ -289,8 +309,14 @@ namespace Serialization
             return result;
         }
 
-        /// Perform raw byte replacement without full deserialization overhead
-        /// Defaults to GZip compression for legacy migration support
+        /// <summary>
+        /// Performs a raw byte replacement without full deserialization overhead.
+        /// Used primarily in offline migration tools.
+        /// </summary>
+        /// <param name="localX">The chunk's local X coordinate index within the region (0-31).</param>
+        /// <param name="localZ">The chunk's local Z coordinate index within the region (0-31).</param>
+        /// <param name="data">The compressed binary payload.</param>
+        /// <param name="algorithm">The compression algorithm flag, defaulting to GZip for legacy formats.</param>
         public void RawWriteChunk(int localX, int localZ, byte[] data, CompressionAlgorithm algorithm = CompressionAlgorithm.GZip)
         {
             // For migration/raw writes, we assume GZip if not specified, or we could overload this.
@@ -325,6 +351,10 @@ namespace Serialization
             return appendStart;
         }
 
+        /// <summary>
+        /// Flushes any buffered stream data directly to the physical disk and releases file handles.
+        /// Preventing corruption on abrupt process exits.
+        /// </summary>
         public void Dispose()
         {
             lock (_fileLock)

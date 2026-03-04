@@ -313,6 +313,8 @@ public class WorldJobManager
     /// <summary>
     /// Helper overload for Chunk objects. Forwards to the ChunkData-based implementation.
     /// </summary>
+    /// <param name="chunk">The chunk object.</param>
+    /// <param name="allocator">The allocator to use for job data (Allocator.TempJob for startup, Allocator.Persistent for runtime).</param>
     public void ScheduleLightingUpdate(Chunk chunk, Allocator allocator = Allocator.Persistent)
     {
         ScheduleLightingUpdate(chunk.ChunkData, allocator);
@@ -660,6 +662,8 @@ public class WorldJobManager
     /// CRITICAL: This performs a bit-mask merge (only light bits) to avoid overwriting
     /// block changes (TOCTOU) made by the player while the job was running.
     /// </summary>
+    /// <param name="chunkData">The target chunk data object.</param>
+    /// <param name="jobMap">The raw voxel data from the background job.</param>
     private void ApplyLightingJobResult(ChunkData chunkData, NativeArray<uint> jobMap)
     {
         int indexOffset = 0;

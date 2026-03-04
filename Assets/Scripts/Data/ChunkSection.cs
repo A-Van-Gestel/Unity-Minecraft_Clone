@@ -115,7 +115,7 @@ namespace Data
                     if (id < blockTypes.Length)
                     {
                         // Note: blockTypes[id] is a reference type lookup (pointer chase).
-                        // This is the most expensive part, but cannot be easily avoided 
+                        // This is the most expensive part, but cannot be easily avoided
                         // without changing the data architecture to use flat structs/arrays.
                         if (blockTypes[id].IsOpaque)
                         {

@@ -54,8 +54,14 @@ namespace Jobs.BurstData
 
         /// <summary>
         /// Packs all component data into a single uint.
-        /// Orientation and FluidLevel now share the same 8-bit Metadata space.
+        /// Orientation and FluidLevel share the same 8-bit Metadata space.
         /// </summary>
+        /// <param name="id">The block ID (0-65535).</param>
+        /// <param name="sunLight">The sunlight level (0-15).</param>
+        /// <param name="blockLight">The blocklight level (0-15).</param>
+        /// <param name="orientation">The world orientation (face index).</param>
+        /// <param name="fluidLevel">The fluid level (0-15).</param>
+        /// <returns>A packed uint containing all the voxel state data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel)
         {
@@ -87,6 +93,11 @@ namespace Jobs.BurstData
 
         // --- Unpacking / Getters ---
 
+        /// <summary>
+        /// Extracts the block ID from the packed voxel data.
+        /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The block ID.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ushort GetId(uint packedData)
         {
@@ -105,6 +116,8 @@ namespace Jobs.BurstData
         /// <summary>
         /// Returns the highest light level between sunlight and blocklight
         /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The highest light level (0-15).</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetLight(uint packedData)
         {
@@ -114,12 +127,22 @@ namespace Jobs.BurstData
             return (byte)math.max(sunLightLevel, blockLightLevel);
         }
 
+        /// <summary>
+        /// Extracts the sunlight level from the packed voxel data.
+        /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The sunlight level (0-15).</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetSunLight(uint packedData)
         {
             return (byte)((packedData & SUNLIGHT_MASK) >> SUNLIGHT_SHIFT);
         }
 
+        /// <summary>
+        /// Extracts the blocklight level from the packed voxel data.
+        /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The blocklight level (0-15).
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetBlockLight(uint packedData)
         {
@@ -166,18 +189,36 @@ namespace Jobs.BurstData
 
         // --- Packing / Setters ---
 
+        /// <summary>
+        /// Updates the block ID within the packed voxel data.
+        /// </summary>
+        /// <param name="packedData">The original packed uint data.</param>
+        /// <param name="id">The new block ID to set.</param>
+        /// <returns>The updated packed uint data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetId(uint packedData, ushort id)
         {
             return (packedData & ~ID_MASK) | (uint)((id) << ID_SHIFT);
         }
 
+        /// <summary>
+        /// Updates the sunlight level within the packed voxel data.
+        /// </summary>
+        /// <param name="packedData">The original packed uint data.</param>
+        /// <param name="sunLightLevel">The new sunlight level to set.</param>
+        /// <returns>The updated packed uint data.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetSunLight(uint packedData, byte sunLightLevel)
         {
             return (packedData & ~SUNLIGHT_MASK) | (uint)((sunLightLevel & 0xF) << SUNLIGHT_SHIFT);
         }
 
+        /// <summary>
+        /// Updates the blocklight level within the packed voxel data.
+        /// </summary>
+        /// <param name="packedData">The original packed uint data.</param>
+        /// <param name="blockLightLevel">The new blocklight level to set.</param>
+        /// <returns>The updated packed uint data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetBlockLight(uint packedData, byte blockLightLevel)
         {

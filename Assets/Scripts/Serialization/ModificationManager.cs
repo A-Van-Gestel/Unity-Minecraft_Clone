@@ -32,6 +32,8 @@ namespace Serialization
         /// Registers a modification for a chunk that is not yet loaded.
         /// These mods will be applied immediately when the target chunk is loaded/generated.
         /// </summary>
+        /// <param name="targetChunk">The coordinate of the chunk that will receive the modification.</param>
+        /// <param name="mod">The voxel modification to queue.</param>
         public void AddPendingMod(ChunkCoord targetChunk, VoxelMod mod)
         {
             // Ensure dictionary key exists
@@ -43,11 +45,17 @@ namespace Serialization
             _pendingMods[targetChunk].Add(mod);
         }
 
+        /// <summary>
+        /// Attempts to retrieve and remove all pending voxel modifications for a specific chunk.
+        /// </summary>
+        /// <param name="coord">The chunk coordinate to query.</param>
+        /// <param name="mods">The list of pending modifications, if any.</param>
+        /// <returns>True if modifications were found; otherwise, false.</returns>
         public bool TryGetModsForChunk(ChunkCoord coord, out List<VoxelMod> mods)
         {
             if (_pendingMods.Remove(coord, out mods))
             {
-                // We found mods. We should remove them from the pending list 
+                // We found mods. We should remove them from the pending list
                 // because they are about to be applied to the chunk.
                 return true;
             }
@@ -57,6 +65,9 @@ namespace Serialization
 
         #endregion
 
+        /// <summary>
+        /// Saves all pending modifications to disk.
+        /// </summary>
         public void Save()
         {
             using var stream = new FileStream(_filePath, FileMode.Create);
@@ -84,6 +95,9 @@ namespace Serialization
             }
         }
 
+        /// <summary>
+        /// Loads all pending modifications from disk.
+        /// </summary>
         public void Load()
         {
             if (!File.Exists(_filePath)) return;

@@ -31,6 +31,11 @@ namespace Data
 
         #region Constructors
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WorldData"/> class.
+        /// </summary>
+        /// <param name="worldName">The name of the world.</param>
+        /// <param name="seed">The world generation seed.</param>
         public WorldData(string worldName, int seed)
         {
             this.worldName = worldName;
@@ -38,6 +43,10 @@ namespace Data
             creationDate = DateTime.Now.Ticks;
         }
 
+        /// <summary>
+        /// Creates a copy of an existing <see cref="WorldData"/> instance.
+        /// </summary>
+        /// <param name="wD">The source WorldData.</param>
         public WorldData(WorldData wD)
         {
             worldName = wD.worldName;
@@ -49,6 +58,12 @@ namespace Data
 
         #region Chunk Management
 
+        /// <summary>
+        /// Requests a chunk at the specified voxel-space world origin.
+        /// </summary>
+        /// <param name="chunkVoxelPos">The world origin of the chunk (X * ChunkWidth, Z * ChunkWidth).</param>
+        /// <param name="allowChunkDataCreation">If true, a placeholder chunk will be created if it doesn't exist.</param>
+        /// <returns>The ChunkData object if found or created; otherwise, null.</returns>
         public ChunkData RequestChunk(Vector2Int chunkVoxelPos, bool allowChunkDataCreation)
         {
             ChunkData c;
@@ -66,6 +81,10 @@ namespace Data
             return c;
         }
 
+        /// <summary>
+        /// Ensures a chunk is loaded into memory, either from disk or by creating a generation placeholder.
+        /// </summary>
+        /// <param name="chunkVoxelPos">The world origin of the chunk.</param>
         public void LoadChunk(Vector2Int chunkVoxelPos)
         {
             // Nothing needs to be loaded if the chunk is already loaded.
@@ -116,8 +135,12 @@ namespace Data
             return true;
         }
 
-        /// Returns the global chunk coordinates for a given world position
-        /// <param name="worldPos">The world position</param>
+        /// <summary>
+        /// Calculates the voxel-space world origin of the chunk containing the given world position.
+        /// <para>Example: <c>Vector3(20, 0, 20)</c> -> <c>Vector2Int(16, 16)</c> (if ChunkWidth = 16)</para>
+        /// </summary>
+        /// <param name="worldPos">The world position.</param>
+        /// <returns>The chunk's voxel-space origin.</returns>
         public Vector2Int GetChunkCoordFor(Vector3 worldPos)
         {
             int x = Mathf.FloorToInt(worldPos.x / VoxelData.ChunkWidth) * VoxelData.ChunkWidth;
@@ -126,10 +149,11 @@ namespace Data
         }
 
         /// <summary>
-        /// Get the local voxel position in a chunk for a given world position.
+        /// Calculates the local voxel position within a chunk for a given world position.
+        /// <para>Example: <c>Vector3(20.5f, 10f, 5f)</c> -> <c>Vector3Int(4, 10, 5)</c> (if ChunkWidth = 16)</para>
         /// </summary>
-        /// <param name="worldPos">The world position</param>
-        /// <returns>The local voxel position in a chunk for the given world position</returns>
+        /// <param name="worldPos">The world position.</param>
+        /// <returns>The local (0-15) voxel position.</returns>
         public Vector3Int GetLocalVoxelPositionInChunk(Vector3 worldPos)
         {
             Vector2Int chunkVoxelPos = GetChunkCoordFor(worldPos);

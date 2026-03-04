@@ -7,6 +7,10 @@ using UnityEngine;
 
 namespace DebugVisualizations
 {
+    /// <summary>
+    /// Manages the generation and rendering of debug visualization meshes for chunks in the world.
+    /// This is primarily used to view active voxels or lighting spread states.
+    /// </summary>
     public class VoxelVisualizer : MonoBehaviour
     {
         [Header("References")]
@@ -64,10 +68,10 @@ namespace DebugVisualizations
         /// </summary>
         /// <param name="chunkCoord">The coordinate of the chunk to update.</param>
         /// <param name="voxelsToDraw">A dictionary mapping local voxel positions to their desired color.</param>
-        /// <param name="northVoxels"></param>
-        /// <param name="southVoxels"></param>
-        /// <param name="eastVoxels"></param>
-        /// <param name="westVoxels"></param>
+        /// <param name="northVoxels">A dictionary mapping the north neighbor's voxel positions to their desired color.</param>
+        /// <param name="southVoxels">A dictionary mapping the south neighbor's voxel positions to their desired color.</param>
+        /// <param name="eastVoxels">A dictionary mapping the east neighbor's voxel positions to their desired color.</param>
+        /// <param name="westVoxels">A dictionary mapping the west neighbor's voxel positions to their desired color.</param>
         public void UpdateChunkVisualization(
             ChunkCoord chunkCoord,
             Dictionary<Vector3Int, Color> voxelsToDraw,
@@ -122,6 +126,7 @@ namespace DebugVisualizations
         /// <summary>
         /// Clears a specific chunk's visualization mesh.
         /// </summary>
+        /// <param name="chunkCoord">The chunk coordinate whose visualization should be cleared.</param>
         public void ClearChunkVisualization(ChunkCoord chunkCoord)
         {
             if (_visualizerChunks.TryGetValue(chunkCoord, out var chunkData))
@@ -147,7 +152,9 @@ namespace DebugVisualizations
         }
     }
 
-    // Add this enum definition above the World class
+    /// <summary>
+    /// Defines the mode of visualization for chunk data in the debug view.
+    /// </summary>
     public enum DebugVisualizationMode
     {
         None,

@@ -92,6 +92,7 @@ public class ChunkPoolManager
     /// Updates the target view distance used to calculate the ideal pool size.
     /// Call this when settings change or on startup.
     /// </summary>
+    /// <param name="viewDistance">The new view distance (radius in chunks).</param>
     public void SetTargetViewDistance(int viewDistance)
     {
         _targetViewDistance = viewDistance;
@@ -132,6 +133,8 @@ public class ChunkPoolManager
     /// Retrieves a chunk from the pool or creates a new one if the pool is empty.
     /// Resets the chunk state for the new coordinate.
     /// </summary>
+    /// <param name="chunkCoord">The coordinate of the chunk to retrieve.</param>
+    /// <returns>A pooled and reset <see cref="Chunk"/> instance.</returns>
     public Chunk Get(ChunkCoord chunkCoord)
     {
         // The Pool.Get() handles the Stack pop.
@@ -145,6 +148,7 @@ public class ChunkPoolManager
     /// <summary>
     /// Returns a chunk to the pool for reuse.
     /// </summary>
+    /// <param name="chunk">The chunk to return to the pool.</param>
     public void Return(Chunk chunk)
     {
         _chunkPool.Return(chunk);
@@ -154,6 +158,11 @@ public class ChunkPoolManager
 
     #region Data Logic
 
+    /// <summary>
+    /// Retrieves a <see cref="ChunkData"/> instance from the pool and initializes its metadata for the given position.
+    /// </summary>
+    /// <param name="pos">The voxel-space world origin of the chunk.</param>
+    /// <returns>A clean <see cref="ChunkData"/> object ready for population.</returns>
     public ChunkData GetChunkData(Vector2Int pos)
     {
         ChunkData data = _dataPool.Get();
@@ -161,6 +170,10 @@ public class ChunkPoolManager
         return data;
     }
 
+    /// <summary>
+    /// Reclaims a <see cref="ChunkData"/> object into the pool, immediately flushing its internal sections to prevent memory hoarding.
+    /// </summary>
+    /// <param name="data">The <see cref="ChunkData"/> object to recycle.</param>
     public void ReturnChunkData(ChunkData data)
     {
         if (data == null) return;
@@ -172,11 +185,19 @@ public class ChunkPoolManager
         _dataPool.Return(data);
     }
 
+    /// <summary>
+    /// Retrieves an empty <see cref="ChunkSection"/> (16x16x16 block) from the pool.
+    /// </summary>
+    /// <returns>A pooled <see cref="ChunkSection"/> with all voxel states cleared.</returns>
     public ChunkSection GetChunkSection()
     {
         return _sectionPool.Get();
     }
 
+    /// <summary>
+    /// Reclaims a <see cref="ChunkSection"/> object to the pool, making it available for new chunks.
+    /// </summary>
+    /// <param name="section">The section to pool.</param>
     public void ReturnChunkSection(ChunkSection section)
     {
         _sectionPool.Return(section);
@@ -189,6 +210,10 @@ public class ChunkPoolManager
     /// <summary>
     /// Retrieves a Border GameObject from the pool or instantiates a new one.
     /// </summary>
+    /// <param name="prefab">The prefab to instantiate if the pool is empty.</param>
+    /// <param name="position">The world position to place the border at.</param>
+    /// <param name="parent">The transform parent to organize the border under.</param>
+    /// <returns>An active GameObject representing the chunk border.</returns>
     public GameObject GetBorder(GameObject prefab, Vector3 position, Transform parent)
     {
         // 1. Try to get from pool.
@@ -216,6 +241,10 @@ public class ChunkPoolManager
         return border;
     }
 
+    /// <summary>
+    /// Returns a chunk border visualization GameObject to the pool, disabling it in the scene.
+    /// </summary>
+    /// <param name="border">The border GameObject to recycle.</param>
     public void ReturnBorder(GameObject border)
     {
         _borderPool.Return(border);
@@ -225,6 +254,13 @@ public class ChunkPoolManager
 
     #region Visualizer Logic
 
+    /// <summary>
+    /// Retrieves a <see cref="VisualizerChunkData"/> wrapper from the pool, used for rendering diagnostic voxel states.
+    /// </summary>
+    /// <param name="chunkCoord">The chunk coordinate being visualized.</param>
+    /// <param name="material">The material assigned to the visualizer mesh.</param>
+    /// <param name="parent">The transform parent to organize the visualizer hierarchy.</param>
+    /// <returns>An initialized visualization container.</returns>
     public VisualizerChunkData GetVisualizer(ChunkCoord chunkCoord, Material material, Transform parent)
     {
         VisualizerChunkData viz = _visualizerPool.Get();
@@ -241,6 +277,10 @@ public class ChunkPoolManager
         return viz;
     }
 
+    /// <summary>
+    /// Returns a <see cref="VisualizerChunkData"/> wrapper back to the pool, halting its background jobs and hiding the mesh.
+    /// </summary>
+    /// <param name="viz">The visualizer object to recycle.</param>
     public void ReturnVisualizer(VisualizerChunkData viz)
     {
         _visualizerPool.Return(viz);

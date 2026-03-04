@@ -13,7 +13,7 @@ namespace Data
         [SerializeField]
         [Tooltip("Material used for transparent blocks (eg: glass or ice).")]
         public Material transparentMaterial;
-        
+
         [SerializeField]
         [Tooltip("Material used for liquid blocks (eg: water or lava).")]
         public Material liquidMaterial;

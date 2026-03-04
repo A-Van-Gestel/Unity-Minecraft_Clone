@@ -51,8 +51,10 @@ namespace Data
 
         /// <summary>
         /// Constructs a ChunkCoord directly from chunk indices.
-        /// <example><c>new ChunkCoord(50, 50)</c> -> <c>ChunkCoord (50, 50)</c></example>
         /// </summary>
+        /// <param name="x">The chunk index on the X axis.</param>
+        /// <param name="z">The chunk index on the Z axis.</param>
+        /// <example><c>new ChunkCoord(50, 50)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public ChunkCoord(int x, int z)
         {
             X = x;
@@ -67,30 +69,35 @@ namespace Data
         /// Returns the chunk INDEX as a Vector2Int: <c>(X, Z)</c>.
         /// Use this for region arithmetic or loop bounds.
         /// <para>⚠ Do NOT use this when you need the voxel-space world origin — call <see cref="ToVoxelOrigin"/> instead.</para>
-        /// <example><c>ChunkCoord (50, 50)</c> -> <c>ChunkIndex (50, 50)</c></example>
         /// </summary>
+        /// <returns>A <see cref="Vector2Int"/> representing the raw chunk indices.</returns>
+        /// <example><c>ChunkCoord (50, 50)</c> -> <c>ChunkIndex (50, 50)</c></example>
         public Vector2Int ToChunkIndex() => new Vector2Int(X, Z);
 
         /// <summary>
         /// Returns the voxel-space world origin of this chunk as a Vector2Int.
         /// This is the value stored in <c>ChunkData.position</c>.
         /// <para>Formula: <c>(X * ChunkWidth, Z * ChunkWidth)</c></para>
-        /// <example><c>ChunkCoord (50, 50)</c> -> <c>WorldPos (800, 800)</c></example>
         /// </summary>
+        /// <returns>A <see cref="Vector2Int"/> representing the absolute 2D voxel coordinates of the chunk's minimum corner.</returns>
+        /// <example><c>ChunkCoord (50, 50)</c> -> <c>WorldPos (800, 800)</c></example>
         public Vector2Int ToVoxelOrigin() => new Vector2Int(X * VoxelData.ChunkWidth, Z * VoxelData.ChunkWidth);
 
         /// <summary>
         /// Returns the Unity world-space position of this chunk's origin as a Vector3 (Y = 0).
         /// Use this for <c>Transform.position</c>, <c>EnsureChunkExists</c>, and similar APIs.
         /// <para>Formula: <c>(X * ChunkWidth, 0, Z * ChunkWidth)</c></para>
-        /// <example><c>ChunkCoord (50, 50)</c> -> <c>WorldPos (800, 0, 800)</c></example>
         /// </summary>
+        /// <returns>A <see cref="Vector3"/> representing the Unity world position of the chunk's origin.</returns>
+        /// <example><c>ChunkCoord (50, 50)</c> -> <c>WorldPos (800, 0, 800)</c></example>
         public Vector3 ToWorldPosition() => new Vector3(X * VoxelData.ChunkWidth, 0, Z * VoxelData.ChunkWidth);
 
         /// <summary>
         /// Creates a ChunkCoord from a voxel-space world origin.
-        /// <example><c>WorldPos (800, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         /// </summary>
+        /// <param name="chunkVoxelPos">The absolute 2D voxel coordinates of the chunk's minimum corner.</param>
+        /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
+        /// <example><c>WorldPos (800, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromVoxelOrigin(Vector2Int chunkVoxelPos)
         {
             return new ChunkCoord(chunkVoxelPos.x / VoxelData.ChunkWidth, chunkVoxelPos.y / VoxelData.ChunkWidth);
@@ -98,8 +105,10 @@ namespace Data
 
         /// <summary>
         /// Creates a ChunkCoord from an absolute 3D voxel position.
-        /// <example><c>WorldPos (800, 75, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         /// </summary>
+        /// <param name="voxelPos">The 3D global voxel coordinates of any block within the desired chunk.</param>
+        /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
+        /// <example><c>WorldPos (800, 75, 800)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromVoxelOrigin(Vector3Int voxelPos)
         {
             return new ChunkCoord(voxelPos.x / VoxelData.ChunkWidth, voxelPos.z / VoxelData.ChunkWidth);
@@ -107,8 +116,10 @@ namespace Data
 
         /// <summary>
         /// Creates a ChunkCoord from a Unity world-space position (e.g. <c>Transform.position</c>).
-        /// <example><c>WorldPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
         /// </summary>
+        /// <param name="worldPos">The floating-point world position in Unity space.</param>
+        /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
+        /// <example><c>WorldPos (800.5f, 75f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromWorldPosition(Vector3 worldPos)
         {
             return new ChunkCoord(Mathf.FloorToInt(worldPos.x) / VoxelData.ChunkWidth,
@@ -117,8 +128,10 @@ namespace Data
 
         /// <summary>
         /// Creates a ChunkCoord from a 2D Unity world-space position.
-        /// <example><c>WorldPos (800.5f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
         /// </summary>
+        /// <param name="worldPos">The 2D floating-point world position (X and Z axes) in Unity space.</param>
+        /// <returns>The calculated <see cref="ChunkCoord"/>.</returns>
+        /// <example><c>WorldPos (800.5f, 800.5f)</c> -> <c>ChunkCoord (50, 50)</c></example>
         public static ChunkCoord FromWorldPosition(Vector2 worldPos)
         {
             return new ChunkCoord(Mathf.FloorToInt(worldPos.x) / VoxelData.ChunkWidth,
@@ -131,8 +144,11 @@ namespace Data
 
         /// <summary>
         /// Returns a new ChunkCoord offset by the given chunk-index deltas.
-        /// <example><c>coord.Neighbor(1, 0)</c> returns the chunk to the east.</example>
         /// </summary>
+        /// <param name="dx">The change in the chunk X index.</param>
+        /// <param name="dz">The change in the chunk Z index.</param>
+        /// <returns>A new <see cref="ChunkCoord"/> representing the neighbor's position.</returns>
+        /// <example><c>coord.Neighbor(1, 0)</c> returns the chunk to the east.</example>
         public ChunkCoord Neighbor(int dx, int dz) => new ChunkCoord(X + dx, Z + dz);
 
         #endregion

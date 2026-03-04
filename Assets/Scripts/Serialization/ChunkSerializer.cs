@@ -49,6 +49,10 @@ namespace Serialization
         /// <summary>
         /// Deserializes a byte array into a ChunkData object based on the specified compression algorithm.
         /// </summary>
+        /// <param name="data">The compressed raw byte span from the region file.</param>
+        /// <param name="algorithm">The compression algorithm used on the data.</param>
+        /// <param name="debugCoord">The expected coordinate of the chunk, used for sanity checks.</param>
+        /// <returns>A populated <see cref="ChunkData"/> instance, or null if deserialization fails.</returns>
         public static ChunkData Deserialize(ReadOnlySpan<byte> data, CompressionAlgorithm algorithm, Vector2Int debugCoord)
         {
             if (data.Length == 0) return null;
@@ -78,7 +82,7 @@ namespace Serialization
                     }
                     finally
                     {
-                        // Clean up the wrapper. 
+                        // Clean up the wrapper.
                         // If it's 'None', it equals unmanagedStream (which is disposed by 'using' above), so we check equality.
                         if (decompressionStream != null && decompressionStream != unmanagedStream)
                         {

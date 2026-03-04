@@ -27,6 +27,12 @@ namespace DebugVisualizations
         public NativeList<Color> Colors;
         private bool _isJobDataAllocated = false;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="VisualizerChunkData"/> class.
+        /// </summary>
+        /// <param name="chunkCoord">The chunk coordinate to visualize.</param>
+        /// <param name="mat">The material used to render the visualization.</param>
+        /// <param name="parent">The parent transform to attach the GameObject to.</param>
         public VisualizerChunkData(ChunkCoord chunkCoord, Material mat, Transform parent)
         {
             ChunkObject = new GameObject($"Visualizer_{chunkCoord.X}_{chunkCoord.Z}");
@@ -49,6 +55,9 @@ namespace DebugVisualizations
         /// <summary>
         /// Resets the visualizer for use at a new coordinate.
         /// </summary>
+        /// <param name="chunkCoord">The new chunk coordinate.</param>
+        /// <param name="mat">The material used to render the visualization.</param>
+        /// <param name="parent">The parent transform to attach the GameObject to.</param>
         public void Reset(ChunkCoord chunkCoord, Material mat, Transform parent)
         {
             ChunkObject.transform.SetParent(parent);
@@ -75,6 +84,9 @@ namespace DebugVisualizations
             ChunkObject.SetActive(false);
         }
 
+        /// <summary>
+        /// Destroys the associated GameObject and frees the mesh and native resources.
+        /// </summary>
         public void Destroy()
         {
             Release();
@@ -84,6 +96,15 @@ namespace DebugVisualizations
 
         // --- Logic ---
 
+        /// <summary>
+        /// Prepares the native job data required for the visualization job.
+        /// Converts managed dictionaries into <see cref="NativeHashMap{TKey,TValue}"/>.
+        /// </summary>
+        /// <param name="main">The main chunk's voxel colors.</param>
+        /// <param name="n">The north neighbor's voxel colors.</param>
+        /// <param name="s">The south neighbor's voxel colors.</param>
+        /// <param name="e">The east neighbor's voxel colors.</param>
+        /// <param name="w">The west neighbor's voxel colors.</param>
         public void PrepareJobData(Dictionary<Vector3Int, Color> main, Dictionary<Vector3Int, Color> n, Dictionary<Vector3Int, Color> s, Dictionary<Vector3Int, Color> e, Dictionary<Vector3Int, Color> w)
         {
             // Allocate all native containers for the job.
@@ -100,6 +121,9 @@ namespace DebugVisualizations
             IsMeshApplied = false; // A new job is prepared, its mesh is not yet applied.
         }
 
+        /// <summary>
+        /// Applies the generated vertices, triangles, and colors from the job output to the mesh.
+        /// </summary>
         public void ApplyMesh()
         {
             if (!_isJobDataAllocated) return;
@@ -112,12 +136,18 @@ namespace DebugVisualizations
             IsMeshApplied = true; // Mark as applied.
         }
 
+        /// <summary>
+        /// Clears the existing mesh data.
+        /// </summary>
         public void ClearMesh()
         {
             _mesh.Clear();
             IsMeshApplied = true; // An empty mesh is considered "applied".
         }
 
+        /// <summary>
+        /// Disposes all the native data allocations associated with the job.
+        /// </summary>
         public void DisposeJobData()
         {
             if (!_isJobDataAllocated) return;

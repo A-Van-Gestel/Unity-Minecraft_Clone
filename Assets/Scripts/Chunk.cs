@@ -25,7 +25,7 @@ public class Chunk
     #region Constructor
 
     /// <summary>
-    /// Creates a new Chunk Visual. 
+    /// Creates a new Chunk Visual.
     /// NOTE: Should only be called by the ChunkPool. Use World.GetChunkFromPool() instead.
     /// </summary>
     public Chunk(ChunkCoord chunkCoord)
@@ -98,7 +98,7 @@ public class Chunk
     public void Release()
     {
         // CRITICAL: Unlink the Data.
-        // If this ChunkData is modified while the Visual is in the pool, 
+        // If this ChunkData is modified while the Visual is in the pool,
         // it shouldn't try to update a disabled GameObject.
         if (ChunkData != null)
         {
@@ -134,7 +134,8 @@ public class Chunk
     #endregion
 
     /// <summary>
-    /// A new method to be called by World.cs after the chunk's data has been populated by a job.
+    /// Scans the newly populated chunk data for voxels that possess active behaviors (e.g., grass spreading)
+    /// and registers them to the active voxel list for continuous tick processing.
     /// </summary>
     public void OnDataPopulated()
     {
@@ -177,6 +178,10 @@ public class Chunk
 
     #region Block Behavior Methods
 
+    /// <summary>
+    /// Processes the block behavior for all active voxels currently registered in this chunk.
+    /// Removes voxels from the active list if they no longer meet their activation conditions.
+    /// </summary>
     public void TickUpdate()
     {
         if (_activeVoxels.Count == 0) return;
@@ -213,16 +218,28 @@ public class Chunk
         ListPool<Vector3Int>.Release(toRemove);
     }
 
+    /// <summary>
+    /// Registers a voxel as active, meaning it will be evaluated during every chunk tick.
+    /// </summary>
+    /// <param name="pos">The local position of the voxel within this chunk.</param>
     public void AddActiveVoxel(Vector3Int pos)
     {
         _activeVoxels.Add(pos);
     }
 
+    /// <summary>
+    /// Unregisters an active voxel, stopping it from being evaluated during chunk ticks.
+    /// </summary>
+    /// <param name="pos">The local position of the voxel within this chunk.</param>
     public void RemoveActiveVoxel(Vector3Int pos)
     {
         _activeVoxels.Remove(pos);
     }
 
+    /// <summary>
+    /// Retrieves the total number of active voxels currently registered for ticking in this chunk.
+    /// </summary>
+    /// <returns>The count of active voxels.</returns>
     public int GetActiveVoxelCount()
     {
         return _activeVoxels.Count;
@@ -244,6 +261,12 @@ public class Chunk
         }
     }
 
+    /// <summary>
+    /// Converts a global world position into a local voxel position strictly within the bounds of this chunk.
+    /// </summary>
+    /// <param name="pos">The global world-space position.</param>
+    /// <returns>The local 3D position of the voxel (0-15 on X and Z).</returns>
+    /// <example><c>Global Pos (17.5f, 50f, -5f)</c> in Chunk at <c>(16, 0, -16)</c> -> <c>Local Pos (1, 50, 11)</c></example>
     public Vector3Int GetVoxelPositionInChunkFromGlobalVector3(Vector3 pos)
     {
         int xCheck = Mathf.FloorToInt(pos.x);
@@ -293,7 +316,7 @@ public class Chunk
                 }
 
                 // 2. Adjust Indices: Relativize indices to start at 0 for this section
-                // The indices currently point to the 'allVerts' array. 
+                // The indices currently point to the 'allVerts' array.
                 // We need them to point to the start of the section slice.
                 int offset = -vertStart;
 
@@ -312,7 +335,11 @@ public class Chunk
         }
     }
 
-    // This is called by World.cs when a mesh job for this chunk is complete.
+    /// <summary>
+    /// Applies the completed mesh data output from the Burst Job System to the chunk's internal section renderers.
+    /// Uses the advanced native mesh API to apply data seamlessly without GC allocations.
+    /// </summary>
+    /// <param name="meshData">The structured mesh data buffer produced by the <see cref="Jobs.MeshGenerationJob"/>.</param>
     public void ApplyMeshData(MeshDataJobOutput meshData)
     {
         // 1. Run a fast Burst job on the main thread to adjust coordinate spaces from Chunk-Space to Section-Space.
@@ -372,7 +399,9 @@ public class Chunk
         World.Instance.ChunksToDraw.Enqueue(this);
     }
 
-    // CreateMesh is now just the final step of enabling the renderer after data is applied.
+    /// <summary>
+    /// Finalizes the visual creation step by optionally triggering the chunk load animation.
+    /// </summary>
     public void CreateMesh()
     {
         // The mesh is already assigned in ApplyMeshData.

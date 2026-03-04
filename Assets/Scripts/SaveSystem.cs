@@ -11,6 +11,12 @@ public static class SaveSystem
     //          All V1 worlds are automatically migrated by MigrationV1ToV2RegionRepack.
     public const int CURRENT_VERSION = 2;
 
+    /// <summary>
+    /// Resolves the absolute directory path where a world's save files are stored.
+    /// </summary>
+    /// <param name="worldName">The identifier name of the world.</param>
+    /// <param name="useVolatilePath">If true, returns a temporary editor-only path instead of the persistent user path.</param>
+    /// <returns>The absolute physical folder path.</returns>
     public static string GetSavePath(string worldName, bool useVolatilePath)
     {
         string baseFolder = useVolatilePath
@@ -20,6 +26,10 @@ public static class SaveSystem
         return Path.Combine(baseFolder, worldName);
     }
 
+    /// <summary>
+    /// Consolidates and saves all world metadata, player state, and triggers the serialization of pending chunks/modifications to disk.
+    /// </summary>
+    /// <param name="world">The active world instance to snapshot.</param>
     public static void SaveWorld(World world)
     {
         string worldName = world.worldData.worldName;
@@ -78,6 +88,12 @@ public static class SaveSystem
         Debug.Log($"Saved World Metadata to {path}");
     }
 
+    /// <summary>
+    /// Reads and deserializes the world's core metadata file (<c>level.dat</c>) without loading heavy region terrain data.
+    /// </summary>
+    /// <param name="worldName">The name of the world.</param>
+    /// <param name="useVolatilePath">If true, looks in the temporary editor path.</param>
+    /// <returns>The deserialized <see cref="WorldSaveData"/> object, or null if the file does not exist.</returns>
     public static WorldSaveData LoadWorldMetadata(string worldName, bool useVolatilePath)
     {
         string path = Path.Combine(GetSavePath(worldName, useVolatilePath), "level.dat");
@@ -95,6 +111,11 @@ public static class SaveSystem
         }
     }
 
+    /// <summary>
+    /// Applies previously loaded player state (position, inventory, capabilities) and world parameters (time of day) directly to the active game state.
+    /// </summary>
+    /// <param name="world">The active world singleton.</param>
+    /// <param name="data">The pre-loaded save data representing the state to restore.</param>
     public static void LoadWorldGameState(World world, WorldSaveData data)
     {
         if (data == null) return;
@@ -127,6 +148,8 @@ public static class SaveSystem
     /// <summary>
     /// Returns a list of metadata for all valid saves found in the save directory.
     /// </summary>
+    /// <param name="useVolatilePath">If true, targets the temporary editor-only path.</param>
+    /// <returns>A list containing the <see cref="WorldSaveData"/> for all found worlds.</returns>
     public static List<WorldSaveData> GetAvailableWorlds(bool useVolatilePath)
     {
         string baseFolder = useVolatilePath
@@ -166,6 +189,11 @@ public static class SaveSystem
         return worlds;
     }
 
+    /// <summary>
+    /// Permanently deletes a world's save directory and all associated region/metadata files.
+    /// </summary>
+    /// <param name="worldName">The name of the world to delete.</param>
+    /// <param name="useVolatilePath">If true, targets the temporary editor-only path.</param>
     public static void DeleteWorld(string worldName, bool useVolatilePath)
     {
         string path = GetSavePath(worldName, useVolatilePath);

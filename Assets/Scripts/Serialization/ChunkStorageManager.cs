@@ -17,6 +17,9 @@ namespace Serialization
         // Concurrent Dictionary with Lazy to ensure thread-safe, single initialization of RegionFiles
         private readonly ConcurrentDictionary<Vector2Int, Lazy<RegionFile>> _regions = new ConcurrentDictionary<Vector2Int, Lazy<RegionFile>>();
 
+        /// <summary>
+        /// Initializes a new instance of the ChunkStorageManager, setting up region file I/O for the specified world.
+        /// </summary>
         /// <param name="worldName">Name of the world being loaded or created.</param>
         /// <param name="useVolatilePath">True in Editor mode to use a temp save directory.</param>
         /// <param name="saveVersion">
@@ -41,7 +44,12 @@ namespace Serialization
         // Public API
         // -------------------------------------------------------------------------
 
-        /// <summary>Returns null if the chunk is not found on disk.</summary>
+        /// <summary>
+        /// Asynchronously loads and deserializes a chunk from its corresponding region file into memory.
+        /// I/O operations and decompression are kept on background threads to prevent frame drops.
+        /// </summary>
+        /// <param name="chunkVoxelPos">The voxel-space world origin of the chunk.</param>
+        /// <returns>The deserialized <see cref="ChunkData"/>, or null if the chunk does not exist on disk.</returns>
         public async Task<ChunkData> LoadChunkAsync(Vector2Int chunkVoxelPos)
         {
             // Run I/O on background thread
@@ -70,7 +78,11 @@ namespace Serialization
             });
         }
 
-        /// <summary>Synchronous save. Blocks the calling thread until the write completes.</summary>
+        /// <summary>
+        /// Synchronously serializes, compresses, and saves a chunk to its region file.
+        /// This directly blocks the calling thread, rendering it suitable primarily for application shutdown logic.
+        /// </summary>
+        /// <param name="data">The chunk data object to persist.</param>
         public void SaveChunk(ChunkData data)
         {
             CompressionAlgorithm algorithm = World.Instance.settings.saveCompression;
@@ -107,6 +119,9 @@ namespace Serialization
         /// Async save. Snapshots chunk data on the calling thread, then serializes and writes on a ThreadPool thread.
         /// Includes CancellationToken support to safely abort on game quit.
         /// </summary>
+        /// <param name="data">The chunk data to save.</param>
+        /// <param name="cancellationToken">An optional cancellation token to abort the task.</param>
+        /// <returns>A task representing the asynchronous save operation.</returns>
         public async Task SaveChunkAsync(ChunkData data, CancellationToken cancellationToken = default)
         {
             // 1. Get Preferred Algorithm from Global Settings
@@ -155,6 +170,10 @@ namespace Serialization
             }
         }
 
+        /// <summary>
+        /// Safely disposes all open region files, forcing their physical file streams to flush pending I/O bytes to the drive.
+        /// Call this only when tearing down the storage manager.
+        /// </summary>
         public void Dispose()
         {
             Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");

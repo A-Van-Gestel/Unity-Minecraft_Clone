@@ -1217,6 +1217,11 @@ public class World : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Explicitly queues mesh rebuild jobs for the four cardinal neighbors of a specified chunk.
+    /// Typically called when a central chunk stabilizes its lighting, changing the boundary appearance of its neighbors.
+    /// </summary>
+    /// <param name="chunkCoord">The chunk coordinate of the central chunk.</param>
     public void RequestNeighborMeshRebuilds(ChunkCoord chunkCoord)
     {
         // Queue rebuilds for all 4 direct neighbors
@@ -1312,6 +1317,12 @@ public class World : MonoBehaviour
     }
 
 
+    /// <summary>
+    /// Verifies that all four cardinal neighbors of a chunk exist and have completely finished initial terrain generation.
+    /// Out-of-bounds chunks (beyond world limits) are treated as intrinsically "ready".
+    /// </summary>
+    /// <param name="coord">The coordinate of the central chunk.</param>
+    /// <returns>True if all valid neighbors are fully populated with voxel data.</returns>
     public bool AreNeighborsDataReady(ChunkCoord coord)
     {
         // Check all 4 horizontal neighbors
@@ -1338,8 +1349,14 @@ public class World : MonoBehaviour
         return true;
     }
 
-    // A global SetLight method that ONLY sets the light value
-    // This is used by the main thread when processing cross-chunk modifications.
+    /// <summary>
+    /// Safely writes an updated light value to a specific voxel's data without triggering the cascading
+    /// flood-fill updates normally caused by player modifications.
+    /// This is strictly used by background jobs to apply cross-chunk propagation results.
+    /// </summary>
+    /// <param name="globalPos">The absolute world position of the target voxel.</param>
+    /// <param name="lightValue">The newly calculated light intensity (0-15).</param>
+    /// <param name="channel">Which light channel to apply this to (Sunlight or Blocklight).</param>
     public void SetLight(Vector3 globalPos, byte lightValue, LightChannel channel)
     {
         ChunkData chunkData = worldData.RequestChunk(worldData.GetChunkCoordFor(globalPos), false);
@@ -1556,6 +1573,11 @@ public class World : MonoBehaviour
         return ChunkCoord.FromWorldPosition(worldPos);
     }
 
+    /// <summary>
+    /// Retrieves the active chunk object at the specified coordinate.
+    /// </summary>
+    /// <param name="chunkCoord">The chunk coordinate to look up.</param>
+    /// <returns>The Chunk object if found and in bounds; otherwise, null.</returns>
     [CanBeNull]
     public Chunk GetChunkFromChunkCoord(ChunkCoord chunkCoord)
     {
@@ -1568,6 +1590,11 @@ public class World : MonoBehaviour
         return _chunkMap.GetValueOrDefault(chunkCoord);
     }
 
+    /// <summary>
+    /// Retrieves the active chunk object containing the specified world position.
+    /// </summary>
+    /// <param name="pos">The world-space position.</param>
+    /// <returns>The Chunk object if found and in bounds; otherwise, null.</returns>
     [CanBeNull]
     public Chunk GetChunkFromVector3(Vector3 pos)
     {
@@ -2091,13 +2118,11 @@ public class World : MonoBehaviour
     #endregion
 
     /// <summary>
-    /// Finds the Y-coordinate of the highest solid voxel at a given X/Z position.
-    /// It fist tries to get it from the actual chunk data, this respects voxel modifications (like trees),
-    /// if that fails, it will use the expensive world generation code, this however doesn't respect voxel modifications.
-    /// Should even that fail, it will return the world height.
+    /// Finds the absolute world-space Y-coordinate of the highest solid voxel at a given X/Z position.
+    /// <para>Priority: Chunk Data (respects structures) -> World Generation (expensive fallback) -> World Height (safe fallback).</para>
     /// </summary>
-    /// <param name="worldPos">The world position to check.</param>
-    /// <returns>A Vector3 with the original X/Z and the new Y of the highest solid block.</returns>
+    /// <param name="worldPos">The world-space position to check.</param>
+    /// <returns>A Vector3Int containing the highest solid block's coordinates.</returns>
     public Vector3Int GetHighestVoxel(Vector3Int worldPos)
     {
         const int yMax = VoxelData.ChunkHeight - 1;
@@ -2157,26 +2182,42 @@ public class World : MonoBehaviour
         return worldHeight;
     }
 
-    /// Returns true when voxel is solid.
+    /// <summary>
+    /// Determines if a voxel at the given world position is solid.
+    /// </summary>
+    /// <param name="worldPos">The world-space position.</param>
+    /// <returns>True if the voxel is solid; otherwise, false.</returns>
     public bool CheckForVoxel(Vector3 worldPos)
     {
         VoxelState? voxel = worldData.GetVoxelState(worldPos);
         return voxel.HasValue && blockDatabase.blockTypes[voxel.Value.id].isSolid;
     }
 
-    /// Returns true when voxel is solid & not water.
+    /// <summary>
+    /// Determines if a voxel at the given world position should cause physical collision (solid and not a fluid).
+    /// </summary>
+    /// <param name="pos">The world-space position.</param>
+    /// <returns>True if the voxel is solid and not water; otherwise, false.</returns>
     public bool CheckForCollision(Vector3 pos)
     {
         VoxelState? voxel = worldData.GetVoxelState(pos);
         return voxel.HasValue && voxel.Value.Properties.isSolid && voxel.Value.Properties.fluidType == FluidType.None;
     }
 
-    /// Returns the voxel state at the given world position, or null if out of bounds.
+    /// <summary>
+    /// Retrieves the full state of a voxel at a given world position.
+    /// </summary>
+    /// <param name="worldPos">The world-space position.</param>
+    /// <returns>The VoxelState if the position is within world bounds; otherwise, null.</returns>
     public VoxelState? GetVoxelState(Vector3 worldPos)
     {
         return worldData.GetVoxelState(worldPos);
     }
 
+    /// <summary>
+    /// Gets or sets whether the game is currently in a UI menu.
+    /// Manages cursor locking and UI window visibility.
+    /// </summary>
     public bool inUI
     {
         // ReSharper disable once ArrangeAccessorOwnerBody
@@ -2195,14 +2236,23 @@ public class World : MonoBehaviour
         }
     }
 
-    /// Returns true when chunk is in world, otherwise false.
+    /// <summary>
+    /// Checks if the specified chunk coordinate is within the permitted world boundaries.
+    /// </summary>
+    /// <param name="chunkCoord">The chunk coordinate.</param>
+    /// <returns>True if the chunk is in the world; otherwise, false.</returns>
     private static bool IsChunkInWorld(ChunkCoord chunkCoord)
     {
         return chunkCoord.X is >= 0 and < VoxelData.WorldSizeInChunks &&
                chunkCoord.Z is >= 0 and < VoxelData.WorldSizeInChunks;
     }
 
-    /// Returns true when chunk is in world, otherwise false.
+    /// <summary>
+    /// Checks if the specified X/Z coordinates are within the permitted world boundaries.
+    /// </summary>
+    /// <param name="x">The X coordinate.</param>
+    /// <param name="z">The Z coordinate.</param>
+    /// <returns>True if in world; otherwise, false.</returns>
     private static bool IsChunkInWorld(int x, int z)
     {
         return x is >= 0 and < VoxelData.WorldSizeInChunks &&
@@ -2211,6 +2261,9 @@ public class World : MonoBehaviour
 
     #region Public Interface Methods
 
+    /// <summary>
+    /// Toggles the debug screen between Off, FPS Only, and Full Debug modes.
+    /// </summary>
     public void ToggleDebugScreen()
     {
         if (!debugScreen.activeSelf)
@@ -2266,6 +2319,10 @@ public class World : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Saves all modified chunk data and global world metadata to disk.
+    /// This is an asynchronous operation.
+    /// </summary>
     public void SaveWorldData()
     {
         // For manual/auto saves, use Async to prevent freezing the game
@@ -2275,6 +2332,9 @@ public class World : MonoBehaviour
         Debug.Log("[Manual Save] World data saved successfully.");
     }
 
+    /// <summary>
+    /// Cycles through the available voxel debug visualization modes.
+    /// </summary>
     public void CycleVisualizationMode()
     {
         int currentModeIndex = (int)visualizationMode;
@@ -2294,6 +2354,10 @@ public class World : MonoBehaviour
 
     #region Debug Information Methods
 
+    /// <summary>
+    /// Gets the number of chunks currently waiting for a mesh rebuild.
+    /// </summary>
+    /// <returns>The mesh build queue count.</returns>
     public int GetChunksToBuildMeshCount()
     {
         return _chunksToBuildMesh.Count;
@@ -2308,6 +2372,10 @@ public class World : MonoBehaviour
         return _modifications.Count;
     }
 
+    /// <summary>
+    /// Calculates the sum of all active voxels across all currently loaded chunks.
+    /// </summary>
+    /// <returns>Total active voxel count.</returns>
     public int GetTotalActiveVoxelsInWorld()
     {
         int total = 0;
@@ -2360,15 +2428,24 @@ public class Settings
     // --- SAVE SYSTEM ---
     [Header("Save System")]
 #if UNITY_EDITOR
-    [Tooltip(
-        "If true: Chunks are never unloaded and saving/loading is disabled. Use this to verify generation without disk I/O side effects.\nIf false: Standard behavior (Chunk Unloading + Disk Persistence).")]
+    /// <summary>
+    /// If true, chunks are never unloaded and saving/loading is disabled.
+    /// Useful for verifying generation without disk I/O side effects.
+    /// </summary>
+    [Tooltip("If true: Chunks are never unloaded and saving/loading is disabled. Use this to verify generation without disk I/O side effects.\nIf false: Standard behavior (Chunk Unloading + Disk Persistence).")]
     public bool keepChunksInMemory = false;
 #endif
 
-    [Tooltip(
-        "If true and running in Editor, saves will be stored in a temporary folder to keep production saves clean.")]
+    /// <summary>
+    /// If true, saves are stored in a temporary folder in the Editor to keep production saves clean.
+    /// </summary>
+    [Tooltip("If true and running in Editor, saves will be stored in a temporary folder to keep production saves clean.")]
     public bool enableVolatileSaveData = true;
 
+    /// <summary>
+    /// The compression algorithm used for saving chunks.
+    /// LZ4 is recommended for a balance of speed and size.
+    /// </summary>
     [Tooltip("The compression algorithm used for saving chunks. 'None' is faster but uses more disk space.")]
     public CompressionAlgorithm saveCompression = CompressionAlgorithm.LZ4;
 
@@ -2393,6 +2470,9 @@ public class Settings
     // --- PERFORMANCE ---
     [Header("Performance")]
     // --- CHUNK LOADING ---
+    /// <summary>
+    /// The radius of chunks (in chunks) around the player that will be visible and rendered.
+    /// </summary>
     [Tooltip("The radius of chunks around the player that will be visible and rendered.")]
     public int viewDistance = 5;
 
@@ -2410,22 +2490,30 @@ public class Settings
     public int loadDistance => viewDistance + DATA_LOAD_BUFFER;
 
     /// <summary>
-    /// A cap on the load distance specifically for the initial world startup.
-    /// This prevents extremely long load times if the player has a very high viewDistance set,
-    /// ensuring a responsive start. The world will continue to load to the full loadDistance asynchronously after startup.
+    /// Caps the load distance for the initial startup to prevent long freezes.
+    /// The world will continue to load to the full loadDistance asynchronously after startup.
     /// </summary>
     [Tooltip("Caps the load distance for the initial startup to prevent long freezes. Set to a high value to disable.")]
     public int maxInitialLoadRadius = 10;
 
     // --- LIGHTING ---
+    /// <summary>
+    /// The maximum number of lighting jobs that can be scheduled in a single frame.
+    /// </summary>
     [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame.")]
     public int maxLightJobsPerFrame = 32;
 
+    /// <summary>
+    /// If true, the lighting system is enabled.
+    /// </summary>
     [InitializationField]
     [Tooltip("Enable the lighting system.")]
     public bool enableLighting = true;
 
     // --- MESHING ---
+    /// <summary>
+    /// The maximum number of chunks that can be meshed (rebuilt) in a single frame.
+    /// </summary>
     [Tooltip("The maximum number of chunks that can be meshed (rebuilt) in a single frame.")]
     public int maxMeshRebuildsPerFrame = 10;
 

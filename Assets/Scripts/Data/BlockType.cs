@@ -37,7 +37,7 @@ namespace Data
         [Header("Fluid Properties")]
         [Tooltip("The type of fluid this block represents. 'None' for solid blocks.")]
         public FluidType fluidType = FluidType.None;
-        
+
         [Tooltip("The ID passed to the liquid shader (e.g., 0 for Water, 1 for Lava). This controls the visual style.")]
         [Range(0, 16)] // 0 = Water, 1 = Lava, range can be expanded up to 256 (byte)
         public byte fluidShaderID = 0;
@@ -62,11 +62,11 @@ namespace Data
         [Tooltip("How many light levels will be emitted by this block.")]
         [Range(0, 15)]
         public byte lightEmission = 0;
-        
+
         [Header("Placement Rules")]
         [Tooltip("Apply a preset for the tags below. This is a workflow helper and doesn't affect the game directly. After applying, the values are copied to the fields below.")]
         public BlockTagPreset tagPreset;
-        
+
         [Tooltip("What tags does this block have? A block can have multiple tags.")]
         public BlockTags tags;
 
@@ -81,18 +81,28 @@ namespace Data
         [Header("Texture Values")]
         [Tooltip("Texture ID for the Negative Z face.")]
         public int backFaceTexture;
+
         [Tooltip("Texture ID for the Positive Z face.")]
         public int frontFaceTexture;
+
         [Tooltip("Texture ID for the Positive Y face.")]
         public int topFaceTexture;
+
         [Tooltip("Texture ID for the Negative Y face.")]
         public int bottomFaceTexture;
+
         [Tooltip("Texture ID for the Negative X face.")]
         public int leftFaceTexture;
+
         [Tooltip("Texture ID for the Positive X face.")]
         public int rightFaceTexture;
 
-        // Back, Front, Top, Bottom, Left, Right
+        /// <summary>
+        /// Gets the texture atlas ID for a specific face of this block type.
+        /// </summary>
+        /// <param name="faceIndex">The index of the face (0=Back, 1=Front, 2=Top, 3=Bottom, 4=Left, 5=Right).</param>
+        /// <returns>The integer ID linking to the texture mapping atlas.</returns>
+        /// <example><c>GetTextureID(2)</c> -> Returns the <c>topFaceTexture</c> ID.</example>
         public int GetTextureID(int faceIndex)
         {
             switch (faceIndex)
