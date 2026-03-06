@@ -22,6 +22,9 @@ public class Chunk
     private bool _isActive;
     private HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
 
+    // Cached flag to avoid a GetComponent call on every pool activation
+    private bool _hasLoadAnimation;
+
     #region Constructor
 
     /// <summary>
@@ -79,6 +82,10 @@ public class Chunk
         if (ChunkData != null)
         {
             ChunkData.Chunk = this;
+            if (ChunkData.IsPopulated)
+            {
+                OnDataPopulated();
+            }
         }
 
         // Reset Visuals (clears mesh but keeps memory allocated)
@@ -442,8 +449,11 @@ public class Chunk
 
     private void PlayChunkLoadAnimation()
     {
-        if (World.Instance.settings.enableChunkLoadAnimations && ChunkGameObject.GetComponent<ChunkLoadAnimation>() == null)
+        if (World.Instance.settings.enableChunkLoadAnimations && !_hasLoadAnimation)
+        {
             ChunkGameObject.AddComponent<ChunkLoadAnimation>();
+            _hasLoadAnimation = true;
+        }
     }
 
     #endregion

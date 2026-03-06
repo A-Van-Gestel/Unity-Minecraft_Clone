@@ -167,8 +167,7 @@ namespace Data
 
         public override int GetHashCode()
         {
-            // Multiply x & y by different constants to differentiate (12,13) from (13,12).
-            return 31 * X + 17 * Z;
+            return HashCode.Combine(X, Z);
         }
 
         public override bool Equals(object obj)

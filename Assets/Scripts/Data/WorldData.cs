@@ -157,7 +157,10 @@ namespace Data
         public Vector3Int GetLocalVoxelPositionInChunk(Vector3 worldPos)
         {
             Vector2Int chunkVoxelPos = GetChunkCoordFor(worldPos);
-            return new Vector3Int((int)(worldPos.x - chunkVoxelPos.x), (int)worldPos.y, (int)(worldPos.z - chunkVoxelPos.y));
+            return new Vector3Int(
+                Mathf.FloorToInt(worldPos.x - chunkVoxelPos.x),
+                Mathf.FloorToInt(worldPos.y),
+                Mathf.FloorToInt(worldPos.z - chunkVoxelPos.y));
         }
 
         #endregion

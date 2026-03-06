@@ -562,11 +562,24 @@ public class WorldJobManager
                         {
                             byte currentSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
 
-                            // If the block already has full sunlight (15), and this modification would decrease it, ignore the modification.
-                            // This prevents a job using stale data from overwriting a correct value set by another job.
+                            // Guard: Only skip decreases for voxels with genuine sky access (above heightmap).
+                            // Below the heightmap, sunlight=15 may be stale from initial column fill and needs correction from cross-chunk shadow data.
                             if (currentSunlight == 15 && mod.LightLevel < 15)
                             {
-                                continue; // Skip this modification
+                                int hmIdx = localVoxelPos.x + VoxelData.ChunkWidth * localVoxelPos.z;
+                                byte heightmapY = neighborChunk.heightMap[hmIdx];
+                                if (localVoxelPos.y > heightmapY)
+                                {
+                                    // Voxel is above terrain — sunlight=15 is correct, skip.
+                                    if (_world.settings.enableDiagnosticLogs)
+                                    {
+                                        Debug.LogWarning($"[LIGHTING DEBUG] Skipped sunlight decrease at {mod.GlobalPosition} " +
+                                                         $"in chunk {neighborChunkVoxelPos}: current={currentSunlight}, incoming={mod.LightLevel}. " +
+                                                         $"Source job: {jobEntry.Key} (above heightmap={heightmapY})");
+                                    }
+                                    continue;
+                                }
+                                // Below or at heightmap — allow the decrease through.
                             }
 
                             oldLightLevel = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);

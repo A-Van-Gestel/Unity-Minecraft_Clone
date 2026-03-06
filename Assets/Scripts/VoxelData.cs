@@ -90,6 +90,19 @@ public static class VoxelData
         2, // Top Face
     };
 
+    /// <summary>
+    /// The four horizontal diagonal offsets (NE, NW, SE, SW).
+    /// These are NOT indices into FaceChecks — they are standalone Vector3Int offsets.
+    /// Used for stability checks that must account for all 8 neighbors, e.g. mesh or lighting readiness.
+    /// </summary>
+    public static readonly Vector3Int[] DiagonalNeighborOffsets = new Vector3Int[4]
+    {
+        new Vector3Int( 1, 0,  1), // Front-Right (NE)
+        new Vector3Int(-1, 0,  1), // Front-Left  (NW)
+        new Vector3Int( 1, 0, -1), // Back-Right  (SE)
+        new Vector3Int(-1, 0, -1), // Back-Left   (SW)
+    };
+
     // Should be accessed like this: VoxelTris[face * 4 + vert].
     public static readonly int[] VoxelTris = new int[24]
     {

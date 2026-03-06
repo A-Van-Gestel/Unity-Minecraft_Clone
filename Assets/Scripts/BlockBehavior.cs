@@ -126,9 +126,16 @@ public static class BlockBehavior
                 if (neighborState.Value.Properties.fluidType == props.fluidType && neighborState.Value.FluidLevel > voxel.FluidLevel + 1) return true;
             }
 
-            // Reason 5: Check if any horizontal neighbor is a valid source (a place to flow FROM)
-            // A flowing block (level > 0) must remain active if it is connected to a source block or another fluid block with a lower fluid level number.
-            // This ensures it will drain away if the source is removed.
+            // Reason 5: Stay active if fed vertically (fluid directly above keeps this falling block alive)
+            // or fed horizontally (a neighbor with a lower level value, i.e. closer to source).
+            // This is the drain-check: if all feeder sources are gone, the block will stop being active
+            // during the next tick and Behave() will replace it with air.
+            VoxelState? aboveState = chunkData.GetState(localPos + Vector3Int.up);
+            if (aboveState.HasValue && aboveState.Value.Properties.fluidType == props.fluidType)
+            {
+                return true; // Fed from above (part of a waterfall column).
+            }
+
             for (int i = 0; i < 4; i++)
             {
                 Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
@@ -300,24 +307,32 @@ public static class BlockBehavior
 
         // --- Rule 1: Flow Downwards ---
         // Fluids always try to flow down into empty space first.
+        // A falling block is NON-SOURCE (FluidLevel=1) so that if the feeder above is removed,
+        // the column drains away. Source blocks (FluidLevel=0) are infinite and only placed by
+        // the player or world generation.
         Vector3Int belowPos = localPos + Vector3Int.down;
         VoxelState? belowState = chunkData.GetState(belowPos);
 
-        if (belowState.HasValue && !belowState.Value.Properties.isSolid)
+        // Flow into air or any non-solid, non-same-fluid block below.
+        bool belowIsSameFluid = belowState.HasValue && belowState.Value.Properties.fluidType == props.fluidType;
+        if (belowState.HasValue && !belowState.Value.Properties.isSolid && !belowIsSameFluid)
         {
-            // Replace the block below with a new source block of this fluid.
-            // This creates waterfalls and ensures fluid columns fill up from the bottom.
+            // Place a *flowing* block (level=1) not a source. This makes waterfalls drain when
+            // the source is removed (Minecraft-style), because FluidLevel>0 blocks are not self-sustaining.
             Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
-            s_mods.Add(new VoxelMod(globalBelowPos, blockId: currentId)); // Place a new source block below
+            s_mods.Add(new VoxelMod(globalBelowPos, blockId: currentId)
+            {
+                FluidLevel = 1, // Flowing (non-source)
+            });
 
-            // If the current block was a flowing block (not a source), it has now flowed away
-            // and should be replaced with air. Source blocks are infinite and remain.
+            // If the current block was itself a flowing block (not a source), it has now
+            // fallen away — replace it with air. Source blocks remain (they are infinite).
             if (currentLevel > 0)
             {
                 s_mods.Add(new VoxelMod(globalPos, blockId: 0)); // Replace self with air
             }
 
-            return; // Fluid has moved down, no further action this tick.
+            return; // Fluid has moved down, no further horizontal action this tick.
         }
 
         // --- Rule 2: Flow Horizontally ---
@@ -343,7 +358,6 @@ public static class BlockBehavior
                     {
                         FluidLevel = newLevel,
                     };
-                    mod.FluidLevel = newLevel; // Set fluid level
                     s_mods.Add(mod);
                 }
             }

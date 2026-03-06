@@ -1,4 +1,5 @@
 using Serialization;
+using UnityEditor;
 using UnityEngine;
 
 [RequireComponent(typeof(PlayerInteraction))]
@@ -81,7 +82,7 @@ public class Player : MonoBehaviour
     private void Start()
     {
         PlayerInteraction = GetComponent<PlayerInteraction>();
-        _playerCamera = GameObject.Find("Main Camera").transform;
+        _playerCamera = Camera.main?.transform;
         _world = World.Instance;
 
         // Scale playerBody to match the width and height settings.
@@ -98,6 +99,10 @@ public class Player : MonoBehaviour
 
     private void FixedUpdate()
     {
+        // Prevent gravity / movement while the world is still loading to avoid
+        // the player falling through not-yet-meshed terrain. (FIX-I)
+        if (!_world.IsWorldLoaded) return;
+
         if (!_world.inUI)
         {
             CalculateVelocity();
@@ -224,7 +229,13 @@ public class Player : MonoBehaviour
     {
         // CLOSE GAME ON ESC BUTTON PRESS
         if (Input.GetKeyDown(KeyCode.Escape))
+        {
+#if UNITY_EDITOR
+            EditorApplication.isPlaying = false;
+#else
             Application.Quit();
+#endif
+        }
 
         // MOVEMENT & CAMERA
         _horizontal = Input.GetAxis("Horizontal");
@@ -397,7 +408,7 @@ public class Player : MonoBehaviour
 
         // Apply Pitch to Camera (X axis)
         // Ensure camera ref is valid (Load can happen before Start if called manually)
-        if (_playerCamera == null) _playerCamera = GameObject.Find("Main Camera").transform;
+        if (_playerCamera == null) _playerCamera = Camera.main?.transform;
 
         if (_playerCamera != null)
         {

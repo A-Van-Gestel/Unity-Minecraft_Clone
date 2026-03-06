@@ -145,6 +145,11 @@ public class World : MonoBehaviour
     /// </summary>
     private bool _isWorldLoaded = false;
 
+    /// <summary>
+    /// Public accessor for world load state. True once <see cref="StartWorld"/> has fully completed.
+    /// </summary>
+    public bool IsWorldLoaded => _isWorldLoaded;
+
     // --- Cancellation Token for Async Saves ---
     private CancellationTokenSource _shutdownTokenSource;
 
@@ -170,10 +175,10 @@ public class World : MonoBehaviour
 
             // Initialize Pool Manager
             ChunkPool = new ChunkPoolManager(transform);
-        }
 
-        // --- Prepare Job-Safe Data ---
-        PrepareJobData();
+            // --- Prepare Job-Safe Data ---
+            PrepareJobData();
+        }
     }
 
     private void OnEnable()
@@ -873,12 +878,26 @@ public class World : MonoBehaviour
     {
         while (true)
         {
-            foreach (ChunkCoord chunkCoord in _activeChunks)
+            // FIX: Snapshot _activeChunks to prevent InvalidOperationException if
+            // CheckViewDistance modifies the set between coroutine yields.
+            using var enumerator = _activeChunks.GetEnumerator();
+            var snapshot = ListPool<ChunkCoord>.Get();
+            try
             {
-                if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
+                while (enumerator.MoveNext())
+                    snapshot.Add(enumerator.Current);
+
+                foreach (ChunkCoord chunkCoord in snapshot)
                 {
-                    chunk.TickUpdate();
+                    if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
+                    {
+                        chunk.TickUpdate();
+                    }
                 }
+            }
+            finally
+            {
+                ListPool<ChunkCoord>.Release(snapshot);
             }
 
             yield return new WaitForSeconds(VoxelData.TickLength);
@@ -1312,6 +1331,26 @@ public class World : MonoBehaviour
             }
         }
 
+        // Also check the 4 diagonal neighbors. Both mesh and lighting jobs copy data
+        // from all 8 neighbors (including diagonals), so stale diagonal lighting data
+        // can cause seam artifacts at chunk corners.
+        foreach (Vector3Int diagOffset in VoxelData.DiagonalNeighborOffsets)
+        {
+            ChunkCoord neighborCoord = chunkCoord.Neighbor(diagOffset.x, diagOffset.z);
+
+            if (!IsChunkInWorld(neighborCoord)) continue;
+
+            if (JobManager.generationJobs.ContainsKey(neighborCoord)) return false;
+            if (JobManager.lightingJobs.ContainsKey(neighborCoord)) return false;
+
+            Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
+            if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData diagData) && diagData.IsPopulated)
+            {
+                if (diagData.HasLightChangesToProcess || diagData.NeedsInitialLighting) return false;
+                if (diagData.IsAwaitingMainThreadProcess) return false;
+            }
+        }
+
         // If we get here, all neighbors are stable.
         return true;
     }
@@ -1658,13 +1697,6 @@ public class World : MonoBehaviour
             {
                 // Skip unload - chunk is still being processed
                 continue;
-            }
-
-            // --- DIAGNOSTIC A: Check for Race Condition ---
-            // If pending process flag is true, we are about to save incomplete data.
-            if (data.IsAwaitingMainThreadProcess)
-            {
-                Debug.LogError($"[LIGHTING CRITICAL] Unloading Chunk {chunkCoord} while IsAwaitingMainThreadProcess is TRUE! Lighting data will be lost.");
             }
 
             // 1. Persist Orphaned Lighting Queue
@@ -2547,4 +2579,7 @@ public class Settings
     [Header("Debug")]
     [Tooltip("Visualize chunk borders in the scene view.")]
     public bool showChunkBorders = false;
+
+    [Tooltip("Enable detailed diagnostic logs for debugging fluid, lighting, and chunk issues. Warning: may impact performance.")]
+    public bool enableDiagnosticLogs = false;
 }

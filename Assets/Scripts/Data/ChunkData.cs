@@ -356,7 +356,8 @@ namespace Data
                 {
                     uint checkPacked = GetVoxel(localPos.x, y, localPos.z);
                     ushort checkId = BurstVoxelDataBitMapping.GetId(checkPacked);
-                    if (World.Instance.blockTypes[checkId].IsOpaque)
+                    // FIX: Was IsOpaque — changed to IsLightObstructing for consistency with Case 1 (line 346).
+                    if (World.Instance.blockTypes[checkId].IsLightObstructing)
                     {
                         newHeight = (byte)y;
                         break; // Found the new highest block, stop scanning.
