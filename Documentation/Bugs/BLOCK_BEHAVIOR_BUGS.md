@@ -38,14 +38,6 @@ The condition for allowing horizontal fluid flow evaluates to `true` if the neig
 
 ---
 
-## 04. Fluid downward flow always places a source block, creating infinite water
+## ~~04. Fluid downward flow always places a source block, creating infinite water~~ ✅ FIXED
 
-**Severity:** Bug  
-**Files:** `BlockBehavior.cs` — `HandleFluidFlow` (lines 300–321)
-
-> [!WARNING]
-> **SAVE COMPATIBILITY:** Existing waterfalls in saved worlds are made of source blocks and would remain unchanged. New fluid flows after a fix would create non-source "flowing" blocks instead, producing an inconsistency between old and new waterfalls in the same world.
-
-When a fluid flows downward, it places a **source block** (`FluidLevel = 0`) below, making every block in a waterfall column an independent infinite source. Removing the top source does not stop the fall. In Minecraft, falling water creates disposable "flowing" blocks.
-
-**Root cause:** The `VoxelMod` for downward flow never sets `FluidLevel`, so it defaults to `0` (source).
+> Moved to `_FIXED_BUGS.md` → **Fluid #02**.

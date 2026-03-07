@@ -411,9 +411,7 @@ public class World : MonoBehaviour
         // If we loaded a save, the player position is already set by LoadWorldGameState.
         // If not, we use the default spawn logic.
         bool wasSaveLoaded = !isNewGame && settings.EnablePersistence;
-        Vector3
-            savedPlayerPosition =
-                new Vector3(); // TODO: Prevent player position updates while the world is loading (eg: player falling trough world because chunks aren't loaded yet)
+        Vector3 savedPlayerPosition = new Vector3();
         if (!wasSaveLoaded)
         {
             // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
