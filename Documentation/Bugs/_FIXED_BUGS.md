@@ -93,20 +93,21 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 ### ~~02. Downward flow creates infinite source blocks (waterfalls don't drain)~~
 
 **Severity:** Bug  
-**Files:** `BlockBehavior.cs` — `HandleFluidFlow`, `Active`  
+**Files:** `BlockBehavior.cs` — `HandleFluidFlow`, `Active`; `FluidDataGenerator.cs`; `FluidMeshData.cs`  
 **Fixed:** March 2026
 
-**Symptom:** Placing a single water source block at height Y and then removing it left the entire waterfall column permanently, because every block in the column had become an independent infinite source.
+**Symptom:** Placing a single water source block at height Y and then removing it left the entire waterfall column permanently, because every block in the column had become an independent infinite source. Additionally, even after an initial fix (FluidLevel=1), falling water spread ~60 blocks on landing because level 1 still allowed 6 levels of horizontal spread.
 
-**Root Cause:** `HandleFluidFlow` Rule 1 called `new VoxelMod(..., blockId: currentId)` without setting `FluidLevel`, which defaulted to `0` (source). Every block the waterfall placed was therefore a self-sustaining infinite source, identical to a player-placed source block.
+**Root Cause:** `HandleFluidFlow` Rule 1 created downward flow without properly encoding the upstream level. In Minecraft Beta 1.3.2, falling fluid uses metadata `>= 8` (the "falling flag"), with the lower 3 bits carrying the effective upstream level. When a falling block lands, horizontal spread starts from `effectiveLevel + 1`, not from level 1.
 
-**Fix:**
-1. **`HandleFluidFlow` Rule 1:** The `VoxelMod` placed downward now explicitly sets `FluidLevel = 1` (a transient flowing block). Only the player or world generation place real source blocks (`FluidLevel = 0`).
-2. **`Active()` Reason 5:** The activity check now also returns `true` if there is a same-fluid block directly **above** the current block (i.e., it is part of a waterfall column being fed from above). This ensures the column stays active and drains correctly when the feeder source is removed.
+**Fix (Minecraft-style falling metadata):**
 
-**Behavior after fix (matching Minecraft):**
-- Placing a water source → waterfall flows down using FluidLevel=1 blocks → horizontal spread at floor level.
-- Removing the source → waterfall column drains upward tick by tick, and horizontal pools recede.
+1. **Falling flag encoding:** Added `FALLING_FLAG = 8`, `IsFalling()`, `GetEffectiveLevel()`, `MakeFalling()` helpers to `BlockBehavior.cs`.
+2. **Step A (Gravity):** Downward flow now places `MakeFalling(effectiveLevel)` — e.g., a source (level 0) falling becomes FluidLevel 8, a level-2 flow falling becomes FluidLevel 10.
+3. **Step B (Settle):** A falling block that lands on solid ground converts to its non-falling effective level before spreading horizontally.
+4. **Step C (Horizontal spread):** Spread starts from `effectiveLevel + 1`, not from the raw FluidLevel.
+5. **`Active()` updated** with 6 reasons including falling-aware drain checks.
+6. **`FluidDataGenerator.cs`:** Template indices 8–15 now generate as `1.0f` (full block height for falling columns). Added validation that `flowLevels <= 8`.
 
 ---
 

@@ -39,3 +39,12 @@ Fluid voxels do not currently affect the player:
 **Files:** `BlockBehavior.cs` — `HandleFluidFlow` (lines 334–346)
 
 Water and lava currently do not interact with each other. In Minecraft, water touching lava creates cobblestone or obsidian. This is intentionally unimplemented for now — the collision logic is silently skipped (water simply won't flow into lava), which is safe. Implementing proper fluid interaction requires a new interaction table and is deferred as a feature, not a bug fix.
+
+---
+
+## 05. 7x7 Horizontal Spreading Cube in Mid-Air
+
+**Severity:** Gameplay / Physics bug  
+**Files:** `BlockBehavior.cs` — `HandleFluidFlow` Step 4
+
+When a source block is placed on top of an elevated surface (like a tree), the fluid flows outwards and sometimes incorrectly spawns horizontal spreading blocks in mid-air (forming a floating 7x7 water grid) instead of accurately checking if those spread locations have ground support below them. The `isSupportedBelow` check during Step 4 needs further refinement to distinguish between valid adjacent support vs floating.

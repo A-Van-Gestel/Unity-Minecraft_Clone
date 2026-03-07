@@ -61,9 +61,10 @@ namespace Jobs.BurstData
         /// <param name="blockLight">The blocklight level (0-15).</param>
         /// <param name="orientation">The world orientation (face index).</param>
         /// <param name="fluidLevel">The fluid level (0-15).</param>
+        /// <param name="isFluid">Whether the block is a fluid type. If true, fluidLevel is packed. If false, orientation is packed.</param>
         /// <returns>A packed uint containing all the voxel state data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel)
+        public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel, bool isFluid = false)
         {
             uint packedData = 0;
             packedData |= (uint)((id) << ID_SHIFT); // ID: 16 bits
@@ -71,13 +72,12 @@ namespace Jobs.BurstData
             packedData |= (uint)((blockLight & 0xF) << BLOCKLIGHT_SHIFT); // Blocklight: 4 bits
 
             // Metadata Logic:
-            // Since Fluid and Orientation share the same bits, we prioritize FluidLevel if it exists.
+            // Since Fluid and Orientation share the same bits, we prioritize FluidLevel if it is a fluid block.
             // A block defined as a Fluid in BlockTypes should use FluidLevel.
             // A block defined as Solid should use Orientation.
-            // Here we combine them, assuming the caller sends 0 for the unused property.
 
             byte meta = 0;
-            if (fluidLevel > 0)
+            if (isFluid || fluidLevel > 0)
             {
                 meta = (byte)(fluidLevel & META_VAL_FLUID_MASK);
             }

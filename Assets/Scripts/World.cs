@@ -2131,9 +2131,18 @@ public class World : MonoBehaviour
                         else if (visualizationMode == DebugVisualizationMode.FluidLevel &&
                                  state.Properties.fluidType != FluidType.None)
                         {
-                            // Make color fade from bright blue (level 0) to dark blue
-                            float levelRatio = (15 - state.FluidLevel) / 15f;
-                            color = new Color(0f, levelRatio * 0.7f, 1f, 0.7f);
+                            byte fluidLevel = state.FluidLevel;
+                            if (fluidLevel >= 8) // Falling blocks (FluidLevel 8-15)
+                            {
+                                byte effectiveLevel = (byte)(fluidLevel & 0x7);
+                                float levelRatio = (7 - effectiveLevel) / 7f;
+                                color = new Color(0f, 1f, 0.8f, 0.5f + levelRatio * 0.3f); // Cyan/teal
+                            }
+                            else // Horizontal flow (FluidLevel 0-7)
+                            {
+                                float levelRatio = (7 - fluidLevel) / 7f;
+                                color = new Color(0f, levelRatio * 0.7f, 1f, 0.7f); // Blue gradient
+                            }
                         }
 
                         if (color.HasValue)
@@ -2582,4 +2591,7 @@ public class Settings
 
     [Tooltip("Enable detailed diagnostic logs for debugging fluid, lighting, and chunk issues. Warning: may impact performance.")]
     public bool enableDiagnosticLogs = false;
+
+    [Tooltip("Enable detailed diagnostic logs specifically for water/fluid simulation. Warning: may impact performance.")]
+    public bool enableWaterDiagnosticLogs = false;
 }

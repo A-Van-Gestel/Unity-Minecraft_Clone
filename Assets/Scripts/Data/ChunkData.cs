@@ -323,7 +323,13 @@ namespace Data
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
             // The LightingJob will then fill it with propagated light from neighbors.
             BlockType newProps = World.Instance.blockTypes[mod.ID];
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, 0, newProps.lightEmission, mod.Orientation, mod.FluidLevel);
+            
+            // IMPORTANT: If this is a fluid block, we must NOT pass the block placement orientation.
+            // BurstVoxelDataBitMapping combines Orientation/FluidLevel into the same byte.
+            bool isFluid = newProps.fluidType != FluidType.None;
+            byte packOrientation = isFluid ? (byte)0 : mod.Orientation;
+
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, 0, newProps.lightEmission, packOrientation, mod.FluidLevel, isFluid);
 
             // Check if the full voxel state has actually changed.
             if (oldPackedData == newPackedData)

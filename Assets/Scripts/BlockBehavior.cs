@@ -93,64 +93,91 @@ public static class BlockBehavior
         // --- Generic Fluid Activation Logic ---
         if (props.fluidType != FluidType.None)
         {
-            // A fluid block is active if it has any potential to flow.
+            byte currentLevel = voxel.FluidLevel;
+            byte effectiveLevel = GetEffectiveLevel(currentLevel);
+            
+            // LOG ACTIVATION
+            if (World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs)
+                Debug.Log($"[WaterDebug ACTIVE] Eval pos={localPos} level={currentLevel}");
 
-            // Reason 1: The block below is not solid or is a different fluid type.
+            // Reason 1: Can it flow down?
             VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
-            if (!belowState.HasValue || !belowState.Value.Properties.isSolid || belowState.Value.Properties.fluidType != props.fluidType)
+            bool belowIsSameFluid = belowState.HasValue && belowState.Value.id == id;
+            if (belowState.HasValue && !belowState.Value.Properties.isSolid && !belowIsSameFluid)
             {
-                return true; // Must be active to fall or interact.
+                return true; // Must be active to fall.
             }
 
-            // Reason 2: It's a source block (level 0) and can flow out. Source blocks are always potentially active.
-            if (voxel.FluidLevel == 0) return true;
-
-            // Reason 3: It is a flowing fluid block that is not at its maximum flow distance.
-            if (voxel.FluidLevel >= props.flowLevels - 1)
+            // Reason 2: Can it settle? (Falling block hitting solid)
+            if (IsFalling(currentLevel) && (!belowState.HasValue || belowState.Value.Properties.isSolid || belowIsSameFluid))
             {
-                return false; // Max flow distance reached, it is stable.
+                return true; // Needs to settle.
             }
 
-            // Reason 4: Check if any horizontal neighbor is a valid flow target (a place to flow TO).
-            for (int i = 0; i < 4; i++)
+            // Reason 3: Can it flow horizontally?
+            if (effectiveLevel + 1 < props.flowLevels)
             {
-                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
-                VoxelState? neighborState = chunkData.GetState(neighborPos);
-
-                if (!neighborState.HasValue) continue; // Edge of loaded world, cannot flow.
-
-                // If neighbor is air, we can flow into it.
-                if (neighborState.Value.id == 0) return true;
-
-                // If neighbor is the same fluid type and has a lower fluid level (higher level value), we can flow to level it out.
-                if (neighborState.Value.Properties.fluidType == props.fluidType && neighborState.Value.FluidLevel > voxel.FluidLevel + 1) return true;
-            }
-
-            // Reason 5: Stay active if fed vertically (fluid directly above keeps this falling block alive)
-            // or fed horizontally (a neighbor with a lower level value, i.e. closer to source).
-            // This is the drain-check: if all feeder sources are gone, the block will stop being active
-            // during the next tick and Behave() will replace it with air.
-            VoxelState? aboveState = chunkData.GetState(localPos + Vector3Int.up);
-            if (aboveState.HasValue && aboveState.Value.Properties.fluidType == props.fluidType)
-            {
-                return true; // Fed from above (part of a waterfall column).
-            }
-
-            for (int i = 0; i < 4; i++)
-            {
-                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
-                VoxelState? neighborState = chunkData.GetState(neighborPos);
-
-                if (neighborState.HasValue &&
-                    neighborState.Value.Properties.fluidType == props.fluidType &&
-                    neighborState.Value.FluidLevel < voxel.FluidLevel)
+                for (int i = 0; i < 4; i++)
                 {
-                    return true;
+                    Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                    VoxelState? neighborState = chunkData.GetState(neighborPos);
+
+                    if (!neighborState.HasValue) continue;
+
+                    bool neighborIsAir = neighborState.Value.id == 0;
+                    bool neighborIsSameFluidAndWorse = neighborState.Value.id == id &&
+                                                       GetEffectiveLevel(neighborState.Value.FluidLevel) > effectiveLevel + 1;
+
+                    if ((neighborIsAir || neighborIsSameFluidAndWorse) && !neighborState.Value.Properties.isSolid)
+                    {
+                        return true;
+                    }
                 }
+            }
+
+            // Reason 4: Does its current level match its expected supported level? (Drain check / better source check)
+            if (currentLevel != 0) // Source blocks are conceptually stable internally
+            {
+                byte expectedEffectiveLevel = props.flowLevels;
+                bool isFedFromAbove = false;
+
+                VoxelState? aboveState = chunkData.GetState(localPos + Vector3Int.up);
+                if (aboveState.HasValue && aboveState.Value.id == id)
+                {
+                    isFedFromAbove = true;
+                    expectedEffectiveLevel = GetEffectiveLevel(aboveState.Value.FluidLevel);
+                    if (expectedEffectiveLevel == 0) expectedEffectiveLevel = 1; // Falling from source
+                }
+                else
+                {
+                    for (int i = 0; i < 4; i++)
+                    {
+                        Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                        VoxelState? neighborState = chunkData.GetState(neighborPos);
+
+                        if (neighborState.HasValue && neighborState.Value.id == id)
+                        {
+                            byte neighborEffective = GetEffectiveLevel(neighborState.Value.FluidLevel);
+                            if (neighborEffective < expectedEffectiveLevel)
+                            {
+                                expectedEffectiveLevel = neighborEffective;
+                            }
+                        }
+                    }
+                    if (expectedEffectiveLevel < props.flowLevels) expectedEffectiveLevel++;
+                }
+
+                bool expectedFalling = isFedFromAbove || IsFalling(currentLevel);
+                byte expectedFluidLevel = expectedFalling ? MakeFalling(expectedEffectiveLevel) : expectedEffectiveLevel;
+                
+                if (expectedEffectiveLevel >= props.flowLevels) return true; // Active: needs to decay to air
+                if (expectedFluidLevel != currentLevel) return true;         // Active: needs to update level
             }
         }
 
         // If no activation conditions are met, the block is stable and does not need to be ticked.
+        if (props.fluidType != FluidType.None && World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs) 
+            Debug.Log($"[WaterDebug ACTIVE] pos={localPos} Returning FALSE");
         return false;
     }
 
@@ -244,6 +271,8 @@ public static class BlockBehavior
         // --- GENERIC FLUID LOGIC ---
         if (props.fluidType != FluidType.None)
         {
+            if (World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs)
+                Debug.Log($"[WaterDebug BEHAVE] Behave called for {localPos} level={voxel.FluidLevel}");
             HandleFluidFlow(chunkData, localPos, voxel);
         }
 
@@ -294,8 +323,24 @@ public static class BlockBehavior
 
     #region Fluid Behavior Methods
 
+    // --- Falling Flag Encoding ---
+    // Minecraft Beta 1.3.2 uses metadata >= 8 for falling fluid.
+    // Lower 3 bits (0-7) carry the "effective level" of the upstream block.
+    // FluidLevel 0 = source, 1-7 = horizontal flow, 8 = falling from source, 9-15 = falling from flow.
+    private const byte FALLING_FLAG = 8;
+
+    /// <summary>Returns true if the fluid level encodes a vertically falling block (level >= 8).</summary>
+    private static bool IsFalling(byte fluidLevel) => fluidLevel >= FALLING_FLAG;
+
+    /// <summary>Strips the falling flag, returning the horizontal level (0-7).</summary>
+    private static byte GetEffectiveLevel(byte fluidLevel) => (byte)(fluidLevel & 0x7);
+
+    /// <summary>Creates a falling metadata value from a horizontal level.</summary>
+    private static byte MakeFalling(byte effectiveLevel) => (byte)(effectiveLevel | FALLING_FLAG);
+
     /// <summary>
     /// Manages the flow logic for a single fluid voxel.
+    /// Follows Minecraft Beta 1.3.2 tick order: Update Level (Drain) → Gravitate → Spread Horizontal.
     /// </summary>
     private static void HandleFluidFlow(ChunkData chunkData, Vector3Int localPos, VoxelState fluidState)
     {
@@ -304,62 +349,153 @@ public static class BlockBehavior
         byte currentLevel = fluidState.FluidLevel;
         Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
 
-
-        // --- Rule 1: Flow Downwards ---
-        // Fluids always try to flow down into empty space first.
-        // A falling block is NON-SOURCE (FluidLevel=1) so that if the feeder above is removed,
-        // the column drains away. Source blocks (FluidLevel=0) are infinite and only placed by
-        // the player or world generation.
+        // Calculate gravity support state once at the top, since both Step 1 and Step 2 need it
         Vector3Int belowPos = localPos + Vector3Int.down;
         VoxelState? belowState = chunkData.GetState(belowPos);
+        bool belowIsSameFluid = belowState.HasValue && belowState.Value.id == currentId;
+        bool canFlowDown = belowState.HasValue && !belowState.Value.Properties.isSolid && !belowIsSameFluid;
+        bool isSupportedBelow = belowState.HasValue && (belowState.Value.Properties.isSolid || (belowIsSameFluid && !IsFalling(belowState.Value.FluidLevel)));
 
-        // Flow into air or any non-solid, non-same-fluid block below.
-        bool belowIsSameFluid = belowState.HasValue && belowState.Value.Properties.fluidType == props.fluidType;
-        if (belowState.HasValue && !belowState.Value.Properties.isSolid && !belowIsSameFluid)
+        // --- Step 1: Calculate Expected Level (Decay / Drainage) ---
+        // Source blocks (level 0) are infinite and never decay.
+        if (currentLevel != 0)
         {
-            // Place a *flowing* block (level=1) not a source. This makes waterfalls drain when
-            // the source is removed (Minecraft-style), because FluidLevel>0 blocks are not self-sustaining.
-            Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
-            s_mods.Add(new VoxelMod(globalBelowPos, blockId: currentId)
-            {
-                FluidLevel = 1, // Flowing (non-source)
-            });
+            byte expectedEffectiveLevel = props.flowLevels; // Default to max (decays to air)
+            bool isFedFromAbove = false;
 
-            // If the current block was itself a flowing block (not a source), it has now
-            // fallen away — replace it with air. Source blocks remain (they are infinite).
-            if (currentLevel > 0)
+            // 1a: Check if fed from above
+            VoxelState? aboveState = chunkData.GetState(localPos + Vector3Int.up);
+            if (aboveState.HasValue && aboveState.Value.id == currentId)
             {
-                s_mods.Add(new VoxelMod(globalPos, blockId: 0)); // Replace self with air
+                isFedFromAbove = true;
+                expectedEffectiveLevel = GetEffectiveLevel(aboveState.Value.FluidLevel);
+                // Important: Falling fluid cannot be a source block (0).
+                // A source (0) feeds a falling column of effective level 1.
+                if (expectedEffectiveLevel == 0) expectedEffectiveLevel = 1;
             }
 
-            return; // Fluid has moved down, no further horizontal action this tick.
+            if (isFedFromAbove)
+            {
+                // Naturally supported by the column above
+            }
+            else
+            {
+                // 1b: Check horizontal neighbors for the lowest effective level (closest to source)
+                for (int i = 0; i < 4; i++)
+                {
+                    Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                    VoxelState? neighborState = chunkData.GetState(neighborPos);
+
+                    if (neighborState.HasValue && neighborState.Value.id == currentId)
+                    {
+                        byte neighborEffective = GetEffectiveLevel(neighborState.Value.FluidLevel);
+                        if (neighborEffective < expectedEffectiveLevel)
+                        {
+                            expectedEffectiveLevel = neighborEffective;
+                        }
+                    }
+                }
+                
+                // Horizontal spread adds 1 to the effective level.
+                if (expectedEffectiveLevel < props.flowLevels)
+                {
+                    expectedEffectiveLevel++;
+                }
+            }
+
+            // 1c: Determine expected full fluidLevel state
+            bool expectedFalling = isFedFromAbove || IsFalling(currentLevel); // Keep falling if we already are, unless we hit ground
+            byte expectedFluidLevel = expectedFalling ? MakeFalling(expectedEffectiveLevel) : expectedEffectiveLevel;
+
+            // If expected level is beyond max flow, or has changed, update it.
+            if (expectedEffectiveLevel >= props.flowLevels)
+            {
+                // Drain to air if unsupported horizontally and vertically, or reached max flow
+                s_mods.Add(new VoxelMod(globalPos, 0) { ImmediateUpdate = true });
+                return; // Stop processing further
+            }
+            else if (expectedFluidLevel != currentLevel)
+            {
+                // Update our level to match our support
+                s_mods.Add(new VoxelMod(globalPos, currentId) { FluidLevel = expectedFluidLevel, ImmediateUpdate = true });
+                currentLevel = expectedFluidLevel; // Update local state for subsequent steps
+            }
         }
 
-        // --- Rule 2: Flow Horizontally ---
-        // If it can't flow down, it tries to spread out.
-        // A source block (level 0) is required to start a horizontal flow.
-        if (currentLevel >= props.flowLevels - 1) return; // Max flow distance reached.
+        byte effectiveLevel = GetEffectiveLevel(currentLevel);
+        bool falling = IsFalling(currentLevel);
 
-        // Check horizontal neighbors
+        // --- Step 2: Gravity (Vertical Flow) ---
+        if (canFlowDown)
+        {
+            Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
+            s_mods.Add(new VoxelMod(globalBelowPos, currentId)
+            {
+                FluidLevel = MakeFalling(effectiveLevel),
+            });
+            return; // Skip horizontal spreading this tick if we pushed downwards
+        }
+
+        // --- Step 3: Settle Falling Blocks ---
+        if (falling)
+        {
+            if (isSupportedBelow)
+            {
+                // We've hit a floor, settle into horizontal form and prepare to spread next tick.
+                s_mods.Add(new VoxelMod(globalPos, currentId) { FluidLevel = effectiveLevel, ImmediateUpdate = true });
+            }
+            return;
+        }
+
+        // --- Step 4: Horizontal Spreading ---
+        // Fluids ONLY spread horizontally if they are supported by a solid block or the same fluid (non-falling) below.
+        
+        if (World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs)
+        {
+            Debug.Log($"[WaterDebug FLOW] Step 4 REACHED: pos={globalPos} id={currentId} level={currentLevel} " + 
+                      $"below={(belowState.HasValue ? belowState.Value.id.ToString() : "none")}(solid? {(belowState.HasValue ? belowState.Value.Properties.isSolid.ToString() : "N/A")}, " +
+                      $"falling? {(belowState.HasValue ? IsFalling(belowState.Value.FluidLevel).ToString() : "N/A")}, " +
+                      $"level={(belowState.HasValue ? belowState.Value.FluidLevel.ToString() : "N/A")}) " + 
+                      $"isSupported: {isSupportedBelow}");
+        }
+
+        if (!isSupportedBelow) 
+        {
+            if (World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs)
+                Debug.Log($"[WaterDebug FLOW] {globalPos} Not supported below. Returning.");
+            return;
+        }
+
+        byte newLevel = (byte)(effectiveLevel + 1);
+        if (newLevel >= props.flowLevels) return;
+
         for (int i = 0; i < 4; i++)
         {
             Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
             VoxelState? neighborState = chunkData.GetState(neighborPos);
 
-            if (neighborState.HasValue && (!neighborState.Value.Properties.isSolid || neighborState.Value.Properties.fluidType != FluidType.None))
-            {
-                byte newLevel = (byte)(currentLevel + 1);
+            if (!neighborState.HasValue) continue;
 
-                // Flow into air or a fluid block with a lower level
-                if (neighborState.Value.id == 0 || (neighborState.Value.id == currentId && neighborState.Value.FluidLevel > newLevel))
+            // Flow into air or same fluid with worse level
+            bool neighborIsAir = neighborState.Value.id == 0;
+            bool neighborIsSameFluidAndWorse = neighborState.Value.id == currentId &&
+                                               GetEffectiveLevel(neighborState.Value.FluidLevel) > newLevel;
+
+            if (neighborIsAir || neighborIsSameFluidAndWorse)
+            {
+                if (neighborState.Value.Properties.isSolid) continue;
+
+                Vector3Int globalNeighborPos = new Vector3Int(
+                    neighborPos.x + chunkData.position.x, neighborPos.y,
+                    neighborPos.z + chunkData.position.y);
+                
+                if (World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs)
+                    Debug.Log($"[WaterDebug FLOW] {globalPos} SPREADING HORIZONTALLY to {globalNeighborPos} with level {newLevel}");
+
+                s_mods.Add(new VoxelMod(globalNeighborPos, currentId)
                 {
-                    Vector3Int globalNeighborPos = new Vector3Int(neighborPos.x + chunkData.position.x, neighborPos.y, neighborPos.z + chunkData.position.y);
-                    VoxelMod mod = new VoxelMod(globalNeighborPos, blockId: currentId)
-                    {
-                        FluidLevel = newLevel,
-                    };
-                    s_mods.Add(mod);
-                }
+                    FluidLevel = newLevel,
+                });
             }
         }
     }
