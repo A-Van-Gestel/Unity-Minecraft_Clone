@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using Helpers;
 using Jobs.BurstData;
 using Unity.Burst;
@@ -27,7 +27,7 @@ namespace Jobs
 
         // Read-only heightmap & maps for all 8 neighbors.
         [ReadOnly]
-        public NativeArray<byte> Heightmap;
+        public NativeArray<ushort> Heightmap;
 
         [ReadOnly]
         public NativeArray<uint> NeighborN; // North (+Z)
@@ -238,7 +238,7 @@ namespace Jobs
         {
             // Use the heightmap to find the Y-level of the highest block that has any opacity.
             int heightmapIndex = x + VoxelData.ChunkWidth * z;
-            byte highestBlockY = Heightmap[heightmapIndex];
+            ushort highestBlockY = Heightmap[heightmapIndex];
 
             // --- PASS 1: Above the highest block ---
             // Everything above this point is transparent to the sky and should be fully sunlit.

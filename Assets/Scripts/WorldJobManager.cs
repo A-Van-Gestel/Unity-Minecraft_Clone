@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using Data;
 using Helpers;
@@ -59,7 +59,7 @@ public class WorldJobManager
         // Allocate and track all data together
         var modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
         var outputMap = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent);
-        var outputHeightMap = new NativeArray<byte>(VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent);
+        var outputHeightMap = new NativeArray<ushort>(VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent);
 
         ChunkGenerationJob job = new ChunkGenerationJob
         {
@@ -233,7 +233,7 @@ public class WorldJobManager
         var inputData = new LightingJobInputData();
 
         // Get all 8 Neighbor Maps and the heightmap (Read-Only, disposed by job dependency)
-        inputData.Heightmap = new NativeArray<byte>(chunkData.heightMap, allocator);
+        inputData.Heightmap = new NativeArray<ushort>(chunkData.heightMap, allocator);
         // Cardinal Neighbors
         inputData.NeighborN = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), allocator);
         inputData.NeighborE = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), allocator);
@@ -389,9 +389,6 @@ public class WorldJobManager
                     chunkData.HasLightChangesToProcess = true;
                 }
 
-                // Dispose of the job's data here, AFTER it has been used
-                jobEntry.Value.Dispose();
-
                 // --- STAGE 3: Lighting ---
                 if (_world.settings.enableLighting)
                 {
@@ -414,6 +411,10 @@ public class WorldJobManager
                         }
                     }
                 }
+
+                // Dispose of the job's data here, AFTER it has been used, just before saving it to completed block lists.
+                // This guarantees we don't dispose early if we use the height map / chunks for the initial lighting run.
+                jobEntry.Value.Dispose();
 
                 _completedGenJobs.Add(jobEntry.Key);
 
@@ -567,7 +568,7 @@ public class WorldJobManager
                             if (currentSunlight == 15 && mod.LightLevel < 15)
                             {
                                 int hmIdx = localVoxelPos.x + VoxelData.ChunkWidth * localVoxelPos.z;
-                                byte heightmapY = neighborChunk.heightMap[hmIdx];
+                                ushort heightmapY = neighborChunk.heightMap[hmIdx];
                                 if (localVoxelPos.y > heightmapY)
                                 {
                                     // Voxel is above terrain — sunlight=15 is correct, skip.

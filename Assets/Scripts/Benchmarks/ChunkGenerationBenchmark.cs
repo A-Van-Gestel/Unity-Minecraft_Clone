@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -283,7 +283,7 @@ namespace Benchmarks
                 Biomes = _world.JobDataManager.BiomesJobData,
                 AllLodes = _world.JobDataManager.AllLodesJobData,
                 OutputMap = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent),
-                OutputHeightMap = new NativeArray<byte>(VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent),
+                OutputHeightMap = new NativeArray<ushort>(VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent),
                 Modifications = modificationsQueue.AsParallelWriter()
             };
 

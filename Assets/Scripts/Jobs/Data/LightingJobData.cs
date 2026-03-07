@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -11,7 +11,7 @@ namespace Jobs.Data
     /// </summary>
     public struct LightingJobInputData
     {
-        public NativeArray<byte> Heightmap;
+        public NativeArray<ushort> Heightmap;
         public NativeArray<uint> NeighborN, NeighborE, NeighborS, NeighborW;
         public NativeArray<uint> NeighborNE, NeighborSE, NeighborSW, NeighborNW;
 

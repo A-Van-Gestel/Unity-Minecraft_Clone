@@ -52,9 +52,4 @@ The logging statement fires every frame that `_droppedLightUpdates` has entries.
 
 ---
 
-## 05. Generation job output disposed before all consumers are guaranteed done
-
-**Severity:** Improvement (potential risk)  
-**Files:** `WorldJobManager.cs` — `ProcessGenerationJobs` (line 397)
-
-`jobEntry.Value.Dispose()` is called on line 397, disposing the `NativeArray<uint>` output map. This is correct because `Populate()` copies data into managed arrays first. However, if future code were to defer mod processing (apply lazily), this dispose would cause a use-after-free crash. The dispose should ideally happen after all data consumption is guaranteed complete.
+---

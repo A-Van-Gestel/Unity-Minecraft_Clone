@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -15,7 +15,7 @@ namespace Serialization
     /// </summary>
     public static class ChunkSerializer
     {
-        private const byte CURRENT_CHUNK_VERSION = 1;
+        private const byte CURRENT_CHUNK_VERSION = 2;
 
         // FUTURE-PROOFING: Version header for individual sections.
         // Allows upgrading section format (e.g. adding Palettes) without breaking the chunk header.
@@ -105,8 +105,9 @@ namespace Serialization
             writer.Write(data.NeedsInitialLighting);
 
             // --- Height Map ---
-            // Heightmap is fixed size (16*16 = 256 bytes)
-            writer.Write(data.heightMap);
+            // Heightmap is fixed size (16*16 = 256 entries) -> 512 bytes
+            ReadOnlySpan<byte> hmBytes = MemoryMarshal.AsBytes(data.heightMap.AsSpan());
+            writer.Write(hmBytes);
 
             // --- Section Bitmask ---
             int sectionBitmask = 0;
@@ -168,10 +169,21 @@ namespace Serialization
                 // --- State Flags ---
                 chunk.NeedsInitialLighting = reader.ReadBoolean();
 
-                // --- Height Map (256 bytes) ---
-                chunk.heightMap = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth);
-                if (chunk.heightMap.Length != VoxelData.ChunkWidth * VoxelData.ChunkWidth)
-                    throw new EndOfStreamException("Heightmap truncated");
+                // --- Height Map ---
+                if (version == 1)
+                {
+                    byte[] oldHm = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth);
+                    if (oldHm.Length != VoxelData.ChunkWidth * VoxelData.ChunkWidth)
+                        throw new EndOfStreamException("Heightmap truncated");
+                    for (int hmIdx = 0; hmIdx < oldHm.Length; hmIdx++) chunk.heightMap[hmIdx] = oldHm[hmIdx];
+                }
+                else
+                {
+                    byte[] hmBytes = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth * sizeof(ushort));
+                    if (hmBytes.Length != VoxelData.ChunkWidth * VoxelData.ChunkWidth * sizeof(ushort))
+                        throw new EndOfStreamException("Heightmap truncated");
+                    Buffer.BlockCopy(hmBytes, 0, chunk.heightMap, 0, hmBytes.Length);
+                }
 
                 // --- Sections ---
                 int sectionBitmask = reader.ReadInt32();

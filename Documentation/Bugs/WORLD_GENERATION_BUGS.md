@@ -18,14 +18,6 @@ The seed calculation includes a hack (`Mathf.Abs(hashCode) / 10000`) marked with
 - `Mathf.Abs(int.MinValue)` overflows and returns `int.MinValue` (negative), causing a negative seed downstream.
 - String seeds parsed as integers bypass this hack entirely, so numeric strings and string-hashed names behave differently.
 
----
-
-## 02. `heightMap` uses `byte` which limits world height to 255
-
-**Severity:** Improvement  
-**Files:** `ChunkData.cs` — `heightMap` (line 37), `ModifyVoxel` (line 332)
-
-The heightmap is stored as `byte[]`, limiting tracked height to 0–255. Current `ChunkHeight` is 128 (safe), but if chunk height is ever increased beyond 255, heights would silently truncate.
 
 ---
 

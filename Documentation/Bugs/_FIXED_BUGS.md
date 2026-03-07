@@ -205,6 +205,18 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 
 ## World Generation & Data
 
+### ~~04. `heightMap` uses `byte` which limits world height to 255~~
+
+**Severity:** Improvement  
+**Files:** `ChunkData.cs` — `heightMap`, `ModifyVoxel`; `WorldJobManager.cs`  
+**Fixed:** March 2026
+
+**Symptom:** The heightmap was stored as `byte[]`, limiting tracked height to 0–255. If chunk height were ever increased beyond 255, heights would silently truncate.
+
+**Fix:** Changed `heightMap` to `ushort[]` (0–65535) across the generation and lighting pipeline (`ChunkData`, `GenerationJobData`, `LightingJobData`). Added region serialization backwards compatibility to upgrade V1 chunks (`byte[]`) to V2 chunks (`ushort[]`).
+
+---
+
 ### ~~03. `ModifyVoxel` heightmap scan uses `IsOpaque` instead of `IsLightObstructing`~~
 
 **Severity:** Bug  
