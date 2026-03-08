@@ -86,9 +86,9 @@ public class Player : MonoBehaviour
         // Scale playerBody to match the width and height settings.
         if (playerBody)
         {
-            playerBody.localScale = new Vector3(VoxelRigidbody.entityWidth * 2f, VoxelRigidbody.entityHeight / 2f, VoxelRigidbody.entityWidth * 2f);
+            playerBody.localScale = new Vector3(VoxelRigidbody.collisionWidthX, VoxelRigidbody.collisionHeight / 2f, VoxelRigidbody.collisionDepthZ);
             Vector3 playerBodyLocalPosition = playerBody.localPosition;
-            playerBodyLocalPosition = new Vector3(playerBodyLocalPosition.x, VoxelRigidbody.entityHeight / 2f, playerBodyLocalPosition.z);
+            playerBodyLocalPosition = new Vector3(playerBodyLocalPosition.x, VoxelRigidbody.collisionHeight / 2f, playerBodyLocalPosition.z);
             playerBody.localPosition = playerBodyLocalPosition;
         }
 

@@ -1,5 +1,6 @@
 using Data;
 using MyBox;
+using Physics;
 using UnityEngine;
 
 public class PlayerInteraction : MonoBehaviour
@@ -146,8 +147,11 @@ public class PlayerInteraction : MonoBehaviour
             // Check if the placement position is valid.
             // Using an AABB intersection to ensure the placed block does not overlap the player entity dynamically.
             Vector3 playerPosition = transform.position;
-            Vector3 pMin = playerPosition - new Vector3(_player.VoxelRigidbody.entityWidth, 0, _player.VoxelRigidbody.entityWidth);
-            Vector3 pMax = playerPosition + new Vector3(_player.VoxelRigidbody.entityWidth, _player.VoxelRigidbody.entityHeight, _player.VoxelRigidbody.entityWidth);
+            VoxelRigidbody rb = _player.VoxelRigidbody;
+            float extX = rb.collisionWidthX * 0.5f;
+            float extZ = rb.collisionDepthZ * 0.5f;
+            Vector3 pMin = new Vector3(playerPosition.x - extX, playerPosition.y, playerPosition.z - extZ);
+            Vector3 pMax = new Vector3(playerPosition.x + extX, playerPosition.y + rb.collisionHeight, playerPosition.z + extZ);
             
             // The block AABB is exactly 1x1x1 at integer coordinates
             Vector3 bMin = result.PlacePosition;

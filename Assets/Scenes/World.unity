@@ -130,6 +130,7 @@ GameObject:
   - component: {fileID: 151001797}
   - component: {fileID: 151001798}
   - component: {fileID: 151001799}
+  - component: {fileID: 151001800}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -166,20 +167,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 44b912604a22a6a42978771f835be758, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  isFlying: 0
-  isNoclipping: 0
-  isGrounded: 0
-  isSprinting: 0
-  walkSpeed: 3
-  sprintSpeed: 6
-  flyingSpeed: 3
   flyingSpeedIncrement: 0.5
-  flyingAscendSpeed: 5
-  jumpForce: 5.7
-  gravity: -13
   playerBody: {fileID: 439044755}
-  playerWidth: 0.4
-  playerHeight: 1.8
   orientation: 0
   toggleDebugScreenKey: 284
   toggleFlyingKey: 282
@@ -207,6 +196,32 @@ MonoBehaviour:
   checkIncrement: 0.05
   reach: 8
   toolbar: {fileID: 154747212}
+--- !u!114 &151001800
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 151001796}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dcca164d141895046a3a0ebd32ef2e11, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::VoxelRigidbody
+  gravity: -13
+  collisionHeight: 1.8
+  collisionWidthX: 0.8
+  collisionDepthZ: 0.8
+  collisionPadding: 0
+  showBoundingBox: 1
+  jumpForce: 5.7
+  walkSpeed: 3
+  sprintSpeed: 6
+  flyingSpeed: 3
+  flyingAscendSpeed: 5
+  isFlying: 0
+  isNoclipping: 0
+  isSprinting: 0
 --- !u!1 &154747208
 GameObject:
   m_ObjectHideFlags: 0
