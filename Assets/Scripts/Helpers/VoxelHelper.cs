@@ -4,8 +4,14 @@ namespace Helpers
 {
     public static class VoxelHelper
     {
-        /// Takes the world direction (p) and the voxel's orientation,
-        /// returns the original face index (0-5) that now points in direction p.
+        /// <summary>
+        /// Takes a standardized world face direction (0-5) and a block's metadata orientation,
+        /// and translates it back into the original local texture/geometry face index (0-5)
+        /// representing that side of the block.
+        /// </summary>
+        /// <param name="worldFaceIndex">The absolute world face index to query (e.g. 1 for World-Front).</param>
+        /// <param name="orientation">The rotation state of the voxel (1=N, 0=S, 4=W, 5=E).</param>
+        /// <returns>The original local face index corresponding to that physical side.</returns>
         public static int GetTranslatedFaceIndex(int worldFaceIndex, byte orientation)
         {
             // Face Indices: 0=Back(-Z), 1=Front(+Z), 2=Top(+Y), 3=Bottom(-Y), 4=Left(-X), 5=Right(+X)
@@ -52,18 +58,22 @@ namespace Helpers
             }
         }
 
-        /// Returns the Y rotation angle in degrees for a given orientation
+        /// <summary>
+        /// Maps the internal block orientation state directly to an absolute Y-axis rotation angle in degrees.
+        /// </summary>
+        /// <param name="orientation">The numeric orientation flag stored in the voxel metadata.</param>
+        /// <returns>The rotation angle (0f, 90f, 180f, 270f).</returns>
         public static float GetRotationAngle(byte orientation)
         {
             switch (orientation)
             {
                 case 0: return 180f; // Back
                 case 5: return 270f; // Right (East)
-                case 1: return 0f;   // Front (North - Default)
-                case 4: return 90f;  // Left (West)
+                case 1: return 0f; // Front (North - Default)
+                case 4: return 90f; // Left (West)
                 default: // Front (North) as fallback
                     Debug.LogWarning($"Unhandled orientation: {orientation}");
-                    return 0f;  // Fallback
+                    return 0f; // Fallback
             }
         }
     }

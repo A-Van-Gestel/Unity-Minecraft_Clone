@@ -43,6 +43,10 @@ public class DebugScreen : MonoBehaviour
 
 
     [Header("Update Rates")]
+    [Tooltip("How many times per second the text UI is rebuilt and rendered (e.g. 0.1 = 10 times a second).")]
+    [SerializeField]
+    private float _textUpdateRate = 0.1f;
+
     [Tooltip("How many times per second the frame rate counter will be updated.")]
     [SerializeField]
     private float _frameRateUpdateRate = 0.25f;
@@ -50,6 +54,15 @@ public class DebugScreen : MonoBehaviour
     [Tooltip("How many times per second expensive debug info is updated.")]
     [SerializeField]
     private float _infrequentUpdateRate = 0.2f;
+
+    // --- Public Fields ---
+    public enum DebugMode
+    {
+        FPSOnly,
+        Full
+    }
+
+    public DebugMode CurrentMode { get; private set; } = DebugMode.Full;
 
     // --- Private Fields ---
     private World _world;
@@ -92,6 +105,7 @@ public class DebugScreen : MonoBehaviour
     private long _gcReservedMemory;
 
     // --- Timers ---
+    private float _textUpdateTimer;
     private float _frameRateTimer;
     private float _infrequentUpdateTimer;
 
@@ -176,8 +190,31 @@ public class DebugScreen : MonoBehaviour
             _infrequentUpdateTimer = 0;
         }
 
-        // Build the debug strings for each text block.
-        BuildDebugStrings();
+        // --- Text UI Update (Throttled for GC Optimization) ---
+        _textUpdateTimer += Time.unscaledDeltaTime;
+        if (_textUpdateTimer >= _textUpdateRate)
+        {
+            // Build the debug strings for each text block.
+            BuildDebugStrings();
+            _textUpdateTimer = 0;
+        }
+    }
+
+    /// <summary>
+    /// Sets the display mode of the debug screen and toggles unused text objects to save rendering overhead.
+    /// </summary>
+    public void SetMode(DebugMode mode)
+    {
+        CurrentMode = mode;
+        _textUpdateTimer = _textUpdateRate; // Force an immediate text update
+
+        // Disable unused TextMeshPro components so they don't consume layout/render time
+        bool isFull = mode == DebugMode.Full;
+        _middleLeftText.gameObject.SetActive(isFull);
+        _bottomLeftText.gameObject.SetActive(isFull);
+        _topRightText.gameObject.SetActive(isFull);
+        _middleRightText.gameObject.SetActive(isFull);
+        _bottomRightText.gameObject.SetActive(isFull);
     }
 
     /// <summary>
@@ -239,14 +276,23 @@ public class DebugScreen : MonoBehaviour
     {
         // Clear builders from the previous frame.
         _topLeftBuilder.Clear();
+        
+        // We ALWAYS populate the top left, as it contains the FPS counter
+        PopulateTopLeftBuilder();
+        _topLeftText.text = _topLeftBuilder.ToString();
+
+        // Skip building the rest of the strings if we are in FPS Only mode
+        if (CurrentMode == DebugMode.FPSOnly) return;
+        
+        // Clear remaining builders from the previous frame.
+        _topLeftBuilder.Clear();
         _middleLeftBuilder.Clear();
         _bottomLeftBuilder.Clear();
         _topRightBuilder.Clear();
         _middleRightBuilder.Clear();
         _bottomRightBuilder.Clear();
 
-        // Populate each builder with its respective data.
-        PopulateTopLeftBuilder();
+        // Populate each remaining builder with its respective data.
         PopulateMiddleLeftBuilder();
         PopulateBottomLeftBuilder();
         PopulateTopRightBuilder();
@@ -254,7 +300,6 @@ public class DebugScreen : MonoBehaviour
         PopulateBottomRightBuilder();
 
         // Set the text property once per UI element.
-        _topLeftText.text = _topLeftBuilder.ToString();
         _middleLeftText.text = _middleLeftBuilder.ToString();
         _bottomLeftText.text = _bottomLeftBuilder.ToString();
         _topRightText.text = _topRightBuilder.ToString();
@@ -267,9 +312,12 @@ public class DebugScreen : MonoBehaviour
         Vector3 playerPosition = _player.transform.position;
         Vector2 lookingDirection = GetLookingAngles();
 
-        // --- General Info ---
-        _topLeftBuilder.AppendLine("Minecraft Clone based on b3agz' Code a Game Like Minecraft in Unity");
+        // --- General Info (Always Show) ---
+        _topLeftBuilder.AppendLine("Minecraft Clone in Unity");
         _topLeftBuilder.Append(Mathf.RoundToInt(_frameRate)).AppendLine(" fps");
+        
+        // Skip building the rest of the strings if we are in FPS Only mode
+        if (CurrentMode == DebugMode.FPSOnly) return;
         _topLeftBuilder.AppendLine();
 
         // --- World & Orientation Info ---
@@ -277,7 +325,7 @@ public class DebugScreen : MonoBehaviour
         _topLeftBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
-        _topLeftBuilder.Append(" | Eye Level: ").AppendFormat("{0:F2}", playerPosition.y + _player.playerHeight * 0.9f).AppendLine();
+        _topLeftBuilder.Append(" | Eye Level: ").AppendFormat("{0:F2}", playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f).AppendLine();
         _topLeftBuilder.Append("Looking Angle H / V: ").AppendFormat("{0:F2} / {1:F2}", lookingDirection.x, lookingDirection.y)
             .Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
         _topLeftBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
@@ -291,21 +339,27 @@ public class DebugScreen : MonoBehaviour
             .Append($" | isNoclipping ({_player.toggleNoclipKey.ToString()}): ").Append(_player.isNoclipping)
             .Append($" | showHighlight ({_player.toggleBlockHighlightKey.ToString()}): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
         _topLeftBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", _player.MoveSpeed)
-            .Append(" | Flying: ").AppendFormat("{0:F1}", _player.flyingSpeed).AppendLine();
+            .Append(" | Flying: ").AppendFormat("{0:F1}", _player.VoxelRigidbody.flyingSpeed).AppendLine();
         _topLeftBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", _player.Velocity.x, _player.Velocity.y, _player.Velocity.z).AppendLine();
         _topLeftBuilder.AppendLine();
 
         // --- Chunk Info ---
         _topLeftBuilder.AppendLine("CHUNK:");
         string activeBlockBehaviorVoxelsCount = _currentChunk != null ? _currentChunk.GetActiveVoxelCount().ToString() : "NULL";
-        string totalActiveVoxels = _currentChunk != null ? _world.GetTotalActiveVoxelsInWorld().ToString() : "NULL";
-        string activeChunksCount = _currentChunk != null ? _world.GetActiveChunksCount().ToString() : "NULL";
-        string chunksToBuildMeshCount = _currentChunk != null ? _world.GetChunksToBuildMeshCount().ToString() : "NULL";
-        string voxelModificationsCount = _currentChunk != null ? _world.GetVoxelModificationsCount().ToString() : "NULL";
+        string totalActiveVoxels = _world.GetTotalActiveVoxelsInWorld().ToString();
+        string activeChunksCount = _world.ChunkPool.ActiveChunks.ToString();
+        string pooledChunksCount = _world.ChunkPool.PooledChunks.ToString();
+        string pooledChunkBordersCount = _world.ChunkPool.PooledBorders.ToString();
+        string pooledChunkDataCount = _world.ChunkPool.PooledData.ToString();
+        string pooledChunkSectionsCount = _world.ChunkPool.PooledSections.ToString();
+        string chunksToBuildMeshInfo = World.Instance.GetMeshQueueDebugInfo();
+        string voxelModificationsCount = _world.GetVoxelModificationsCount().ToString();
         _topLeftBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
         _topLeftBuilder.Append("Total Active Voxels in World: ").AppendLine(totalActiveVoxels);
         _topLeftBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount);
-        _topLeftBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshCount);
+        _topLeftBuilder.AppendLine($" ├ Chunks unused in Pool: {pooledChunksCount} | Borders unused in Pool: {pooledChunkBordersCount}");
+        _topLeftBuilder.AppendLine($" └ Data unused in Pool: {pooledChunkDataCount} | Sections unused in Pool: {pooledChunkSectionsCount}");
+        _topLeftBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshInfo);
         _topLeftBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
 
         // --- Voxel Info ---
@@ -355,6 +409,8 @@ public class DebugScreen : MonoBehaviour
         // --- Display Current Visualization Mode ---
         _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
         _topRightBuilder.Append($"Mode ({_player.cycleVisModeKey.ToString()} to cycle): ").AppendLine(_world.visualizationMode.ToString());
+        _topRightBuilder.AppendLine($" └ Unused in Pool: {_world.ChunkPool.PooledVisualizers}");
+
         _topRightBuilder.AppendLine();
     }
 

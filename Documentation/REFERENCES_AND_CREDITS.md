@@ -4,11 +4,13 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 
 ## 🛠️ Libraries & Algorithms
 
-| Name                        | Author                                                                                               | License                                | Usage Details                                                                                  |
-|:----------------------------|:-----------------------------------------------------------------------------------------------------|:---------------------------------------|:-----------------------------------------------------------------------------------------------|
-| **Starlight / ScalableLux** | [RelativityMC](https://github.com/RelativityMC/ScalableLux)                                          | GNU Lesser General Public License v3.0 | Reference implementation for the BFS flood-fill lighting propagation and optimazation details. |
-| **Perlin Noise**            | Unity Technologies                                                                                   | Proprietary                            | Used via `Mathf.PerlinNoise` for terrain generation (pending replacement with FastNoiseLite).  |
-| **Spiral Loop**             | [Unity Discussions](https://discussions.unity.com/t/how-to-generate-a-grid-from-the-center/171186/2) | N/A                                    | Math logic for chunk loading iteration in a Spiral Loop.                                       |
+| Name                        | Author                                                                                               | License                                | Usage Details                                                                                                                                                 |
+|:----------------------------|:-----------------------------------------------------------------------------------------------------|:---------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **NativeCompressions**      | [Cysharp](https://github.com/Cysharp/NativeCompressions)                                             | MIT                                    | High-performance native LZ4 bindings for Chunk Serialization.                                                                                                 |
+| **Starlight / ScalableLux** | [RelativityMC](https://github.com/RelativityMC/ScalableLux)                                          | GNU Lesser General Public License v3.0 | Reference implementation for the BFS flood-fill lighting propagation and optimization details.                                                                |
+| **FastNoiseLite**           | [Auburn](https://github.com/Auburn/FastNoiseLite) (Burst port by Project Developer)                  | MIT                                    | Burst-compatible port of the v1.1 C# version used for high-performance `Standard` terrain generation. Located at `Assets/Scripts/Libraries/FastNoiseLite.cs`. |
+| **Perlin Noise**            | Unity Technologies                                                                                   | Proprietary                            | Used via `Mathf.PerlinNoise` for `Legacy` world terrain generation.                                                                                           |
+| **Spiral Loop**             | [Unity Discussions](https://discussions.unity.com/t/how-to-generate-a-grid-from-the-center/171186/2) | N/A                                    | Math logic for chunk loading iteration in a Spiral Loop.                                                                                                      |
 
 ## 🎨 Graphics & Textures
 
@@ -49,10 +51,17 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 
 ## ✒️ Fonts
 
-* **Monocraft** by [IdreesInc](https://github.com/IdreesInc/Monocraft)
+* [**Monocraft**](https://github.com/IdreesInc/Monocraft) by [IdreesInc](https://github.com/IdreesInc)
+    * *Version:* v4.2.1
     * *License:* SIL Open Font License 1.1
-    * *Source:* `Assets/Fonts/Monocraft.ttf`
+    * *Source:* `Assets/Fonts/Monocraft/Monocraft.ttc`
     * *Notes:* A monospaced font inspired by the Minecraft typeface.
+
+* [**FireCuda**](https://github.com/tonsky/FiraCode) by [tonsky](https://github.com/tonsky)
+    * *Version:* v6.2
+    * *License:* SIL Open Font License 1.1
+    * *Source:* `Assets/Fonts/FireCuda/FireCuda.ttf`
+    * *Notes:* Free monospaced font with programming ligatures. Used as fallback for Monocraft for "Box Drawing" characters.
 
 ## 📄 Shaders & Technical Art
 

@@ -18,9 +18,21 @@ namespace Data
 
         public ChunkSection()
         {
+            // 4096 * 4 bytes = 16KB allocation
             voxels = new uint[ChunkMath.SECTION_VOLUME];
             nonAirCount = 0;
             opaqueCount = 0;
+        }
+
+        /// <summary>
+        /// Resets the section for reuse in the pool.
+        /// Zeros out the voxel array and resets counts.
+        /// </summary>
+        public void Reset()
+        {
+            nonAirCount = 0;
+            opaqueCount = 0;
+            Array.Clear(voxels, 0, voxels.Length);
         }
 
         public bool IsEmpty => nonAirCount == 0;
@@ -103,7 +115,7 @@ namespace Data
                     if (id < blockTypes.Length)
                     {
                         // Note: blockTypes[id] is a reference type lookup (pointer chase).
-                        // This is the most expensive part, but cannot be easily avoided 
+                        // This is the most expensive part, but cannot be easily avoided
                         // without changing the data architecture to use flat structs/arrays.
                         if (blockTypes[id].IsOpaque)
                         {

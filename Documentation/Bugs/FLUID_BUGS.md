@@ -1,22 +1,50 @@
-﻿# Known fluid related bugs
+﻿# Known Fluid related bugs
 
-This document outlines known bugs related to fluid behavior and simulation.
+This document outlines **open** bugs related to fluid behavior and simulation. Resolved bugs are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
-## 1. Cross chunk fluid simulation
+> **Last reviewed:** March 2026
 
-Fluid simulation (or block behavior in general) is currently not fully cross chunk-aware, meaning that fluids can only flow one block into a neighbouring chunk B, it then stops behaving or updating. This can lead to unexpected behavior and visual artifacts where the fluid just suddenly stops.
+---
 
-Looking at the debug screen, the new "*should be active*" fluid voxel is not added to the active voxels list of the neighbouring chunk B.
+## 01. Side face rendering between different fluid levels
 
-NOTE: I am standing in chunk B and breaking the solid voxel in chunk B so that the fluid from chunk A flows into chunk B. So both chunks are fully loaded.
+**Severity:** Visual Artifact / Performance  
+**Files:** `MeshGenerationJob.cs` — fluid face cull logic
 
-## 2. Side face rendering
+Side faces between fluid voxels of different fluid levels are always rendered, causing internal faces to be incorrectly visible and hurting performance. This is currently intentional to allow waterfall-like faces to render, but a better solution should be found.
 
-Side faces between fluid voxels of different fluid levels are currently always rendered, this can lead to visual artefacts where these internal faces are incorrectly visible to the player and is bad for performance.
-NOTE: This is currently done to allow "waterfall" like faces to render properly, but a better solution should be found.
+---
 
-## 3. No player effect
+## 02. No player effect
 
-Fluid voxels do not currently affect the player, meaning that the player can walk through fluid voxels without any interaction.  
-It should slow the player down when walking into fluid voxels. And affect the buoyancy of the player when swimming.  
-A visual on-screen effect should also be applied to indicate that the player is submerged in a fluid.
+**Severity:** Missing Feature  
+**Files:** `Player.cs`, `PlayerInteraction.cs`
+
+Fluid voxels do not currently affect the player:
+- Player can walk through fluid without slowing down
+- No buoyancy / swimming simulation
+- No on-screen visual to indicate submersion
+
+---
+
+## ~~03. Downward flow creates infinite source blocks~~ ✅ FIXED
+
+> Moved to [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) → **Fluid #02**.
+
+---
+
+## 04. No fluid interaction between different fluid types — ⚠️ MISSING FEATURE
+
+**Severity:** Missing Feature (not a bug)  
+**Files:** `BlockBehavior.cs` — `HandleFluidFlow` (lines 334–346)
+
+Water and lava currently do not interact with each other. In Minecraft, water touching lava creates cobblestone or obsidian. This is intentionally unimplemented for now — the collision logic is silently skipped (water simply won't flow into lava), which is safe. Implementing proper fluid interaction requires a new interaction table and is deferred as a feature, not a bug fix.
+
+---
+
+## 05. 7x7 Horizontal Spreading Cube in Mid-Air
+
+**Severity:** Gameplay / Physics bug  
+**Files:** `BlockBehavior.cs` — `HandleFluidFlow` Step 4
+
+When a source block is placed on top of an elevated surface (like a tree), the fluid flows outwards and sometimes incorrectly spawns horizontal spreading blocks in mid-air (forming a floating 7x7 water grid) instead of accurately checking if those spread locations have ground support below them. The `isSupportedBelow` check during Step 4 needs further refinement to distinguish between valid adjacent support vs floating.

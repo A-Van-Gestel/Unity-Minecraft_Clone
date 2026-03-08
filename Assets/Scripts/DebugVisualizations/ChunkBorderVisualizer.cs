@@ -9,7 +9,7 @@ namespace DebugVisualizations
     /// <para>
     /// <b>Optimization Strategy:</b><br/>
     /// Since all chunks in the world share the exact same dimensions (16x128x16), generating a unique mesh
-    /// for every chunk is incredibly wasteful. This script generates a single <b>static</b> <see cref="Mesh"/> 
+    /// for every chunk is incredibly wasteful. This script generates a single <b>static</b> <see cref="Mesh"/>
     /// containing the visualization geometry. All instances of this script simply reference that shared mesh.
     /// </para>
     /// <para>
@@ -94,7 +94,7 @@ namespace DebugVisualizations
             // Apply the shared mesh. This is a lightweight reference copy.
             GetComponent<MeshFilter>().sharedMesh = _cachedMesh;
 
-            // Assign materials. 
+            // Assign materials.
             // We have 4 SubMeshes, so we need an array of 4 Materials.
             // SubMesh 2 (Section Frame) and SubMesh 3 (Section Cross) share the same material.
             GetComponent<MeshRenderer>().sharedMaterials = new Material[]
@@ -107,7 +107,7 @@ namespace DebugVisualizations
         }
 
         /// <summary>
-        /// Generates the geometry for the chunk visualization. 
+        /// Generates the geometry for the chunk visualization.
         /// This creates a single Mesh with 4 SubMeshes, mixing Triangle and Line topologies.
         /// </summary>
         private void RebuildSharedMesh()
@@ -124,7 +124,7 @@ namespace DebugVisualizations
             _cachedMesh = new Mesh();
             _cachedMesh.name = "SharedChunkBorderMesh";
 
-            // Pre-allocate a vertex list. 
+            // Pre-allocate a vertex list.
             // Vertices are shared across all submeshes to minimize memory footprint.
             List<Vector3> allVertices = new List<Vector3>(4096);
 
@@ -155,7 +155,7 @@ namespace DebugVisualizations
             // 2. Define SubMeshes.
             _cachedMesh.subMeshCount = 4;
 
-            // Note: We deliberately mix Topologies here. 
+            // Note: We deliberately mix Topologies here.
             // SubMeshes 0 & 2 use Triangles (for thickness).
             // SubMeshes 1 & 3 use Lines (for performance).
             _cachedMesh.SetIndices(borderIndices, MeshTopology.Triangles, 0);
@@ -175,6 +175,9 @@ namespace DebugVisualizations
         /// <summary>
         /// Generates the 12 edges of the chunk using elongated cubes (geometry).
         /// </summary>
+        /// <param name="verts">The list of vertices to append to.</param>
+        /// <param name="indices">The list of triangle indices to append to.</param>
+        /// <param name="thickness">The thickness of the border pillars.</param>
         private void GenerateBorderGeometry(List<Vector3> verts, List<int> indices, float thickness)
         {
             float w = VoxelData.ChunkWidth;
@@ -203,6 +206,9 @@ namespace DebugVisualizations
         /// <summary>
         /// Generates horizontal frames indicating where ChunkSections start and end using geometry.
         /// </summary>
+        /// <param name="verts">The list of vertices to append to.</param>
+        /// <param name="indices">The list of triangle indices to append to.</param>
+        /// <param name="thickness">The thickness of the section frame lines.</param>
         private void GenerateSectionGeometry(List<Vector3> verts, List<int> indices, float thickness)
         {
             float w = VoxelData.ChunkWidth;
@@ -224,6 +230,8 @@ namespace DebugVisualizations
         /// <summary>
         /// Adds a 3D Box (Cube) to the vertex/index lists.
         /// </summary>
+        /// <param name="verts">The list of vertices to append to.</param>
+        /// <param name="indices">The list of triangle indices to append to.</param>
         /// <param name="center">Center position of the box relative to the chunk origin.</param>
         /// <param name="size">Total size (width, height, depth) of the box.</param>
         private void AddBox(List<Vector3> verts, List<int> indices, Vector3 center, Vector3 size)
@@ -253,6 +261,15 @@ namespace DebugVisualizations
             AddQuad(indices, startIndex, 1, 2, 6, 5); // Right
         }
 
+        /// <summary>
+        /// Adds two triangles representing a quad to the indices list.
+        /// </summary>
+        /// <param name="indices">The list of indices to append to.</param>
+        /// <param name="offset">The vertex index offset to apply to local indices.</param>
+        /// <param name="a">The first local vertex index.</param>
+        /// <param name="b">The second local vertex index.</param>
+        /// <param name="c">The third local vertex index.</param>
+        /// <param name="d">The fourth local vertex index.</param>
         private void AddQuad(List<int> indices, int offset, int a, int b, int c, int d)
         {
             // Triangle 1
@@ -273,6 +290,8 @@ namespace DebugVisualizations
         /// <summary>
         /// Generates the internal grid using single-pixel lines.
         /// </summary>
+        /// <param name="verts">The list of vertices to append to.</param>
+        /// <param name="indices">The list of line indices to append to.</param>
         private void GenerateGridLines(List<Vector3> verts, List<int> indices)
         {
             if (gridInterval <= 0) return;
@@ -320,6 +339,8 @@ namespace DebugVisualizations
         /// <summary>
         /// Generates optional cross lines (X) inside sections using single-pixel lines.
         /// </summary>
+        /// <param name="verts">The list of vertices to append to.</param>
+        /// <param name="indices">The list of line indices to append to.</param>
         private void GenerateSectionCrossLines(List<Vector3> verts, List<int> indices)
         {
             if (!renderSectionsInternalCross) return;

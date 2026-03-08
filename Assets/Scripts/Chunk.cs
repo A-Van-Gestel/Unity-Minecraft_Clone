@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Data;
 using Helpers;
@@ -7,49 +6,167 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using UnityEngine.Pool;
+using Object = UnityEngine.Object;
 
 public class Chunk
 {
-    public readonly ChunkCoord Coord;
-    public readonly Vector3 ChunkPosition;
-    public readonly ChunkData ChunkData;
-    private readonly SectionRenderer[] _sectionRenderers;
-    private readonly GameObject _chunkObject;
+    public ChunkCoord Coord;
+    public Vector3 ChunkPosition;
+    public ChunkData ChunkData;
+    private SectionRenderer[] _sectionRenderers;
+
+    // Expose for pool management validation
+    public readonly GameObject ChunkGameObject;
 
     private bool _isActive;
-    private List<Vector3Int> _activeVoxels = new List<Vector3Int>();
+    private HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
+
+    // Cached reference to avoid a GetComponent call on every pool activation, while remaining Unity-lifetime safe
+    private ChunkLoadAnimation _loadAnimation;
+    private bool _hasPlayedLoadAnimation;
 
     #region Constructor
 
-    public Chunk(ChunkCoord coord, bool createGameObject = true)
+    /// <summary>
+    /// Creates a new Chunk Visual.
+    /// NOTE: Should only be called by the ChunkPool. Use World.GetChunkFromPool() instead.
+    /// </summary>
+    public Chunk(ChunkCoord chunkCoord)
     {
-        Coord = coord;
-        Vector3 worldPos = new Vector3(Coord.X * VoxelData.ChunkWidth, 0f, Coord.Z * VoxelData.ChunkWidth);
-        ChunkPosition = worldPos;
+        Coord = chunkCoord;
 
-        ChunkData = World.Instance.worldData.RequestChunk(new Vector2Int((int)ChunkPosition.x, (int)ChunkPosition.z), true);
-        ChunkData.Chunk = this;
+        // Create GameObject hierarchy
+        ChunkGameObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
+        ChunkGameObject.transform.SetParent(World.Instance.transform);
 
-        if (createGameObject)
+        // Initialize Section Renderers
+        int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+        _sectionRenderers = new SectionRenderer[sectionCount];
+        for (int i = 0; i < sectionCount; i++)
         {
-            _chunkObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
-            _chunkObject.transform.SetParent(World.Instance.transform);
-            _chunkObject.transform.position = worldPos;
+            _sectionRenderers[i] = new SectionRenderer(ChunkGameObject.transform, i);
+        }
 
-            // Initialize Section Renderers
-            int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
-            _sectionRenderers = new SectionRenderer[sectionCount];
-            for (int i = 0; i < sectionCount; i++)
+        // Ensure object is inactive until properly Reset/Activated
+        ChunkGameObject.SetActive(false);
+    }
+
+    #endregion
+
+    #region Lifecycle
+
+    /// <summary>
+    /// Resets the Chunk instance for use at a new coordinate.
+    /// Used by the ChunkPool.
+    /// </summary>
+    public void Reset(ChunkCoord chunkCoord)
+    {
+        Coord = chunkCoord;
+        ChunkPosition = Coord.ToWorldPosition();
+
+        // Update GameObject identity
+        ChunkGameObject.name = $"Chunk {Coord.X}, {Coord.Z}";
+
+        if (World.Instance.settings.enableChunkLoadAnimations)
+        {
+            if (_loadAnimation == null)
             {
-                _sectionRenderers[i] = new SectionRenderer(_chunkObject.transform, i);
+                if (!ChunkGameObject.TryGetComponent(out _loadAnimation))
+                {
+                    _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
+                }
             }
+
+            _loadAnimation.ResetToUnderground(ChunkPosition);
+        }
+        else
+        {
+            if (_loadAnimation != null) _loadAnimation.enabled = false;
+            ChunkGameObject.transform.position = ChunkPosition;
+        }
+
+        // Reset State
+        _isActive = true;
+        _activeVoxels.Clear();
+        _hasPlayedLoadAnimation = false;
+
+        Vector2Int worldPosKey = Coord.ToVoxelOrigin();
+
+        // Link Data
+        // NOTE: We retrieve the existing data (loaded or generated) from WorldData.
+        ChunkData = World.Instance.worldData.RequestChunk(worldPosKey, true);
+
+        // CRITICAL: Link the Data to this Visual Instance
+        if (ChunkData != null)
+        {
+            ChunkData.Chunk = this;
+            if (ChunkData.IsPopulated)
+            {
+                OnDataPopulated();
+            }
+        }
+
+        // Reset Visuals (clears mesh but keeps memory allocated)
+        for (int i = 0; i < _sectionRenderers.Length; i++)
+        {
+            _sectionRenderers[i].Clear();
+        }
+
+        // Ensure object is active
+        ChunkGameObject.SetActive(true);
+    }
+
+    /// <summary>
+    /// Prepares the chunk to be returned to the pool.
+    /// Unlinks data references to prevent ghost updates.
+    /// </summary>
+    public void Release()
+    {
+        // CRITICAL: Unlink the Data.
+        // If this ChunkData is modified while the Visual is in the pool,
+        // it shouldn't try to update a disabled GameObject.
+        if (ChunkData != null)
+        {
+            ChunkData.Chunk = null;
+            ChunkData = null;
+        }
+
+        if (ChunkGameObject != null)
+        {
+            ChunkGameObject.SetActive(false);
+        }
+
+        if (_loadAnimation != null)
+        {
+            _loadAnimation.enabled = false;
+        }
+
+        _isActive = false;
+    }
+
+    /// <summary>
+    /// Permanently destroys the GameObject. Used when shutting down the pool.
+    /// </summary>
+    public void Destroy()
+    {
+        if (ChunkGameObject != null)
+        {
+            Object.Destroy(ChunkGameObject);
+        }
+
+        // Clean up renderers (Meshes)
+        if (_sectionRenderers != null)
+        {
+            foreach (SectionRenderer sr in _sectionRenderers) sr.Destroy();
         }
     }
 
     #endregion
 
     /// <summary>
-    /// A new method to be called by World.cs after the chunk's data has been populated by a job.
+    /// Scans the newly populated chunk data for voxels that possess active behaviors (e.g., grass spreading)
+    /// and registers them to the active voxel list for continuous tick processing.
     /// </summary>
     public void OnDataPopulated()
     {
@@ -92,54 +209,68 @@ public class Chunk
 
     #region Block Behavior Methods
 
+    /// <summary>
+    /// Processes the block behavior for all active voxels currently registered in this chunk.
+    /// Removes voxels from the active list if they no longer meet their activation conditions.
+    /// </summary>
     public void TickUpdate()
     {
-        // A temporary list to avoid modifying the activeVoxels list while iterating.
-        List<Vector3Int> stillActive = new List<Vector3Int>();
-        Queue<VoxelMod> modifications = new Queue<VoxelMod>();
+        if (_activeVoxels.Count == 0) return;
+
+        // A temporary, pooled list to track items that need to be removed
+        List<Vector3Int> toRemove = ListPool<Vector3Int>.Get();
 
         foreach (Vector3Int pos in _activeVoxels)
         {
             // Get the list of modifications from the behavior logic.
             List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
 
-            // If the block is still active, keep it for the next tick.
-            if (BlockBehavior.Active(ChunkData, pos))
+            // If the block is NO LONGER active, mark it for removal
+            // TODO: Future refactor could combine Behave and Active logic to save chunk lookups
+            if (!BlockBehavior.Active(ChunkData, pos))
             {
-                stillActive.Add(pos);
+                toRemove.Add(pos);
             }
 
-            // If the behavior produced any changes, add them to our queue.
+            // If the behavior produced any changes, submit them to the world's global queue.
             if (mods != null)
             {
-                foreach (VoxelMod mod in mods)
-                {
-                    modifications.Enqueue(mod);
-                }
+                World.Instance.EnqueueVoxelModifications(mods);
             }
         }
 
-        // If there are any modifications, submit them to the world's global queue.
-        if (modifications.Count > 0)
+        // Remove inactive voxels from the HashSet in O(1) time each
+        foreach (var pos in toRemove)
         {
-            World.Instance.EnqueueVoxelModifications(modifications);
+            _activeVoxels.Remove(pos);
         }
 
-        // Update the active voxel list for the next frame.
-        _activeVoxels = stillActive;
+        // Release the temporary list back to the pool
+        ListPool<Vector3Int>.Release(toRemove);
     }
 
+    /// <summary>
+    /// Registers a voxel as active, meaning it will be evaluated during every chunk tick.
+    /// </summary>
+    /// <param name="pos">The local position of the voxel within this chunk.</param>
     public void AddActiveVoxel(Vector3Int pos)
     {
-        if (!_activeVoxels.Contains(pos))
-            _activeVoxels.Add(pos);
+        _activeVoxels.Add(pos);
     }
 
+    /// <summary>
+    /// Unregisters an active voxel, stopping it from being evaluated during chunk ticks.
+    /// </summary>
+    /// <param name="pos">The local position of the voxel within this chunk.</param>
     public void RemoveActiveVoxel(Vector3Int pos)
     {
-        _activeVoxels.Remove(pos); // List<T>.Remove is efficient enough for this
+        _activeVoxels.Remove(pos);
     }
 
+    /// <summary>
+    /// Retrieves the total number of active voxels currently registered for ticking in this chunk.
+    /// </summary>
+    /// <returns>The count of active voxels.</returns>
     public int GetActiveVoxelCount()
     {
         return _activeVoxels.Count;
@@ -153,14 +284,20 @@ public class Chunk
         set
         {
             _isActive = value;
-            if (_chunkObject != null)
+            if (ChunkGameObject != null)
             {
-                _chunkObject.SetActive(value);
+                ChunkGameObject.SetActive(value);
                 if (value) PlayChunkLoadAnimation();
             }
         }
     }
 
+    /// <summary>
+    /// Converts a global world position into a local voxel position strictly within the bounds of this chunk.
+    /// </summary>
+    /// <param name="pos">The global world-space position.</param>
+    /// <returns>The local 3D position of the voxel (0-15 on X and Z).</returns>
+    /// <example><c>Global Pos (17.5f, 50f, -5f)</c> in Chunk at <c>(16, 0, -16)</c> -> <c>Local Pos (1, 50, 11)</c></example>
     public Vector3Int GetVoxelPositionInChunkFromGlobalVector3(Vector3 pos)
     {
         int xCheck = Mathf.FloorToInt(pos.x);
@@ -210,7 +347,7 @@ public class Chunk
                 }
 
                 // 2. Adjust Indices: Relativize indices to start at 0 for this section
-                // The indices currently point to the 'allVerts' array. 
+                // The indices currently point to the 'allVerts' array.
                 // We need them to point to the start of the section slice.
                 int offset = -vertStart;
 
@@ -229,7 +366,11 @@ public class Chunk
         }
     }
 
-    // This is called by World.cs when a mesh job for this chunk is complete.
+    /// <summary>
+    /// Applies the completed mesh data output from the Burst Job System to the chunk's internal section renderers.
+    /// Uses the advanced native mesh API to apply data seamlessly without GC allocations.
+    /// </summary>
+    /// <param name="meshData">The structured mesh data buffer produced by the <see cref="Jobs.MeshGenerationJob"/>.</param>
     public void ApplyMeshData(MeshDataJobOutput meshData)
     {
         // 1. Run a fast Burst job on the main thread to adjust coordinate spaces from Chunk-Space to Section-Space.
@@ -289,7 +430,9 @@ public class Chunk
         World.Instance.ChunksToDraw.Enqueue(this);
     }
 
-    // CreateMesh is now just the final step of enabling the renderer after data is applied.
+    /// <summary>
+    /// Finalizes the visual creation step by optionally triggering the chunk load animation.
+    /// </summary>
     public void CreateMesh()
     {
         // The mesh is already assigned in ApplyMeshData.
@@ -302,9 +445,9 @@ public class Chunk
     #region Public Getters
 
     /// <summary>
-    /// Gets the list of active voxels in this chunk.
+    /// Gets a read-only collection of the active voxels in this chunk.
     /// </summary>
-    public List<Vector3Int> ActiveVoxels => _activeVoxels;
+    public IReadOnlyCollection<Vector3Int> ActiveVoxels => _activeVoxels;
 
     #endregion
 
@@ -313,14 +456,14 @@ public class Chunk
     /// <summary>
     /// Checks if a voxel is active in this chunk.
     /// </summary>
-    /// <param name="localPos">The local position of the voxel in the given chunk.</param>
+    /// <param name="localVoxelPos">The local position of the voxel in the given chunk.</param>
     /// <returns>True if the voxel is active, false otherwise.</returns>
-    public bool IsVoxelActive(Vector3Int localPos)
+    public bool IsVoxelActive(Vector3Int localVoxelPos)
     {
         if (_activeVoxels.Count == 0)
             return false;
 
-        return _activeVoxels.Contains(localPos);
+        return _activeVoxels.Contains(localVoxelPos);
     }
 
     #endregion
@@ -330,102 +473,32 @@ public class Chunk
 
     private void PlayChunkLoadAnimation()
     {
-        if (World.Instance.settings.enableChunkLoadAnimations && _chunkObject.GetComponent<ChunkLoadAnimation>() == null)
-            _chunkObject.AddComponent<ChunkLoadAnimation>();
-    }
+        if (_hasPlayedLoadAnimation) return;
 
-    #endregion
-}
+        if (World.Instance.settings.enableChunkLoadAnimations)
+        {
+            // Unity's overloaded == null accurately checks if the native object was destroyed.
+            if (_loadAnimation == null)
+            {
+                if (!ChunkGameObject.TryGetComponent(out _loadAnimation))
+                {
+                    _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
+                }
 
-public class ChunkCoord : IEquatable<ChunkCoord>
-{
-    public readonly int X;
-    public readonly int Z;
+                // If added mid-game, snap it underground
+                _loadAnimation.ResetToUnderground(ChunkPosition);
+            }
 
-    #region Constructors
-
-    public ChunkCoord()
-    {
-        X = 0;
-        Z = 0;
-    }
-
-    public ChunkCoord(int x, int z)
-    {
-        X = x;
-        Z = z;
-    }
-
-    public ChunkCoord(Vector2 pos)
-    {
-        int xInt = Mathf.FloorToInt(pos.x);
-        int zInt = Mathf.FloorToInt(pos.y);
-
-        X = xInt / VoxelData.ChunkWidth;
-        Z = zInt / VoxelData.ChunkWidth;
-    }
-
-    public ChunkCoord(Vector2Int pos)
-    {
-        X = pos.x / VoxelData.ChunkWidth;
-        Z = pos.y / VoxelData.ChunkWidth;
-    }
-
-    public ChunkCoord(Vector3 pos)
-    {
-        int xInt = Mathf.FloorToInt(pos.x);
-        int zInt = Mathf.FloorToInt(pos.z);
-
-        X = xInt / VoxelData.ChunkWidth;
-        Z = zInt / VoxelData.ChunkWidth;
-    }
-
-    public ChunkCoord(Vector3Int pos)
-    {
-        X = pos.x / VoxelData.ChunkWidth;
-        Z = pos.z / VoxelData.ChunkWidth;
-    }
-
-    #endregion
-
-    #region Type Conversion
-
-    public Vector2Int ToVector2Int()
-    {
-        return new Vector2Int(X, Z);
-    }
-
-    public static implicit operator Vector2Int(ChunkCoord coord)
-    {
-        return new Vector2Int(coord.X, coord.Z);
-    }
-
-    #endregion
-
-    #region Overides
-
-    public override int GetHashCode()
-    {
-        // Multiply x & y by different constant to differentiate between situations like x=12 & z=13 and x=13 & z=12.
-        return 31 * X + 17 * Z;
-    }
-
-    public override bool Equals(object obj)
-    {
-        return obj is ChunkCoord coord && Equals(coord);
-    }
-
-    public bool Equals(ChunkCoord other)
-    {
-        if (other == null)
-            return false;
-
-        return other.X == X && other.Z == Z;
-    }
-
-    public override string ToString()
-    {
-        return $"ChunkCoord({X}, {Z})";
+            _loadAnimation.StartAnimation();
+            _hasPlayedLoadAnimation = true;
+        }
+        else
+        {
+            // If animations are heavily disabled or toggled off mid-game, ensure chunk is snapped to correct position
+            if (_loadAnimation != null) _loadAnimation.enabled = false;
+            ChunkGameObject.transform.position = ChunkPosition;
+            _hasPlayedLoadAnimation = true;
+        }
     }
 
     #endregion

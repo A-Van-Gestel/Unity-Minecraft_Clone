@@ -1,19 +1,26 @@
 using System.Collections.Generic;
 using System.Linq;
 using JetBrains.Annotations;
+using Serialization;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 public class DragAndDropHandler : MonoBehaviour
 {
-    [SerializeField] private UIItemSlot _cursorSlot;
+    [SerializeField]
+    private UIItemSlot _cursorSlot;
+
     private ItemSlot _cursorItemSlot;
     private UIItemSlot _lastClickedSlot;
 
-    [SerializeField] private GraphicRaycaster _m_Raycaster;
+    [SerializeField]
+    private GraphicRaycaster _m_Raycaster;
+
     private PointerEventData _m_PointerEventData;
-    [SerializeField] private EventSystem _m_EventSystem;
+
+    [SerializeField]
+    private EventSystem _m_EventSystem;
 
     private World _world;
 
@@ -286,4 +293,38 @@ public class DragAndDropHandler : MonoBehaviour
 
         return null;
     }
+
+    // --- SAVE / LOAD LOGIC ---
+
+    #region Save / Load Logic
+
+    public CursorItemData GetCursorData()
+    {
+        if (_cursorSlot != null && _cursorSlot.HasItem)
+        {
+            return new CursorItemData
+            {
+                itemID = _cursorSlot.ItemSlot.Stack.ID,
+                amount = _cursorSlot.ItemSlot.Stack.Amount,
+                originSlotIndex = -1 // We don't track origin currently, could add later
+            };
+        }
+
+        return null;
+    }
+
+    public void LoadCursorData(CursorItemData data)
+    {
+        if (data != null && data.itemID != 0)
+        {
+            ItemStack stack = new ItemStack(data.itemID, data.amount);
+            _cursorSlot.ItemSlot.InsertStack(stack);
+        }
+        else
+        {
+            _cursorSlot.ItemSlot.EmptySlot();
+        }
+    }
+
+    #endregion
 }

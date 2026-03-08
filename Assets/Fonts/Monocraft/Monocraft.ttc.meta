@@ -1,0 +1,33 @@
+fileFormatVersion: 2
+guid: 8d4cf1d58c6f0ec43926aab0c111a2d4
+TrueTypeFontImporter:
+  externalObjects: {}
+  serializedVersion: 4
+  fontSize: 16
+  forceTextureCase: -2
+  characterSpacing: 0
+  characterPadding: 1
+  includeFontData: 1
+  fontNames:
+  - Monocraft
+  fallbackFontReferences:
+  - {fileID: 12800000, guid: c3b6c80095efe7546819d8f010e916fd, type: 3}
+  - {fileID: 12800000, guid: cd30d89b4f2b6074d833e4638fd06639, type: 3}
+  - {fileID: 12800000, guid: 27fd9a13c86ecfe4796586ba4193b29f, type: 3}
+  - {fileID: 12800000, guid: dffc28cf85f92b34fb688129e03946e9, type: 3}
+  - {fileID: 12800000, guid: 5c32e3ac4811c6f44b47255b7f5dc3c2, type: 3}
+  - {fileID: 12800000, guid: 6a5d05aed6d686943b762b751cdaceed, type: 3}
+  - {fileID: 12800000, guid: 199e63a98f057664a8cfaffb0d9059de, type: 3}
+  - {fileID: 12800000, guid: 4a8ef1a345035d243b85a283d5625390, type: 3}
+  - {fileID: 12800000, guid: d33ada78033cf3f458050f7feb5e7435, type: 3}
+  - {fileID: 12800000, guid: 620452092adf73643ae0eaa820c202bf, type: 3}
+  - {fileID: 12800000, guid: 63d624393db01e94f8dcd500ccc15625, type: 3}
+  - {fileID: 12800000, guid: 6547b94da16dada4fa0be9177629acc8, type: 3}
+  customCharacters: 
+  fontRenderingMode: 2
+  ascentCalculationMode: 1
+  useLegacyBoundsCalculation: 0
+  shouldRoundAdvanceValue: 1
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

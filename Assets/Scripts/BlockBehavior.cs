@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Data;
 using JetBrains.Annotations;
 using UnityEngine;
@@ -7,11 +7,33 @@ using UnityEngine;
 /// Contains the static logic for all special block behaviors in the world,
 /// such as grass spreading and fluid simulation.
 /// </summary>
-public static class BlockBehavior
+public static partial class BlockBehavior
 {
     // A reusable list to avoid allocating new memory every time Behave is called.
-    private static readonly List<VoxelMod> Mods = new List<VoxelMod>();
+    private static readonly List<VoxelMod> s_mods = new List<VoxelMod>();
 
+    // OPTIMIZATION: Cached spread vectors to prevent array allocations every tick
+    private static readonly Vector3Int[] s_grassSpreadVectors =
+    {
+        // Adjacent
+        VoxelData.FaceChecks[0],
+        VoxelData.FaceChecks[1],
+        VoxelData.FaceChecks[4],
+        VoxelData.FaceChecks[5],
+        // Above Adjacent
+        VoxelData.FaceChecks[0] + VoxelData.FaceChecks[2],
+        VoxelData.FaceChecks[1] + VoxelData.FaceChecks[2],
+        VoxelData.FaceChecks[4] + VoxelData.FaceChecks[2],
+        VoxelData.FaceChecks[5] + VoxelData.FaceChecks[2],
+    };
+
+    private static readonly Vector3Int[] s_grassAirCheckVectors =
+    {
+        VoxelData.FaceChecks[0],
+        VoxelData.FaceChecks[1],
+        VoxelData.FaceChecks[4],
+        VoxelData.FaceChecks[5],
+    };
 
     // --- Public Methods ---
 
@@ -71,54 +93,7 @@ public static class BlockBehavior
         // --- Generic Fluid Activation Logic ---
         if (props.fluidType != FluidType.None)
         {
-            // A fluid block is active if it has any potential to flow.
-
-            // Reason 1: The block below is not solid or is a different fluid type.
-            VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
-            if (!belowState.HasValue || !belowState.Value.Properties.isSolid || belowState.Value.Properties.fluidType != props.fluidType)
-            {
-                return true; // Must be active to fall or interact.
-            }
-
-            // Reason 2: It's a source block (level 0) and can flow out. Source blocks are always potentially active.
-            if (voxel.FluidLevel == 0) return true;
-
-            // Reason 3: It is a flowing fluid block that is not at its maximum flow distance.
-            if (voxel.FluidLevel >= props.flowLevels - 1)
-            {
-                return false; // Max flow distance reached, it is stable.
-            }
-
-            // Reason 4: Check if any horizontal neighbor is a valid flow target (a place to flow TO).
-            for (int i = 0; i < 4; i++)
-            {
-                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
-                VoxelState? neighborState = chunkData.GetState(neighborPos);
-
-                if (!neighborState.HasValue) continue; // Edge of loaded world, cannot flow.
-
-                // If neighbor is air, we can flow into it.
-                if (neighborState.Value.id == 0) return true;
-
-                // If neighbor is the same fluid type and has a lower fluid level (higher level value), we can flow to level it out.
-                if (neighborState.Value.Properties.fluidType == props.fluidType && neighborState.Value.FluidLevel > voxel.FluidLevel + 1) return true;
-            }
-
-            // Reason 5: Check if any horizontal neighbor is a valid source (a place to flow FROM)
-            // A flowing block (level > 0) must remain active if it is connected to a source block or another fluid block with a lower fluid level number.
-            // This ensures it will drain away if the source is removed.
-            for (int i = 0; i < 4; i++)
-            {
-                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
-                VoxelState? neighborState = chunkData.GetState(neighborPos);
-
-                if (neighborState.HasValue &&
-                    neighborState.Value.Properties.fluidType == props.fluidType &&
-                    neighborState.Value.FluidLevel < voxel.FluidLevel)
-                {
-                    return true;
-                }
-            }
+            return IsFluidActive(chunkData, localPos, voxel, props, id);
         }
 
         // If no activation conditions are met, the block is stable and does not need to be ticked.
@@ -134,7 +109,7 @@ public static class BlockBehavior
     [CanBeNull]
     public static List<VoxelMod> Behave(ChunkData chunkData, Vector3Int localPos)
     {
-        Mods.Clear(); // Clear the reusable list before use.
+        s_mods.Clear(); // Clear the reusable list before use.
 
         // Get the voxel
         VoxelState? voxelNullable = chunkData.VoxelFromV3Int(localPos);
@@ -161,31 +136,16 @@ public static class BlockBehavior
             {
                 Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
                 VoxelMod voxelMod = new VoxelMod(globalPos, blockId: 3);
-                Mods.Add(voxelMod);
-                return Mods;
+                s_mods.Add(voxelMod);
+                return s_mods;
             }
 
             // Condition 2: Attempt to spread, using a GC-friendly method.
             int candidateCount = 0;
             Vector3Int chosenCandidateLocalPos = Vector3Int.zero; // A default value
 
-            // Create an array of all possible relative locations to check.
-            Vector3Int[] spreadVectors =
-            {
-                // Adjacent
-                VoxelData.FaceChecks[0],
-                VoxelData.FaceChecks[1],
-                VoxelData.FaceChecks[4],
-                VoxelData.FaceChecks[5],
-                // Above Adjacent
-                VoxelData.FaceChecks[0] + VoxelData.FaceChecks[2],
-                VoxelData.FaceChecks[1] + VoxelData.FaceChecks[2],
-                VoxelData.FaceChecks[4] + VoxelData.FaceChecks[2],
-                VoxelData.FaceChecks[5] + VoxelData.FaceChecks[2],
-            };
-
             // Check standard spread locations
-            foreach (Vector3Int vec in spreadVectors)
+            foreach (Vector3Int vec in s_grassSpreadVectors)
             {
                 Vector3Int checkPos = localPos + vec;
                 if (IsConvertibleDirt(chunkData, checkPos))
@@ -200,14 +160,7 @@ public static class BlockBehavior
             }
 
             // Check "spread down" locations separately
-            Vector3Int[] airCheckVectors =
-            {
-                VoxelData.FaceChecks[0],
-                VoxelData.FaceChecks[1],
-                VoxelData.FaceChecks[4],
-                VoxelData.FaceChecks[5],
-            };
-            foreach (var vec in airCheckVectors)
+            foreach (var vec in s_grassAirCheckVectors)
             {
                 Vector3Int checkPos = localPos + vec;
                 if (IsDirtNextToAir(chunkData, checkPos))
@@ -229,7 +182,7 @@ public static class BlockBehavior
                 {
                     // Modify the single, randomly chosen candidate.
                     Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.position.y);
-                    Mods.Add(new VoxelMod(chosenCandidateGlobalPos, blockId: 2));
+                    s_mods.Add(new VoxelMod(chosenCandidateGlobalPos, blockId: 2));
                 }
             }
         }
@@ -237,131 +190,19 @@ public static class BlockBehavior
         // --- GENERIC FLUID LOGIC ---
         if (props.fluidType != FluidType.None)
         {
+            LogWaterDebug($"[WaterDebug BEHAVE] Behave called for {localPos} level={voxel.FluidLevel}");
             HandleFluidFlow(chunkData, localPos, voxel);
         }
 
-        // Return the list of modifications.
-        return Mods.Count > 0 ? Mods : null;
+        // IMPORTANT: Returns a reference to a shared static list. Callers must
+        // consume the result immediately and must not store the reference,
+        // as it will be cleared on the next call to Behave().
+        return s_mods.Count > 0 ? s_mods : null;
     }
 
     #endregion
 
 
-    // --- Private Behavior Handlers ---
-
-    #region Grass Behavior Methods
-
-    /// <summary>
-    /// Helper to check if a voxel at a position is a dirt block with air above it.
-    /// </summary>
-    private static bool IsConvertibleDirt(ChunkData chunkData, Vector3Int pos)
-    {
-        VoxelState? state = chunkData.GetState(pos);
-        // It must be a dirt block (ID 3).
-        if (!state.HasValue || state.Value.id != 3)
-            return false;
-
-        // The block above it must be air (ID 0).
-        VoxelState? stateAbove = chunkData.GetState(pos + VoxelData.FaceChecks[2]);
-        return stateAbove.HasValue && stateAbove.Value.id == 0;
-    }
-
-    /// <summary>
-    /// Helper to check the special case of spreading downwards: is the target location Air,
-    /// and is the block below *that* a convertible dirt block?
-    /// </summary>
-    private static bool IsDirtNextToAir(ChunkData chunkData, Vector3Int airPos)
-    {
-        VoxelState? state = chunkData.GetState(airPos);
-        // The target adjacent block must be air.
-        if (!state.HasValue || state.Value.id != 0)
-            return false;
-
-        // The block below the air block must be a convertible dirt block.
-        return IsConvertibleDirt(chunkData, airPos + VoxelData.FaceChecks[3]); // FaceChecks[3] is Down
-    }
-
-    #endregion
-
-    #region Fluid Behavior Methods
-
-    /// <summary>
-    /// Manages the flow logic for a single fluid voxel.
-    /// </summary>
-    private static void HandleFluidFlow(ChunkData chunkData, Vector3Int localPos, VoxelState fluidState)
-    {
-        BlockType props = fluidState.Properties;
-        ushort currentId = fluidState.id;
-        byte currentLevel = fluidState.FluidLevel;
-        Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
 
 
-        // --- Rule 1: Flow Downwards ---
-        // Fluids always try to flow down into empty space first.
-        Vector3Int belowPos = localPos + Vector3Int.down;
-        VoxelState? belowState = chunkData.GetState(belowPos);
-
-        if (belowState.HasValue && !belowState.Value.Properties.isSolid)
-        {
-            // Replace the block below with a new source block of this fluid.
-            // This creates waterfalls and ensures fluid columns fill up from the bottom.
-            Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
-            Mods.Add(new VoxelMod(globalBelowPos, blockId: currentId)); // Place a new source block below
-
-            // If the current block was a flowing block (not a source), it has now flowed away
-            // and should be replaced with air. Source blocks are infinite and remain.
-            if (currentLevel > 0)
-            {
-                Mods.Add(new VoxelMod(globalPos, blockId: 0)); // Replace self with air
-            }
-
-            return; // Fluid has moved down, no further action this tick.
-        }
-
-        // --- Rule 2: Flow Horizontally ---
-        // If it can't flow down, it tries to spread out.
-        // A source block (level 0) is required to start a horizontal flow.
-        if (currentLevel >= props.flowLevels - 1) return; // Max flow distance reached.
-
-        // Check horizontal neighbors
-        for (int i = 0; i < 4; i++)
-        {
-            Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
-            VoxelState? neighborState = chunkData.GetState(neighborPos);
-
-            if (neighborState.HasValue && (!neighborState.Value.Properties.isSolid || neighborState.Value.Properties.fluidType != FluidType.None))
-            {
-                byte newLevel = (byte)(currentLevel + 1);
-
-                // Flow into air or a fluid block with a lower level
-                if (neighborState.Value.id == 0 || (neighborState.Value.id == currentId && neighborState.Value.FluidLevel > newLevel))
-                {
-                    Vector3Int globalNeighborPos = new Vector3Int(neighborPos.x + chunkData.position.x, neighborPos.y, neighborPos.z + chunkData.position.y);
-                    VoxelMod mod = new VoxelMod(globalNeighborPos, blockId: currentId)
-                    {
-                        FluidLevel = newLevel,
-                    };
-                    mod.FluidLevel = newLevel; // Set fluid level
-                    Mods.Add(mod);
-                }
-            }
-        }
-    }
-
-    #endregion
-
-    // --- HELPER METHODS ---
-
-    #region Helper Methods
-
-    /// Helper to reduce boilerplate code when checking a neighbour's neighbour.
-    private static VoxelState? GetNeighboursNeighbour(ChunkData chunkData, Vector3Int initialPos, int neighbourFaceIndex, int finalFaceIndex)
-    {
-        VoxelState? initialNeighbour = chunkData.GetState(initialPos + VoxelData.FaceChecks[neighbourFaceIndex]);
-        if (!initialNeighbour.HasValue) return null;
-
-        return chunkData.GetState(initialPos + VoxelData.FaceChecks[neighbourFaceIndex] + VoxelData.FaceChecks[finalFaceIndex]);
-    }
-
-    #endregion
 }

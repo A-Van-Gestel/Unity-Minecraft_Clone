@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -318,7 +318,7 @@ namespace Benchmarks
             {
                 Input = new LightingJobInputData
                 {
-                    Heightmap = new NativeArray<byte>(_sourceData.HeightMap, allocator),
+                    Heightmap = new NativeArray<ushort>(_sourceData.HeightMap, allocator),
                     NeighborN = new NativeArray<uint>(_sourceData.NeighborN, allocator),
                     NeighborE = new NativeArray<uint>(_sourceData.NeighborE, allocator),
                     NeighborS = new NativeArray<uint>(_sourceData.NeighborS, allocator),
@@ -483,7 +483,7 @@ namespace Benchmarks
             }
 
             // Set Heightmap
-            for (int i = 0; i < data.HeightMap.Length; i++) data.HeightMap[i] = (byte)height;
+            for (int i = 0; i < data.HeightMap.Length; i++) data.HeightMap[i] = (ushort)height;
         }
 
         private void CarveSwissCheese(LightingBenchmarkData data)
@@ -659,7 +659,7 @@ namespace Benchmarks
         private struct LightingBenchmarkData
         {
             public NativeArray<uint> Center;
-            public NativeArray<byte> HeightMap;
+            public NativeArray<ushort> HeightMap;
             public NativeArray<uint> NeighborN, NeighborE, NeighborS, NeighborW;
             public NativeArray<uint> NeighborNE, NeighborSE, NeighborSW, NeighborNW;
 
@@ -676,7 +676,7 @@ namespace Benchmarks
                 int heightMapSize = VoxelData.ChunkWidth * VoxelData.ChunkWidth;
 
                 Center = new NativeArray<uint>(mapSize, allocator);
-                HeightMap = new NativeArray<byte>(heightMapSize, allocator);
+                HeightMap = new NativeArray<ushort>(heightMapSize, allocator);
 
                 NeighborN = new NativeArray<uint>(mapSize, allocator);
                 NeighborE = new NativeArray<uint>(mapSize, allocator);

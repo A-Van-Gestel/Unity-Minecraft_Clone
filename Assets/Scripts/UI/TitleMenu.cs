@@ -1,51 +1,63 @@
+using System;
 using System.IO;
+using Data.Enums;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace UI
 {
     public class TitleMenu : MonoBehaviour
     {
-    #region Variables
-    #region Menu Objects
+        #region Variables
+
+        #region Menu Objects
+
         [Header("Menu Objects")]
         public GameObject mainMenuObject;
+
         public GameObject settingsMenuObject;
-    #endregion
+        public GameObject worldSelectMenuObject;
 
-    #region Main Menu UI Elements
+        #endregion
+
+        #region Main Menu UI Elements
+
         [Header("Main Menu UI Elements")]
-        public TextMeshProUGUI seedField;
         public TextMeshProUGUI versionField;
-    #endregion
 
-    #region Settings Menu UI Elements
+        #endregion
+
+        #region Settings Menu UI Elements
+
         [Header("Settings Menu UI Elements")]
         // View Distance
         public Slider viewDistanceSlider;
+
         public TextMeshProUGUI viewDistanceText;
 
         // Mouse Sensitivity
         public Slider mouseSensitivitySlider;
         public TextMeshProUGUI mouseSensitivityText;
-        
+
         // Cloud Style
         public TMP_Dropdown cloudStyleDropdown;
 
         // Toggles
         public Toggle chunkAnimationToggle;
-    #endregion
+
+        #endregion
 
         private Settings _settings;
         private readonly string _settingFilePath = Application.dataPath + "/settings.json";
-    #endregion
+
+        #endregion
 
 
         public void Awake()
         {
+            // TODO: Extract settings loading logic into a single Settings class / singleton
             // Create settings file if it doesn't yet exist, after that, load it.
             if (!File.Exists(_settingFilePath) || Application.isEditor)
             {
@@ -63,13 +75,30 @@ namespace UI
         _settings = JsonUtility.FromJson<Settings>(jsonImport);
 # endif
 
-            versionField.text = $"v{_settings.version}";
+            // --- VERSION STRING LOGIC ---
+#if UNITY_EDITOR
+            // In the Editor, we fetch the live date and the chosen enum from EditorPrefs.
+            // (We cast from int back to the string representation of the Enum)
+            int stageInt = EditorPrefs.GetInt("MC_DevStage", 2); // 2 = Alpha
+            string stageString = stageInt == 5 ? "" : $" - {(DevelopmentStage)stageInt}"; // <-- Cannot resolve symbol 'DevelopmentStage' :71
+
+            versionField.text = $"v{DateTime.Now:yyyy-MM-dd}{stageString} (Editor)";
+#else
+            // In a built game, the PreBuild hook has already baked the final string into Application.version
+            versionField.text = $"v{Application.version}";
+#endif
         }
 
         public void StartGame()
         {
-            VoxelData.Seed = VoxelData.CalculateSeed(seedField.text);
-            SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single);
+            mainMenuObject.SetActive(false);
+            worldSelectMenuObject.SetActive(true);
+        }
+
+        public void BackToMainMenu()
+        {
+            worldSelectMenuObject.SetActive(false);
+            mainMenuObject.SetActive(true);
         }
 
 
@@ -116,7 +145,8 @@ namespace UI
 #endif
         }
 
-    #region UI UpdateSliderValues
+        #region UI UpdateSliderValues
+
         public void UpdateViewDistanceSlider()
         {
             viewDistanceText.text = $"View Distance: {viewDistanceSlider.value}";
@@ -126,6 +156,7 @@ namespace UI
         {
             mouseSensitivityText.text = $"Mouse Sensitivity: {mouseSensitivitySlider.value:f1}";
         }
-    #endregion
+
+        #endregion
     }
 }

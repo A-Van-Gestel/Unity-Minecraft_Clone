@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using Unity.Collections;
 using Unity.Jobs;
 
@@ -10,7 +10,7 @@ namespace Jobs.Data
 
         // --- Output data ---
         public NativeArray<uint> Map;
-        public NativeArray<byte> HeightMap;
+        public NativeArray<ushort> HeightMap;
         public NativeQueue<VoxelMod> Mods;
 
         /// A helper to dispose all the containers at once

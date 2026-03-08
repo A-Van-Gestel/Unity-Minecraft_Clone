@@ -1,6 +1,12 @@
 # Own stuff
 /Assets/settings.json*
 
+# NugetForUnity
+/Assets/Packages/
+
+# Unity
+/ProfilerCaptures/
+
 
 
 # This .gitignore file should be placed at the root of your Unity project directory

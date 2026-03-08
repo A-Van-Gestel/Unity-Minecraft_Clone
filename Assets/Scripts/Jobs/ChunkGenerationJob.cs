@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using Helpers;
 using Jobs.BurstData;
 using Unity.Collections;
@@ -41,7 +41,7 @@ namespace Jobs
         public NativeArray<uint> OutputMap;
 
         [WriteOnly]
-        public NativeArray<byte> OutputHeightMap;
+        public NativeArray<ushort> OutputHeightMap;
 
         [WriteOnly]
         public NativeQueue<VoxelMod>.ParallelWriter Modifications;

@@ -1,0 +1,32 @@
+﻿# Stop the IDE from looking for config files in higher folders
+root = true
+
+# Base settings for all files
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# C# formatting
+[*.cs]
+indent_style = space
+indent_size = 4
+max_line_length = off
+
+# Voxel Engine Shader / Compute Shader files
+[*.{shader,compute,hlsl,cginc}]
+indent_style = space
+indent_size = 4
+
+# Unity specific configuration files (Assembly Definitions, etc.)
+[*.{json,asmdef,asmref}]
+indent_style = space
+indent_size = 4
+
+# Protect Markdown hard line breaks (which rely on two trailing spaces)
+[*.md]
+trim_trailing_whitespace = false
+
+# Tell the IDE not to mess with Unity's auto-generated meta files
+[*.meta]
+trim_trailing_whitespace = false

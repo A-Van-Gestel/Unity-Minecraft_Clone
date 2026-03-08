@@ -5,6 +5,10 @@ using UnityEngine;
 
 namespace DebugVisualizations.Jobs
 {
+    /// <summary>
+    /// A Burst-compiled job that generates the mesh data required to visualize specific voxels within a chunk.
+    /// Automatically culls faces between adjacent solid visualized blocks to optimize the generated geometry.
+    /// </summary>
     // TODO: I believe this could be converted into an IJobParallelFor
     [BurstCompile(FloatPrecision = FloatPrecision.Standard, FloatMode = FloatMode.Fast)]
     public struct VoxelVisualizerJob : IJob
@@ -40,6 +44,10 @@ namespace DebugVisualizations.Jobs
         public NativeList<int> Triangles;
         public NativeList<Color> Colors;
 
+        /// <summary>
+        /// Executes the visualization mesh generation algorithm.
+        /// Iterates through the provided dictionaries and builds faces for non-occluded voxels.
+        /// </summary>
         public void Execute()
         {
             const float cubeScale = 0.8f;
