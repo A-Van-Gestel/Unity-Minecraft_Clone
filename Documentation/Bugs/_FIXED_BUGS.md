@@ -277,3 +277,49 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 **Fix:** Removed the redundant second assignment.
 
 ---
+
+## Player & Input
+
+### ~~01. Collision only checks at two height levels (feet and +1)~~
+
+**Severity:** Bug  
+**Files:** `Player.cs`, `Physics/VoxelRigidbody.cs`
+**Fixed:** March 2026
+
+**Root Cause:** The horizontal collision properties only checked at two Y levels.
+**Fix:** Encapsulated player physics into `VoxelRigidbody` and implemented dynamic AABB sweeping across the entity's full `entityHeight`.
+
+---
+
+### ~~02. Collision checks don't account for player width in the cross-axis~~
+
+**Severity:** Bug  
+**Files:** `Player.cs`, `Physics/VoxelRigidbody.cs`
+**Fixed:** March 2026
+
+**Root Cause:** Each directional collision check sampled a single line, causing clipping on diagonal movement.
+**Fix:** `VoxelRigidbody` now sweeps an axis-aligned bounding box face dynamically.
+
+---
+
+### ~~03. Raycast-based block placement can be incorrect on exact voxel edges~~
+
+**Severity:** Bug (latent)  
+**Files:** `PlayerInteraction.cs` — `RaycastForVoxel`
+**Fixed:** March 2026
+
+**Root Cause:** The block placement used modulo `% 1` which failed on negative coordinates.
+**Fix:** Rewrote `RaycastForVoxel` to use a robust previous-step integer coordinate tracking method.
+
+---
+
+### ~~04. Block placement overlap check only covers 2 voxels of player height~~
+
+**Severity:** Bug  
+**Files:** `PlayerInteraction.cs` — `PlaceCursorBlocks`
+**Fixed:** March 2026
+
+**Root Cause:** The placement validity check only checked `y` and `y+1`, ignoring actual `playerHeight`.
+**Fix:** Replaced hardcoded checks with a dynamic AABB intersection check against the placed voxel's bounds.
+
+---

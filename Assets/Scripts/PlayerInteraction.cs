@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using MyBox;
 using UnityEngine;
 
@@ -86,6 +86,7 @@ public class PlayerInteraction : MonoBehaviour
 
     /// <summary>
     /// Centralized method to cast a ray from the player's camera to find a voxel.
+    /// Uses mathematical fractional offsets to accurately determine the placed block face.
     /// </summary>
     /// <returns>A VoxelRaycastResult struct containing information about the hit.</returns>
     public VoxelRaycastResult RaycastForVoxel()
@@ -99,46 +100,19 @@ public class PlayerInteraction : MonoBehaviour
             if (_world.CheckForVoxel(pos))
             {
                 VoxelRaycastResult result = new VoxelRaycastResult { DidHit = true };
-
-                // DESTROY HIGHLIGHT BLOCK
                 result.HitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
 
-                // PLACE HIGHLIGHT BLOCK
-                // Calculate place block position based on smallest x, y, z value, using HitPosition position as your origin.
-                float xCheck = pos.x % 1;
-                if (xCheck > 0.5f)
-                    xCheck -= 1;
-                float yCheck = pos.y % 1;
-                if (yCheck > 0.5f)
-                    yCheck -= 1;
-                float zCheck = pos.z % 1;
-                if (zCheck > 0.5f)
-                    zCheck -= 1;
+                // Find the fractional position within the voxel to determine which face was intersected
+                float xCheck = GetCoordinateOffset(pos.x);
+                float yCheck = GetCoordinateOffset(pos.y);
+                float zCheck = GetCoordinateOffset(pos.z);
 
                 if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
-                {
-                    // place block on x-axis
-                    if (xCheck < 0)
-                        result.PlacePosition = result.HitPosition + Vector3Int.right;
-                    else
-                        result.PlacePosition = result.HitPosition + Vector3Int.left;
-                }
+                    result.PlacePosition = result.HitPosition + (xCheck < 0 ? Vector3Int.right : Vector3Int.left);
                 else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
-                {
-                    // place block on z axis
-                    if (zCheck < 0)
-                        result.PlacePosition = result.HitPosition + Vector3Int.forward;
-                    else
-                        result.PlacePosition = result.HitPosition + Vector3Int.back;
-                }
+                    result.PlacePosition = result.HitPosition + (zCheck < 0 ? Vector3Int.forward : Vector3Int.back);
                 else
-                {
-                    // place block on y-axis by default
-                    if (yCheck < 0)
-                        result.PlacePosition = result.HitPosition + Vector3Int.up;
-                    else
-                        result.PlacePosition = result.HitPosition + Vector3Int.down;
-                }
+                    result.PlacePosition = result.HitPosition + (yCheck < 0 ? Vector3Int.up : Vector3Int.down);
 
                 return result;
             }
@@ -148,6 +122,16 @@ public class PlayerInteraction : MonoBehaviour
 
         // If we get here, we didn't hit anything.
         return new VoxelRaycastResult { DidHit = false };
+    }
+
+    /// <summary>
+    /// Calculates the signed fractional distance from the nearest voxel boundary.
+    /// </summary>
+    private float GetCoordinateOffset(float coordinate)
+    {
+        float frac = coordinate - Mathf.Floor(coordinate);
+        if (frac > 0.5f) frac -= 1f;
+        return frac;
     }
 
     private void PlaceCursorBlocks()
@@ -160,12 +144,22 @@ public class PlayerInteraction : MonoBehaviour
             placeBlock.position = result.PlacePosition;
 
             // Check if the placement position is valid.
+            // Using an AABB intersection to ensure the placed block does not overlap the player entity dynamically.
             Vector3 playerPosition = transform.position;
-            Vector3Int playerCoord = new Vector3Int(Mathf.FloorToInt(playerPosition.x), Mathf.FloorToInt(playerPosition.y), Mathf.FloorToInt(playerPosition.z));
+            Vector3 pMin = playerPosition - new Vector3(_player.VoxelRigidbody.entityWidth, 0, _player.VoxelRigidbody.entityWidth);
+            Vector3 pMax = playerPosition + new Vector3(_player.VoxelRigidbody.entityWidth, _player.VoxelRigidbody.entityHeight, _player.VoxelRigidbody.entityWidth);
+            
+            // The block AABB is exactly 1x1x1 at integer coordinates
+            Vector3 bMin = result.PlacePosition;
+            Vector3 bMax = result.PlacePosition + Vector3.one;
+
+            bool isInsidePlayer =
+                pMin.x < bMax.x && pMax.x > bMin.x &&
+                pMin.y < bMax.y && pMax.y > bMin.y &&
+                pMin.z < bMax.z && pMax.z > bMin.z;
 
             _blockPlaceable =
-                result.PlacePosition != playerCoord && // Not inside player's feet
-                result.PlacePosition != playerCoord + Vector3Int.up && // Not inside player's head
+                !isInsidePlayer &&
                 _world.worldData.IsVoxelInWorld(result.PlacePosition) &&
                 !_world.CheckForVoxel(result.PlacePosition) &&
                 toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem;

@@ -325,7 +325,7 @@ public class DebugScreen : MonoBehaviour
         _topLeftBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
-        _topLeftBuilder.Append(" | Eye Level: ").AppendFormat("{0:F2}", playerPosition.y + _player.playerHeight * 0.9f).AppendLine();
+        _topLeftBuilder.Append(" | Eye Level: ").AppendFormat("{0:F2}", playerPosition.y + _player.VoxelRigidbody.entityHeight * 0.9f).AppendLine();
         _topLeftBuilder.Append("Looking Angle H / V: ").AppendFormat("{0:F2} / {1:F2}", lookingDirection.x, lookingDirection.y)
             .Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
         _topLeftBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
@@ -339,7 +339,7 @@ public class DebugScreen : MonoBehaviour
             .Append($" | isNoclipping ({_player.toggleNoclipKey.ToString()}): ").Append(_player.isNoclipping)
             .Append($" | showHighlight ({_player.toggleBlockHighlightKey.ToString()}): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
         _topLeftBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", _player.MoveSpeed)
-            .Append(" | Flying: ").AppendFormat("{0:F1}", _player.flyingSpeed).AppendLine();
+            .Append(" | Flying: ").AppendFormat("{0:F1}", _player.VoxelRigidbody.flyingSpeed).AppendLine();
         _topLeftBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", _player.Velocity.x, _player.Velocity.y, _player.Velocity.z).AppendLine();
         _topLeftBuilder.AppendLine();
 
