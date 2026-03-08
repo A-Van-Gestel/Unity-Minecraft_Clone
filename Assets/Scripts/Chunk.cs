@@ -22,8 +22,9 @@ public class Chunk
     private bool _isActive;
     private HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
 
-    // Cached flag to avoid a GetComponent call on every pool activation
-    private bool _hasLoadAnimation;
+    // Cached reference to avoid a GetComponent call on every pool activation, while remaining Unity-lifetime safe
+    private ChunkLoadAnimation _loadAnimation;
+    private bool _hasPlayedLoadAnimation;
 
     #region Constructor
 
@@ -66,11 +67,29 @@ public class Chunk
 
         // Update GameObject identity
         ChunkGameObject.name = $"Chunk {Coord.X}, {Coord.Z}";
-        ChunkGameObject.transform.position = ChunkPosition;
+
+        if (World.Instance.settings.enableChunkLoadAnimations)
+        {
+            if (_loadAnimation == null)
+            {
+                if (!ChunkGameObject.TryGetComponent(out _loadAnimation))
+                {
+                    _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
+                }
+            }
+
+            _loadAnimation.ResetToUnderground(ChunkPosition);
+        }
+        else
+        {
+            if (_loadAnimation != null) _loadAnimation.enabled = false;
+            ChunkGameObject.transform.position = ChunkPosition;
+        }
 
         // Reset State
         _isActive = true;
         _activeVoxels.Clear();
+        _hasPlayedLoadAnimation = false;
 
         Vector2Int worldPosKey = Coord.ToVoxelOrigin();
 
@@ -116,6 +135,11 @@ public class Chunk
         if (ChunkGameObject != null)
         {
             ChunkGameObject.SetActive(false);
+        }
+
+        if (_loadAnimation != null)
+        {
+            _loadAnimation.enabled = false;
         }
 
         _isActive = false;
@@ -449,10 +473,31 @@ public class Chunk
 
     private void PlayChunkLoadAnimation()
     {
-        if (World.Instance.settings.enableChunkLoadAnimations && !_hasLoadAnimation)
+        if (_hasPlayedLoadAnimation) return;
+
+        if (World.Instance.settings.enableChunkLoadAnimations)
         {
-            ChunkGameObject.AddComponent<ChunkLoadAnimation>();
-            _hasLoadAnimation = true;
+            // Unity's overloaded == null accurately checks if the native object was destroyed.
+            if (_loadAnimation == null)
+            {
+                if (!ChunkGameObject.TryGetComponent(out _loadAnimation))
+                {
+                    _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
+                }
+
+                // If added mid-game, snap it underground
+                _loadAnimation.ResetToUnderground(ChunkPosition);
+            }
+
+            _loadAnimation.StartAnimation();
+            _hasPlayedLoadAnimation = true;
+        }
+        else
+        {
+            // If animations are heavily disabled or toggled off mid-game, ensure chunk is snapped to correct position
+            if (_loadAnimation != null) _loadAnimation.enabled = false;
+            ChunkGameObject.transform.position = ChunkPosition;
+            _hasPlayedLoadAnimation = true;
         }
     }
 

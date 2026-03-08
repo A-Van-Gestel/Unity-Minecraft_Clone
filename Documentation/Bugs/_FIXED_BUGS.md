@@ -113,6 +113,18 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 
 ## Chunk Management
 
+### ~~01. `ChunkCoord` integer division truncates negative coordinates incorrectly~~
+
+**Severity:** Bug (latent)  
+**Files:** `Chunk.cs` — `ChunkCoord`
+**Fixed:** March 2026
+
+**Root Cause:** `FromVoxelOrigin` and `FromWorldPosition` used raw integer division (`pos.x / VoxelData.ChunkWidth`) without `Mathf.FloorToInt`. In C#, integer division truncates toward zero instead of stepping down to the correct negative grid coordinate.
+
+**Fix:** Replaced the integer division in the `Vector2Int` and `Vector3Int` constructors with floating-point division coupled with `Mathf.FloorToInt`.
+
+---
+
 ### ~~02. `ChunkCoord.GetHashCode()` has high collision potential~~
 
 **Severity:** Improvement  
@@ -137,7 +149,7 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 
 ---
 
-### ~~06. `PrepareJobData` is called for soon-to-be-destroyed World instances~~
+### ~~04. `PrepareJobData` is called for soon-to-be-destroyed World instances~~
 
 **Severity:** Bug  
 **Files:** `World.cs` — `Awake`  
@@ -149,7 +161,7 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 
 ---
 
-### ~~07. Unreachable diagnostic check in `UnloadChunks`~~
+### ~~05. Unreachable diagnostic check in `UnloadChunks`~~
 
 **Severity:** Code Quality  
 **Files:** `World.cs` — `UnloadChunks`  
@@ -158,6 +170,21 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 **Root Cause:** Dead code — the same `IsAwaitingMainThreadProcess` condition was already checked above and caused a `continue`, making the second check unreachable.
 
 **Fix:** Removed the unreachable block.
+
+---
+
+### ~~06. Chunk load animation adds `GetComponent` on every activation and loops on modify~~
+
+**Severity:** Improvement (performance) & Bug
+**Files:** `Chunk.cs` — `PlayChunkLoadAnimation`, `ChunkLoadAnimation.cs`
+**Fixed:** March 2026
+
+**Root Cause:** `GetComponent<ChunkLoadAnimation>()` was called on each pool activation. A primitive boolean flag was previously attempted, but it could become stale if the component were destroyed. Furthermore, applying animations from the pool caused a 1-frame visual flash, and subsequent chunk modifications re-triggered the upward animation natively since it hooked into mesh generation.
+
+**Fix:**
+- Used a cached `_loadAnimation` reference inside `Chunk.cs` utilizing Unity's overriden `== null` safety check rather than a primitive boolean flag.
+- Refactored `ChunkLoadAnimation` to take an absolute target position (`ResetToUnderground`) to prevent infinite vertical offsets.
+- Added a `_hasPlayedLoadAnimation` flag to `Chunk.cs` to guarantee animations don't re-trigger when local voxel modifications request a mesh rebuild.
 
 ---
 

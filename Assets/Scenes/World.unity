@@ -4030,6 +4030,10 @@ PrefabInstance:
       value: 10
       objectReference: {fileID: 0}
     - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: settings.enableChunkLoadAnimations
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
       propertyPath: settings.enableWaterDiagnosticLogs
       value: 0
       objectReference: {fileID: 0}
