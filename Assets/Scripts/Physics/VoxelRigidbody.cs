@@ -27,6 +27,10 @@ namespace Physics
         [Tooltip("Render the physics bounding box in the Scene/Game view.")]
         public bool showBoundingBox = false;
 
+        public float CollisionHalfWidthX => collisionWidthX * 0.5f;
+        public float CollisionHalfDepthZ => collisionDepthZ * 0.5f;
+
+        [Header("Movement Settings")]
         [Tooltip("Jump velocity applied when jumping.")]
         public float jumpForce = 5.7f;
 
@@ -167,8 +171,8 @@ namespace Physics
             // COLLISION (Continuous predict-check snapping)
             if (!isNoclipping)
             {
-                float extX = collisionWidthX * 0.5f;
-                float extZ = collisionDepthZ * 0.5f;
+                float extX = CollisionHalfWidthX;
+                float extZ = CollisionHalfDepthZ;
 
                 // Resolve Z Axis
                 if (Velocity.z > 0 && CheckHorizontalCollision(0, extZ + Velocity.z))
@@ -200,8 +204,8 @@ namespace Physics
             float y = pos.y + downSpeed;
 
             // Skin width to ensure vertical checks don't clip into adjacent side walls
-            float wx = (collisionWidthX * 0.5f) - collisionPadding;
-            float wz = (collisionDepthZ * 0.5f) - collisionPadding;
+            float wx = CollisionHalfWidthX - collisionPadding;
+            float wz = CollisionHalfDepthZ - collisionPadding;
 
             // Check 4 corners of the bottom face
             if (_world.CheckForCollision(new Vector3(pos.x - wx, y, pos.z - wz)) ||
@@ -224,8 +228,8 @@ namespace Physics
             float y = pos.y + collisionHeight + upSpeed;
 
             // Skin width to ensure vertical checks don't clip into adjacent side walls
-            float wx = (collisionWidthX * 0.5f) - collisionPadding;
-            float wz = (collisionDepthZ * 0.5f) - collisionPadding;
+            float wx = CollisionHalfWidthX - collisionPadding;
+            float wz = CollisionHalfDepthZ - collisionPadding;
 
             // Check 4 corners of the top face
             if (_world.CheckForCollision(new Vector3(pos.x - wx, y, pos.z - wz)) ||
@@ -250,15 +254,13 @@ namespace Physics
             Vector3 offset = new Vector3(dx, 0, dz);
 
             // Inset dimensions based on padding
-            float extX = collisionWidthX * 0.5f;
-            float extZ = collisionDepthZ * 0.5f;
-            float insetX = extX - collisionPadding;
-            float insetZ = extZ - collisionPadding;
+            float insetX = CollisionHalfWidthX - collisionPadding;
+            float insetZ = CollisionHalfDepthZ - collisionPadding;
 
             // Perpendicular vector for the sweeping face
             Vector3 perp;
             if (Mathf.Abs(dz) > 0) // Moving along Z, sweep an X face
-                perp = new Vector3(insetX, 0, 0); 
+                perp = new Vector3(insetX, 0, 0);
             else // Moving along X, sweep a Z face
                 perp = new Vector3(0, 0, insetZ);
 
@@ -299,24 +301,24 @@ namespace Physics
         private void LateUpdate()
         {
             // In development builds, we use LateUpdate to draw the debug lines continuously if toggled on
-            #if DEVELOPMENT_BUILD || UNITY_EDITOR
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             if (showBoundingBox)
                 DrawBoundingBox(Color.red, Time.deltaTime);
-            #endif
+#endif
         }
 
         private void DrawBoundingBox(Color color, float duration)
         {
             Vector3 center = transform.position;
-            float extX = collisionWidthX * 0.5f;
-            float extZ = collisionDepthZ * 0.5f;
+            float extX = CollisionHalfWidthX;
+            float extZ = CollisionHalfDepthZ;
             float h = collisionHeight;
 
             // Define the 8 corners of the full AABB
-            Vector3 bfl = center + new Vector3(-extX, 0,  extZ);
-            Vector3 bfr = center + new Vector3( extX, 0,  extZ);
+            Vector3 bfl = center + new Vector3(-extX, 0, extZ);
+            Vector3 bfr = center + new Vector3(extX, 0, extZ);
             Vector3 bbl = center + new Vector3(-extX, 0, -extZ);
-            Vector3 bbr = center + new Vector3( extX, 0, -extZ);
+            Vector3 bbr = center + new Vector3(extX, 0, -extZ);
 
             Vector3 tfl = bfl + new Vector3(0, h, 0);
             Vector3 tfr = bfr + new Vector3(0, h, 0);

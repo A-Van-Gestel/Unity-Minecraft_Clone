@@ -148,11 +148,11 @@ public class PlayerInteraction : MonoBehaviour
             // Using an AABB intersection to ensure the placed block does not overlap the player entity dynamically.
             Vector3 playerPosition = transform.position;
             VoxelRigidbody rb = _player.VoxelRigidbody;
-            float extX = rb.collisionWidthX * 0.5f;
-            float extZ = rb.collisionDepthZ * 0.5f;
+            float extX = rb.CollisionHalfWidthX;
+            float extZ = rb.CollisionHalfDepthZ;
             Vector3 pMin = new Vector3(playerPosition.x - extX, playerPosition.y, playerPosition.z - extZ);
             Vector3 pMax = new Vector3(playerPosition.x + extX, playerPosition.y + rb.collisionHeight, playerPosition.z + extZ);
-            
+
             // The block AABB is exactly 1x1x1 at integer coordinates
             Vector3 bMin = result.PlacePosition;
             Vector3 bMax = result.PlacePosition + Vector3.one;
