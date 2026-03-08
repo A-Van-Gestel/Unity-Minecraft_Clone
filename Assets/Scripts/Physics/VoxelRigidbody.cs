@@ -12,6 +12,10 @@ namespace Physics
         [Min(0.1f)]
         public float collisionHeight = 1.8f;
 
+        // A microscopic offset applied to snapped velocities to prevent floating point math from
+        // evaluating to exactly equal with the block boundary on subsequent frames.
+        private const float COLLISION_EPSILON = 0.001f;
+
         [Tooltip("The total width of the physics collider (X axis).")]
         [Min(0.1f)]
         public float collisionWidthX = 0.8f;
@@ -176,15 +180,15 @@ namespace Physics
 
                 // Resolve Z Axis
                 if (Velocity.z > 0 && CheckHorizontalCollision(0, extZ + Velocity.z))
-                    Velocity = new Vector3(Velocity.x, Velocity.y, Mathf.Floor(transform.position.z + extZ + Velocity.z) - (transform.position.z + extZ) - 0.001f);
+                    Velocity = new Vector3(Velocity.x, Velocity.y, Mathf.Floor(transform.position.z + extZ + Velocity.z) - (transform.position.z + extZ) - COLLISION_EPSILON);
                 else if (Velocity.z < 0 && CheckHorizontalCollision(0, -extZ + Velocity.z))
-                    Velocity = new Vector3(Velocity.x, Velocity.y, Mathf.Floor(transform.position.z - extZ + Velocity.z) + 1f - (transform.position.z - extZ) + 0.001f);
+                    Velocity = new Vector3(Velocity.x, Velocity.y, Mathf.Floor(transform.position.z - extZ + Velocity.z) + 1f - (transform.position.z - extZ) + COLLISION_EPSILON);
 
                 // Resolve X Axis
                 if (Velocity.x > 0 && CheckHorizontalCollision(extX + Velocity.x, 0))
-                    Velocity = new Vector3(Mathf.Floor(transform.position.x + extX + Velocity.x) - (transform.position.x + extX) - 0.001f, Velocity.y, Velocity.z);
+                    Velocity = new Vector3(Mathf.Floor(transform.position.x + extX + Velocity.x) - (transform.position.x + extX) - COLLISION_EPSILON, Velocity.y, Velocity.z);
                 else if (Velocity.x < 0 && CheckHorizontalCollision(-extX + Velocity.x, 0))
-                    Velocity = new Vector3(Mathf.Floor(transform.position.x - extX + Velocity.x) + 1f - (transform.position.x - extX) + 0.001f, Velocity.y, Velocity.z);
+                    Velocity = new Vector3(Mathf.Floor(transform.position.x - extX + Velocity.x) + 1f - (transform.position.x - extX) + COLLISION_EPSILON, Velocity.y, Velocity.z);
 
                 // Resolve Y Axis
                 if (Velocity.y < 0)
@@ -238,7 +242,7 @@ namespace Physics
                 _world.CheckForCollision(new Vector3(pos.x - wx, y, pos.z + wz)))
             {
                 _verticalMomentum = 0; // set to 0 so the entity falls when its head hits a block while jumping
-                return Mathf.Floor(y) - (pos.y + collisionHeight) - 0.001f;
+                return Mathf.Floor(y) - (pos.y + collisionHeight) - COLLISION_EPSILON;
             }
 
             return upSpeed;
