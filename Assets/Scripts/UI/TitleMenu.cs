@@ -57,24 +57,7 @@ namespace UI
 
         public void Awake()
         {
-            // TODO: Extract settings loading logic into a single Settings class / singleton
-            // Create settings file if it doesn't yet exist, after that, load it.
-            if (!File.Exists(_settingFilePath) || Application.isEditor)
-            {
-                Debug.Log("No settings file found, creating new one.");
-                _settings = new Settings();
-                string jsonExport = JsonUtility.ToJson(_settings, true);
-                File.WriteAllText(_settingFilePath, jsonExport);
-#if UNITY_EDITOR
-                AssetDatabase.Refresh(); // Refresh Unity's asset database.
-# endif
-            }
-
-#if !UNITY_EDITOR
-        string jsonImport = File.ReadAllText(_settingFilePath);
-        _settings = JsonUtility.FromJson<Settings>(jsonImport);
-# endif
-
+            _settings = SettingsManager.LoadSettings();
             // --- VERSION STRING LOGIC ---
 #if UNITY_EDITOR
             // In the Editor, we fetch the live date and the chosen enum from EditorPrefs.

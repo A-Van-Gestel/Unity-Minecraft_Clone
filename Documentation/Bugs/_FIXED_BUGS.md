@@ -16,7 +16,8 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 
 **Root Cause:** A cross-chunk read-after-write hazard in `NeighborhoodLightingJob`. `PropagateDarkness` could not modify neighbor chunk data (marked `[ReadOnly]`), so `PropagateLight` read stale data and re-spread light, undoing the darkness propagation.
 
-**Fix:** Implemented a write-through cache (`NativeHashMap<long, uint>`) inside `Execute()`. `SetLight` writes to the cache for neighbor positions; `GetPackedData` checks the cache before the ReadOnly arrays. This ensures all light changes within a single job execution are immediately visible to subsequent reads.
+**Fix:** Implemented a write-through cache (`NativeHashMap<long, uint>`) inside `Execute()`. `SetLight` writes to the cache for neighbor positions; `GetPackedData` checks the cache before the ReadOnly arrays. This ensures all light changes within a single job execution are
+immediately visible to subsequent reads.
 
 ---
 
@@ -82,9 +83,11 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 
 **Symptom:** Water would flow one block into a neighboring chunk and then stop, leaving a dead-end fluid tile that did not continue spreading.
 
-**Root Cause:** During the initial world load (`StartWorld`), `ChunkData` for a chunk could be fully populated before the corresponding `Chunk` GameObject was retrieved from the pool. `Chunk.Reset()` did not call `OnDataPopulated()` when the data was already populated, so active voxels (e.g., water source blocks) placed during generation were never registered in `_activeVoxels`, and fluid simulation never started for them.
+**Root Cause:** During the initial world load (`StartWorld`), `ChunkData` for a chunk could be fully populated before the corresponding `Chunk` GameObject was retrieved from the pool. `Chunk.Reset()` did not call `OnDataPopulated()` when the data was already populated, so active
+voxels (e.g., water source blocks) placed during generation were never registered in `_activeVoxels`, and fluid simulation never started for them.
 
 **Fix:**
+
 - Added a check in `Chunk.Reset()`: if `ChunkData.IsPopulated` is already true when the chunk is reset, `OnDataPopulated()` is called immediately.
 - The noisy `[FLUID DEBUG]` warning in `World.ApplyModifications()` is now gated on `_isWorldLoaded` to suppress expected noise during the initial load phase.
 
@@ -96,9 +99,11 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 **Files:** `BlockBehavior.cs` — `HandleFluidFlow`, `Active`; `FluidDataGenerator.cs`; `FluidMeshData.cs`  
 **Fixed:** March 2026
 
-**Symptom:** Placing a single water source block at height Y and then removing it left the entire waterfall column permanently, because every block in the column had become an independent infinite source. Additionally, even after an initial fix (FluidLevel=1), falling water spread ~60 blocks on landing because level 1 still allowed 6 levels of horizontal spread.
+**Symptom:** Placing a single water source block at height Y and then removing it left the entire waterfall column permanently, because every block in the column had become an independent infinite source. Additionally, even after an initial fix (FluidLevel=1), falling water
+spread ~60 blocks on landing because level 1 still allowed 6 levels of horizontal spread.
 
-**Root Cause:** `HandleFluidFlow` Rule 1 created downward flow without properly encoding the upstream level. In Minecraft Beta 1.3.2, falling fluid uses metadata `>= 8` (the "falling flag"), with the lower 3 bits carrying the effective upstream level. When a falling block lands, horizontal spread starts from `effectiveLevel + 1`, not from level 1.
+**Root Cause:** `HandleFluidFlow` Rule 1 created downward flow without properly encoding the upstream level. In Minecraft Beta 1.3.2, falling fluid uses metadata `>= 8` (the "falling flag"), with the lower 3 bits carrying the effective upstream level. When a falling block lands,
+horizontal spread starts from `effectiveLevel + 1`, not from level 1.
 
 **Fix (Minecraft-style falling metadata):**
 
@@ -179,9 +184,11 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 **Files:** `Chunk.cs` — `PlayChunkLoadAnimation`, `ChunkLoadAnimation.cs`
 **Fixed:** March 2026
 
-**Root Cause:** `GetComponent<ChunkLoadAnimation>()` was called on each pool activation. A primitive boolean flag was previously attempted, but it could become stale if the component were destroyed. Furthermore, applying animations from the pool caused a 1-frame visual flash, and subsequent chunk modifications re-triggered the upward animation natively since it hooked into mesh generation.
+**Root Cause:** `GetComponent<ChunkLoadAnimation>()` was called on each pool activation. A primitive boolean flag was previously attempted, but it could become stale if the component were destroyed. Furthermore, applying animations from the pool caused a 1-frame visual flash, and
+subsequent chunk modifications re-triggered the upward animation natively since it hooked into mesh generation.
 
 **Fix:**
+
 - Used a cached `_loadAnimation` reference inside `Chunk.cs` utilizing Unity's overriden `== null` safety check rather than a primitive boolean flag.
 - Refactored `ChunkLoadAnimation` to take an absolute target position (`ResetToUnderground`) to prevent infinite vertical offsets.
 - Added a `_hasPlayedLoadAnimation` flag to `Chunk.cs` to guarantee animations don't re-trigger when local voxel modifications request a mesh rebuild.
@@ -201,6 +208,7 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 **Root Cause:** `FixedUpdate` applied gravity and movement before `StartWorld` finished loading and meshing the spawn chunks.
 
 **Fix:**
+
 - Exposed `_isWorldLoaded` as `public bool IsWorldLoaded => _isWorldLoaded` on `World`.
 - `FixedUpdate` in `Player.cs` now returns immediately if `!_world.IsWorldLoaded`.
 
@@ -321,5 +329,54 @@ This file consolidates all bugs that have been resolved. Entries are moved here 
 
 **Root Cause:** The placement validity check only checked `y` and `y+1`, ignoring actual `playerHeight`.
 **Fix:** Replaced hardcoded checks with a dynamic AABB intersection check against the placed voxel's bounds.
+
+---
+
+### ~~05. `collisionPadding` shrinks AABB incorrectly causing erratic collision behavior~~
+
+**Severity:** Bug  
+**Files:** `Physics/VoxelRigidbody.cs`  
+**Fixed:** March 2026
+
+**Symptom:** Setting `collisionPadding` to non-zero values caused erratic collision behavior (e.g., random teleports if negative, or not affecting actual collision distance correctly if positive). Corners of voxels intersected the collision bounding box.  
+**Root Cause:** Bounding box continuous widths and radius calculations were loosely defined and sometimes conflated, leading to scalar errors during AABB sweep tests.  
+**Fix:** Introduced unified `CollisionHalfWidthX` and `CollisionHalfDepthZ` properties as the single source of truth, removing `* 0.5f` redundant calculations and properly incorporating `collisionPadding`.
+
+---
+
+### ~~06. Block placement disabled too early due to overly strict player AABB intersection~~
+
+**Severity:** Bug  
+**Files:** `PlayerInteraction.cs`  
+**Fixed:** March 2026
+
+**Symptom:** The player could not replace a broken block if they were standing close to the wall (e.g., 1/3 of a block away) because the placement check overlapped with the player's collision bounds too safely.  
+**Root Cause:** `PlayerInteraction` used `VoxelRigidbody.collisionWidthX` and depth without accurately accounting for padding or using consistent extents.  
+**Fix:** Refactored the overlap calculation in `PlayerInteraction.cs` to accurately use the new `CollisionHalfWidthX` and `CollisionHalfDepthZ` properties.
+
+---
+
+### ~~07. Hardcoded collision epsilon `0.001f` causing readability issues~~
+
+**Severity:** Code Quality  
+**Files:** `Physics/VoxelRigidbody.cs`  
+**Fixed:** March 2026
+
+**Root Cause:** The collision snapping logic used hardcoded `0.001f` magic numbers across properties.  
+**Fix:** Centralized with a `COLLISION_EPSILON` constant.
+
+---
+
+## Architecture & Configuration
+
+### ~~01. Settings logic is duplicated and tightly coupled to World.cs~~
+
+**Severity:** Code Quality  
+**Files:** `World.cs`, `SettingsManager.cs`, `TitleMenu.cs`, `WorldSelectMenu.cs`  
+**Fixed:** March 2026
+
+**Symptom:** JSON Settings creation and loading logic was duplicated across multiple scripts.  
+**Root Cause:** `Settings` was previously nested inside `World.cs` and lacked a dedicated serialization controller.  
+**Fix:** Extracted `Settings` into a standalone POCO and created a centralized `SettingsManager` that handles loading, saving, and Editor-specific DB refresh functionality. The duplicated load logic was removed from all caller scripts.
 
 ---
