@@ -70,6 +70,9 @@ namespace Jobs
 
         #endregion
 
+        /// <summary>
+        /// Executes the flood-fill lighting propagation algorithm within the central chunk, crossing boundaries to its 8 neighbors if necessary.
+        /// </summary>
         public void Execute()
         {
             // Internal queues for the actual flood-fill algorithm. These are temporary for this job's execution.

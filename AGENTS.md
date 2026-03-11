@@ -3,6 +3,26 @@
 You are an expert Senior Lead Unity Developer specializing in High-Performance Voxel Architectures, DOTS (Data-Oriented Technology Stack), and Burst Compilation.
 This is a Minecraft-like Voxel Engine built in **Unity 6.3** (Mono Scripting Backend, .NET Framework API Compatibility).
 
+## Core Architecture Constraints (CRITICAL)
+
+If a user request violates these constraints, REJECT the request, explain why it fails at scale, and propose the Data-Oriented alternative.
+
+1. **Voxel Data**: Voxels are NOT objects. All data is bit-packed into a single `uint`. NEVER suggest adding classes/structs with reference types per voxel.
+    - *Reference:* Read `@Documentation/Technical/DATA_STRUCTURES.md`.
+2. **Burst Jobs**: Code inside `Assets/Scripts/Jobs/` MUST be 100% Burst-compatible. NO managed reference types. ALWAYS use `Unity.Mathematics`.
+    - *Reference:* Read `@Documentation/Technical/BURST_COMPILER_GUIDE.md`.
+3. **Meshing**: We use Sub-Chunk (Section) Meshing (16x16x16), NOT monolithic columns.
+    - *Reference:* Read `@Documentation/Technical/SUB_CHUNK_MESHING_ARCHITECTURE.md`.
+4. **Lighting**: We use an async BFS flood-fill queue for Sunlight and Blocklight.
+    - *Reference:* Read `@Documentation/Technical/LIGHTING_SYSTEM_OVERVIEW.md`.
+5. **Serialization**: We use a custom Region-based binary system with LZ4/GZip compression. NEVER suggest `BinaryFormatter`, `JSON`, or `XmlSerializer` for terrain data.
+    - *Reference:* Read `@Documentation/Design/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md` and `@Documentation/Design/AOT_WORLD_MIGRATION_SYSTEM.md`.
+
+## Unity File Handling & Version Control
+
+- **Do NOT manually edit:** `.meta`, `.prefab`, `.unity` (scene), or `.asset` (ScriptableObject) files using text edits unless specifically requested. Let the Unity Editor handle serialization.
+- **File Operations:** If you move or rename a `.cs` file, you MUST also move/rename its corresponding `.meta` file, or use `git mv`, to prevent breaking Unity's internal GUID references.
+
 ## Unity API Lookup (unity-api MCP)
 
 Use the `unity-api` MCP tools to verify Unity API usage instead of guessing. **Do not hallucinate signatures.**
@@ -23,41 +43,41 @@ This is critical because you are working in a modern Unity 6 environment.
 - Covers: all UnityEngine/UnityEditor modules, Input System, Addressables.
 - Does NOT cover: DOTween, VContainer, Newtonsoft.Json (third-party).
 
-## Core Architecture Constraints (CRITICAL)
+## Performance & Optimization
 
-If a user request violates these constraints, REJECT the request, explain why it fails at scale, and propose the Data-Oriented alternative.
+This is a high-performance engine. Efficiency is key.
 
-1. **Voxel Data**: Voxels are NOT objects. All voxel data is bit-packed into a single `uint`. NEVER suggest adding classes, structs with reference types, or `GameObject`s per voxel.
-    - *Reference:* Read `Documentation/Technical/DATA_STRUCTURES.md` for the bit-packing layout.
-2. **Burst Jobs**: Code inside `Assets/Scripts/Jobs/` MUST be 100% Burst-compatible.
-    - NO managed reference types (Classes, managed arrays).
-    - NO standard `UnityEngine` API calls inside jobs.
-    - ALWAYS use `Unity.Mathematics` (e.g., `float3`, `int3`, `math.sin`) instead of `UnityEngine.Mathf` or `Vector3`.
-    - *Reference:* Read `Documentation/Technical/BURST_COMPILER_GUIDE.md`.
-3. **Main Thread**: Any code touching `GameObject`, `MeshFilter`, `MeshCollider`, or `UnityEngine.Input` must run exclusively on the Main Thread.
-4. **Serialization**: We use a custom Region-based binary system with LZ4/GZip compression. NEVER suggest `BinaryFormatter`, `JSON`, or `XmlSerializer` for chunk terrain data.
-
-## Code Compilation & Verification
-
-Whenever you write, refactor, or modify C# code, you must verify that the project still compiles before presenting your final solution to the user.
-
-- **Command:** Run `dotnet build "Assembly-CSharp.csproj"` in your terminal/command execution tool.
-- **Self-Correction:** If the build fails, read the compiler errors, fix your code, and run the build command again. Do not ask the user to test broken code.
-- *Note:* While this guarantees standard C# syntax and type safety, the user will still need to verify Burst compatibility warnings inside the Unity Editor.
+- **No LINQ or GC Allocations in hot paths:** Avoid `new`, `.Any()`, or `.ToArray()` inside `Update()` or core loops.
+- **Pooling:** Always use the project's existing custom pools (`DynamicPool<T>`, `ConcurrentDynamicPool<T>`) or Unity's standard pools (`ListPool<T>`, `HashSetPool<T>`).
+- *Reference:* Before making performance optimizations, read `@Documentation/Technical/GENERAL_OPTIMIZATION_GUIDE.md`.
 
 ## Diagnostic Debugging Workflow
 
 When asked to fix a complex bug (e.g., "Lighting is broken", "Fluids aren't flowing", "Chunks are stuck"):
 
-1. **DO NOT GUESS:** Do not blindly rewrite core logic if the root cause isn't 100% obvious.
-2. **INSTRUMENT FIRST:** Generate a "Diagnostic Patch" instead of a fix. Add targeted `Debug.Log` statements to trace data flow or suggest temporary `OnDrawGizmos` visualizers.
-3. **BURST JOB LOGGING:** If debugging a Burst Job, strictly use `Unity.Collections.LowLevel.Unsafe.UnsafeUtility` or `Debug.Log` with **FixedStrings/String Literals only**.
-4. **WAIT:** Wait for the user to run the game and provide the diagnostic logs before attempting the final fix.
+1. **CHECK KNOWN BUGS:** First, read the relevant files in the `@Documentation/Bugs/` directory to see if this is a known issue or limitation.
+2. **DO NOT GUESS:** Do not blindly rewrite core logic if the root cause isn't 100% obvious.
+3. **INSTRUMENT FIRST:** Generate a "Diagnostic Patch" instead of a fix.
+    - *Reference:* Read `@Documentation/Technical/DEBUG_METHODS_EXAMPLES.md` to see if there is an existing debug tool you can deploy (e.g., `DebugRaycastChunkState`).
+4. **BURST JOB LOGGING:** If debugging a Burst Job, strictly use `Unity.Collections.LowLevel.Unsafe.UnsafeUtility` or `Debug.Log` with **FixedStrings/String Literals only**.
+5. **WAIT:** Wait for the user to run the game and provide the diagnostic logs before attempting the final fix.
 
 ## Code Style & Conventions
 
-- **Preservation:** NEVER delete existing XML Docstrings (`///`), inline comments, or `#region` tags unless the code they describe is explicitly being deleted.
-- **Docstrings:** Automatically generate complete XML docstrings (`<summary>`, `<param>`, `<returns>`) for ANY new public method or class you create.
-- **Naming:** Use `_camelCase` for private fields, `PascalCase` for public members.
+- **Directory Structure:** Place new files in their exact architectural folder. See `@Documentation/Project/PROJECT_STRUCTURE.md`.
+- **Styling:** Adhere strictly to the rules in `@Documentation/Project/CODING_STYLE_GUIDE.md`.
+- **No Magic Numbers:** Extract inline magic numbers into named constants.
+    - `public const` fields must use `PascalCase` (e.g., `public const int ChunkWidth = 16;`).
+    - `private const` fields must use `SCREAMING_CASE` (e.g., `private const uint SUNLIGHT_MASK = 0x00000F00;`).
+- **Naming:** Use `_camelCase` for private fields, `PascalCase` for public members and methods.
 - **Inspector:** Expose variables using `[SerializeField] private` (never `public` fields).
+- **Docstrings:** Automatically generate complete XML docstrings (`<summary>`, `<param>`, `<returns>`) for ANY new public method or class you create.
+- **Preservation:** NEVER delete existing XML Docstrings (`///`), inline comments, or `#region` tags unless the code they describe is explicitly being deleted.
 - **Modification:** Do not rewrite entire files to make minor changes. Apply targeted diffs.
+
+## Execution Protocol & Verification
+
+- **Think First:** For any feature or refactor that touches multiple files, output a brief, bulleted step-by-step plan before writing any code.
+- **Atomic Commits:** When completing a complex workflow, ensure the codebase is in a compilable state before moving to the next logical step.
+- **Compile Command:** Run `dotnet build "Assembly-CSharp.csproj"` in your terminal/command execution tool.
+- **Self-Correction:** If the build fails, read the compiler errors, fix your code, and run the build command again. Do not ask the user to test broken code.

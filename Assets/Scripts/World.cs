@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -18,7 +17,6 @@ using Jobs.Data;
 using MyBox;
 using Serialization;
 using Unity.Collections;
-using UnityEditor;
 using UnityEngine;
 using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
@@ -27,7 +25,6 @@ using Random = UnityEngine.Random;
 public class World : MonoBehaviour
 {
     public Settings settings;
-    private readonly string _settingFilePath = Application.dataPath + "/settings.json";
 
     [Header("World Generation Values")]
     public BiomeAttributes[] biomes;
@@ -327,22 +324,8 @@ public class World : MonoBehaviour
         _playerTransform = player.GetComponent<Transform>();
         _playerCamera = Camera.main!;
 
-        // --- Load / Create Settings ---
-        // TODO: Extract settings loading logic into a single Settings class / singleton
-        // Create settings file if it doesn't yet exist, after that, load it.
-        if (!File.Exists(_settingFilePath) || Application.isEditor)
-        {
-            string jsonExport = JsonUtility.ToJson(settings, true);
-            File.WriteAllText(_settingFilePath, jsonExport);
-#if UNITY_EDITOR
-            AssetDatabase.Refresh(); // Refresh Unity's asset database.
-# endif
-        }
-
-#if !UNITY_EDITOR
-        string jsonImport = File.ReadAllText(_settingFilePath);
-        settings = JsonUtility.FromJson<Settings>(jsonImport);
-# endif
+        // --- Load Settings via Manager ---
+        settings = SettingsManager.LoadSettings();
 
         // --- Initialize World settings (from save data / create new world) ---
         // 1. Determine Mode
@@ -435,7 +418,7 @@ public class World : MonoBehaviour
 
         // 1. First, just schedule generation for everything in the load radius.
         //    This ensures the initial "blocking" load is fast, even with high view distance settings.
-        int initialLoadRadius = Mathf.Min(settings.loadDistance, settings.maxInitialLoadRadius);
+        int initialLoadRadius = Mathf.Min(settings.loadDistance, (int)settings.maxInitialLoadRadius);
 
         // Generate an extra ring of chunks (+1 radius).
         // This ensures that the chunks inside 'initialLoadRadius' have valid neighbors to calculate lighting against.
@@ -2459,137 +2442,4 @@ public class World : MonoBehaviour
     }
 
     #endregion
-}
-
-[Serializable]
-public class Settings
-{
-    // --- SAVE SYSTEM ---
-    [Header("Save System")]
-#if UNITY_EDITOR
-    /// <summary>
-    /// If true, chunks are never unloaded and saving/loading is disabled.
-    /// Useful for verifying generation without disk I/O side effects.
-    /// </summary>
-    [Tooltip("If true: Chunks are never unloaded and saving/loading is disabled. Use this to verify generation without disk I/O side effects.\nIf false: Standard behavior (Chunk Unloading + Disk Persistence).")]
-    public bool keepChunksInMemory = false;
-#endif
-
-    /// <summary>
-    /// If true, saves are stored in a temporary folder in the Editor to keep production saves clean.
-    /// </summary>
-    [Tooltip("If true and running in Editor, saves will be stored in a temporary folder to keep production saves clean.")]
-    public bool enableVolatileSaveData = true;
-
-    /// <summary>
-    /// The compression algorithm used for saving chunks.
-    /// LZ4 is recommended for a balance of speed and size.
-    /// </summary>
-    [Tooltip("The compression algorithm used for saving chunks. 'None' is faster but uses more disk space.")]
-    public CompressionAlgorithm saveCompression = CompressionAlgorithm.LZ4;
-
-    /// <summary>
-    /// Returns true if the game should behave normally (Save/Load/Unload).
-    /// Returns false if the game is in Editor Debug Mode (Keep everything in RAM, no Disk I/O).
-    /// Always returns true in Builds.
-    /// </summary>
-    public bool EnablePersistence
-    {
-        get
-        {
-#if UNITY_EDITOR
-            return !keepChunksInMemory;
-#else
-            return true;
-#endif
-        }
-    }
-
-
-    // --- PERFORMANCE ---
-    [Header("Performance")]
-    // --- CHUNK LOADING ---
-    /// <summary>
-    /// The radius of chunks (in chunks) around the player that will be visible and rendered.
-    /// </summary>
-    [Tooltip("The radius of chunks around the player that will be visible and rendered.")]
-    public int viewDistance = 5;
-
-    /// <summary>
-    /// The additional radius of chunks beyond the viewDistance where data will be generated but not rendered.
-    /// This buffer is crucial for systems that need neighbor data, such as lighting, face culling, and preventing
-    /// structures (e.g., trees) from suddenly appearing at the edge of the view.
-    /// </summary>
-    private const int DATA_LOAD_BUFFER = 2;
-
-    /// <summary>
-    /// Gets the total radius of chunks around the player for which voxel data will be loaded and generated.
-    /// This is a calculated property, dynamically derived from the viewDistance plus a safe buffer.
-    /// </summary>
-    public int loadDistance => viewDistance + DATA_LOAD_BUFFER;
-
-    /// <summary>
-    /// Caps the load distance for the initial startup to prevent long freezes.
-    /// The world will continue to load to the full loadDistance asynchronously after startup.
-    /// </summary>
-    [Tooltip("Caps the load distance for the initial startup to prevent long freezes. Set to a high value to disable.")]
-    public int maxInitialLoadRadius = 10;
-
-    // --- LIGHTING ---
-    /// <summary>
-    /// The maximum number of lighting jobs that can be scheduled in a single frame.
-    /// </summary>
-    [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame.")]
-    public int maxLightJobsPerFrame = 32;
-
-    /// <summary>
-    /// If true, the lighting system is enabled.
-    /// </summary>
-    [InitializationField]
-    [Tooltip("Enable the lighting system.")]
-    public bool enableLighting = true;
-
-    // --- MESHING ---
-    /// <summary>
-    /// The maximum number of chunks that can be meshed (rebuilt) in a single frame.
-    /// </summary>
-    [Tooltip("The maximum number of chunks that can be meshed (rebuilt) in a single frame.")]
-    public int maxMeshRebuildsPerFrame = 10;
-
-    // --- RENDERING ---
-    [Tooltip("The style of clouds to render.")]
-    public CloudStyle clouds = CloudStyle.Fancy;
-
-    // --- CONTROLS ---
-    [Header("Controls")]
-    [Range(0.1f, 10f)]
-    public float mouseSensitivityX = 1.2f;
-
-    [Range(0.1f, 10f)]
-    public float mouseSensitivityY = 1.2f;
-
-    // --- WORLD GENERATION ---
-    [Header("World Generation")]
-    [InitializationField]
-    [Tooltip("Second Pass: Lode generation")]
-    public bool enableSecondPass = true;
-
-    [InitializationField]
-    [Tooltip("Structure Pass: Tree generation")]
-    public bool enableMajorFloraPass = true;
-
-    // --- BONUS STUFF ---
-    [Header("Bonus Stuff")]
-    public bool enableChunkLoadAnimations = false;
-
-    // --- DEBUG ---
-    [Header("Debug")]
-    [Tooltip("Visualize chunk borders in the scene view.")]
-    public bool showChunkBorders = false;
-
-    [Tooltip("Enable detailed diagnostic logs for debugging fluid, lighting, and chunk issues. Warning: may impact performance.")]
-    public bool enableDiagnosticLogs = false;
-
-    [Tooltip("Enable detailed diagnostic logs specifically for water/fluid simulation. Warning: may impact performance.")]
-    public bool enableWaterDiagnosticLogs = false;
 }

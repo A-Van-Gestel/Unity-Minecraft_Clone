@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Mathematics;
 
@@ -14,25 +14,26 @@ namespace Jobs.BurstData
     {
         // --- Constants for Bit Packing ---
         // Using Hex for clarity with bit positions
-        private const uint ID_MASK = 0x0000FFFF; // Bits 0-15  (16-bits, Values 0-65,535)
-        private const uint SUNLIGHT_MASK = 0x000F0000; // Bits 16-19 (4-bits, Values 0-15)
-        private const uint BLOCKLIGHT_MASK = 0x00F00000; // Bits 20-23 (4-bits, Values 0-15)
-        private const uint META_MASK = 0xFF000000; // Bits 24-31 (8-bits, Values 0-255)
+        public const uint ID_MASK = 0x0000FFFF; // Bits 0-15  (16-bits, Values 0-65,535)
+        public const uint SUNLIGHT_MASK = 0x000F0000; // Bits 16-19 (4-bits, Values 0-15)
+        public const uint BLOCKLIGHT_MASK = 0x00F00000; // Bits 20-23 (4-bits, Values 0-15)
+        public const uint META_MASK = 0xFF000000; // Bits 24-31 (8-bits, Values 0-255)
         // All 32 bits are used.
 
-        private const int ID_SHIFT = 0;
-        private const int SUNLIGHT_SHIFT = 16;
-        private const int BLOCKLIGHT_SHIFT = 20;
-        private const int META_SHIFT = 24;
+        public const int ID_SHIFT = 0;
+        public const int SUNLIGHT_SHIFT = 16;
+        public const int BLOCKLIGHT_SHIFT = 20;
+        public const int META_SHIFT = 24;
 
         // --- Internal Masks within the 8-bit Metadata field ---
         // These apply AFTER shifting the meta bits down to 0.
-        private const byte META_VAL_FLUID_MASK = 0xF; // 4 bits (0-15)
-        private const byte META_VAL_ORIENT_MASK = 0x7; // 3 bits (0-7)
+        public const byte META_VAL_FLUID_MASK = 0xF; // 4 bits (0-15)
+        public const byte META_VAL_ORIENT_MASK = 0x7; // 3 bits (0-7)
 
         // --- Helpers ---
 
-        /// Maps World Orientation (Face Index) -> Internal Storage Index (0-5)
+        /// <summary>Maps World Orientation (Face Index) -> Internal Storage Index (0-5).</summary>
+        /// <param name="orientation">The world orientation to convert.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte GetOrientationIndex(byte orientation)
         {
@@ -76,7 +77,7 @@ namespace Jobs.BurstData
             // A block defined as a Fluid in BlockTypes should use FluidLevel.
             // A block defined as Solid should use Orientation.
 
-            byte meta = 0;
+            byte meta;
             if (isFluid || fluidLevel > 0)
             {
                 meta = (byte)(fluidLevel & META_VAL_FLUID_MASK);
@@ -107,6 +108,8 @@ namespace Jobs.BurstData
         /// <summary>
         /// Returns the raw 8-bit metadata value.
         /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The 8-bit metadata value.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetMeta(uint packedData)
         {
@@ -142,7 +145,7 @@ namespace Jobs.BurstData
         /// Extracts the blocklight level from the packed voxel data.
         /// </summary>
         /// <param name="packedData">The packed uint data.</param>
-        /// <returns>The blocklight level (0-15).
+        /// <returns>The blocklight level (0-15).</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetBlockLight(uint packedData)
         {
@@ -152,6 +155,8 @@ namespace Jobs.BurstData
         /// <summary>
         /// Extracts orientation from the Metadata bits.
         /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The world orientation.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetOrientation(uint packedData)
         {
@@ -177,6 +182,8 @@ namespace Jobs.BurstData
         /// <summary>
         /// Extracts fluid level from the Metadata bits.
         /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The fluid level (0-15).</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetFluidLevel(uint packedData)
         {
@@ -206,7 +213,7 @@ namespace Jobs.BurstData
         /// </summary>
         /// <param name="packedData">The original packed uint data.</param>
         /// <param name="sunLightLevel">The new sunlight level to set.</param>
-        /// <returns>The updated packed uint data.
+        /// <returns>The updated packed uint data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetSunLight(uint packedData, byte sunLightLevel)
         {
@@ -228,6 +235,9 @@ namespace Jobs.BurstData
         /// <summary>
         /// Sets the full 8-bit metadata field directly.
         /// </summary>
+        /// <param name="packedData">The original packed uint data.</param>
+        /// <param name="meta">The metadata value to set.</param>
+        /// <returns>The updated packed uint data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetMeta(uint packedData, byte meta)
         {
@@ -238,6 +248,9 @@ namespace Jobs.BurstData
         /// Sets the orientation bits within the metadata field.
         /// Note: This blindly overwrites the lower 3 bits of the metadata.
         /// </summary>
+        /// <param name="packedData">The original packed uint data.</param>
+        /// <param name="orientation">The orientation value to set.</param>
+        /// <returns>The updated packed uint data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetOrientation(uint packedData, byte orientation)
         {
@@ -262,6 +275,9 @@ namespace Jobs.BurstData
         /// Sets the fluid level bits within the metadata field.
         /// Note: This blindly overwrites the lower 4 bits of the metadata.
         /// </summary>
+        /// <param name="packedData">The original packed uint data.</param>
+        /// <param name="fluidLevel">The fluid level to set.</param>
+        /// <returns>The updated packed uint data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetFluidLevel(uint packedData, byte fluidLevel)
         {

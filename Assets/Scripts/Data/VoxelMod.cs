@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 
 namespace Data
@@ -23,6 +23,11 @@ namespace Data
 
         #region Constructors
 
+        /// <summary>
+        /// Creates a new voxel modification to be applied to the world.
+        /// </summary>
+        /// <param name="globalPosition">The absolute world-space block position.</param>
+        /// <param name="blockId">The ID of the block to place.</param>
         public VoxelMod(Vector3Int globalPosition, ushort blockId)
         {
             GlobalPosition = globalPosition;

@@ -1,12 +1,10 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
-using System.IO;
 using Data;
 using Helpers;
 using Serialization;
 using Serialization.Migration;
 using TMPro;
-using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -64,48 +62,9 @@ namespace UI
         }
 
 
-        // FIX: Centralized and robust settings loading
         private void LoadSettings()
         {
-            if (_settings != null) return;
-
-            // TODO: Extract settings loading logic into a single Settings class / singleton
-            // Create settings file if it doesn't yet exist, after that, load it.
-            if (!File.Exists(_settingFilePath) || Application.isEditor)
-            {
-                _settings = new Settings();
-                try
-                {
-                    string jsonExport = JsonUtility.ToJson(_settings, true);
-                    File.WriteAllText(_settingFilePath, jsonExport);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"Failed to create settings file: {e.Message}");
-                }
-
-#if UNITY_EDITOR
-                AssetDatabase.Refresh(); // Refresh Unity's asset database.
-#endif
-            }
-#if !UNITY_EDITOR
-            else
-            {
-                // Load existing
-                try
-                {
-                    string jsonImport = File.ReadAllText(_settingFilePath);
-                    _settings = JsonUtility.FromJson<Settings>(jsonImport);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"Failed to load settings: {e.Message}");
-                }
-            }
-# endif
-
-            // Fallback to prevent NullReferenceException
-            _settings ??= new Settings();
+            _settings = SettingsManager.LoadSettings();
         }
 
         private void OnEnable()

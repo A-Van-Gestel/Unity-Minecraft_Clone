@@ -1,7 +1,10 @@
-﻿using Unity.Collections;
+using Unity.Collections;
 
 namespace Data.JobData
 {
+    /// <summary>
+    /// Manages native arrays of game data required by the job system.
+    /// </summary>
     public class JobDataManager
     {
         // --- Public Readonly Fields ---
@@ -15,6 +18,16 @@ namespace Data.JobData
 
 
         // --- Constructor ---
+        /// <summary>
+        /// Initializes a new instance of the <see cref="JobDataManager"/> class.
+        /// </summary>
+        /// <param name="biomesJobData">Native array of biome properties.</param>
+        /// <param name="allLodesJobData">Native array of all biome lodes.</param>
+        /// <param name="blockTypesJobData">Native array of block type properties.</param>
+        /// <param name="customMeshesJobData">Native array of custom mesh structures.</param>
+        /// <param name="customFacesJobData">Native array tracking custom faces.</param>
+        /// <param name="customVertsJobData">Native array of custom vertices.</param>
+        /// <param name="customTrisJobData">Native array of custom triangles.</param>
         public JobDataManager(
             NativeArray<BiomeAttributesJobData> biomesJobData,
             NativeArray<LodeJobData> allLodesJobData,
@@ -35,7 +48,9 @@ namespace Data.JobData
         }
 
         // --- Methods ---
-        /// A helper to dispose all the containers at once
+        /// <summary>
+        /// A helper to dispose all the containers at once.
+        /// </summary>
         public void Dispose()
         {
             if (BiomesJobData.IsCreated) BiomesJobData.Dispose();

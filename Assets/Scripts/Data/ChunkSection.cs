@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Helpers;
 using JetBrains.Annotations;
 using Jobs.BurstData;
@@ -16,6 +16,9 @@ namespace Data
         // Optimization: Track fully light-blocking blocks.
         public int opaqueCount;
 
+        /// <summary>
+        /// Initializes a new, empty <see cref="ChunkSection"/> with arrays allocated.
+        /// </summary>
         public ChunkSection()
         {
             // 4096 * 4 bytes = 16KB allocation
@@ -35,11 +38,21 @@ namespace Data
             Array.Clear(voxels, 0, voxels.Length);
         }
 
+        /// <summary>
+        /// Returns true if the section contains no blocks other than air.
+        /// </summary>
         public bool IsEmpty => nonAirCount == 0;
+
+        /// <summary>
+        /// Returns true if the section is completely filled with light-obstructing blocks,
+        /// allowing meshing to optimize away internal faces.
+        /// </summary>
         public bool IsFullySolid => opaqueCount >= ChunkMath.SECTION_VOLUME;
 
         /// <summary>
         /// Recalculates the NonAirCount using optimized pointer arithmetic and loop unrolling.
+        /// Uses a mask-based check (<c>data &amp; ID_MASK</c>) to correctly ignore air voxels
+        /// that only carry light data (sunlight/blocklight bits set, block ID = 0).
         /// </summary>
         public unsafe void RecalculateNonAirCount()
         {
@@ -56,17 +69,17 @@ namespace Data
                 // This reduces the overhead of the loop comparison/increment logic
                 while (ptr <= end - 4)
                 {
-                    if (*ptr != 0) count++;
-                    if (*(ptr + 1) != 0) count++;
-                    if (*(ptr + 2) != 0) count++;
-                    if (*(ptr + 3) != 0) count++;
+                    if ((*ptr & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
+                    if ((*(ptr + 1) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
+                    if ((*(ptr + 2) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
+                    if ((*(ptr + 3) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
                     ptr += 4;
                 }
 
                 // Handle remaining items
                 while (ptr < end)
                 {
-                    if (*ptr != 0) count++;
+                    if ((*ptr & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
                     ptr++;
                 }
 
@@ -76,6 +89,8 @@ namespace Data
 
         /// <summary>
         /// Recalculates NonAir and Opaque counts.
+        /// Uses a mask-based check (<c>data &amp; ID_MASK</c>) to correctly ignore air voxels
+        /// that only carry light data (sunlight/blocklight bits set, block ID = 0).
         /// </summary>
         /// <param name="blockTypes">The blockTypes array to look up opacity.</param>
         public unsafe void RecalculateCounts([CanBeNull] BlockType[] blockTypes)
@@ -103,9 +118,9 @@ namespace Data
                 {
                     uint data = *ptr++;
 
-                    // OPTIMIZATION: Early exit for Air.
-                    // This avoids the bitwise extraction and the array lookup entirely.
-                    if (data == 0) continue;
+                    // OPTIMIZATION: Mask-based check to correctly skip air voxels.
+                    // Light-only air voxels (data != 0 but ID == 0) are correctly skipped.
+                    if ((data & BurstVoxelDataBitMapping.ID_MASK) == 0) continue;
 
                     localNonAir++;
 

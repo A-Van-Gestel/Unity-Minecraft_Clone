@@ -67,23 +67,21 @@ public static partial class BlockBehavior
     {
         if (currentLevel == 0) return false; // Source blocks never decay
 
-        byte expectedEffectiveLevel;
-        bool isFedFromAbove;
-        CalculateExpectedFluidLevel(chunkData, localPos, currentId, flowLevels, out expectedEffectiveLevel, out isFedFromAbove);
+        CalculateExpectedFluidLevel(chunkData, localPos, currentId, flowLevels, out byte expectedEffectiveLevel, out bool isFedFromAbove);
 
         bool expectedFalling = isFedFromAbove || IsFalling(currentLevel);
         byte expectedFluidLevel = expectedFalling ? MakeFalling(expectedEffectiveLevel) : expectedEffectiveLevel;
 
         if (expectedEffectiveLevel >= flowLevels)
         {
-            // Drain to air if unsupported horizontally and vertically, or reached max flow
-            s_mods.Add(new VoxelMod(globalPos, 0) { ImmediateUpdate = true });
+            Mods.Add(new VoxelMod(globalPos, 0) { ImmediateUpdate = true });
             return true;
         }
-        else if (expectedFluidLevel != currentLevel)
+
+        if (expectedFluidLevel != currentLevel)
         {
             // Update our level to match our support
-            s_mods.Add(new VoxelMod(globalPos, currentId) { FluidLevel = expectedFluidLevel, ImmediateUpdate = true });
+            Mods.Add(new VoxelMod(globalPos, currentId) { FluidLevel = expectedFluidLevel, ImmediateUpdate = true });
             currentLevel = expectedFluidLevel; // Update by ref for the orchestrator
             return false; // Still process gravity/spread this tick, but with updated level (caught next tick mostly)
         }
@@ -101,7 +99,7 @@ public static partial class BlockBehavior
         if (canFlowDown)
         {
             Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
-            s_mods.Add(new VoxelMod(globalBelowPos, currentId)
+            Mods.Add(new VoxelMod(globalBelowPos, currentId)
             {
                 FluidLevel = MakeFalling(effectiveLevel),
             });
@@ -114,8 +112,9 @@ public static partial class BlockBehavior
             if (isSupportedBelow)
             {
                 // We've hit a floor, settle into horizontal form and prepare to spread next tick.
-                s_mods.Add(new VoxelMod(globalPos, currentId) { FluidLevel = effectiveLevel, ImmediateUpdate = true });
+                Mods.Add(new VoxelMod(globalPos, currentId) { FluidLevel = effectiveLevel, ImmediateUpdate = true });
             }
+
             return true;
         }
 
@@ -128,10 +127,10 @@ public static partial class BlockBehavior
     private static void HandleFluidSpread(ChunkData chunkData, Vector3Int localPos, Vector3Int globalPos, ushort currentId, byte currentLevel, byte effectiveLevel, byte flowLevels, VoxelState? belowState, bool isSupportedBelow)
     {
         LogWaterDebug($"[WaterDebug FLOW] Step 4 REACHED: pos={globalPos} id={currentId} level={currentLevel} " +
-            $"below={(belowState.HasValue ? belowState.Value.id.ToString() : "none")}(solid? {(belowState.HasValue ? belowState.Value.Properties.isSolid.ToString() : "N/A")}, " +
-            $"falling? {(belowState.HasValue ? IsFalling(belowState.Value.FluidLevel).ToString() : "N/A")}, " +
-            $"level={(belowState.HasValue ? belowState.Value.FluidLevel.ToString() : "N/A")}) " +
-            $"isSupported: {isSupportedBelow}");
+                      $"below={(belowState.HasValue ? belowState.Value.id.ToString() : "none")}(solid? {(belowState.HasValue ? belowState.Value.Properties.isSolid.ToString() : "N/A")}, " +
+                      $"falling? {(belowState.HasValue ? IsFalling(belowState.Value.FluidLevel).ToString() : "N/A")}, " +
+                      $"level={(belowState.HasValue ? belowState.Value.FluidLevel.ToString() : "N/A")}) " +
+                      $"isSupported: {isSupportedBelow}");
 
         if (!isSupportedBelow)
         {
@@ -164,7 +163,7 @@ public static partial class BlockBehavior
 
                 LogWaterDebug($"[WaterDebug FLOW] {globalPos} SPREADING HORIZONTALLY to {globalNeighborPos} with level {newLevel}");
 
-                s_mods.Add(new VoxelMod(globalNeighborPos, currentId)
+                Mods.Add(new VoxelMod(globalNeighborPos, currentId)
                 {
                     FluidLevel = newLevel,
                 });
@@ -224,16 +223,14 @@ public static partial class BlockBehavior
         // Source blocks (0) are conceptually stable internally and won't decay
         if (currentLevel != 0)
         {
-            byte expectedEffectiveLevel;
-            bool isFedFromAbove;
             CalculateExpectedFluidLevel(chunkData, localPos, id, props.flowLevels,
-                out expectedEffectiveLevel, out isFedFromAbove);
+                out byte expectedEffectiveLevel, out bool isFedFromAbove);
 
             bool expectedFalling = isFedFromAbove || IsFalling(currentLevel);
             byte expectedFluidLevel = expectedFalling ? MakeFalling(expectedEffectiveLevel) : expectedEffectiveLevel;
 
             if (expectedEffectiveLevel >= props.flowLevels) return true; // Needs to decay to air completely
-            if (expectedFluidLevel != currentLevel) return true;         // Needs to update its flowing level state
+            if (expectedFluidLevel != currentLevel) return true; // Needs to update its flowing level state
         }
 
         // If no activation conditions are met, the block is stable and does not need to be ticked this cycle.

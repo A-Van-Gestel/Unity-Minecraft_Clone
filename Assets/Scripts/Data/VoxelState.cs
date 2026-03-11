@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.CompilerServices;
 using Jobs.BurstData;
 
@@ -15,6 +15,9 @@ namespace Data
 
         #region Packed Data Properties
 
+        /// <summary>
+        /// Gets or sets the block ID.
+        /// </summary>
         public ushort id
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -23,6 +26,9 @@ namespace Data
             set => _packedData = BurstVoxelDataBitMapping.SetId(_packedData, value); // Direct set, handle consequences elsewhere (like ModifyVoxel)
         }
 
+        /// <summary>
+        /// Gets or sets the orientation index of the voxel.
+        /// </summary>
         public byte orientation
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -32,14 +38,18 @@ namespace Data
         }
 
         /// <summary>
-        /// Returns the highest light level between sunlight and blocklight
+        /// Returns the highest light level between sunlight and blocklight.
         /// </summary>
+        /// <value>A byte from 0 to 15 representing the maximum light.</value>
         public byte light
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => BurstVoxelDataBitMapping.GetLight(_packedData);
         }
 
+        /// <summary>
+        /// Gets or sets the incoming sunlight level (0-15).
+        /// </summary>
         public byte Sunlight
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -48,6 +58,9 @@ namespace Data
             set => _packedData = BurstVoxelDataBitMapping.SetSunLight(_packedData, value);
         }
 
+        /// <summary>
+        /// Gets or sets the incoming blocklight level (0-15).
+        /// </summary>
         public byte Blocklight
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -56,6 +69,9 @@ namespace Data
             set => _packedData = BurstVoxelDataBitMapping.SetBlockLight(_packedData, value);
         }
 
+        /// <summary>
+        /// Gets or sets the fluid level of the voxel.
+        /// </summary>
         public byte FluidLevel
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -70,7 +86,10 @@ namespace Data
 
         #region Constructors
 
-        /// Create a new voxel state from a block id.
+        /// <summary>
+        /// Creates a new voxel state from a block id.
+        /// </summary>
+        /// <param name="blockId">The block ID to initialize.</param>
         public VoxelState(byte blockId)
         {
             _packedData = BurstVoxelDataBitMapping.PackVoxelData(
@@ -82,13 +101,23 @@ namespace Data
             );
         }
 
-        /// Create a new voxel state from all its components.
+        /// <summary>
+        /// Creates a new voxel state from all its components.
+        /// </summary>
+        /// <param name="blockId">The ID of the block.</param>
+        /// <param name="sunLightLevel">The initial sunlight level (0-15).</param>
+        /// <param name="blockLightLevel">The initial blocklight level (0-15).</param>
+        /// <param name="orientation">The face orientation (default 1).</param>
+        /// <param name="fluidLevel">The fluid level (default 0).</param>
         public VoxelState(byte blockId, byte sunLightLevel, byte blockLightLevel, byte orientation = 1, byte fluidLevel = 0)
         {
             _packedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, sunLightLevel, blockLightLevel, orientation, fluidLevel);
         }
 
-        /// Create a new voxel state from its raw packed data.
+        /// <summary>
+        /// Creates a new voxel state from its raw packed uint representation.
+        /// </summary>
+        /// <param name="packedData">The raw 32-bit packed data.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public VoxelState(uint packedData)
         {
@@ -98,11 +127,15 @@ namespace Data
         #endregion
 
         // --- Other Properties ---
+        /// <summary>
+        /// Convenience accessor for the actual <see cref="BlockType"/> properties.
+        /// </summary>
         public BlockType Properties => World.Instance.blockTypes[id];
 
         /// <summary>
         /// Returns the highest light level between sunlight and blocklight as a float between 0 and 1.
         /// </summary>
+        /// <value>A float from 0 to 1 representing the light intensity.</value>
         public float lightAsFloat
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
