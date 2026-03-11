@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using Data;
 using JetBrains.Annotations;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 /// <summary>
 /// Contains the static logic for all special block behaviors in the world,
@@ -9,8 +11,12 @@ using UnityEngine;
 /// </summary>
 public static partial class BlockBehavior
 {
-    // A reusable list to avoid allocating new memory every time Behave is called.
-    private static readonly List<VoxelMod> s_mods = new List<VoxelMod>();
+    [ThreadStatic]
+    private static List<VoxelMod> _tMods;
+
+    // A ThreadStatic reusable list to avoid allocating memory while ensuring thread-safety.
+    // Lazy initialized because ThreadStatic inline initializers only run for the first thread.
+    private static List<VoxelMod> Mods => _tMods ??= new List<VoxelMod>();
 
     // OPTIMIZATION: Cached spread vectors to prevent array allocations every tick
     private static readonly Vector3Int[] s_grassSpreadVectors =
@@ -109,7 +115,7 @@ public static partial class BlockBehavior
     [CanBeNull]
     public static List<VoxelMod> Behave(ChunkData chunkData, Vector3Int localPos)
     {
-        s_mods.Clear(); // Clear the reusable list before use.
+        Mods.Clear(); // Clear the reusable list before use.
 
         // Get the voxel
         VoxelState? voxelNullable = chunkData.VoxelFromV3Int(localPos);
@@ -136,8 +142,8 @@ public static partial class BlockBehavior
             {
                 Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
                 VoxelMod voxelMod = new VoxelMod(globalPos, blockId: 3);
-                s_mods.Add(voxelMod);
-                return s_mods;
+                Mods.Add(voxelMod);
+                return Mods;
             }
 
             // Condition 2: Attempt to spread, using a GC-friendly method.
@@ -182,7 +188,7 @@ public static partial class BlockBehavior
                 {
                     // Modify the single, randomly chosen candidate.
                     Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.position.y);
-                    s_mods.Add(new VoxelMod(chosenCandidateGlobalPos, blockId: 2));
+                    Mods.Add(new VoxelMod(chosenCandidateGlobalPos, blockId: 2));
                 }
             }
         }
@@ -194,15 +200,11 @@ public static partial class BlockBehavior
             HandleFluidFlow(chunkData, localPos, voxel);
         }
 
-        // IMPORTANT: Returns a reference to a shared static list. Callers must
-        // consume the result immediately and must not store the reference,
-        // as it will be cleared on the next call to Behave().
-        return s_mods.Count > 0 ? s_mods : null;
+        // IMPORTANT: Returns a reference to a shared ThreadStatic list. Callers must
+        // consume the result immediately (e.g. by enqueueing it) and must not store
+        // the reference, as it will be cleared on the next call to Behave() by this thread.
+        return Mods.Count > 0 ? Mods : null;
     }
 
     #endregion
-
-
-
-
 }

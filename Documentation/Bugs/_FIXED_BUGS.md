@@ -73,6 +73,33 @@ immediately visible to subsequent reads.
 
 ---
 
+### ~~06. `ApplyLightingJobResult` creates sections without updating opaque/non-air counts correctly~~
+
+**Severity:** Bug  
+**Files:** `WorldJobManager.cs` — `ApplyLightingJobResult`  
+**Fixed:** March 2026
+
+**Symptom:** Internal chunk section voxel counts get desynchronized because light-only air blocks were being counted as solid.
+**Root Cause:** When the lighting job result contains non-zero voxel data for a null section (light in previously empty air), a new `ChunkSection` is created and populated. `RecalculateCounts` counted these air voxels as non-air because `data != 0`.
+**Fix:**
+
+1. `RecalculateCounts` and `RecalculateNonAirCount` now check for solidity using `(data & ID_MASK) != 0` to properly ignore light-only air voxels.
+2. Added an `isNewSection` flag to `ApplyLightingJobResult` to completely skip `RecalculateCounts` for freshly created light-only sections, as their pool-reset counts `(0, 0)` are already correct.
+
+---
+
+### ~~07. `ProcessLightingJobs` logs every frame when any dropped updates exist~~
+
+**Severity:** Improvement  
+**Files:** `WorldJobManager.cs` — `ProcessLightingJobs`  
+**Fixed:** March 2026
+
+**Symptom:** Performance hitching and extreme console log spam.
+**Root Cause:** The logging statement fired every frame that `_droppedLightUpdates` had entries. Since the collection is rebuilt each iteration, in busy worlds this effectively logged every frame.
+**Fix:** Gated the log behind `enableDiagnosticLogs`, replaced LINQ `.Sum()` with a manual loop to prevent allocations, and removed the unused `using System.Linq` directive.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~
@@ -272,6 +299,18 @@ subsequent chunk modifications re-triggered the upward animation natively since 
 
 ---
 
+### ~~06. `WorldData.GetLocalVoxelPositionInChunk` uses `(int)` cast instead of `FloorToInt`~~
+
+**Severity:** Bug (latent)  
+**Files:** `WorldData.cs` — `GetLocalVoxelPositionInChunk`
+**Fixed:** March 2026
+
+**Symptom:** Yielded incorrect chunk boundary voxel references for negative world coordinates.
+**Root Cause:** The method used an `(int)` cast which truncates toward zero, producing wrong results for negative coordinates.
+**Fix:** Both `x` and `z` components now use `Mathf.FloorToInt()`. The `y` component retains the `(int)` cast since Y is always non-negative.
+
+---
+
 ## Block Behavior
 
 ### ~~04. Fluid `FluidLevel` set redundantly in `HandleFluidFlow`~~
@@ -283,6 +322,18 @@ subsequent chunk modifications re-triggered the upward animation natively since 
 **Root Cause:** `FluidLevel` was set once inside the object initializer and a second time directly on the variable immediately after — harmless but clearly a copy-paste oversight.
 
 **Fix:** Removed the redundant second assignment.
+
+---
+
+### ~~01. `BlockBehavior.s_mods` is a shared static list (thread safety / reentrancy hazard)~~
+
+**Severity:** Bug (latent)  
+**Files:** `BlockBehavior.cs`  
+**Fixed:** March 2026
+
+**Symptom:** Race condition if block behavior is evaluated across multiple threads, leading to data corruption as `Behave()` overwrites the returned reusable metadata list.
+**Root Cause:** The `Behave` method used a single shared static `List<VoxelMod>` (`s_mods`) that was cleared and reused on every call.
+**Fix:** Replaced the single static list with a `[ThreadStatic]` lazily instantiated backing list mapped to a `Mods` property. This guarantees every thread hitting `Behave()` gets its own private, zero-allocation reusable list.
 
 ---
 

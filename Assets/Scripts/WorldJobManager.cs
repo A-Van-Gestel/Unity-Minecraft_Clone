@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using Data;
 using Helpers;
 using Jobs;
@@ -578,6 +577,7 @@ public class WorldJobManager
                                                          $"in chunk {neighborChunkVoxelPos}: current={currentSunlight}, incoming={mod.LightLevel}. " +
                                                          $"Source job: {jobEntry.Key} (above heightmap={heightmapY})");
                                     }
+
                                     continue;
                                 }
                                 // Below or at heightmap — allow the decrease through.
@@ -647,9 +647,14 @@ public class WorldJobManager
         }
 
         // Log summary
-        if (_droppedLightUpdates.Count > 0)
+        if (_droppedLightUpdates.Count > 0 && _world.settings.enableDiagnosticLogs)
         {
-            int totalColumns = _droppedLightUpdates.Values.Sum(set => set.Count);
+            int totalColumns = 0;
+            foreach (var set in _droppedLightUpdates.Values)
+            {
+                totalColumns += set.Count;
+            }
+
             Debug.Log($"[LIGHTING] Processed {_completedLightJobs.Count} jobs. Saved updates for {_droppedLightUpdates.Count} unloaded chunks ({totalColumns} columns)");
         }
 
@@ -687,6 +692,7 @@ public class WorldJobManager
         {
             ChunkSection section = chunkData.sections[s];
             bool sectionHasData = false;
+            bool isNewSection = false;
 
             // 1. If the live section is null, check if the job has light data for this area.
             // If the job says there is light here, we must create a section to hold it.
@@ -706,6 +712,7 @@ public class WorldJobManager
                 {
                     section = _world.ChunkPool.GetChunkSection();
                     chunkData.sections[s] = section;
+                    isNewSection = true;
                 }
             }
 
@@ -736,9 +743,11 @@ public class WorldJobManager
                     _world.ChunkPool.ReturnChunkSection(section);
                     chunkData.sections[s] = null; // Clear array slot
                 }
-                else
+                else if (!isNewSection)
                 {
-                    // Ensure opaque counts are updated since we modified voxel data
+                    // Only recalculate for pre-existing sections where block IDs are present.
+                    // New sections contain only light data (all block IDs = air),
+                    // so their counts from Reset() (0, 0) are already correct.
                     section.RecalculateCounts(_world.blockTypes);
                 }
             }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Helpers;
 using JetBrains.Annotations;
 using Jobs.BurstData;
@@ -8,6 +8,9 @@ namespace Data
     [Serializable]
     public class ChunkSection
     {
+        /// <summary>ID bit mask — bits 0-15 (must match <see cref="BurstVoxelDataBitMapping"/>).</summary>
+        private const uint ID_MASK = 0x0000FFFF;
+
         public uint[] voxels;
 
         // Optimization: Track non-air blocks.
@@ -40,6 +43,8 @@ namespace Data
 
         /// <summary>
         /// Recalculates the NonAirCount using optimized pointer arithmetic and loop unrolling.
+        /// Uses a mask-based check (<c>data &amp; ID_MASK</c>) to correctly ignore air voxels
+        /// that only carry light data (sunlight/blocklight bits set, block ID = 0).
         /// </summary>
         public unsafe void RecalculateNonAirCount()
         {
@@ -56,17 +61,17 @@ namespace Data
                 // This reduces the overhead of the loop comparison/increment logic
                 while (ptr <= end - 4)
                 {
-                    if (*ptr != 0) count++;
-                    if (*(ptr + 1) != 0) count++;
-                    if (*(ptr + 2) != 0) count++;
-                    if (*(ptr + 3) != 0) count++;
+                    if ((*ptr & ID_MASK) != 0) count++;
+                    if ((*(ptr + 1) & ID_MASK) != 0) count++;
+                    if ((*(ptr + 2) & ID_MASK) != 0) count++;
+                    if ((*(ptr + 3) & ID_MASK) != 0) count++;
                     ptr += 4;
                 }
 
                 // Handle remaining items
                 while (ptr < end)
                 {
-                    if (*ptr != 0) count++;
+                    if ((*ptr & ID_MASK) != 0) count++;
                     ptr++;
                 }
 
@@ -76,6 +81,8 @@ namespace Data
 
         /// <summary>
         /// Recalculates NonAir and Opaque counts.
+        /// Uses a mask-based check (<c>data &amp; ID_MASK</c>) to correctly ignore air voxels
+        /// that only carry light data (sunlight/blocklight bits set, block ID = 0).
         /// </summary>
         /// <param name="blockTypes">The blockTypes array to look up opacity.</param>
         public unsafe void RecalculateCounts([CanBeNull] BlockType[] blockTypes)
@@ -103,9 +110,9 @@ namespace Data
                 {
                     uint data = *ptr++;
 
-                    // OPTIMIZATION: Early exit for Air.
-                    // This avoids the bitwise extraction and the array lookup entirely.
-                    if (data == 0) continue;
+                    // OPTIMIZATION: Mask-based check to correctly skip air voxels.
+                    // Light-only air voxels (data != 0 but ID == 0) are correctly skipped.
+                    if ((data & ID_MASK) == 0) continue;
 
                     localNonAir++;
 

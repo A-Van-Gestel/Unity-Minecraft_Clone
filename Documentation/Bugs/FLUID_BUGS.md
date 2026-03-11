@@ -1,4 +1,4 @@
-﻿# Known Fluid related bugs
+# Known Fluid related bugs
 
 This document outlines **open** bugs related to fluid behavior and simulation. Resolved bugs are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
@@ -21,15 +21,10 @@ Side faces between fluid voxels of different fluid levels are always rendered, c
 **Files:** `Player.cs`, `PlayerInteraction.cs`
 
 Fluid voxels do not currently affect the player:
+
 - Player can walk through fluid without slowing down
 - No buoyancy / swimming simulation
 - No on-screen visual to indicate submersion
-
----
-
-## ~~03. Downward flow creates infinite source blocks~~ ✅ FIXED
-
-> Moved to [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) → **Fluid #02**.
 
 ---
 
