@@ -19,9 +19,6 @@ namespace Editor
         /// <summary>Number of timed iterations per test run.</summary>
         private const int ITERATIONS = 10_000;
 
-        /// <summary>ID bit mask — bits 0-15 (matches <see cref="BurstVoxelDataBitMapping"/>).</summary>
-        private const uint ID_MASK = 0x0000FFFF;
-
         [MenuItem("Minecraft Clone/Benchmarks/RecalculateCounts")]
         public static void RunBenchmark()
         {
@@ -35,7 +32,7 @@ namespace Editor
             foreach (uint data in section.voxels)
             {
                 if (data != 0) originalNonAir++;
-                if ((data & ID_MASK) != 0) trueNonAir++;
+                if ((data & BurstVoxelDataBitMapping.ID_MASK) != 0) trueNonAir++;
             }
 
             Debug.Log($"[BENCHMARK] Section data: original thinks {originalNonAir} non-air, " +
@@ -192,16 +189,16 @@ namespace Editor
 
                 while (ptr <= end - 4)
                 {
-                    if ((*ptr & ID_MASK) != 0) count++;
-                    if ((*(ptr + 1) & ID_MASK) != 0) count++;
-                    if ((*(ptr + 2) & ID_MASK) != 0) count++;
-                    if ((*(ptr + 3) & ID_MASK) != 0) count++;
+                    if ((*ptr & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
+                    if ((*(ptr + 1) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
+                    if ((*(ptr + 2) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
+                    if ((*(ptr + 3) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
                     ptr += 4;
                 }
 
                 while (ptr < end)
                 {
-                    if ((*ptr & ID_MASK) != 0) count++;
+                    if ((*ptr & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
                     ptr++;
                 }
             }
@@ -220,7 +217,7 @@ namespace Editor
                 while (ptr < end)
                 {
                     uint data = *ptr++;
-                    if ((data & ID_MASK) == 0) continue;
+                    if ((data & BurstVoxelDataBitMapping.ID_MASK) == 0) continue;
                     count++;
                 }
             }

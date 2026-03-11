@@ -8,9 +8,6 @@ namespace Data
     [Serializable]
     public class ChunkSection
     {
-        /// <summary>ID bit mask — bits 0-15 (must match <see cref="BurstVoxelDataBitMapping"/>).</summary>
-        private const uint ID_MASK = 0x0000FFFF;
-
         public uint[] voxels;
 
         // Optimization: Track non-air blocks.
@@ -61,17 +58,17 @@ namespace Data
                 // This reduces the overhead of the loop comparison/increment logic
                 while (ptr <= end - 4)
                 {
-                    if ((*ptr & ID_MASK) != 0) count++;
-                    if ((*(ptr + 1) & ID_MASK) != 0) count++;
-                    if ((*(ptr + 2) & ID_MASK) != 0) count++;
-                    if ((*(ptr + 3) & ID_MASK) != 0) count++;
+                    if ((*ptr & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
+                    if ((*(ptr + 1) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
+                    if ((*(ptr + 2) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
+                    if ((*(ptr + 3) & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
                     ptr += 4;
                 }
 
                 // Handle remaining items
                 while (ptr < end)
                 {
-                    if ((*ptr & ID_MASK) != 0) count++;
+                    if ((*ptr & BurstVoxelDataBitMapping.ID_MASK) != 0) count++;
                     ptr++;
                 }
 
@@ -112,7 +109,7 @@ namespace Data
 
                     // OPTIMIZATION: Mask-based check to correctly skip air voxels.
                     // Light-only air voxels (data != 0 but ID == 0) are correctly skipped.
-                    if ((data & ID_MASK) == 0) continue;
+                    if ((data & BurstVoxelDataBitMapping.ID_MASK) == 0) continue;
 
                     localNonAir++;
 
