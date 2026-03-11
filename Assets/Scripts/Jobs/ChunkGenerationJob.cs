@@ -48,7 +48,10 @@ namespace Jobs
 
         #endregion
 
-        // The Execute method now takes an index, which will represent one X/Z column in the chunk.
+        /// <summary>
+        /// Generates the voxel data for a single vertical column (X/Z coordinate pair) in the chunk.
+        /// </summary>
+        /// <param name="index">The 1D flattened index representing the X and Z coordinates of the column (0 to 255).</param>
         public void Execute(int index)
         {
             // Column-major iteration (X, Z)

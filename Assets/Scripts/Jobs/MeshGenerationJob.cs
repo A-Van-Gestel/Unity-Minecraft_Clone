@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using Helpers;
 using Jobs.BurstData;
 using Unity.Burst;
@@ -85,6 +85,9 @@ namespace Jobs
             new Vector3Int(0, 1, 0), new Vector3Int(0, -1, 0),
         };
 
+        /// <summary>
+        /// Executes the mesh generation logic across all sections of the chunk, iterating through voxels to build visual face data.
+        /// </summary>
         public void Execute()
         {
             _vertexIndex = 0;

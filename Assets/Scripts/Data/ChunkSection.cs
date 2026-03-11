@@ -16,6 +16,9 @@ namespace Data
         // Optimization: Track fully light-blocking blocks.
         public int opaqueCount;
 
+        /// <summary>
+        /// Initializes a new, empty <see cref="ChunkSection"/> with arrays allocated.
+        /// </summary>
         public ChunkSection()
         {
             // 4096 * 4 bytes = 16KB allocation
@@ -35,7 +38,15 @@ namespace Data
             Array.Clear(voxels, 0, voxels.Length);
         }
 
+        /// <summary>
+        /// Returns true if the section contains no blocks other than air.
+        /// </summary>
         public bool IsEmpty => nonAirCount == 0;
+
+        /// <summary>
+        /// Returns true if the section is completely filled with light-obstructing blocks,
+        /// allowing meshing to optimize away internal faces.
+        /// </summary>
         public bool IsFullySolid => opaqueCount >= ChunkMath.SECTION_VOLUME;
 
         /// <summary>

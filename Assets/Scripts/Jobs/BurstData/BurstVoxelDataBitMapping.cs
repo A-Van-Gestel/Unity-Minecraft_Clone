@@ -32,7 +32,8 @@ namespace Jobs.BurstData
 
         // --- Helpers ---
 
-        /// Maps World Orientation (Face Index) -> Internal Storage Index (0-5)
+        /// <summary>Maps World Orientation (Face Index) -> Internal Storage Index (0-5).</summary>
+        /// <param name="orientation">The world orientation to convert.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte GetOrientationIndex(byte orientation)
         {
@@ -107,6 +108,8 @@ namespace Jobs.BurstData
         /// <summary>
         /// Returns the raw 8-bit metadata value.
         /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The 8-bit metadata value.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetMeta(uint packedData)
         {
@@ -152,6 +155,8 @@ namespace Jobs.BurstData
         /// <summary>
         /// Extracts orientation from the Metadata bits.
         /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The world orientation.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetOrientation(uint packedData)
         {
@@ -177,6 +182,8 @@ namespace Jobs.BurstData
         /// <summary>
         /// Extracts fluid level from the Metadata bits.
         /// </summary>
+        /// <param name="packedData">The packed uint data.</param>
+        /// <returns>The fluid level (0-15).</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetFluidLevel(uint packedData)
         {
@@ -228,6 +235,9 @@ namespace Jobs.BurstData
         /// <summary>
         /// Sets the full 8-bit metadata field directly.
         /// </summary>
+        /// <param name="packedData">The original packed uint data.</param>
+        /// <param name="meta">The metadata value to set.</param>
+        /// <returns>The updated packed uint data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetMeta(uint packedData, byte meta)
         {
@@ -238,6 +248,9 @@ namespace Jobs.BurstData
         /// Sets the orientation bits within the metadata field.
         /// Note: This blindly overwrites the lower 3 bits of the metadata.
         /// </summary>
+        /// <param name="packedData">The original packed uint data.</param>
+        /// <param name="orientation">The orientation value to set.</param>
+        /// <returns>The updated packed uint data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetOrientation(uint packedData, byte orientation)
         {
@@ -262,6 +275,9 @@ namespace Jobs.BurstData
         /// Sets the fluid level bits within the metadata field.
         /// Note: This blindly overwrites the lower 4 bits of the metadata.
         /// </summary>
+        /// <param name="packedData">The original packed uint data.</param>
+        /// <param name="fluidLevel">The fluid level to set.</param>
+        /// <returns>The updated packed uint data.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetFluidLevel(uint packedData, byte fluidLevel)
         {
