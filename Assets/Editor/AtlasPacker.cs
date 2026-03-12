@@ -1,133 +1,130 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using UnityEngine;
 using UnityEditor;
-using Object = System.Object;
+using UnityEngine;
 
-public class AtlasPacker : EditorWindow
+namespace Editor
 {
-    private string saveLocation = "/Textures/Packed_Atlas.png";
-    private int blockSize = 256;  // Block size in pixels.
-    private int atlasSizeInBlocks = VoxelData.TextureAtlasSizeInBlocks;
-    private int atlasSize;
-
-    private Object[] rawTextures = new Object[256];
-    private List<Texture2D> sortedTextures = new List<Texture2D>();
-    private Texture2D atlas;
-    
-    [MenuItem("Minecraft Clone/Atlas Packer")]
-    public static void ShowWindow()
+    public class AtlasPacker : EditorWindow
     {
-        EditorWindow.GetWindow(typeof(AtlasPacker));
-    }
+        private string _saveLocation = "/Textures/Packed_Atlas.png";
+        private int _blockSize = 256; // Block size in pixels.
+        private int _atlasSizeInBlocks = VoxelData.TextureAtlasSizeInBlocks;
+        private int _atlasSize;
 
-    private void OnGUI()
-    {
-        atlasSize = blockSize * atlasSizeInBlocks;
-        
-        GUILayout.Label("Minecraft Clone Texture Atlas Packer", EditorStyles.boldLabel);
+        private Texture2D[] _rawTextures = Array.Empty<Texture2D>();
+        private readonly List<Texture2D> _sortedTextures = new List<Texture2D>();
+        private Texture2D _atlas;
 
-        saveLocation = EditorGUILayout.TextField("Save Location", saveLocation);
-        blockSize = EditorGUILayout.IntField("Block Size", blockSize);
-        atlasSizeInBlocks = EditorGUILayout.IntField("Atlas Size (in blocks)", atlasSizeInBlocks);
-        
-        if (GUILayout.Button("Load Textures"))
+        [MenuItem("Minecraft Clone/Atlas Packer")]
+        public static void ShowWindow()
         {
-            LoadTextures();
-            PackAtlas();
+            GetWindow(typeof(AtlasPacker));
         }
-        
-        if (GUILayout.Button("Clear Textures"))
-        {
-            atlas = new Texture2D(atlasSize, atlasSize);
-            Debug.Log("Atlas Packer: Textures cleared.");
-        }
-        
-        if (GUILayout.Button("Save Atlas"))
-        {
-            WriteAtlasToFile();
-        }
-        
-        GUILayout.Label("Preview:", EditorStyles.boldLabel);
-        GUILayout.Box(atlas, GUILayout.Width(this.position.width), GUILayout.Height(this.position.height));
-    }
 
-    private void LoadTextures()
-    {
-        sortedTextures.Clear();
-        
-        rawTextures = Resources.LoadAll("AtlasPacker", typeof(Texture2D));
-
-        int index = 0;
-        foreach (Object tex in rawTextures)
+        private void OnGUI()
         {
-            Texture2D t = (Texture2D)tex;
-            if (t.width == blockSize && t.height == blockSize)
+            _atlasSize = _blockSize * _atlasSizeInBlocks;
+
+            GUILayout.Label("Minecraft Clone Texture Atlas Packer", EditorStyles.boldLabel);
+
+            _saveLocation = EditorGUILayout.TextField("Save Location", _saveLocation);
+            _blockSize = EditorGUILayout.IntField("Block Size", _blockSize);
+            _atlasSizeInBlocks = EditorGUILayout.IntField("Atlas Size (in blocks)", _atlasSizeInBlocks);
+
+            if (GUILayout.Button("Load Textures"))
             {
-                sortedTextures.Add(t);
+                LoadTextures();
+                PackAtlas();
             }
-            else
+
+            if (GUILayout.Button("Clear Textures"))
             {
-                Debug.Log($"Atlas Packer: {t.name} incorrect size. Texture not loaded.");
+                _atlas = new Texture2D(_atlasSize, _atlasSize);
+                Debug.Log("Atlas Packer: Textures cleared.");
             }
-            
-            index++;
-        }
-        
-        Debug.Log($"Atlas Packer: {sortedTextures.Count} successfully loaded.");
-    }
 
-    private void PackAtlas()
-    {
-        atlas = new Texture2D(atlasSize, atlasSize);
-        Color[] pixels = new Color[atlasSize * atlasSize];
-
-        for (int x = 0; x < atlasSize; x++)
-        {
-            for (int y = 0; y < atlasSize; y++)
+            if (GUILayout.Button("Save Atlas"))
             {
-                // Get the current block that we're looking at.
-                int currentBlockX = x / blockSize;
-                int currentBlockY = y / blockSize;
+                WriteAtlasToFile();
+            }
 
-                //                   rowIndex                 +  columnIndex
-                int index = currentBlockY * atlasSizeInBlocks + currentBlockX;
+            GUILayout.Label("Preview:", EditorStyles.boldLabel);
+            GUILayout.Box(_atlas, GUILayout.Width(this.position.width), GUILayout.Height(this.position.height));
+        }
 
-                if (index < sortedTextures.Count)
-                    pixels[(atlasSize - y - 1) * atlasSize + x] = sortedTextures[index].GetPixel(x, blockSize - y - 1);
+        private void LoadTextures()
+        {
+            _sortedTextures.Clear();
+
+            _rawTextures = Resources.LoadAll<Texture2D>("AtlasPacker");
+
+            foreach (Texture2D t in _rawTextures)
+            {
+                if (t.width == _blockSize && t.height == _blockSize)
+                {
+                    _sortedTextures.Add(t);
+                }
                 else
-                    pixels[(atlasSize - y - 1) * atlasSize + x] = new Color(0f, 0f, 0f, 0f);
+                {
+                    Debug.Log($"Atlas Packer: {t.name} incorrect size. Texture not loaded.");
+                }
+            }
+
+            Debug.Log($"Atlas Packer: {_sortedTextures.Count} successfully loaded.");
+        }
+
+        private void PackAtlas()
+        {
+            _atlas = new Texture2D(_atlasSize, _atlasSize);
+            Color[] pixels = new Color[_atlasSize * _atlasSize];
+
+            for (int x = 0; x < _atlasSize; x++)
+            {
+                for (int y = 0; y < _atlasSize; y++)
+                {
+                    // Get the current block that we're looking at.
+                    int currentBlockX = x / _blockSize;
+                    int currentBlockY = y / _blockSize;
+
+                    //                   rowIndex                 +  columnIndex
+                    int index = currentBlockY * _atlasSizeInBlocks + currentBlockX;
+
+                    if (index < _sortedTextures.Count)
+                        pixels[(_atlasSize - y - 1) * _atlasSize + x] = _sortedTextures[index].GetPixel(x, _blockSize - y - 1);
+                    else
+                        pixels[(_atlasSize - y - 1) * _atlasSize + x] = new Color(0f, 0f, 0f, 0f);
+                }
+            }
+
+            _atlas.SetPixels(pixels);
+            _atlas.Apply();
+            Debug.Log("Atlas Packer: Texture Atlas Created.");
+        }
+
+        private void WriteAtlasToFile()
+        {
+            byte[] bytes = _atlas.EncodeToPNG();
+            try
+            {
+                string path = Application.dataPath + _saveLocation;
+                CreateDirectory(path);
+                File.WriteAllBytes(path, bytes);
+                AssetDatabase.Refresh(); // Refresh Unity's asset database.
+                Debug.Log($"Atlas Packer: Atlas saved to {_saveLocation}");
+            }
+            catch (Exception e)
+            {
+                Debug.Log("Atlas Packer: Couldn't save atlas to file." + e);
             }
         }
-        
-        atlas.SetPixels(pixels);
-        atlas.Apply();
-        Debug.Log("Atlas Packer: Texture Atlas Created.");
-    }
 
-    private void WriteAtlasToFile()
-    {
-        byte[] bytes = atlas.EncodeToPNG();
-        try
+        private static void CreateDirectory(string path)
         {
-            string path = Application.dataPath + saveLocation;
-            CreateDirectory(path);
-            File.WriteAllBytes(path, bytes);
-            AssetDatabase.Refresh();  // Refresh Unity's asset database.
-            Debug.Log($"Atlas Packer: Atlas saved to {saveLocation}");
+            string fileName = Path.GetFileName(path);
+            string directoryPath = path[..path.LastIndexOf(fileName, StringComparison.Ordinal)];
+            Directory.CreateDirectory(directoryPath);
         }
-        catch (Exception e)
-        {
-            Debug.Log("Atlas Packer: Couldn't save atlas to file." + e);
-        }
-    }
-
-    private static void CreateDirectory(string path)
-    {
-        string fileName = Path.GetFileName(path);
-        string directoryPath = path[..path.LastIndexOf(fileName, StringComparison.Ordinal)];
-        Directory.CreateDirectory(directoryPath);
     }
 }
