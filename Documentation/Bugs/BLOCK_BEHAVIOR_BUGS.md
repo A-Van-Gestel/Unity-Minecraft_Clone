@@ -13,3 +13,13 @@ The condition for allowing horizontal fluid flow evaluates to `true` if the neig
 is silently skipped rather than triggering a reaction (see also `FLUID_BUGS.md #04`).
 
 ---
+
+## 02. Block Behavior Separation
+
+**Severity:** Future Architecture  
+**Files:** `BlockBehavior.cs`
+
+Need to combine `Behave` and `Active` logic, or split active collections by block type.  
+**Impact:** Performance bottleneck on main thread.
+
+---
