@@ -73,7 +73,7 @@ public static partial class BlockBehavior
         ushort id = voxel.id;
 
         // --- Grass Block ---
-        if (id == 2) // Grass Block
+        if (id == BlockIDs.Grass)
         {
             // A grass block is active if there is an adjacent dirt block that it can spread to.
             // We must check all possible spread locations.
@@ -134,14 +134,14 @@ public static partial class BlockBehavior
         ushort id = voxel.id;
 
         // --- Grass Block ---
-        if (id == 2) // Grass Block
+        if (id == BlockIDs.Grass)
         {
             // Condition 1: If there is a solid block on top, grass turns to dirt.
             VoxelState? topNeighbour = chunkData.GetState(localPos + VoxelData.FaceChecks[2]);
             if (topNeighbour.HasValue && topNeighbour.Value.Properties.isSolid)
             {
                 Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
-                VoxelMod voxelMod = new VoxelMod(globalPos, blockId: 3);
+                VoxelMod voxelMod = new VoxelMod(globalPos, BlockIDs.Dirt);
                 Mods.Add(voxelMod);
                 return Mods;
             }
@@ -188,7 +188,7 @@ public static partial class BlockBehavior
                 {
                     // Modify the single, randomly chosen candidate.
                     Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.position.y);
-                    Mods.Add(new VoxelMod(chosenCandidateGlobalPos, blockId: 2));
+                    Mods.Add(new VoxelMod(chosenCandidateGlobalPos, BlockIDs.Grass));
                 }
             }
         }

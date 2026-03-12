@@ -149,7 +149,7 @@ public static partial class BlockBehavior
             if (!neighborState.HasValue) continue;
 
             // Flow into air or same fluid with worse level
-            bool neighborIsAir = neighborState.Value.id == 0;
+            bool neighborIsAir = neighborState.Value.id == BlockIDs.Air;
             bool neighborIsSameFluidAndWorse = neighborState.Value.id == currentId &&
                                                GetEffectiveLevel(neighborState.Value.FluidLevel) > newLevel;
 
@@ -208,7 +208,7 @@ public static partial class BlockBehavior
 
                 if (!neighborState.HasValue) continue;
 
-                bool neighborIsAir = neighborState.Value.id == 0;
+                bool neighborIsAir = neighborState.Value.id == BlockIDs.Air;
                 bool neighborIsSameFluidAndWorse = neighborState.Value.id == id &&
                                                    GetEffectiveLevel(neighborState.Value.FluidLevel) > effectiveLevel + 1;
 

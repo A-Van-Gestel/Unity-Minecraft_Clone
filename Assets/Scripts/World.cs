@@ -1457,7 +1457,7 @@ public class World : MonoBehaviour
             // --- 2. Check Placement Rules ---
             // Special Case: If the mod is to place Air (ID 0), it's a "break" action.
             // We should always allow this, unless the target is unbreakable.
-            if (v.ID == 0)
+            if (v.ID == BlockIDs.Air)
             {
                 VoxelState? stateToBreak = worldData.GetVoxelState(v.GlobalPosition);
                 if (stateToBreak.HasValue &&
@@ -1483,7 +1483,7 @@ public class World : MonoBehaviour
 
                         case ReplacementRule.OnlyReplaceAir:
                             // Only allow placement if the existing block is Air (ID 0).
-                            if (existingState.Value.id != 0)
+                            if (existingState.Value.id != BlockIDs.Air)
                                 canPlace = false;
                             break;
 
@@ -2086,7 +2086,7 @@ public class World : MonoBehaviour
                         uint packedData = section.voxels[i];
 
                         // --- OPTIMIZATION: Get ID first and skip if it's air ---
-                        if (BurstVoxelDataBitMapping.GetId(packedData) == 0)
+                        if (BurstVoxelDataBitMapping.GetId(packedData) == BlockIDs.Air)
                         {
                             continue;
                         }

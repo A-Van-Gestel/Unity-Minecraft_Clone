@@ -24,7 +24,7 @@ public static class Structure
 
         // LEAVES
         // Example: By setting the rule to `OnlyReplaceAir`, we guarantee that leaves will never overwrite part of the trunk or any other existing solid block.
-        VoxelMod leafMod = new VoxelMod { ID = 15 /*, rule = ReplacementRule.OnlyReplaceAir */ };
+        VoxelMod leafMod = new VoxelMod { ID = BlockIDs.OakLeaves /*, rule = ReplacementRule.OnlyReplaceAir */ };
 
         for (int x = -2; x < 3; x++)
         {
@@ -64,7 +64,7 @@ public static class Structure
         // TRUNK
         // The trunk uses the Default rule. This allows it to replace grass, dirt, etc., based on how its BlockType is configured in the Inspector.
         for (int i = 1; i <= height; i++)
-            yield return new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), blockId: 14);
+            yield return new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), BlockIDs.OakLog);
     }
 
     public static IEnumerable<VoxelMod> MakeCacti(Vector3Int position, int minTrunkHeight, int maxTrunkHeight)
@@ -76,6 +76,6 @@ public static class Structure
 
         // TRUNK
         for (int i = 1; i <= height; i++)
-            yield return new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), blockId: 16);
+            yield return new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), BlockIDs.Cactus);
     }
 }

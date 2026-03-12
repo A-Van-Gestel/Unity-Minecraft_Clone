@@ -325,6 +325,25 @@ subsequent chunk modifications re-triggered the upward animation natively since 
 
 ---
 
+### ~~05. Hardcoded Block IDs throughout the codebase~~
+
+**Severity:** Improvement  
+**Files:** `BlockBehavior.cs`, `BlockBehavior.Grass.cs`, `BlockBehavior.Fluids.cs`, `Structure.cs`, `MeshGenerationJob.cs`, `World.cs`, `PlayerInteraction.cs`, `LightingJobBenchmark.cs`  
+**Fixed:** March 2026
+
+**Symptom:** Block IDs like Grass (`2`), Dirt (`3`), Air (`0`), Stone (`1`), Oak Log (`14`), Oak Leaves (`15`), Cactus (`16`), and Lava (`20`) were hardcoded as magic numbers across 8 files.  
+**Impact:** Any change to the `BlockDatabase` array order would silently break all logic referencing these IDs.  
+**Fix:**
+
+1. Created `Assets/Editor/BlockIdGenerator.cs` — an Editor tool (`Minecraft Clone > Generate Block IDs`) that reads the `BlockDatabase` and auto-generates `Assets/Scripts/Data/BlockIDs.cs` containing `public const ushort` fields for every block type.
+2. Replaced all 26 hardcoded block ID instances across 8 files with `BlockIDs.*` constants.
+3. Added a `BlockDatabaseChangeDetector` asset postprocessor that warns when the database changes and the generated file may be stale.
+4. Generator enforces the **Air = 0 architectural invariant** with a hard-assert, refusing to write the file if `blockTypes[0]` is not "Air".
+
+**Note:** This resolves magic numbers in code but changing the `BlockDatabase` order still breaks save files. The long-term fix is the Chunk Palette Mapping system (see `Documentation/Design/CHUNK_PALETTE_MAPPING.md`).
+
+---
+
 ### ~~01. `BlockBehavior.s_mods` is a shared static list (thread safety / reentrancy hazard)~~
 
 **Severity:** Bug (latent)  

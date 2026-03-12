@@ -211,7 +211,7 @@ namespace Jobs
             uint packedData = Map[mapIndex];
             ushort id = BurstVoxelDataBitMapping.GetId(packedData);
 
-            if (id == 0) return; // Skip Air
+            if (id == BlockIDs.Air) return; // Skip Air
 
             BlockTypeJobData props = BlockTypes[id];
 

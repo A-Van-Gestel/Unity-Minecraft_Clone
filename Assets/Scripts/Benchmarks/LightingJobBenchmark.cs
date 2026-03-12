@@ -404,7 +404,7 @@ namespace Benchmarks
                     for (int i = 0; i < data.Center.Length; i++)
                     {
                         // If ID is Air (0), set sunlight to 15.
-                        if (BurstVoxelDataBitMapping.GetId(data.Center[i]) == 0)
+                        if (BurstVoxelDataBitMapping.GetId(data.Center[i]) == BlockIDs.Air)
                         {
                             data.Center[i] = BurstVoxelDataBitMapping.SetSunLight(data.Center[i], 15);
                         }
@@ -418,7 +418,7 @@ namespace Benchmarks
                             int index = x + VoxelData.ChunkWidth * (100 + VoxelData.ChunkHeight * z);
 
                             // Set to Stone (Solid, Opacity 15, Light 0)
-                            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(1, 0, 0, 1, 0);
+                            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0, 0, 1, 0);
 
                             // Trigger vertical darkness logic via Column Recalc
                             data.SourceSunRecalcQueue.Add(new Vector2Int(x, z));
@@ -463,8 +463,8 @@ namespace Benchmarks
 
         private void FillDefaultTerrain(LightingBenchmarkData data, int height)
         {
-            uint solid = BurstVoxelDataBitMapping.PackVoxelData(1, 0, 0, 1, 0); // Stone
-            uint air = BurstVoxelDataBitMapping.PackVoxelData(0, 0, 0, 1, 0); // Air
+            uint solid = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0, 0, 1, 0); // Stone
+            uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 1, 0); // Air
 
             for (int i = 0; i < data.Center.Length; i++)
             {
@@ -498,7 +498,7 @@ namespace Benchmarks
                         if (Random.value > 0.6f) // 40% chance of air hole
                         {
                             int index = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-                            data.Center[index] = BurstVoxelDataBitMapping.SetId(data.Center[index], 0); // Set to Air
+                            data.Center[index] = BurstVoxelDataBitMapping.SetId(data.Center[index], BlockIDs.Air); // Set to Air
                         }
                     }
                 }
@@ -514,7 +514,7 @@ namespace Benchmarks
                     for (int z = startZ; z < startZ + sizeZ; z++)
                     {
                         int index = x + VoxelData.ChunkWidth * (y + VoxelData.ChunkHeight * z);
-                        data.Center[index] = BurstVoxelDataBitMapping.SetId(data.Center[index], 0);
+                        data.Center[index] = BurstVoxelDataBitMapping.SetId(data.Center[index], BlockIDs.Air);
                     }
                 }
             }
@@ -524,8 +524,8 @@ namespace Benchmarks
         {
             int index = pos.x + VoxelData.ChunkWidth * (pos.y + VoxelData.ChunkHeight * pos.z);
 
-            // Use ID 20 (Lava) 
-            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(20, 0, level, 1, 0);
+            // Use Lava as the light-emitting block
+            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level, 1, 0);
 
             // Add to queue
             data.SourceBlockLightQueue.Add(new LightQueueNode
@@ -543,7 +543,7 @@ namespace Benchmarks
         {
             // 1. Set Source in Map
             int srcIdx = srcPos.x + VoxelData.ChunkWidth * (srcPos.y + VoxelData.ChunkHeight * srcPos.z);
-            data.Center[srcIdx] = BurstVoxelDataBitMapping.PackVoxelData(20, 0, level, 1, 0);
+            data.Center[srcIdx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level, 1, 0);
 
             var queue = new Queue<(Vector3Int p, int l)>();
             queue.Enqueue((srcPos, level));
@@ -559,7 +559,7 @@ namespace Benchmarks
 
                 // If solid (and not the source itself), stop.
                 ushort id = BurstVoxelDataBitMapping.GetId(currentPacked);
-                if (id == 1) continue; // Stone
+                if (id == BlockIDs.Stone) continue; // Stone
 
                 // If current light is already higher/equal, skip (simple visited check logic)
                 byte currentLight = BurstVoxelDataBitMapping.GetBlockLight(currentPacked);
@@ -584,7 +584,7 @@ namespace Benchmarks
         {
             // 1. Set Block to Air (ID 0), Light 0.
             int idx = pos.x + VoxelData.ChunkWidth * (pos.y + VoxelData.ChunkHeight * pos.z);
-            data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(0, 0, 0, 1, 0);
+            data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 1, 0);
 
             // 2. Queue Removal
             data.SourceBlockLightQueue.Add(new LightQueueNode

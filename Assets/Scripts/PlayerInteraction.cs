@@ -61,7 +61,7 @@ public class PlayerInteraction : MonoBehaviour
             // Destroy block.
             if (Input.GetMouseButtonDown(0))
             {
-                _world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: 0)
+                _world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: BlockIDs.Air)
                 {
                     ImmediateUpdate = true,
                 });

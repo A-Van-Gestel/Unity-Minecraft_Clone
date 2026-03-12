@@ -6,16 +6,7 @@ This document outlines **open** bugs related to block behaviors (grass spreading
 
 ---
 
-## 02. Grass / dirt block IDs are hardcoded
 
-**Severity:** Improvement  
-**Files:** `BlockBehavior.cs` — `Active` (line 70), `Behave` (line 178), `IsConvertibleDirt` (line 263)
-
-Block IDs are hardcoded: grass = `2`, dirt = `3`, air = `0`. If a new block is inserted before these entries or the `BlockDatabase` order changes, grass behavior silently breaks without any compiler error or runtime warning.
-
-A proper solution would reference blocks by name or a dedicated enum/tag.
-
----
 
 ## 03. Fluid horizontal flow condition is slightly wrong
 
