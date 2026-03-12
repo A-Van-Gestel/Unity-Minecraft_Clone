@@ -8,24 +8,24 @@ namespace Editor
     public class BlockEditorWindow : EditorWindow
     {
         // Data references
-        private BlockDatabase blockDatabase;
-        private List<BlockType> blockTypesCopy;
-        private BlockType selectedBlock;
-        private int selectedBlockIndex = -1;
+        private BlockDatabase _blockDatabase;
+        private List<BlockType> _blockTypesCopy;
+        private BlockType _selectedBlock;
+        private int _selectedBlockIndex = -1;
 
         // UI state
-        private Vector2 listScrollPos;
-        private Vector2 detailScrollPos;
-        private BlockTags filterTags = BlockTags.NONE;
-        private string searchText = "";
-        private Texture2D atlasTexture;
+        private Vector2 _listScrollPos;
+        private Vector2 _detailScrollPos;
+        private BlockTags _filterTags = BlockTags.NONE;
+        private string _searchText = "";
+        private Texture2D _atlasTexture;
 
         // --- 3D Preview Fields ---
-        private PreviewRenderUtility previewRenderUtility;
-        private Mesh previewMesh;
-        private Material previewMaterial;
+        private PreviewRenderUtility _previewRenderUtility;
+        private Mesh _previewMesh;
+        private Material _previewMaterial;
 
-        private Vector2 previewRotation = new Vector2(135, -30); // Initial rotation
+        private Vector2 _previewRotation = new Vector2(135, -30); // Initial rotation
 
         // Stores the editor-only state of the fluid preview slider.
         private int _previewFluidLevel = 0;
@@ -46,23 +46,23 @@ namespace Editor
         void OnEnable()
         {
             // --- Initialize Preview Utility ---
-            previewRenderUtility = new PreviewRenderUtility();
+            _previewRenderUtility = new PreviewRenderUtility();
 
             // --- Enhanced Camera Setup ---
-            previewRenderUtility.camera.nearClipPlane = 0.1f;
-            previewRenderUtility.camera.farClipPlane = 10f;
+            _previewRenderUtility.camera.nearClipPlane = 0.1f;
+            _previewRenderUtility.camera.farClipPlane = 10f;
 
             // Make the camera background transparent to reveal the checkerboard.
-            previewRenderUtility.camera.cameraType = CameraType.Preview;
-            previewRenderUtility.camera.clearFlags = CameraClearFlags.SolidColor;
-            previewRenderUtility.camera.backgroundColor = new Color(0, 0, 0, 0);
+            _previewRenderUtility.camera.cameraType = CameraType.Preview;
+            _previewRenderUtility.camera.clearFlags = CameraClearFlags.SolidColor;
+            _previewRenderUtility.camera.backgroundColor = new Color(0, 0, 0, 0);
 
-            previewRenderUtility.camera.transform.position = new Vector3(0, 0, -3.5f);
-            previewRenderUtility.camera.transform.rotation = Quaternion.identity;
-            previewRenderUtility.camera.fieldOfView = 30;
+            _previewRenderUtility.camera.transform.position = new Vector3(0, 0, -3.5f);
+            _previewRenderUtility.camera.transform.rotation = Quaternion.identity;
+            _previewRenderUtility.camera.fieldOfView = 30;
 
             // Set up a light for the preview
-            var light = previewRenderUtility.lights[0];
+            var light = _previewRenderUtility.lights[0];
             light.intensity = 1.2f;
             light.transform.rotation = Quaternion.Euler(30, 30, 0);
 
@@ -80,18 +80,18 @@ namespace Editor
             }
 
             string path = AssetDatabase.GUIDToAssetPath(guids[0]);
-            blockDatabase = AssetDatabase.LoadAssetAtPath<BlockDatabase>(path);
+            _blockDatabase = AssetDatabase.LoadAssetAtPath<BlockDatabase>(path);
 
-            if (blockDatabase != null)
+            if (_blockDatabase != null)
             {
                 LoadBlockData();
 
                 // --- Load Materials ---
-                if (blockDatabase.opaqueMaterial != null)
+                if (_blockDatabase.opaqueMaterial != null)
                 {
-                    atlasTexture = blockDatabase.opaqueMaterial.mainTexture as Texture2D;
+                    _atlasTexture = _blockDatabase.opaqueMaterial.mainTexture as Texture2D;
                     // Create an instance of the material for our preview
-                    previewMaterial = new Material(blockDatabase.opaqueMaterial);
+                    _previewMaterial = new Material(_blockDatabase.opaqueMaterial);
                 }
             }
 
@@ -106,9 +106,9 @@ namespace Editor
             EditorApplication.update -= OnUpdate;
 
             // IMPORTANT: Clean up the preview utility and created objects to prevent memory leaks
-            previewRenderUtility?.Cleanup();
-            if (previewMesh != null) DestroyImmediate(previewMesh);
-            if (previewMaterial != null) DestroyImmediate(previewMaterial);
+            _previewRenderUtility?.Cleanup();
+            if (_previewMesh != null) DestroyImmediate(_previewMesh);
+            if (_previewMaterial != null) DestroyImmediate(_previewMaterial);
         }
 
         // This method will be called on every editor frame.
@@ -117,7 +117,7 @@ namespace Editor
             // Only force a repaint if we have a block selected that might be animated.
             // This is a small optimization to prevent the window from repainting constantly
             // when it's just sitting empty.
-            if (selectedBlock != null)
+            if (_selectedBlock != null)
             {
                 Repaint();
             }
@@ -125,13 +125,13 @@ namespace Editor
 
         private void LoadBlockData()
         {
-            if (blockDatabase == null) return;
+            if (_blockDatabase == null) return;
             // We work on a copy of the data. This allows for "Save" and "Revert" functionality.
-            blockTypesCopy = new List<BlockType>();
-            foreach (var blockType in blockDatabase.blockTypes)
+            _blockTypesCopy = new List<BlockType>();
+            foreach (var blockType in _blockDatabase.blockTypes)
             {
                 // Simple member-wise copy for a new instance.
-                blockTypesCopy.Add(new BlockType
+                _blockTypesCopy.Add(new BlockType
                 {
                     // copy all fields
                     blockName = blockType.blockName,
@@ -160,25 +160,25 @@ namespace Editor
                 });
             }
 
-            Debug.Log("Block Editor: Loaded " + blockTypesCopy.Count + " block types from BlockDatabase asset.");
+            Debug.Log("Block Editor: Loaded " + _blockTypesCopy.Count + " block types from BlockDatabase asset.");
         }
 
         private void SaveBlockData()
         {
-            if (blockDatabase == null || blockTypesCopy == null)
+            if (_blockDatabase == null || _blockTypesCopy == null)
             {
                 EditorUtility.DisplayDialog("Error", "BlockDatabase asset not found or data not loaded.", "OK");
                 return;
             }
 
             // Prepare the BlockDatabase asset for modification.
-            Undo.RecordObject(blockDatabase, "Save Block Types");
+            Undo.RecordObject(_blockDatabase, "Save Block Types");
 
             // Overwrite the BlockDatabase asset's array with our edited copy.
-            blockDatabase.blockTypes = blockTypesCopy.ToArray();
+            _blockDatabase.blockTypes = _blockTypesCopy.ToArray();
 
             // Mark the BlockDatabase asset as dirty and save the assets to disk. This is the "sync" part.
-            EditorUtility.SetDirty(blockDatabase);
+            EditorUtility.SetDirty(_blockDatabase);
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
@@ -187,18 +187,18 @@ namespace Editor
             if (generatedSuccessfully)
             {
                 _blockIdsStale = false;
-                EditorUtility.DisplayDialog("Success", $"Saved {blockTypesCopy.Count} block types to the BlockDatabase asset and regenerated BlockIDs.cs.", "OK");
+                EditorUtility.DisplayDialog("Success", $"Saved {_blockTypesCopy.Count} block types to the BlockDatabase asset and regenerated BlockIDs.cs.", "OK");
             }
             else
             {
                 _blockIdsStale = true;
-                EditorUtility.DisplayDialog("Warning", $"Saved {blockTypesCopy.Count} block types, but BlockIDs.cs generation failed. See console for details.", "OK");
+                EditorUtility.DisplayDialog("Warning", $"Saved {_blockTypesCopy.Count} block types, but BlockIDs.cs generation failed. See console for details.", "OK");
             }
         }
 
         void OnGUI()
         {
-            if (blockDatabase == null)
+            if (_blockDatabase == null)
             {
                 EditorGUILayout.HelpBox("Could not find the 'BlockDatabase.asset'. Please ensure it exists in your project by creating one via the Assets > Create menu.", MessageType.Error);
                 return;
@@ -206,16 +206,13 @@ namespace Editor
 
             // --- Initialize custom GUIStyle here ---
             // We create a new style based on the default button, then modify it.
-            if (_listButtonStyle == null)
+            _listButtonStyle ??= new GUIStyle(EditorStyles.toolbarButton)
             {
-                _listButtonStyle = new GUIStyle(EditorStyles.toolbarButton)
-                {
-                    alignment = TextAnchor.MiddleLeft,
-                    imagePosition = ImagePosition.ImageLeft,
-                    fontStyle = FontStyle.Bold,
-                    padding = new RectOffset(26, 4, 2, 2)
-                };
-            }
+                alignment = TextAnchor.MiddleLeft,
+                imagePosition = ImagePosition.ImageLeft,
+                fontStyle = FontStyle.Bold,
+                padding = new RectOffset(26, 4, 2, 2)
+            };
 
             // --- Toolbar ---
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
@@ -227,8 +224,8 @@ namespace Editor
             if (GUILayout.Button("Revert Changes", EditorStyles.toolbarButton))
             {
                 LoadBlockData();
-                selectedBlock = null;
-                selectedBlockIndex = -1;
+                _selectedBlock = null;
+                _selectedBlockIndex = -1;
             }
 
             // --- Generate Block IDs Button (Fallback) ---
@@ -270,33 +267,33 @@ namespace Editor
             EditorGUILayout.LabelField("Blocks", EditorStyles.boldLabel);
 
             // --- Filter Controls ---
-            searchText = EditorGUILayout.TextField("Search", searchText);
-            filterTags = (BlockTags)EditorGUILayout.EnumFlagsField("Filter by Tag", filterTags);
+            _searchText = EditorGUILayout.TextField("Search", _searchText);
+            _filterTags = (BlockTags)EditorGUILayout.EnumFlagsField("Filter by Tag", _filterTags);
 
-            listScrollPos = EditorGUILayout.BeginScrollView(listScrollPos, "box");
+            _listScrollPos = EditorGUILayout.BeginScrollView(_listScrollPos, "box");
 
-            for (int i = 0; i < blockTypesCopy.Count; i++)
+            for (int i = 0; i < _blockTypesCopy.Count; i++)
             {
                 // Apply text search filter
-                bool searchMatch = string.IsNullOrEmpty(searchText) || blockTypesCopy[i].blockName.ToLower().Contains(searchText.ToLower());
+                bool searchMatch = string.IsNullOrEmpty(_searchText) || _blockTypesCopy[i].blockName.ToLower().Contains(_searchText.ToLower());
                 // Apply tag filter
-                bool tagMatch = filterTags == BlockTags.NONE || (blockTypesCopy[i].tags & filterTags) == filterTags;
+                bool tagMatch = _filterTags == BlockTags.NONE || (_blockTypesCopy[i].tags & _filterTags) == _filterTags;
 
                 if (searchMatch && tagMatch)
                 {
                     // Highlight the selected block
-                    GUI.backgroundColor = (i == selectedBlockIndex) ? Color.cyan : Color.white;
+                    GUI.backgroundColor = (i == _selectedBlockIndex) ? Color.cyan : Color.white;
 
                     // Button for each block with its icon and name.
                     Rect buttonRect = GUILayoutUtility.GetRect(new GUIContent(), _listButtonStyle, GUILayout.Height(24));
-                    string buttonText = $" {blockTypesCopy[i].blockName} (ID: {i})";
+                    string buttonText = $" {_blockTypesCopy[i].blockName} (ID: {i})";
 
                     if (GUI.Button(buttonRect, buttonText, _listButtonStyle))
                     {
-                        if (selectedBlockIndex != i)
+                        if (_selectedBlockIndex != i)
                         {
-                            selectedBlock = blockTypesCopy[i];
-                            selectedBlockIndex = i;
+                            _selectedBlock = _blockTypesCopy[i];
+                            _selectedBlockIndex = i;
                             GUI.FocusControl(null); // Deselect text fields
 
                             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
@@ -307,10 +304,10 @@ namespace Editor
                     }
 
                     // Manually draw the icon in the padded space we created.
-                    if (blockTypesCopy[i].icon != null)
+                    if (_blockTypesCopy[i].icon != null)
                     {
                         Rect iconRect = new Rect(buttonRect.x + 5, buttonRect.y + 3, 18, 18);
-                        DrawSprite(iconRect, blockTypesCopy[i].icon);
+                        DrawSprite(iconRect, _blockTypesCopy[i].icon);
                     }
                 }
             }
@@ -326,7 +323,7 @@ namespace Editor
             }
 
             // Disable "Duplicate" and "Delete" if no block is selected
-            GUI.enabled = (selectedBlock != null);
+            GUI.enabled = (_selectedBlock != null);
             if (GUILayout.Button("Duplicate"))
             {
                 DuplicateSelectedBlock();
@@ -350,38 +347,38 @@ namespace Editor
         private void DrawSelectedBlockDetails()
         {
             EditorGUILayout.BeginVertical();
-            detailScrollPos = EditorGUILayout.BeginScrollView(detailScrollPos, "box");
+            _detailScrollPos = EditorGUILayout.BeginScrollView(_detailScrollPos, "box");
 
-            if (selectedBlock != null)
+            if (_selectedBlock != null)
             {
                 // --- Title ---
-                EditorGUILayout.LabelField($"Editing: {selectedBlock.blockName} (ID: {selectedBlockIndex})", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField($"Editing: {_selectedBlock.blockName} (ID: {_selectedBlockIndex})", EditorStyles.boldLabel);
                 EditorGUILayout.Space();
 
                 // --- Block details with Tooltips ---
-                selectedBlock.blockName = EditorGUILayout.TextField(new GUIContent("Block Name", "The display name of the block."), selectedBlock.blockName);
-                selectedBlock.icon = (Sprite)EditorGUILayout.ObjectField(new GUIContent("Icon", "The icon that appears in the toolbar and inventory."), selectedBlock.icon, typeof(Sprite), false, GUILayout.Width(200));
-                selectedBlock.meshData = (VoxelMeshData)EditorGUILayout.ObjectField(new GUIContent("Custom Mesh Data", "The custom mesh data for this block, if it's not a standard cube."), selectedBlock.meshData, typeof(VoxelMeshData), false);
+                _selectedBlock.blockName = EditorGUILayout.TextField(new GUIContent("Block Name", "The display name of the block."), _selectedBlock.blockName);
+                _selectedBlock.icon = (Sprite)EditorGUILayout.ObjectField(new GUIContent("Icon", "The icon that appears in the toolbar and inventory."), _selectedBlock.icon, typeof(Sprite), false, GUILayout.Width(200));
+                _selectedBlock.meshData = (VoxelMeshData)EditorGUILayout.ObjectField(new GUIContent("Custom Mesh Data", "The custom mesh data for this block, if it's not a standard cube."), _selectedBlock.meshData, typeof(VoxelMeshData), false);
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Properties", EditorStyles.boldLabel);
-                selectedBlock.stackSize = EditorGUILayout.IntSlider(new GUIContent("Stack Size", "The maximum amount of this block that can be stacked."), selectedBlock.stackSize, 1, 64);
-                selectedBlock.isSolid = EditorGUILayout.Toggle(new GUIContent("Is Solid", "Indicates whether the player collides with this block."), selectedBlock.isSolid);
-                selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighbouring faces should still be rendered when this block is placed."), selectedBlock.renderNeighborFaces);
-                selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), selectedBlock.isActive);
+                _selectedBlock.stackSize = EditorGUILayout.IntSlider(new GUIContent("Stack Size", "The maximum amount of this block that can be stacked."), _selectedBlock.stackSize, 1, 64);
+                _selectedBlock.isSolid = EditorGUILayout.Toggle(new GUIContent("Is Solid", "Indicates whether the player collides with this block."), _selectedBlock.isSolid);
+                _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighbouring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
+                _selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), _selectedBlock.isActive);
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Fluid Properties", EditorStyles.boldLabel);
-                selectedBlock.fluidType = (FluidType)EditorGUILayout.EnumPopup(new GUIContent("Fluid Type", "The type of fluid this block represents. 'None' for solid blocks."), selectedBlock.fluidType);
+                _selectedBlock.fluidType = (FluidType)EditorGUILayout.EnumPopup(new GUIContent("Fluid Type", "The type of fluid this block represents. 'None' for solid blocks."), _selectedBlock.fluidType);
 
                 // --- Conditional Fluid Properties ---
-                if (selectedBlock.fluidType != FluidType.None)
+                if (_selectedBlock.fluidType != FluidType.None)
                 {
                     EditorGUI.indentLevel++;
-                    selectedBlock.fluidShaderID =
-                        (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Shader ID", "The ID passed to the liquid shader, controlling its visual style (e.g., 0 for Water, 1 for Lava)."), selectedBlock.fluidShaderID, 0, 16); // 256 (byte) is actual maximum
-                    selectedBlock.fluidLevel = (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Level", "Default fluid level."), selectedBlock.fluidLevel, 0, 15);
-                    selectedBlock.flowLevels = (byte)EditorGUILayout.IntSlider(new GUIContent("Flow Levels", "How many blocks a fluid can flow horizontally from a source block."), selectedBlock.flowLevels, 1, 8);
+                    _selectedBlock.fluidShaderID =
+                        (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Shader ID", "The ID passed to the liquid shader, controlling its visual style (e.g., 0 for Water, 1 for Lava)."), _selectedBlock.fluidShaderID, 0, 16); // 256 (byte) is actual maximum
+                    _selectedBlock.fluidLevel = (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Level", "Default fluid level."), _selectedBlock.fluidLevel, 0, 15);
+                    _selectedBlock.flowLevels = (byte)EditorGUILayout.IntSlider(new GUIContent("Flow Levels", "How many blocks a fluid can flow horizontally from a source block."), _selectedBlock.flowLevels, 1, 8);
 
                     // --- Fluid Preview Slider ---
                     EditorGUILayout.Space();
@@ -403,15 +400,15 @@ namespace Editor
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Lighting Properties", EditorStyles.boldLabel);
-                selectedBlock.opacity = (byte)EditorGUILayout.IntSlider(new GUIContent("Opacity", "How many light levels will be blocked by this block."), selectedBlock.opacity, 0, 15);
-                selectedBlock.lightEmission = (byte)EditorGUILayout.IntSlider(new GUIContent("Light Emission", "How many light levels will be emitted by this block."), selectedBlock.lightEmission, 0, 15);
+                _selectedBlock.opacity = (byte)EditorGUILayout.IntSlider(new GUIContent("Opacity", "How many light levels will be blocked by this block."), _selectedBlock.opacity, 0, 15);
+                _selectedBlock.lightEmission = (byte)EditorGUILayout.IntSlider(new GUIContent("Light Emission", "How many light levels will be emitted by this block."), _selectedBlock.lightEmission, 0, 15);
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Placement Rules & Tags", EditorStyles.boldLabel);
 
                 // --- Tag Preset and Tag fields ---
                 EditorGUILayout.BeginHorizontal();
-                selectedBlock.tagPreset = (BlockTagPreset)EditorGUILayout.ObjectField(new GUIContent("Tag Preset", "Apply a preset for the tags below."), selectedBlock.tagPreset, typeof(BlockTagPreset), false);
+                _selectedBlock.tagPreset = (BlockTagPreset)EditorGUILayout.ObjectField(new GUIContent("Tag Preset", "Apply a preset for the tags below."), _selectedBlock.tagPreset, typeof(BlockTagPreset), false);
 
                 // Button to create a new preset asset
                 if (GUILayout.Button("New", GUILayout.Width(40)))
@@ -419,19 +416,19 @@ namespace Editor
                     CreateNewTagPreset();
                 }
 
-                if (selectedBlock.tagPreset != null)
+                if (_selectedBlock.tagPreset != null)
                 {
                     if (GUILayout.Button("Apply", GUILayout.Width(60)))
                     {
-                        selectedBlock.tags = selectedBlock.tagPreset.tags;
-                        selectedBlock.canReplaceTags = selectedBlock.tagPreset.canReplaceTags;
+                        _selectedBlock.tags = _selectedBlock.tagPreset.tags;
+                        _selectedBlock.canReplaceTags = _selectedBlock.tagPreset.canReplaceTags;
                     }
                 }
 
                 EditorGUILayout.EndHorizontal();
 
-                selectedBlock.tags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Tags", "What tags does this block have? A block can have multiple tags."), selectedBlock.tags);
-                selectedBlock.canReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Can Replace Tags", "What tags can this block replace?"), selectedBlock.canReplaceTags);
+                _selectedBlock.tags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Tags", "What tags does this block have? A block can have multiple tags."), _selectedBlock.tags);
+                _selectedBlock.canReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Can Replace Tags", "What tags can this block replace?"), _selectedBlock.canReplaceTags);
 
 
                 EditorGUILayout.Space();
@@ -442,35 +439,35 @@ namespace Editor
                 // in an "unfolded cube" pattern without hardcoding pixel sizes.
 
                 // Only draw the texture selectors if the block is not a fluid. As fluids are drawn using shaders.
-                if (selectedBlock.fluidType == FluidType.None)
+                if (_selectedBlock.fluidType == FluidType.None)
                 {
                     // Row 1: Top Face (centered)
                     EditorGUILayout.BeginHorizontal();
                     GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Top (+Y)", "Texture ID for the Positive Y face."), ref selectedBlock.topFaceTexture);
+                    DrawTextureSelectorControl(new GUIContent("Top (+Y)", "Texture ID for the Positive Y face."), ref _selectedBlock.topFaceTexture);
                     GUILayout.FlexibleSpace();
                     EditorGUILayout.EndHorizontal();
 
                     // Row 2: Left, Front, and Right Faces
                     EditorGUILayout.BeginHorizontal();
                     GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Left (-X)", "Texture ID for the Negative X face."), ref selectedBlock.leftFaceTexture);
-                    DrawTextureSelectorControl(new GUIContent("Front (+Z)", "Texture ID for the Positive Z face."), ref selectedBlock.frontFaceTexture);
-                    DrawTextureSelectorControl(new GUIContent("Right (+X)", "Texture ID for the Positive X face."), ref selectedBlock.rightFaceTexture);
+                    DrawTextureSelectorControl(new GUIContent("Left (-X)", "Texture ID for the Negative X face."), ref _selectedBlock.leftFaceTexture);
+                    DrawTextureSelectorControl(new GUIContent("Front (+Z)", "Texture ID for the Positive Z face."), ref _selectedBlock.frontFaceTexture);
+                    DrawTextureSelectorControl(new GUIContent("Right (+X)", "Texture ID for the Positive X face."), ref _selectedBlock.rightFaceTexture);
                     GUILayout.FlexibleSpace();
                     EditorGUILayout.EndHorizontal();
 
                     // Row 3: Bottom Face (centered)
                     EditorGUILayout.BeginHorizontal();
                     GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Bottom (-Y)", "Texture ID for the Negative Y face."), ref selectedBlock.bottomFaceTexture);
+                    DrawTextureSelectorControl(new GUIContent("Bottom (-Y)", "Texture ID for the Negative Y face."), ref _selectedBlock.bottomFaceTexture);
                     GUILayout.FlexibleSpace();
                     EditorGUILayout.EndHorizontal();
 
                     // Row 4: Back Face (centered)
                     EditorGUILayout.BeginHorizontal();
                     GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Back (-Z)", "Texture ID for the Negative Z face."), ref selectedBlock.backFaceTexture);
+                    DrawTextureSelectorControl(new GUIContent("Back (-Z)", "Texture ID for the Negative Z face."), ref _selectedBlock.backFaceTexture);
                     GUILayout.FlexibleSpace();
                     EditorGUILayout.EndHorizontal();
                 }
@@ -500,86 +497,86 @@ namespace Editor
         {
             BlockType newBlock = new BlockType
             {
-                blockName = $"New Block {blockTypesCopy.Count}"
+                blockName = $"New Block {_blockTypesCopy.Count}"
             };
-            blockTypesCopy.Add(newBlock);
+            _blockTypesCopy.Add(newBlock);
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
 
             // Automatically select the new block for immediate editing
-            selectedBlockIndex = blockTypesCopy.Count - 1;
-            selectedBlock = newBlock;
+            _selectedBlockIndex = _blockTypesCopy.Count - 1;
+            _selectedBlock = newBlock;
             UpdatePreviewMesh();
 
             // Scroll the list to the bottom to make the new block visible
-            listScrollPos.y = float.MaxValue;
+            _listScrollPos.y = float.MaxValue;
         }
 
         private void DuplicateSelectedBlock()
         {
-            if (selectedBlock == null) return;
+            if (_selectedBlock == null) return;
 
             // Create a deep copy
             BlockType newBlock = new BlockType
             {
-                blockName = $"{selectedBlock.blockName} (Copy)",
-                icon = selectedBlock.icon,
-                meshData = selectedBlock.meshData,
-                stackSize = selectedBlock.stackSize,
-                isSolid = selectedBlock.isSolid,
-                renderNeighborFaces = selectedBlock.renderNeighborFaces,
-                fluidType = selectedBlock.fluidType,
-                fluidShaderID = selectedBlock.fluidShaderID,
-                fluidMeshData = selectedBlock.fluidMeshData,
-                fluidLevel = selectedBlock.fluidLevel,
-                flowLevels = selectedBlock.flowLevels,
-                opacity = selectedBlock.opacity,
-                lightEmission = selectedBlock.lightEmission,
-                tagPreset = selectedBlock.tagPreset,
-                tags = selectedBlock.tags,
-                canReplaceTags = selectedBlock.canReplaceTags,
-                isActive = selectedBlock.isActive,
-                backFaceTexture = selectedBlock.backFaceTexture,
-                frontFaceTexture = selectedBlock.frontFaceTexture,
-                topFaceTexture = selectedBlock.topFaceTexture,
-                bottomFaceTexture = selectedBlock.bottomFaceTexture,
-                leftFaceTexture = selectedBlock.leftFaceTexture,
-                rightFaceTexture = selectedBlock.rightFaceTexture
+                blockName = $"{_selectedBlock.blockName} (Copy)",
+                icon = _selectedBlock.icon,
+                meshData = _selectedBlock.meshData,
+                stackSize = _selectedBlock.stackSize,
+                isSolid = _selectedBlock.isSolid,
+                renderNeighborFaces = _selectedBlock.renderNeighborFaces,
+                fluidType = _selectedBlock.fluidType,
+                fluidShaderID = _selectedBlock.fluidShaderID,
+                fluidMeshData = _selectedBlock.fluidMeshData,
+                fluidLevel = _selectedBlock.fluidLevel,
+                flowLevels = _selectedBlock.flowLevels,
+                opacity = _selectedBlock.opacity,
+                lightEmission = _selectedBlock.lightEmission,
+                tagPreset = _selectedBlock.tagPreset,
+                tags = _selectedBlock.tags,
+                canReplaceTags = _selectedBlock.canReplaceTags,
+                isActive = _selectedBlock.isActive,
+                backFaceTexture = _selectedBlock.backFaceTexture,
+                frontFaceTexture = _selectedBlock.frontFaceTexture,
+                topFaceTexture = _selectedBlock.topFaceTexture,
+                bottomFaceTexture = _selectedBlock.bottomFaceTexture,
+                leftFaceTexture = _selectedBlock.leftFaceTexture,
+                rightFaceTexture = _selectedBlock.rightFaceTexture
             };
 
-            int insertIndex = selectedBlockIndex + 1;
-            blockTypesCopy.Insert(insertIndex, newBlock);
+            int insertIndex = _selectedBlockIndex + 1;
+            _blockTypesCopy.Insert(insertIndex, newBlock);
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
 
             // Select the newly created duplicate
-            selectedBlockIndex = insertIndex;
-            selectedBlock = newBlock;
+            _selectedBlockIndex = insertIndex;
+            _selectedBlock = newBlock;
             UpdatePreviewMesh();
         }
 
         private void DeleteSelectedBlock()
         {
-            if (selectedBlock == null) return;
+            if (_selectedBlock == null) return;
 
             // CRITICAL: Always ask for confirmation before deleting data.
             if (EditorUtility.DisplayDialog(
                     "Delete Block",
-                    $"Are you sure you want to delete the block '{selectedBlock.blockName}'? This action cannot be undone.",
+                    $"Are you sure you want to delete the block '{_selectedBlock.blockName}'? This action cannot be undone.",
                     "Delete",
                     "Cancel"))
             {
-                blockTypesCopy.RemoveAt(selectedBlockIndex);
+                _blockTypesCopy.RemoveAt(_selectedBlockIndex);
 
                 // Clear selection
-                selectedBlock = null;
-                selectedBlockIndex = -1;
+                _selectedBlock = null;
+                _selectedBlockIndex = -1;
 
                 // Clear preview
-                if (previewMesh != null) DestroyImmediate(previewMesh);
-                previewMesh = null;
+                if (_previewMesh != null) DestroyImmediate(_previewMesh);
+                _previewMesh = null;
             }
         }
 
@@ -588,7 +585,7 @@ namespace Editor
             // 1. Prompt the user to select a save location for the new asset.
             string path = EditorUtility.SaveFilePanelInProject(
                 "Save New Block Tag Preset",
-                $"BTP_{selectedBlock.blockName}.asset", // Default file name
+                $"BTP_{_selectedBlock.blockName}.asset", // Default file name
                 "asset",
                 "Please select a location to save the new preset."
             );
@@ -603,8 +600,8 @@ namespace Editor
             BlockTagPreset newPreset = CreateInstance<BlockTagPreset>();
 
             // Pre-fill the new preset with the block's current tags.
-            newPreset.tags = selectedBlock.tags;
-            newPreset.canReplaceTags = selectedBlock.canReplaceTags;
+            newPreset.tags = _selectedBlock.tags;
+            newPreset.canReplaceTags = _selectedBlock.canReplaceTags;
 
             // 4. Create the .asset file in the project.
             AssetDatabase.CreateAsset(newPreset, path);
@@ -612,37 +609,37 @@ namespace Editor
             AssetDatabase.Refresh();
 
             // 5. Automatically assign the newly created preset to the current block.
-            selectedBlock.tagPreset = newPreset;
+            _selectedBlock.tagPreset = newPreset;
 
             Debug.Log($"Created and assigned new Block Tag Preset at: {path}");
         }
 
         private void UpdatePreviewMesh()
         {
-            if (previewMesh != null) DestroyImmediate(previewMesh);
-            previewMesh = EditorMeshGenerator.GenerateBlockMesh(selectedBlock, blockTypesCopy, _previewFluidLevel);
+            if (_previewMesh != null) DestroyImmediate(_previewMesh);
+            _previewMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, _previewFluidLevel);
 
             // Material switching logic
-            if (selectedBlock.fluidType != FluidType.None)
+            if (_selectedBlock.fluidType != FluidType.None)
             {
-                if (blockDatabase.liquidMaterial != null)
+                if (_blockDatabase.liquidMaterial != null)
                 {
                     // Just assign the material. The vertex colors in the mesh will handle the rest.
-                    previewMaterial.shader = blockDatabase.liquidMaterial.shader;
-                    previewMaterial.CopyPropertiesFromMaterial(blockDatabase.liquidMaterial);
+                    _previewMaterial.shader = _blockDatabase.liquidMaterial.shader;
+                    _previewMaterial.CopyPropertiesFromMaterial(_blockDatabase.liquidMaterial);
                 }
                 else
                 {
                     EditorUtility.DisplayDialog("Error", "Liquid material not found.", "OK");
                 }
             }
-            else if (selectedBlock.renderNeighborFaces)
+            else if (_selectedBlock.renderNeighborFaces)
             {
                 // Use the transparent material for see-through solid blocks
-                if (blockDatabase.transparentMaterial != null)
+                if (_blockDatabase.transparentMaterial != null)
                 {
-                    previewMaterial.shader = blockDatabase.transparentMaterial.shader;
-                    previewMaterial.CopyPropertiesFromMaterial(blockDatabase.transparentMaterial);
+                    _previewMaterial.shader = _blockDatabase.transparentMaterial.shader;
+                    _previewMaterial.CopyPropertiesFromMaterial(_blockDatabase.transparentMaterial);
                 }
                 else
                 {
@@ -652,10 +649,10 @@ namespace Editor
             else
             {
                 // Default to the standard opaque material
-                if (blockDatabase.opaqueMaterial != null)
+                if (_blockDatabase.opaqueMaterial != null)
                 {
-                    previewMaterial.shader = blockDatabase.opaqueMaterial.shader;
-                    previewMaterial.CopyPropertiesFromMaterial(blockDatabase.opaqueMaterial);
+                    _previewMaterial.shader = _blockDatabase.opaqueMaterial.shader;
+                    _previewMaterial.CopyPropertiesFromMaterial(_blockDatabase.opaqueMaterial);
                 }
                 else
                 {
@@ -670,10 +667,7 @@ namespace Editor
             Rect previewRect = GUILayoutUtility.GetRect(200, 300, GUILayout.ExpandWidth(true));
 
             // 1. Initialize the style on first use. This is a common performance pattern for IMGUI.
-            if (_checkerboardStyle == null)
-            {
-                _checkerboardStyle = CreateCheckerboardStyle();
-            }
+            _checkerboardStyle ??= CreateCheckerboardStyle();
 
             // 2. Draw the cached style as the background.
             if (Event.current.type == EventType.Repaint)
@@ -695,26 +689,26 @@ namespace Editor
 
             if (Event.current.type == EventType.Repaint)
             {
-                if (previewMesh == null) UpdatePreviewMesh();
+                if (_previewMesh == null) UpdatePreviewMesh();
             }
 
-            if (previewMesh != null)
+            if (_previewMesh != null)
             {
                 // Handle mouse input for rotation
-                previewRotation = DragAndDropPreviewRotation(previewRect, previewRotation);
+                _previewRotation = DragAndDropPreviewRotation(previewRect, _previewRotation);
 
-                previewRenderUtility.BeginPreview(previewRect, GUIStyle.none);
+                _previewRenderUtility.BeginPreview(previewRect, GUIStyle.none);
 
                 // Draw the mesh with the current rotation
-                var rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(previewRotation.y, 0, 0) * Quaternion.Euler(0, previewRotation.x, 0), Vector3.one);
+                var rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(_previewRotation.y, 0, 0) * Quaternion.Euler(0, _previewRotation.x, 0), Vector3.one);
 
                 // Draw sub-mesh 0 (Opaque parts)
-                previewRenderUtility.DrawMesh(previewMesh, rotationMatrix, previewMaterial, 0);
+                _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _previewMaterial, 0);
                 // Draw sub-mesh 1 (Transparent parts)
-                previewRenderUtility.DrawMesh(previewMesh, rotationMatrix, previewMaterial, 1);
+                _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _previewMaterial, 1);
 
-                previewRenderUtility.Render();
-                Texture previewTexture = previewRenderUtility.EndPreview();
+                _previewRenderUtility.Render();
+                Texture previewTexture = _previewRenderUtility.EndPreview();
 
                 // Because the preview utility has a transparent background, this will
                 // draw the rendered block correctly on top of the checkerboard we drew earlier.
@@ -820,22 +814,17 @@ namespace Editor
 
             // --- Row 2: The Centered Int Field ---
             // On first run, create and cache a new GUIStyle for the IntField.
-            if (_centeredIntFieldStyle == null)
+            _centeredIntFieldStyle ??= new GUIStyle(EditorStyles.numberField)
             {
-                // We create a new style based on the default number field,
-                // otherwise it would look completely different (no background, etc.).
-                _centeredIntFieldStyle = new GUIStyle(EditorStyles.numberField)
-                {
-                    // Set the text alignment to the center.
-                    alignment = TextAnchor.MiddleCenter
-                };
-            }
+                // Set the text alignment to the center.
+                alignment = TextAnchor.MiddleCenter
+            };
 
             // Draw the integer field using our custom centered style.
             textureID = EditorGUILayout.IntField(textureID, _centeredIntFieldStyle);
 
             // --- Row 3: The Texture Preview ---
-            if (atlasTexture != null)
+            if (_atlasTexture != null)
             {
                 // This horizontal group just serves to center the preview image.
                 GUILayout.BeginHorizontal();
@@ -854,7 +843,7 @@ namespace Editor
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawTexturePreview(Rect position, int textureID)
+        private void DrawTexturePreview(Rect drawRect, int textureID)
         {
             // Calculate UV coordinates for the given texture ID in the atlas.
             float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
@@ -867,7 +856,7 @@ namespace Editor
             Rect texCoords = new Rect(x, y, VoxelData.NormalizedBlockTextureSize, VoxelData.NormalizedBlockTextureSize);
 
             // Draw the texture segment.
-            GUI.DrawTextureWithTexCoords(position, atlasTexture, texCoords);
+            GUI.DrawTextureWithTexCoords(drawRect, _atlasTexture, texCoords);
         }
 
         // Helper method to draw sprites correctly from an atlas.
