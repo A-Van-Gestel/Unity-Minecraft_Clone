@@ -4,11 +4,7 @@ This document outlines **open** bugs related to block behaviors (grass spreading
 
 > **Last reviewed:** March 2026
 
----
-
-
-
-## 03. Fluid horizontal flow condition is slightly wrong
+## 01. Fluid horizontal flow condition is slightly wrong
 
 **Severity:** Bug  
 **Files:** `BlockBehavior.cs` — `HandleFluidFlow` (line 334)

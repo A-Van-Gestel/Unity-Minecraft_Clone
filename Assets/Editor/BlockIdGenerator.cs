@@ -23,12 +23,20 @@ namespace Editor
         [MenuItem("Minecraft Clone/Generate Block IDs")]
         public static void Generate()
         {
+            TryGenerate();
+        }
+
+        /// <summary>
+        /// Generates the Block IDs from the BlockDatabase. Returns true on success, false on failure.
+        /// </summary>
+        public static bool TryGenerate()
+        {
             // --- Find the BlockDatabase asset ---
             string[] guids = AssetDatabase.FindAssets("t:BlockDatabase");
             if (guids.Length == 0)
             {
                 Debug.LogError("[BlockIdGenerator] Could not find a 'BlockDatabase' asset in the project.");
-                return;
+                return false;
             }
 
             if (guids.Length > 1)
@@ -42,13 +50,13 @@ namespace Editor
             if (db == null)
             {
                 Debug.LogError($"[BlockIdGenerator] Failed to load BlockDatabase at '{assetPath}'.");
-                return;
+                return false;
             }
 
             if (db.blockTypes == null || db.blockTypes.Length == 0)
             {
                 Debug.LogError("[BlockIdGenerator] BlockDatabase has no block types defined.");
-                return;
+                return false;
             }
 
             // --- Validate Air invariant ---
@@ -58,7 +66,7 @@ namespace Editor
                     $"[BlockIdGenerator] CRITICAL: blockTypes[0] must be 'Air' but is '{db.blockTypes[0].blockName}'. " +
                     "Air at index 0 is a locked architectural invariant (NativeArray zero-initialization, meshing, lighting). " +
                     "Refusing to generate. Fix the BlockDatabase before running this tool.");
-                return;
+                return false;
             }
 
             // --- Generate ---
@@ -110,6 +118,7 @@ namespace Editor
             AssetDatabase.Refresh();
 
             Debug.Log($"[BlockIdGenerator] Successfully generated {db.blockTypes.Length} block IDs → {OUTPUT_PATH}");
+            return true;
         }
 
         /// <summary>

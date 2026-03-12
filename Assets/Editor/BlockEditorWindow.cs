@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Data;
 using UnityEditor;
 using UnityEngine;
@@ -34,6 +34,8 @@ namespace Editor
         private GUIStyle _listButtonStyle;
         private static GUIStyle _checkerboardStyle;
         private static GUIStyle _centeredIntFieldStyle;
+
+        private bool _blockIdsStale = false;
 
         [MenuItem("Minecraft Clone/Block Editor")]
         public static void ShowWindow()
@@ -180,7 +182,18 @@ namespace Editor
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
-            EditorUtility.DisplayDialog("Success", $"Saved {blockTypesCopy.Count} block types to the BlockDatabase asset.", "OK");
+            // Auto-generate Block IDs
+            bool generatedSuccessfully = BlockIdGenerator.TryGenerate();
+            if (generatedSuccessfully)
+            {
+                _blockIdsStale = false;
+                EditorUtility.DisplayDialog("Success", $"Saved {blockTypesCopy.Count} block types to the BlockDatabase asset and regenerated BlockIDs.cs.", "OK");
+            }
+            else
+            {
+                _blockIdsStale = true;
+                EditorUtility.DisplayDialog("Warning", $"Saved {blockTypesCopy.Count} block types, but BlockIDs.cs generation failed. See console for details.", "OK");
+            }
         }
 
         void OnGUI()
@@ -217,6 +230,25 @@ namespace Editor
                 selectedBlock = null;
                 selectedBlockIndex = -1;
             }
+
+            // --- Generate Block IDs Button (Fallback) ---
+            Color originalBgColor = GUI.backgroundColor;
+            if (_blockIdsStale)
+            {
+                GUI.backgroundColor = new Color(1f, 0.9f, 0.4f); // Warm yellow
+            }
+
+            string genBtnText = _blockIdsStale ? "⚡ Generate Block IDs (Stale!)" : "⚡ Generate Block IDs";
+            if (GUILayout.Button(genBtnText, EditorStyles.toolbarButton))
+            {
+                if (BlockIdGenerator.TryGenerate())
+                {
+                    _blockIdsStale = false;
+                    EditorUtility.DisplayDialog("Success", "Regenerated BlockIDs.cs successfully.", "OK");
+                }
+            }
+
+            GUI.backgroundColor = originalBgColor;
 
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
