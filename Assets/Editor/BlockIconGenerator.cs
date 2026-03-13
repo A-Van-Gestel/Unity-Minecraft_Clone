@@ -364,9 +364,10 @@ namespace Editor
                 }
                 else
                 {
-                    // For fluid blocks, RGB channels hold packed data (LiquidType, ShorelineFlag, etc.).
-                    // We must NOT corrupt this data, and fluids are rendered unshadowed using their native shader.
-                    // Doing nothing is the correct approach here.
+                    // For fluid blocks, the R and G channels hold packed data (LiquidType, ShorelineFlag).
+                    // The B channel is completely unused, so we strictly inject our shadow multiplier 
+                    // into colors[i].b, which the UberLiquidShader will extract and apply natively.
+                    colors[i] = new Color(colors[i].r, colors[i].g, multiplier, colors[i].a);
                 }
             }
 

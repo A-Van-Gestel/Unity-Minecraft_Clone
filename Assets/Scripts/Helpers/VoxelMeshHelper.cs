@@ -232,7 +232,11 @@ namespace Helpers
                 vertices.Add(pos + new Vector3(1, height_tr, 1)); // Front-Right
 
                 float lightLevel = above.HasValue ? above.State.lightAsFloat : 1.0f;
-                Color vertexColor = new Color(liquidType, shorelineFlag, 0.0f, lightLevel);
+                // v.color.r = liquidType
+                // v.color.g = shorelineFlag
+                // v.color.b = Isometric Shadow Multiplier (Defaults to 1.0f for runtime fluids)
+                // v.color.a = lightLevel
+                Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
 
                 for (int i = 0; i < 4; i++)
                 {
@@ -291,7 +295,8 @@ namespace Helpers
                 vertices.Add(pos + p4);
 
                 float lightLevel = neighbor.HasValue ? neighbor.State.lightAsFloat : 1.0f;
-                Color vertexColor = new Color(liquidType, shorelineFlag, 0.0f, lightLevel);
+                // Use 1.0f for the b-channel so side faces default to full brightness (unshadowed) in game
+                Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
 
                 for (int j = 0; j < 4; j++)
                 {
@@ -319,7 +324,8 @@ namespace Helpers
                 vertices.Add(pos + new Vector3(1, 0, 1)); // Front-Right (3)
 
                 float lightLevel = below.HasValue ? below.State.lightAsFloat : 1.0f;
-                Color vertexColor = new Color(liquidType, shorelineFlag, 0.0f, lightLevel);
+                // Use 1.0f for the b-channel so bottom faces default to full brightness (unshadowed) in game
+                Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
 
                 for (int i = 0; i < 4; i++)
                 {

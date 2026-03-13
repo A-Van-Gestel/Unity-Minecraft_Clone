@@ -1,4 +1,4 @@
-﻿Shader "Minecraft/UberLiquidShader"
+Shader "Minecraft/UberLiquidShader"
 {
     Properties
     {
@@ -82,6 +82,7 @@
                 float liquidType : TEXCOORD3;
                 float shorelineFlag : TEXCOORD4;
                 float lightLevel : TEXCOORD5;
+                float shadowMultiplier : TEXCOORD6;
             };
 
             // Global Properties
@@ -174,6 +175,7 @@
                 o.liquidType = v.color.r;
                 o.shorelineFlag = v.color.g;
                 o.lightLevel = v.color.a;
+                o.shadowMultiplier = v.color.b;
                 return o;
             }
 
@@ -264,6 +266,9 @@
                     lava_col *= pulse;
                     lava_col = lerp(lava_col, lava_col * 0.1, shade);
 
+                    // Apply Isometric Icon shadow multiplier (Defaults to 1.0 from chunk mesher)
+                    lava_col *= i.shadowMultiplier;
+
                     // Compose with distorted background for a hazy, semi-opaque effect
                     return lerp(background, fixed4(lava_col, 1.0), 0.95);
                 }
@@ -306,6 +311,10 @@
 
                     fixed3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
                     final_color = lerp(final_color, final_color * 0.1, shade);
+
+                    // Apply Isometric Icon shadow multiplier (Defaults to 1.0 from chunk mesher)
+                    final_color *= i.shadowMultiplier;
+
                     return lerp(background, fixed4(final_color, 1.0), water_base_color.a);
                 }
             }
