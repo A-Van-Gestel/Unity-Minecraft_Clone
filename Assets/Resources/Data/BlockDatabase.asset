@@ -17,7 +17,7 @@ MonoBehaviour:
   liquidMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
   blockTypes:
   - blockName: Air
-    icon: {fileID: 21300000, guid: 858a12ab8b36948478ce85b5d22dfd5a, type: 3}
+    icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 0
