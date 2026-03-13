@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Editor.Libraries;
 using UnityEditor;
 using UnityEngine;
 
@@ -77,36 +78,15 @@ namespace Editor.BlockEditor
             EditorGUILayout.BeginVertical(GUILayout.Width(250));
             EditorGUILayout.LabelField("Tag Presets", EditorStyles.boldLabel);
 
-            // --- Search Filter ---
-            _tagManagerSearchText = EditorGUILayout.TextField("Search", _tagManagerSearchText);
-
-            _tagManagerListScrollPos = EditorGUILayout.BeginScrollView(_tagManagerListScrollPos, "box");
-
-            for (int i = 0; i < _tagPresets.Count; i++)
-            {
-                if (_tagPresets[i] == null) continue;
-
-                string presetName = _tagPresets[i].name;
-
-                // Apply search filter
-                bool searchMatch = string.IsNullOrEmpty(_tagManagerSearchText) ||
-                                   presetName.ToLower().Contains(_tagManagerSearchText.ToLower());
-
-                if (searchMatch)
-                {
-                    GUI.backgroundColor = (i == _selectedPresetIndex) ? Color.cyan : Color.white;
-
-                    if (GUILayout.Button(presetName, EditorStyles.toolbarButton))
-                    {
-                        _selectedPreset = _tagPresets[i];
-                        _selectedPresetIndex = i;
-                        GUI.FocusControl(null);
-                    }
-                }
-            }
-
-            GUI.backgroundColor = Color.white;
-            EditorGUILayout.EndScrollView();
+            EditorGUIHelper.DrawSearchableSelectionList(
+                _tagPresets,
+                ref _tagManagerSearchText,
+                ref _tagManagerListScrollPos,
+                ref _selectedPresetIndex,
+                (preset, search) => string.IsNullOrEmpty(search) || preset.name.ToLower().Contains(search.ToLower()),
+                (rect, preset, _) => { GUI.Label(rect, preset.name, EditorStyles.toolbarButton); },
+                (index) => { _selectedPreset = _tagPresets[index]; }
+            );
 
             // --- List management buttons ---
             EditorGUILayout.BeginHorizontal();

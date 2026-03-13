@@ -1,6 +1,7 @@
 using Data;
 using Editor.BlockEditor.Helpers;
 using Editor.DataGeneration;
+using Editor.Libraries;
 using UnityEditor;
 using UnityEngine;
 
@@ -100,53 +101,38 @@ namespace Editor.BlockEditor
             EditorGUILayout.LabelField("Blocks", EditorStyles.boldLabel);
 
             // --- Filter Controls ---
-            _searchText = EditorGUILayout.TextField("Search", _searchText);
             _filterTags = (BlockTags)EditorGUILayout.EnumFlagsField("Filter by Tag", _filterTags);
 
-            _listScrollPos = EditorGUILayout.BeginScrollView(_listScrollPos, "box");
-
-            for (int i = 0; i < _blockTypesCopy.Count; i++)
-            {
-                // Apply text search filter
-                bool searchMatch = string.IsNullOrEmpty(_searchText) || _blockTypesCopy[i].blockName.ToLower().Contains(_searchText.ToLower());
-                // Apply tag filter
-                bool tagMatch = _filterTags == BlockTags.NONE || (_blockTypesCopy[i].tags & _filterTags) == _filterTags;
-
-                if (searchMatch && tagMatch)
+            EditorGUIHelper.DrawSearchableSelectionList(
+                _blockTypesCopy,
+                ref _searchText,
+                ref _listScrollPos,
+                ref _selectedBlockIndex,
+                (block, search) =>
                 {
-                    // Highlight the selected block
-                    GUI.backgroundColor = (i == _selectedBlockIndex) ? Color.cyan : Color.white;
+                    bool searchMatch = string.IsNullOrEmpty(search) || block.blockName.ToLower().Contains(search.ToLower());
+                    bool tagMatch = _filterTags == BlockTags.NONE || (block.tags & _filterTags) == _filterTags;
+                    return searchMatch && tagMatch;
+                },
+                (rect, block, index) =>
+                {
+                    // Draw the text (using _listButtonStyle's left-padding to make room for the icon)
+                    GUI.Label(rect, $" {block.blockName} (ID: {index})", _listButtonStyle);
 
-                    // Button for each block with its icon and name.
-                    Rect buttonRect = GUILayoutUtility.GetRect(new GUIContent(), _listButtonStyle, GUILayout.Height(24));
-                    string buttonText = $" {_blockTypesCopy[i].blockName} (ID: {i})";
-
-                    if (GUI.Button(buttonRect, buttonText, _listButtonStyle))
+                    // Draw the icon
+                    if (block.icon != null)
                     {
-                        if (_selectedBlockIndex != i)
-                        {
-                            _selectedBlock = _blockTypesCopy[i];
-                            _selectedBlockIndex = i;
-                            GUI.FocusControl(null); // Deselect text fields
-
-                            // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
-                            _previewFluidLevel = 0;
-
-                            UpdatePreviewMesh();
-                        }
+                        Rect iconRect = new Rect(rect.x + 5, rect.y + 3, 18, 18);
+                        EditorGUIHelper.DrawSprite(iconRect, block.icon);
                     }
-
-                    // Manually draw the icon in the padded space we created.
-                    if (_blockTypesCopy[i].icon != null)
-                    {
-                        Rect iconRect = new Rect(buttonRect.x + 5, buttonRect.y + 3, 18, 18);
-                        DrawSprite(iconRect, _blockTypesCopy[i].icon);
-                    }
+                },
+                (index) =>
+                {
+                    _selectedBlock = _blockTypesCopy[index];
+                    _previewFluidLevel = 0;
+                    UpdatePreviewMesh();
                 }
-            }
-
-            GUI.backgroundColor = Color.white; // Reset background color
-            EditorGUILayout.EndScrollView();
+            );
 
             // --- List management buttons ---
             EditorGUILayout.BeginHorizontal();
@@ -585,25 +571,9 @@ namespace Editor.BlockEditor
             // Define the rectangle for the preview
             Rect previewRect = GUILayoutUtility.GetRect(200, 300, GUILayout.ExpandWidth(true));
 
-            // 1. Initialize the style on first use. This is a common performance pattern for IMGUI.
-            _checkerboardStyle ??= CreateCheckerboardStyle();
-
-            // 2. Draw the cached style as the background.
             if (Event.current.type == EventType.Repaint)
             {
-                // Get the texture from our cached style.
-                Texture2D checkerTexture = _checkerboardStyle.normal.background;
-                if (checkerTexture != null)
-                {
-                    // Calculate how many times the texture should repeat based on the rect's size.
-                    // If our preview is 200px wide and the texture is 16px wide, the UV rect width will be 200/16 = 12.5.
-                    // This tells the GPU to repeat the texture 12.5 times horizontally.
-                    Rect texCoords = new Rect(0, 0, previewRect.width / checkerTexture.width, previewRect.height / checkerTexture.height);
-
-                    // Draw the texture using the calculated tiling coordinates.
-                    // This respects the texture's wrapMode, which we set to Repeat.
-                    GUI.DrawTextureWithTexCoords(previewRect, checkerTexture, texCoords);
-                }
+                EditorGUIHelper.DrawCheckerboardBackground(previewRect);
             }
 
             if (Event.current.type == EventType.Repaint)
@@ -613,8 +583,8 @@ namespace Editor.BlockEditor
 
             if (_previewMesh != null)
             {
-                // Handle mouse input for rotation
-                _previewRotation = DragAndDropPreviewRotation(previewRect, _previewRotation);
+                // Handle mouse input for rotation via generic helper
+                _previewRotation = EditorGUIHelper.HandleDragRotation(previewRect, _previewRotation);
 
                 _previewRenderUtility.BeginPreview(previewRect, GUIStyle.none);
 
@@ -633,85 +603,6 @@ namespace Editor.BlockEditor
                 // draw the rendered block correctly on top of the checkerboard we drew earlier.
                 GUI.DrawTexture(previewRect, previewTexture);
             }
-        }
-
-        /// <summary>
-        /// Programmatically creates a GUIStyle with a checkerboard texture background.
-        /// The texture is generated once and the style is cached for performance.
-        /// </summary>
-        private static GUIStyle CreateCheckerboardStyle()
-        {
-            // Define two colors for the checkerboard that work in both light and dark themes.
-            Color c0 = EditorGUIUtility.isProSkin ? new Color(0.32f, 0.32f, 0.32f) : new Color(0.8f, 0.8f, 0.8f);
-            Color c1 = EditorGUIUtility.isProSkin ? new Color(0.28f, 0.28f, 0.28f) : new Color(0.75f, 0.75f, 0.75f);
-
-            // Create a 16x16 texture
-            int width = 16;
-            int height = 16;
-            var texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
-            texture.hideFlags = HideFlags.HideAndDontSave; // Don't save this texture with the scene
-            var pixels = new Color[width * height];
-
-            // Fill the texture with the checkerboard pattern
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    // Use integer division to create 8x8 pixel squares
-                    bool isFirstColor = ((x / 8) + (y / 8)) % 2 == 0;
-                    pixels[y * width + x] = isFirstColor ? c0 : c1;
-                }
-            }
-
-            texture.SetPixels(pixels);
-            texture.Apply();
-
-            // This ensures the small texture tiles correctly over the whole preview area.
-            texture.wrapMode = TextureWrapMode.Repeat;
-
-            // Create the style and assign the texture to its background.
-            var style = new GUIStyle();
-            style.normal.background = texture;
-            return style;
-        }
-
-
-        // Helper for interactive rotation
-        private static Vector2 DragAndDropPreviewRotation(Rect position, Vector2 rotation)
-        {
-            int controlID = GUIUtility.GetControlID("Preview".GetHashCode(), FocusType.Passive, position);
-            Event current = Event.current;
-
-            switch (current.type)
-            {
-                case EventType.MouseDown:
-                    if (position.Contains(current.mousePosition) && current.button == 0)
-                    {
-                        GUIUtility.hotControl = controlID;
-                        current.Use();
-                    }
-
-                    break;
-                case EventType.MouseUp:
-                    if (GUIUtility.hotControl == controlID)
-                    {
-                        GUIUtility.hotControl = 0;
-                        current.Use();
-                    }
-
-                    break;
-                case EventType.MouseDrag:
-                    if (GUIUtility.hotControl == controlID)
-                    {
-                        rotation.x -= current.delta.x * 0.5f;
-                        rotation.y -= current.delta.y * 0.5f;
-                        current.Use();
-                    }
-
-                    break;
-            }
-
-            return rotation;
         }
 
         #endregion
@@ -735,29 +626,8 @@ namespace Editor.BlockEditor
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
 
-            // --- Row 2: Stepper Buttons + Centered Int Field ---
-            // On first run, create and cache a new GUIStyle for the IntField.
-            _centeredIntFieldStyle ??= new GUIStyle(EditorStyles.numberField)
-            {
-                // Set the text alignment to the center.
-                alignment = TextAnchor.MiddleCenter
-            };
-
-            // Feature 2: < [ID] > stepper layout
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("◀", GUILayout.Width(22), GUILayout.Height(18)))
-            {
-                textureID = Mathf.Max(0, textureID - 1);
-            }
-
-            textureID = EditorGUILayout.IntField(textureID, _centeredIntFieldStyle);
-
-            if (GUILayout.Button("▶", GUILayout.Width(22), GUILayout.Height(18)))
-            {
-                textureID++;
-            }
-
-            GUILayout.EndHorizontal();
+            // --- Row 2: Stepper Buttons + Centered Int Field via helper ---
+            textureID = EditorGUIHelper.IntFieldWithSteppers(textureID);
 
             // --- Row 3: The Texture Preview ---
             if (_atlasTexture != null)
@@ -793,24 +663,6 @@ namespace Editor.BlockEditor
 
             // Draw the texture segment.
             GUI.DrawTextureWithTexCoords(drawRect, _atlasTexture, texCoords);
-        }
-
-        // Helper method to draw sprites correctly from an atlas.
-        private static void DrawSprite(Rect position, Sprite sprite)
-        {
-            Rect spriteRect = sprite.rect;
-            Texture2D tex = sprite.texture;
-
-            // Calculate the texture coordinates for the sprite within its atlas.
-            Rect texCoords = new Rect(
-                spriteRect.x / tex.width,
-                spriteRect.y / tex.height,
-                spriteRect.width / tex.width,
-                spriteRect.height / tex.height
-            );
-
-            // Draw the specific part of the texture.
-            GUI.DrawTextureWithTexCoords(position, tex, texCoords);
         }
 
         #endregion
