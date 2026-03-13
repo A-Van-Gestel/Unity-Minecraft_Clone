@@ -1,6 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Data;
-using Jobs;
 using Jobs.BurstData;
 using Unity.Burst;
 using Unity.Burst.CompilerServices;
@@ -69,7 +68,7 @@ namespace Helpers
 
                 vertices.Add(position + direction + center);
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color(0, 0, 0, lightLevel));
+                colors.Add(new Color(1f, 1f, 1f, lightLevel));
 
                 // Use the FaceUvOrder array to get the correct UV for this vertex.
                 int uvIndex = FaceUvOrder[faceIndex * 4 + i];
@@ -135,7 +134,7 @@ namespace Helpers
                 vertices.Add(position + direction + center);
 
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]); // Assuming one normal per face for custom meshes
-                colors.Add(new Color(0, 0, 0, lightLevel));
+                colors.Add(new Color(1f, 1f, 1f, lightLevel));
                 AddTexture(textureID, vertData.UV, ref uvs);
             }
 

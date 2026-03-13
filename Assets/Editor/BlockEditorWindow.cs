@@ -37,6 +37,11 @@ namespace Editor
 
         private bool _blockIdsStale = false;
 
+        // --- Icon Generation ---
+        private static readonly int[] s_iconSizes = { 64, 128, 256 };
+        private static readonly string[] s_iconSizeLabels = { "64×64", "128×128", "256×256" };
+        private int _iconSizeIndex = 2; // Default to 256×256
+
         [MenuItem("Minecraft Clone/Block Editor")]
         public static void ShowWindow()
         {
@@ -247,6 +252,21 @@ namespace Editor
 
             GUI.backgroundColor = originalBgColor;
 
+            // --- Generate All Icons Button ---
+            if (GUILayout.Button("🎨 Generate All Icons", EditorStyles.toolbarButton))
+            {
+                bool forceRegen = EditorUtility.DisplayDialog(
+                    "Generate All Icons",
+                    "Regenerate icons for ALL blocks, or only blocks missing an icon?",
+                    "All Blocks (Force)",
+                    "Missing Only");
+
+                int count = BlockIconGenerator.GenerateAllIcons(
+                    _blockTypesCopy, _blockDatabase, forceRegen, s_iconSizes[_iconSizeIndex]);
+
+                EditorUtility.DisplayDialog("Complete", $"Generated {count} block icon(s).", "OK");
+            }
+
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
@@ -357,7 +377,21 @@ namespace Editor
 
                 // --- Block details with Tooltips ---
                 _selectedBlock.blockName = EditorGUILayout.TextField(new GUIContent("Block Name", "The display name of the block."), _selectedBlock.blockName);
+                EditorGUILayout.BeginHorizontal();
                 _selectedBlock.icon = (Sprite)EditorGUILayout.ObjectField(new GUIContent("Icon", "The icon that appears in the toolbar and inventory."), _selectedBlock.icon, typeof(Sprite), false, GUILayout.Width(200));
+                _iconSizeIndex = EditorGUILayout.Popup(_iconSizeIndex, s_iconSizeLabels, GUILayout.Width(70));
+                if (GUILayout.Button("🎨 Generate", GUILayout.Width(90)))
+                {
+                    Sprite generatedIcon = BlockIconGenerator.GenerateAndSaveIcon(
+                        _selectedBlock, _blockTypesCopy, _blockDatabase, s_iconSizes[_iconSizeIndex]);
+                    if (generatedIcon != null)
+                    {
+                        _selectedBlock.icon = generatedIcon;
+                    }
+                }
+
+                EditorGUILayout.EndHorizontal();
+
                 _selectedBlock.meshData = (VoxelMeshData)EditorGUILayout.ObjectField(new GUIContent("Custom Mesh Data", "The custom mesh data for this block, if it's not a standard cube."), _selectedBlock.meshData, typeof(VoxelMeshData), false);
 
                 EditorGUILayout.Space();

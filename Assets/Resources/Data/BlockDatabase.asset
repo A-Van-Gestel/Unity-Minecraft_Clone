@@ -17,7 +17,7 @@ MonoBehaviour:
   liquidMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
   blockTypes:
   - blockName: Air
-    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
+    icon: {fileID: 21300000, guid: 858a12ab8b36948478ce85b5d22dfd5a, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 0
@@ -40,7 +40,7 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Stone
-    icon: {fileID: 880016561, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 27e44f78b5b2e5047a5ade71d928cfd2, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -63,7 +63,7 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Grass
-    icon: {fileID: -1336346017, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 2505f40e592d8654cb5c213523807663, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -86,7 +86,7 @@ MonoBehaviour:
     leftFaceTexture: 12
     rightFaceTexture: 12
   - blockName: Dirt
-    icon: {fileID: 1551665942, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 4d2a30764a49d4d40a87bf33603b7b6a, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -109,7 +109,7 @@ MonoBehaviour:
     leftFaceTexture: 2
     rightFaceTexture: 2
   - blockName: Sand
-    icon: {fileID: -1153239741, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: dbb3377fea8e43441a525b8e5f600fb5, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -132,7 +132,7 @@ MonoBehaviour:
     leftFaceTexture: 3
     rightFaceTexture: 3
   - blockName: Snow
-    icon: {fileID: 455753414, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 7b8f03c8f0c48804d9fb4a6ad9505a9a, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -155,7 +155,7 @@ MonoBehaviour:
     leftFaceTexture: 4
     rightFaceTexture: 4
   - blockName: Grass Snowy
-    icon: {fileID: 122583294, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 7958f1daa10196145a6ad7483f331b69, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -178,7 +178,7 @@ MonoBehaviour:
     leftFaceTexture: 21
     rightFaceTexture: 21
   - blockName: Stone Walkway
-    icon: {fileID: -1793209460, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: d85503badde0d44448178bc5b607e998, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -201,7 +201,7 @@ MonoBehaviour:
     leftFaceTexture: 6
     rightFaceTexture: 6
   - blockName: Bedrock
-    icon: {fileID: 1008106713, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 44d0880b225812b46862687bbe56e4a4, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -224,7 +224,7 @@ MonoBehaviour:
     leftFaceTexture: 7
     rightFaceTexture: 7
   - blockName: Desert Cracked
-    icon: {fileID: -966074416, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 0005b9a00aa37664fbb7a796137d0c8c, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -247,7 +247,7 @@ MonoBehaviour:
     leftFaceTexture: 8
     rightFaceTexture: 8
   - blockName: Grass Rocky
-    icon: {fileID: 2025127514, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 766f2bbdc8c56ab44bbb213d710ffe56, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -270,7 +270,7 @@ MonoBehaviour:
     leftFaceTexture: 25
     rightFaceTexture: 25
   - blockName: Tile
-    icon: {fileID: 1436998987, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: f043e96164a8e5249931e8c48d451c4f, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -293,7 +293,7 @@ MonoBehaviour:
     leftFaceTexture: 10
     rightFaceTexture: 10
   - blockName: Wood
-    icon: {fileID: -1841403712, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 2427470a8352b854a8ae6d49ad0ced94, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -316,7 +316,7 @@ MonoBehaviour:
     leftFaceTexture: 11
     rightFaceTexture: 11
   - blockName: Facade
-    icon: {fileID: -1490239207, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 5eb34bc57b61a4c478ac7b0d38fd9736, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -339,7 +339,7 @@ MonoBehaviour:
     leftFaceTexture: 13
     rightFaceTexture: 13
   - blockName: Oak Log
-    icon: {fileID: -2144359328, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 1c9020fc480c80a43b91bc252d09d58f, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -362,7 +362,7 @@ MonoBehaviour:
     leftFaceTexture: 14
     rightFaceTexture: 14
   - blockName: Oak Leaves
-    icon: {fileID: -392713096, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 0335f040fa78fcb48a9080f10217e7b6, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -385,7 +385,7 @@ MonoBehaviour:
     leftFaceTexture: 16
     rightFaceTexture: 16
   - blockName: Cactus
-    icon: {fileID: -954973061, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 5bdf426e6c470a14a991101bc047ae99, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -408,7 +408,7 @@ MonoBehaviour:
     leftFaceTexture: 18
     rightFaceTexture: 18
   - blockName: Stone Half Slab
-    icon: {fileID: 2016017474, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: 615f06e5618484b428678b605917c0ff, type: 3}
     meshData: {fileID: 11400000, guid: f1f1cbb961eacda4dbac46e90f49df51, type: 2}
     stackSize: 64
     isSolid: 1
@@ -431,7 +431,7 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Directional Block
-    icon: {fileID: 21300000, guid: 46e041bd0aa570f479e9953c3d91a20f, type: 3}
+    icon: {fileID: 21300000, guid: 54584f2d29bbd864ca3da902bf1e3050, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
@@ -454,7 +454,7 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Water
-    icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
+    icon: {fileID: 21300000, guid: 8360d6e2f874c114a9a6ec0f054e66b5, type: 3}
     meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
     stackSize: 64
     isSolid: 1
@@ -477,7 +477,7 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Lava
-    icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
+    icon: {fileID: 21300000, guid: c505a45281380954d8a6fdc84a3a94c0, type: 3}
     meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
     stackSize: 64
     isSolid: 1
@@ -500,7 +500,7 @@ MonoBehaviour:
     leftFaceTexture: 0
     rightFaceTexture: 0
   - blockName: Coal Ore
-    icon: {fileID: -1618621799, guid: b50ba5de9a761dd4db5e84d505f7ca77, type: 3}
+    icon: {fileID: 21300000, guid: ab41ff4a26fa3b14a996591448acc4b2, type: 3}
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1

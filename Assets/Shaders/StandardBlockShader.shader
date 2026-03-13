@@ -75,6 +75,9 @@ Shader "Minecraft/Blocks"
                 // Darken block based on block light level.
                 col = lerp(col, col * .10, shade);
 
+                // Multiply by vertex RGB to support BlockIconGenerator shadows and tinting
+                col.rgb *= i.color.rgb;
+
                 return col;
             }
             ENDCG
