@@ -53,7 +53,7 @@ namespace Editor.BlockEditor
         // --- Icon Generation ---
         private static readonly int[] s_iconSizes = { 64, 128, 256 };
         private static readonly string[] s_iconSizeLabels = { "64×64", "128×128", "256×256" };
-        private int _iconSizeIndex = 2; // Default to 256×256
+        private int _iconSizeIndex = 1; // Default to 128x128
 
         #endregion
 
