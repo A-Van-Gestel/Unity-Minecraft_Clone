@@ -4,7 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace Editor
+namespace Editor.ProjectUtilities
 {
     public class AtlasPacker : EditorWindow
     {

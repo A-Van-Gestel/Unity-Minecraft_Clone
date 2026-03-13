@@ -6,7 +6,7 @@ using Data;
 using UnityEditor;
 using UnityEngine;
 
-namespace Editor
+namespace Editor.DataGeneration
 {
     /// <summary>
     /// Editor tool that reads the <see cref="BlockDatabase"/> ScriptableObject and generates

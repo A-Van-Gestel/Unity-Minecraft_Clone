@@ -5,7 +5,7 @@ using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
 
-namespace Editor
+namespace Editor.ProjectUtilities
 {
     /// <summary>
     /// Manages the automatic generation of the game's version string.

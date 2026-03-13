@@ -6,7 +6,7 @@ using Jobs.BurstData;
 using Unity.Collections;
 using UnityEngine;
 
-namespace Editor
+namespace Editor.BlockEditor.Helpers
 {
     public static class EditorMeshGenerator
     {

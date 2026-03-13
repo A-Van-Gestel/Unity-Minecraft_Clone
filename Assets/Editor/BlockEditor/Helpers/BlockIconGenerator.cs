@@ -4,7 +4,7 @@ using Data;
 using UnityEditor;
 using UnityEngine;
 
-namespace Editor
+namespace Editor.BlockEditor.Helpers
 {
     /// <summary>
     /// Generates Minecraft-style isometric block icons using Unity's

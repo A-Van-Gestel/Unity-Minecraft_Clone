@@ -1,9 +1,11 @@
 using System.Collections.Generic;
 using Data;
+using Editor.BlockEditor.Helpers;
+using Editor.DataGeneration;
 using UnityEditor;
 using UnityEngine;
 
-namespace Editor
+namespace Editor.BlockEditor
 {
     public class BlockEditorWindow : EditorWindow
     {

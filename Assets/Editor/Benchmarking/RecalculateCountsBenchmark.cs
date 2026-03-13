@@ -4,7 +4,7 @@ using Jobs.BurstData;
 using UnityEditor;
 using Debug = UnityEngine.Debug;
 
-namespace Editor
+namespace Editor.Benchmarking
 {
     /// <summary>
     /// Editor benchmark comparing two approaches for counting non-air voxels in <see cref="ChunkSection"/>.
