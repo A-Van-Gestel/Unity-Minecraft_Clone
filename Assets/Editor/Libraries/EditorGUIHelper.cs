@@ -123,8 +123,10 @@ namespace Editor.Libraries
         /// Handles mouse drag events to rotate a preview vector.
         /// Call this before rendering a 3D mesh via PreviewRenderUtility.
         /// </summary>
-        public static Vector2 HandleDragRotation(Rect position, Vector2 rotation, float sensitivity = 0.5f)
+        public static Vector2 HandleDragRotation(Rect position, Vector2 rotation, Vector2? dragSensitivity = null)
         {
+            Vector2 sensitivity = dragSensitivity ?? new Vector2(-0.5f, -0.5f);
+
             int controlID = GUIUtility.GetControlID("Preview".GetHashCode(), FocusType.Passive, position);
             Event current = Event.current;
 
@@ -149,8 +151,8 @@ namespace Editor.Libraries
                 case EventType.MouseDrag:
                     if (GUIUtility.hotControl == controlID)
                     {
-                        rotation.x -= current.delta.x * sensitivity;
-                        rotation.y -= current.delta.y * sensitivity;
+                        rotation.x += current.delta.x * sensitivity.x;
+                        rotation.y += current.delta.y * sensitivity.y;
                         current.Use();
                     }
 

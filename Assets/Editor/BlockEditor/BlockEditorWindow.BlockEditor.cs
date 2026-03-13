@@ -495,8 +495,7 @@ namespace Editor.BlockEditor
                 _selectedBlockIndex = -1;
 
                 // Clear preview
-                if (_previewMesh != null) DestroyImmediate(_previewMesh);
-                _previewMesh = null;
+                _meshPreviewWidget.ClearPreview();
             }
         }
 
@@ -521,49 +520,29 @@ namespace Editor.BlockEditor
 
         private void UpdatePreviewMesh()
         {
-            if (_previewMesh != null) DestroyImmediate(_previewMesh);
-            _previewMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, _previewFluidLevel);
+            Mesh newMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, _previewFluidLevel);
+            Material targetMaterial = null;
 
             // Material switching logic
             if (_selectedBlock.fluidType != FluidType.None)
             {
-                if (_blockDatabase.liquidMaterial != null)
-                {
-                    // Just assign the material. The vertex colors in the mesh will handle the rest.
-                    _previewMaterial.shader = _blockDatabase.liquidMaterial.shader;
-                    _previewMaterial.CopyPropertiesFromMaterial(_blockDatabase.liquidMaterial);
-                }
-                else
-                {
-                    EditorUtility.DisplayDialog("Error", "Liquid material not found.", "OK");
-                }
+                if (_blockDatabase.liquidMaterial != null) targetMaterial = _blockDatabase.liquidMaterial;
+                else EditorUtility.DisplayDialog("Error", "Liquid material not found.", "OK");
             }
             else if (_selectedBlock.renderNeighborFaces)
             {
                 // Use the transparent material for see-through solid blocks
-                if (_blockDatabase.transparentMaterial != null)
-                {
-                    _previewMaterial.shader = _blockDatabase.transparentMaterial.shader;
-                    _previewMaterial.CopyPropertiesFromMaterial(_blockDatabase.transparentMaterial);
-                }
-                else
-                {
-                    EditorUtility.DisplayDialog("Error", "Transparent material not found.", "OK");
-                }
+                if (_blockDatabase.transparentMaterial != null) targetMaterial = _blockDatabase.transparentMaterial;
+                else EditorUtility.DisplayDialog("Error", "Transparent material not found.", "OK");
             }
             else
             {
                 // Default to the standard opaque material
-                if (_blockDatabase.opaqueMaterial != null)
-                {
-                    _previewMaterial.shader = _blockDatabase.opaqueMaterial.shader;
-                    _previewMaterial.CopyPropertiesFromMaterial(_blockDatabase.opaqueMaterial);
-                }
-                else
-                {
-                    EditorUtility.DisplayDialog("Error", "Opaque material not found.", "OK");
-                }
+                if (_blockDatabase.opaqueMaterial != null) targetMaterial = _blockDatabase.opaqueMaterial;
+                else EditorUtility.DisplayDialog("Error", "Opaque material not found.", "OK");
             }
+
+            _meshPreviewWidget.UpdatePreview(newMesh, targetMaterial);
         }
 
         private void Draw3DPreview()
@@ -573,36 +552,14 @@ namespace Editor.BlockEditor
 
             if (Event.current.type == EventType.Repaint)
             {
-                EditorGUIHelper.DrawCheckerboardBackground(previewRect);
+                if (!_meshPreviewWidget.HasMesh && _selectedBlock != null)
+                {
+                    UpdatePreviewMesh();
+                }
             }
 
-            if (Event.current.type == EventType.Repaint)
-            {
-                if (_previewMesh == null) UpdatePreviewMesh();
-            }
-
-            if (_previewMesh != null)
-            {
-                // Handle mouse input for rotation via generic helper
-                _previewRotation = EditorGUIHelper.HandleDragRotation(previewRect, _previewRotation);
-
-                _previewRenderUtility.BeginPreview(previewRect, GUIStyle.none);
-
-                // Draw the mesh with the current rotation
-                var rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(_previewRotation.y, 0, 0) * Quaternion.Euler(0, _previewRotation.x, 0), Vector3.one);
-
-                // Draw sub-mesh 0 (Opaque parts)
-                _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _previewMaterial, 0);
-                // Draw sub-mesh 1 (Transparent parts)
-                _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _previewMaterial, 1);
-
-                _previewRenderUtility.Render();
-                Texture previewTexture = _previewRenderUtility.EndPreview();
-
-                // Because the preview utility has a transparent background, this will
-                // draw the rendered block correctly on top of the checkerboard we drew earlier.
-                GUI.DrawTexture(previewRect, previewTexture);
-            }
+            // The widget internally handles the checkerboard background, interactive rotation, and mesh rendering.
+            _meshPreviewWidget.Draw(previewRect);
         }
 
         #endregion

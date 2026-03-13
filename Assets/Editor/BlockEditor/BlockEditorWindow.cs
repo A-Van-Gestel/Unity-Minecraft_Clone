@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using Editor.DataGeneration;
+using Editor.Libraries;
 using UnityEditor;
 using UnityEngine;
 
@@ -36,12 +37,8 @@ namespace Editor.BlockEditor
         private string _searchText = "";
         private Texture2D _atlasTexture;
 
-        // --- 3D Preview Fields ---
-        private PreviewRenderUtility _previewRenderUtility;
-        private Mesh _previewMesh;
-        private Material _previewMaterial;
-
-        private Vector2 _previewRotation = new Vector2(135, -30); // Initial rotation
+        // --- 3D Preview Widget ---
+        private MeshPreviewWidget _meshPreviewWidget;
 
         // Stores the editor-only state of the fluid preview slider.
         private int _previewFluidLevel = 0;
@@ -78,26 +75,9 @@ namespace Editor.BlockEditor
 
         void OnEnable()
         {
-            // --- Initialize Preview Utility ---
-            _previewRenderUtility = new PreviewRenderUtility();
-
-            // --- Enhanced Camera Setup ---
-            _previewRenderUtility.camera.nearClipPlane = 0.1f;
-            _previewRenderUtility.camera.farClipPlane = 10f;
-
-            // Make the camera background transparent to reveal the checkerboard.
-            _previewRenderUtility.camera.cameraType = CameraType.Preview;
-            _previewRenderUtility.camera.clearFlags = CameraClearFlags.SolidColor;
-            _previewRenderUtility.camera.backgroundColor = new Color(0, 0, 0, 0);
-
-            _previewRenderUtility.camera.transform.position = new Vector3(0, 0, -3.5f);
-            _previewRenderUtility.camera.transform.rotation = Quaternion.identity;
-            _previewRenderUtility.camera.fieldOfView = 30;
-
-            // Set up a light for the preview
-            var light = _previewRenderUtility.lights[0];
-            light.intensity = 1.2f;
-            light.transform.rotation = Quaternion.Euler(30, 30, 0);
+            // --- Initialize Preview Widget ---
+            _meshPreviewWidget = new MeshPreviewWidget();
+            _meshPreviewWidget.Initialize();
 
             // ---  Find BlockDatabase asset ---
             string[] guids = AssetDatabase.FindAssets("t:BlockDatabase");
@@ -123,8 +103,6 @@ namespace Editor.BlockEditor
                 if (_blockDatabase.opaqueMaterial != null)
                 {
                     _atlasTexture = _blockDatabase.opaqueMaterial.mainTexture as Texture2D;
-                    // Create an instance of the material for our preview
-                    _previewMaterial = new Material(_blockDatabase.opaqueMaterial);
                 }
             }
 
@@ -138,10 +116,8 @@ namespace Editor.BlockEditor
             // Unsubscribe from the update loop when the window is closed or disabled.
             EditorApplication.update -= OnUpdate;
 
-            // IMPORTANT: Clean up the preview utility and created objects to prevent memory leaks
-            _previewRenderUtility?.Cleanup();
-            if (_previewMesh != null) DestroyImmediate(_previewMesh);
-            if (_previewMaterial != null) DestroyImmediate(_previewMaterial);
+            // IMPORTANT: Clean up the preview widget to prevent memory leaks in the Editor
+            _meshPreviewWidget?.Dispose();
         }
 
         // This method will be called on every editor frame.
