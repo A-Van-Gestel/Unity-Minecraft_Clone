@@ -143,6 +143,26 @@ horizontal spread starts from `effectiveLevel + 1`, not from level 1.
 
 ---
 
+### ~~05. 7x7 Horizontal Spreading Cube in Mid-Air~~
+
+**Severity:** Gameplay / Physics bug  
+**Files:** `BlockBehavior.Fluids.cs`  
+**Fixed:** March 2026
+
+**Symptom:** When a source block is placed on top of an elevated surface (like a tree), the fluid flows outwards and sometimes incorrectly spawns horizontal spreading blocks in mid-air (forming a floating 7x7 water grid) instead of accurately checking if those spread locations
+have ground support below them.
+
+**Root Cause:** The `isSupportedBelow` check during horizontal spreading incorrectly allowed fluid to spread if the block below was the *same fluid type*, regardless of whether it was falling or solid. Additionally, falling waterfall columns and pulsating decay loops contributed
+to broken spread distances.
+
+**Fix:**
+
+1. Aligned horizontal spread gating with Minecraft logic (fluids only spread horizontally if supported by a solid block, preventing mid-air grids).
+2. Resolved infinite decay loops by treating falling blocks as level 0 when calculating expected support levels.
+3. Added a `waterfallsMaxSpread` configuration toggle in `BlockType.cs` to let the user select between Minecraft parity (infinite waterfall spread) and physics-based volume conservation.
+
+---
+
 ## Chunk Management
 
 ### ~~01. `ChunkCoord` integer division truncates negative coordinates incorrectly~~

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.CompilerServices;
 using MyBox;
 using UnityEngine;
@@ -53,6 +53,9 @@ namespace Data
         [Tooltip("How many blocks a fluid can flow horizontally from a source block.\nWater is 8 (levels 0-7), Lava is typically 4.")]
         [Range(1, 8)]
         public byte flowLevels = 8;
+
+        [Tooltip("If true, waterfalls dropping on the floor will spread outwards with maximum flow volume (Minecraft behavior). If false, it conserves its remaining level on impact.")]
+        public bool waterfallsMaxSpread = true;
 
         [Header("Lighting Properties")]
         [Tooltip("How many light levels will be blocked by this block.")]

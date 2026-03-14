@@ -158,6 +158,7 @@ namespace Editor.BlockEditor
                     fluidMeshData = blockType.fluidMeshData,
                     fluidLevel = blockType.fluidLevel,
                     flowLevels = blockType.flowLevels,
+                    waterfallsMaxSpread = blockType.waterfallsMaxSpread,
                     opacity = blockType.opacity,
                     lightEmission = blockType.lightEmission,
                     tagPreset = blockType.tagPreset,

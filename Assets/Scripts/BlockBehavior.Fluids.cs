@@ -36,11 +36,10 @@ public static partial class BlockBehavior
         VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
         bool belowIsSameFluid = belowState.HasValue && belowState.Value.id == currentId;
         bool canFlowDown = belowState.HasValue && !belowState.Value.Properties.isSolid && !belowIsSameFluid;
-        bool isSupportedBelow = belowState.HasValue && (belowState.Value.Properties.isSolid || (belowIsSameFluid && !IsFalling(belowState.Value.FluidLevel)));
 
         // 2. Step 1: Calculate Expected Level (Decay / Drainage)
         // Returns true if the block died (drained completely) or changed its own level this tick.
-        if (HandleFluidDecay(chunkData, localPos, globalPos, currentId, ref currentLevel, props.flowLevels))
+        if (HandleFluidDecay(chunkData, localPos, globalPos, currentId, ref currentLevel, props))
         {
             return;
         }
@@ -49,30 +48,30 @@ public static partial class BlockBehavior
         bool falling = IsFalling(currentLevel);
 
         // 3. Step 2 & 3: Gravity and Settling
-        // Returns true if gravity acted or settling occurred, meaning we shouldn't spread horizontally this tick
-        if (HandleFluidVertical(globalPos, currentId, effectiveLevel, falling, canFlowDown, isSupportedBelow))
+        // Returns true if gravity acted (skipping horizontal spread)
+        if (HandleFluidVertical(globalPos, currentId, effectiveLevel, canFlowDown))
         {
             return;
         }
 
         // 4. Step 4: Horizontal Spreading
-        HandleFluidSpread(chunkData, localPos, globalPos, currentId, currentLevel, effectiveLevel, props.flowLevels, belowState, belowIsSameFluid);
+        HandleFluidSpread(chunkData, localPos, globalPos, currentId, currentLevel, effectiveLevel, props, belowState, belowIsSameFluid, falling);
     }
 
     /// <summary>
     /// Checks if the fluid needs to drain (decay) based on its neighbors.
     /// Returns true if a VoxelMod was added for this position, meaning further processing should stop.
     /// </summary>
-    private static bool HandleFluidDecay(ChunkData chunkData, Vector3Int localPos, Vector3Int globalPos, ushort currentId, ref byte currentLevel, byte flowLevels)
+    private static bool HandleFluidDecay(ChunkData chunkData, Vector3Int localPos, Vector3Int globalPos, ushort currentId, ref byte currentLevel, BlockType props)
     {
         if (currentLevel == 0) return false; // Source blocks never decay
 
-        CalculateExpectedFluidLevel(chunkData, localPos, currentId, flowLevels, out byte expectedEffectiveLevel, out bool isFedFromAbove);
+        CalculateExpectedFluidLevel(chunkData, localPos, currentId, props, out byte expectedEffectiveLevel, out bool isFedFromAbove);
 
         bool expectedFalling = isFedFromAbove || IsFalling(currentLevel);
         byte expectedFluidLevel = expectedFalling ? MakeFalling(expectedEffectiveLevel) : expectedEffectiveLevel;
 
-        if (expectedEffectiveLevel >= flowLevels)
+        if (expectedEffectiveLevel >= props.flowLevels)
         {
             Mods.Add(new VoxelMod(globalPos, 0) { ImmediateUpdate = true });
             return true;
@@ -90,10 +89,10 @@ public static partial class BlockBehavior
     }
 
     /// <summary>
-    /// Handles fluid falling downward and settling when it hits a floor.
-    /// Returns true if an action was taken, delaying horizontal spread to the next tick.
+    /// Handles fluid falling downward.
+    /// Returns true if gravity acted, bypassing horizontal spread to the next tick.
     /// </summary>
-    private static bool HandleFluidVertical(Vector3Int globalPos, ushort currentId, byte effectiveLevel, bool falling, bool canFlowDown, bool isSupportedBelow)
+    private static bool HandleFluidVertical(Vector3Int globalPos, ushort currentId, byte effectiveLevel, bool canFlowDown)
     {
         // Gravity (Vertical Flow)
         if (canFlowDown)
@@ -106,18 +105,6 @@ public static partial class BlockBehavior
             return true; // Skip horizontal spreading this tick if we pushed downwards
         }
 
-        // Settle Falling Blocks
-        if (falling)
-        {
-            if (isSupportedBelow)
-            {
-                // We've hit a floor, settle into horizontal form and prepare to spread next tick.
-                Mods.Add(new VoxelMod(globalPos, currentId) { FluidLevel = effectiveLevel, ImmediateUpdate = true });
-            }
-
-            return true;
-        }
-
         return false;
     }
 
@@ -127,7 +114,7 @@ public static partial class BlockBehavior
     /// non-source blocks only spread if the block directly below blocks flow
     /// (is solid and NOT the same fluid type).
     /// </summary>
-    private static void HandleFluidSpread(ChunkData chunkData, Vector3Int localPos, Vector3Int globalPos, ushort currentId, byte currentLevel, byte effectiveLevel, byte flowLevels, VoxelState? belowState, bool belowIsSameFluid)
+    private static void HandleFluidSpread(ChunkData chunkData, Vector3Int localPos, Vector3Int globalPos, ushort currentId, byte currentLevel, byte effectiveLevel, BlockType props, VoxelState? belowState, bool belowIsSameFluid, bool falling)
     {
         // Minecraft gate:
         // Source blocks (effectiveLevel == 0) always spread horizontally.
@@ -147,8 +134,9 @@ public static partial class BlockBehavior
             return;
         }
 
-        byte newLevel = (byte)(effectiveLevel + 1);
-        if (newLevel >= flowLevels) return;
+        // Minecraft waterfall spread reset: if a falling block hits the ground, it optionally resets to max spread (level 1)
+        byte newLevel = (falling && props.waterfallsMaxSpread) ? (byte)1 : (byte)(effectiveLevel + 1);
+        if (newLevel >= props.flowLevels) return;
 
         for (int i = 0; i < 4; i++)
         {
@@ -201,18 +189,18 @@ public static partial class BlockBehavior
             return true;
         }
 
-        // Reason 2: Can it settle? (Falling block hitting a solid surface)
-        if (IsFalling(currentLevel) && (!belowState.HasValue || belowState.Value.Properties.isSolid || belowIsSameFluid))
-        {
-            return true;
-        }
+        // Reason 2: Can it settle?
+        // Removed: falling blocks hitting solid ground no longer settle, they stay falling and spread horizontally instead (matching Minecraft).
 
         // Reason 3: Can it flow horizontally?
         // Source blocks always, non-source only on solid non-fluid ground.
         bool canSpreadHorizontally = (effectiveLevel == 0) ||
                                      (belowState.HasValue && belowState.Value.Properties.isSolid && !belowIsSameFluid);
 
-        if (canSpreadHorizontally && effectiveLevel + 1 < props.flowLevels)
+        bool falling = IsFalling(currentLevel);
+        byte expectedNewLevel = (falling && props.waterfallsMaxSpread) ? (byte)1 : (byte)(effectiveLevel + 1);
+
+        if (canSpreadHorizontally && expectedNewLevel < props.flowLevels)
         {
             for (int i = 0; i < 4; i++) // 4 cardinal horizontal directions
             {
@@ -223,7 +211,7 @@ public static partial class BlockBehavior
 
                 bool neighborIsAir = neighborState.Value.id == BlockIDs.Air;
                 bool neighborIsSameFluidAndWorse = neighborState.Value.id == id &&
-                                                   GetEffectiveLevel(neighborState.Value.FluidLevel) > effectiveLevel + 1;
+                                                   GetEffectiveLevel(neighborState.Value.FluidLevel) > expectedNewLevel;
 
                 if ((neighborIsAir || neighborIsSameFluidAndWorse) && !neighborState.Value.Properties.isSolid)
                 {
@@ -236,7 +224,7 @@ public static partial class BlockBehavior
         // Source blocks (0) are conceptually stable internally and won't decay
         if (currentLevel != 0)
         {
-            CalculateExpectedFluidLevel(chunkData, localPos, id, props.flowLevels,
+            CalculateExpectedFluidLevel(chunkData, localPos, id, props,
                 out byte expectedEffectiveLevel, out bool isFedFromAbove);
 
             bool expectedFalling = isFedFromAbove || IsFalling(currentLevel);
@@ -267,10 +255,10 @@ public static partial class BlockBehavior
     /// Used by both Active() and HandleFluidFlow() to determine if a block needs to drain or decay.
     /// </summary>
     private static void CalculateExpectedFluidLevel(
-        ChunkData chunkData, Vector3Int localPos, ushort fluidId, byte flowLevels,
+        ChunkData chunkData, Vector3Int localPos, ushort fluidId, BlockType props,
         out byte expectedEffectiveLevel, out bool isFedFromAbove)
     {
-        expectedEffectiveLevel = flowLevels; // Default to max (decays to air)
+        expectedEffectiveLevel = props.flowLevels; // Default to max (decays to air)
         isFedFromAbove = false;
 
         // 1. Check if fed from above
@@ -293,7 +281,18 @@ public static partial class BlockBehavior
 
                 if (neighborState.HasValue && neighborState.Value.id == fluidId)
                 {
-                    byte neighborEffective = GetEffectiveLevel(neighborState.Value.FluidLevel);
+                    byte neighborEffective;
+                    if (IsFalling(neighborState.Value.FluidLevel) && props.waterfallsMaxSpread)
+                    {
+                        // Minecraft rule: Falling blocks act like source blocks (level 0) for horizontal spreading
+                        neighborEffective = 0;
+                    }
+                    else
+                    {
+                        // Conserve volume logic
+                        neighborEffective = GetEffectiveLevel(neighborState.Value.FluidLevel);
+                    }
+
                     if (neighborEffective < expectedEffectiveLevel)
                     {
                         expectedEffectiveLevel = neighborEffective;
@@ -302,7 +301,7 @@ public static partial class BlockBehavior
             }
 
             // Horizontal spread adds 1 to the effective level.
-            if (expectedEffectiveLevel < flowLevels)
+            if (expectedEffectiveLevel < props.flowLevels)
             {
                 expectedEffectiveLevel++;
             }

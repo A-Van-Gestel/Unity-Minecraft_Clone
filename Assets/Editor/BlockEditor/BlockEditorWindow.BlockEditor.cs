@@ -215,6 +215,7 @@ namespace Editor.BlockEditor
                         (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Shader ID", "The ID passed to the liquid shader, controlling its visual style (e.g., 0 for Water, 1 for Lava)."), _selectedBlock.fluidShaderID, 0, 16); // 256 (byte) is actual maximum
                     _selectedBlock.fluidLevel = (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Level", "Default fluid level."), _selectedBlock.fluidLevel, 0, 15);
                     _selectedBlock.flowLevels = (byte)EditorGUILayout.IntSlider(new GUIContent("Flow Levels", "How many blocks a fluid can flow horizontally from a source block."), _selectedBlock.flowLevels, 1, 8);
+                    _selectedBlock.waterfallsMaxSpread = EditorGUILayout.Toggle(new GUIContent("Waterfalls Max Spread", "If true, waterfalls dropping on the floor will spread outwards with maximum flow volume (Minecraft behavior). If false, it conserves its remaining level on impact."), _selectedBlock.waterfallsMaxSpread);
 
                     // --- Fluid Preview Slider ---
                     EditorGUILayout.Space();
@@ -451,6 +452,7 @@ namespace Editor.BlockEditor
                 fluidMeshData = _selectedBlock.fluidMeshData,
                 fluidLevel = _selectedBlock.fluidLevel,
                 flowLevels = _selectedBlock.flowLevels,
+                waterfallsMaxSpread = _selectedBlock.waterfallsMaxSpread,
                 opacity = _selectedBlock.opacity,
                 lightEmission = _selectedBlock.lightEmission,
                 tagPreset = _selectedBlock.tagPreset,
