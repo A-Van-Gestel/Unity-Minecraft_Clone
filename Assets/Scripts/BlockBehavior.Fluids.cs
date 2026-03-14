@@ -56,7 +56,7 @@ public static partial class BlockBehavior
         }
 
         // 4. Step 4: Horizontal Spreading
-        HandleFluidSpread(chunkData, localPos, globalPos, currentId, currentLevel, effectiveLevel, props.flowLevels, belowState, isSupportedBelow);
+        HandleFluidSpread(chunkData, localPos, globalPos, currentId, currentLevel, effectiveLevel, props.flowLevels, belowState, belowIsSameFluid);
     }
 
     /// <summary>
@@ -123,18 +123,27 @@ public static partial class BlockBehavior
 
     /// <summary>
     /// Handles horizontal spreading of fluid across supported surfaces.
+    /// Minecraft rule: source blocks always spread;
+    /// non-source blocks only spread if the block directly below blocks flow
+    /// (is solid and NOT the same fluid type).
     /// </summary>
-    private static void HandleFluidSpread(ChunkData chunkData, Vector3Int localPos, Vector3Int globalPos, ushort currentId, byte currentLevel, byte effectiveLevel, byte flowLevels, VoxelState? belowState, bool isSupportedBelow)
+    private static void HandleFluidSpread(ChunkData chunkData, Vector3Int localPos, Vector3Int globalPos, ushort currentId, byte currentLevel, byte effectiveLevel, byte flowLevels, VoxelState? belowState, bool belowIsSameFluid)
     {
-        LogWaterDebug($"[WaterDebug FLOW] Step 4 REACHED: pos={globalPos} id={currentId} level={currentLevel} " +
-                      $"below={(belowState.HasValue ? belowState.Value.id.ToString() : "none")}(solid? {(belowState.HasValue ? belowState.Value.Properties.isSolid.ToString() : "N/A")}, " +
-                      $"falling? {(belowState.HasValue ? IsFalling(belowState.Value.FluidLevel).ToString() : "N/A")}, " +
-                      $"level={(belowState.HasValue ? belowState.Value.FluidLevel.ToString() : "N/A")}) " +
-                      $"isSupported: {isSupportedBelow}");
+        // Minecraft gate:
+        // Source blocks (effectiveLevel == 0) always spread horizontally.
+        // Non-source blocks only spread if the block below is solid AND not the same fluid.
+        // This prevents mid-air horizontal grids when fluid overhangs an edge.
+        bool canSpreadHorizontally = (effectiveLevel == 0) ||
+                                     (belowState.HasValue && belowState.Value.Properties.isSolid && !belowIsSameFluid);
 
-        if (!isSupportedBelow)
+        LogWaterDebug($"[WaterDebug FLOW] Step 4 REACHED: pos={globalPos} id={currentId} level={currentLevel} " +
+                      $"canSpread={canSpreadHorizontally} effectiveLevel={effectiveLevel} " +
+                      $"belowSolid={(belowState.HasValue && belowState.Value.Properties.isSolid)} " +
+                      $"belowIsSameFluid={belowIsSameFluid}");
+
+        if (!canSpreadHorizontally)
         {
-            LogWaterDebug($"[WaterDebug FLOW] {globalPos} Not supported below. Returning.");
+            LogWaterDebug($"[WaterDebug FLOW] {globalPos} Cannot spread horizontally. Returning.");
             return;
         }
 
@@ -199,7 +208,11 @@ public static partial class BlockBehavior
         }
 
         // Reason 3: Can it flow horizontally?
-        if (effectiveLevel + 1 < props.flowLevels)
+        // Source blocks always, non-source only on solid non-fluid ground.
+        bool canSpreadHorizontally = (effectiveLevel == 0) ||
+                                     (belowState.HasValue && belowState.Value.Properties.isSolid && !belowIsSameFluid);
+
+        if (canSpreadHorizontally && effectiveLevel + 1 < props.flowLevels)
         {
             for (int i = 0; i < 4; i++) // 4 cardinal horizontal directions
             {
