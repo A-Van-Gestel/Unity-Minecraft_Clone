@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using Data;
 using Helpers;
@@ -83,6 +83,7 @@ namespace Editor.BlockEditor.Helpers
                     int textureID = blockType.GetTextureID(p);
                     float yUv = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
                     float xUv = textureID - (yUv * VoxelData.TextureAtlasSizeInBlocks);
+
                     xUv *= VoxelData.NormalizedBlockTextureSize;
                     yUv *= VoxelData.NormalizedBlockTextureSize;
                     yUv = 1f - yUv - VoxelData.NormalizedBlockTextureSize;

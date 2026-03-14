@@ -4029,6 +4029,10 @@ PrefabInstance:
       value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: settings.keepChunksInMemory
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
       propertyPath: settings.enableDiagnosticLogs
       value: 0
       objectReference: {fileID: 0}
