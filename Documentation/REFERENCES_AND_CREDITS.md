@@ -1,4 +1,4 @@
-﻿# Project References & Credits
+# Project References & Credits
 
 This document tracks all third-party assets, libraries, algorithms, and resources used in the development of this project.
 
@@ -43,7 +43,8 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 ### UI Elements
 
 * **Block Icons**
-    * *Source:* Custom made / Generated using [Minecraft Blocks Render](https://github.com/TABmk/minecraft-blocks-render) by [TABmk](https://github.com/TABmk).
+    * *Source:* Custom made / Originally generated using [Minecraft Blocks Render](https://github.com/TABmk/minecraft-blocks-render) by [TABmk](https://github.com/TABmk).
+    * *Notes:* Now also used as an implementation reference for the project's own in-editor block icon renderer.
 * **Crosshair**
     * *Source:* Custom made.
 * **Hotbar**
