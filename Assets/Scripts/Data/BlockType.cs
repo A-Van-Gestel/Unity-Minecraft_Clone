@@ -60,6 +60,10 @@ namespace Data
         [Tooltip("If true, this fluid will generate a new source block if it is horizontally adjacent to 2 other source blocks and has a solid floor.")]
         public bool infiniteSourceRegeneration = false;
 
+        [Tooltip("Chance between 0.0 and 1.0 that this fluid will successfully spread horizontally on a tick. 1.0 = Water (deterministic), 0.25 = Lava (thick/slow).")]
+        [Range(0f, 1f)]
+        public float spreadChance = 1.0f;
+
         [Header("Lighting Properties")]
         [Tooltip("How many light levels will be blocked by this block.")]
         [Range(0, 15)]

@@ -160,6 +160,7 @@ namespace Editor.BlockEditor
                     flowLevels = blockType.flowLevels,
                     waterfallsMaxSpread = blockType.waterfallsMaxSpread,
                     infiniteSourceRegeneration = blockType.infiniteSourceRegeneration,
+                    spreadChance = blockType.spreadChance,
                     opacity = blockType.opacity,
                     lightEmission = blockType.lightEmission,
                     tagPreset = blockType.tagPreset,

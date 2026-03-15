@@ -2,6 +2,7 @@ using System;
 using Data;
 using Unity.Collections;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 public static partial class BlockBehavior
 {
@@ -142,6 +143,15 @@ public static partial class BlockBehavior
         // Minecraft waterfall spread reset: if a falling block hits the ground, it optionally resets to max spread (level 1)
         byte newLevel = (falling && props.waterfallsMaxSpread) ? (byte)1 : (byte)(effectiveLevel + 1);
         if (newLevel >= props.flowLevels) return;
+
+        // Lava Viscosity Randomization (Bug 08)
+        // If a fluid has a spread chance less than 1.0, it will randomly skip horizontal spreading ticks.
+        // E.g., Lava at 0.25 only flows 25% of the time, resulting in thick, blob-like staggering.
+        if (Random.value > props.spreadChance)
+        {
+            LogWaterDebug($"[WaterDebug FLOW] {globalPos} Random Viscosity Skip (Chance={props.spreadChance}).");
+            return;
+        }
 
         // Pathfind for the optimal flow direction (drops within 4 blocks)
         byte optimalFlowMask = GetOptimalFlowDirections(chunkData, localPos, currentId);

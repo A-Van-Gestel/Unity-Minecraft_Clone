@@ -38,15 +38,6 @@ Implementing proper fluid interaction requires a new interaction table and is de
 
 ---
 
-## 08. Missing Lava Viscosity Randomization — ⚠️ MISSING FEATURE
-
-**Severity:** Missing Feature (not a bug)  
-**Files:** `BlockBehavior.Fluids.cs`
-
-Currently, lava spreads horizontally at the exact same deterministic rate as water (just scaled by its `TickRate`).
-Minecraft lava has a 75% chance to skip horizontal spreading on any given tick, simulating thicker viscosity and resulting in a much slower, more organic flow pattern.
-
----
 
 ## 09. Missing Flow-Blocking Logic for Non-Solid Blocks — ⚠️ MISSING FEATURE
 

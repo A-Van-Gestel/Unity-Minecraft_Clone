@@ -180,6 +180,20 @@ to broken spread distances.
 
 ---
 
+### ~~08. Missing Lava Viscosity Randomization~~
+
+**Severity:** Missing Feature (not a bug)  
+**Files:** `BlockBehavior.Fluids.cs`, `BlockType.cs`  
+**Fixed:** March 2026
+
+**Symptom:** Lava spread horizontally at the exact same deterministic rate as water, lacking its thick, random flow pattern.
+
+**Root Cause:** Fluid flow evaluation always proceeded at 100% chance for all fluids.
+
+**Fix:** Added a `spreadChance` configuration `float` (0.0 - 1.0) to `BlockType.cs` and exposed it in the `BlockEditorWindow`. Inside `HandleFluidSpread`, `UnityEngine.Random.value` is rolled against this chance; if it fails, the horizontal spread step is cleanly aborted for that tick.
+
+---
+
 ## Chunk Management
 
 ### ~~01. `ChunkCoord` integer division truncates negative coordinates incorrectly~~

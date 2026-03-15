@@ -29,6 +29,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 0
     lightEmission: 0
     tagPreset: {fileID: 0}
@@ -54,6 +55,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: a91aed358be075240b8070cec5b5d183, type: 2}
@@ -79,6 +81,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
@@ -104,6 +107,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
@@ -129,6 +133,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 049839df00a000b4ea7843c245313b35, type: 2}
@@ -154,6 +159,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 0}
@@ -179,6 +185,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
@@ -204,6 +211,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 0}
@@ -229,6 +237,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 0}
@@ -254,6 +263,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: a91aed358be075240b8070cec5b5d183, type: 2}
@@ -279,6 +289,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
@@ -304,6 +315,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 0}
@@ -329,6 +341,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 845289f1f2ec46f47b7c181729b4cd4d, type: 2}
@@ -354,6 +367,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 0
     lightEmission: 0
     tagPreset: {fileID: 0}
@@ -379,6 +393,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 929eb7cd71e07db4aa16102fa5ec0746, type: 2}
@@ -404,6 +419,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 5
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 40c769fe208bc7d45a9682a06a87e461, type: 2}
@@ -429,6 +445,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 371aa74a265a2b448911164183310f2e, type: 2}
@@ -454,6 +471,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 0}
@@ -479,6 +497,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 0}
@@ -504,6 +523,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 1
+    spreadChance: 1
     opacity: 2
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 90adce5ab71476a47b05068311651645, type: 2}
@@ -529,6 +549,7 @@ MonoBehaviour:
     flowLevels: 4
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 0.25
     opacity: 7
     lightEmission: 15
     tagPreset: {fileID: 11400000, guid: 90adce5ab71476a47b05068311651645, type: 2}
@@ -554,6 +575,7 @@ MonoBehaviour:
     flowLevels: 8
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
+    spreadChance: 1
     opacity: 15
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 1559d011df30dd845ae9ed95fdef3706, type: 2}
