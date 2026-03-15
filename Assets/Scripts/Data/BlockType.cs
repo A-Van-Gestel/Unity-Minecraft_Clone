@@ -57,6 +57,9 @@ namespace Data
         [Tooltip("If true, waterfalls dropping on the floor will spread outwards with maximum flow volume (Minecraft behavior). If false, it conserves its remaining level on impact.")]
         public bool waterfallsMaxSpread = true;
 
+        [Tooltip("If true, this fluid will generate a new source block if it is horizontally adjacent to 2 other source blocks and has a solid floor.")]
+        public bool infiniteSourceRegeneration = false;
+
         [Header("Lighting Properties")]
         [Tooltip("How many light levels will be blocked by this block.")]
         [Range(0, 15)]

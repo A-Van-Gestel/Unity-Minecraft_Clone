@@ -216,6 +216,7 @@ namespace Editor.BlockEditor
                     _selectedBlock.fluidLevel = (byte)EditorGUILayout.IntSlider(new GUIContent("Fluid Level", "Default fluid level."), _selectedBlock.fluidLevel, 0, 15);
                     _selectedBlock.flowLevels = (byte)EditorGUILayout.IntSlider(new GUIContent("Flow Levels", "How many blocks a fluid can flow horizontally from a source block."), _selectedBlock.flowLevels, 1, 8);
                     _selectedBlock.waterfallsMaxSpread = EditorGUILayout.Toggle(new GUIContent("Waterfalls Max Spread", "If true, waterfalls dropping on the floor will spread outwards with maximum flow volume (Minecraft behavior). If false, it conserves its remaining level on impact."), _selectedBlock.waterfallsMaxSpread);
+                    _selectedBlock.infiniteSourceRegeneration = EditorGUILayout.Toggle(new GUIContent("Infinite Source Regeneration", "If true, this fluid will generate a new source block if it is horizontally adjacent to 2 other source blocks and has a solid floor."), _selectedBlock.infiniteSourceRegeneration);
 
                     // --- Fluid Preview Slider ---
                     EditorGUILayout.Space();

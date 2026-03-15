@@ -38,16 +38,6 @@ Implementing proper fluid interaction requires a new interaction table and is de
 
 ---
 
-## 07. Missing Source Block Regeneration (Infinite Water) — ⚠️ MISSING FEATURE
-
-**Severity:** Missing Feature (not a bug)  
-**Files:** `BlockBehavior.Fluids.cs`
-
-In Minecraft, two or more adjacent water source blocks (level 0) resting on solid ground will cause an empty air block between them to spontaneously regenerate into a new water source block.
-This is the core mechanic behind "infinite water sources". This is currently not implemented.
-
----
-
 ## 08. Missing Lava Viscosity Randomization — ⚠️ MISSING FEATURE
 
 **Severity:** Missing Feature (not a bug)  

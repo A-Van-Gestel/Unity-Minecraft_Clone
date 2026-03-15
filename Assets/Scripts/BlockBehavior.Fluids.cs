@@ -289,6 +289,8 @@ public static partial class BlockBehavior
 
         if (!isFedFromAbove)
         {
+            int adjacentSources = 0;
+
             // 2. Check horizontal neighbors for the lowest effective level (closest to source)
             for (int i = 0; i < 4; i++)
             {
@@ -313,6 +315,12 @@ public static partial class BlockBehavior
                     {
                         // Conserve volume logic
                         neighborEffective = GetEffectiveLevel(neighborState.Value.FluidLevel);
+
+                        // Infinite Water Mechanic: Count adjacent true source blocks (level 0, not falling).
+                        if (neighborEffective == 0)
+                        {
+                            adjacentSources++;
+                        }
                     }
 
                     if (neighborEffective < expectedEffectiveLevel)
@@ -326,6 +334,20 @@ public static partial class BlockBehavior
             if (expectedEffectiveLevel < props.flowLevels)
             {
                 expectedEffectiveLevel++;
+            }
+
+            // 3. Infinite Source Regeneration (Minecraft Beta 1.3.2 rule)
+            // If we have >= 2 adjacent true sources, and the block below us is solid or identical source fluid...
+            if (props.infiniteSourceRegeneration && adjacentSources >= 2)
+            {
+                VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
+                bool belowIsSolid = belowState.HasValue && belowState.Value.Properties.isSolid;
+                bool belowIsSource = belowState.HasValue && belowState.Value.id == fluidId && belowState.Value.FluidLevel == 0;
+
+                if (belowIsSolid || belowIsSource)
+                {
+                    expectedEffectiveLevel = 0;
+                }
             }
         }
     }

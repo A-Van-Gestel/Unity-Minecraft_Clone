@@ -163,6 +163,23 @@ to broken spread distances.
 
 ---
 
+### ~~07. Missing Source Block Regeneration (Infinite Water)~~
+
+**Severity:** Missing Feature (not a bug)  
+**Files:** `BlockBehavior.Fluids.cs`, `BlockType.cs`  
+**Fixed:** March 2026
+
+**Symptom:** In Minecraft Beta 1.3.2, two or more adjacent water source blocks resting on solid ground spontaneously regenerate an empty air block between them into a new source block. This core "infinite water" mechanic was missing from the engine.
+
+**Root Cause:** The `BlockBehavior.Fluids.cs` decay pass successfully gathered environmental constraints, but had no logic to construct new infinite sources out of thin air, meaning water was strictly finite.
+
+**Fix:**
+1. Added an `infiniteSourceRegeneration = false` flag to `BlockType.cs` to allow toggling this for specific fluids (e.g., Water = true, Lava = false).
+2. Integrated the horizontal source-counting logic directly into `CalculateExpectedFluidLevel` when looking for cross-chunk neighbors.
+3. If `>= 2` native source blocks (level 0) are horizontally adjacent, and the block below is either solid ground or another level 0 source block, the block organically overrides its target decay to `0`, successfully generating an infinite source pool without extra overhead or allocations.
+
+---
+
 ## Chunk Management
 
 ### ~~01. `ChunkCoord` integer division truncates negative coordinates incorrectly~~
