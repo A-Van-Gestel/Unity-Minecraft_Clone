@@ -61,6 +61,8 @@ When asked to fix a complex bug (e.g., "Lighting is broken", "Fluids aren't flow
     - *Reference:* Read `@Documentation/Technical/DEBUG_METHODS_EXAMPLES.md` to see if there is an existing debug tool you can deploy (e.g., `DebugRaycastChunkState`).
 4. **BURST JOB LOGGING:** If debugging a Burst Job, strictly use `Unity.Collections.LowLevel.Unsafe.UnsafeUtility` or `Debug.Log` with **FixedStrings/String Literals only**.
 5. **WAIT:** Wait for the user to run the game and provide the diagnostic logs before attempting the final fix.
+6. **RESOLUTION & ARCHIVING:** After a bug is fixed AND confirmed to be fixed by the user, you MUST move the bug's entry to `@Documentation/Bugs/_FIXED_BUGS.md` under the correct category header, updating the "Fixed:" field to the current month and year. Remove the bug entry
+   entirely from its original location (e.g., `FLUID_BUGS.md`).
 
 ## Code Style & Conventions
 
