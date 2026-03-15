@@ -476,14 +476,14 @@ MonoBehaviour:
     icon: {fileID: 21300000, guid: 8360d6e2f874c114a9a6ec0f054e66b5, type: 3}
     meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
     stackSize: 64
-    isSolid: 1
+    isSolid: 0
     renderNeighborFaces: 1
     fluidType: 1
     fluidShaderID: 0
     fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
     fluidLevel: 0
     flowLevels: 8
-    waterfallsMaxSpread: 1
+    waterfallsMaxSpread: 0
     opacity: 2
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 90adce5ab71476a47b05068311651645, type: 2}
@@ -500,7 +500,7 @@ MonoBehaviour:
     icon: {fileID: 21300000, guid: c505a45281380954d8a6fdc84a3a94c0, type: 3}
     meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
     stackSize: 64
-    isSolid: 1
+    isSolid: 0
     renderNeighborFaces: 1
     fluidType: 2
     fluidShaderID: 1

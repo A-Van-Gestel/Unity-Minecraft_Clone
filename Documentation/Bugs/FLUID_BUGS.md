@@ -38,16 +38,6 @@ Implementing proper fluid interaction requires a new interaction table and is de
 
 ---
 
-## 06. Missing Optimal Flow Direction Pathfinding — ⚠️ MISSING FEATURE
-
-**Severity:** Missing Feature (not a bug)  
-**Files:** `BlockBehavior.Fluids.cs`
-
-Currently, fluids spread equally in all 4 cardinal directions at once (producing a uniform diamond shape).
-Minecraft uses recursive pathfinding (up to roughly 4 blocks away) to detect downhill drops, forcing the fluid to flow directly towards the drop rather than spreading evenly.
-
----
-
 ## 07. Missing Source Block Regeneration (Infinite Water) — ⚠️ MISSING FEATURE
 
 **Severity:** Missing Feature (not a bug)  

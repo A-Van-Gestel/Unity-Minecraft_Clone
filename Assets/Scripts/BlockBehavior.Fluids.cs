@@ -1,4 +1,6 @@
+using System;
 using Data;
+using Unity.Collections;
 using UnityEngine;
 
 public static partial class BlockBehavior
@@ -68,10 +70,13 @@ public static partial class BlockBehavior
 
         CalculateExpectedFluidLevel(chunkData, localPos, currentId, props, out byte expectedEffectiveLevel, out bool isFedFromAbove);
 
+        bool falling = IsFalling(currentLevel);
+        bool isFallingAndCutOff = falling && !isFedFromAbove;
+
         bool expectedFalling = isFedFromAbove || IsFalling(currentLevel);
         byte expectedFluidLevel = expectedFalling ? MakeFalling(expectedEffectiveLevel) : expectedEffectiveLevel;
 
-        if (expectedEffectiveLevel >= props.flowLevels)
+        if (expectedEffectiveLevel >= props.flowLevels || isFallingAndCutOff)
         {
             Mods.Add(new VoxelMod(globalPos, 0) { ImmediateUpdate = true });
             return true;
@@ -138,8 +143,14 @@ public static partial class BlockBehavior
         byte newLevel = (falling && props.waterfallsMaxSpread) ? (byte)1 : (byte)(effectiveLevel + 1);
         if (newLevel >= props.flowLevels) return;
 
+        // Pathfind for the optimal flow direction (drops within 4 blocks)
+        byte optimalFlowMask = GetOptimalFlowDirections(chunkData, localPos, currentId);
+
         for (int i = 0; i < 4; i++)
         {
+            // If this direction is not in the optimal flow mask, skip it to prevent spreading away from drops
+            if ((optimalFlowMask & (1 << i)) == 0) continue;
+
             Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
             VoxelState? neighborState = chunkData.GetState(neighborPos);
 
@@ -224,12 +235,17 @@ public static partial class BlockBehavior
         // Source blocks (0) are conceptually stable internally and won't decay
         if (currentLevel != 0)
         {
+            // If it's a falling block that is NO LONGER fed from above, it MUST decay and disappear (or become a declining horizontal flow)
+            // It loses its "source-like" falling status.
             CalculateExpectedFluidLevel(chunkData, localPos, id, props,
                 out byte expectedEffectiveLevel, out bool isFedFromAbove);
+
+            bool isFallingAndCutOff = falling && !isFedFromAbove;
 
             bool expectedFalling = isFedFromAbove || IsFalling(currentLevel);
             byte expectedFluidLevel = expectedFalling ? MakeFalling(expectedEffectiveLevel) : expectedEffectiveLevel;
 
+            if (isFallingAndCutOff) return true; // Needs to decay because the source above was broken
             if (expectedEffectiveLevel >= props.flowLevels) return true; // Needs to decay to air completely
             if (expectedFluidLevel != currentLevel) return true; // Needs to update its flowing level state
         }
@@ -284,8 +300,14 @@ public static partial class BlockBehavior
                     byte neighborEffective;
                     if (IsFalling(neighborState.Value.FluidLevel) && props.waterfallsMaxSpread)
                     {
-                        // Minecraft rule: Falling blocks act like source blocks (level 0) for horizontal spreading
-                        neighborEffective = 0;
+                        // Minecraft rule: Falling blocks act like source blocks (level 0) for horizontal spreading.
+                        // CRITICAL FIX: To prevent infinite decay loops when a waterfall is broken,
+                        // a falling block can ONLY act as a horizontal source if it itself is currently fed from above.
+                        VoxelState? neighborAbove = chunkData.GetState(neighborPos + Vector3Int.up);
+                        bool isNeighborFed = neighborAbove.HasValue && neighborAbove.Value.id == fluidId;
+
+                        // If it's a falling block but its source was severed, it provides no support.
+                        neighborEffective = isNeighborFed ? (byte)0 : props.flowLevels;
                     }
                     else
                     {
@@ -306,6 +328,157 @@ public static partial class BlockBehavior
                 expectedEffectiveLevel++;
             }
         }
+    }
+
+    private struct SearchNode
+    {
+        public Vector3Int Pos;
+        public int Cost;
+    }
+
+    /// <summary>
+    /// Calculates the length of the path to the nearest drop. Max distance is 4.
+    /// Uses NativeQueue/NativeHashSet from Unity.Collections to guarantee zero GC allocations on the main thread.
+    /// </summary>
+    private static int CalculateFlowCost(ChunkData chunkData, Vector3Int startPos, int startCost, int incomingDir, ushort fluidId)
+    {
+        // Use Temp allocator to avoid GC drops
+        var queue = new NativeQueue<SearchNode>(Allocator.Temp);
+        var visited = new NativeHashSet<Vector3Int>(64, Allocator.Temp);
+
+        queue.Enqueue(new SearchNode { Pos = startPos, Cost = startCost });
+        visited.Add(startPos);
+
+        int minCost = 1000;
+
+        while (queue.TryDequeue(out SearchNode node))
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                // Skip going backwards immediately on the first step
+                // Horizontal indices: 0=+z, 1=-z, 2=+x, 3=-x
+                // Opposites: 0 and 1, 2 and 3
+                if (node.Cost == startCost)
+                {
+                    if ((incomingDir == 0 && i == 1) || (incomingDir == 1 && i == 0) ||
+                        (incomingDir == 2 && i == 3) || (incomingDir == 3 && i == 2))
+                    {
+                        continue;
+                    }
+                }
+
+                Vector3Int neighborPos = node.Pos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+
+                if (visited.Contains(neighborPos)) continue;
+                visited.Add(neighborPos);
+
+                VoxelState? neighborState = chunkData.GetState(neighborPos);
+                if (!neighborState.HasValue) continue;
+
+                // Stop if we hit a solid block or a source block of the same fluid
+                bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.id != fluidId;
+                bool isSourceFluid = neighborState.Value.id == fluidId && neighborState.Value.FluidLevel == 0;
+
+                if (isSolid || isSourceFluid) continue;
+
+                // Check for a drop
+                VoxelState? belowNeighbor = chunkData.GetState(neighborPos + Vector3Int.down);
+                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.id != fluidId;
+
+                if (belowNeighbor.HasValue && !belowIsSolid)
+                {
+                    // Found a drop! Since it's BFS, this is guaranteed to be the shortest path length.
+                    minCost = node.Cost + 1;
+                    queue.Dispose();
+                    visited.Dispose();
+                    return minCost;
+                }
+
+                // If no drop and we haven't reached max depth (4), explore further
+                if (node.Cost + 1 < 4)
+                {
+                    queue.Enqueue(new SearchNode { Pos = neighborPos, Cost = node.Cost + 1 });
+                }
+            }
+        }
+
+        queue.Dispose();
+        visited.Dispose();
+        return minCost;
+    }
+
+    /// <summary>
+    /// Returns a bitmask where each bit relates to an optimal flow direction (0: N, 1: E, 2: S, 3: W).
+    /// If all directions are equally bad or equally good, returns 0b1111 (all directions).
+    /// </summary>
+    private static byte GetOptimalFlowDirections(ChunkData chunkData, Vector3Int centerPos, ushort fluidId)
+    {
+        int[] flowCost = new int[4];
+        int minCost = 1000;
+        byte validDirectionsMask = 0;
+
+        for (int i = 0; i < 4; i++)
+        {
+            flowCost[i] = 1000;
+            Vector3Int neighborPos = centerPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+            VoxelState? neighborState = chunkData.GetState(neighborPos);
+
+            if (!neighborState.HasValue) continue;
+
+            bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.id != fluidId;
+            bool isSourceFluid = neighborState.Value.id == fluidId && neighborState.Value.FluidLevel == 0;
+
+            if (!isSolid && !isSourceFluid)
+            {
+                validDirectionsMask |= (byte)(1 << i);
+                VoxelState? belowNeighbor = chunkData.GetState(neighborPos + Vector3Int.down);
+                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.id != fluidId;
+
+                // If the block below is not a solid boundary, it's an immediate drop
+                if (belowNeighbor.HasValue && !belowIsSolid)
+                {
+                    flowCost[i] = 0;
+                }
+                else
+                {
+                    flowCost[i] = CalculateFlowCost(chunkData, neighborPos, 1, i, fluidId);
+                }
+            }
+
+            if (flowCost[i] < minCost)
+            {
+                minCost = flowCost[i];
+            }
+        }
+
+        // GetOptimalFlowDirections needs to accurately collect ALL minimum paths.
+        // If minCost is > 4 (the max BFS depth), that means NO drops were found in ANY direction.
+        // In that case, we MUST return all valid flowing directions minus solid walls, to create the spreading diamond.
+
+        if (minCost > 4)
+        {
+            // No optimal path found, fallback to uniform spread.
+            LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} NO OPTIMAL DROPS. Falling back to mask={Convert.ToString(validDirectionsMask, 2).PadLeft(4, '0')}");
+            return validDirectionsMask;
+        }
+
+        byte optimalMask = 0;
+        string debugStr = "";
+        for (int i = 0; i < 4; i++)
+        {
+            if (flowCost[i] == minCost)
+            {
+                optimalMask |= (byte)(1 << i);
+                debugStr += $"{i}:{flowCost[i]} ";
+            }
+            else
+            {
+                debugStr += $"({i}:{flowCost[i]}) ";
+            }
+        }
+
+        LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} minCost={minCost} mask={Convert.ToString(optimalMask, 2).PadLeft(4, '0')} dirs={debugStr}");
+        return optimalMask;
     }
 
     #endregion

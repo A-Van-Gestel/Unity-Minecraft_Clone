@@ -470,3 +470,41 @@ subsequent chunk modifications re-triggered the upward animation natively since 
 **Fix:** Extracted `Settings` into a standalone POCO and created a centralized `SettingsManager` that handles loading, saving, and Editor-specific DB refresh functionality. The duplicated load logic was removed from all caller scripts.
 
 ---
+
+## Fluid Simulation
+
+### ~~05. 7x7 Horizontal Spreading Cube in Mid-Air~~
+
+**Severity:** Bug  
+**Files:** `BlockBehavior.Fluids.cs`  
+**Fixed:** March 2026
+
+**Symptom:** Pouring water off a cliff caused it to spread out horizontally into a 7x7 mid-air platform.
+**Root Cause:** Horizontal spread allowed fluid blocks to freely expand if the block below them was empty air, rather than matching Minecraft's gating logic which requires soft/fluid support to be solid.
+**Fix:** Added a conditional gate enforcing that non-source blocks can only spread if the block directly below them is solid, forcing waterfalls to drop straight down.
+
+---
+
+### ~~06. Missing Optimal Flow Direction Pathfinding~~
+
+**Severity:** Missing Feature  
+**Files:** `BlockBehavior.Fluids.cs`  
+**Fixed:** March 2026
+
+**Symptom:** Water spread outward in a uniform diamond shape, oblivious to nearby holes or drops.
+**Root Cause:** The simulation lacked Minecraft's recursive `calculateFlowCost` terrain scanner.
+**Fix:** Injected a dot-net 2.1 zero-allocation Breadth-First-Search iterative pathfinder using Unity's `NativeQueue` and bitmasks to determine the optimal downhill path.
+
+---
+
+### ~~07. Severed waterfalls cause infinite decay loops~~
+
+**Severity:** Bug  
+**Files:** `BlockBehavior.Fluids.cs`  
+**Fixed:** March 2026
+
+**Symptom:** Breaking a source block with a waterfall beneath it left floating, non-decaying waterfall columns that indefinitely supplied water to adjacent blocks.
+**Root Cause:** `CalculateExpectedFluidLevel` allowed orphaned waterfall blocks to act as level-0 support for each other, establishing a self-sustaining loop.
+**Fix:** Added an `isFedFromAbove` check. Now, if a falling fluid block is cut off from the stream above, it immediately decays to air or regular decaying fluid, ending the loop.
+
+---
