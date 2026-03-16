@@ -16,7 +16,7 @@ Shader "Minecraft/UberLiquidShader"
         _MidColor("Mid Color", Color) = (1, 0.5, 0, 1)
         _DarkColor("Dark Color (Crust)", Color) = (0.6, 0.1, 0, 1)
         _CrustColor("Cooled Crust Color (Shore)", Color) = (0.2, 0.05, 0.0, 1)
-        _LavaFlowDirection("Flow Direction (XZ)", Vector) = (0.1, 0.05, 0, 0)
+        _LavaFlowMultiplier("Lava Flow Multiplier", Range(0.0, 5.0)) = 0.35
         _NoiseScale("Lava Scale", Range(0.1, 10)) = 2.0
         _CellDensity("Cell Density", Range(1, 4)) = 2.5
         _Speed("Flow Speed", Range(0, 2)) = 0.3
@@ -30,7 +30,7 @@ Shader "Minecraft/UberLiquidShader"
         _DeepColor("Deep Color (Low Light)", Color) = (0.1, 0.2, 0.5, 0.85)
         _ShallowColor("Shallow Color (High Light)", Color) = (0.3, 0.5, 0.9, 0.7)
         _FoamColor("Foam Color", Color) = (0.9, 0.9, 0.9, 1)
-        _WaterFlowDirection("Flow Direction (XZ)", Vector) = (0.3, 0.2, 0, 0)
+        _WaterFlowMultiplier("Water Flow Multiplier", Range(0.0, 5.0)) = 2.5
         _WaveScale("Wave Scale", Range(0.1, 10)) = 5.0
         _WaveSpeed("Wave Speed", Range(0, 2)) = 0.4
         _RippleScale("Ripple Scale", Range(1, 20)) = 15.0
@@ -83,6 +83,7 @@ Shader "Minecraft/UberLiquidShader"
                 float shorelineFlag : TEXCOORD4;
                 float lightLevel : TEXCOORD5;
                 float shadowMultiplier : TEXCOORD6;
+                float2 localFlowVector : TEXCOORD7; // Added physical flow XY vector from mesher
             };
 
             // Global Properties
@@ -93,13 +94,11 @@ Shader "Minecraft/UberLiquidShader"
 
             // Lava Properties
             fixed4 _BrightColor, _MidColor, _DarkColor, _CrustColor;
-            float2 _LavaFlowDirection;
-            float _NoiseScale, _CellDensity, _Speed, _CrackBrightness, _PulseSpeed, _HeatDistortionAmount, _FlowHighlight;
+            float _LavaFlowMultiplier, _NoiseScale, _CellDensity, _Speed, _CrackBrightness, _PulseSpeed, _HeatDistortionAmount, _FlowHighlight;
 
             // Water Properties
             fixed4 _DeepColor, _ShallowColor, _FoamColor;
-            float2 _WaterFlowDirection;
-            float _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _DistortionAmount;
+            float _WaterFlowMultiplier, _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _DistortionAmount;
 
             // Noise Functions
             float3 mod289(float3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -176,6 +175,7 @@ Shader "Minecraft/UberLiquidShader"
                 o.shorelineFlag = v.color.g;
                 o.lightLevel = v.color.a;
                 o.shadowMultiplier = v.color.b;
+                o.localFlowVector = v.uv; // Pass the flow direction vector
                 return o;
             }
 
@@ -201,109 +201,132 @@ Shader "Minecraft/UberLiquidShader"
                 return 1.0 - smoothstep(0.5 - (shoreSize * 0.5), 0.5, maxDist);
             }
 
+            void EvaluateLava(v2f i, float phaseTime, out float3 lavaCol, out float2 heatNormal)
+            {
+                float t_boil = _Time.y * _Speed;
+                float2 flow = i.localFlowVector * phaseTime * _LavaFlowMultiplier;
+
+                float3 p1 = i.worldPos * _NoiseScale + float3(flow.x, t_boil, flow.y);
+                float3 p2 = i.worldPos * _NoiseScale + float3(-flow.y, -t_boil * 0.8, -flow.x);
+
+                float base_fbm = fbm(p1, 5);
+                float base_noise = (base_fbm + 1.0) * 0.5;
+
+                float2 offset = float2(0.01, 0.0);
+                float normal_dx = fbm(p1 + offset.xyy, 4) - base_fbm;
+                float normal_dz = fbm(p1 + offset.yxy, 4) - base_fbm;
+                float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
+                heatNormal = normal.xz * _HeatDistortionAmount;
+
+                float noise1 = fbm(p1 * _CellDensity, 5);
+                float noise2 = fbm(p2 * _CellDensity, 5);
+                float crack_pattern = pow(abs(noise1 - noise2), 2.0) * _CrackBrightness;
+
+                fixed3 col = lerp(_DarkColor.rgb, _MidColor.rgb, smoothstep(0.3, 0.7, base_noise));
+                lavaCol = lerp(col, _BrightColor.rgb, smoothstep(0.1, 0.35, crack_pattern));
+
+                // Flow Highlight
+                float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + float3(flow.x * 2, 0, flow.y * 2);
+                float flow_mask = (fbm(flow_mask_p, 4) + 1.0) * 0.5;
+                lavaCol += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * _FlowHighlight;
+            }
+
+            void EvaluateWater(v2f i, float phaseTime, out float3 waterCol, out float foamAmt, out float2 waterNormal)
+            {
+                float2 flow = i.localFlowVector * phaseTime * _WaterFlowMultiplier * _Speed;
+
+                float3 wave_p = i.worldPos * _WaveScale + float3(flow.x, _Time.y * _WaveSpeed, flow.y);
+                float3 ripple_p = i.worldPos * _RippleScale + float3(flow.y, _Time.y * _RippleSpeed, -flow.x);
+
+                float wave_fbm = fbm(wave_p, 4);
+                float ripple_noise = fbm(ripple_p, 4);
+
+                float2 offset = float2(0.01, 0.0);
+                float normal_dx = fbm(wave_p + offset.xyy, 3) - wave_fbm;
+                float normal_dz = fbm(wave_p + offset.yxy, 3) - wave_fbm;
+                float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
+                waterNormal = normal.xz * _DistortionAmount;
+
+                fixed4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
+
+                float combined_noise = (wave_fbm + ripple_noise) * 0.5;
+                combined_noise = (combined_noise + 1.0) * 0.5;
+
+                waterCol = lerp(water_base_color.rgb, _ShallowColor.rgb, combined_noise);
+                foamAmt = smoothstep(_FoamThreshold - 0.1, _FoamThreshold + 0.1, combined_noise);
+            }
+
             fixed4 fragFunction(v2f i) : SV_Target
             {
                 float finalLiquidType = i.liquidType;
 
-                // This block correctly handles editor vs. runtime logic ---
                 #if defined(UNITY_EDITOR)
-                // When the editor is NOT in play mode, use the dropdown property.
-                if (!unity_IsEditorPlaying)
-                {
-                    finalLiquidType = _EditorPreviewType;
-                }
+                if (!unity_IsEditorPlaying) finalLiquidType = _EditorPreviewType;
                 #endif
 
-                // Shared Lighting
                 float shade = (maxGlobalLightLevel - minGlobalLightLevel) * GlobalLightLevel + minGlobalLightLevel;
                 shade *= i.lightLevel;
                 shade = clamp(1.0 - shade, minGlobalLightLevel, maxGlobalLightLevel);
 
-                // --- DYNAMIC LIQUID BRANCH ---
-                if (finalLiquidType > 0.5) // Is it Lava?
+                // --- FLOW MAPPING TIME SETUP ---
+                float cycleDuration = 3.0; // Seconds before flow phase resets
+                float phase0 = frac(_Time.y / cycleDuration);
+                float phase1 = frac((_Time.y + cycleDuration * 0.5) / cycleDuration);
+
+                float weight0 = 1.0 - abs(2.0 * phase0 - 1.0);
+                float weight1 = 1.0 - abs(2.0 * phase1 - 1.0);
+
+                float time0 = phase0 * cycleDuration;
+                float time1 = phase1 * cycleDuration;
+
+                if (finalLiquidType > 0.5) // Lava
                 {
-                    // --- LAVA LOGIC ---
-                    float t = _Time.y * _Speed;
-                    float2 flow = _LavaFlowDirection * t;
+                    float3 col0, col1;
+                    float2 norm0, norm1;
 
-                    float3 p1 = i.worldPos * _NoiseScale + float3(t + flow.x, t, flow.y);
-                    float3 p2 = i.worldPos * _NoiseScale + float3(-t * 0.8 - flow.y, -t * 0.8, -flow.x);
+                    EvaluateLava(i, time0, col0, norm0);
+                    EvaluateLava(i, time1, col1, norm1);
 
-                    float base_fbm = fbm(p1, 6);
-                    float base_noise = (base_fbm + 1.0) * 0.5;
+                    fixed3 lava_col = col0 * weight0 + col1 * weight1;
+                    float2 final_normal = norm0 * weight0 + norm1 * weight1;
 
-                    // Heat Distortion Normal
-                    float2 offset = float2(0.01, 0.0);
-                    float normal_dx = fbm(p1 + offset.xyy, 6) - base_fbm;
-                    float normal_dz = fbm(p1 + offset.yxy, 6) - base_fbm;
-                    float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
-                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + (normal.xz * _HeatDistortionAmount);
+                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
                     fixed4 background = tex2D(_GrabTexture, distortedUV);
 
-                    // Color Calculation
-                    float noise1 = fbm(p1 * _CellDensity, 6);
-                    float noise2 = fbm(p2 * _CellDensity, 6);
-                    float crack_pattern = pow(abs(noise1 - noise2), 2.0) * _CrackBrightness;
-
-                    fixed3 lava_col = lerp(_DarkColor.rgb, _MidColor.rgb, smoothstep(0.3, 0.7, base_noise));
-                    lava_col = lerp(lava_col, _BrightColor.rgb, smoothstep(0.1, 0.35, crack_pattern));
-
-                    // Flow Highlight
-                    float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + float3(flow.x * 2, 0, flow.y * 2);
-                    float flow_mask = (fbm(flow_mask_p, 4) + 1.0) * 0.5;
-                    lava_col += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * _FlowHighlight;
-
-                    // Shoreline Crust with Gradient and Toggle
                     #if defined(USE_SHORE_EFFECTS)
-                    float crust_noise = (snoise(p2.xzy * 0.7) + 1.0) * 0.5;
+                    float crust_noise = (snoise(i.worldPos.xzy * 0.7) + 1.0) * 0.5;
                     float shore_factor = get_shore_factor(i.worldPos, i.worldNormal, _ShoreSize);
                     float crust_amount = i.shorelineFlag * shore_factor * crust_noise;
                     lava_col = lerp(lava_col, _CrustColor.rgb, crust_amount);
                     #endif
 
-                    // Final Touches
                     float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
                     lava_col *= pulse;
                     lava_col = lerp(lava_col, lava_col * 0.1, shade);
 
-                    // Apply Isometric Icon shadow multiplier (Defaults to 1.0 from chunk mesher)
                     lava_col *= i.shadowMultiplier;
-
-                    // Compose with distorted background for a hazy, semi-opaque effect
                     return lerp(background, fixed4(lava_col, 1.0), 0.95);
                 }
-                else // It's Water
+                else // Water
                 {
-                    // --- WATER LOGIC ---
-                    float2 flow = _WaterFlowDirection * _Time.y;
-                    float3 wave_p = i.worldPos * _WaveScale + float3(flow.x, _Time.y * _WaveSpeed, flow.y);
-                    float3 ripple_p = i.worldPos * _RippleScale + float3(flow.y, _Time.y * _RippleSpeed, -flow.x);
+                    float3 col0, col1;
+                    float foam0, foam1;
+                    float2 norm0, norm1;
 
-                    float wave_fbm = fbm(wave_p, 4);
-                    float ripple_noise = fbm(ripple_p, 5);
+                    EvaluateWater(i, time0, col0, foam0, norm0);
+                    EvaluateWater(i, time1, col1, foam1, norm1);
 
-                    float2 offset = float2(0.01, 0.0);
-                    float normal_dx = fbm(wave_p + offset.xyy, 4) - wave_fbm;
-                    float normal_dz = fbm(wave_p + offset.yxy, 4) - wave_fbm;
-                    float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
+                    fixed3 water_surface_color = col0 * weight0 + col1 * weight1;
+                    float wave_foam = foam0 * weight0 + foam1 * weight1;
+                    float2 final_normal = norm0 * weight0 + norm1 * weight1;
 
-                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + (normal.xz * _DistortionAmount);
+                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
                     fixed4 background = tex2D(_GrabTexture, distortedUV);
-
-                    fixed4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
-
-                    float combined_noise = (wave_fbm + ripple_noise) * 0.5;
-                    combined_noise = (combined_noise + 1.0) * 0.5;
-
-                    fixed3 water_surface_color = lerp(water_base_color.rgb, _ShallowColor.rgb, combined_noise);
-
-                    float wave_foam = smoothstep(_FoamThreshold - 0.1, _FoamThreshold + 0.1, combined_noise);
 
                     float total_foam = wave_foam;
 
-                    // Shoreline Foam with Gradient and Toggle
                     #if defined(USE_SHORE_EFFECTS)
-                    float shore_foam_noise = (snoise(wave_p.xzy * 0.5) + 1.0) * 0.5;
+                    float shore_foam_noise = (snoise(i.worldPos.xzy * 0.5) + 1.0) * 0.5;
                     float shore_factor = get_shore_factor(i.worldPos, i.worldNormal, _ShoreSize);
                     float shore_foam = i.shorelineFlag * shore_factor * shore_foam_noise;
                     total_foam = saturate(total_foam + shore_foam);
@@ -311,10 +334,9 @@ Shader "Minecraft/UberLiquidShader"
 
                     fixed3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
                     final_color = lerp(final_color, final_color * 0.1, shade);
-
-                    // Apply Isometric Icon shadow multiplier (Defaults to 1.0 from chunk mesher)
                     final_color *= i.shadowMultiplier;
 
+                    fixed4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
                     return lerp(background, fixed4(final_color, 1.0), water_base_color.a);
                 }
             }

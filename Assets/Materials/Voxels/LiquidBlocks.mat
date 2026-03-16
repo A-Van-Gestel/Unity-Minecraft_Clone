@@ -62,6 +62,10 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _NoiseTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _OcclusionMap:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -111,6 +115,7 @@ Material:
     - _EnableTriplanarProjection: 1
     - _FlowHighlight: 0.5
     - _FoamThreshold: 0.8
+    - _GlobalFlowMultiplier: 3
     - _GlossMapScale: 1
     - _Glossiness: 0
     - _GlossyReflections: 1
@@ -120,6 +125,7 @@ Material:
     - _InvertABaseColor: 0
     - _InvertCutout: 0
     - _InvertMask: 0
+    - _LavaFlowMultiplier: 0.35
     - _LiquidType: 1
     - _Metallic: 0
     - _Mode: 1
@@ -150,6 +156,7 @@ Material:
     - _UseEmissionFromMainProperties: 1
     - _UseShoreEffects: 0
     - _VisualizeMask: 0
+    - _WaterFlowMultiplier: 3
     - _WaveScale: 5
     - _WaveSpeed: 0.4
     - _ZTest: 4
@@ -166,6 +173,9 @@ Material:
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _FoamColor: {r: 0.9, g: 0.9, b: 0.9, a: 1}
     - _GlobalXYTilingXYZWOffsetXY: {r: 1, g: 1, b: 0, a: 0}
+    - _LavaColor: {r: 1.5, g: 0.5, b: 0, a: 1}
+    - _LavaCoreColor: {r: 2, g: 1.5, b: 0.2, a: 1}
+    - _LavaCrustColor: {r: 0.2, g: 0.1, b: 0, a: 1}
     - _LavaFlowDirection: {r: 0.1, g: 0.05, b: 0, a: 0}
     - _MidColor: {r: 1, g: 0.5, b: 0, a: 1}
     - _ShallowColor: {r: 0.3, g: 0.5, b: 0.9, a: 0.7}

@@ -185,11 +185,11 @@ namespace Helpers
             float shorelineFlag = 0.0f;
 
             // Check horizontal neighbors (N, E, S, W) for "shoreline" effect
-            for (int i = 0; i < 4; i++)
+            for (int k = 0; k < 4; k++)
             {
-                OptionalVoxelState neighbor = neighbors[i];
+                OptionalVoxelState shoreNeighbor = neighbors[k];
                 // Neighboring voxels need to be solid...
-                if (neighbor.HasValue && blockTypes[neighbor.State.id].IsSolid && blockTypes[neighbor.State.id].FluidType == FluidType.None)
+                if (shoreNeighbor.HasValue && blockTypes[shoreNeighbor.State.id].IsSolid && blockTypes[shoreNeighbor.State.id].FluidType == FluidType.None)
                 {
                     // But voxel above should not be a fluid
                     if (above.HasValue && blockTypes[above.State.id].FluidType != FluidType.None) continue;
@@ -203,6 +203,16 @@ namespace Helpers
             // First, get the LOGICAL top height based on the fluid level. This is ONLY used for face culling logic.
             byte fluidLevel = BurstVoxelDataBitMapping.GetFluidLevel(packedData);
             float topHeight = templates[fluidLevel];
+
+            // --- 3. CALCULATE FLOW VECTOR ---
+            // Calculate 4 distinct corner flow vectors for bilinear interpolation across the top face
+            Vector2 flow_bl = CalculateCornerFlow(in props, fluidLevel, n_W, -1, n_S, -1, n_SW, in templates, in blockTypes);
+            Vector2 flow_tl = CalculateCornerFlow(in props, fluidLevel, n_W, -1, n_N, 1, n_NW, in templates, in blockTypes);
+            Vector2 flow_br = CalculateCornerFlow(in props, fluidLevel, n_E, 1, n_S, -1, n_SE, in templates, in blockTypes);
+            Vector2 flow_tr = CalculateCornerFlow(in props, fluidLevel, n_E, 1, n_N, 1, n_NE, in templates, in blockTypes);
+
+            // Side and bottom faces will use an averaged flow
+            Vector2 avgFlow = (flow_bl + flow_tl + flow_br + flow_tr) * 0.25f;
 
             // Second, set the visual height by default to full voxel size to avoid "air gaps"
             const float fullBlockHeight = 1.0f;
@@ -221,8 +231,8 @@ namespace Helpers
                 height_bl = GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_W, n_SW, in templates, in blockTypes); // Bottom-Left
             }
 
-            // --- 3. GENERATE FACES ---
-            // --- 3A. Top Face ---
+            // --- 4. GENERATE FACES ---
+            // --- 4A. Top Face ---
             // Only draw top face if above neighboring voxel is transparent and a different fluid.
             if (!above.HasValue || blockTypes[above.State.id].IsTransparentForMesh && blockTypes[above.State.id].FluidType != props.FluidType)
             {
@@ -238,12 +248,19 @@ namespace Helpers
                 // v.color.a = lightLevel
                 Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
 
-                for (int i = 0; i < 4; i++)
-                {
-                    normals.Add(Vector3.up);
-                    colors.Add(vertexColor);
-                    uvs.Add(Vector2.zero);
-                }
+                // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
+                normals.Add(Vector3.up);
+                colors.Add(vertexColor);
+                uvs.Add(flow_bl); // Back-Left
+                normals.Add(Vector3.up);
+                colors.Add(vertexColor);
+                uvs.Add(flow_tl); // Front-Left
+                normals.Add(Vector3.up);
+                colors.Add(vertexColor);
+                uvs.Add(flow_br); // Back-Right
+                normals.Add(Vector3.up);
+                colors.Add(vertexColor);
+                uvs.Add(flow_tr); // Front-Right
 
                 fluidTriangles.Add(vertexIndex);
                 fluidTriangles.Add(vertexIndex + 1);
@@ -254,25 +271,25 @@ namespace Helpers
                 vertexIndex += 4;
             }
 
-            // --- 3B. Side Faces ---
-            for (int i = 0; i < 4; i++)
+            // --- 4B. Side Faces ---
+            for (int n = 0; n < 4; n++)
             {
-                int faceIndex = VoxelData.HorizontalFaceChecksIndices[i];
-                OptionalVoxelState neighbor;
+                int faceIndex = VoxelData.HorizontalFaceChecksIndices[n];
+                OptionalVoxelState sideNeighbor;
                 switch (faceIndex)
                 {
-                    case 1: neighbor = n_N; break;
-                    case 0: neighbor = n_S; break;
-                    case 5: neighbor = n_E; break;
-                    case 4: neighbor = n_W; break;
+                    case 1: sideNeighbor = n_N; break;
+                    case 0: sideNeighbor = n_S; break;
+                    case 5: sideNeighbor = n_E; break;
+                    case 4: sideNeighbor = n_W; break;
                     default: continue;
                 }
 
                 // Rule 1: Don't draw if neighbor is a higher or equal fluid block.
-                if (neighbor.HasValue && blockTypes[neighbor.State.id].FluidType == props.FluidType && templates[neighbor.State.FluidLevel] >= topHeight) continue;
+                if (sideNeighbor.HasValue && blockTypes[sideNeighbor.State.id].FluidType == props.FluidType && templates[sideNeighbor.State.FluidLevel] >= topHeight) continue;
 
                 // Rule 2: Don't draw if neighbor is an opaque solid block (like stone).
-                if (neighbor.HasValue && !blockTypes[neighbor.State.id].IsTransparentForMesh) continue;
+                if (sideNeighbor.HasValue && !blockTypes[sideNeighbor.State.id].IsTransparentForMesh) continue;
 
                 int v1 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 0];
                 int v2 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 1];
@@ -294,7 +311,7 @@ namespace Helpers
                 vertices.Add(pos + p3);
                 vertices.Add(pos + p4);
 
-                float lightLevel = neighbor.HasValue ? neighbor.State.lightAsFloat : 1.0f;
+                float lightLevel = sideNeighbor.HasValue ? sideNeighbor.State.lightAsFloat : 1.0f;
                 // Use 1.0f for the b-channel so side faces default to full brightness (unshadowed) in game
                 Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
 
@@ -302,7 +319,16 @@ namespace Helpers
                 {
                     normals.Add(VoxelData.FaceChecks[faceIndex]);
                     colors.Add(vertexColor);
-                    uvs.Add(Vector2.zero);
+
+                    // Waterfalls: If the fluid is falling, make the vertical flow speed extreme
+                    if (fluidLevel == 8) // Level 8 is standard falling ID in our architecture
+                    {
+                        uvs.Add(new Vector2(0, -4.0f));
+                    }
+                    else
+                    {
+                        uvs.Add(avgFlow);
+                    }
                 }
 
                 fluidTriangles.Add(vertexIndex);
@@ -314,7 +340,7 @@ namespace Helpers
                 vertexIndex += 4;
             }
 
-            // --- 3C. Bottom Face ---
+            // --- 4C. Bottom Face ---
             // Only draw bottom face if below neighboring voxel is transparent or a different fluid.
             if (!below.HasValue || blockTypes[below.State.id].IsTransparentForMesh && blockTypes[below.State.id].FluidType != props.FluidType)
             {
@@ -327,12 +353,19 @@ namespace Helpers
                 // Use 1.0f for the b-channel so bottom faces default to full brightness (unshadowed) in game
                 Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
 
-                for (int i = 0; i < 4; i++)
-                {
-                    normals.Add(Vector3.down);
-                    colors.Add(vertexColor);
-                    uvs.Add(Vector2.zero);
-                }
+                // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
+                normals.Add(Vector3.down);
+                colors.Add(vertexColor);
+                uvs.Add(avgFlow);
+                normals.Add(Vector3.down);
+                colors.Add(vertexColor);
+                uvs.Add(avgFlow);
+                normals.Add(Vector3.down);
+                colors.Add(vertexColor);
+                uvs.Add(avgFlow);
+                normals.Add(Vector3.down);
+                colors.Add(vertexColor);
+                uvs.Add(avgFlow);
 
                 // Clockwise winding order when viewed from below.
                 fluidTriangles.Add(vertexIndex); // Triangle 1: 0, 2, 1
@@ -376,6 +409,62 @@ namespace Helpers
             }
 
             return totalHeight / count;
+        }
+
+        /// <summary>
+        /// Calculates a discrete flow-direction vector for a specific corner of a fluid block for seamless bilinear interpolation.
+        /// Evaluates the two adjacent orthogonal neighbors and the diagonal neighbor relative to that corner.
+        /// </summary>
+        private static Vector2 CalculateCornerFlow(
+            in BlockTypeJobData centerProps, byte centerLevel,
+            OptionalVoxelState neighborX, int signX,
+            OptionalVoxelState neighborZ, int signZ,
+            OptionalVoxelState diag,
+            in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
+        {
+            float centerHeight = templates[centerLevel];
+
+            float hX = GetEffectiveFluidHeight(neighborX, centerProps.FluidType, templates, blockTypes);
+            float hZ = GetEffectiveFluidHeight(neighborZ, centerProps.FluidType, templates, blockTypes);
+            float hDiag = GetEffectiveFluidHeight(diag, centerProps.FluidType, templates, blockTypes);
+
+            // Obstacle handling: Flow should mathematically push *away* from solid walls.
+            if (hX > 1.0f) hX = centerHeight + 0.05f;
+            if (hZ > 1.0f) hZ = centerHeight + 0.05f;
+            if (hDiag > 1.0f) hDiag = centerHeight + 0.05f;
+
+            // To compute a generic 2D slope for any corner, we take the derivative across the two local axes (X and Z).
+            // We subtract the center's height from the neighbor's height so the resulting vector maps negatively downstream for the shader.
+            // We then multiply by sign to map it to global +X or +Z flow vectors.
+            float dx = (hX - centerHeight) * signX;
+            float dz = (hZ - centerHeight) * signZ;
+
+            // Factor in the diagonal for a slightly smoother sweep.
+            float dDiag = (hDiag - centerHeight);
+            dx += dDiag * signX * 0.707f; // Cos(45)
+            dz += dDiag * signZ * 0.707f; // Sin(45)
+
+            // Normalize safely
+            Vector2 cornerFlow = new Vector2(dx, dz);
+            return cornerFlow.sqrMagnitude > 0.001f ? cornerFlow.normalized : Vector2.zero;
+        }
+
+        private static float GetEffectiveFluidHeight(OptionalVoxelState neighbor, FluidType centerFluidType, in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
+        {
+            if (!neighbor.HasValue) return 0f; // Neutral chunk edge
+
+            BlockTypeJobData nbProps = blockTypes[neighbor.State.id];
+
+            // Solid obstacle
+            if (nbProps.IsSolid && !nbProps.IsTransparentForMesh) return 2.0f; // Represents a solid wall (higher than fluid 1.0)
+
+            // Open Drop / Pit
+            if (nbProps.FluidType == FluidType.None && !nbProps.IsSolid) return -1.0f; // Massive pull
+
+            // Same fluid type
+            if (nbProps.FluidType == centerFluidType) return templates[neighbor.State.FluidLevel];
+
+            return 0f;
         }
 
         private static float GetVertexHeightForCorner(in Vector3 vertPos, float h_tl, float h_tr, float h_bl, float h_br)
