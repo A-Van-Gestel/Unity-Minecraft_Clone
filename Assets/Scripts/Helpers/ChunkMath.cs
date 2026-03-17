@@ -21,7 +21,7 @@ namespace Helpers
         {
             // Layout: X increases fastest (1), then Y (16), then Z (256).
             // Formula: x + (y * width) + (z * width * height)
-            return x + (localY * CHUNK_WIDTH) + (z * CHUNK_WIDTH * SECTION_SIZE);
+            return x + localY * CHUNK_WIDTH + z * CHUNK_WIDTH * SECTION_SIZE;
         }
 
         /// <summary>

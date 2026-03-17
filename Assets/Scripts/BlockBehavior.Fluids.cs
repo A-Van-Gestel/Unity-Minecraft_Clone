@@ -100,18 +100,16 @@ public static partial class BlockBehavior
     /// </summary>
     private static bool HandleFluidVertical(Vector3Int globalPos, ushort currentId, byte effectiveLevel, bool canFlowDown)
     {
-        // Gravity (Vertical Flow)
-        if (canFlowDown)
-        {
-            Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
-            Mods.Add(new VoxelMod(globalBelowPos, currentId)
-            {
-                FluidLevel = MakeFalling(effectiveLevel),
-            });
-            return true; // Skip horizontal spreading this tick if we pushed downwards
-        }
+        // If we can't flow down, do nothing
+        if (!canFlowDown) return false;
 
-        return false;
+        // Gravity (Vertical Flow)
+        Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
+        Mods.Add(new VoxelMod(globalBelowPos, currentId)
+        {
+            FluidLevel = MakeFalling(effectiveLevel),
+        });
+        return true; // Skip horizontal spreading this tick if we pushed downwards
     }
 
     /// <summary>
@@ -126,12 +124,12 @@ public static partial class BlockBehavior
         // Source blocks (effectiveLevel == 0) always spread horizontally.
         // Non-source blocks only spread if the block below is solid AND not the same fluid.
         // This prevents mid-air horizontal grids when fluid overhangs an edge.
-        bool canSpreadHorizontally = (effectiveLevel == 0) ||
+        bool canSpreadHorizontally = effectiveLevel == 0 ||
                                      (belowState.HasValue && belowState.Value.Properties.isSolid && !belowIsSameFluid);
 
         LogWaterDebug($"[WaterDebug FLOW] Step 4 REACHED: pos={globalPos} id={currentId} level={currentLevel} " +
                       $"canSpread={canSpreadHorizontally} effectiveLevel={effectiveLevel} " +
-                      $"belowSolid={(belowState.HasValue && belowState.Value.Properties.isSolid)} " +
+                      $"belowSolid={belowState.HasValue && belowState.Value.Properties.isSolid} " +
                       $"belowIsSameFluid={belowIsSameFluid}");
 
         if (!canSpreadHorizontally)
@@ -141,7 +139,7 @@ public static partial class BlockBehavior
         }
 
         // Minecraft waterfall spread reset: if a falling block hits the ground, it optionally resets to max spread (level 1)
-        byte newLevel = (falling && props.waterfallsMaxSpread) ? (byte)1 : (byte)(effectiveLevel + 1);
+        byte newLevel = falling && props.waterfallsMaxSpread ? (byte)1 : (byte)(effectiveLevel + 1);
         if (newLevel >= props.flowLevels) return;
 
         // Lava Viscosity Randomization (Bug 08)
@@ -215,11 +213,11 @@ public static partial class BlockBehavior
 
         // Reason 3: Can it flow horizontally?
         // Source blocks always, non-source only on solid non-fluid ground.
-        bool canSpreadHorizontally = (effectiveLevel == 0) ||
+        bool canSpreadHorizontally = effectiveLevel == 0 ||
                                      (belowState.HasValue && belowState.Value.Properties.isSolid && !belowIsSameFluid);
 
         bool falling = IsFalling(currentLevel);
-        byte expectedNewLevel = (falling && props.waterfallsMaxSpread) ? (byte)1 : (byte)(effectiveLevel + 1);
+        byte expectedNewLevel = falling && props.waterfallsMaxSpread ? (byte)1 : (byte)(effectiveLevel + 1);
 
         if (canSpreadHorizontally && expectedNewLevel < props.flowLevels)
         {
@@ -375,8 +373,8 @@ public static partial class BlockBehavior
     private static int CalculateFlowCost(ChunkData chunkData, Vector3Int startPos, int startCost, int incomingDir, ushort fluidId)
     {
         // Use Temp allocator to avoid GC drops
-        var queue = new NativeQueue<SearchNode>(Allocator.Temp);
-        var visited = new NativeHashSet<Vector3Int>(64, Allocator.Temp);
+        NativeQueue<SearchNode> queue = new NativeQueue<SearchNode>(Allocator.Temp);
+        NativeHashSet<Vector3Int> visited = new NativeHashSet<Vector3Int>(64, Allocator.Temp);
 
         queue.Enqueue(new SearchNode { Pos = startPos, Cost = startCost });
         visited.Add(startPos);

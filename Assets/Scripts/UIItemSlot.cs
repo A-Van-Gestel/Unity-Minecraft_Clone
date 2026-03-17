@@ -4,7 +4,7 @@ using UnityEngine.UI;
 
 public class UIItemSlot : MonoBehaviour
 {
-    public bool isLinked = false;
+    public bool isLinked;
     public ItemSlot ItemSlot;
     public Image slotImage;
     public Image slotIcon;
@@ -17,16 +17,7 @@ public class UIItemSlot : MonoBehaviour
         _world = GameObject.Find("World").GetComponent<World>();
     }
 
-    public bool HasItem
-    {
-        get
-        {
-            if (ItemSlot == null)
-                return false;
-            else
-                return ItemSlot.HasItem;
-        }
-    }
+    public bool HasItem => ItemSlot != null && ItemSlot.HasItem;
 
     public void Link(ItemSlot itemSlot)
     {
@@ -77,8 +68,8 @@ public class UIItemSlot : MonoBehaviour
 
 public class ItemSlot
 {
-    public ItemStack Stack = null;
-    private UIItemSlot _uiItemSlot = null;
+    public ItemStack Stack;
+    private UIItemSlot _uiItemSlot;
     public bool IsCreative;
 
     public ItemSlot(UIItemSlot uiItemSlot)
@@ -119,13 +110,13 @@ public class ItemSlot
         // Asked more than amount available, return amount available and empty slot. Or asked exactly amount available, return asked amount and empty slot.
         if (amount >= Stack.Amount)
             return _uiItemSlot.ItemSlot.TakeAll();
-        
+
         // Asked less than amount available, return asked amount and reduce stack amount.
         ItemStack handOver = new ItemStack(Stack.ID, amount);
 
         // Don't update slot info when slot is creative
         if (IsCreative) return handOver;
-        
+
         Stack.Amount -= amount;
         _uiItemSlot.UpdateSlot();
 
@@ -135,10 +126,10 @@ public class ItemSlot
     public ItemStack TakeAll()
     {
         ItemStack handOver = new ItemStack(Stack.ID, Stack.Amount);
-        
+
         // Don't update slot info when slot is creative
         if (IsCreative) return handOver;
-        
+
         EmptySlot();
         return handOver;
     }
@@ -150,10 +141,10 @@ public class ItemSlot
 
         // Don't update slot info when slot is creative
         if (IsCreative) return halveStack;
-        
-        
+
+
         Stack.Amount -= halveAmount;
-        
+
         // If remaining stack amount is 0, remove stack from slot. Else update slot with new amount.
         if (Stack.Amount == 0)
             EmptySlot();
@@ -167,10 +158,10 @@ public class ItemSlot
     {
         if (stack == null)
         {
-          EmptySlot();
-          return;
+            EmptySlot();
+            return;
         }
-        
+
         Stack = stack;
         _uiItemSlot.UpdateSlot();
     }
@@ -181,8 +172,7 @@ public class ItemSlot
         {
             if (Stack != null)
                 return true;
-            else
-                return false;
+            return false;
         }
     }
 }

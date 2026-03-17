@@ -18,7 +18,7 @@ namespace Helpers
 
             // --- Prepare Fluid Vertex Templates ---
             const string fluidDataPath = "FluidData";
-            var waterAsset = Resources.Load<FluidMeshData>($"{fluidDataPath}/FluidData_Water");
+            FluidMeshData waterAsset = Resources.Load<FluidMeshData>($"{fluidDataPath}/FluidData_Water");
             if (waterAsset)
             {
                 waterVertexTemplates = waterAsset.vertexYPositions;
@@ -28,7 +28,7 @@ namespace Helpers
                 Debug.LogWarning("Could not find 'FluidData_Water.asset' in Resources. Falling back to default.");
             }
 
-            var lavaAsset = Resources.Load<FluidMeshData>($"{fluidDataPath}/FluidData_Lava");
+            FluidMeshData lavaAsset = Resources.Load<FluidMeshData>($"{fluidDataPath}/FluidData_Lava");
             if (lavaAsset)
             {
                 lavaVertexTemplates = lavaAsset.vertexYPositions;

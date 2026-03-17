@@ -30,19 +30,19 @@ public class PlayerInteraction : MonoBehaviour
     [Header("UI Interaction")]
     public Toolbar toolbar;
 
-    void Awake()
+    private void Awake()
     {
         _player = GetComponent<Player>();
         _playerCamera = Camera.main.transform;
     }
 
-    void Start()
+    private void Start()
     {
         _world = World.Instance;
         _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
     }
 
-    void Update()
+    private void Update()
     {
         if (_world.inUI) return;
 
@@ -128,7 +128,7 @@ public class PlayerInteraction : MonoBehaviour
     /// <summary>
     /// Calculates the signed fractional distance from the nearest voxel boundary.
     /// </summary>
-    private float GetCoordinateOffset(float coordinate)
+    private static float GetCoordinateOffset(float coordinate)
     {
         float frac = coordinate - Mathf.Floor(coordinate);
         if (frac > 0.5f) frac -= 1f;

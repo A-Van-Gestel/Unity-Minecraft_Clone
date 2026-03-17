@@ -123,7 +123,7 @@ public class WorldJobManager
 
         for (int i = 0; i < sectionCount; i++)
         {
-            var s = chunk.ChunkData.sections[i];
+            ChunkSection s = chunk.ChunkData.sections[i];
             sectionData[i] = new SectionJobData
             {
                 IsEmpty = s == null || s.IsEmpty,
@@ -229,7 +229,7 @@ public class WorldJobManager
 
         // --- 1. ALLOCATE INPUT DATA ---
         // Use the passed allocator (TempJob for startup, Persistent for runtime)
-        var inputData = new LightingJobInputData();
+        LightingJobInputData inputData = new LightingJobInputData();
 
         // Get all 8 Neighbor Maps and the heightmap (Read-Only, disposed by job dependency)
         inputData.Heightmap = new NativeArray<ushort>(chunkData.heightMap, allocator);
@@ -245,7 +245,7 @@ public class WorldJobManager
         inputData.NeighborNW = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), allocator);
 
         // --- 2. ALLOCATE OUTPUT DATA ---
-        var jobData = new LightingJobData
+        LightingJobData jobData = new LightingJobData
         {
             Input = inputData,
             // The output arrays also use the faster allocator
@@ -364,7 +364,7 @@ public class WorldJobManager
                 {
                     // Convert Local columns to Global Columns before adding to the queue!
                     HashSet<Vector2Int> globalLightCols = HashSetPool<Vector2Int>.Get(); // POOLING
-                    foreach (var lCol in localLightCols)
+                    foreach (Vector2Int lCol in localLightCols)
                     {
                         globalLightCols.Add(new Vector2Int(lCol.x + chunkData.position.x, lCol.y + chunkData.position.y));
                     }
@@ -686,7 +686,7 @@ public class WorldJobManager
     private void ApplyLightingJobResult(ChunkData chunkData, NativeArray<uint> jobMap)
     {
         int indexOffset = 0;
-        int sectionVolume = ChunkMath.SECTION_VOLUME; // Cache for slight perf
+        const int sectionVolume = ChunkMath.SECTION_VOLUME; // Cache for slight perf
 
         for (int s = 0; s < chunkData.sections.Length; s++)
         {

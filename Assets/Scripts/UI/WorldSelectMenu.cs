@@ -54,7 +54,6 @@ namespace UI
         private List<WorldListItem> _spawnedItems = new List<WorldListItem>();
 
         private Settings _settings;
-        private readonly string _settingFilePath = Application.dataPath + "/settings.json";
 
         public void Awake()
         {
@@ -78,7 +77,7 @@ namespace UI
             // 1. Cleanup old items
             if (_spawnedItems != null)
             {
-                foreach (var item in _spawnedItems)
+                foreach (WorldListItem item in _spawnedItems)
                 {
                     if (item != null && item.gameObject != null) Destroy(item.gameObject);
                 }
@@ -106,7 +105,7 @@ namespace UI
                 return;
             }
 
-            foreach (var data in worlds)
+            foreach (WorldSaveData data in worlds)
             {
                 if (data == null) continue;
 
@@ -135,7 +134,7 @@ namespace UI
             _selectedWorld = data;
 
             // Update visuals
-            foreach (var item in _spawnedItems)
+            foreach (WorldListItem item in _spawnedItems)
             {
                 if (item == null) continue;
 
@@ -166,7 +165,7 @@ namespace UI
             if (loadButton != null) loadButton.interactable = false;
             if (deleteButton != null) deleteButton.interactable = false;
 
-            var migrationManager = new MigrationManager();
+            MigrationManager migrationManager = new MigrationManager();
             bool migrationSucceeded = false;
 
             try
@@ -179,7 +178,7 @@ namespace UI
                     if (migrationProgressPanel != null)
                         migrationProgressPanel.SetActive(true);
 
-                    var progress = new Progress<MigrationProgress>(status =>
+                    Progress<MigrationProgress> progress = new Progress<MigrationProgress>(status =>
                     {
                         if (progressBar != null)
                             progressBar.value = status.PercentComplete;
@@ -188,7 +187,7 @@ namespace UI
                     });
 
                     // 2. AOT Execution
-                    bool isVolatile = Application.isEditor && (_settings != null && _settings.enableVolatileSaveData);
+                    bool isVolatile = Application.isEditor && _settings != null && _settings.enableVolatileSaveData;
                     await migrationManager.RunAOTMigrationAsync(
                         _selectedWorld.worldName,
                         isVolatile,
@@ -217,8 +216,8 @@ namespace UI
             {
                 Debug.LogError($"[UI] Migration Failed: {ex}");
                 ShowErrorPrompt("Migration Failed",
-                    $"An unexpected error occurred while upgrading the world.\n\n" +
-                    $"We have automatically restored your world to its original state.\n\n" +
+                    "An unexpected error occurred while upgrading the world.\n\n" +
+                    "We have automatically restored your world to its original state.\n\n" +
                     $"Error Details: {ex.Message}");
             }
             finally
@@ -226,7 +225,7 @@ namespace UI
                 if (!migrationSucceeded)
                 {
                     // Execute the Rollback automatically
-                    bool isVolatile = Application.isEditor && (_settings != null && _settings.enableVolatileSaveData);
+                    bool isVolatile = Application.isEditor && _settings != null && _settings.enableVolatileSaveData;
                     migrationManager.RollbackMigration(_selectedWorld.worldName, isVolatile);
                 }
             }
@@ -256,7 +255,7 @@ namespace UI
         {
             if (_selectedWorld == null) return;
 
-            bool isVolatile = Application.isEditor && (_settings != null && _settings.enableVolatileSaveData);
+            bool isVolatile = Application.isEditor && _settings != null && _settings.enableVolatileSaveData;
             SaveSystem.DeleteWorld(_selectedWorld.worldName, isVolatile);
             RefreshList();
         }
@@ -306,7 +305,7 @@ namespace UI
             UpdateButtons();
         }
 
-        private void LoadGameScene()
+        private static void LoadGameScene()
         {
             SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single);
         }
@@ -329,7 +328,7 @@ namespace UI
 
             infoPanel.SetActive(true);
 
-            bool isVolatile = Application.isEditor && (_settings != null && _settings.enableVolatileSaveData);
+            bool isVolatile = Application.isEditor && _settings != null && _settings.enableVolatileSaveData;
             string savePath = SaveSystem.GetSavePath(_selectedWorld.worldName, isVolatile);
             int saveVersion = _selectedWorld.version;
 
@@ -361,9 +360,9 @@ namespace UI
                 // 4. Format string data
                 string scaleText = info.ChunkCount == 0
                     ? "<color=#FFA500>N/A (No terrain generated yet)</color>"
-                    : (mapData.ScaleFactor == 1
+                    : mapData.ScaleFactor == 1
                         ? "1 Pixel = 1 Chunk"
-                        : $"1 Pixel = {mapData.ScaleFactor}x{mapData.ScaleFactor} Chunks");
+                        : $"1 Pixel = {mapData.ScaleFactor}x{mapData.ScaleFactor} Chunks";
 
                 // Convert bytes to MB
                 string sizeMb = (info.TotalSizeBytes / 1024f / 1024f).ToString("F2");
@@ -375,9 +374,9 @@ namespace UI
                 List<string> compressionStrings = new List<string>();
                 if (info.CompressionStats != null && info.ChunkCount > 0)
                 {
-                    foreach (var kvp in info.CompressionStats)
+                    foreach (KeyValuePair<CompressionAlgorithm, int> kvp in info.CompressionStats)
                     {
-                        float percentage = (kvp.Value / (float)info.ChunkCount) * 100f;
+                        float percentage = kvp.Value / (float)info.ChunkCount * 100f;
                         compressionStrings.Add($"{kvp.Key} ({percentage:F0}%)");
                     }
                 }
@@ -391,12 +390,12 @@ namespace UI
                 {
                     try
                     {
-                        var migrationManager = new MigrationManager();
-                        var steps = migrationManager.GetRequiredMigrations(saveVersion);
+                        MigrationManager migrationManager = new MigrationManager();
+                        List<WorldMigrationStep> steps = migrationManager.GetRequiredMigrations(saveVersion);
                         if (steps.Count > 0)
                         {
                             migrationText = "\n\n<b><color=#FFA500>Pending Migrations:</color></b>";
-                            foreach (var step in steps)
+                            foreach (WorldMigrationStep step in steps)
                             {
                                 migrationText += $"\n• <b>v{step.SourceWorldVersion} → v{step.TargetWorldVersion}:</b> {step.ChangeSummary}";
                             }
@@ -427,11 +426,11 @@ namespace UI
                         $"<b>Generated Chunks:</b> {info.ChunkCount:N0}\n" +
                         $"<b>Map Scale:</b> {scaleText}" +
                         migrationText + "\n\n" +
-                        $"<b>Map Legend:</b>\n" +
-                        $"<color=#32FF32>■</color> Player Location\n" +
+                        "<b>Map Legend:</b>\n" +
+                        "<color=#32FF32>■</color> Player Location\n" +
                         $"<color=#FF3232>■</color> World Center ({info.CenterChunkCoord.x},{info.CenterChunkCoord.y})\n" +
-                        $"<color=#FFA500>□</color> Valid World Borders\n" +
-                        $"<color=#50B4FF>■</color> Generated Terrain";
+                        "<color=#FFA500>□</color> Valid World Borders\n" +
+                        "<color=#50B4FF>■</color> Generated Terrain";
                 }
 
                 // 6. Apply the minimap texture

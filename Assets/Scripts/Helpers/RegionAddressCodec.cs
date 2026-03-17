@@ -86,7 +86,7 @@ namespace Helpers
                 >= 2 => new V2Codec(),
                 _ => throw new NotSupportedException(
                     $"[RegionAddressCodec] No codec registered for save version {saveVersion}. " +
-                    $"Add a new IRegionAddressCodec implementation and register it in ForVersion().")
+                    "Add a new IRegionAddressCodec implementation and register it in ForVersion()."),
             };
         }
 

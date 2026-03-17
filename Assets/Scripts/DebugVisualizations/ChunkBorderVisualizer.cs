@@ -97,12 +97,12 @@ namespace DebugVisualizations
             // Assign materials.
             // We have 4 SubMeshes, so we need an array of 4 Materials.
             // SubMesh 2 (Section Frame) and SubMesh 3 (Section Cross) share the same material.
-            GetComponent<MeshRenderer>().sharedMaterials = new Material[]
+            GetComponent<MeshRenderer>().sharedMaterials = new[]
             {
                 borderMaterial,
                 gridMaterial,
                 sectionMaterial,
-                sectionMaterial
+                sectionMaterial,
             };
         }
 
@@ -180,8 +180,8 @@ namespace DebugVisualizations
         /// <param name="thickness">The thickness of the border pillars.</param>
         private void GenerateBorderGeometry(List<Vector3> verts, List<int> indices, float thickness)
         {
-            float w = VoxelData.ChunkWidth;
-            float h = VoxelData.ChunkHeight;
+            const float w = VoxelData.ChunkWidth;
+            const float h = VoxelData.ChunkHeight;
 
             // 1. Vertical Pillars (Corners)
             // Centered at the corner, extending up.
@@ -211,9 +211,9 @@ namespace DebugVisualizations
         /// <param name="thickness">The thickness of the section frame lines.</param>
         private void GenerateSectionGeometry(List<Vector3> verts, List<int> indices, float thickness)
         {
-            float w = VoxelData.ChunkWidth;
-            float h = VoxelData.ChunkHeight;
-            float sectionSize = ChunkMath.SECTION_SIZE;
+            const float w = VoxelData.ChunkWidth;
+            const float h = VoxelData.ChunkHeight;
+            const float sectionSize = ChunkMath.SECTION_SIZE;
 
             // Iterate vertically sections
             // We skip 0 and h (128) because the red border already covers those areas.
@@ -270,7 +270,7 @@ namespace DebugVisualizations
         /// <param name="b">The second local vertex index.</param>
         /// <param name="c">The third local vertex index.</param>
         /// <param name="d">The fourth local vertex index.</param>
-        private void AddQuad(List<int> indices, int offset, int a, int b, int c, int d)
+        private static void AddQuad(List<int> indices, int offset, int a, int b, int c, int d)
         {
             // Triangle 1
             indices.Add(offset + a);
@@ -295,17 +295,8 @@ namespace DebugVisualizations
         private void GenerateGridLines(List<Vector3> verts, List<int> indices)
         {
             if (gridInterval <= 0) return;
-            float w = VoxelData.ChunkWidth;
-            float h = VoxelData.ChunkHeight;
-
-            // Helper for adding a line segment
-            void AddLine(Vector3 start, Vector3 end)
-            {
-                indices.Add(verts.Count);
-                verts.Add(start);
-                indices.Add(verts.Count);
-                verts.Add(end);
-            }
+            const float w = VoxelData.ChunkWidth;
+            const float h = VoxelData.ChunkHeight;
 
             // X-Axis Lines
             for (float i = gridInterval; i < h; i += gridInterval)
@@ -334,6 +325,17 @@ namespace DebugVisualizations
                 AddLine(new Vector3(i, 0, 0), new Vector3(i, 0, w));
                 AddLine(new Vector3(i, h, 0), new Vector3(i, h, w));
             }
+
+            return;
+
+            // Helper for adding a line segment
+            void AddLine(Vector3 start, Vector3 end)
+            {
+                indices.Add(verts.Count);
+                verts.Add(start);
+                indices.Add(verts.Count);
+                verts.Add(end);
+            }
         }
 
         /// <summary>
@@ -345,9 +347,17 @@ namespace DebugVisualizations
         {
             if (!renderSectionsInternalCross) return;
 
-            float w = VoxelData.ChunkWidth;
-            float h = VoxelData.ChunkHeight;
-            float sectionSize = ChunkMath.SECTION_SIZE;
+            const float w = VoxelData.ChunkWidth;
+            const float h = VoxelData.ChunkHeight;
+            const float sectionSize = ChunkMath.SECTION_SIZE;
+
+            for (float y = 0; y <= h; y += sectionSize)
+            {
+                AddLine(new Vector3(0, y, 0), new Vector3(w, y, w)); // Diagonal 1
+                AddLine(new Vector3(w, y, 0), new Vector3(0, y, w)); // Diagonal 2
+            }
+
+            return;
 
             void AddLine(Vector3 start, Vector3 end)
             {
@@ -355,12 +365,6 @@ namespace DebugVisualizations
                 verts.Add(start);
                 indices.Add(verts.Count);
                 verts.Add(end);
-            }
-
-            for (float y = 0; y <= h; y += sectionSize)
-            {
-                AddLine(new Vector3(0, y, 0), new Vector3(w, y, w)); // Diagonal 1
-                AddLine(new Vector3(w, y, 0), new Vector3(0, y, w)); // Diagonal 2
             }
         }
 

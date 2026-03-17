@@ -165,7 +165,7 @@ namespace Data
 
         public override bool Equals(object obj)
         {
-            return obj is VoxelState other && this == other;
+            return obj is VoxelState other && this == other; // TODO: Burst: Loading managed type 'Object' is not supported
         }
 
         public override int GetHashCode()

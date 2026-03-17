@@ -40,7 +40,7 @@ namespace Serialization
             if (localColumns == null || localColumns.Count == 0) return;
 
             // VALIDATION: Ensure coordinates are truly local (0-15)
-            foreach (var col in localColumns)
+            foreach (Vector2Int col in localColumns)
             {
                 if (col.x < 0 || col.x >= VoxelData.ChunkWidth ||
                     col.y < 0 || col.y >= VoxelData.ChunkWidth)
@@ -55,7 +55,7 @@ namespace Serialization
                 _pendingRecalcs[chunkCoord] = existingSet;
             }
 
-            foreach (var col in localColumns)
+            foreach (Vector2Int col in localColumns)
             {
                 existingSet.Add(col);
             }
@@ -82,11 +82,11 @@ namespace Serialization
         /// </summary>
         public void Save()
         {
-            using var stream = new FileStream(_filePath, FileMode.Create);
-            using var writer = new BinaryWriter(stream);
+            using FileStream stream = new FileStream(_filePath, FileMode.Create);
+            using BinaryWriter writer = new BinaryWriter(stream);
 
             writer.Write(_pendingRecalcs.Count);
-            foreach (var kvp in _pendingRecalcs)
+            foreach (KeyValuePair<ChunkCoord, HashSet<Vector2Int>> kvp in _pendingRecalcs)
             {
                 writer.Write(kvp.Key.X);
                 writer.Write(kvp.Key.Z);
@@ -110,8 +110,8 @@ namespace Serialization
 
             try
             {
-                using var stream = new FileStream(_filePath, FileMode.Open);
-                using var reader = new BinaryReader(stream);
+                using FileStream stream = new FileStream(_filePath, FileMode.Open);
+                using BinaryReader reader = new BinaryReader(stream);
 
                 int chunkCount = reader.ReadInt32();
                 for (int i = 0; i < chunkCount; i++)
@@ -187,7 +187,7 @@ namespace Serialization
         /// </summary>
         public void Clear()
         {
-            foreach (var set in _pendingRecalcs.Values)
+            foreach (HashSet<Vector2Int> set in _pendingRecalcs.Values)
             {
                 HashSetPool<Vector2Int>.Release(set);
             }

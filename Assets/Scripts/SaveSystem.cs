@@ -49,8 +49,8 @@ public static class SaveSystem
 
             worldState = new WorldStateData
             {
-                timeOfDay = world.globalLightLevel
-            }
+                timeOfDay = world.globalLightLevel,
+            },
         };
 
         // --- 2. Gather Player Data ---
@@ -124,24 +124,24 @@ public static class SaveSystem
         world.globalLightLevel = data.worldState.timeOfDay;
         world.SetGlobalLightValue(); // Apply to shader immediately
 
+        // If the player doesn't exist, do nothing
+        if (world.player == null) return;
+
         // 2. Apply Player State
-        if (world.player != null)
+        world.player.LoadSaveData(data.player);
+
+        // Apply Inventory
+        Toolbar toolbar = Object.FindFirstObjectByType<Toolbar>();
+        if (toolbar != null)
         {
-            world.player.LoadSaveData(data.player);
+            toolbar.LoadInventoryData(data.player.inventory);
+        }
 
-            // Apply Inventory
-            Toolbar toolbar = Object.FindFirstObjectByType<Toolbar>();
-            if (toolbar != null)
-            {
-                toolbar.LoadInventoryData(data.player.inventory);
-            }
-
-            // Apply Cursor Item
-            DragAndDropHandler cursorHandler = Object.FindFirstObjectByType<DragAndDropHandler>();
-            if (cursorHandler != null)
-            {
-                cursorHandler.LoadCursorData(data.player.cursorItem);
-            }
+        // Apply Cursor Item
+        DragAndDropHandler cursorHandler = Object.FindFirstObjectByType<DragAndDropHandler>();
+        if (cursorHandler != null)
+        {
+            cursorHandler.LoadCursorData(data.player.cursorItem);
         }
     }
 
@@ -197,11 +197,12 @@ public static class SaveSystem
     public static void DeleteWorld(string worldName, bool useVolatilePath)
     {
         string path = GetSavePath(worldName, useVolatilePath);
-        if (Directory.Exists(path))
-        {
-            Directory.Delete(path, true); // Recursive delete
-            Debug.Log($"Deleted world: {worldName}");
-        }
+
+        // If the world doesn't exist, do nothing
+        if (!Directory.Exists(path)) return;
+
+        Directory.Delete(path, true); // Recursive delete
+        Debug.Log($"Deleted world: {worldName}");
     }
 
     // --- Helper methods ---

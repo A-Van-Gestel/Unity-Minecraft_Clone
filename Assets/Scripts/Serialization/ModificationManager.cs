@@ -70,18 +70,18 @@ namespace Serialization
         /// </summary>
         public void Save()
         {
-            using var stream = new FileStream(_filePath, FileMode.Create);
-            using var writer = new BinaryWriter(stream);
+            using FileStream stream = new FileStream(_filePath, FileMode.Create);
+            using BinaryWriter writer = new BinaryWriter(stream);
 
             // --- 1. Save Voxel Mods ---
             writer.Write(_pendingMods.Count);
-            foreach (var kvp in _pendingMods)
+            foreach (KeyValuePair<ChunkCoord, List<VoxelMod>> kvp in _pendingMods)
             {
                 writer.Write(kvp.Key.X);
                 writer.Write(kvp.Key.Z);
                 writer.Write(kvp.Value.Count);
 
-                foreach (var mod in kvp.Value)
+                foreach (VoxelMod mod in kvp.Value)
                 {
                     // Serialize VoxelMod
                     writer.Write(mod.GlobalPosition.x);
@@ -102,8 +102,8 @@ namespace Serialization
         {
             if (!File.Exists(_filePath)) return;
 
-            using var stream = new FileStream(_filePath, FileMode.Open);
-            using var reader = new BinaryReader(stream);
+            using FileStream stream = new FileStream(_filePath, FileMode.Open);
+            using BinaryReader reader = new BinaryReader(stream);
 
             // --- 1. Load Voxel Mods ---
             int chunkCount = reader.ReadInt32();
@@ -126,7 +126,7 @@ namespace Serialization
                     mods.Add(new VoxelMod(pos, id)
                     {
                         Orientation = orient,
-                        FluidLevel = fluid
+                        FluidLevel = fluid,
                     });
                 }
 

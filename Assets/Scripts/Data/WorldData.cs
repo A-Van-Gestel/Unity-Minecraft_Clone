@@ -235,12 +235,12 @@ namespace Data
             ChunkData chunk = RequestChunk(chunkVoxelPos, false);
 
             // Allocate the full height array for the job
-            var jobArray = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, allocator);
+            NativeArray<uint> jobArray = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, allocator);
 
             if (chunk != null)
             {
                 // Copy sections into the flat native array
-                int sectionSize = 16 * 16 * 16;
+                const int sectionSize = 16 * 16 * 16;
                 for (int i = 0; i < chunk.sections.Length; i++)
                 {
                     if (chunk.sections[i] != null)

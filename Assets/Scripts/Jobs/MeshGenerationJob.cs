@@ -78,7 +78,7 @@ namespace Jobs
         private int _vertexIndex;
 
         // --- HELPERS ---
-        private static readonly Vector3Int[] FluidNeighborOffsets =
+        private static readonly Vector3Int[] s_fluidNeighborOffsets =
         {
             new Vector3Int(0, 0, 1), new Vector3Int(1, 0, 0), new Vector3Int(0, 0, -1), new Vector3Int(-1, 0, 0),
             new Vector3Int(1, 0, 1), new Vector3Int(1, 0, -1), new Vector3Int(-1, 0, -1), new Vector3Int(-1, 0, 1),
@@ -91,8 +91,8 @@ namespace Jobs
         public void Execute()
         {
             _vertexIndex = 0;
-            int sectionHeight = 16;
-            int sectionCount = VoxelData.ChunkHeight / sectionHeight;
+            const int sectionHeight = 16;
+            const int sectionCount = VoxelData.ChunkHeight / sectionHeight;
 
             for (int s = 0; s < sectionCount; s++)
             {
@@ -137,7 +137,7 @@ namespace Jobs
                     TransparentTriStartIndex = startTrans,
                     TransparentTriCount = Output.TransparentTriangles.Length - startTrans,
                     FluidTriStartIndex = startFluid,
-                    FluidTriCount = Output.FluidTriangles.Length - startFluid
+                    FluidTriCount = Output.FluidTriangles.Length - startFluid,
                 };
             }
         }
@@ -233,11 +233,11 @@ namespace Jobs
                 NativeArray<float> templates = voxelProps.FluidType == FluidType.WaterLike ? WaterVertexTemplates : LavaVertexTemplates;
 
                 // Collect 9 neighbors for smoothing
-                var neighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
+                NativeArray<OptionalVoxelState> neighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
 
-                for (int i = 0; i < FluidNeighborOffsets.Length; i++)
+                for (int i = 0; i < s_fluidNeighborOffsets.Length; i++)
                 {
-                    VoxelState? neighborState = GetVoxelStateFromLocalPos(pos + FluidNeighborOffsets[i]);
+                    VoxelState? neighborState = GetVoxelStateFromLocalPos(pos + s_fluidNeighborOffsets[i]);
                     if (neighborState.HasValue) neighbors[i] = new OptionalVoxelState(neighborState.Value);
                 }
 
@@ -412,16 +412,16 @@ namespace Jobs
         private int GetTextureID(ushort blockId, int faceIndex)
         {
             BlockTypeJobData props = BlockTypes[blockId];
-            switch (faceIndex)
+            return faceIndex switch
             {
-                case 0: return props.BackFaceTexture;
-                case 1: return props.FrontFaceTexture;
-                case 2: return props.TopFaceTexture;
-                case 3: return props.BottomFaceTexture;
-                case 4: return props.LeftFaceTexture;
-                case 5: return props.RightFaceTexture;
-                default: return 0;
-            }
+                0 => props.BackFaceTexture,
+                1 => props.FrontFaceTexture,
+                2 => props.TopFaceTexture,
+                3 => props.BottomFaceTexture,
+                4 => props.LeftFaceTexture,
+                5 => props.RightFaceTexture,
+                _ => 0,
+            };
         }
 
         #endregion

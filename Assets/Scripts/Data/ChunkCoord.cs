@@ -172,7 +172,7 @@ namespace Data
 
         public override bool Equals(object obj)
         {
-            return obj is ChunkCoord coord && Equals(coord);
+            return obj is ChunkCoord coord && Equals(coord); // TODO: Burst: Loading managed type 'Object' is not supported
         }
 
         public bool Equals(ChunkCoord other)

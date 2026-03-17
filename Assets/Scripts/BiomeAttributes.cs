@@ -23,19 +23,22 @@ public class BiomeAttributes : ScriptableObject
 
     [Header("Major Flora")]
     public bool placeMajorFlora = true;
-    public int majorFloraIndex = 0;
+    public int majorFloraIndex;
     public float majorFloraZoneScale = 1.3f;
+
     [Range(0.1f, 1f)]
     public float majorFloraZoneThreshold = 0.6f;
+
     public float majorFloraPlacementScale = 15f;
 
     [Range(0.1f, 1f)]
     public float majorFloraPlacementThreshold = 0.8f;
-    
+
     public int maxHeight = 12;
     public int minHeight = 5;
 
-    [FormerlySerializedAs("Lodes")] [Header("Second Pass")]
+    [FormerlySerializedAs("Lodes")]
+    [Header("Second Pass")]
     public Lode[] lodes;
 }
 

@@ -50,7 +50,7 @@ namespace UI
                 {
                     try
                     {
-                        var migrationManager = new MigrationManager();
+                        MigrationManager migrationManager = new MigrationManager();
                         var steps = migrationManager.GetRequiredMigrations(data.version);
                         if (steps.Count > 0)
                         {

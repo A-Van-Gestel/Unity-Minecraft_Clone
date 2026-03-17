@@ -93,7 +93,7 @@ namespace Editor.BlockEditor.Helpers
             Material renderMaterial = new Material(sourceMaterial);
 
             // --- Set up the preview renderer ---
-            var previewUtility = new PreviewRenderUtility();
+            PreviewRenderUtility previewUtility = new PreviewRenderUtility();
 
             try
             {
@@ -117,7 +117,7 @@ namespace Editor.BlockEditor.Helpers
                 cam.transform.rotation = Quaternion.identity;
 
                 // Set preview background lighting back to a neutral state just in case
-                var light = previewUtility.lights[0];
+                Light light = previewUtility.lights[0];
                 light.intensity = 1.0f;
 
                 // Render

@@ -29,8 +29,8 @@ namespace Data.NativeData
         /// </summary>
         public void Dispose()
         {
-            if (WaterVertexTemplates.IsCreated) WaterVertexTemplates.Dispose();
-            if (LavaVertexTemplates.IsCreated) LavaVertexTemplates.Dispose();
+            if (WaterVertexTemplates.IsCreated) WaterVertexTemplates.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            if (LavaVertexTemplates.IsCreated) LavaVertexTemplates.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
         }
     }
 }

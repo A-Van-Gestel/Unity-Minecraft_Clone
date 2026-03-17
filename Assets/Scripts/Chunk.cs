@@ -14,13 +14,13 @@ public class Chunk
     public ChunkCoord Coord;
     public Vector3 ChunkPosition;
     public ChunkData ChunkData;
-    private SectionRenderer[] _sectionRenderers;
+    private readonly SectionRenderer[] _sectionRenderers;
 
     // Expose for pool management validation
     public readonly GameObject ChunkGameObject;
 
     private bool _isActive;
-    private HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
+    private readonly HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
 
     // Cached reference to avoid a GetComponent call on every pool activation, while remaining Unity-lifetime safe
     private ChunkLoadAnimation _loadAnimation;
@@ -41,7 +41,7 @@ public class Chunk
         ChunkGameObject.transform.SetParent(World.Instance.transform);
 
         // Initialize Section Renderers
-        int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+        const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
         _sectionRenderers = new SectionRenderer[sectionCount];
         for (int i = 0; i < sectionCount; i++)
         {
@@ -108,9 +108,9 @@ public class Chunk
         }
 
         // Reset Visuals (clears mesh but keeps memory allocated)
-        for (int i = 0; i < _sectionRenderers.Length; i++)
+        foreach (SectionRenderer sectionRenderer in _sectionRenderers)
         {
-            _sectionRenderers[i].Clear();
+            sectionRenderer.Clear();
         }
 
         // Ensure object is active
@@ -189,7 +189,7 @@ public class Chunk
                 {
                     // Convert section index back to 3D position
                     int x = i % ChunkMath.SECTION_SIZE;
-                    int yOffset = (i / ChunkMath.SECTION_SIZE) % ChunkMath.SECTION_SIZE;
+                    int yOffset = i / ChunkMath.SECTION_SIZE % ChunkMath.SECTION_SIZE;
                     int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
 
                     AddActiveVoxel(new Vector3Int(x, startY + yOffset, z));
@@ -240,7 +240,7 @@ public class Chunk
         }
 
         // Remove inactive voxels from the HashSet in O(1) time each
-        foreach (var pos in toRemove)
+        foreach (Vector3Int pos in toRemove)
         {
             _activeVoxels.Remove(pos);
         }
@@ -357,7 +357,7 @@ public class Chunk
             }
         }
 
-        private void AdjustIndices(NativeList<int> indices, int start, int count, int offset)
+        private static void AdjustIndices(NativeList<int> indices, int start, int count, int offset)
         {
             for (int k = 0; k < count; k++)
             {
@@ -375,14 +375,14 @@ public class Chunk
     {
         // 1. Run a fast Burst job on the main thread to adjust coordinate spaces from Chunk-Space to Section-Space.
         // This modifies the data in-place efficiently.
-        var postProcessJob = new PostProcessMeshJob
+        PostProcessMeshJob postProcessJob = new PostProcessMeshJob
         {
             Vertices = meshData.Vertices,
             OpaqueTris = meshData.Triangles,
             TransparentTris = meshData.TransparentTriangles,
             FluidTris = meshData.FluidTriangles,
             Stats = meshData.SectionStats,
-            SectionHeight = ChunkMath.SECTION_SIZE
+            SectionHeight = ChunkMath.SECTION_SIZE,
         };
 
         postProcessJob.Schedule().Complete();
@@ -391,13 +391,13 @@ public class Chunk
         NativeArray<MeshSectionStats> stats = meshData.SectionStats;
 
         // Obtain raw NativeArray views from the lists
-        var allVerts = meshData.Vertices.AsArray();
-        var allUvs = meshData.Uvs.AsArray();
-        var allColors = meshData.Colors.AsArray();
-        var allNormals = meshData.Normals.AsArray();
-        var allOpaqueTris = meshData.Triangles.AsArray();
-        var allTransTris = meshData.TransparentTriangles.AsArray();
-        var allFluidTris = meshData.FluidTriangles.AsArray();
+        NativeArray<Vector3> allVerts = meshData.Vertices.AsArray();
+        NativeArray<Vector2> allUvs = meshData.Uvs.AsArray();
+        NativeArray<Color> allColors = meshData.Colors.AsArray();
+        NativeArray<Vector3> allNormals = meshData.Normals.AsArray();
+        NativeArray<int> allOpaqueTris = meshData.Triangles.AsArray();
+        NativeArray<int> allTransTris = meshData.TransparentTriangles.AsArray();
+        NativeArray<int> allFluidTris = meshData.FluidTriangles.AsArray();
 
         for (int i = 0; i < _sectionRenderers.Length; i++)
         {
@@ -490,15 +490,15 @@ public class Chunk
             }
 
             _loadAnimation.StartAnimation();
-            _hasPlayedLoadAnimation = true;
         }
         else
         {
             // If animations are heavily disabled or toggled off mid-game, ensure chunk is snapped to correct position
             if (_loadAnimation != null) _loadAnimation.enabled = false;
             ChunkGameObject.transform.position = ChunkPosition;
-            _hasPlayedLoadAnimation = true;
         }
+
+        _hasPlayedLoadAnimation = true;
     }
 
     #endregion

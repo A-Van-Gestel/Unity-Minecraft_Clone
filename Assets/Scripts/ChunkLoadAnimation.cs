@@ -2,7 +2,7 @@ using UnityEngine;
 
 public class ChunkLoadAnimation : MonoBehaviour
 {
-    private readonly float _speed = 3f;
+    private const float SPEED = 3f;
     private Vector3 _targetPos;
 
     /// Random delay for each chunk before playing animation.
@@ -46,7 +46,7 @@ public class ChunkLoadAnimation : MonoBehaviour
             return;
         }
 
-        transform.position = Vector3.Lerp(transform.position, _targetPos, Time.deltaTime * _speed);
+        transform.position = Vector3.Lerp(transform.position, _targetPos, Time.deltaTime * SPEED);
         if (_targetPos.y - transform.position.y < 0.05f)
         {
             transform.position = _targetPos;

@@ -12,8 +12,8 @@ public static class VoxelData
     public const int SeaLevel = 45; // Minecraft = 62
 
     // Lighting Values
-    public static readonly float MinLightLevel = 0.15f;
-    public static readonly float MaxLightLevel = 1.0f;
+    public const float MinLightLevel = 0.15f;
+    public const float MaxLightLevel = 1.0f;
 
     // Light is handled as float (0-1) byt Minecraft stores light as a byte (0-15),
     // so we need to know how much of that float a single light level represents.
@@ -35,7 +35,7 @@ public static class VoxelData
 
     public const float NormalizedBlockTextureSize = 1f / TextureAtlasSizeInBlocks;
 
-    public static readonly Vector3[] VoxelVerts = new Vector3[8]
+    public static readonly Vector3[] VoxelVerts =
     {
         new Vector3(0.0f, 0.0f, 0.0f),
         new Vector3(1.0f, 0.0f, 0.0f),
@@ -47,7 +47,7 @@ public static class VoxelData
         new Vector3(0.0f, 1.0f, 1.0f),
     };
 
-    public static readonly Vector3Int[] FaceChecks = new Vector3Int[6]
+    public static readonly Vector3Int[] FaceChecks =
     {
         new Vector3Int(0, 0, -1), // Back Face
         new Vector3Int(0, 0, 1), // Front Face
@@ -60,7 +60,7 @@ public static class VoxelData
     /// <summary>
     /// Checks for all faces (front, back, top, bottom, right, left).
     /// </summary>
-    public static readonly int[] RevFaceChecksIndices = new int[6]
+    public static readonly int[] RevFaceChecksIndices =
     {
         1, // Front Face
         0, // Back Face
@@ -73,7 +73,7 @@ public static class VoxelData
     /// <summary>
     /// Checks for only the horizontal faces (front, back, right, left).
     /// </summary>
-    public static readonly int[] HorizontalFaceChecksIndices = new int[4]
+    public static readonly int[] HorizontalFaceChecksIndices =
     {
         1, // Front Face
         0, // Back Face
@@ -84,7 +84,7 @@ public static class VoxelData
     /// <summary>
     /// Checks for only the vertical faces (bottom, top).
     /// </summary>
-    public static readonly int[] VerticalFaceChecksIndices = new int[2]
+    public static readonly int[] VerticalFaceChecksIndices =
     {
         3, // Bottom Face
         2, // Top Face
@@ -95,16 +95,16 @@ public static class VoxelData
     /// These are NOT indices into FaceChecks — they are standalone Vector3Int offsets.
     /// Used for stability checks that must account for all 8 neighbors, e.g. mesh or lighting readiness.
     /// </summary>
-    public static readonly Vector3Int[] DiagonalNeighborOffsets = new Vector3Int[4]
+    public static readonly Vector3Int[] DiagonalNeighborOffsets =
     {
-        new Vector3Int( 1, 0,  1), // Front-Right (NE)
-        new Vector3Int(-1, 0,  1), // Front-Left  (NW)
-        new Vector3Int( 1, 0, -1), // Back-Right  (SE)
+        new Vector3Int(1, 0, 1), // Front-Right (NE)
+        new Vector3Int(-1, 0, 1), // Front-Left  (NW)
+        new Vector3Int(1, 0, -1), // Back-Right  (SE)
         new Vector3Int(-1, 0, -1), // Back-Left   (SW)
     };
 
     // Should be accessed like this: VoxelTris[face * 4 + vert].
-    public static readonly int[] VoxelTris = new int[24]
+    public static readonly int[] VoxelTris =
     {
         // Vertex Index order (with duplicates)
         // Back, Front, Top, Bottom, Left, Right
@@ -117,7 +117,7 @@ public static class VoxelData
         1, 2, 5, 6, // Right Face
     };
 
-    public static readonly Vector2[] VoxelUvs = new Vector2[4]
+    public static readonly Vector2[] VoxelUvs =
     {
         new Vector2(0.0f, 0.0f), // Bottom left
         new Vector2(0.0f, 1.0f), // Top Left
@@ -147,7 +147,7 @@ public static class VoxelData
             return parsedSeed; // Return the parsed integer directly.
         }
         // 3. Seed was string (e.g., "hello world").
-        else
+
         {
             int hashCode = seedText.GetHashCode();
             int safeHashCode = Mathf.Abs(hashCode) / 10000; // TODO: This is a hack to make the make the world generation not shit itself.

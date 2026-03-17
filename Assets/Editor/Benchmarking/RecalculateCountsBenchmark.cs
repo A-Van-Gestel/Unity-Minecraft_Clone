@@ -23,7 +23,7 @@ namespace Editor.Benchmarking
         public static void RunBenchmark()
         {
             // --- Setup: Create a realistic section with a mix of air, lit air, and solid blocks ---
-            var section = new ChunkSection();
+            ChunkSection section = new ChunkSection();
             FillRealisticData(section);
 
             // Count ground truth first
@@ -46,7 +46,7 @@ namespace Editor.Benchmarking
             }
 
             // --- Benchmark: Original (data != 0) ---
-            var sw = Stopwatch.StartNew();
+            Stopwatch sw = Stopwatch.StartNew();
             for (int i = 0; i < ITERATIONS; i++)
             {
                 _ = RecalculateNonAirCount_Original(section);
@@ -85,20 +85,20 @@ namespace Editor.Benchmarking
             double countsFixedMs = sw.Elapsed.TotalMilliseconds;
 
             // --- Report ---
-            double perCallOriginalUs = (originalMs / ITERATIONS) * 1000.0;
-            double perCallFixedUs = (fixedMs / ITERATIONS) * 1000.0;
+            double perCallOriginalUs = originalMs / ITERATIONS * 1000.0;
+            double perCallFixedUs = fixedMs / ITERATIONS * 1000.0;
             double diffUs = perCallFixedUs - perCallOriginalUs;
-            double diffPercent = (diffUs / perCallOriginalUs) * 100.0;
+            double diffPercent = diffUs / perCallOriginalUs * 100.0;
 
             Debug.Log($"=== RecalculateCounts Benchmark ({ITERATIONS} iterations) ===");
-            Debug.Log($"[NonAirCount Only]");
+            Debug.Log("[NonAirCount Only]");
             Debug.Log($"  Original (data != 0):       {originalMs:F3} ms total, {perCallOriginalUs:F3} µs/call");
             Debug.Log($"  Fixed (data & ID_MASK != 0): {fixedMs:F3} ms total, {perCallFixedUs:F3} µs/call");
             Debug.Log($"  Difference: {diffUs:+0.000;-0.000} µs/call ({diffPercent:+0.00;-0.00}%)");
-            Debug.Log($"[Full RecalculateCounts (null blockTypes)]");
-            Debug.Log($"  Original: {countsOriginalMs:F3} ms total, {(countsOriginalMs / ITERATIONS) * 1000.0:F3} µs/call");
-            Debug.Log($"  Fixed:    {countsFixedMs:F3} ms total, {(countsFixedMs / ITERATIONS) * 1000.0:F3} µs/call");
-            Debug.Log($"=== End Benchmark ===");
+            Debug.Log("[Full RecalculateCounts (null blockTypes)]");
+            Debug.Log($"  Original: {countsOriginalMs:F3} ms total, {countsOriginalMs / ITERATIONS * 1000.0:F3} µs/call");
+            Debug.Log($"  Fixed:    {countsFixedMs:F3} ms total, {countsFixedMs / ITERATIONS * 1000.0:F3} µs/call");
+            Debug.Log("=== End Benchmark ===");
         }
 
         /// <summary>

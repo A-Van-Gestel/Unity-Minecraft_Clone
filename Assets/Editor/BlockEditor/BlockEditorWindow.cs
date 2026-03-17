@@ -73,7 +73,7 @@ namespace Editor.BlockEditor
             GetWindow<BlockEditorWindow>("Block Editor");
         }
 
-        void OnEnable()
+        private void OnEnable()
         {
             // --- Initialize Preview Widget ---
             _meshPreviewWidget = new MeshPreviewWidget();
@@ -111,7 +111,7 @@ namespace Editor.BlockEditor
         }
 
         // --- OnDisable for Cleanup ---
-        void OnDisable()
+        private void OnDisable()
         {
             // Unsubscribe from the update loop when the window is closed or disabled.
             EditorApplication.update -= OnUpdate;
@@ -141,7 +141,7 @@ namespace Editor.BlockEditor
             if (_blockDatabase == null) return;
             // We work on a copy of the data. This allows for "Save" and "Revert" functionality.
             _blockTypesCopy = new List<BlockType>();
-            foreach (var blockType in _blockDatabase.blockTypes)
+            foreach (BlockType blockType in _blockDatabase.blockTypes)
             {
                 // Simple member-wise copy for a new instance.
                 _blockTypesCopy.Add(new BlockType
@@ -172,7 +172,7 @@ namespace Editor.BlockEditor
                     topFaceTexture = blockType.topFaceTexture,
                     bottomFaceTexture = blockType.bottomFaceTexture,
                     leftFaceTexture = blockType.leftFaceTexture,
-                    rightFaceTexture = blockType.rightFaceTexture
+                    rightFaceTexture = blockType.rightFaceTexture,
                 });
             }
 
@@ -224,7 +224,7 @@ namespace Editor.BlockEditor
         /// <param name="initialTags">Initial tags to assign to the new preset.</param>
         /// <param name="initialCanReplaceTags">Initial canReplaceTags to assign to the new preset.</param>
         /// <returns>The created preset, or null if the user cancelled.</returns>
-        private BlockTagPreset CreateTagPresetAsset(
+        private static BlockTagPreset CreateTagPresetAsset(
             string defaultFileName,
             BlockTags initialTags = BlockTags.NONE,
             BlockTags initialCanReplaceTags = BlockTags.NONE)
@@ -255,7 +255,7 @@ namespace Editor.BlockEditor
 
         #region OnGUI - Tab Switching
 
-        void OnGUI()
+        private void OnGUI()
         {
             if (_blockDatabase == null)
             {
@@ -270,7 +270,7 @@ namespace Editor.BlockEditor
                 alignment = TextAnchor.MiddleLeft,
                 imagePosition = ImagePosition.ImageLeft,
                 fontStyle = FontStyle.Bold,
-                padding = new RectOffset(26, 4, 2, 2)
+                padding = new RectOffset(26, 4, 2, 2),
             };
 
             // --- Tab Toolbar ---

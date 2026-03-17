@@ -28,14 +28,14 @@ namespace Benchmarks
         private enum BenchmarkMode
         {
             Serial, // Simulates a sequential job by using ScheduleByRef.
-            Parallel // Uses ScheduleParallelByRef for maximum parallelism.
+            Parallel, // Uses ScheduleParallelByRef for maximum parallelism.
         }
 
         /// <summary>
         /// A predefined list of batch sizes to test during a full comparison run.
         /// These are powers of two, which are common and efficient batch sizes.
         /// </summary>
-        private static readonly int[] SBatchSizesToTest = { 1, 2, 4, 8, 16, 32, 64, 128 };
+        private static readonly int[] s_sBatchSizesToTest = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
         #endregion
 
@@ -91,7 +91,7 @@ namespace Benchmarks
         #region Private Fields
 
         private World _world;
-        private bool _isBenchmarking = false;
+        private bool _isBenchmarking;
 
         #endregion
 
@@ -166,7 +166,7 @@ namespace Benchmarks
             string modeDetails = _mode == BenchmarkMode.Parallel
                 ? $"Parallel (Batch Size: {_parallelBatchSize})"
                 : "Serial";
-            Debug.Log($"<color=lime>--- Single Benchmark Complete ---</color>\n" +
+            Debug.Log("<color=lime>--- Single Benchmark Complete ---</color>\n" +
                       $"Configuration: {modeDetails}\n" +
                       $"<b>Average Time over {_benchmarkRuns} runs: {averageTime} ms</b>");
         }
@@ -180,13 +180,13 @@ namespace Benchmarks
             _isBenchmarking = true;
             Debug.Log("--- Starting Full Comparison Benchmark ---");
 
-            var results = new Dictionary<string, long>();
+            Dictionary<string, long> results = new Dictionary<string, long>();
 
             // --- Run Serial Benchmark ---
             yield return StartCoroutine(ExecuteBenchmarkRun(BenchmarkMode.Serial, 0, result => results["Serial"] = result));
 
             // --- Run Parallel Benchmarks ---
-            foreach (int batchSize in SBatchSizesToTest)
+            foreach (int batchSize in s_sBatchSizesToTest)
             {
                 yield return StartCoroutine(ExecuteBenchmarkRun(BenchmarkMode.Parallel, batchSize, result => results[$"Parallel_{batchSize}"] = result));
             }
@@ -213,9 +213,9 @@ namespace Benchmarks
 
             for (int run = 0; run < _benchmarkRuns; run++)
             {
-                var jobHandles = new NativeArray<JobHandle>(_chunksToGenerate, Allocator.Persistent);
-                var jobDataToDispose = new List<GenerationJobData>(_chunksToGenerate);
-                var stopwatch = new Stopwatch();
+                NativeArray<JobHandle> jobHandles = new NativeArray<JobHandle>(_chunksToGenerate, Allocator.Persistent);
+                List<GenerationJobData> jobDataToDispose = new List<GenerationJobData>(_chunksToGenerate);
+                Stopwatch stopwatch = new Stopwatch();
 
                 try
                 {
@@ -225,14 +225,14 @@ namespace Benchmarks
                     int sideLength = Mathf.CeilToInt(Mathf.Sqrt(_chunksToGenerate));
                     for (int i = 0; i < _chunksToGenerate; i++)
                     {
-                        var coord = new ChunkCoord(i % sideLength, i / sideLength);
+                        ChunkCoord coord = new ChunkCoord(i % sideLength, i / sideLength);
                         GenerationJobData jobData = ScheduleBenchmarkGeneration(coord, mode, batchSize);
                         jobHandles[i] = jobData.Handle;
                         jobDataToDispose.Add(jobData);
                     }
 
                     // --- Completion Phase ---
-                    var combinedHandle = JobHandle.CombineDependencies(jobHandles);
+                    JobHandle combinedHandle = JobHandle.CombineDependencies(jobHandles);
 
                     if (_useBlockingWait)
                     {
@@ -251,7 +251,7 @@ namespace Benchmarks
                 {
                     // --- Cleanup for this single run ---
                     if (jobHandles.IsCreated) jobHandles.Dispose();
-                    foreach (var data in jobDataToDispose) data.Dispose();
+                    foreach (GenerationJobData data in jobDataToDispose) data.Dispose();
                 }
 
                 if (!_useBlockingWait) yield return null;
@@ -274,8 +274,8 @@ namespace Benchmarks
         /// <returns>A GenerationJobData struct containing the job handle and output data containers.</returns>
         private GenerationJobData ScheduleBenchmarkGeneration(ChunkCoord chunkCoord, BenchmarkMode benchmarkMode, int parallelBatchSize)
         {
-            var modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
-            var job = new ChunkGenerationJob
+            NativeQueue<VoxelMod> modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
+            ChunkGenerationJob job = new ChunkGenerationJob
             {
                 Seed = VoxelData.Seed,
                 ChunkPosition = chunkCoord.ToVoxelOrigin(),
@@ -284,7 +284,7 @@ namespace Benchmarks
                 AllLodes = _world.JobDataManager.AllLodesJobData,
                 OutputMap = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent),
                 OutputHeightMap = new NativeArray<ushort>(VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent),
-                Modifications = modificationsQueue.AsParallelWriter()
+                Modifications = modificationsQueue.AsParallelWriter(),
             };
 
             JobHandle handle;
@@ -307,7 +307,7 @@ namespace Benchmarks
                 Handle = handle,
                 Map = job.OutputMap,
                 HeightMap = job.OutputHeightMap,
-                Mods = modificationsQueue
+                Mods = modificationsQueue,
             };
         }
 
@@ -317,8 +317,8 @@ namespace Benchmarks
         /// <param name="results">A dictionary containing the average times for each test configuration.</param>
         private void GenerateReport(Dictionary<string, long> results)
         {
-            var report = new StringBuilder();
-            report.AppendLine($"<color=lime><b>--- CHUNK GENERATION BENCHMARK REPORT ---</b></color>");
+            StringBuilder report = new StringBuilder();
+            report.AppendLine("<color=lime><b>--- CHUNK GENERATION BENCHMARK REPORT ---</b></color>");
             report.AppendLine($"Test configuration: {_chunksToGenerate} chunks per run, averaged over {_benchmarkRuns} runs.\n");
 
             // --- Baseline: Serial ---
@@ -331,7 +331,7 @@ namespace Benchmarks
             long bestParallelTime = long.MaxValue;
             int bestBatchSize = 0;
 
-            foreach (int batchSize in SBatchSizesToTest)
+            foreach (int batchSize in s_sBatchSizesToTest)
             {
                 string key = $"Parallel_{batchSize}";
                 if (results.TryGetValue(key, out long time))
@@ -351,7 +351,7 @@ namespace Benchmarks
             report.AppendLine($"  - Fastest (Parallel): {bestParallelTime} ms with a batch size of <b>{bestBatchSize}</b>");
 
             long difference = serialTime - bestParallelTime;
-            float percentage = (difference / (float)serialTime) * 100f;
+            float percentage = difference / (float)serialTime * 100f;
 
             report.AppendLine($"  - <color=cyan>Conclusion: Parallel mode with a batch size of {bestBatchSize} was <b>{percentage:F1}% faster</b> than Serial mode.</color>");
             report.AppendLine($"  - <color=yellow>Recommendation: For this system, a batch size of <b>{bestBatchSize}</b> is optimal for chunk generation.</color>");

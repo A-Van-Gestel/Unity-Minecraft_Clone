@@ -56,7 +56,7 @@ namespace Serialization
 
                     // Read Header
                     _fileStream.Seek(0, SeekOrigin.Begin);
-                    using var reader = new BinaryReader(_fileStream, Encoding.Default, true);
+                    using BinaryReader reader = new BinaryReader(_fileStream, Encoding.Default, true);
 
                     // Read Offsets
                     for (int i = 0; i < TOTAL_CHUNKS; i++)
@@ -257,6 +257,7 @@ namespace Serialization
             // Since this is usually used for migration (offline), it's acceptable.
             for (int i = 0; i < TOTAL_CHUNKS; i++)
             {
+                // TODO: The field is sometimes used inside synchronized block and sometimes used without synchronization
                 if (_offsets[i] != 0)
                 {
                     int localX = i % CHUNKS_PER_SIDE;

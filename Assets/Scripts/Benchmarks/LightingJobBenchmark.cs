@@ -65,7 +65,7 @@ namespace Benchmarks
             /// Simulates breaking hundreds of overlapping lights.
             /// This forces the engine to calculate darkness propagation AND neighbor refill logic simultaneously.
             /// </summary>
-            BlocklightRemovalStress
+            BlocklightRemovalStress,
         }
 
         #endregion
@@ -110,7 +110,7 @@ namespace Benchmarks
         #region Private Fields
 
         private World _world;
-        private bool _isBenchmarking = false;
+        private bool _isBenchmarking;
 
         // Reusable setup data to avoid regenerating the test scenario for every single job iteration
         private LightingBenchmarkData _sourceData;
@@ -181,7 +181,7 @@ namespace Benchmarks
             long averageTime = 0;
             yield return StartCoroutine(ExecuteBenchmarkRun(_scenario, result => averageTime = result));
 
-            Debug.Log($"<color=lime>--- Single Benchmark Complete ---</color>\n" +
+            Debug.Log("<color=lime>--- Single Benchmark Complete ---</color>\n" +
                       $"Scenario: {_scenario}\n" +
                       $"<b>Average Time over {_benchmarkRuns} runs: {averageTime} ms</b>");
         }
@@ -191,7 +191,7 @@ namespace Benchmarks
             _isBenchmarking = true;
             Debug.Log("--- Starting Full Comparison Lighting Benchmark ---");
 
-            var results = new Dictionary<string, long>();
+            Dictionary<string, long> results = new Dictionary<string, long>();
 
             foreach (LightingScenario scenario in Enum.GetValues(typeof(LightingScenario)))
             {
@@ -225,16 +225,16 @@ namespace Benchmarks
 
             for (int run = 0; run < _benchmarkRuns; run++)
             {
-                var jobHandles = new NativeArray<JobHandle>(_jobsToRun, Allocator.Persistent);
+                NativeArray<JobHandle> jobHandles = new NativeArray<JobHandle>(_jobsToRun, Allocator.Persistent);
                 // We need to track the data for every single job to dispose of it later.
-                var activeJobDataList = new List<LightingJobData>(_jobsToRun);
+                List<LightingJobData> activeJobDataList = new List<LightingJobData>(_jobsToRun);
 
-                var stopwatch = new Stopwatch();
+                Stopwatch stopwatch = new Stopwatch();
 
                 try
                 {
                     // Prepare all jobs BEFORE starting the timer to measure execution time, not allocation time.
-                    // However, allocation is technically part of the overhead. 
+                    // However, allocation is technically part of the overhead.
                     // For strict algorithm testing, we prepare first.
                     for (int i = 0; i < _jobsToRun; i++)
                     {
@@ -250,7 +250,7 @@ namespace Benchmarks
                         LightingJobData data = activeJobDataList[i];
 
                         // Re-create the job struct here to link the schedule
-                        var job = new NeighborhoodLightingJob
+                        NeighborhoodLightingJob job = new NeighborhoodLightingJob
                         {
                             Map = data.Map,
                             ChunkPosition = new Vector2Int(0, 0), // Dummy position
@@ -266,14 +266,14 @@ namespace Benchmarks
 
                             BlockTypes = _world.JobDataManager.BlockTypesJobData,
                             CrossChunkLightMods = data.Mods,
-                            IsStable = data.IsStable
+                            IsStable = data.IsStable,
                         };
 
                         jobHandles[i] = job.Schedule();
                     }
 
                     // --- Completion Phase ---
-                    var combinedHandle = JobHandle.CombineDependencies(jobHandles);
+                    JobHandle combinedHandle = JobHandle.CombineDependencies(jobHandles);
 
                     if (_useBlockingWait)
                     {
@@ -292,7 +292,7 @@ namespace Benchmarks
                 {
                     // Cleanup
                     if (jobHandles.IsCreated) jobHandles.Dispose();
-                    foreach (var jobData in activeJobDataList)
+                    foreach (LightingJobData jobData in activeJobDataList)
                     {
                         jobData.Dispose();
                     }
@@ -314,7 +314,7 @@ namespace Benchmarks
         /// </summary>
         private LightingJobData PrepareJob(Allocator allocator)
         {
-            var jobData = new LightingJobData
+            LightingJobData jobData = new LightingJobData
             {
                 Input = new LightingJobInputData
                 {
@@ -326,7 +326,7 @@ namespace Benchmarks
                     NeighborNE = new NativeArray<uint>(_sourceData.NeighborNE, allocator),
                     NeighborSE = new NativeArray<uint>(_sourceData.NeighborSE, allocator),
                     NeighborSW = new NativeArray<uint>(_sourceData.NeighborSW, allocator),
-                    NeighborNW = new NativeArray<uint>(_sourceData.NeighborNW, allocator)
+                    NeighborNW = new NativeArray<uint>(_sourceData.NeighborNW, allocator),
                 },
                 Map = new NativeArray<uint>(_sourceData.Center, allocator),
 
@@ -336,20 +336,20 @@ namespace Benchmarks
                 SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator),
 
                 Mods = new NativeList<LightModification>(allocator),
-                IsStable = new NativeArray<bool>(1, allocator)
+                IsStable = new NativeArray<bool>(1, allocator),
             };
 
             // Populate Queues
-            foreach (var node in _sourceData.SourceSunLightQueue) jobData.SunLightQueue.Enqueue(node);
-            foreach (var node in _sourceData.SourceBlockLightQueue) jobData.BlockLightQueue.Enqueue(node);
-            foreach (var col in _sourceData.SourceSunRecalcQueue) jobData.SunLightRecalcQueue.Enqueue(col);
+            foreach (LightQueueNode node in _sourceData.SourceSunLightQueue) jobData.SunLightQueue.Enqueue(node);
+            foreach (LightQueueNode node in _sourceData.SourceBlockLightQueue) jobData.BlockLightQueue.Enqueue(node);
+            foreach (Vector2Int col in _sourceData.SourceSunRecalcQueue) jobData.SunLightRecalcQueue.Enqueue(col);
 
             return jobData;
         }
 
         private LightingBenchmarkData GenerateScenarioData(LightingScenario scenario, Allocator allocator)
         {
-            var data = new LightingBenchmarkData(allocator);
+            LightingBenchmarkData data = new LightingBenchmarkData(allocator);
 
             // 1. Fill Default Terrain (Solid Stone up to Y=60)
             FillDefaultTerrain(data, 60);
@@ -444,7 +444,7 @@ namespace Benchmarks
                         {
                             for (int z = 4; z < 13; z += 4)
                             {
-                                var pos = new Vector3Int(x, y, z);
+                                Vector3Int pos = new Vector3Int(x, y, z);
                                 // Pre-populate the light field so there is something to remove
                                 PrecalculateBlockLight(data, pos, 15);
                                 // Queue removal
@@ -461,14 +461,14 @@ namespace Benchmarks
 
         #region Generation Helpers
 
-        private void FillDefaultTerrain(LightingBenchmarkData data, int height)
+        private static void FillDefaultTerrain(LightingBenchmarkData data, int height)
         {
             uint solid = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0, 0, 1, 0); // Stone
             uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 1, 0); // Air
 
             for (int i = 0; i < data.Center.Length; i++)
             {
-                int y = (i / VoxelData.ChunkWidth) % VoxelData.ChunkHeight;
+                int y = i / VoxelData.ChunkWidth % VoxelData.ChunkHeight;
                 uint val = y <= height ? solid : air;
 
                 data.Center[i] = val;
@@ -486,7 +486,7 @@ namespace Benchmarks
             for (int i = 0; i < data.HeightMap.Length; i++) data.HeightMap[i] = (ushort)height;
         }
 
-        private void CarveSwissCheese(LightingBenchmarkData data)
+        private static void CarveSwissCheese(LightingBenchmarkData data)
         {
             Random.InitState(12345); // Fixed seed for consistency
             for (int x = 0; x < VoxelData.ChunkWidth; x++)
@@ -505,7 +505,7 @@ namespace Benchmarks
             }
         }
 
-        private void CarveRoom(LightingBenchmarkData data, int startX, int startY, int startZ, int sizeX, int sizeY, int sizeZ)
+        private static void CarveRoom(LightingBenchmarkData data, int startX, int startY, int startZ, int sizeX, int sizeY, int sizeZ)
         {
             for (int x = startX; x < startX + sizeX; x++)
             {
@@ -520,7 +520,7 @@ namespace Benchmarks
             }
         }
 
-        private void PlaceLightSource(LightingBenchmarkData data, Vector3Int pos, byte level)
+        private static void PlaceLightSource(LightingBenchmarkData data, Vector3Int pos, byte level)
         {
             int index = pos.x + VoxelData.ChunkWidth * (pos.y + VoxelData.ChunkHeight * pos.z);
 
@@ -531,7 +531,7 @@ namespace Benchmarks
             data.SourceBlockLightQueue.Add(new LightQueueNode
             {
                 Position = pos,
-                OldLightLevel = 0
+                OldLightLevel = 0,
             });
         }
 
@@ -545,12 +545,12 @@ namespace Benchmarks
             int srcIdx = srcPos.x + VoxelData.ChunkWidth * (srcPos.y + VoxelData.ChunkHeight * srcPos.z);
             data.Center[srcIdx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level, 1, 0);
 
-            var queue = new Queue<(Vector3Int p, int l)>();
+            Queue<(Vector3Int p, int l)> queue = new Queue<(Vector3Int p, int l)>();
             queue.Enqueue((srcPos, level));
 
             while (queue.Count > 0)
             {
-                var (pos, l) = queue.Dequeue();
+                (Vector3Int pos, int l) = queue.Dequeue();
 
                 if (!IsInsideChunk(pos)) continue;
 
@@ -580,7 +580,7 @@ namespace Benchmarks
             }
         }
 
-        private void RemoveLightSource(LightingBenchmarkData data, Vector3Int pos, byte oldLevel)
+        private static void RemoveLightSource(LightingBenchmarkData data, Vector3Int pos, byte oldLevel)
         {
             // 1. Set Block to Air (ID 0), Light 0.
             int idx = pos.x + VoxelData.ChunkWidth * (pos.y + VoxelData.ChunkHeight * pos.z);
@@ -590,11 +590,11 @@ namespace Benchmarks
             data.SourceBlockLightQueue.Add(new LightQueueNode
             {
                 Position = pos,
-                OldLightLevel = oldLevel
+                OldLightLevel = oldLevel,
             });
         }
 
-        private bool IsInsideChunk(Vector3Int pos)
+        private static bool IsInsideChunk(Vector3Int pos)
         {
             return pos.x >= 0 && pos.x < VoxelData.ChunkWidth &&
                    pos.y >= 0 && pos.y < VoxelData.ChunkHeight &&
@@ -609,23 +609,22 @@ namespace Benchmarks
 
         private void GenerateReport(Dictionary<string, long> results)
         {
-            var sb = new StringBuilder();
-            sb.AppendLine($"<color=cyan><b>--- NEIGHBORHOOD LIGHTING BENCHMARK REPORT ---</b></color>");
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("<color=cyan><b>--- NEIGHBORHOOD LIGHTING BENCHMARK REPORT ---</b></color>");
             sb.AppendLine($"Configuration: {_jobsToRun} jobs per run, {_benchmarkRuns} runs average.\n");
 
             long baseline = results.ContainsKey(nameof(LightingScenario.SunlightVerticalFlat))
                 ? results[nameof(LightingScenario.SunlightVerticalFlat)]
                 : 1; // Avoid divide by zero if baseline is skipped/missing
 
-            foreach (var kvp in results)
+            foreach ((string key, long time) in results)
             {
-                string name = kvp.Key.Replace("_", " ");
-                long time = kvp.Value;
+                string name = key.Replace("_", " ");
 
                 if (time == -1)
                 {
                     sb.AppendLine($"<b>{name}:</b>");
-                    sb.AppendLine($"  <color=orange>SKIPPED (Currently Unreliable)</color>");
+                    sb.AppendLine("  <color=orange>SKIPPED (Currently Unreliable)</color>");
                     sb.AppendLine();
                     continue;
                 }
@@ -672,8 +671,8 @@ namespace Benchmarks
 
             public LightingBenchmarkData(Allocator allocator)
             {
-                int mapSize = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
-                int heightMapSize = VoxelData.ChunkWidth * VoxelData.ChunkWidth;
+                const int mapSize = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
+                const int heightMapSize = VoxelData.ChunkWidth * VoxelData.ChunkWidth;
 
                 Center = new NativeArray<uint>(mapSize, allocator);
                 HeightMap = new NativeArray<ushort>(heightMapSize, allocator);

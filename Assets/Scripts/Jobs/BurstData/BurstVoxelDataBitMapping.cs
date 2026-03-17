@@ -39,16 +39,16 @@ namespace Jobs.BurstData
         {
             // Standard VoxelData.FaceChecks indices:
             // 0=Back, 1=Front, 2=Top, 3=Bottom, 4=Left, 5=Right
-            switch (orientation)
+            return orientation switch
             {
-                case 1: return 0; // Front/North maps to index 0 (Default)
-                case 0: return 1; // Back/South maps to index 1
-                case 4: return 2; // Left/West  maps to index 2
-                case 5: return 3; // Right/East maps to index 3
-                case 2: return 4; // Top        maps to index 4
-                case 3: return 5; // Bottom     maps to index 5
-                default: return 0; // Default to index 0 (Front) for any invalid orientation
-            }
+                1 => 0, // Front/North maps to index 0 (Default)
+                0 => 1, // Back/South maps to index 1
+                4 => 2, // Left/West  maps to index 2
+                5 => 3, // Right/East maps to index 3
+                2 => 4, // Top        maps to index 4
+                3 => 5, // Bottom     maps to index 5
+                _ => 0,
+            };
         }
 
         // --- Packing ---
@@ -68,7 +68,7 @@ namespace Jobs.BurstData
         public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel, bool isFluid = false)
         {
             uint packedData = 0;
-            packedData |= (uint)((id) << ID_SHIFT); // ID: 16 bits
+            packedData |= (uint)(id << ID_SHIFT); // ID: 16 bits
             packedData |= (uint)((sunLight & 0xF) << SUNLIGHT_SHIFT); // Sunlight: 4 bits
             packedData |= (uint)((blockLight & 0xF) << BLOCKLIGHT_SHIFT); // Blocklight: 4 bits
 
@@ -87,7 +87,7 @@ namespace Jobs.BurstData
                 meta = GetOrientationIndex(orientation);
             }
 
-            packedData |= (uint)((meta) << META_SHIFT); // Meta: 8 bits
+            packedData |= (uint)(meta << META_SHIFT); // Meta: 8 bits
 
             return packedData;
         }
@@ -167,16 +167,16 @@ namespace Jobs.BurstData
             byte orientationIndex = (byte)(meta & META_VAL_ORIENT_MASK);
 
             // Inverse mapping: Storage Index -> World Orientation
-            switch (orientationIndex)
+            return orientationIndex switch
             {
-                case 0: return 1; // Index 0 -> Front (North)
-                case 1: return 0; // Index 1 -> Back (South)
-                case 2: return 4; // Index 2 -> Left (West)
-                case 3: return 5; // Index 3 -> Right (East)
-                case 4: return 2; // Index 4 -> Top
-                case 5: return 3; // Index 5 -> Bottom
-                default: return 1; // Fallback to Front
-            }
+                0 => 1, // Index 0 -> Front (North)
+                1 => 0, // Index 1 -> Back (South)
+                2 => 4, // Index 2 -> Left (West)
+                3 => 5, // Index 3 -> Right (East)
+                4 => 2, // Index 4 -> Top
+                5 => 3, // Index 5 -> Bottom
+                _ => 1,
+            };
         }
 
         /// <summary>
@@ -205,7 +205,7 @@ namespace Jobs.BurstData
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetId(uint packedData, ushort id)
         {
-            return (packedData & ~ID_MASK) | (uint)((id) << ID_SHIFT);
+            return (packedData & ~ID_MASK) | (uint)(id << ID_SHIFT);
         }
 
         /// <summary>
@@ -241,7 +241,7 @@ namespace Jobs.BurstData
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static uint SetMeta(uint packedData, byte meta)
         {
-            return (packedData & ~META_MASK) | (uint)((meta) << META_SHIFT);
+            return (packedData & ~META_MASK) | (uint)(meta << META_SHIFT);
         }
 
         /// <summary>

@@ -16,7 +16,6 @@ namespace DebugVisualizations
         public bool IsMeshApplied { get; private set; }
 
         public readonly GameObject ChunkObject;
-        private readonly MeshFilter _meshFilter;
         private readonly Mesh _mesh;
 
         // Native data for the job
@@ -25,7 +24,7 @@ namespace DebugVisualizations
         public NativeList<Vector3> Vertices;
         public NativeList<int> Triangles;
         public NativeList<Color> Colors;
-        private bool _isJobDataAllocated = false;
+        private bool _isJobDataAllocated;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="VisualizerChunkData"/> class.
@@ -39,13 +38,13 @@ namespace DebugVisualizations
             ChunkObject.transform.SetParent(parent);
             ChunkObject.transform.position = chunkCoord.ToWorldPosition();
 
-            _meshFilter = ChunkObject.AddComponent<MeshFilter>();
-            var mr = ChunkObject.AddComponent<MeshRenderer>();
+            MeshFilter meshFilter = ChunkObject.AddComponent<MeshFilter>();
+            MeshRenderer mr = ChunkObject.AddComponent<MeshRenderer>();
             mr.material = mat;
 
             _mesh = new Mesh();
             _mesh.MarkDynamic(); // Hint that we update this often
-            _meshFilter.mesh = _mesh;
+            meshFilter.mesh = _mesh;
 
             IsMeshApplied = true; // Initially, there's no pending mesh.
         }
@@ -66,7 +65,7 @@ namespace DebugVisualizations
             ChunkObject.SetActive(true);
 
             // Ensure material is correct (in case setting changed)
-            var mr = ChunkObject.GetComponent<MeshRenderer>();
+            MeshRenderer mr = ChunkObject.GetComponent<MeshRenderer>();
             if (mr.sharedMaterial != mat) mr.material = mat;
 
             IsMeshApplied = true;
@@ -165,12 +164,12 @@ namespace DebugVisualizations
             _isJobDataAllocated = false;
         }
 
-        private NativeHashMap<Vector3Int, Color> ToNativeHashMap(Dictionary<Vector3Int, Color> dict, Allocator allocator)
+        private static NativeHashMap<Vector3Int, Color> ToNativeHashMap(Dictionary<Vector3Int, Color> dict, Allocator allocator)
         {
             if (dict == null || dict.Count == 0) return new NativeHashMap<Vector3Int, Color>(0, allocator);
 
-            var nativeMap = new NativeHashMap<Vector3Int, Color>(dict.Count, allocator);
-            foreach (var kvp in dict)
+            NativeHashMap<Vector3Int, Color> nativeMap = new NativeHashMap<Vector3Int, Color>(dict.Count, allocator);
+            foreach (KeyValuePair<Vector3Int, Color> kvp in dict)
             {
                 nativeMap.Add(kvp.Key, kvp.Value);
             }

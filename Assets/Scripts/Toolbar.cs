@@ -8,7 +8,7 @@ public class Toolbar : MonoBehaviour
     public Player player;
     public RectTransform highlight;
     public UIItemSlot[] slots;
-    public int slotIndex = 0;
+    public int slotIndex;
 
     private readonly KeyCode[] _keyCodes =
     {
@@ -78,7 +78,7 @@ public class Toolbar : MonoBehaviour
 
     public List<InventoryItemData> GetInventoryData()
     {
-        var list = new List<InventoryItemData>();
+        List<InventoryItemData> list = new List<InventoryItemData>();
         for (int i = 0; i < slots.Length; i++)
         {
             if (slots[i].ItemSlot.HasItem)
@@ -97,16 +97,17 @@ public class Toolbar : MonoBehaviour
     public void LoadInventoryData(List<InventoryItemData> data)
     {
         // Clear existing
-        foreach (var slot in slots) slot.ItemSlot.EmptySlot();
+        foreach (UIItemSlot slot in slots) slot.ItemSlot.EmptySlot();
 
         // Fill from save
-        foreach (var item in data)
+        foreach (InventoryItemData item in data)
         {
-            if (item.slotIndex >= 0 && item.slotIndex < slots.Length)
-            {
-                ItemStack stack = new ItemStack(item.itemID, item.amount);
-                slots[item.slotIndex].ItemSlot.InsertStack(stack);
-            }
+            // Skip invalid slots
+            if (item.slotIndex < 0 || item.slotIndex >= slots.Length) continue;
+
+            // Create stack and insert
+            ItemStack stack = new ItemStack(item.itemID, item.amount);
+            slots[item.slotIndex].ItemSlot.InsertStack(stack);
         }
     }
 

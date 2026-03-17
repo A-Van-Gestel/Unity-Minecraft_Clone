@@ -52,7 +52,7 @@ namespace DebugVisualizations.Jobs
         {
             const float cubeScale = 0.8f;
             const float offset = (1f - cubeScale) / 2f;
-            var cubeOffset = new Vector3(offset, offset, offset);
+            Vector3 cubeOffset = new Vector3(offset, offset, offset);
             int vertexIndex = 0;
 
             // Instead of iterating the dictionary, we iterate its key array for determinism.
@@ -67,22 +67,11 @@ namespace DebugVisualizations.Jobs
                     Vector3Int neighborPos = localPos + FaceChecks[faceIndex];
 
                     // --- CULLING LOGIC ---
-                    bool shouldCull = false;
-                    if (VoxelsToDraw.ContainsKey(neighborPos))
-                    {
-                        shouldCull = true;
-                    }
-                    else
-                    {
-                        if (neighborPos.z >= VoxelData.ChunkWidth && NorthVoxels.IsCreated && NorthVoxels.ContainsKey(new Vector3Int(neighborPos.x, neighborPos.y, 0)))
-                            shouldCull = true;
-                        else if (neighborPos.z < 0 && SouthVoxels.IsCreated && SouthVoxels.ContainsKey(new Vector3Int(neighborPos.x, neighborPos.y, VoxelData.ChunkWidth - 1)))
-                            shouldCull = true;
-                        else if (neighborPos.x >= VoxelData.ChunkWidth && EastVoxels.IsCreated && EastVoxels.ContainsKey(new Vector3Int(0, neighborPos.y, neighborPos.z)))
-                            shouldCull = true;
-                        else if (neighborPos.x < 0 && WestVoxels.IsCreated && WestVoxels.ContainsKey(new Vector3Int(VoxelData.ChunkWidth - 1, neighborPos.y, neighborPos.z)))
-                            shouldCull = true;
-                    }
+                    bool shouldCull = VoxelsToDraw.ContainsKey(neighborPos)
+                                      || neighborPos.z >= VoxelData.ChunkWidth && NorthVoxels.IsCreated && NorthVoxels.ContainsKey(new Vector3Int(neighborPos.x, neighborPos.y, 0))
+                                      || neighborPos.z < 0 && SouthVoxels.IsCreated && SouthVoxels.ContainsKey(new Vector3Int(neighborPos.x, neighborPos.y, VoxelData.ChunkWidth - 1))
+                                      || neighborPos.x >= VoxelData.ChunkWidth && EastVoxels.IsCreated && EastVoxels.ContainsKey(new Vector3Int(0, neighborPos.y, neighborPos.z))
+                                      || neighborPos.x < 0 && WestVoxels.IsCreated && WestVoxels.ContainsKey(new Vector3Int(VoxelData.ChunkWidth - 1, neighborPos.y, neighborPos.z));
 
                     if (shouldCull) continue;
 

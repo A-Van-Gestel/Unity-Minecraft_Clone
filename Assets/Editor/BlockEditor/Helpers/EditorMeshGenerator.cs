@@ -19,24 +19,24 @@ namespace Editor.BlockEditor.Helpers
             if (blockType == null) return null;
 
             Mesh mesh = new Mesh();
-            var vertices = new List<Vector3>();
-            var opaqueTriangles = new List<int>();
-            var transparentTriangles = new List<int>();
-            var uvs = new List<Vector2>();
-            var colors = new List<Color>();
-            var normals = new List<Vector3>();
+            List<Vector3> vertices = new List<Vector3>();
+            List<int> opaqueTriangles = new List<int>();
+            List<int> transparentTriangles = new List<int>();
+            List<Vector2> uvs = new List<Vector2>();
+            List<Color> colors = new List<Color>();
+            List<Vector3> normals = new List<Vector3>();
 
             // Center point for rotating the mesh around its true center
             Vector3 centerOffset = new Vector3(-0.5f, -0.5f, -0.5f);
 
             // --- Unified path for all block types using VoxelMeshHelper ---
-            var nativeVertices = new NativeList<Vector3>(Allocator.Temp);
-            var nativeOpaqueTris = new NativeList<int>(Allocator.Temp);
-            var nativeTransparentTris = new NativeList<int>(Allocator.Temp);
-            var nativeFluidTris = new NativeList<int>(Allocator.Temp);
-            var nativeUvs = new NativeList<Vector2>(Allocator.Temp);
-            var nativeColors = new NativeList<Color>(Allocator.Temp);
-            var nativeNormals = new NativeList<Vector3>(Allocator.Temp);
+            NativeList<Vector3> nativeVertices = new NativeList<Vector3>(Allocator.Temp);
+            NativeList<int> nativeOpaqueTris = new NativeList<int>(Allocator.Temp);
+            NativeList<int> nativeTransparentTris = new NativeList<int>(Allocator.Temp);
+            NativeList<int> nativeFluidTris = new NativeList<int>(Allocator.Temp);
+            NativeList<Vector2> nativeUvs = new NativeList<Vector2>(Allocator.Temp);
+            NativeList<Color> nativeColors = new NativeList<Color>(Allocator.Temp);
+            NativeList<Vector3> nativeNormals = new NativeList<Vector3>(Allocator.Temp);
             int vertexIndex = 0;
 
 
@@ -44,20 +44,20 @@ namespace Editor.BlockEditor.Helpers
             if (blockType.fluidType != FluidType.None)
             {
                 // Create mock data needed by the helper that isn't available in the editor.
-                var mockProps = new BlockTypeJobData(blockType);
+                BlockTypeJobData mockProps = new BlockTypeJobData(blockType);
                 // Use fluid level 0 (full block) and full sunlight (15) for the preview.
                 uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0, 1, (byte)fluidLevel);
 
                 // For a simple, flat preview, an empty (default) array is sufficient.
-                var mockNeighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
+                NativeArray<OptionalVoxelState> mockNeighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
 
                 // Load fluid templates using the new helper - works perfectly in the editor.
                 FluidTemplates fluidTemplates = ResourceLoader.LoadFluidTemplates();
-                var templates = new NativeArray<float>(16, Allocator.Temp);
+                NativeArray<float> templates = new NativeArray<float>(16, Allocator.Temp);
                 templates.CopyFrom(blockType.fluidType == FluidType.WaterLike ? fluidTemplates.WaterVertexTemplates : fluidTemplates.LavaVertexTemplates);
 
                 // Create temporary BlockTypeJobData from the editor's list.
-                var blockTypesJobData = new NativeArray<BlockTypeJobData>(allBlockTypes.Select(bt => new BlockTypeJobData(bt)).ToArray(), Allocator.Temp);
+                NativeArray<BlockTypeJobData> blockTypesJobData = new NativeArray<BlockTypeJobData>(allBlockTypes.Select(bt => new BlockTypeJobData(bt)).ToArray(), Allocator.Temp);
 
                 VoxelMeshHelper.GenerateFluidMeshData(Vector3Int.zero, mockPackedData, mockProps, in templates, in blockTypesJobData, mockNeighbors,
                     ref vertexIndex, ref nativeVertices, ref nativeFluidTris, ref nativeUvs, ref nativeColors, ref nativeNormals);
@@ -82,14 +82,14 @@ namespace Editor.BlockEditor.Helpers
                     // --- Calculate the base UV from the atlas for this specific face ---
                     int textureID = blockType.GetTextureID(p);
                     float yUv = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
-                    float xUv = textureID - (yUv * VoxelData.TextureAtlasSizeInBlocks);
+                    float xUv = textureID - yUv * VoxelData.TextureAtlasSizeInBlocks;
 
                     xUv *= VoxelData.NormalizedBlockTextureSize;
                     yUv *= VoxelData.NormalizedBlockTextureSize;
                     yUv = 1f - yUv - VoxelData.NormalizedBlockTextureSize;
                     Vector2 baseUv = new Vector2(xUv, yUv);
 
-                    foreach (var vertData in face.vertData)
+                    foreach (VertData vertData in face.vertData)
                     {
                         vertices.Add(vertData.position);
                         uvs.Add(new Vector2(
@@ -101,7 +101,7 @@ namespace Editor.BlockEditor.Helpers
                     }
 
                     // Add triangles to the correct sub-mesh list
-                    foreach (var tri in face.triangles)
+                    foreach (int tri in face.triangles)
                     {
                         if (blockType.renderNeighborFaces)
                             transparentTriangles.Add(vertCount + tri);

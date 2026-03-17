@@ -24,8 +24,8 @@ namespace Serialization
             try
             {
                 // Test instantiation. This will throw DllNotFoundException if the native plugin is missing.
-                using var testStream = new MemoryStream();
-                using var lz4 = new LZ4Stream(testStream, CompressionMode.Compress, true);
+                using MemoryStream testStream = new MemoryStream();
+                using LZ4Stream lz4 = new LZ4Stream(testStream, CompressionMode.Compress, true);
                 _lz4Available = true;
                 return true;
             }

@@ -105,7 +105,7 @@ namespace Data
 
         private void InitializeSections()
         {
-            int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+            const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
             sections = new ChunkSection[sectionCount];
         }
 
@@ -196,7 +196,7 @@ namespace Data
         /// <param name="flatData">The flattened voxel data array (size 16 * 128 * 16).</param>
         public void PopulateFromFlattened(NativeArray<uint> flatData)
         {
-            int sectionVoxelCount = ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+            const int sectionVoxelCount = ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
 
             for (int i = 0; i < sections.Length; i++)
             {
@@ -277,8 +277,8 @@ namespace Data
 
             // Copy Queues
             // We move the queues from the loaded object (temp) to this object (live)
-            foreach (var node in loadedData.SunlightBfsQueue) AddToSunLightQueue(node.Position, node.OldLightLevel);
-            foreach (var node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel);
+            foreach (LightQueueNode node in loadedData.SunlightBfsQueue) AddToSunLightQueue(node.Position, node.OldLightLevel);
+            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel);
 
             // If loaded data had flags, transfer them
             if (loadedData.HasLightChangesToProcess) HasLightChangesToProcess = true;
@@ -288,7 +288,7 @@ namespace Data
             // Recalculate counts
             if (World.Instance != null)
             {
-                foreach (var section in sections)
+                foreach (ChunkSection section in sections)
                     section?.RecalculateCounts(World.Instance.blockTypes);
             }
 
@@ -455,7 +455,7 @@ namespace Data
             // Index logic: 16x16x16
             // Note: We manually calculate the local section index here because ChunkSection.Voxels is only 4096 long.
             // We cannot use ChunkMath.GetFlattenedIndex here because that returns the global index (e.g. 5000+).
-            int index = x + (localY * ChunkMath.SECTION_SIZE) + (z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
+            int index = x + localY * ChunkMath.SECTION_SIZE + z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
             uint oldValue = sections[sectionY].voxels[index];
 
             // -- Update Counts --
@@ -505,7 +505,7 @@ namespace Data
             if (sections[sectionY] == null) return 0;
 
             int localY = y % ChunkMath.SECTION_SIZE;
-            int index = x + (localY * ChunkMath.SECTION_SIZE) + (z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
+            int index = x + localY * ChunkMath.SECTION_SIZE + z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
             return sections[sectionY].voxels[index];
         }
 
@@ -550,7 +550,7 @@ namespace Data
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
         public NativeQueue<LightQueueNode> GetBlocklightQueueForJob(Allocator allocator)
         {
-            var nativeQueue = new NativeQueue<LightQueueNode>(allocator);
+            NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
             while (BlockLightQueueCount > 0)
@@ -569,7 +569,7 @@ namespace Data
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
         public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator)
         {
-            var nativeQueue = new NativeQueue<LightQueueNode>(allocator);
+            NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
             while (SunLightQueueCount > 0)
@@ -613,10 +613,10 @@ namespace Data
         public NativeArray<uint> GetMapForJob(Allocator allocator)
         {
             // Flatten sections into a single NativeArray
-            int totalVoxels = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
-            var jobArray = new NativeArray<uint>(totalVoxels, allocator);
+            const int totalVoxels = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
+            NativeArray<uint> jobArray = new NativeArray<uint>(totalVoxels, allocator);
 
-            int sectionVoxelCount = ChunkMath.SECTION_VOLUME;
+            const int sectionVoxelCount = ChunkMath.SECTION_VOLUME;
 
             for (int i = 0; i < sections.Length; i++)
             {
@@ -752,7 +752,7 @@ namespace Data
 
         public override bool Equals(object obj)
         {
-            return obj is LightQueueNode other && this == other;
+            return obj is LightQueueNode other && this == other; // TODO: Burst: Loading managed type 'Object' is not supported
         }
 
         public override int GetHashCode()

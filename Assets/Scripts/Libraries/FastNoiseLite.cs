@@ -23,14 +23,14 @@ namespace Libraries
             Cellular,
             Perlin,
             ValueCubic,
-            Value
+            Value,
         }
 
         public enum RotationType3D
         {
             None,
             ImproveXYPlanes,
-            ImproveXZPlanes
+            ImproveXZPlanes,
         }
 
         public enum FractalType
@@ -40,7 +40,7 @@ namespace Libraries
             Ridged,
             PingPong,
             DomainWarpProgressive,
-            DomainWarpIndependent
+            DomainWarpIndependent,
         }
 
         public enum CellularDistanceFunction
@@ -48,7 +48,7 @@ namespace Libraries
             Euclidean,
             EuclideanSq,
             Manhattan,
-            Hybrid
+            Hybrid,
         }
 
         public enum CellularReturnType
@@ -59,14 +59,14 @@ namespace Libraries
             Distance2Add,
             Distance2Sub,
             Distance2Mul,
-            Distance2Div
+            Distance2Div,
         }
 
         public enum DomainWarpType
         {
             OpenSimplex2,
             OpenSimplex2Reduced,
-            BasicGrid
+            BasicGrid,
         }
 
         private enum TransformType3D
@@ -74,7 +74,7 @@ namespace Libraries
             None,
             ImproveXYPlanes,
             ImproveXZPlanes,
-            DefaultOpenSimplex2
+            DefaultOpenSimplex2,
         }
 
         // Fields
@@ -214,26 +214,26 @@ namespace Libraries
         public float GetNoise(float x, float y)
         {
             TransformNoiseCoordinate(ref x, ref y);
-            switch (mFractalType)
+            return mFractalType switch
             {
-                default: return GenNoiseSingle(mSeed, x, y);
-                case FractalType.FBm: return GenFractalFBm(x, y);
-                case FractalType.Ridged: return GenFractalRidged(x, y);
-                case FractalType.PingPong: return GenFractalPingPong(x, y);
-            }
+                FractalType.FBm => GenFractalFBm(x, y),
+                FractalType.Ridged => GenFractalRidged(x, y),
+                FractalType.PingPong => GenFractalPingPong(x, y),
+                _ => GenNoiseSingle(mSeed, x, y),
+            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float GetNoise(float x, float y, float z)
         {
             TransformNoiseCoordinate(ref x, ref y, ref z);
-            switch (mFractalType)
+            return mFractalType switch
             {
-                default: return GenNoiseSingle(mSeed, x, y, z);
-                case FractalType.FBm: return GenFractalFBm(x, y, z);
-                case FractalType.Ridged: return GenFractalRidged(x, y, z);
-                case FractalType.PingPong: return GenFractalPingPong(x, y, z);
-            }
+                FractalType.FBm => GenFractalFBm(x, y, z),
+                FractalType.Ridged => GenFractalRidged(x, y, z),
+                FractalType.PingPong => GenFractalPingPong(x, y, z),
+                _ => GenNoiseSingle(mSeed, x, y, z),
+            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -413,31 +413,31 @@ namespace Libraries
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private float GenNoiseSingle(int seed, float x, float y)
         {
-            switch (mNoiseType)
+            return mNoiseType switch
             {
-                case NoiseType.OpenSimplex2: return SingleSimplex(seed, x, y);
-                case NoiseType.OpenSimplex2S: return SingleOpenSimplex2S(seed, x, y);
-                case NoiseType.Cellular: return SingleCellular(seed, x, y);
-                case NoiseType.Perlin: return SinglePerlin(seed, x, y);
-                case NoiseType.ValueCubic: return SingleValueCubic(seed, x, y);
-                case NoiseType.Value: return SingleValue(seed, x, y);
-                default: return 0;
-            }
+                NoiseType.OpenSimplex2 => SingleSimplex(seed, x, y),
+                NoiseType.OpenSimplex2S => SingleOpenSimplex2S(seed, x, y),
+                NoiseType.Cellular => SingleCellular(seed, x, y),
+                NoiseType.Perlin => SinglePerlin(seed, x, y),
+                NoiseType.ValueCubic => SingleValueCubic(seed, x, y),
+                NoiseType.Value => SingleValue(seed, x, y),
+                _ => 0,
+            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private float GenNoiseSingle(int seed, float x, float y, float z)
         {
-            switch (mNoiseType)
+            return mNoiseType switch
             {
-                case NoiseType.OpenSimplex2: return SingleOpenSimplex2(seed, x, y, z);
-                case NoiseType.OpenSimplex2S: return SingleOpenSimplex2S(seed, x, y, z);
-                case NoiseType.Cellular: return SingleCellular(seed, x, y, z);
-                case NoiseType.Perlin: return SinglePerlin(seed, x, y, z);
-                case NoiseType.ValueCubic: return SingleValueCubic(seed, x, y, z);
-                case NoiseType.Value: return SingleValue(seed, x, y, z);
-                default: return 0;
-            }
+                NoiseType.OpenSimplex2 => SingleOpenSimplex2(seed, x, y, z),
+                NoiseType.OpenSimplex2S => SingleOpenSimplex2S(seed, x, y, z),
+                NoiseType.Cellular => SingleCellular(seed, x, y, z),
+                NoiseType.Perlin => SinglePerlin(seed, x, y, z),
+                NoiseType.ValueCubic => SingleValueCubic(seed, x, y, z),
+                NoiseType.Value => SingleValue(seed, x, y, z),
+                _ => 0,
+            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -500,24 +500,16 @@ namespace Libraries
 
         private void UpdateTransformType3D()
         {
-            switch (mRotationType3D)
+            mTransformType3D = mRotationType3D switch
             {
-                case RotationType3D.ImproveXYPlanes: mTransformType3D = TransformType3D.ImproveXYPlanes; break;
-                case RotationType3D.ImproveXZPlanes: mTransformType3D = TransformType3D.ImproveXZPlanes; break;
-                default:
-                    switch (mNoiseType)
-                    {
-                        case NoiseType.OpenSimplex2:
-                        case NoiseType.OpenSimplex2S:
-                            mTransformType3D = TransformType3D.DefaultOpenSimplex2;
-                            break;
-                        default:
-                            mTransformType3D = TransformType3D.None;
-                            break;
-                    }
-
-                    break;
-            }
+                RotationType3D.ImproveXYPlanes => TransformType3D.ImproveXYPlanes,
+                RotationType3D.ImproveXZPlanes => TransformType3D.ImproveXZPlanes,
+                _ => mNoiseType switch
+                {
+                    NoiseType.OpenSimplex2 or NoiseType.OpenSimplex2S => TransformType3D.DefaultOpenSimplex2,
+                    _ => TransformType3D.None,
+                },
+            };
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -575,24 +567,16 @@ namespace Libraries
 
         private void UpdateWarpTransformType3D()
         {
-            switch (mRotationType3D)
+            mWarpTransformType3D = mRotationType3D switch
             {
-                case RotationType3D.ImproveXYPlanes: mWarpTransformType3D = TransformType3D.ImproveXYPlanes; break;
-                case RotationType3D.ImproveXZPlanes: mWarpTransformType3D = TransformType3D.ImproveXZPlanes; break;
-                default:
-                    switch (mDomainWarpType)
-                    {
-                        case DomainWarpType.OpenSimplex2:
-                        case DomainWarpType.OpenSimplex2Reduced:
-                            mWarpTransformType3D = TransformType3D.DefaultOpenSimplex2;
-                            break;
-                        default:
-                            mWarpTransformType3D = TransformType3D.None;
-                            break;
-                    }
-
-                    break;
-            }
+                RotationType3D.ImproveXYPlanes => TransformType3D.ImproveXYPlanes,
+                RotationType3D.ImproveXZPlanes => TransformType3D.ImproveXZPlanes,
+                _ => mDomainWarpType switch
+                {
+                    DomainWarpType.OpenSimplex2 or DomainWarpType.OpenSimplex2Reduced => TransformType3D.DefaultOpenSimplex2,
+                    _ => TransformType3D.None,
+                },
+            };
         }
 
         // Algorithms (Math implementation replaced with Unity.Mathematics)
@@ -600,13 +584,13 @@ namespace Libraries
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int FastFloor(float f)
         {
-            return (f >= 0) ? (int)f : (int)f - 1;
+            return f >= 0 ? (int)f : (int)f - 1;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int FastRound(float f)
         {
-            return (f >= 0) ? (int)(f + 0.5f) : (int)(f - 0.5f);
+            return f >= 0 ? (int)(f + 0.5f) : (int)(f - 0.5f);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -624,8 +608,8 @@ namespace Libraries
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float CubicLerp(float a, float b, float c, float d, float t)
         {
-            float p = (d - c) - (a - b);
-            return t * t * t * p + t * t * ((a - b) - p) + t * (c - a) + b;
+            float p = d - c - (a - b);
+            return t * t * t * p + t * t * (a - b - p) + t * (c - a) + b;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -746,7 +730,7 @@ namespace Libraries
             return sum;
         }
 
-        private float SingleSimplex(int seed, float x, float y)
+        private static float SingleSimplex(int seed, float x, float y)
         {
             const float SQRT3 = 1.7320508075688772935274463415059f;
             const float G2 = (3 - SQRT3) / 6;
@@ -762,14 +746,14 @@ namespace Libraries
             float n0, n1, n2;
             float a = 0.5f - x0 * x0 - y0 * y0;
             if (a <= 0) n0 = 0;
-            else n0 = (a * a) * (a * a) * GradCoord(seed, i, j, x0, y0);
-            float c = (2 * (1 - 2 * G2) * (1 / G2 - 2)) * t + ((-2 * (1 - 2 * G2) * (1 - 2 * G2)) + a);
+            else n0 = a * a * (a * a) * GradCoord(seed, i, j, x0, y0);
+            float c = 2 * (1 - 2 * G2) * (1 / G2 - 2) * t + (-2 * (1 - 2 * G2) * (1 - 2 * G2) + a);
             if (c <= 0) n2 = 0;
             else
             {
                 float x2 = x0 + (2 * G2 - 1);
                 float y2 = y0 + (2 * G2 - 1);
-                n2 = (c * c) * (c * c) * GradCoord(seed, i + PrimeX, j + PrimeY, x2, y2);
+                n2 = c * c * (c * c) * GradCoord(seed, i + PrimeX, j + PrimeY, x2, y2);
             }
 
             if (y0 > x0)
@@ -778,7 +762,7 @@ namespace Libraries
                 float y1 = y0 + (G2 - 1);
                 float b = 0.5f - x1 * x1 - y1 * y1;
                 if (b <= 0) n1 = 0;
-                else n1 = (b * b) * (b * b) * GradCoord(seed, i, j + PrimeY, x1, y1);
+                else n1 = b * b * (b * b) * GradCoord(seed, i, j + PrimeY, x1, y1);
             }
             else
             {
@@ -786,13 +770,13 @@ namespace Libraries
                 float y1 = y0 + G2;
                 float b = 0.5f - x1 * x1 - y1 * y1;
                 if (b <= 0) n1 = 0;
-                else n1 = (b * b) * (b * b) * GradCoord(seed, i + PrimeX, j, x1, y1);
+                else n1 = b * b * (b * b) * GradCoord(seed, i + PrimeX, j, x1, y1);
             }
 
             return (n0 + n1 + n2) * 99.83685446303647f;
         }
 
-        private float SingleOpenSimplex2(int seed, float x, float y, float z)
+        private static float SingleOpenSimplex2(int seed, float x, float y, float z)
         {
             int i = FastRound(x);
             int j = FastRound(y);
@@ -810,17 +794,17 @@ namespace Libraries
             j *= PrimeY;
             k *= PrimeZ;
             float value = 0;
-            float a = (0.6f - x0 * x0) - (y0 * y0 + z0 * z0);
+            float a = 0.6f - x0 * x0 - (y0 * y0 + z0 * z0);
             for (int l = 0;; l++)
             {
-                if (a > 0) value += (a * a) * (a * a) * GradCoord(seed, i, j, k, x0, y0, z0);
+                if (a > 0) value += a * a * (a * a) * GradCoord(seed, i, j, k, x0, y0, z0);
                 if (ax0 >= ay0 && ax0 >= az0)
                 {
                     float b = a + ax0 + ax0;
                     if (b > 1)
                     {
                         b -= 1;
-                        value += (b * b) * (b * b) * GradCoord(seed, i - xNSign * PrimeX, j, k, x0 + xNSign, y0, z0);
+                        value += b * b * (b * b) * GradCoord(seed, i - xNSign * PrimeX, j, k, x0 + xNSign, y0, z0);
                     }
                 }
                 else if (ay0 > ax0 && ay0 >= az0)
@@ -829,7 +813,7 @@ namespace Libraries
                     if (b > 1)
                     {
                         b -= 1;
-                        value += (b * b) * (b * b) * GradCoord(seed, i, j - yNSign * PrimeY, k, x0, y0 + yNSign, z0);
+                        value += b * b * (b * b) * GradCoord(seed, i, j - yNSign * PrimeY, k, x0, y0 + yNSign, z0);
                     }
                 }
                 else
@@ -838,7 +822,7 @@ namespace Libraries
                     if (b > 1)
                     {
                         b -= 1;
-                        value += (b * b) * (b * b) * GradCoord(seed, i, j, k - zNSign * PrimeZ, x0, y0, z0 + zNSign);
+                        value += b * b * (b * b) * GradCoord(seed, i, j, k - zNSign * PrimeZ, x0, y0, z0 + zNSign);
                     }
                 }
 
@@ -849,7 +833,7 @@ namespace Libraries
                 x0 = xNSign * ax0;
                 y0 = yNSign * ay0;
                 z0 = zNSign * az0;
-                a += (0.75f - ax0) - (ay0 + az0);
+                a += 0.75f - ax0 - (ay0 + az0);
                 i += (xNSign >> 1) & PrimeX;
                 j += (yNSign >> 1) & PrimeY;
                 k += (zNSign >> 1) & PrimeZ;
@@ -862,7 +846,7 @@ namespace Libraries
             return value * 32.69428253173828125f;
         }
 
-        private float SingleOpenSimplex2S(int seed, float x, float y)
+        private static float SingleOpenSimplex2S(int seed, float x, float y)
         {
             const float SQRT3 = 1.7320508075688772935274463415059f;
             const float G2 = (3 - SQRT3) / 6;
@@ -877,12 +861,12 @@ namespace Libraries
             float t = (xi + yi) * G2;
             float x0 = xi - t;
             float y0 = yi - t;
-            float a0 = (2.0f / 3.0f) - x0 * x0 - y0 * y0;
-            float value = (a0 * a0) * (a0 * a0) * GradCoord(seed, i, j, x0, y0);
-            float a1 = (2 * (1 - 2 * G2) * (1 / G2 - 2)) * t + ((-2 * (1 - 2 * G2) * (1 - 2 * G2)) + a0);
+            float a0 = 2.0f / 3.0f - x0 * x0 - y0 * y0;
+            float value = a0 * a0 * (a0 * a0) * GradCoord(seed, i, j, x0, y0);
+            float a1 = 2 * (1 - 2 * G2) * (1 / G2 - 2) * t + (-2 * (1 - 2 * G2) * (1 - 2 * G2) + a0);
             float x1 = x0 - (1 - 2 * G2);
             float y1 = y0 - (1 - 2 * G2);
-            value += (a1 * a1) * (a1 * a1) * GradCoord(seed, i1, j1, x1, y1);
+            value += a1 * a1 * (a1 * a1) * GradCoord(seed, i1, j1, x1, y1);
             float xmyi = xi - yi;
             if (t > G2)
             {
@@ -890,30 +874,30 @@ namespace Libraries
                 {
                     float x2 = x0 + (3 * G2 - 2);
                     float y2 = y0 + (3 * G2 - 1);
-                    float a2 = (2.0f / 3.0f) - x2 * x2 - y2 * y2;
-                    if (a2 > 0) value += (a2 * a2) * (a2 * a2) * GradCoord(seed, i + (PrimeX << 1), j + PrimeY, x2, y2);
+                    float a2 = 2.0f / 3.0f - x2 * x2 - y2 * y2;
+                    if (a2 > 0) value += a2 * a2 * (a2 * a2) * GradCoord(seed, i + (PrimeX << 1), j + PrimeY, x2, y2);
                 }
                 else
                 {
                     float x2 = x0 + G2;
                     float y2 = y0 + (G2 - 1);
-                    float a2 = (2.0f / 3.0f) - x2 * x2 - y2 * y2;
-                    if (a2 > 0) value += (a2 * a2) * (a2 * a2) * GradCoord(seed, i, j + PrimeY, x2, y2);
+                    float a2 = 2.0f / 3.0f - x2 * x2 - y2 * y2;
+                    if (a2 > 0) value += a2 * a2 * (a2 * a2) * GradCoord(seed, i, j + PrimeY, x2, y2);
                 }
 
                 if (yi - xmyi > 1)
                 {
                     float x3 = x0 + (3 * G2 - 1);
                     float y3 = y0 + (3 * G2 - 2);
-                    float a3 = (2.0f / 3.0f) - x3 * x3 - y3 * y3;
-                    if (a3 > 0) value += (a3 * a3) * (a3 * a3) * GradCoord(seed, i + PrimeX, j + (PrimeY << 1), x3, y3);
+                    float a3 = 2.0f / 3.0f - x3 * x3 - y3 * y3;
+                    if (a3 > 0) value += a3 * a3 * (a3 * a3) * GradCoord(seed, i + PrimeX, j + (PrimeY << 1), x3, y3);
                 }
                 else
                 {
                     float x3 = x0 + (G2 - 1);
                     float y3 = y0 + G2;
-                    float a3 = (2.0f / 3.0f) - x3 * x3 - y3 * y3;
-                    if (a3 > 0) value += (a3 * a3) * (a3 * a3) * GradCoord(seed, i + PrimeX, j, x3, y3);
+                    float a3 = 2.0f / 3.0f - x3 * x3 - y3 * y3;
+                    if (a3 > 0) value += a3 * a3 * (a3 * a3) * GradCoord(seed, i + PrimeX, j, x3, y3);
                 }
             }
             else
@@ -922,37 +906,37 @@ namespace Libraries
                 {
                     float x2 = x0 + (1 - G2);
                     float y2 = y0 - G2;
-                    float a2 = (2.0f / 3.0f) - x2 * x2 - y2 * y2;
-                    if (a2 > 0) value += (a2 * a2) * (a2 * a2) * GradCoord(seed, i - PrimeX, j, x2, y2);
+                    float a2 = 2.0f / 3.0f - x2 * x2 - y2 * y2;
+                    if (a2 > 0) value += a2 * a2 * (a2 * a2) * GradCoord(seed, i - PrimeX, j, x2, y2);
                 }
                 else
                 {
                     float x2 = x0 + (G2 - 1);
                     float y2 = y0 + G2;
-                    float a2 = (2.0f / 3.0f) - x2 * x2 - y2 * y2;
-                    if (a2 > 0) value += (a2 * a2) * (a2 * a2) * GradCoord(seed, i + PrimeX, j, x2, y2);
+                    float a2 = 2.0f / 3.0f - x2 * x2 - y2 * y2;
+                    if (a2 > 0) value += a2 * a2 * (a2 * a2) * GradCoord(seed, i + PrimeX, j, x2, y2);
                 }
 
                 if (yi < xmyi)
                 {
                     float x2 = x0 - G2;
                     float y2 = y0 - (G2 - 1);
-                    float a2 = (2.0f / 3.0f) - x2 * x2 - y2 * y2;
-                    if (a2 > 0) value += (a2 * a2) * (a2 * a2) * GradCoord(seed, i, j - PrimeY, x2, y2);
+                    float a2 = 2.0f / 3.0f - x2 * x2 - y2 * y2;
+                    if (a2 > 0) value += a2 * a2 * (a2 * a2) * GradCoord(seed, i, j - PrimeY, x2, y2);
                 }
                 else
                 {
                     float x2 = x0 + G2;
                     float y2 = y0 + (G2 - 1);
-                    float a2 = (2.0f / 3.0f) - x2 * x2 - y2 * y2;
-                    if (a2 > 0) value += (a2 * a2) * (a2 * a2) * GradCoord(seed, i, j + PrimeY, x2, y2);
+                    float a2 = 2.0f / 3.0f - x2 * x2 - y2 * y2;
+                    if (a2 > 0) value += a2 * a2 * (a2 * a2) * GradCoord(seed, i, j + PrimeY, x2, y2);
                 }
             }
 
             return value * 18.24196194486065f;
         }
 
-        private float SingleOpenSimplex2S(int seed, float x, float y, float z)
+        private static float SingleOpenSimplex2S(int seed, float x, float y, float z)
         {
             int i = FastFloor(x);
             int j = FastFloor(y);
@@ -971,12 +955,12 @@ namespace Libraries
             float y0 = yi + yNMask;
             float z0 = zi + zNMask;
             float a0 = 0.75f - x0 * x0 - y0 * y0 - z0 * z0;
-            float value = (a0 * a0) * (a0 * a0) * GradCoord(seed, i + (xNMask & PrimeX), j + (yNMask & PrimeY), k + (zNMask & PrimeZ), x0, y0, z0);
+            float value = a0 * a0 * (a0 * a0) * GradCoord(seed, i + (xNMask & PrimeX), j + (yNMask & PrimeY), k + (zNMask & PrimeZ), x0, y0, z0);
             float x1 = xi - 0.5f;
             float y1 = yi - 0.5f;
             float z1 = zi - 0.5f;
             float a1 = 0.75f - x1 * x1 - y1 * y1 - z1 * z1;
-            value += (a1 * a1) * (a1 * a1) * GradCoord(seed2, i + PrimeX, j + PrimeY, k + PrimeZ, x1, y1, z1);
+            value += a1 * a1 * (a1 * a1) * GradCoord(seed2, i + PrimeX, j + PrimeY, k + PrimeZ, x1, y1, z1);
             float xAFlipMask0 = ((xNMask | 1) << 1) * x1;
             float yAFlipMask0 = ((yNMask | 1) << 1) * y1;
             float zAFlipMask0 = ((zNMask | 1) << 1) * z1;
@@ -990,7 +974,7 @@ namespace Libraries
                 float x2 = x0 - (xNMask | 1);
                 float y2 = y0;
                 float z2 = z0;
-                value += (a2 * a2) * (a2 * a2) * GradCoord(seed, i + (~xNMask & PrimeX), j + (yNMask & PrimeY), k + (zNMask & PrimeZ), x2, y2, z2);
+                value += a2 * a2 * (a2 * a2) * GradCoord(seed, i + (~xNMask & PrimeX), j + (yNMask & PrimeY), k + (zNMask & PrimeZ), x2, y2, z2);
             }
             else
             {
@@ -1000,7 +984,7 @@ namespace Libraries
                     float x3 = x0;
                     float y3 = y0 - (yNMask | 1);
                     float z3 = z0 - (zNMask | 1);
-                    value += (a3 * a3) * (a3 * a3) * GradCoord(seed, i + (xNMask & PrimeX), j + (~yNMask & PrimeY), k + (~zNMask & PrimeZ), x3, y3, z3);
+                    value += a3 * a3 * (a3 * a3) * GradCoord(seed, i + (xNMask & PrimeX), j + (~yNMask & PrimeY), k + (~zNMask & PrimeZ), x3, y3, z3);
                 }
 
                 float a4 = xAFlipMask1 + a1;
@@ -1009,7 +993,7 @@ namespace Libraries
                     float x4 = (xNMask | 1) + x1;
                     float y4 = y1;
                     float z4 = z1;
-                    value += (a4 * a4) * (a4 * a4) * GradCoord(seed2, i + (xNMask & (PrimeX * 2)), j + PrimeY, k + PrimeZ, x4, y4, z4);
+                    value += a4 * a4 * (a4 * a4) * GradCoord(seed2, i + (xNMask & (PrimeX * 2)), j + PrimeY, k + PrimeZ, x4, y4, z4);
                     skip5 = true;
                 }
             }
@@ -1021,7 +1005,7 @@ namespace Libraries
                 float x6 = x0;
                 float y6 = y0 - (yNMask | 1);
                 float z6 = z0;
-                value += (a6 * a6) * (a6 * a6) * GradCoord(seed, i + (xNMask & PrimeX), j + (~yNMask & PrimeY), k + (zNMask & PrimeZ), x6, y6, z6);
+                value += a6 * a6 * (a6 * a6) * GradCoord(seed, i + (xNMask & PrimeX), j + (~yNMask & PrimeY), k + (zNMask & PrimeZ), x6, y6, z6);
             }
             else
             {
@@ -1031,7 +1015,7 @@ namespace Libraries
                     float x7 = x0 - (xNMask | 1);
                     float y7 = y0;
                     float z7 = z0 - (zNMask | 1);
-                    value += (a7 * a7) * (a7 * a7) * GradCoord(seed, i + (~xNMask & PrimeX), j + (yNMask & PrimeY), k + (~zNMask & PrimeZ), x7, y7, z7);
+                    value += a7 * a7 * (a7 * a7) * GradCoord(seed, i + (~xNMask & PrimeX), j + (yNMask & PrimeY), k + (~zNMask & PrimeZ), x7, y7, z7);
                 }
 
                 float a8 = yAFlipMask1 + a1;
@@ -1040,7 +1024,7 @@ namespace Libraries
                     float x8 = x1;
                     float y8 = (yNMask | 1) + y1;
                     float z8 = z1;
-                    value += (a8 * a8) * (a8 * a8) * GradCoord(seed2, i + PrimeX, j + (yNMask & (PrimeY << 1)), k + PrimeZ, x8, y8, z8);
+                    value += a8 * a8 * (a8 * a8) * GradCoord(seed2, i + PrimeX, j + (yNMask & (PrimeY << 1)), k + PrimeZ, x8, y8, z8);
                     skip9 = true;
                 }
             }
@@ -1052,7 +1036,7 @@ namespace Libraries
                 float xA = x0;
                 float yA = y0;
                 float zA = z0 - (zNMask | 1);
-                value += (aA * aA) * (aA * aA) * GradCoord(seed, i + (xNMask & PrimeX), j + (yNMask & PrimeY), k + (~zNMask & PrimeZ), xA, yA, zA);
+                value += aA * aA * (aA * aA) * GradCoord(seed, i + (xNMask & PrimeX), j + (yNMask & PrimeY), k + (~zNMask & PrimeZ), xA, yA, zA);
             }
             else
             {
@@ -1062,7 +1046,7 @@ namespace Libraries
                     float xB = x0 - (xNMask | 1);
                     float yB = y0 - (yNMask | 1);
                     float zB = z0;
-                    value += (aB * aB) * (aB * aB) * GradCoord(seed, i + (~xNMask & PrimeX), j + (~yNMask & PrimeY), k + (zNMask & PrimeZ), xB, yB, zB);
+                    value += aB * aB * (aB * aB) * GradCoord(seed, i + (~xNMask & PrimeX), j + (~yNMask & PrimeY), k + (zNMask & PrimeZ), xB, yB, zB);
                 }
 
                 float aC = zAFlipMask1 + a1;
@@ -1071,7 +1055,7 @@ namespace Libraries
                     float xC = x1;
                     float yC = y1;
                     float zC = (zNMask | 1) + z1;
-                    value += (aC * aC) * (aC * aC) * GradCoord(seed2, i + PrimeX, j + PrimeY, k + (zNMask & (PrimeZ << 1)), xC, yC, zC);
+                    value += aC * aC * (aC * aC) * GradCoord(seed2, i + PrimeX, j + PrimeY, k + (zNMask & (PrimeZ << 1)), xC, yC, zC);
                     skipD = true;
                 }
             }
@@ -1084,7 +1068,7 @@ namespace Libraries
                     float x5 = x1;
                     float y5 = (yNMask | 1) + y1;
                     float z5 = (zNMask | 1) + z1;
-                    value += (a5 * a5) * (a5 * a5) * GradCoord(seed2, i + PrimeX, j + (yNMask & (PrimeY << 1)), k + (zNMask & (PrimeZ << 1)), x5, y5, z5);
+                    value += a5 * a5 * (a5 * a5) * GradCoord(seed2, i + PrimeX, j + (yNMask & (PrimeY << 1)), k + (zNMask & (PrimeZ << 1)), x5, y5, z5);
                 }
             }
 
@@ -1096,7 +1080,7 @@ namespace Libraries
                     float x9 = (xNMask | 1) + x1;
                     float y9 = y1;
                     float z9 = (zNMask | 1) + z1;
-                    value += (a9 * a9) * (a9 * a9) * GradCoord(seed2, i + (xNMask & (PrimeX * 2)), j + PrimeY, k + (zNMask & (PrimeZ << 1)), x9, y9, z9);
+                    value += a9 * a9 * (a9 * a9) * GradCoord(seed2, i + (xNMask & (PrimeX * 2)), j + PrimeY, k + (zNMask & (PrimeZ << 1)), x9, y9, z9);
                 }
             }
 
@@ -1108,7 +1092,7 @@ namespace Libraries
                     float xD = (xNMask | 1) + x1;
                     float yD = (yNMask | 1) + y1;
                     float zD = z1;
-                    value += (aD * aD) * (aD * aD) * GradCoord(seed2, i + (xNMask & (PrimeX << 1)), j + (yNMask & (PrimeY << 1)), k + PrimeZ, xD, yD, zD);
+                    value += aD * aD * (aD * aD) * GradCoord(seed2, i + (xNMask & (PrimeX << 1)), j + (yNMask & (PrimeY << 1)), k + PrimeZ, xD, yD, zD);
                 }
             }
 
@@ -1138,8 +1122,8 @@ namespace Libraries
                             {
                                 int hash = Hash(seed, xPrimed, yPrimed);
                                 int idx = hash & (255 << 1);
-                                float vecX = (xi - x) + Lookup.Data.RandVecs2D[idx] * cellularJitter;
-                                float vecY = (yi - y) + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
+                                float vecX = xi - x + Lookup.Data.RandVecs2D[idx] * cellularJitter;
+                                float vecY = yi - y + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
                                 float newDistance = vecX * vecX + vecY * vecY;
                                 distance1 = math.max(math.min(distance1, newDistance), distance0);
                                 if (newDistance < distance0)
@@ -1163,8 +1147,8 @@ namespace Libraries
                             {
                                 int hash = Hash(seed, xPrimed, yPrimed);
                                 int idx = hash & (255 << 1);
-                                float vecX = (xi - x) + Lookup.Data.RandVecs2D[idx] * cellularJitter;
-                                float vecY = (yi - y) + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
+                                float vecX = xi - x + Lookup.Data.RandVecs2D[idx] * cellularJitter;
+                                float vecY = yi - y + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
                                 float newDistance = math.abs(vecX) + math.abs(vecY);
                                 distance1 = math.max(math.min(distance1, newDistance), distance0);
                                 if (newDistance < distance0)
@@ -1188,9 +1172,9 @@ namespace Libraries
                             {
                                 int hash = Hash(seed, xPrimed, yPrimed);
                                 int idx = hash & (255 << 1);
-                                float vecX = (xi - x) + Lookup.Data.RandVecs2D[idx] * cellularJitter;
-                                float vecY = (yi - y) + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
-                                float newDistance = (math.abs(vecX) + math.abs(vecY)) + (vecX * vecX + vecY * vecY);
+                                float vecX = xi - x + Lookup.Data.RandVecs2D[idx] * cellularJitter;
+                                float vecY = yi - y + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
+                                float newDistance = math.abs(vecX) + math.abs(vecY) + (vecX * vecX + vecY * vecY);
                                 distance1 = math.max(math.min(distance1, newDistance), distance0);
                                 if (newDistance < distance0)
                                 {
@@ -1214,17 +1198,17 @@ namespace Libraries
                 if (mCellularReturnType >= CellularReturnType.Distance2) distance1 = math.sqrt(distance1);
             }
 
-            switch (mCellularReturnType)
+            return mCellularReturnType switch
             {
-                case CellularReturnType.CellValue: return closestHash * (1.0f / 2147483648.0f);
-                case CellularReturnType.Distance: return distance0 - 1;
-                case CellularReturnType.Distance2: return distance1 - 1;
-                case CellularReturnType.Distance2Add: return (distance1 + distance0) * 0.5f - 1;
-                case CellularReturnType.Distance2Sub: return distance1 - distance0 - 1;
-                case CellularReturnType.Distance2Mul: return distance1 * distance0 * 0.5f - 1;
-                case CellularReturnType.Distance2Div: return distance0 / distance1 - 1;
-                default: return 0;
-            }
+                CellularReturnType.CellValue => closestHash * (1.0f / 2147483648.0f),
+                CellularReturnType.Distance => distance0 - 1,
+                CellularReturnType.Distance2 => distance1 - 1,
+                CellularReturnType.Distance2Add => (distance1 + distance0) * 0.5f - 1,
+                CellularReturnType.Distance2Sub => distance1 - distance0 - 1,
+                CellularReturnType.Distance2Mul => distance1 * distance0 * 0.5f - 1,
+                CellularReturnType.Distance2Div => distance0 / distance1 - 1,
+                _ => 0,
+            };
         }
 
         private float SingleCellular(int seed, float x, float y, float z)
@@ -1255,9 +1239,9 @@ namespace Libraries
                                 {
                                     int hash = Hash(seed, xPrimed, yPrimed, zPrimed);
                                     int idx = hash & (255 << 2);
-                                    float vecX = (xi - x) + Lookup.Data.RandVecs3D[idx] * cellularJitter;
-                                    float vecY = (yi - y) + Lookup.Data.RandVecs3D[idx | 1] * cellularJitter;
-                                    float vecZ = (zi - z) + Lookup.Data.RandVecs3D[idx | 2] * cellularJitter;
+                                    float vecX = xi - x + Lookup.Data.RandVecs3D[idx] * cellularJitter;
+                                    float vecY = yi - y + Lookup.Data.RandVecs3D[idx | 1] * cellularJitter;
+                                    float vecZ = zi - z + Lookup.Data.RandVecs3D[idx | 2] * cellularJitter;
                                     float newDistance = vecX * vecX + vecY * vecY + vecZ * vecZ;
                                     distance1 = math.max(math.min(distance1, newDistance), distance0);
                                     if (newDistance < distance0)
@@ -1287,9 +1271,9 @@ namespace Libraries
                                 {
                                     int hash = Hash(seed, xPrimed, yPrimed, zPrimed);
                                     int idx = hash & (255 << 2);
-                                    float vecX = (xi - x) + Lookup.Data.RandVecs3D[idx] * cellularJitter;
-                                    float vecY = (yi - y) + Lookup.Data.RandVecs3D[idx | 1] * cellularJitter;
-                                    float vecZ = (zi - z) + Lookup.Data.RandVecs3D[idx | 2] * cellularJitter;
+                                    float vecX = xi - x + Lookup.Data.RandVecs3D[idx] * cellularJitter;
+                                    float vecY = yi - y + Lookup.Data.RandVecs3D[idx | 1] * cellularJitter;
+                                    float vecZ = zi - z + Lookup.Data.RandVecs3D[idx | 2] * cellularJitter;
                                     float newDistance = math.abs(vecX) + math.abs(vecY) + math.abs(vecZ);
                                     distance1 = math.max(math.min(distance1, newDistance), distance0);
                                     if (newDistance < distance0)
@@ -1319,10 +1303,10 @@ namespace Libraries
                                 {
                                     int hash = Hash(seed, xPrimed, yPrimed, zPrimed);
                                     int idx = hash & (255 << 2);
-                                    float vecX = (xi - x) + Lookup.Data.RandVecs3D[idx] * cellularJitter;
-                                    float vecY = (yi - y) + Lookup.Data.RandVecs3D[idx | 1] * cellularJitter;
-                                    float vecZ = (zi - z) + Lookup.Data.RandVecs3D[idx | 2] * cellularJitter;
-                                    float newDistance = (math.abs(vecX) + math.abs(vecY) + math.abs(vecZ)) + (vecX * vecX + vecY * vecY + vecZ * vecZ);
+                                    float vecX = xi - x + Lookup.Data.RandVecs3D[idx] * cellularJitter;
+                                    float vecY = yi - y + Lookup.Data.RandVecs3D[idx | 1] * cellularJitter;
+                                    float vecZ = zi - z + Lookup.Data.RandVecs3D[idx | 2] * cellularJitter;
+                                    float newDistance = math.abs(vecX) + math.abs(vecY) + math.abs(vecZ) + (vecX * vecX + vecY * vecY + vecZ * vecZ);
                                     distance1 = math.max(math.min(distance1, newDistance), distance0);
                                     if (newDistance < distance0)
                                     {
@@ -1349,20 +1333,20 @@ namespace Libraries
                 if (mCellularReturnType >= CellularReturnType.Distance2) distance1 = math.sqrt(distance1);
             }
 
-            switch (mCellularReturnType)
+            return mCellularReturnType switch
             {
-                case CellularReturnType.CellValue: return closestHash * (1.0f / 2147483648.0f);
-                case CellularReturnType.Distance: return distance0 - 1;
-                case CellularReturnType.Distance2: return distance1 - 1;
-                case CellularReturnType.Distance2Add: return (distance1 + distance0) * 0.5f - 1;
-                case CellularReturnType.Distance2Sub: return distance1 - distance0 - 1;
-                case CellularReturnType.Distance2Mul: return distance1 * distance0 * 0.5f - 1;
-                case CellularReturnType.Distance2Div: return distance0 / distance1 - 1;
-                default: return 0;
-            }
+                CellularReturnType.CellValue => closestHash * (1.0f / 2147483648.0f),
+                CellularReturnType.Distance => distance0 - 1,
+                CellularReturnType.Distance2 => distance1 - 1,
+                CellularReturnType.Distance2Add => (distance1 + distance0) * 0.5f - 1,
+                CellularReturnType.Distance2Sub => distance1 - distance0 - 1,
+                CellularReturnType.Distance2Mul => distance1 * distance0 * 0.5f - 1,
+                CellularReturnType.Distance2Div => distance0 / distance1 - 1,
+                _ => 0,
+            };
         }
 
-        private float SinglePerlin(int seed, float x, float y)
+        private static float SinglePerlin(int seed, float x, float y)
         {
             int x0 = FastFloor(x);
             int y0 = FastFloor(y);
@@ -1381,7 +1365,7 @@ namespace Libraries
             return math.lerp(xf0, xf1, ys) * 1.4247691104677813f;
         }
 
-        private float SinglePerlin(int seed, float x, float y, float z)
+        private static float SinglePerlin(int seed, float x, float y, float z)
         {
             int x0 = FastFloor(x);
             int y0 = FastFloor(y);
@@ -1410,7 +1394,7 @@ namespace Libraries
             return math.lerp(yf0, yf1, zs) * 0.964921414852142333984375f;
         }
 
-        private float SingleValueCubic(int seed, float x, float y)
+        private static float SingleValueCubic(int seed, float x, float y)
         {
             int x1 = FastFloor(x);
             int y1 = FastFloor(y);
@@ -1432,7 +1416,7 @@ namespace Libraries
                 ys) * (1.0f / (1.5f * 1.5f));
         }
 
-        private float SingleValueCubic(int seed, float x, float y, float z)
+        private static float SingleValueCubic(int seed, float x, float y, float z)
         {
             int x1 = FastFloor(x);
             int y1 = FastFloor(y);
@@ -1480,7 +1464,7 @@ namespace Libraries
                 zs) * (1.0f / (1.5f * 1.5f * 1.5f));
         }
 
-        private float SingleValue(int seed, float x, float y)
+        private static float SingleValue(int seed, float x, float y)
         {
             int x0 = FastFloor(x);
             int y0 = FastFloor(y);
@@ -1495,7 +1479,7 @@ namespace Libraries
             return math.lerp(xf0, xf1, ys);
         }
 
-        private float SingleValue(int seed, float x, float y, float z)
+        private static float SingleValue(int seed, float x, float y, float z)
         {
             int x0 = FastFloor(x);
             int y0 = FastFloor(y);
@@ -1631,7 +1615,7 @@ namespace Libraries
             }
         }
 
-        private void SingleDomainWarpBasicGrid(int seed, float warpAmp, float frequency, float x, float y, ref float xr, ref float yr)
+        private static void SingleDomainWarpBasicGrid(int seed, float warpAmp, float frequency, float x, float y, ref float xr, ref float yr)
         {
             float xf = x * frequency;
             float yf = y * frequency;
@@ -1658,7 +1642,7 @@ namespace Libraries
             }
         }
 
-        private void SingleDomainWarpBasicGrid(int seed, float warpAmp, float frequency, float x, float y, float z, ref float xr, ref float yr, ref float zr)
+        private static void SingleDomainWarpBasicGrid(int seed, float warpAmp, float frequency, float x, float y, float z, ref float xr, ref float yr, ref float zr)
         {
             float xf = x * frequency;
             float yf = y * frequency;
@@ -1706,7 +1690,7 @@ namespace Libraries
             }
         }
 
-        private void SingleDomainWarpSimplexGradient(int seed, float warpAmp, float frequency, float x, float y, ref float xr, ref float yr, bool outGradOnly)
+        private static void SingleDomainWarpSimplexGradient(int seed, float warpAmp, float frequency, float x, float y, ref float xr, ref float yr, bool outGradOnly)
         {
             const float SQRT3 = 1.7320508075688772935274463415059f;
             const float G2 = (3 - SQRT3) / 6;
@@ -1725,7 +1709,7 @@ namespace Libraries
             float a = 0.5f - x0 * x0 - y0 * y0;
             if (a > 0)
             {
-                float aaaa = (a * a) * (a * a);
+                float aaaa = a * a * (a * a);
                 float xo, yo;
                 if (outGradOnly) GradCoordOut(seed, i, j, out xo, out yo);
                 else GradCoordDual(seed, i, j, x0, y0, out xo, out yo);
@@ -1733,12 +1717,12 @@ namespace Libraries
                 vy += aaaa * yo;
             }
 
-            float c = (2 * (1 - 2 * G2) * (1 / G2 - 2)) * t + ((-2 * (1 - 2 * G2) * (1 - 2 * G2)) + a);
+            float c = 2 * (1 - 2 * G2) * (1 / G2 - 2) * t + (-2 * (1 - 2 * G2) * (1 - 2 * G2) + a);
             if (c > 0)
             {
                 float x2 = x0 + (2 * G2 - 1);
                 float y2 = y0 + (2 * G2 - 1);
-                float cccc = (c * c) * (c * c);
+                float cccc = c * c * (c * c);
                 float xo, yo;
                 if (outGradOnly) GradCoordOut(seed, i + PrimeX, j + PrimeY, out xo, out yo);
                 else GradCoordDual(seed, i + PrimeX, j + PrimeY, x2, y2, out xo, out yo);
@@ -1753,7 +1737,7 @@ namespace Libraries
                 float b = 0.5f - x1 * x1 - y1 * y1;
                 if (b > 0)
                 {
-                    float bbbb = (b * b) * (b * b);
+                    float bbbb = b * b * (b * b);
                     float xo, yo;
                     if (outGradOnly) GradCoordOut(seed, i, j + PrimeY, out xo, out yo);
                     else GradCoordDual(seed, i, j + PrimeY, x1, y1, out xo, out yo);
@@ -1768,7 +1752,7 @@ namespace Libraries
                 float b = 0.5f - x1 * x1 - y1 * y1;
                 if (b > 0)
                 {
-                    float bbbb = (b * b) * (b * b);
+                    float bbbb = b * b * (b * b);
                     float xo, yo;
                     if (outGradOnly) GradCoordOut(seed, i + PrimeX, j, out xo, out yo);
                     else GradCoordDual(seed, i + PrimeX, j, x1, y1, out xo, out yo);
@@ -1781,7 +1765,7 @@ namespace Libraries
             yr += vy * warpAmp;
         }
 
-        private void SingleDomainWarpOpenSimplex2Gradient(int seed, float warpAmp, float frequency, float x, float y, float z, ref float xr, ref float yr, ref float zr, bool outGradOnly)
+        private static void SingleDomainWarpOpenSimplex2Gradient(int seed, float warpAmp, float frequency, float x, float y, float z, ref float xr, ref float yr, ref float zr, bool outGradOnly)
         {
             x *= frequency;
             y *= frequency;
@@ -1802,12 +1786,12 @@ namespace Libraries
             j *= PrimeY;
             k *= PrimeZ;
             float vx = 0, vy = 0, vz = 0;
-            float a = (0.6f - x0 * x0) - (y0 * y0 + z0 * z0);
+            float a = 0.6f - x0 * x0 - (y0 * y0 + z0 * z0);
             for (int l = 0; l < 2; l++)
             {
                 if (a > 0)
                 {
-                    float aaaa = (a * a) * (a * a);
+                    float aaaa = a * a * (a * a);
                     float xo, yo, zo;
                     if (outGradOnly) GradCoordOut(seed, i, j, k, out xo, out yo, out zo);
                     else GradCoordDual(seed, i, j, k, x0, y0, z0, out xo, out yo, out zo);
@@ -1844,7 +1828,7 @@ namespace Libraries
 
                 if (b > 0)
                 {
-                    float bbbb = (b * b) * (b * b);
+                    float bbbb = b * b * (b * b);
                     float xo, yo, zo;
                     if (outGradOnly) GradCoordOut(seed, i1, j1, k1, out xo, out yo, out zo);
                     else GradCoordDual(seed, i1, j1, k1, x1, y1, z1, out xo, out yo, out zo);
@@ -1860,7 +1844,7 @@ namespace Libraries
                 x0 = xNSign * ax0;
                 y0 = yNSign * ay0;
                 z0 = zNSign * az0;
-                a += (0.75f - ax0) - (ay0 + az0);
+                a += 0.75f - ax0 - (ay0 + az0);
                 i += (xNSign >> 1) & PrimeX;
                 j += (yNSign >> 1) & PrimeY;
                 k += (zNSign >> 1) & PrimeZ;
@@ -2010,7 +1994,7 @@ namespace Libraries
                 0, 1, 1, 0, 0, -1, 1, 0, 0, 1, -1, 0, 0, -1, -1, 0,
                 1, 0, 1, 0, -1, 0, 1, 0, 1, 0, -1, 0, -1, 0, -1, 0,
                 1, 1, 0, 0, -1, 1, 0, 0, 1, -1, 0, 0, -1, -1, 0, 0,
-                1, 1, 0, 0, 0, -1, 1, 0, -1, 1, 0, 0, 0, -1, -1, 0
+                1, 1, 0, 0, 0, -1, 1, 0, -1, 1, 0, 0, 0, -1, -1, 0,
             };
 
             private static readonly float[] RandVecs3DArray =
@@ -2078,7 +2062,7 @@ namespace Libraries
                 0.2178065647f, -0.9698322841f, -0.1094789531f, 0, -0.1518031304f, -0.7788918132f, -0.6085091231f, 0, -0.2600384876f, -0.4755398075f, -0.8403819825f, 0, 0.572313509f, -0.7474340931f, -0.3373418503f, 0, -0.7174141009f, 0.1699017182f, -0.6756111411f, 0,
                 -0.684180784f, 0.02145707593f, -0.7289967412f, 0, -0.2007447902f, 0.06555605789f, -0.9774476623f, 0, -0.1148803697f, -0.8044887315f, 0.5827524187f, 0,
                 -0.7870349638f, 0.03447489231f, 0.6159443543f, 0, -0.2015596421f, 0.6859872284f, 0.6991389226f, 0, -0.08581082512f, -0.10920836f, -0.9903080513f, 0, 0.5532693395f, 0.7325250401f, -0.396610771f, 0, -0.1842489331f, -0.9777375055f, -0.1004076743f, 0, 0.0775473789f,
-                -0.9111505856f, 0.4047110257f, 0, 0.1399838409f, 0.7601631212f, -0.6344734459f, 0, 0.4484419361f, -0.845289248f, 0.2904925424f, 0
+                -0.9111505856f, 0.4047110257f, 0, 0.1399838409f, 0.7601631212f, -0.6344734459f, 0, 0.4484419361f, -0.845289248f, 0.2904925424f, 0,
             };
         }
     }

@@ -61,7 +61,7 @@ namespace Serialization
             {
                 fixed (byte* ptr = data)
                 {
-                    using var unmanagedStream = new UnmanagedMemoryStream(ptr, data.Length);
+                    using UnmanagedMemoryStream unmanagedStream = new UnmanagedMemoryStream(ptr, data.Length);
                     Stream decompressionStream = null; // Helper to dispose if created
 
                     try
@@ -71,7 +71,7 @@ namespace Serialization
 
                         // Explicitly tell BinaryReader NOT to close the stream (leaveOpen: true).
                         // This makes the intent clear: "The finally block owns the stream disposal."
-                        using var reader = new BinaryReader(decompressionStream, Encoding.UTF8, leaveOpen: true);
+                        using BinaryReader reader = new BinaryReader(decompressionStream, Encoding.UTF8, leaveOpen: true);
 
                         return ReadChunkInternal(reader, debugCoord, data.Length);
                     }
@@ -122,7 +122,7 @@ namespace Serialization
 
                 if (sec != null && !sec.IsEmpty)
                 {
-                    sectionBitmask |= (1 << i);
+                    sectionBitmask |= 1 << i;
                     safeSections[i] = sec;
                 }
             }
@@ -222,7 +222,7 @@ namespace Serialization
             writer.Write(queue.Count);
 
             // Write Items
-            foreach (var node in queue)
+            foreach (LightQueueNode node in queue)
             {
                 writer.Write(node.Position.x);
                 writer.Write(node.Position.y);
@@ -248,7 +248,7 @@ namespace Serialization
                 queue.Enqueue(new LightQueueNode
                 {
                     Position = new Vector3Int(x, y, z),
-                    OldLightLevel = level
+                    OldLightLevel = level,
                 });
             }
         }
@@ -288,7 +288,7 @@ namespace Serialization
 
                 while (bytesReadTotal < totalBytesToRead)
                 {
-                    int bytesRead = reader.Read(bytes.Slice(bytesReadTotal));
+                    int bytesRead = reader.Read(bytes[bytesReadTotal..]);
                     if (bytesRead == 0)
                         throw new EndOfStreamException($"Section data truncated. Read {bytesReadTotal} of {totalBytesToRead} bytes.");
 

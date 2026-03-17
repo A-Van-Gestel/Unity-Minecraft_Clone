@@ -120,7 +120,7 @@ namespace Editor.AtlasPacker
             {
                 EditorGUILayout.LabelField("Atlas Preview", EditorStyles.boldLabel);
 
-                int atlasBlocks = VoxelData.TextureAtlasSizeInBlocks;
+                const int atlasBlocks = VoxelData.TextureAtlasSizeInBlocks;
                 string resLabel = $"{_atlasPreview.width}x{_atlasPreview.height} ({atlasBlocks}x{atlasBlocks} grid)";
                 EditorGUILayout.LabelField(resLabel, EditorStyles.miniLabel);
 
@@ -169,7 +169,7 @@ namespace Editor.AtlasPacker
                 {
                     SerializedProperty element = texturesProp.GetArrayElementAtIndex(index);
                     rect.y += 4;
-                    float lineHeight = THUMBNAIL_SIZE;
+                    const float lineHeight = THUMBNAIL_SIZE;
 
                     // Index label
                     Rect indexRect = new Rect(rect.x, rect.y, 30, lineHeight);
@@ -188,7 +188,7 @@ namespace Editor.AtlasPacker
                         GUI.Label(thumbRect, "—", new GUIStyle(EditorStyles.centeredGreyMiniLabel)
                         {
                             fontSize = 16,
-                            alignment = TextAnchor.MiddleCenter
+                            alignment = TextAnchor.MiddleCenter,
                         });
                     }
 
@@ -197,7 +197,7 @@ namespace Editor.AtlasPacker
                     float fieldWidth = rect.width - (34 + THUMBNAIL_SIZE + 8);
                     Rect fieldRect = new Rect(fieldX, rect.y + (lineHeight - EditorGUIUtility.singleLineHeight) * 0.5f, fieldWidth, EditorGUIUtility.singleLineHeight);
                     EditorGUI.PropertyField(fieldRect, element, GUIContent.none);
-                }
+                },
             };
         }
 
@@ -219,7 +219,7 @@ namespace Editor.AtlasPacker
             }
 
             int blockSize = _config.blockSize;
-            int atlasBlocks = VoxelData.TextureAtlasSizeInBlocks;
+            const int atlasBlocks = VoxelData.TextureAtlasSizeInBlocks;
             int atlasPixels = blockSize * atlasBlocks;
 
             Texture2D atlas = new Texture2D(atlasPixels, atlasPixels, TextureFormat.RGBA32, false);
@@ -243,7 +243,7 @@ namespace Editor.AtlasPacker
 
                 int blockX = i % atlasBlocks;
                 int logicalY = i / atlasBlocks;
-                int blockY = (atlasBlocks - 1) - logicalY;
+                int blockY = atlasBlocks - 1 - logicalY;
 
                 if (logicalY >= atlasBlocks)
                 {
@@ -278,7 +278,7 @@ namespace Editor.AtlasPacker
 
             int maxIndex = -1;
 
-            foreach (var tex in loadedTextures)
+            foreach (Texture2D tex in loadedTextures)
             {
                 Match match = s_prefixRegex.Match(tex.name);
                 if (match.Success)
@@ -308,7 +308,7 @@ namespace Editor.AtlasPacker
             }
 
             int populatedCount = 0;
-            foreach (var tex in loadedTextures)
+            foreach (Texture2D tex in loadedTextures)
             {
                 Match match = s_prefixRegex.Match(tex.name);
                 if (match.Success)
@@ -360,7 +360,7 @@ namespace Editor.AtlasPacker
                     return;
                 }
 
-                string fullPath = Path.Combine(Application.dataPath, path.Substring(7));
+                string fullPath = Path.Combine(Application.dataPath, path[7..]);
                 string dir = Path.GetDirectoryName(fullPath);
                 if (!Directory.Exists(dir) && dir != null)
                 {

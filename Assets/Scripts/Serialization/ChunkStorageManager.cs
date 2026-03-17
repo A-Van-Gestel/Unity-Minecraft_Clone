@@ -55,10 +55,10 @@ namespace Serialization
             // Run I/O on background thread
             return await Task.Run(() =>
             {
-                var (regionCoord, lx, lz) = _codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
+                (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
                 RegionFile region = GetRegion(regionCoord);
 
-                var (data, algorithm) = region.LoadChunkData(lx, lz);
+                (byte[] data, CompressionAlgorithm algorithm) = region.LoadChunkData(lx, lz);
                 if (data == null)
                 {
                     Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
@@ -66,7 +66,7 @@ namespace Serialization
                 }
 
                 // Deserialize (Expensive CPU, kept on background thread)
-                var chunk = ChunkSerializer.Deserialize(data, algorithm, chunkVoxelPos);
+                ChunkData chunk = ChunkSerializer.Deserialize(data, algorithm, chunkVoxelPos);
 
                 if (chunk == null)
                 {
@@ -100,7 +100,7 @@ namespace Serialization
                 }
 
                 // Write to Region
-                var (regionCoord, lx, lz) = _codec.ChunkVoxelPosToRegionAddress(data.position);
+                (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(data.position);
                 RegionFile region = GetRegion(regionCoord);
 
                 region.SaveChunkData(lx, lz, buffer, length, algorithm);
@@ -147,7 +147,7 @@ namespace Serialization
                     if (length <= 0 || cancellationToken.IsCancellationRequested) return;
 
                     // Write
-                    var (regionCoord, lx, lz) = _codec.ChunkVoxelPosToRegionAddress(snapshot.position);
+                    (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(snapshot.position);
                     RegionFile region = GetRegion(regionCoord);
 
                     region.SaveChunkData(lx, lz, buffer, length, algorithm);
@@ -203,7 +203,7 @@ namespace Serialization
             })).Value;
         }
 
-        private ChunkData CreateSerializationSnapshot(ChunkData source)
+        private static ChunkData CreateSerializationSnapshot(ChunkData source)
         {
             ChunkData snapshot = World.Instance.ChunkPool.GetChunkData(source.position);
             snapshot.NeedsInitialLighting = source.NeedsInitialLighting;
@@ -232,12 +232,12 @@ namespace Serialization
             // Queue copying (Locking is correct)
             lock (source.SunlightBfsQueue)
             {
-                foreach (var item in source.SunlightBfsQueue) snapshot.SunlightBfsQueue.Enqueue(item);
+                foreach (LightQueueNode item in source.SunlightBfsQueue) snapshot.SunlightBfsQueue.Enqueue(item);
             }
 
             lock (source.BlocklightBfsQueue)
             {
-                foreach (var item in source.BlocklightBfsQueue) snapshot.BlocklightBfsQueue.Enqueue(item);
+                foreach (LightQueueNode item in source.BlocklightBfsQueue) snapshot.BlocklightBfsQueue.Enqueue(item);
             }
 
             return snapshot;

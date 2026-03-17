@@ -59,7 +59,7 @@ public class DebugScreen : MonoBehaviour
     public enum DebugMode
     {
         FPSOnly,
-        Full
+        Full,
     }
 
     public DebugMode CurrentMode { get; private set; } = DebugMode.Full;
@@ -85,7 +85,7 @@ public class DebugScreen : MonoBehaviour
     private ProfilerRecorder _gcReservedMemoryRecorder;
 
     private bool _profilerRecordersAreValid;
-    private bool _didIEnableTheProfiler = false;
+    private bool _didIEnableTheProfiler;
 
     // --- Cached Data (updated periodically) ---
     private float _frameRate;
@@ -276,14 +276,14 @@ public class DebugScreen : MonoBehaviour
     {
         // Clear builders from the previous frame.
         _topLeftBuilder.Clear();
-        
+
         // We ALWAYS populate the top left, as it contains the FPS counter
         PopulateTopLeftBuilder();
         _topLeftText.text = _topLeftBuilder.ToString();
 
         // Skip building the rest of the strings if we are in FPS Only mode
         if (CurrentMode == DebugMode.FPSOnly) return;
-        
+
         // Clear remaining builders from the previous frame.
         _topLeftBuilder.Clear();
         _middleLeftBuilder.Clear();
@@ -315,7 +315,7 @@ public class DebugScreen : MonoBehaviour
         // --- General Info (Always Show) ---
         _topLeftBuilder.AppendLine("Minecraft Clone in Unity");
         _topLeftBuilder.Append(Mathf.RoundToInt(_frameRate)).AppendLine(" fps");
-        
+
         // Skip building the rest of the strings if we are in FPS Only mode
         if (CurrentMode == DebugMode.FPSOnly) return;
         _topLeftBuilder.AppendLine();
@@ -496,15 +496,12 @@ public class DebugScreen : MonoBehaviour
     /// </summary>
     private static string FormatBytes(long bytes)
     {
-        switch (bytes)
+        return bytes switch
         {
-            case > 1024 * 1024:
-                return $"{bytes / (1024f * 1024f):F2} MB";
-            case > 1024:
-                return $"{bytes / 1024f:F1} KB";
-            default:
-                return $"{bytes} B";
-        }
+            > 1024 * 1024 => $"{bytes / (1024f * 1024f):F2} MB",
+            > 1024 => $"{bytes / 1024f:F1} KB",
+            _ => $"{bytes} B",
+        };
     }
 
     /// <summary>
@@ -533,15 +530,18 @@ public class DebugScreen : MonoBehaviour
         // Normalize angle to prevent issues with negative values or values > 360
         hAngle = (hAngle % 360f + 360f) % 360f;
 
-        if (hAngle >= 337.5f || hAngle < 22.5f) return "North";
-        if (hAngle < 67.5f) return "North-East";
-        if (hAngle < 112.5f) return "East";
-        if (hAngle < 157.5f) return "South-East";
-        if (hAngle < 202.5f) return "South";
-        if (hAngle < 247.5f) return "South-West";
-        if (hAngle < 292.5f) return "West";
-        if (hAngle < 337.5f) return "North-West";
-        return "North";
+        return hAngle switch
+        {
+            >= 337.5f or < 22.5f => "North",
+            < 67.5f => "North-East",
+            < 112.5f => "East",
+            < 157.5f => "South-East",
+            < 202.5f => "South",
+            < 247.5f => "South-West",
+            < 292.5f => "West",
+            < 337.5f => "North-West",
+            _ => "North",
+        };
     }
 
     private static string BoolToEnabledDisabledString(bool value) => value ? "Enabled" : "Disabled";

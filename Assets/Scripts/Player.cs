@@ -95,11 +95,6 @@ public class Player : MonoBehaviour
         _world.inUI = false;
     }
 
-    private void FixedUpdate()
-    {
-        // Physics logic is handled by VoxelRigidbody
-    }
-
     private void Update()
     {
         if (Input.GetKeyDown(KeyCode.I))
@@ -237,15 +232,15 @@ public class Player : MonoBehaviour
             0f // Roll (Unused)
         );
 
-        var data = new PlayerSaveData
+        PlayerSaveData data = new PlayerSaveData
         {
             position = transform.position,
             rotation = combinedRotation,
             capabilities = new PlayerCapabilityData
             {
                 isFlying = isFlying,
-                isNoclipping = isNoclipping
-            }
+                isNoclipping = isNoclipping,
+            },
         };
 
         // Note: Inventory and Cursor data are gathered by the SaveSystem

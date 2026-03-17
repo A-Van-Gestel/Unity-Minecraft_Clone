@@ -149,7 +149,7 @@ namespace Jobs
         private static long EncodeNeighborKey(int x, int y, int z)
         {
             // X+16: [0, 47], Z+16: [0, 47], Y: [0, 255]
-            return (long)(x + 16) + (long)(z + 16) * 48L + (long)y * 48L * 48L;
+            return x + 16 + (z + 16) * 48L + y * 48L * 48L;
         }
 
         #region Core Logic
@@ -247,7 +247,7 @@ namespace Jobs
             // Everything above this point is transparent to the sky and should be fully sunlit.
             for (int y = VoxelData.ChunkHeight - 1; y > highestBlockY; y--)
             {
-                var currentPos = new Vector3Int(x, y, z);
+                Vector3Int currentPos = new Vector3Int(x, y, z);
                 uint currentPacked = GetPackedData(currentPos, ref cache);
                 byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(currentPacked);
 
@@ -296,7 +296,7 @@ namespace Jobs
             byte lightFromSky = 15;
             for (int y = highestBlockY; y >= 0; y--)
             {
-                var currentPos = new Vector3Int(x, y, z);
+                Vector3Int currentPos = new Vector3Int(x, y, z);
                 uint currentPacked = GetPackedData(currentPos, ref cache);
                 byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(currentPacked);
                 BlockTypeJobData props = BlockTypes[BurstVoxelDataBitMapping.GetId(currentPacked)];
@@ -427,11 +427,7 @@ namespace Jobs
                 // This is critical for darkness removal: PropagateDarkness sets neighbor light to 0,
                 // and PropagateLight must see that 0 to avoid re-spreading ghost light.
                 long cacheKey = EncodeNeighborKey(localPos.x, localPos.y, localPos.z);
-                uint currentPacked;
-                if (cache.TryGetValue(cacheKey, out uint existing))
-                    currentPacked = existing;
-                else
-                    currentPacked = GetPackedData(localPos, ref cache);
+                uint currentPacked = cache.TryGetValue(cacheKey, out uint existing) ? existing : GetPackedData(localPos, ref cache);
                 uint updatedPacked = channel == LightChannel.Sun
                     ? BurstVoxelDataBitMapping.SetSunLight(currentPacked, lightLevel)
                     : BurstVoxelDataBitMapping.SetBlockLight(currentPacked, lightLevel);

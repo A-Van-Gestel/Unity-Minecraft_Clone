@@ -34,7 +34,7 @@ namespace Editor.BlockEditor
             foreach (string guid in guids)
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
-                var preset = AssetDatabase.LoadAssetAtPath<BlockTagPreset>(path);
+                BlockTagPreset preset = AssetDatabase.LoadAssetAtPath<BlockTagPreset>(path);
                 if (preset != null)
                 {
                     _tagPresets.Add(preset);
@@ -85,7 +85,7 @@ namespace Editor.BlockEditor
                 ref _selectedPresetIndex,
                 (preset, search) => string.IsNullOrEmpty(search) || preset.name.ToLower().Contains(search.ToLower()),
                 (rect, preset, _) => { GUI.Label(rect, preset.name, EditorStyles.toolbarButton); },
-                (index) => { _selectedPreset = _tagPresets[index]; }
+                index => { _selectedPreset = _tagPresets[index]; }
             );
 
             // --- List management buttons ---
@@ -95,7 +95,7 @@ namespace Editor.BlockEditor
                 CreateNewTagPresetFromManager();
             }
 
-            GUI.enabled = (_selectedPreset != null);
+            GUI.enabled = _selectedPreset != null;
             if (GUILayout.Button("Duplicate"))
             {
                 DuplicateSelectedTagPreset();

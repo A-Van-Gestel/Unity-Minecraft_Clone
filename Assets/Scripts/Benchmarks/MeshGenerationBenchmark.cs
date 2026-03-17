@@ -28,7 +28,7 @@ namespace Benchmarks
         private enum BenchmarkMode
         {
             WithDiagonals, // Passes all 8 neighbors to the job.
-            CardinalsOnly // Passes only the 4 cardinal neighbors.
+            CardinalsOnly, // Passes only the 4 cardinal neighbors.
         }
 
         /// <summary>
@@ -37,7 +37,7 @@ namespace Benchmarks
         private enum ChunkDataType
         {
             Solid, // Easiest case: very few faces to generate.
-            Checkerboard // Worst case: maximum number of faces to generate.
+            Checkerboard, // Worst case: maximum number of faces to generate.
         }
 
         #endregion
@@ -93,7 +93,7 @@ namespace Benchmarks
         #region Private Fields
 
         private World _world;
-        private bool _isBenchmarking = false;
+        private bool _isBenchmarking;
 
         #endregion
 
@@ -166,7 +166,7 @@ namespace Benchmarks
             // Execute the benchmark and capture the average time via a callback.
             yield return StartCoroutine(ExecuteBenchmarkRun(_mode, _dataType, result => averageTime = result));
 
-            Debug.Log($"<color=lime>--- Single Benchmark Complete ---</color>\n" +
+            Debug.Log("<color=lime>--- Single Benchmark Complete ---</color>\n" +
                       $"Configuration: {_mode} | {_dataType}\n" +
                       $"<b>Average Time over {_benchmarkRuns} runs: {averageTime} ms</b>");
         }
@@ -179,7 +179,7 @@ namespace Benchmarks
             _isBenchmarking = true;
             Debug.Log("--- Starting Full Comparison Benchmark ---");
 
-            var results = new Dictionary<string, long>();
+            Dictionary<string, long> results = new Dictionary<string, long>();
 
             // --- Run all 4 combinations sequentially ---
             yield return StartCoroutine(ExecuteBenchmarkRun(BenchmarkMode.WithDiagonals, ChunkDataType.Solid, result => results["Solid_WithDiagonals"] = result));
@@ -211,10 +211,10 @@ namespace Benchmarks
 
             for (int run = 0; run < _benchmarkRuns; run++)
             {
-                var jobHandles = new NativeArray<JobHandle>(_chunksToMesh, Allocator.Persistent);
-                var inputDataToDispose = new List<BenchmarkVoxelData>(_chunksToMesh);
-                var outputDataToDispose = new List<MeshDataJobOutput>(_chunksToMesh);
-                var stopwatch = new Stopwatch();
+                NativeArray<JobHandle> jobHandles = new NativeArray<JobHandle>(_chunksToMesh, Allocator.Persistent);
+                List<BenchmarkVoxelData> inputDataToDispose = new List<BenchmarkVoxelData>(_chunksToMesh);
+                List<MeshDataJobOutput> outputDataToDispose = new List<MeshDataJobOutput>(_chunksToMesh);
+                Stopwatch stopwatch = new Stopwatch();
 
                 try
                 {
@@ -224,18 +224,18 @@ namespace Benchmarks
                     for (int i = 0; i < _chunksToMesh; i++)
                     {
                         // For each job, create its input data with Allocator.Persistent.
-                        var jobInputData = new BenchmarkVoxelData(Allocator.Persistent);
+                        BenchmarkVoxelData jobInputData = new BenchmarkVoxelData(Allocator.Persistent);
                         jobInputData.CopyFrom(benchmarkData);
                         inputDataToDispose.Add(jobInputData); // Track it for cleanup.
 
                         // Schedule the job.
-                        var jobInfo = ScheduleBenchmarkMeshing(jobInputData, mode);
+                        (JobHandle handle, MeshDataJobOutput output) jobInfo = ScheduleBenchmarkMeshing(jobInputData, mode);
                         jobHandles[i] = jobInfo.handle;
                         outputDataToDispose.Add(jobInfo.output); // Track output for cleanup.
                     }
 
                     // --- Completion Phase ---
-                    var combinedHandle = JobHandle.CombineDependencies(jobHandles);
+                    JobHandle combinedHandle = JobHandle.CombineDependencies(jobHandles);
 
                     if (_useBlockingWait)
                     {
@@ -256,8 +256,8 @@ namespace Benchmarks
                     // The 'finally' block ensures that all native collections are disposed
                     // even if an exception occurs during the benchmark.
                     if (jobHandles.IsCreated) jobHandles.Dispose();
-                    foreach (var data in inputDataToDispose) data.Dispose();
-                    foreach (var data in outputDataToDispose) data.Dispose();
+                    foreach (BenchmarkVoxelData data in inputDataToDispose) data.Dispose();
+                    foreach (MeshDataJobOutput data in outputDataToDispose) data.Dispose();
                 }
 
                 // If running in non-blocking mode, yield a frame between runs to keep the editor responsive.
@@ -282,14 +282,14 @@ namespace Benchmarks
         /// <returns>A tuple containing the final JobHandle and the job's output data struct.</returns>
         private (JobHandle handle, MeshDataJobOutput output) ScheduleBenchmarkMeshing(BenchmarkVoxelData data, BenchmarkMode mode)
         {
-            var meshOutput = new MeshDataJobOutput(Allocator.Persistent);
+            MeshDataJobOutput meshOutput = new MeshDataJobOutput(Allocator.Persistent);
 
             // If we're in CardinalsOnly mode, create a temporary empty array to pass to the unused job fields.
-            var emptyArray = mode == BenchmarkMode.CardinalsOnly
+            NativeArray<uint> emptyArray = mode == BenchmarkMode.CardinalsOnly
                 ? new NativeArray<uint>(0, Allocator.TempJob)
                 : default;
 
-            var job = new MeshGenerationJob
+            MeshGenerationJob job = new MeshGenerationJob
             {
                 Map = data.Center,
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
@@ -328,7 +328,7 @@ namespace Benchmarks
         /// <returns>A BenchmarkVoxelData struct containing the generated maps.</returns>
         private BenchmarkVoxelData GenerateBenchmarkData(ChunkDataType type, Allocator allocator)
         {
-            var data = new BenchmarkVoxelData(allocator);
+            BenchmarkVoxelData data = new BenchmarkVoxelData(allocator);
             for (int i = 0; i < data.Center.Length; i++)
             {
                 byte idToPlace = GetVoxelIDForPattern(type, i);
@@ -345,7 +345,7 @@ namespace Benchmarks
         /// <param name="type">The data pattern type.</param>
         /// <param name="index">The flat array index of the voxel.</param>
         /// <returns>The ushort ID of the block to place.</returns>
-        private byte GetVoxelIDForPattern(ChunkDataType type, int index)
+        private static byte GetVoxelIDForPattern(ChunkDataType type, int index)
         {
             switch (type)
             {
@@ -353,7 +353,7 @@ namespace Benchmarks
                     return 1; // Stone
                 case ChunkDataType.Checkerboard:
                     int x = index % VoxelData.ChunkWidth;
-                    int y = (index / VoxelData.ChunkWidth) % VoxelData.ChunkHeight;
+                    int y = index / VoxelData.ChunkWidth % VoxelData.ChunkHeight;
                     int z = index / (VoxelData.ChunkWidth * VoxelData.ChunkHeight);
                     return (x + y + z) % 2 == 0 ? (byte)1 : (byte)0; // Stone or Air
                 default:
@@ -371,8 +371,8 @@ namespace Benchmarks
         /// <param name="results">A dictionary containing the average times for each test configuration.</param>
         private void GenerateReport(Dictionary<string, long> results)
         {
-            var report = new StringBuilder();
-            report.AppendLine($"<color=lime><b>--- MESH GENERATION BENCHMARK REPORT ---</b></color>");
+            StringBuilder report = new StringBuilder();
+            report.AppendLine("<color=lime><b>--- MESH GENERATION BENCHMARK REPORT ---</b></color>");
             report.AppendLine($"Test configuration: {_chunksToMesh} chunks per run, averaged over {_benchmarkRuns} runs.\n");
 
             // --- Solid Data Report ---
@@ -402,7 +402,7 @@ namespace Benchmarks
         /// <param name="timeB">The timing for the second mode.</param>
         /// <param name="nameA">The name of the first mode.</param>
         /// <param name="nameB">The name of the second mode.</param>
-        private void AppendWinner(StringBuilder sb, long timeA, long timeB, BenchmarkMode nameA, BenchmarkMode nameB)
+        private static void AppendWinner(StringBuilder sb, long timeA, long timeB, BenchmarkMode nameA, BenchmarkMode nameB)
         {
             if (timeA == timeB)
             {
@@ -415,7 +415,7 @@ namespace Benchmarks
             string winnerName = timeA < timeB ? nameA.ToString() : nameB.ToString();
 
             long difference = loserTime - winnerTime;
-            float percentage = (difference / (float)loserTime) * 100f;
+            float percentage = difference / (float)loserTime * 100f;
 
             sb.AppendLine($"  - <color=cyan>Winner: {winnerName} by {difference} ms ({percentage:F1}% faster)</color>");
         }

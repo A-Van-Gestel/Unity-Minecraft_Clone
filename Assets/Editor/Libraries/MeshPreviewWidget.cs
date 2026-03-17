@@ -68,7 +68,7 @@ namespace Editor.Libraries
                 _previewRenderUtility.camera.fieldOfView = CameraFieldOfView;
 
                 // Set up a light for the preview
-                var light = _previewRenderUtility.lights[0];
+                Light light = _previewRenderUtility.lights[0];
                 light.intensity = LightIntensity;
                 light.transform.rotation = Quaternion.Euler(30, 30, 0);
 
@@ -152,7 +152,7 @@ namespace Editor.Libraries
                 _previewRenderUtility.BeginPreview(previewRect, GUIStyle.none);
 
                 // Center the rotation matrix
-                var rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
+                Matrix4x4 rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
 
                 // Draw sub-mesh 0 (Opaque parts)
                 _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _previewMaterial, 0);

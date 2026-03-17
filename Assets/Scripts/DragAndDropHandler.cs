@@ -306,7 +306,7 @@ public class DragAndDropHandler : MonoBehaviour
             {
                 itemID = _cursorSlot.ItemSlot.Stack.ID,
                 amount = _cursorSlot.ItemSlot.Stack.Amount,
-                originSlotIndex = -1 // We don't track origin currently, could add later
+                originSlotIndex = -1, // We don't track origin currently, could add later
             };
         }
 

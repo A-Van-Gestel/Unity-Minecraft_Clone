@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using Data;
 using Data.JobData;
 using Data.NativeData;
@@ -17,6 +18,7 @@ using Jobs.Data;
 using MyBox;
 using Serialization;
 using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
@@ -61,7 +63,7 @@ public class World : MonoBehaviour
 
     private readonly Dictionary<ChunkCoord, Chunk> _chunkMap = new Dictionary<ChunkCoord, Chunk>();
 
-    private HashSet<ChunkCoord> _activeChunks = new HashSet<ChunkCoord>();
+    private readonly HashSet<ChunkCoord> _activeChunks = new HashSet<ChunkCoord>();
     public ChunkCoord PlayerChunkCoord;
     private ChunkCoord _playerLastChunkCoord = new ChunkCoord(int.MinValue, int.MinValue);
 
@@ -70,7 +72,7 @@ public class World : MonoBehaviour
 
     public readonly Queue<Chunk> ChunksToDraw = new Queue<Chunk>();
 
-    private bool _applyingModifications = false;
+    private bool _applyingModifications;
     private readonly Queue<VoxelMod> _modifications = new Queue<VoxelMod>();
 
     // UI
@@ -79,7 +81,7 @@ public class World : MonoBehaviour
 
     public GameObject creativeInventoryWindow;
     public GameObject cursorSlot;
-    private bool _inUI = false;
+    private bool _inUI;
 
     // Clouds
     [Header("Clouds")]
@@ -92,7 +94,7 @@ public class World : MonoBehaviour
 
     [Header("Paths")]
     [MyBox.ReadOnly]
-    public string appSaveDataPath;
+    public string appSaveDataPath; // TODO: Should used by the "Save system classes"
 
     [Header("Debug")]
     [Tooltip("The prefab to use for chunk borders.")]
@@ -117,9 +119,9 @@ public class World : MonoBehaviour
     public ChunkPoolManager ChunkPool { get; private set; }
 
     // --- Shader Properties ---
-    private static readonly int ShaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
-    private static readonly int ShaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
-    private static readonly int ShaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
+    private static readonly int s_shaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
+    private static readonly int s_shaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
+    private static readonly int s_shaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
 
     // --- Fluid Vertex Data ---
     public FluidVertexTemplatesNativeData FluidVertexTemplates;
@@ -140,7 +142,7 @@ public class World : MonoBehaviour
     /// <summary>
     /// Indicates whether the world startup process has completed and the world is ready to be used.
     /// </summary>
-    private bool _isWorldLoaded = false;
+    private bool _isWorldLoaded;
 
     /// <summary>
     /// Public accessor for world load state. True once <see cref="StartWorld"/> has fully completed.
@@ -233,17 +235,17 @@ public class World : MonoBehaviour
         // -- World generation jobs --
         foreach (GenerationJobData job in JobManager.generationJobs.Values)
         {
-            job.Handle.Complete();
+            job.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
             job.Dispose();
         }
 
         JobManager.generationJobs.Clear();
 
         // -- Mesh generation jobs --
-        foreach (var job in JobManager.meshJobs.Values)
+        foreach ((JobHandle handle, MeshDataJobOutput meshData) job in JobManager.meshJobs.Values) // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
         {
-            job.handle.Complete();
-            job.meshData.Dispose();
+            job.handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            job.meshData.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
         }
 
         JobManager.meshJobs.Clear();
@@ -251,7 +253,7 @@ public class World : MonoBehaviour
         // -- Lighting jobs --
         foreach (LightingJobData jobData in JobManager.lightingJobs.Values)
         {
-            jobData.Handle.Complete();
+            jobData.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
             jobData.Dispose();
         }
 
@@ -281,7 +283,7 @@ public class World : MonoBehaviour
         // Cleanup world data
         if (worldData != null)
         {
-            foreach (var data in worldData.Chunks.Values)
+            foreach (ChunkData data in worldData.Chunks.Values)
             {
                 // POOLING: Return data to pool
                 ChunkPool.ReturnChunkData(data);
@@ -292,14 +294,14 @@ public class World : MonoBehaviour
         }
 
         // Cleanup chunk pool
-        if (ChunkPool != null) ChunkPool.Clear();
+        ChunkPool?.Clear();
 
         // Clean active map
-        foreach (var chunk in _chunkMap.Values) chunk.Destroy();
+        foreach (Chunk chunk in _chunkMap.Values) chunk.Destroy();
         _chunkMap.Clear();
 
         // Clean active borders map
-        foreach (var border in _chunkBorders.Values)
+        foreach (GameObject border in _chunkBorders.Values)
         {
             if (border != null) Destroy(border);
         }
@@ -366,7 +368,7 @@ public class World : MonoBehaviour
             LightingStateManager.Load();
 
             // Load Level.dat (Player pos, Inventory, Time)
-            var metadata = SaveSystem.LoadWorldMetadata(worldName, IsVolatileMode);
+            WorldSaveData metadata = SaveSystem.LoadWorldMetadata(worldName, IsVolatileMode);
 
             if (metadata != null)
             {
@@ -380,8 +382,8 @@ public class World : MonoBehaviour
         Random.InitState(VoxelData.Seed);
 
         // Initialize global shader properties
-        Shader.SetGlobalFloat(ShaderMinGlobalLightLevel, VoxelData.MinLightLevel);
-        Shader.SetGlobalFloat(ShaderMaxGlobalLightLevel, VoxelData.MaxLightLevel);
+        Shader.SetGlobalFloat(s_shaderMinGlobalLightLevel, VoxelData.MinLightLevel);
+        Shader.SetGlobalFloat(s_shaderMaxGlobalLightLevel, VoxelData.MaxLightLevel);
         SetGlobalLightValue();
 
         // --- Initialize Chunk Border Visualization ---
@@ -418,7 +420,7 @@ public class World : MonoBehaviour
 
         // 1. First, just schedule generation for everything in the load radius.
         //    This ensures the initial "blocking" load is fast, even with high view distance settings.
-        int initialLoadRadius = Mathf.Min(settings.loadDistance, (int)settings.maxInitialLoadRadius);
+        int initialLoadRadius = Mathf.Min(settings.loadDistance, settings.maxInitialLoadRadius);
 
         // Generate an extra ring of chunks (+1 radius).
         // This ensures that the chunks inside 'initialLoadRadius' have valid neighbors to calculate lighting against.
@@ -451,7 +453,7 @@ public class World : MonoBehaviour
         }
 
         // Wait for all to finish (Data Ready)
-        foreach (var task in loadTasks) yield return task;
+        foreach (Awaitable task in loadTasks) yield return task;
 
         // 2. Force complete ONLY the data-related jobs (generation and lighting).
         //    Now, instead of a blocking call, we yield to (wait for) another coroutine.
@@ -574,7 +576,7 @@ public class World : MonoBehaviour
                 if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
                 {
                     Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {chunkCoord}");
-                    foreach (var mod in pendingMods)
+                    foreach (VoxelMod mod in pendingMods)
                     {
                         // Apply directly to data (fast)
                         Vector3Int localVoxelPos = worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
@@ -590,7 +592,7 @@ public class World : MonoBehaviour
                     Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {chunkCoord}");
 
                     HashSet<Vector2Int> globalCols = new HashSet<Vector2Int>();
-                    foreach (var lCol in localCols)
+                    foreach (Vector2Int lCol in localCols)
                     {
                         globalCols.Add(new Vector2Int(lCol.x + chunkVoxelPos.x, lCol.y + chunkVoxelPos.y));
                     }
@@ -656,10 +658,10 @@ public class World : MonoBehaviour
     private IEnumerator ForceCompleteDataJobsCoroutine(List<ChunkCoord> initialChunks)
     {
         // --- Profiling Setup ---
-        var totalStopwatch = Stopwatch.StartNew();
-        var generationProcessingWatch = new Stopwatch();
-        var lightingSchedulingWatch = new Stopwatch();
-        var lightingCompletionWatch = new Stopwatch();
+        Stopwatch totalStopwatch = Stopwatch.StartNew();
+        Stopwatch generationProcessingWatch = new Stopwatch();
+        Stopwatch lightingSchedulingWatch = new Stopwatch();
+        Stopwatch lightingCompletionWatch = new Stopwatch();
 
         int safetyBreak = 0;
 
@@ -688,7 +690,7 @@ public class World : MonoBehaviour
             safetyBreak++;
             if (safetyBreak > maxIterations)
             {
-                Debug.LogError($"ForceCompleteDataJobsCoroutine timed out during Generation Phase. Forcing exit.");
+                Debug.LogError("ForceCompleteDataJobsCoroutine timed out during Generation Phase. Forcing exit.");
                 yield break; // Exit the coroutine
             }
 
@@ -700,7 +702,7 @@ public class World : MonoBehaviour
         // --- PHASE 2: Complete all lighting calculations ---
         // Optimization: Convert Coord list to Data list once
         List<ChunkData> chunksInLoadArea = new List<ChunkData>();
-        foreach (var chunkCoord in initialChunks)
+        foreach (ChunkCoord chunkCoord in initialChunks)
         {
             // We can use the dictionary directly as we know they were requested
             Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
@@ -773,7 +775,7 @@ public class World : MonoBehaviour
         Debug.Log("All generation and lighting jobs are complete!");
 
         // --- Generate and Print Profiling Report ---
-        var report = new StringBuilder();
+        StringBuilder report = new StringBuilder();
         report.AppendLine(
             $"<color=yellow><b>--- Startup Coroutine Profile Report (Load Radius: {initialChunks.Count}) ---</b></color>");
         report.AppendLine($"<b>Total Time: {totalStopwatch.ElapsedMilliseconds} ms</b>");
@@ -810,7 +812,7 @@ public class World : MonoBehaviour
     /// </summary>
     /// <param name="chunkList">The list of chunks to check.</param>
     /// <returns>True if any chunk in the list has the `NeedsInitialLighting` flag set; otherwise, false.</returns>
-    private bool HasPendingInitialLighting(List<ChunkData> chunkList)
+    private static bool HasPendingInitialLighting(List<ChunkData> chunkList)
     {
         return chunkList.Any(chunkData => chunkData != null && chunkData.NeedsInitialLighting);
     }
@@ -820,7 +822,7 @@ public class World : MonoBehaviour
     /// </summary>
     /// <param name="chunkList">The list of chunks to check.</param>
     /// <returns>True if any chunk in the list has the `HasLightChangesToProcess` flag set; otherwise, false.</returns>
-    private bool HasPendingLightChangesOnMainThread(List<ChunkData> chunkList)
+    private static bool HasPendingLightChangesOnMainThread(List<ChunkData> chunkList)
     {
         return chunkList.Any(chunkData => chunkData != null && chunkData.HasLightChangesToProcess);
     }
@@ -828,9 +830,9 @@ public class World : MonoBehaviour
     private void CompleteAndProcessLightingJobs()
     {
         // Force complete all scheduled lighting jobs immediately.
-        foreach (var job in JobManager.lightingJobs.Values)
+        foreach (LightingJobData job in JobManager.lightingJobs.Values)
         {
-            job.Handle.Complete();
+            job.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
         }
 
         // Process their results.
@@ -840,9 +842,9 @@ public class World : MonoBehaviour
     private void CompleteAndProcessMeshJobs()
     {
         // Force complete all scheduled mesh jobs immediately.
-        foreach (var job in JobManager.meshJobs.Values)
+        foreach ((JobHandle handle, MeshDataJobOutput meshData) job in JobManager.meshJobs.Values)
         {
-            job.handle.Complete();
+            job.handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
         }
 
         // Process their results.
@@ -851,7 +853,7 @@ public class World : MonoBehaviour
 
     public void SetGlobalLightValue()
     {
-        Shader.SetGlobalFloat(ShaderGlobalLightLevel, globalLightLevel);
+        Shader.SetGlobalFloat(s_shaderGlobalLightLevel, globalLightLevel);
         _playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
     }
 
@@ -861,8 +863,8 @@ public class World : MonoBehaviour
         {
             // FIX: Snapshot _activeChunks to prevent InvalidOperationException if
             // CheckViewDistance modifies the set between coroutine yields.
-            using var enumerator = _activeChunks.GetEnumerator();
-            var snapshot = ListPool<ChunkCoord>.Get();
+            using HashSet<ChunkCoord>.Enumerator enumerator = _activeChunks.GetEnumerator();
+            List<ChunkCoord> snapshot = ListPool<ChunkCoord>.Get();
             try
             {
                 while (enumerator.MoveNext())
@@ -903,7 +905,7 @@ public class World : MonoBehaviour
         // Toggle chunk border visibility if the setting has changed.
         if (_lastChunkBordersState != settings.showChunkBorders)
         {
-            foreach (var borderObject in _chunkBorders.Values)
+            foreach (GameObject borderObject in _chunkBorders.Values)
             {
                 if (borderObject != null)
                 {
@@ -1046,8 +1048,8 @@ public class World : MonoBehaviour
         }
 
         // Pass 2: Allocate memory and populate the flattened arrays.
-        var biomesJobData = new NativeArray<BiomeAttributesJobData>(biomes.Length, Allocator.Persistent);
-        var allLodesJobData = new NativeArray<LodeJobData>(totalLodeCount, Allocator.Persistent);
+        NativeArray<BiomeAttributesJobData> biomesJobData = new NativeArray<BiomeAttributesJobData>(biomes.Length, Allocator.Persistent);
+        NativeArray<LodeJobData> allLodesJobData = new NativeArray<LodeJobData>(totalLodeCount, Allocator.Persistent);
 
         int currentLodeIndex = 0;
         for (int i = 0; i < biomes.Length; i++)
@@ -1069,7 +1071,7 @@ public class World : MonoBehaviour
         // --- Block Types & Custom Meshes ---
         // --- Step 1: Collect all unique custom mesh assets
         List<VoxelMeshData> uniqueCustomMeshes = new List<VoxelMeshData>();
-        foreach (var blockType in blockDatabase.blockTypes)
+        foreach (BlockType blockType in blockDatabase.blockTypes)
         {
             if (blockType.meshData != null && !uniqueCustomMeshes.Contains(blockType.meshData))
             {
@@ -1114,13 +1116,13 @@ public class World : MonoBehaviour
         }
 
         // --- Step 3: Convert lists to persistent NativeArrays
-        var customMeshesJobData = new NativeArray<CustomMeshData>(customMeshesList.ToArray(), Allocator.Persistent);
-        var customFacesJobData = new NativeArray<CustomFaceData>(customFacesList.ToArray(), Allocator.Persistent);
-        var customVertsJobData = new NativeArray<CustomVertData>(customVertsList.ToArray(), Allocator.Persistent);
-        var customTrisJobData = new NativeArray<int>(customTrisList.ToArray(), Allocator.Persistent);
+        NativeArray<CustomMeshData> customMeshesJobData = new NativeArray<CustomMeshData>(customMeshesList.ToArray(), Allocator.Persistent);
+        NativeArray<CustomFaceData> customFacesJobData = new NativeArray<CustomFaceData>(customFacesList.ToArray(), Allocator.Persistent);
+        NativeArray<CustomVertData> customVertsJobData = new NativeArray<CustomVertData>(customVertsList.ToArray(), Allocator.Persistent);
+        NativeArray<int> customTrisJobData = new NativeArray<int>(customTrisList.ToArray(), Allocator.Persistent);
 
         // --- Step 4: Populate blockTypesJobData, including the custom mesh index
-        var blockTypesJobData =
+        NativeArray<BlockTypeJobData> blockTypesJobData =
             new NativeArray<BlockTypeJobData>(blockDatabase.blockTypes.Length, Allocator.Persistent);
         for (int i = 0; i < blockDatabase.blockTypes.Length; i++)
         {
@@ -1645,7 +1647,7 @@ public class World : MonoBehaviour
         int unloadDistance = settings.loadDistance + 2; // Buffer to prevent flickering
 
         // Step A: Identify candidates
-        foreach (var kvp in worldData.Chunks)
+        foreach (KeyValuePair<Vector2Int, ChunkData> kvp in worldData.Chunks)
         {
             ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(kvp.Key);
 
@@ -1658,7 +1660,7 @@ public class World : MonoBehaviour
         }
 
         // Step B: Unload
-        foreach (var chunkCoord in chunksToRemove)
+        foreach (ChunkCoord chunkCoord in chunksToRemove)
         {
             Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
 
@@ -1687,7 +1689,7 @@ public class World : MonoBehaviour
                 {
                     // Convert to Local Coordinates (0-15) for storage
                     HashSet<Vector2Int> localCols = HashSetPool<Vector2Int>.Get(); // POOLING
-                    foreach (var gCol in globalCols)
+                    foreach (Vector2Int gCol in globalCols)
                     {
                         localCols.Add(new Vector2Int(gCol.x - chunkVoxelPos.x, gCol.y - chunkVoxelPos.y));
                     }
@@ -1711,7 +1713,7 @@ public class World : MonoBehaviour
             if (worldData.ModifiedChunks.Contains(data))
             {
                 // Fire and forget (StorageManager handles the Snapshot lifecycle)
-                var saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
+                Task saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
 
                 saveTask.ContinueWith(t =>
                 {
@@ -1975,8 +1977,8 @@ public class World : MonoBehaviour
         if (visualizationMode != DebugVisualizationMode.None && _chunksToUpdateVisualization.Count > 0)
         {
             // Use Pools for tracking collections
-            var chunksReadyForVisualization = ListPool<ChunkCoord>.Get();
-            var chunkDataCache = DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Get();
+            List<ChunkCoord> chunksReadyForVisualization = ListPool<ChunkCoord>.Get();
+            Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>> chunkDataCache = DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Get();
 
             try
             {
@@ -2001,31 +2003,29 @@ public class World : MonoBehaviour
                     if (_chunkMap.TryGetValue(coord, out Chunk chunk))
                     {
                         // Explicit Ownership. The caller requests the pooled dictionary and passes it into the helper method to be populated.
-                        var voxelsToDraw = DictionaryPool<Vector3Int, Color>.Get();
+                        Dictionary<Vector3Int, Color> voxelsToDraw = DictionaryPool<Vector3Int, Color>.Get();
                         GetVoxelDataForVisualization(chunk, voxelsToDraw);
                         chunkDataCache[coord] = voxelsToDraw;
                     }
                 }
 
                 // Iterate through the cached data to draw meshes
-                foreach (var cachedChunk in chunkDataCache)
+                foreach ((ChunkCoord coord, Dictionary<Vector3Int, Color> value) in chunkDataCache)
                 {
-                    ChunkCoord coord = cachedChunk.Key;
-
                     // Get neighbor data from the cache, or null if not available.
-                    chunkDataCache.TryGetValue(coord.Neighbor(0, 1), out var northData);
-                    chunkDataCache.TryGetValue(coord.Neighbor(0, -1), out var southData);
-                    chunkDataCache.TryGetValue(coord.Neighbor(1, 0), out var eastData);
-                    chunkDataCache.TryGetValue(coord.Neighbor(-1, 0), out var westData);
+                    chunkDataCache.TryGetValue(coord.Neighbor(0, 1), out Dictionary<Vector3Int, Color> northData);
+                    chunkDataCache.TryGetValue(coord.Neighbor(0, -1), out Dictionary<Vector3Int, Color> southData);
+                    chunkDataCache.TryGetValue(coord.Neighbor(1, 0), out Dictionary<Vector3Int, Color> eastData);
+                    chunkDataCache.TryGetValue(coord.Neighbor(-1, 0), out Dictionary<Vector3Int, Color> westData);
 
                     // Call the visualizer method with all neighbor data.
-                    voxelVisualizer.UpdateChunkVisualization(coord, cachedChunk.Value, northData, southData, eastData,
+                    voxelVisualizer.UpdateChunkVisualization(coord, value, northData, southData, eastData,
                         westData);
                 }
 
                 // Remove only the processed chunks from the update set.
                 // Chunks that were not ready will remain in the set to be checked next frame.
-                foreach (var coord in chunksReadyForVisualization)
+                foreach (ChunkCoord coord in chunksReadyForVisualization)
                 {
                     _chunksToUpdateVisualization.Remove(coord);
                 }
@@ -2033,7 +2033,7 @@ public class World : MonoBehaviour
             finally
             {
                 // ALWAYS release pools to prevent memory leaks, even on errors
-                foreach (var dict in chunkDataCache.Values)
+                foreach (Dictionary<Vector3Int, Color> dict in chunkDataCache.Values)
                 {
                     if (dict != null) DictionaryPool<Vector3Int, Color>.Release(dict);
                 }
@@ -2058,7 +2058,7 @@ public class World : MonoBehaviour
         {
             case DebugVisualizationMode.ActiveVoxels:
                 // Instead of checking every voxel, iterate only through the known active list.
-                foreach (var localPos in chunk.ActiveVoxels)
+                foreach (Vector3Int localPos in chunk.ActiveVoxels)
                 {
                     voxelsToDraw[localPos] = new Color(1f, 0f, 0f, 0.7f); // Red for active
                 }
@@ -2093,12 +2093,12 @@ public class World : MonoBehaviour
 
                         // Convert section index to 3D position
                         int x = i % ChunkMath.SECTION_SIZE;
-                        int yOffset = (i / ChunkMath.SECTION_SIZE) % ChunkMath.SECTION_SIZE;
+                        int yOffset = i / ChunkMath.SECTION_SIZE % ChunkMath.SECTION_SIZE;
                         int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
 
-                        var localPos = new Vector3Int(x, startY + yOffset, z);
+                        Vector3Int localPos = new Vector3Int(x, startY + yOffset, z);
 
-                        var state = new VoxelState(packedData);
+                        VoxelState state = new VoxelState(packedData);
                         Color? color = null;
 
                         if (visualizationMode == DebugVisualizationMode.Sunlight && state.Sunlight > 0)
@@ -2133,6 +2133,10 @@ public class World : MonoBehaviour
                     }
                 }
 
+                break;
+
+            case DebugVisualizationMode.None:
+            default:
                 break;
         }
     }
@@ -2296,7 +2300,7 @@ public class World : MonoBehaviour
         }
         else
         {
-            var dbg = debugScreen.GetComponent<DebugScreen>();
+            DebugScreen dbg = debugScreen.GetComponent<DebugScreen>();
             if (dbg.CurrentMode == DebugScreen.DebugMode.FPSOnly)
             {
                 // State 2: FPS Only -> Full Debug
@@ -2322,7 +2326,7 @@ public class World : MonoBehaviour
         if (worldData.ModifiedChunks.Count == 0) return;
 
         // Snapshot the list to avoid collection modification errors
-        var chunksToSave = new List<ChunkData>(worldData.ModifiedChunks);
+        List<ChunkData> chunksToSave = new List<ChunkData>(worldData.ModifiedChunks);
         worldData.ModifiedChunks.Clear();
 
         Debug.Log($"Saving {chunksToSave.Count} modified chunks (Sync: {synchronous})...");

@@ -60,7 +60,7 @@ namespace Physics
         public Vector3 Velocity { get; private set; }
         public float MoveSpeed { get; private set; }
 
-        private float _verticalMomentum = 0f;
+        private float _verticalMomentum;
         private Vector3 _movementIntent;
         private float _verticalFlyingIntent;
         private bool _jumpRequest;
@@ -274,7 +274,7 @@ namespace Physics
             // Iterate bottom to top at 1 block intervals
             // Use a y-offset skin width so horizontal checks don't catch the floor
             float startY = collisionPadding;
-            float step = 1.0f;
+            const float step = 1.0f;
             for (float y = startY; y < collisionHeight; y += step)
             {
                 if (_world.CheckForCollision(center + corner1 + new Vector3(0, y, 0))) return true;

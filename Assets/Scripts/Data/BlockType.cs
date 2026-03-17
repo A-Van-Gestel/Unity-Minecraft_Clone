@@ -40,7 +40,7 @@ namespace Data
 
         [Tooltip("The ID passed to the liquid shader (e.g., 0 for Water, 1 for Lava). This controls the visual style.")]
         [Range(0, 16)] // 0 = Water, 1 = Lava, range can be expanded up to 256 (byte)
-        public byte fluidShaderID = 0;
+        public byte fluidShaderID;
 
         [Tooltip("The pre-computed mesh data for this fluid.")]
         [InitializationField]
@@ -48,7 +48,7 @@ namespace Data
 
         [Tooltip("Default fluid level.")]
         [Range(0, 15)]
-        public byte fluidLevel = 0;
+        public byte fluidLevel;
 
         [Tooltip("How many blocks a fluid can flow horizontally from a source block.\nWater is 8 (levels 0-7), Lava is typically 4.")]
         [Range(1, 8)]
@@ -58,7 +58,7 @@ namespace Data
         public bool waterfallsMaxSpread = true;
 
         [Tooltip("If true, this fluid will generate a new source block if it is horizontally adjacent to 2 other source blocks and has a solid floor.")]
-        public bool infiniteSourceRegeneration = false;
+        public bool infiniteSourceRegeneration;
 
         [Tooltip("Chance between 0.0 and 1.0 that this fluid will successfully spread horizontally on a tick. 1.0 = Water (deterministic), 0.25 = Lava (thick/slow).")]
         [Range(0f, 1f)]
@@ -71,7 +71,7 @@ namespace Data
 
         [Tooltip("How many light levels will be emitted by this block.")]
         [Range(0, 15)]
-        public byte lightEmission = 0;
+        public byte lightEmission;
 
         [Header("Placement Rules")]
         [Tooltip("Apply a preset for the tags below. This is a workflow helper and doesn't affect the game directly. After applying, the values are copied to the fields below.")]
@@ -197,6 +197,6 @@ namespace Data
     {
         None,
         WaterLike,
-        LavaLike
+        LavaLike,
     }
 }

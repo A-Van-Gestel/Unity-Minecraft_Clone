@@ -51,7 +51,7 @@ namespace DebugVisualizations
         private void LateUpdate()
         {
             // This is the "Apply" step of our async process.
-            foreach (var chunkData in _visualizerChunks.Values)
+            foreach (VisualizerChunkData chunkData in _visualizerChunks.Values)
             {
                 // If a job is finished AND its results haven't been applied yet, apply them.
                 if (!chunkData.IsMeshApplied && chunkData.JobHandle.IsCompleted)
@@ -81,7 +81,7 @@ namespace DebugVisualizations
             Dictionary<Vector3Int, Color> westVoxels)
         {
             // Get or create the GameObject for this chunk's visualization.
-            if (!_visualizerChunks.TryGetValue(chunkCoord, out var chunkData))
+            if (!_visualizerChunks.TryGetValue(chunkCoord, out VisualizerChunkData chunkData))
             {
                 // POOLING: Get from World.Instance.ChunkPool
                 chunkData = World.Instance.ChunkPool.GetVisualizer(chunkCoord, visualizerMaterial, _visualizerParent);
@@ -102,7 +102,7 @@ namespace DebugVisualizations
             // --- This is the "Overhead": Convert managed Dictionaries to NativeHashMaps ---
             chunkData.PrepareJobData(voxelsToDraw, northVoxels, southVoxels, eastVoxels, westVoxels);
 
-            var job = new VoxelVisualizerJob
+            VoxelVisualizerJob job = new VoxelVisualizerJob
             {
                 VoxelsToDraw = chunkData.VoxelsToDraw,
                 NorthVoxels = chunkData.NorthVoxels,
@@ -116,7 +116,7 @@ namespace DebugVisualizations
 
                 Vertices = chunkData.Vertices,
                 Triangles = chunkData.Triangles,
-                Colors = chunkData.Colors
+                Colors = chunkData.Colors,
             };
 
             // Schedule the job and store the handle.
@@ -129,7 +129,7 @@ namespace DebugVisualizations
         /// <param name="chunkCoord">The chunk coordinate whose visualization should be cleared.</param>
         public void ClearChunkVisualization(ChunkCoord chunkCoord)
         {
-            if (_visualizerChunks.TryGetValue(chunkCoord, out var chunkData))
+            if (_visualizerChunks.TryGetValue(chunkCoord, out VisualizerChunkData chunkData))
             {
                 // POOLING: Return to World.Instance.ChunkPool
                 World.Instance.ChunkPool.ReturnVisualizer(chunkData);
@@ -142,7 +142,7 @@ namespace DebugVisualizations
         /// </summary>
         public void ClearAll()
         {
-            foreach (var chunkData in _visualizerChunks.Values)
+            foreach (VisualizerChunkData chunkData in _visualizerChunks.Values)
             {
                 // POOLING: Return all
                 World.Instance.ChunkPool.ReturnVisualizer(chunkData);
@@ -161,6 +161,6 @@ namespace DebugVisualizations
         ActiveVoxels,
         Sunlight,
         Blocklight,
-        FluidLevel
+        FluidLevel,
     }
 }

@@ -44,18 +44,18 @@ public class ChunkPoolManager
         // Initialize Chunk Pool
         _chunkPool = new DynamicPool<Chunk>(
             createFunc: () => new Chunk(new ChunkCoord(0, 0)), // Dummy coord, Reset() called later
-            destroyAction: (chunk) => chunk.Destroy(),
-            onReturnAction: (chunk) => chunk.Release()
+            destroyAction: chunk => chunk.Destroy(),
+            onReturnAction: chunk => chunk.Release()
         );
 
         // Initialize ChunkData Pool
         _dataPool = new ConcurrentDynamicPool<ChunkData>(
             createFunc: () => new ChunkData(Vector2Int.zero), // Pos set in Get()
-            destroyAction: (_) =>
+            destroyAction: _ =>
             {
                 /* Data GC handled by runtime */
             },
-            onReturnAction: (_) =>
+            onReturnAction: _ =>
             {
                 /* Reset handled manually in Return logic due to complexity */
             }
@@ -64,11 +64,11 @@ public class ChunkPoolManager
         // Initialize ChunkSection Pool
         _sectionPool = new ConcurrentDynamicPool<ChunkSection>(
             createFunc: () => new ChunkSection(),
-            destroyAction: (_) =>
+            destroyAction: _ =>
             {
                 /* Data GC handled by runtime */
             },
-            onReturnAction: (sec) => sec.Reset()
+            onReturnAction: sec => sec.Reset()
         );
 
         // Initialize Border Pool
@@ -77,14 +77,14 @@ public class ChunkPoolManager
         _borderPool = new DynamicPool<GameObject>(
             createFunc: () => null,
             destroyAction: Object.Destroy,
-            onReturnAction: (go) => go.SetActive(false)
+            onReturnAction: go => go.SetActive(false)
         );
 
         // Initialize Visualizer Pool
         _visualizerPool = new DynamicPool<VisualizerChunkData>(
             createFunc: () => null, // Context needed, created in Get method
-            destroyAction: (viz) => viz.Destroy(),
-            onReturnAction: (viz) => viz.Release()
+            destroyAction: viz => viz.Destroy(),
+            onReturnAction: viz => viz.Release()
         );
     }
 

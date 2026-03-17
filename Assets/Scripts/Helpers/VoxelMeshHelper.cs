@@ -486,7 +486,7 @@ namespace Helpers
             float dz = (hZ - centerHeight) * signZ;
 
             // Factor in the diagonal for a slightly smoother sweep.
-            float dDiag = (hDiag - centerHeight);
+            float dDiag = hDiag - centerHeight;
             dx += dDiag * signX * 0.707f; // Cos(45)
             dz += dDiag * signZ * 0.707f; // Sin(45)
 
@@ -498,7 +498,7 @@ namespace Helpers
             // We use a square-root compression curve so shallow streams don't freeze,
             // while steep drops/waterfalls still move noticeably faster.
             float mag = math.sqrt(sqrMag);
-            return (cornerFlow / mag) * math.sqrt(mag);
+            return cornerFlow / mag * math.sqrt(mag);
         }
 
         /// <summary>
@@ -562,25 +562,20 @@ namespace Helpers
         private static Vector2 ProjectFlowToSideFace(Vector2 xzFlow, int faceIndex)
         {
             // faceIndex: 0=Back(-Z), 1=Front(+Z), 4=Left(-X), 5=Right(+X)
-            switch (faceIndex)
+            return faceIndex switch
             {
-                case 0: // Back
-                case 1: // Front
+                0 or 1 => // Front or Back
                     // Face is on the XY plane.
                     // X-flow moves horizontally across the face.
                     // Z-flow is pushing off the edge, converting to downward gravity (+V).
-                    return new Vector2(xzFlow.x, math.abs(xzFlow.y));
-
-                case 4: // Left
-                case 5: // Right
+                    new Vector2(xzFlow.x, math.abs(xzFlow.y)),
+                4 or 5 => // Left or Right
                     // Face is on the YZ plane.
                     // Z-flow moves horizontally across the face (mapped to U).
                     // X-flow is pushing off the edge, converting to downward gravity (+V).
-                    return new Vector2(xzFlow.y, math.abs(xzFlow.x));
-
-                default:
-                    return Vector2.zero;
-            }
+                    new Vector2(xzFlow.y, math.abs(xzFlow.x)),
+                _ => Vector2.zero,
+            };
         }
     }
 }

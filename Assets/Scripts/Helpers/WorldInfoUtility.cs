@@ -47,14 +47,14 @@ namespace Helpers
                 Debug.Log($"[WorldInfoUtility] Starting world scan at: {savePath}");
                 Stopwatch sw = Stopwatch.StartNew();
 
-                var info = new ParsedWorldInfo
+                ParsedWorldInfo info = new ParsedWorldInfo
                 {
                     ChunkCoords = new List<Vector2Int>(),
                     MinX = int.MaxValue, MaxX = int.MinValue,
                     MinZ = int.MaxValue, MaxZ = int.MinValue,
                     TotalSizeBytes = 0,
                     CenterChunkCoord = new Vector2Int(VoxelData.WorldSizeInChunks / 2, VoxelData.WorldSizeInChunks / 2),
-                    CompressionStats = new Dictionary<CompressionAlgorithm, int>()
+                    CompressionStats = new Dictionary<CompressionAlgorithm, int>(),
                 };
 
                 string regionPath = Path.Combine(savePath, "Region");
@@ -79,10 +79,10 @@ namespace Helpers
                         string[] parts = Path.GetFileName(file).Split('.');
                         if (parts.Length >= 3 && int.TryParse(parts[1], out int rX) && int.TryParse(parts[2], out int rZ))
                         {
-                            using var region = new RegionFile(file);
+                            using RegionFile region = new RegionFile(file);
 
                             // Let the RegionFile class handle its own binary parsing
-                            foreach (var chunkMeta in region.GetAllChunkMetadata())
+                            foreach ((Vector2Int localCoord, CompressionAlgorithm algorithm) chunkMeta in region.GetAllChunkMetadata())
                             {
                                 // 1. Track compression stats
                                 if (info.CompressionStats.ContainsKey(chunkMeta.algorithm))
@@ -158,8 +158,8 @@ namespace Helpers
 
             // 1. Calculate Bounds & Scale
             // Include the world center in bounds so it's always visible
-            int centerChunkX = VoxelData.WorldSizeInChunks / 2;
-            int centerChunkZ = VoxelData.WorldSizeInChunks / 2;
+            const int centerChunkX = VoxelData.WorldSizeInChunks / 2;
+            const int centerChunkZ = VoxelData.WorldSizeInChunks / 2;
 
             // Include player in bounds so they never walk off the map
             int minX = Mathf.Min(info.MinX, centerChunkX, playerChunkCoord.x);
@@ -167,16 +167,16 @@ namespace Helpers
             int minZ = Mathf.Min(info.MinZ, centerChunkZ, playerChunkCoord.y);
             int maxZ = Mathf.Max(info.MaxZ, centerChunkZ, playerChunkCoord.y);
 
-            int worldWidth = (maxX - minX) + 1;
-            int worldHeight = (maxZ - minZ) + 1;
+            int worldWidth = maxX - minX + 1;
+            int worldHeight = maxZ - minZ + 1;
 
             // Determine if we need to scale down (e.g. 1 pixel = 4 chunks)
             int maxDim = Mathf.Max(worldWidth, worldHeight);
             int scale = Mathf.Max(1, Mathf.CeilToInt((float)maxDim / maxTextureSize));
 
-            int padding = 5; // Pixels of padding on the final texture
-            int texWidth = Mathf.CeilToInt((float)worldWidth / scale) + (padding * 2);
-            int texHeight = Mathf.CeilToInt((float)worldHeight / scale) + (padding * 2);
+            const int padding = 5; // Pixels of padding on the final texture
+            int texWidth = Mathf.CeilToInt((float)worldWidth / scale) + padding * 2;
+            int texHeight = Mathf.CeilToInt((float)worldHeight / scale) + padding * 2;
 
             Debug.Log($"[WorldInfoUtility] Dimensions: {worldWidth}x{worldHeight} chunks. Calculated Scale Factor: {scale}. Final Texture Size: {texWidth}x{texHeight}px");
 
@@ -184,10 +184,10 @@ namespace Helpers
             // If scale > 1, multiple chunks map to the same pixel. We count them to calculate density.
             int[] densityMap = new int[texWidth * texHeight];
 
-            foreach (var c in info.ChunkCoords)
+            foreach (Vector2Int c in info.ChunkCoords)
             {
-                int px = ((c.x - minX) / scale) + padding;
-                int pz = ((c.y - minZ) / scale) + padding;
+                int px = (c.x - minX) / scale + padding;
+                int pz = (c.y - minZ) / scale + padding;
 
                 // Safety bound check
                 if (px >= 0 && px < texWidth && pz >= 0 && pz < texHeight)
@@ -200,7 +200,7 @@ namespace Helpers
             Texture2D tex = new Texture2D(texWidth, texHeight, TextureFormat.RGBA32, false)
             {
                 filterMode = FilterMode.Point, // Keeps pixels crisp
-                wrapMode = TextureWrapMode.Clamp
+                wrapMode = TextureWrapMode.Clamp,
             };
 
             Color32 bgColor = new Color32(20, 20, 25, 200);
@@ -216,8 +216,8 @@ namespace Helpers
                 }
                 else
                 {
-                    // Calculate intensity based on density. 
-                    // If 1px = 10x10 chunks, and only 1 chunk exists there, it's faint. 
+                    // Calculate intensity based on density.
+                    // If 1px = 10x10 chunks, and only 1 chunk exists there, it's faint.
                     // If 100 chunks exist there, it's bright cyan.
                     float density = (float)densityMap[i] / maxChunksPerPixel;
 
@@ -231,13 +231,37 @@ namespace Helpers
                 }
             }
 
+            // 1. Draw Valid World Border (Orange/Yellow Box)
+            int borderStartX = (0 - minX) / scale + padding;
+            int borderStartZ = (0 - minZ) / scale + padding;
+            int borderEndX = (VoxelData.WorldSizeInChunks - 1 - minX) / scale + padding;
+            int borderEndZ = (VoxelData.WorldSizeInChunks - 1 - minZ) / scale + padding;
+
+            Color32 borderColor = new Color32(255, 165, 0, 255); // Orange
+            DrawHollowRect(borderStartX, borderStartZ, borderEndX, borderEndZ, borderColor);
+
+            // 2. Draw World Center (Red Crosshair)
+            int wCx = (centerChunkX - minX) / scale + padding;
+            int wCz = (centerChunkZ - minZ) / scale + padding;
+            DrawDot(wCx, wCz, new Color32(255, 50, 50, 255), true);
+
+            // 3. Draw Player Position (Green Square)
+            int pCx = (playerChunkCoord.x - minX) / scale + padding;
+            int pCz = (playerChunkCoord.y - minZ) / scale + padding;
+            DrawDot(pCx, pCz, new Color32(50, 255, 50, 255), false);
+
+            tex.SetPixels32(pixels);
+            tex.Apply();
+
+            return new MinimapData { Texture = tex, ScaleFactor = scale };
+
             // --- DRAWING HELPERS ---
 
             void DrawDot(int cx, int cz, Color32 color, bool isCross)
             {
                 if (cx >= 0 && cx < texWidth && cz >= 0 && cz < texHeight) pixels[cz * texWidth + cx] = color;
                 if (cx > 0) pixels[cz * texWidth + (cx - 1)] = color;
-                if (cx < texWidth - 1) pixels[cz * texWidth + (cx + 1)] = color;
+                if (cx < texWidth - 1) pixels[cz * texWidth + cx + 1] = color;
                 if (cz > 0) pixels[(cz - 1) * texWidth + cx] = color;
                 if (cz < texHeight - 1) pixels[(cz + 1) * texWidth + cx] = color;
 
@@ -245,9 +269,9 @@ namespace Helpers
                 if (!isCross)
                 {
                     if (cx > 0 && cz > 0) pixels[(cz - 1) * texWidth + (cx - 1)] = color;
-                    if (cx < texWidth - 1 && cz > 0) pixels[(cz - 1) * texWidth + (cx + 1)] = color;
+                    if (cx < texWidth - 1 && cz > 0) pixels[(cz - 1) * texWidth + cx + 1] = color;
                     if (cx > 0 && cz < texHeight - 1) pixels[(cz + 1) * texWidth + (cx - 1)] = color;
-                    if (cx < texWidth - 1 && cz < texHeight - 1) pixels[(cz + 1) * texWidth + (cx + 1)] = color;
+                    if (cx < texWidth - 1 && cz < texHeight - 1) pixels[(cz + 1) * texWidth + cx + 1] = color;
                 }
             }
 
@@ -267,30 +291,6 @@ namespace Helpers
                     if (endX >= 0 && endX < texWidth && z >= 0 && z < texHeight) pixels[z * texWidth + endX] = color;
                 }
             }
-
-            // 1. Draw Valid World Border (Orange/Yellow Box)
-            int borderStartX = ((0 - minX) / scale) + padding;
-            int borderStartZ = ((0 - minZ) / scale) + padding;
-            int borderEndX = (((VoxelData.WorldSizeInChunks - 1) - minX) / scale) + padding;
-            int borderEndZ = (((VoxelData.WorldSizeInChunks - 1) - minZ) / scale) + padding;
-
-            Color32 borderColor = new Color32(255, 165, 0, 255); // Orange
-            DrawHollowRect(borderStartX, borderStartZ, borderEndX, borderEndZ, borderColor);
-
-            // 2. Draw World Center (Red Crosshair)
-            int wCx = ((centerChunkX - minX) / scale) + padding;
-            int wCz = ((centerChunkZ - minZ) / scale) + padding;
-            DrawDot(wCx, wCz, new Color32(255, 50, 50, 255), true);
-
-            // 3. Draw Player Position (Green Square)
-            int pCx = ((playerChunkCoord.x - minX) / scale) + padding;
-            int pCz = ((playerChunkCoord.y - minZ) / scale) + padding;
-            DrawDot(pCx, pCz, new Color32(50, 255, 50, 255), false);
-
-            tex.SetPixels32(pixels);
-            tex.Apply();
-
-            return new MinimapData { Texture = tex, ScaleFactor = scale };
         }
     }
 }

@@ -51,7 +51,7 @@ namespace Data
 
         public override bool Equals(object obj)
         {
-            return obj is VoxelMod other && Equals(other);
+            return obj is VoxelMod other && Equals(other); // TODO: Burst: Loading managed type 'Object' is not supported
         }
 
         public override int GetHashCode()

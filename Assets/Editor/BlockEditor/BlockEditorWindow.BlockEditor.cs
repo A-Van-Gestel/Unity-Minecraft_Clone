@@ -126,7 +126,7 @@ namespace Editor.BlockEditor
                         EditorGUIHelper.DrawSprite(iconRect, block.icon);
                     }
                 },
-                (index) =>
+                index =>
                 {
                     _selectedBlock = _blockTypesCopy[index];
                     _previewFluidLevel = 0;
@@ -142,7 +142,7 @@ namespace Editor.BlockEditor
             }
 
             // Disable "Duplicate" and "Delete" if no block is selected
-            GUI.enabled = (_selectedBlock != null);
+            GUI.enabled = _selectedBlock != null;
             if (GUILayout.Button("Duplicate"))
             {
                 DuplicateSelectedBlock();
@@ -420,7 +420,7 @@ namespace Editor.BlockEditor
         {
             BlockType newBlock = new BlockType
             {
-                blockName = $"New Block {_blockTypesCopy.Count}"
+                blockName = $"New Block {_blockTypesCopy.Count}",
             };
             _blockTypesCopy.Add(newBlock);
 
@@ -466,7 +466,7 @@ namespace Editor.BlockEditor
                 topFaceTexture = _selectedBlock.topFaceTexture,
                 bottomFaceTexture = _selectedBlock.bottomFaceTexture,
                 leftFaceTexture = _selectedBlock.leftFaceTexture,
-                rightFaceTexture = _selectedBlock.rightFaceTexture
+                rightFaceTexture = _selectedBlock.rightFaceTexture,
             };
 
             int insertIndex = _selectedBlockIndex + 1;
@@ -614,7 +614,7 @@ namespace Editor.BlockEditor
         {
             // Calculate UV coordinates for the given texture ID in the atlas.
             float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
-            float x = textureID - (y * VoxelData.TextureAtlasSizeInBlocks);
+            float x = textureID - y * VoxelData.TextureAtlasSizeInBlocks;
 
             x *= VoxelData.NormalizedBlockTextureSize;
             y *= VoxelData.NormalizedBlockTextureSize;

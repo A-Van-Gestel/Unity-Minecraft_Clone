@@ -1,9 +1,11 @@
 ﻿using Data;
+using JetBrains.Annotations;
 using UnityEditor;
 using UnityEngine;
 
 namespace Editor.DataGeneration
 {
+    [UsedImplicitly]
     public class FluidDataGenerator
     {
         /// <summary>
@@ -46,7 +48,7 @@ namespace Editor.DataGeneration
         private static void GenerateTemplateHeights(FluidMeshData data, int flowLevels, float decayStep)
         {
             // Source block (level 0): slightly below the top of the block.
-            float topY = 1.0f - (1.0f / 8.0f); // 0.875
+            const float topY = 1.0f - 1.0f / 8.0f; // 0.875
 
             string heights = $"  Levels 0-{flowLevels - 1} (horizontal): ";
 
@@ -55,7 +57,7 @@ namespace Editor.DataGeneration
                 if (i < flowLevels)
                 {
                     // Horizontal flow levels: progressively lower.
-                    data.vertexYPositions[i] = topY - (i * decayStep);
+                    data.vertexYPositions[i] = topY - i * decayStep;
                     heights += $"[{i}]={data.vertexYPositions[i]:F3} ";
                 }
                 else if (i < 8)

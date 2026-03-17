@@ -154,11 +154,11 @@ namespace Serialization.Migration.Steps
 
             int chunksProcessed = 0;
 
-            using var oldRegion = new RegionFile(oldFilePath);
+            using RegionFile oldRegion = new RegionFile(oldFilePath);
 
             foreach (Vector2Int localCoord in oldRegion.GetAllChunkCoords())
             {
-                var (compressedData, oldAlgorithm) = oldRegion.LoadChunkData(localCoord.x, localCoord.y);
+                (byte[] compressedData, CompressionAlgorithm oldAlgorithm) = oldRegion.LoadChunkData(localCoord.x, localCoord.y);
                 if (compressedData == null) continue;
 
                 // ── Step 1: decode V1 address → chunk index ───────────────────
@@ -179,11 +179,11 @@ namespace Serialization.Migration.Steps
                     chunkIndex.x * V1_CHUNK_WIDTH,
                     chunkIndex.y * V1_CHUNK_WIDTH);
 
-                var (correctRegionCoord, correctLocalX, correctLocalZ) =
+                (Vector2Int correctRegionCoord, int correctLocalX, int correctLocalZ) =
                     v2Codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
 
                 // ── Step 3: get or create the target new region file ──────────
-                var regionKey = (correctRegionCoord.x, correctRegionCoord.y);
+                (int x, int y) regionKey = (correctRegionCoord.x, correctRegionCoord.y);
                 if (!newRegions.TryGetValue(regionKey, out RegionFile newRegion))
                 {
                     string newFilePath = Path.Combine(
@@ -208,17 +208,17 @@ namespace Serialization.Migration.Steps
 
         private static byte[] Decompress(byte[] data, CompressionAlgorithm algo)
         {
-            using var inMs = new MemoryStream(data);
-            using var decompressor = CompressionFactory.CreateInputStream(inMs, algo);
-            using var outMs = new MemoryStream();
+            using MemoryStream inMs = new MemoryStream(data);
+            using Stream decompressor = CompressionFactory.CreateInputStream(inMs, algo);
+            using MemoryStream outMs = new MemoryStream();
             decompressor.CopyTo(outMs);
             return outMs.ToArray();
         }
 
         private static byte[] Compress(byte[] data, CompressionAlgorithm algo)
         {
-            using var outMs = new MemoryStream();
-            using (var compressor = CompressionFactory.CreateOutputStream(outMs, algo, leaveOpen: true))
+            using MemoryStream outMs = new MemoryStream();
+            using (Stream compressor = CompressionFactory.CreateOutputStream(outMs, algo, leaveOpen: true))
             {
                 compressor.Write(data, 0, data.Length);
             }

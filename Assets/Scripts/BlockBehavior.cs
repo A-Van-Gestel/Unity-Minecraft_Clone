@@ -166,7 +166,7 @@ public static partial class BlockBehavior
             }
 
             // Check "spread down" locations separately
-            foreach (var vec in s_grassAirCheckVectors)
+            foreach (Vector3Int vec in s_grassAirCheckVectors)
             {
                 Vector3Int checkPos = localPos + vec;
                 if (IsDirtNextToAir(chunkData, checkPos))

@@ -23,7 +23,7 @@ namespace Editor.Libraries
         {
             _centeredIntFieldStyle ??= new GUIStyle(EditorStyles.numberField)
             {
-                alignment = TextAnchor.MiddleCenter
+                alignment = TextAnchor.MiddleCenter,
             };
 
             GUILayout.BeginHorizontal();
@@ -71,18 +71,18 @@ namespace Editor.Libraries
             Color c0 = EditorGUIUtility.isProSkin ? new Color(0.32f, 0.32f, 0.32f) : new Color(0.8f, 0.8f, 0.8f);
             Color c1 = EditorGUIUtility.isProSkin ? new Color(0.28f, 0.28f, 0.28f) : new Color(0.75f, 0.75f, 0.75f);
 
-            int width = 16;
-            int height = 16;
-            var texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
+            const int width = 16;
+            const int height = 16;
+            Texture2D texture = new Texture2D(width, height, TextureFormat.ARGB32, false);
             texture.hideFlags = HideFlags.HideAndDontSave;
 
-            var pixels = new Color[width * height];
+            Color[] pixels = new Color[width * height];
 
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
-                    bool isFirstColor = ((x / 8) + (y / 8)) % 2 == 0;
+                    bool isFirstColor = (x / 8 + y / 8) % 2 == 0;
                     pixels[y * width + x] = isFirstColor ? c0 : c1;
                 }
             }
@@ -193,7 +193,7 @@ namespace Editor.Libraries
                 if (isMatch == null || isMatch(items[i], searchText))
                 {
                     // Draw selection highlight background
-                    GUI.backgroundColor = (i == selectedIndex) ? Color.cyan : Color.white;
+                    GUI.backgroundColor = i == selectedIndex ? Color.cyan : Color.white;
 
                     Rect rowRect = GUILayoutUtility.GetRect(new GUIContent(), EditorStyles.toolbarButton, GUILayout.Height(24));
 

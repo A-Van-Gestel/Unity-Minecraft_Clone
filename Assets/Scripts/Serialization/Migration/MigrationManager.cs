@@ -23,7 +23,7 @@ namespace Serialization.Migration
         private readonly List<WorldMigrationStep> _steps = new List<WorldMigrationStep>
         {
             // new MigrationV1ToV2Dummy()
-            new MigrationV1ToV2RegionRepack()
+            new MigrationV1ToV2RegionRepack(),
         };
 
         // Track the path of the backup we create so we can roll it back if needed.
@@ -54,7 +54,7 @@ namespace Serialization.Migration
                 throw new InvalidOperationException(
                     $"World was saved with a newer version of the game's save-system (v{savedVersion}),\n" +
                     $"but this build only supports versions up to v{SaveSystem.CURRENT_VERSION}.\n\n" +
-                    $"Please update your game to play this world."
+                    "Please update your game to play this world."
                 );
             }
 
@@ -123,7 +123,7 @@ namespace Serialization.Migration
                 if (!Directory.Exists(tempRegionPath))
                     Directory.CreateDirectory(tempRegionPath);
 
-                foreach (var step in migrationPath.Where(s => s.RequiresRegionLayoutMigration))
+                foreach (WorldMigrationStep step in migrationPath.Where(s => s.RequiresRegionLayoutMigration))
                 {
                     progress?.Report(new MigrationProgress
                     {
@@ -142,7 +142,7 @@ namespace Serialization.Migration
                     CurrentTask = "Finalising region layout...",
                     PercentComplete = 0.95f,
                     ProcessedItems = processedChunksTotal,
-                    TotalItems = processedChunksTotal
+                    TotalItems = processedChunksTotal,
                 });
 
                 // Atomic folder swap:
@@ -181,7 +181,7 @@ namespace Serialization.Migration
                         CurrentTask = $"Migrating {fileName}... ({i + 1}/{totalRegions})",
                         PercentComplete = totalRegions == 0 ? 1f : (float)i / totalRegions,
                         ProcessedItems = processedChunksTotal,
-                        TotalItems = totalRegions // Report regions as the unit of total work
+                        TotalItems = totalRegions, // Report regions as the unit of total work
                     });
 
                     // Process on a background thread; await ensures sequential, crash-safe writes.
@@ -206,7 +206,7 @@ namespace Serialization.Migration
                 CurrentTask = "Migration Complete",
                 PercentComplete = 1f,
                 ProcessedItems = processedChunksTotal,
-                TotalItems = processedChunksTotal
+                TotalItems = processedChunksTotal,
             });
 
             Debug.Log($"[MigrationManager] Migration complete! Successfully processed {processedChunksTotal} chunk(s).");
@@ -246,28 +246,28 @@ namespace Serialization.Migration
         // Private: Format-Only Region Migration (single file)
         // -------------------------------------------------------------------------
 
-        private int MigrateSingleRegion(
+        private static int MigrateSingleRegion(
             string oldFile,
             string tempFile,
             CompressionAlgorithm targetCompression,
             List<WorldMigrationStep> path)
         {
-            using var oldRegion = new RegionFile(oldFile);
+            using RegionFile oldRegion = new RegionFile(oldFile);
             // Writing into a fresh RegionFile defragments it: chunks are written
             // sequentially with no dead sectors, reducing final file size at no extra cost.
-            using var newRegion = new RegionFile(tempFile);
+            using RegionFile newRegion = new RegionFile(tempFile);
             int chunksProcessed = 0;
 
             foreach (Vector2Int localCoord in oldRegion.GetAllChunkCoords())
             {
-                var (compressedData, oldCompression) = oldRegion.LoadChunkData(localCoord.x, localCoord.y);
+                (byte[] compressedData, CompressionAlgorithm oldCompression) = oldRegion.LoadChunkData(localCoord.x, localCoord.y);
                 if (compressedData == null) continue;
 
                 // Decompress using the algorithm stored in the region file's chunk header.
                 byte[] currentData = Decompress(compressedData, oldCompression);
 
                 // Run through the migration chain.
-                foreach (var step in path)
+                foreach (WorldMigrationStep step in path)
                 {
                     if (!step.TargetChunkFormatVersion.HasValue)
                         continue; // This world version bump didn't change chunk format. Skip.
@@ -290,7 +290,7 @@ namespace Serialization.Migration
                                 $"Migration step '{step.GetType().Name}' ran but its output " +
                                 $"version byte ({currentData[0]}) does not match its declared " +
                                 $"TargetChunkFormatVersion ({step.TargetChunkFormatVersion.Value}). " +
-                                $"Ensure MigrateChunk writes the new version as byte 0 of the output.");
+                                "Ensure MigrateChunk writes the new version as byte 0 of the output.");
                     }
                 }
 
@@ -308,7 +308,7 @@ namespace Serialization.Migration
         // Private: Global File Migration
         // -------------------------------------------------------------------------
 
-        private void MigrateGlobalFiles(string savePath, List<WorldMigrationStep> path)
+        private static void MigrateGlobalFiles(string savePath, List<WorldMigrationStep> path)
         {
             // --- level.dat ---
             Debug.Log("[MigrationManager] Migrating level.dat...");
@@ -317,11 +317,11 @@ namespace Serialization.Migration
             {
                 string json = File.ReadAllText(levelDatPath);
 
-                foreach (var step in path)
+                foreach (WorldMigrationStep step in path)
                     json = step.MigrateLevelDat(json);
 
                 // Stamp the authoritative final version AFTER all steps have run.
-                var saveData = JsonUtility.FromJson<WorldSaveData>(json);
+                WorldSaveData saveData = JsonUtility.FromJson<WorldSaveData>(json);
                 saveData.version = SaveSystem.CURRENT_VERSION;
                 json = JsonUtility.ToJson(saveData, true);
 
@@ -334,7 +334,7 @@ namespace Serialization.Migration
             if (File.Exists(modsPath))
             {
                 byte[] bytes = File.ReadAllBytes(modsPath);
-                foreach (var step in path) bytes = step.MigratePendingMods(bytes);
+                foreach (WorldMigrationStep step in path) bytes = step.MigratePendingMods(bytes);
                 File.WriteAllBytes(modsPath, bytes);
             }
 
@@ -344,7 +344,7 @@ namespace Serialization.Migration
             if (File.Exists(lightPath))
             {
                 byte[] bytes = File.ReadAllBytes(lightPath);
-                foreach (var step in path) bytes = step.MigratePendingLighting(bytes);
+                foreach (WorldMigrationStep step in path) bytes = step.MigratePendingLighting(bytes);
                 File.WriteAllBytes(lightPath, bytes);
             }
         }
@@ -356,7 +356,7 @@ namespace Serialization.Migration
         /// <summary>
         /// Creates a single rolling backup per world using a rename-based atomic swap.
         /// </summary>
-        private void CreateAtomicBackup(string savePath, string backupPath)
+        private static void CreateAtomicBackup(string savePath, string backupPath)
         {
             Debug.Log($"[MigrationManager] Creating backup at: {backupPath}");
             string tempBackupPath = backupPath + "_tmp";
@@ -379,7 +379,7 @@ namespace Serialization.Migration
 
         private static void CopyDirectory(string sourceDir, string destinationDir)
         {
-            var dir = new DirectoryInfo(sourceDir);
+            DirectoryInfo dir = new DirectoryInfo(sourceDir);
             if (!dir.Exists)
                 throw new DirectoryNotFoundException($"Source directory not found: {dir.FullName}");
 
@@ -403,7 +403,7 @@ namespace Serialization.Migration
 
             while (current < target)
             {
-                var step = _steps.FirstOrDefault(s => s.SourceWorldVersion == current);
+                WorldMigrationStep step = _steps.FirstOrDefault(s => s.SourceWorldVersion == current);
                 if (step == null)
                     throw new InvalidOperationException(
                         $"Missing migration step for v{current} → v{current + 1}. " +
@@ -418,17 +418,17 @@ namespace Serialization.Migration
 
         private static byte[] Decompress(byte[] data, CompressionAlgorithm algo)
         {
-            using var inMs = new MemoryStream(data);
-            using var decompressor = CompressionFactory.CreateInputStream(inMs, algo);
-            using var outMs = new MemoryStream();
+            using MemoryStream inMs = new MemoryStream(data);
+            using Stream decompressor = CompressionFactory.CreateInputStream(inMs, algo);
+            using MemoryStream outMs = new MemoryStream();
             decompressor.CopyTo(outMs);
             return outMs.ToArray();
         }
 
         private static byte[] Compress(byte[] data, CompressionAlgorithm algo)
         {
-            using var outMs = new MemoryStream();
-            using (var compressor = CompressionFactory.CreateOutputStream(outMs, algo, leaveOpen: true))
+            using MemoryStream outMs = new MemoryStream();
+            using (Stream compressor = CompressionFactory.CreateOutputStream(outMs, algo, leaveOpen: true))
             {
                 compressor.Write(data, 0, data.Length);
             }

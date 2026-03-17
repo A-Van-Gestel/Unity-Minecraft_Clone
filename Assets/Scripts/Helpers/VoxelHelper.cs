@@ -23,34 +23,34 @@ namespace Helpers
                     return worldFaceIndex;
 
                 case 0: // South (Rotated 180 deg Y)
-                    switch (worldFaceIndex)
+                    return worldFaceIndex switch
                     {
-                        case 0: return 1; // World Back -> Original Front
-                        case 1: return 0; // World Front -> Original Back
-                        case 4: return 5; // World Left -> Original Right
-                        case 5: return 4; // World Right -> Original Left
-                        default: return worldFaceIndex; // Top and Bottom unchanged
-                    }
+                        0 => 1, // World Back -> Original Front
+                        1 => 0, // World Front -> Original Back
+                        4 => 5, // World Left -> Original Right
+                        5 => 4, // World Right -> Original Left
+                        _ => worldFaceIndex,
+                    };
 
                 case 4: // West (Rotated 90 deg Y)
-                    switch (worldFaceIndex)
+                    return worldFaceIndex switch
                     {
-                        case 0: return 5; // World Back -> Original Right
-                        case 1: return 4; // World Front -> Original Left
-                        case 4: return 0; // World Left -> Original Back
-                        case 5: return 1; // World Right -> Original Front
-                        default: return worldFaceIndex; // Top and Bottom unchanged
-                    }
+                        0 => 5, // World Back -> Original Right
+                        1 => 4, // World Front -> Original Left
+                        4 => 0, // World Left -> Original Back
+                        5 => 1, // World Right -> Original Front
+                        _ => worldFaceIndex,
+                    };
 
                 case 5: // East (Rotated 270 deg Y / -90 deg Y)
-                    switch (worldFaceIndex)
+                    return worldFaceIndex switch
                     {
-                        case 0: return 4; // World Back -> Original Left
-                        case 1: return 5; // World Front -> Original Right
-                        case 4: return 1; // World Left -> Original Front
-                        case 5: return 0; // World Right -> Original Back
-                        default: return worldFaceIndex; // Top and Bottom unchanged
-                    }
+                        0 => 4, // World Back -> Original Left
+                        1 => 5, // World Front -> Original Right
+                        4 => 1, // World Left -> Original Front
+                        5 => 0, // World Right -> Original Back
+                        _ => worldFaceIndex,
+                    };
 
                 default: // Should not happen, but return untranslated as fallback
                     Debug.LogWarning($"Unhandled orientation: {orientation}");

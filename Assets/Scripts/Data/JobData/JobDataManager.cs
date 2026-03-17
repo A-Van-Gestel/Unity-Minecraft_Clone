@@ -53,13 +53,13 @@ namespace Data.JobData
         /// </summary>
         public void Dispose()
         {
-            if (BiomesJobData.IsCreated) BiomesJobData.Dispose();
-            if (AllLodesJobData.IsCreated) AllLodesJobData.Dispose();
-            if (BlockTypesJobData.IsCreated) BlockTypesJobData.Dispose();
-            if (CustomMeshesJobData.IsCreated) CustomMeshesJobData.Dispose();
-            if (CustomFacesJobData.IsCreated) CustomFacesJobData.Dispose();
-            if (CustomVertsJobData.IsCreated) CustomVertsJobData.Dispose();
-            if (CustomTrisJobData.IsCreated) CustomTrisJobData.Dispose();
+            if (BiomesJobData.IsCreated) BiomesJobData.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            if (AllLodesJobData.IsCreated) AllLodesJobData.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            if (BlockTypesJobData.IsCreated) BlockTypesJobData.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            if (CustomMeshesJobData.IsCreated) CustomMeshesJobData.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            if (CustomFacesJobData.IsCreated) CustomFacesJobData.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            if (CustomVertsJobData.IsCreated) CustomVertsJobData.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            if (CustomTrisJobData.IsCreated) CustomTrisJobData.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
         }
     }
 }

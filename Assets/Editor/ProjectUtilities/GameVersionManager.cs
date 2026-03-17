@@ -59,7 +59,7 @@ namespace Editor.ProjectUtilities
         {
             return new SettingsProvider("Project/Game Versioning", SettingsScope.Project)
             {
-                guiHandler = (_) =>
+                guiHandler = _ =>
                 {
                     EditorGUILayout.Space();
                     EditorGUILayout.LabelField("Version Configuration", EditorStyles.boldLabel);
@@ -80,7 +80,7 @@ namespace Editor.ProjectUtilities
 
                     EditorGUILayout.Space();
                     EditorGUILayout.LabelField("Note: The date will automatically update to the current day when you press Play or create a Build.", EditorStyles.wordWrappedLabel);
-                }
+                },
             };
         }
     }
