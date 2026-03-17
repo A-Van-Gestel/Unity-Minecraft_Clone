@@ -4,6 +4,7 @@ using Jobs.BurstData;
 using Unity.Burst;
 using Unity.Burst.CompilerServices;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Helpers
@@ -13,7 +14,7 @@ namespace Helpers
     {
         // This array correctly maps the vertex order for each face to the UV coordinate order.
         // This is the key to fixing the 3D preview textures and ensuring correct runtime textures.
-        private static readonly int[] FaceUvOrder = new int[24]
+        private static readonly int[] s_faceUvOrder =
         {
             0, 1, 2, 3, // Back Face
             2, 3, 0, 1, // Front Face
@@ -24,9 +25,13 @@ namespace Helpers
         };
 
         /// <summary>
-        /// A helper to add texture coordinates to the UV list.
+        /// Calculates and appends the precise UV coordinates for a given texture ID to the UV list.
+        /// Accounts for the normalized texture atlas size and origin alignment.
         /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] // Inlined as it's a simple math helper called frequently
+        /// <param name="textureID">The index of the texture within the atlas.</param>
+        /// <param name="uv">The local UV offset for the current vertex.</param>
+        /// <param name="uvs">The native list of UVs to append to.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddTexture(int textureID, Vector2 uv, ref NativeList<Vector2> uvs)
         {
             float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
@@ -71,7 +76,7 @@ namespace Helpers
                 colors.Add(new Color(1f, 1f, 1f, lightLevel));
 
                 // Use the FaceUvOrder array to get the correct UV for this vertex.
-                int uvIndex = FaceUvOrder[faceIndex * 4 + i];
+                int uvIndex = s_faceUvOrder[faceIndex * 4 + i];
                 AddTexture(textureID, BurstVoxelData.VoxelUvs.Data[uvIndex], ref uvs);
             }
 
@@ -211,9 +216,6 @@ namespace Helpers
             Vector2 flow_br = CalculateCornerFlow(in props, fluidLevel, n_E, 1, n_S, -1, n_SE, in templates, in blockTypes);
             Vector2 flow_tr = CalculateCornerFlow(in props, fluidLevel, n_E, 1, n_N, 1, n_NE, in templates, in blockTypes);
 
-            // Side and bottom faces will use an averaged flow
-            Vector2 avgFlow = (flow_bl + flow_tl + flow_br + flow_tr) * 0.25f;
-
             // Second, set the visual height by default to full voxel size to avoid "air gaps"
             const float fullBlockHeight = 1.0f;
             float height_tr = fullBlockHeight;
@@ -301,10 +303,10 @@ namespace Helpers
                 Vector3 p3 = BurstVoxelData.VoxelVerts.Data[v3];
                 Vector3 p4 = BurstVoxelData.VoxelVerts.Data[v4];
 
-                p1.y = p1.y > 0.5f ? GetVertexHeightForCorner(in p1, height_tl, height_tr, height_bl, height_br) : 0;
-                p2.y = p2.y > 0.5f ? GetVertexHeightForCorner(in p2, height_tl, height_tr, height_bl, height_br) : 0;
-                p3.y = p3.y > 0.5f ? GetVertexHeightForCorner(in p3, height_tl, height_tr, height_bl, height_br) : 0;
-                p4.y = p4.y > 0.5f ? GetVertexHeightForCorner(in p4, height_tl, height_tr, height_bl, height_br) : 0;
+                p1.y = p1.y > 0.5f ? GetCornerValue(in p1, height_tl, height_tr, height_bl, height_br) : 0;
+                p2.y = p2.y > 0.5f ? GetCornerValue(in p2, height_tl, height_tr, height_bl, height_br) : 0;
+                p3.y = p3.y > 0.5f ? GetCornerValue(in p3, height_tl, height_tr, height_bl, height_br) : 0;
+                p4.y = p4.y > 0.5f ? GetCornerValue(in p4, height_tl, height_tr, height_bl, height_br) : 0;
 
                 vertices.Add(pos + p1);
                 vertices.Add(pos + p2);
@@ -315,21 +317,40 @@ namespace Helpers
                 // Use 1.0f for the b-channel so side faces default to full brightness (unshadowed) in game
                 Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
 
-                for (int j = 0; j < 4; j++)
-                {
-                    normals.Add(VoxelData.FaceChecks[faceIndex]);
-                    colors.Add(vertexColor);
+                Vector2 uv1, uv2, uv3, uv4;
 
-                    // Waterfalls: If the fluid is falling, make the vertical flow speed extreme
-                    if (fluidLevel == 8) // Level 8 is standard falling ID in our architecture
-                    {
-                        uvs.Add(new Vector2(0, -4.0f));
-                    }
-                    else
-                    {
-                        uvs.Add(avgFlow);
-                    }
+                if (fluidLevel >= 8) // Waterfall (Falling Fluid)
+                {
+                    // Force a strict downward flow (V-axis)
+                    uv1 = uv2 = uv3 = uv4 = new Vector2(0f, 1.0f);
                 }
+                else // Horizontal Spreading Fluid
+                {
+                    // 1. Get raw XZ flow at the corners
+                    Vector2 f1 = GetCornerValue(in p1, flow_tl, flow_tr, flow_bl, flow_br);
+                    Vector2 f2 = GetCornerValue(in p2, flow_tl, flow_tr, flow_bl, flow_br);
+                    Vector2 f3 = GetCornerValue(in p3, flow_tl, flow_tr, flow_bl, flow_br);
+                    Vector2 f4 = GetCornerValue(in p4, flow_tl, flow_tr, flow_bl, flow_br);
+
+                    // 2. Project XZ flow onto the 2D plane of this specific side face
+                    uv1 = ProjectFlowToSideFace(f1, faceIndex);
+                    uv2 = ProjectFlowToSideFace(f2, faceIndex);
+                    uv3 = ProjectFlowToSideFace(f3, faceIndex);
+                    uv4 = ProjectFlowToSideFace(f4, faceIndex);
+                }
+
+                normals.Add(VoxelData.FaceChecks[faceIndex]);
+                colors.Add(vertexColor);
+                uvs.Add(uv1);
+                normals.Add(VoxelData.FaceChecks[faceIndex]);
+                colors.Add(vertexColor);
+                uvs.Add(uv2);
+                normals.Add(VoxelData.FaceChecks[faceIndex]);
+                colors.Add(vertexColor);
+                uvs.Add(uv3);
+                normals.Add(VoxelData.FaceChecks[faceIndex]);
+                colors.Add(vertexColor);
+                uvs.Add(uv4);
 
                 fluidTriangles.Add(vertexIndex);
                 fluidTriangles.Add(vertexIndex + 1);
@@ -356,16 +377,16 @@ namespace Helpers
                 // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
                 normals.Add(Vector3.down);
                 colors.Add(vertexColor);
-                uvs.Add(avgFlow);
+                uvs.Add(flow_bl);
                 normals.Add(Vector3.down);
                 colors.Add(vertexColor);
-                uvs.Add(avgFlow);
+                uvs.Add(flow_tl);
                 normals.Add(Vector3.down);
                 colors.Add(vertexColor);
-                uvs.Add(avgFlow);
+                uvs.Add(flow_br);
                 normals.Add(Vector3.down);
                 colors.Add(vertexColor);
-                uvs.Add(avgFlow);
+                uvs.Add(flow_tr);
 
                 // Clockwise winding order when viewed from below.
                 fluidTriangles.Add(vertexIndex); // Triangle 1: 0, 2, 1
@@ -378,6 +399,19 @@ namespace Helpers
             }
         }
 
+        /// <summary>
+        /// Calculates the smoothed height for a fluid block's corner by averaging its height
+        /// with adjacent and diagonal fluid neighbors. Prevents height smoothing through solid walls.
+        /// </summary>
+        /// <param name="centerProps">The properties of the center fluid block.</param>
+        /// <param name="centerLevel">The fluid level of the center block.</param>
+        /// <param name="n1">The first adjacent orthogonal neighbor.</param>
+        /// <param name="n2">The second adjacent orthogonal neighbor.</param>
+        /// <param name="nDiag">The diagonal neighbor shared by n1 and n2.</param>
+        /// <param name="templates">The pre-computed height templates for this fluid type.</param>
+        /// <param name="blockTypes">The global block types data array.</param>
+        /// <returns>The averaged height for the evaluated corner.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float GetSmoothedCornerHeight(in BlockTypeJobData centerProps, byte centerLevel, OptionalVoxelState n1, OptionalVoxelState n2, OptionalVoxelState nDiag, in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
         {
             float totalHeight = templates[centerLevel];
@@ -412,9 +446,21 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Calculates a discrete flow-direction vector for a specific corner of a fluid block for seamless bilinear interpolation.
-        /// Evaluates the two adjacent orthogonal neighbors and the diagonal neighbor relative to that corner.
+        /// Calculates a discrete 2D flow-direction vector for a specific corner of a fluid block
+        /// to allow seamless bilinear interpolation across the surface.
+        /// Evaluates the height derivatives against adjacent and diagonal neighbors.
         /// </summary>
+        /// <param name="centerProps">The properties of the center fluid block.</param>
+        /// <param name="centerLevel">The fluid level of the center block.</param>
+        /// <param name="neighborX">The adjacent neighbor along the local X axis.</param>
+        /// <param name="signX">The sign multiplier for X-axis flow direction.</param>
+        /// <param name="neighborZ">The adjacent neighbor along the local Z axis.</param>
+        /// <param name="signZ">The sign multiplier for Z-axis flow direction.</param>
+        /// <param name="diag">The diagonal neighbor between X and Z.</param>
+        /// <param name="templates">The pre-computed height templates for this fluid type.</param>
+        /// <param name="blockTypes">The global block types data array.</param>
+        /// <returns>A normalized 2D vector representing the XZ flow direction at this corner.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Vector2 CalculateCornerFlow(
             in BlockTypeJobData centerProps, byte centerLevel,
             OptionalVoxelState neighborX, int signX,
@@ -449,6 +495,16 @@ namespace Helpers
             return cornerFlow.sqrMagnitude > 0.001f ? cornerFlow.normalized : Vector2.zero;
         }
 
+        /// <summary>
+        /// Determines the effective visual height of a neighboring block for fluid smoothing and flow calculations.
+        /// Treats solid obstacles as high walls (2.0) and open drops as strong pulls (-1.0).
+        /// </summary>
+        /// <param name="neighbor">The neighbor voxel state to evaluate.</param>
+        /// <param name="centerFluidType">The fluid type of the center block (Water/Lava).</param>
+        /// <param name="templates">The pre-computed height templates for this fluid type.</param>
+        /// <param name="blockTypes">The global block types data array.</param>
+        /// <returns>The effective relative height of the neighbor.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static float GetEffectiveFluidHeight(OptionalVoxelState neighbor, FluidType centerFluidType, in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
         {
             if (!neighbor.HasValue) return 0f; // Neutral chunk edge
@@ -467,12 +523,58 @@ namespace Helpers
             return 0f;
         }
 
-        private static float GetVertexHeightForCorner(in Vector3 vertPos, float h_tl, float h_tr, float h_bl, float h_br)
+        /// <summary>
+        /// Retrieves the correct interpolated value (e.g., height or flow vector) for a specific vertex
+        /// based on its local spatial quadrant within the 1x1x1 voxel bounds.
+        /// </summary>
+        /// <typeparam name="T">The type of the value being retrieved (e.g., float, Vector2).</typeparam>
+        /// <param name="vertPos">The local position of the vertex.</param>
+        /// <param name="val_tl">The value mapped to the top-left (North-West) corner.</param>
+        /// <param name="val_tr">The value mapped to the top-right (North-East) corner.</param>
+        /// <param name="val_bl">The value mapped to the bottom-left (South-West) corner.</param>
+        /// <param name="val_br">The value mapped to the bottom-right (South-East) corner.</param>
+        /// <returns>The specific value assigned to the evaluated corner.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static T GetCornerValue<T>(in Vector3 vertPos, T val_tl, T val_tr, T val_bl, T val_br)
         {
             if (vertPos.x > 0.5f) // Right side
-                return vertPos.z > 0.5f ? h_tr : h_br;
-            else // Left side
-                return vertPos.z > 0.5f ? h_tl : h_bl;
+                return vertPos.z > 0.5f ? val_tr : val_br;
+
+            // Left side
+            return vertPos.z > 0.5f ? val_tl : val_bl;
+        }
+
+        /// <summary>
+        /// Projects a 2D world-space XZ fluid flow vector onto the 2D UV plane of a specific vertical side face.
+        /// Ensures that lateral momentum across the top surface correctly translates into horizontal
+        /// drift or downward gravity flow (+V) along the walls.
+        /// </summary>
+        /// <param name="xzFlow">The calculated XZ flow vector at the corner.</param>
+        /// <param name="faceIndex">The index of the vertical face (Back, Front, Left, Right).</param>
+        /// <returns>The projected 2D UV flow vector for the shader.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector2 ProjectFlowToSideFace(Vector2 xzFlow, int faceIndex)
+        {
+            // faceIndex: 0=Back(-Z), 1=Front(+Z), 4=Left(-X), 5=Right(+X)
+            switch (faceIndex)
+            {
+                case 0: // Back
+                case 1: // Front
+                    // Face is on the XY plane.
+                    // X-flow moves horizontally across the face.
+                    // Z-flow is pushing off the edge, converting to downward gravity (+V).
+                    return new Vector2(xzFlow.x, math.abs(xzFlow.y));
+
+                case 4: // Left
+                case 5: // Right
+                    // Face is on the YZ plane.
+                    // Z-flow moves horizontally across the face (mapped to U).
+                    // X-flow is pushing off the edge, converting to downward gravity (+V).
+                    return new Vector2(xzFlow.y, math.abs(xzFlow.x));
+
+                default:
+                    return Vector2.zero;
+            }
         }
     }
 }

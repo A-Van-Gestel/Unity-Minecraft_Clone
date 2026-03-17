@@ -206,8 +206,29 @@ Shader "Minecraft/UberLiquidShader"
                 float t_boil = _Time.y * _Speed;
                 float2 flow = i.localFlowVector * phaseTime * _LavaFlowMultiplier;
 
-                float3 p1 = i.worldPos * _NoiseScale + float3(flow.x, t_boil, flow.y);
-                float3 p2 = i.worldPos * _NoiseScale + float3(-flow.y, -t_boil * 0.8, -flow.x);
+                // Route 2D flow to 3D based on surface normal
+                float3 flow3D;
+                float3 absNorm = abs(i.worldNormal);
+
+                if (absNorm.y > 0.5)
+                {
+                    // Top/Bottom Face: UV translates to (X, Z) axes
+                    flow3D = float3(flow.x, 0, flow.y);
+                }
+                else if (absNorm.x > 0.5)
+                {
+                    // East/West Face: UV translates to (Z, Y) axes
+                    flow3D = float3(0, flow.y, flow.x);
+                }
+                else
+                {
+                    // North/South Face: UV translates to (X, Y) axes
+                    flow3D = float3(flow.x, flow.y, 0);
+                }
+
+                // Apply the routed 3D flow to the noise coordinates
+                float3 p1 = i.worldPos * _NoiseScale + flow3D + float3(0, t_boil, 0);
+                float3 p2 = i.worldPos * _NoiseScale - (flow3D * 0.8) + float3(0, -t_boil * 0.8, 0);
 
                 float base_fbm = fbm(p1, 5);
                 float base_noise = (base_fbm + 1.0) * 0.5;
@@ -226,7 +247,8 @@ Shader "Minecraft/UberLiquidShader"
                 lavaCol = lerp(col, _BrightColor.rgb, smoothstep(0.1, 0.35, crack_pattern));
 
                 // Flow Highlight
-                float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + float3(flow.x * 2, 0, flow.y * 2);
+                float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + (flow3D * 2.0);
+
                 float flow_mask = (fbm(flow_mask_p, 4) + 1.0) * 0.5;
                 lavaCol += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * _FlowHighlight;
             }
@@ -235,8 +257,26 @@ Shader "Minecraft/UberLiquidShader"
             {
                 float2 flow = i.localFlowVector * phaseTime * _WaterFlowMultiplier * _Speed;
 
-                float3 wave_p = i.worldPos * _WaveScale + float3(flow.x, _Time.y * _WaveSpeed, flow.y);
-                float3 ripple_p = i.worldPos * _RippleScale + float3(flow.y, _Time.y * _RippleSpeed, -flow.x);
+                // Route 2D flow to 3D based on surface normal
+                float3 flow3D;
+                float3 absNorm = abs(i.worldNormal);
+
+                if (absNorm.y > 0.5)
+                {
+                    flow3D = float3(flow.x, 0, flow.y);
+                }
+                else if (absNorm.x > 0.5)
+                {
+                    flow3D = float3(0, flow.y, flow.x);
+                }
+                else
+                {
+                    flow3D = float3(flow.x, flow.y, 0);
+                }
+
+                // Apply the routed 3D flow to the noise coordinates
+                float3 wave_p = i.worldPos * _WaveScale + flow3D + float3(0, _Time.y * _WaveSpeed, 0);
+                float3 ripple_p = i.worldPos * _RippleScale - flow3D + float3(0, _Time.y * _RippleSpeed, 0);
 
                 float wave_fbm = fbm(wave_p, 4);
                 float ripple_noise = fbm(ripple_p, 4);
