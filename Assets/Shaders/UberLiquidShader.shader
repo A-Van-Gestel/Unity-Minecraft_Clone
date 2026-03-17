@@ -7,7 +7,7 @@ Shader "Minecraft/UberLiquidShader"
 
         // --- Global Shoreline Controls ---
         [Header(Shoreline Effects)]
-        [Toggle(USE_SHORE_EFFECTS)] _UseShoreEffects ("Enable Shore Effects", Float) = 1
+        [Toggle(USE_SHORE_EFFECTS)] _UseShoreEffects ("Enable Shore Effects", Float) = 0
         _ShoreSize("Shore Effect Size", Range(0.0, 1.0)) = 0.6
 
         // --- Lava Properties ---
@@ -36,6 +36,7 @@ Shader "Minecraft/UberLiquidShader"
         _RippleScale("Ripple Scale", Range(1, 20)) = 15.0
         _RippleSpeed("Ripple Speed", Range(0, 5)) = 1.2
         _FoamThreshold("Wave Foam Threshold", Range(0.5, 1.0)) = 0.8
+        _StreamEffect("Stream Foam Effect", Range(0.0, 3.0)) = 1.0
         _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.02
     }
 
@@ -98,7 +99,7 @@ Shader "Minecraft/UberLiquidShader"
 
             // Water Properties
             fixed4 _DeepColor, _ShallowColor, _FoamColor;
-            float _WaterFlowMultiplier, _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _DistortionAmount;
+            float _WaterFlowMultiplier, _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _StreamEffect, _DistortionAmount;
 
             // Noise Functions
             float3 mod289(float3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -294,6 +295,25 @@ Shader "Minecraft/UberLiquidShader"
 
                 waterCol = lerp(water_base_color.rgb, _ShallowColor.rgb, combined_noise);
                 foamAmt = smoothstep(_FoamThreshold - 0.1, _FoamThreshold + 0.1, combined_noise);
+
+                // --- Streamy Flow Highlights ---
+                // 1. Get the raw speed of the fluid independent of time (length of the mesher's XZ vector)
+                float rawSpeed = length(i.localFlowVector);
+
+                // 2. Variable stream intensity:
+                // rawSpeed is ~0.35 for gentle rivers, up to 1.0 for waterfalls.
+                // We map this so flat rivers have gentle sparks (~20%), and waterfalls roar (100%).
+                float isFlowing = smoothstep(0.1, 0.9, rawSpeed);
+
+                // 3. Sample a higher-frequency noise that moves significantly faster along the flow vector
+                float3 stream_p = i.worldPos * _WaveScale * 2.0 + (flow3D * 3.0);
+                float stream_noise = (fbm(stream_p, 3) + 1.0) * 0.5;
+
+                // 4. Threshold it sharply to create isolated "sparks" and streaks, multiplying by our flow mask
+                float stream_foam = smoothstep(0.55, 0.75, stream_noise) * isFlowing * _StreamEffect;
+
+                // 5. Add the stream foam to the base foam, saturating to keep it between 0.0 and 1.0
+                foamAmt = saturate(foamAmt + stream_foam);
             }
 
             fixed4 fragFunction(v2f i) : SV_Target

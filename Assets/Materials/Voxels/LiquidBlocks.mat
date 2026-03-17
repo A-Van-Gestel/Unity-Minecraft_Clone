@@ -147,6 +147,7 @@ Material:
     - _Speed: 0.3
     - _SpreadDetailMap: 0
     - _SrcBlend: 1
+    - _StreamEffect: 1
     - _Transparency: 0.6
     - _TriplanarFalloff: 20
     - _TriplanarSpaceProjection: 0
@@ -156,7 +157,7 @@ Material:
     - _UseEmissionFromMainProperties: 1
     - _UseShoreEffects: 0
     - _VisualizeMask: 0
-    - _WaterFlowMultiplier: 3
+    - _WaterFlowMultiplier: 3.5
     - _WaveScale: 5
     - _WaveSpeed: 0.4
     - _ZTest: 4

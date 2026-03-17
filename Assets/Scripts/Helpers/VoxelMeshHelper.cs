@@ -490,9 +490,15 @@ namespace Helpers
             dx += dDiag * signX * 0.707f; // Cos(45)
             dz += dDiag * signZ * 0.707f; // Sin(45)
 
-            // Normalize safely
             Vector2 cornerFlow = new Vector2(dx, dz);
-            return cornerFlow.sqrMagnitude > 0.001f ? cornerFlow.normalized : Vector2.zero;
+            float sqrMag = cornerFlow.sqrMagnitude;
+
+            if (sqrMag < 0.0001f) return Vector2.zero;
+
+            // We use a square-root compression curve so shallow streams don't freeze,
+            // while steep drops/waterfalls still move noticeably faster.
+            float mag = math.sqrt(sqrMag);
+            return (cornerFlow / mag) * math.sqrt(mag);
         }
 
         /// <summary>
