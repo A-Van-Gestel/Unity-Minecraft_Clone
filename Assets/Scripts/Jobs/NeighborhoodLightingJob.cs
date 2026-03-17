@@ -282,6 +282,10 @@ namespace Jobs
                     // A neighbor with level 15 has its own direct sky access and should be ignored.
                     if (neighborSunlight > 0 && neighborSunlight < 15)
                     {
+                        // We MUST manually set this block's light to 0 before adding it to the removal queue.
+                        // Otherwise, it acts as a permanent ghost light source during the darkness propagation pass!
+                        SetLight(neighborPos, 0, LightChannel.Sun, ref cache);
+
                         rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborSunlight });
                     }
                 }
