@@ -206,13 +206,9 @@ Shader "Minecraft/UberLiquidShader"
             {
                 float t_boil = _Time.y * _Speed;
 
-                // Decouple direction from speed
-                float rawSpeed = length(i.localFlowVector);
-                float2 flowDir = rawSpeed > 0.001 ? (i.localFlowVector / rawSpeed) : float2(0, 0);
-
-                // Base lava scrolls at a minimum speed of 1.0, waterfalls speed up to 1.5
-                float scrollMultiplier = lerp(1.0, 1.5, smoothstep(0.2, 1.0, rawSpeed));
-                float2 flow = flowDir * scrollMultiplier * phaseTime * _LavaFlowMultiplier;
+                // Use the interpolated vector directly. No normalization!
+                // This guarantees C0 mathematical continuity across the whole block, stopping the "star" pinching.
+                float2 flow = i.localFlowVector * phaseTime * _LavaFlowMultiplier;
 
                 // Route 2D flow to 3D based on surface normal
                 float3 flow3D;
@@ -263,13 +259,11 @@ Shader "Minecraft/UberLiquidShader"
 
             void EvaluateWater(v2f i, float phaseTime, out float3 waterCol, out float foamAmt, out float2 waterNormal)
             {
-                // Decouple direction from speed
-                float rawSpeed = length(i.localFlowVector);
-                float2 flowDir = rawSpeed > 0.001 ? (i.localFlowVector / rawSpeed) : float2(0, 0);
+                // Use the continuous vector directly.
+                float2 flow = i.localFlowVector * phaseTime * _WaterFlowMultiplier * _Speed;
 
-                // Base water scrolls at a minimum speed of 1.0, waterfalls speed up to 1.5
-                float scrollMultiplier = lerp(1.0, 1.5, smoothstep(0.2, 1.0, rawSpeed));
-                float2 flow = flowDir * scrollMultiplier * phaseTime * _WaterFlowMultiplier * _Speed;
+                // We keep rawSpeed solely to mask out the stream sparks on still water
+                float rawSpeed = length(i.localFlowVector);
 
                 // Route 2D flow to 3D based on surface normal
                 float3 flow3D;
@@ -310,10 +304,9 @@ Shader "Minecraft/UberLiquidShader"
                 foamAmt = smoothstep(_FoamThreshold - 0.1, _FoamThreshold + 0.1, combined_noise);
 
                 // --- Streamy Flow Highlights ---
-                // 1. Variable stream intensity:
-                // rawSpeed is ~0.35 for gentle rivers, up to 1.0 for waterfalls.
-                // We map this so flat rivers have gentle sparks (~20%), and waterfalls roar (100%).
-                float isFlowing = smoothstep(0.05, 0.9, rawSpeed);
+                // Because rawSpeed naturally interpolates to 0 at the center of opposing flows,
+                // the stream sparks will gently fade out at the seams instead of tearing violently!
+                float isFlowing = smoothstep(0.1, 0.8, rawSpeed);
 
                 // 2. Sample a higher-frequency noise that moves significantly faster along the flow vector
                 float3 stream_p = i.worldPos * _WaveScale * 2.0 + (flow3D * 3.0);
@@ -339,7 +332,9 @@ Shader "Minecraft/UberLiquidShader"
                 shade = clamp(1.0 - shade, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // --- FLOW MAPPING TIME SETUP ---
-                float cycleDuration = 3.0; // Seconds before flow phase resets
+                // Lowered from 3.0 to 1.5. This halves the maximum distance the texture can stretch
+                // before the dual-phase crossfade resets it, hiding distortions much better.
+                float cycleDuration = 1.5;
                 float phase0 = frac(_Time.y / cycleDuration);
                 float phase1 = frac((_Time.y + cycleDuration * 0.5) / cycleDuration);
 

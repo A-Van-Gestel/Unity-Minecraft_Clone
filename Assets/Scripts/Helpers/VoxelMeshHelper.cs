@@ -321,8 +321,8 @@ namespace Helpers
 
                 if (fluidLevel >= 8) // Waterfall (Falling Fluid)
                 {
-                    // Force a strict downward flow (V-axis)
-                    uv1 = uv2 = uv3 = uv4 = new Vector2(0f, 1.0f);
+                    // Force a strict downward flow at higher speed (V-axis)
+                    uv1 = uv2 = uv3 = uv4 = new Vector2(0f, 1.5f);
                 }
                 else // Horizontal Spreading Fluid
                 {
@@ -475,9 +475,9 @@ namespace Helpers
             float hDiag = GetEffectiveFluidHeight(diag, centerProps.FluidType, templates, blockTypes);
 
             // Obstacle handling: Flow should mathematically push *away* from solid walls.
-            if (hX > 1.0f) hX = centerHeight + 0.035f;
-            if (hZ > 1.0f) hZ = centerHeight + 0.035f;
-            if (hDiag > 1.0f) hDiag = centerHeight + 0.035f;
+            if (hX > 1.0f) hX = centerHeight + 0.05f;
+            if (hZ > 1.0f) hZ = centerHeight + 0.05f;
+            if (hDiag > 1.0f) hDiag = centerHeight + 0.05f;
 
             // To compute a generic 2D slope for any corner, we take the derivative across the two local axes (X and Z).
             // We subtract the center's height from the neighbor's height so the resulting vector maps negatively downstream for the shader.
@@ -495,10 +495,17 @@ namespace Helpers
 
             if (sqrMag < 0.0001f) return Vector2.zero;
 
-            // We use a square-root compression curve so shallow streams don't freeze,
-            // while steep drops/waterfalls still move noticeably faster.
+            // 1. Get the pure normalized direction
             float mag = math.sqrt(sqrMag);
-            return cornerFlow / mag * math.sqrt(mag);
+            Vector2 dir = cornerFlow / mag;
+
+            // 2. Apply a smooth speed curve to the magnitude.
+            // Gentle slopes (mag 0.25) get boosted to a standard speed of 1.0.
+            // Steep drops/waterfalls (mag 1.0+) get boosted to 1.5.
+            float speed = math.smoothstep(0.0f, 0.25f, mag) + math.smoothstep(0.8f, 1.2f, mag) * 0.5f;
+
+            // Return the pre-scaled vector. The shader will use this directly without normalizing.
+            return dir * speed;
         }
 
         /// <summary>
