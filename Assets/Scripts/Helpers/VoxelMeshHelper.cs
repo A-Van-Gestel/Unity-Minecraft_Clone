@@ -475,9 +475,9 @@ namespace Helpers
             float hDiag = GetEffectiveFluidHeight(diag, centerProps.FluidType, templates, blockTypes);
 
             // Obstacle handling: Flow should mathematically push *away* from solid walls.
-            if (hX > 1.0f) hX = centerHeight + 0.05f;
-            if (hZ > 1.0f) hZ = centerHeight + 0.05f;
-            if (hDiag > 1.0f) hDiag = centerHeight + 0.05f;
+            if (hX > 1.0f) hX = centerHeight + 0.035f;
+            if (hZ > 1.0f) hZ = centerHeight + 0.035f;
+            if (hDiag > 1.0f) hDiag = centerHeight + 0.035f;
 
             // To compute a generic 2D slope for any corner, we take the derivative across the two local axes (X and Z).
             // We subtract the center's height from the neighbor's height so the resulting vector maps negatively downstream for the shader.

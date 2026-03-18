@@ -205,7 +205,14 @@ Shader "Minecraft/UberLiquidShader"
             void EvaluateLava(v2f i, float phaseTime, out float3 lavaCol, out float2 heatNormal)
             {
                 float t_boil = _Time.y * _Speed;
-                float2 flow = i.localFlowVector * phaseTime * _LavaFlowMultiplier;
+
+                // Decouple direction from speed
+                float rawSpeed = length(i.localFlowVector);
+                float2 flowDir = rawSpeed > 0.001 ? (i.localFlowVector / rawSpeed) : float2(0, 0);
+
+                // Base lava scrolls at a minimum speed of 1.0, waterfalls speed up to 1.5
+                float scrollMultiplier = lerp(1.0, 1.5, smoothstep(0.2, 1.0, rawSpeed));
+                float2 flow = flowDir * scrollMultiplier * phaseTime * _LavaFlowMultiplier;
 
                 // Route 2D flow to 3D based on surface normal
                 float3 flow3D;
@@ -256,7 +263,13 @@ Shader "Minecraft/UberLiquidShader"
 
             void EvaluateWater(v2f i, float phaseTime, out float3 waterCol, out float foamAmt, out float2 waterNormal)
             {
-                float2 flow = i.localFlowVector * phaseTime * _WaterFlowMultiplier * _Speed;
+                // Decouple direction from speed
+                float rawSpeed = length(i.localFlowVector);
+                float2 flowDir = rawSpeed > 0.001 ? (i.localFlowVector / rawSpeed) : float2(0, 0);
+
+                // Base water scrolls at a minimum speed of 1.0, waterfalls speed up to 1.5
+                float scrollMultiplier = lerp(1.0, 1.5, smoothstep(0.2, 1.0, rawSpeed));
+                float2 flow = flowDir * scrollMultiplier * phaseTime * _WaterFlowMultiplier * _Speed;
 
                 // Route 2D flow to 3D based on surface normal
                 float3 flow3D;
@@ -297,22 +310,19 @@ Shader "Minecraft/UberLiquidShader"
                 foamAmt = smoothstep(_FoamThreshold - 0.1, _FoamThreshold + 0.1, combined_noise);
 
                 // --- Streamy Flow Highlights ---
-                // 1. Get the raw speed of the fluid independent of time (length of the mesher's XZ vector)
-                float rawSpeed = length(i.localFlowVector);
-
-                // 2. Variable stream intensity:
+                // 1. Variable stream intensity:
                 // rawSpeed is ~0.35 for gentle rivers, up to 1.0 for waterfalls.
                 // We map this so flat rivers have gentle sparks (~20%), and waterfalls roar (100%).
-                float isFlowing = smoothstep(0.1, 0.9, rawSpeed);
+                float isFlowing = smoothstep(0.05, 0.9, rawSpeed);
 
-                // 3. Sample a higher-frequency noise that moves significantly faster along the flow vector
+                // 2. Sample a higher-frequency noise that moves significantly faster along the flow vector
                 float3 stream_p = i.worldPos * _WaveScale * 2.0 + (flow3D * 3.0);
                 float stream_noise = (fbm(stream_p, 3) + 1.0) * 0.5;
 
-                // 4. Threshold it sharply to create isolated "sparks" and streaks, multiplying by our flow mask
+                // 3. Threshold it sharply to create isolated "sparks" and streaks, multiplying by our flow mask
                 float stream_foam = smoothstep(0.55, 0.75, stream_noise) * isFlowing * _StreamEffect;
 
-                // 5. Add the stream foam to the base foam, saturating to keep it between 0.0 and 1.0
+                // 4. Add the stream foam to the base foam, saturating to keep it between 0.0 and 1.0
                 foamAmt = saturate(foamAmt + stream_foam);
             }
 
