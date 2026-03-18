@@ -38,7 +38,6 @@ Implementing proper fluid interaction requires a new interaction table and is de
 
 ---
 
-
 ## 09. Missing Flow-Blocking Logic for Non-Solid Blocks — ⚠️ MISSING FEATURE
 
 **Severity:** Missing Feature (not a bug)  
@@ -46,26 +45,6 @@ Implementing proper fluid interaction requires a new interaction table and is de
 
 Currently, fluid spread is gated purely by whether the target block is `Air` (id 0). Non-solid blocks (e.g., torches, ladders, signs) will simply be washed away or ignored.
 We need a fluid-interaction tag or explicit list for specific non-solid blocks that should physically block fluid flow identical to a solid block (e.g., doors preventing water from entering a room).
-
----
-
-## 10. Missing Dynamic Flow Direction Texturing — ⚠️ MISSING FEATURE
-
-**Severity:** Missing Feature (Visuals)  
-**Files:** `BlockBehavior.Fluids.cs`, `MeshGenerationJob.cs` (`VoxelMeshHelper.cs`), Liquid Shader
-
-In Minecraft, the 2D flow vector is calculated based on surrounding fluid height differentials, and this vector rotates or scrolls the water texture UVs so the water visually "moves" in the direction of the flow.
-Currently, our `VoxelMeshHelper` passes `Vector2.zero` for all fluid UVs and relies on a global world-space liquid shader, meaning water cannot visually animate in the direction it is physically spreading.
-
----
-
-## 11. Missing Unique Textures for Falling Fluids (Waterfalls) — ⚠️ MISSING FEATURE
-
-**Severity:** Missing Feature (Visuals)  
-**Files:** `MeshGenerationJob.cs` (`VoxelMeshHelper.cs`), Liquid Shader
-
-Minecraft uses a distinct, fast-scrolling vertical texture specifically for falling fluid blocks (waterfalls).
-Currently, our engine passes no "falling" flag to the liquid shader during mesh generation, so all fluid blocks use the exact same visual properties regardless of whether they are resting or falling.
 
 ---
 
@@ -106,3 +85,14 @@ Our custom `VoxelRigidbody` physics do not currently query fluid flow vectors or
 
 Minecraft fluids spawn ambient particles and sounds. Water drips through solid ceilings if water is directly above them. Lava emits popping ember particles above its surface.
 Both fluids feature ambient background audio (flowing, bubbling) and interaction audio (splashing, hissing when extinguishing fire). Our engine lacks these environmental details.
+
+---
+
+## 16. Suboptimal Fluid Flow Texturing and Vector Math
+
+**Severity:** Improvement (Visuals/Simulation)  
+**Files:** `BlockBehavior.Fluids.cs`, `MeshGenerationJob.cs` (`VoxelMeshHelper.cs`), `UberLiquidShader.shader`
+
+While fluid flow vectors are currently calculated and passed to the shader, the visual result and the underlying simulation math are only "functional" at best.
+The bilinear interpolation of flow vectors across fluid surfaces can lead to awkward stretching, pinching, or unnatural texture warping in the `UberLiquidShader`.
+Future improvements should refine the flow vector derivatives in the meshing job and implement more advanced flowmap rendering techniques (e.g., improved dual-phase crossfading or flowmap texture synthesis) to achieve a highly polished and natural liquid surface.

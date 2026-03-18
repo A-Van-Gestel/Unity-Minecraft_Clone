@@ -174,9 +174,11 @@ to broken spread distances.
 **Root Cause:** The `BlockBehavior.Fluids.cs` decay pass successfully gathered environmental constraints, but had no logic to construct new infinite sources out of thin air, meaning water was strictly finite.
 
 **Fix:**
+
 1. Added an `infiniteSourceRegeneration = false` flag to `BlockType.cs` to allow toggling this for specific fluids (e.g., Water = true, Lava = false).
 2. Integrated the horizontal source-counting logic directly into `CalculateExpectedFluidLevel` when looking for cross-chunk neighbors.
-3. If `>= 2` native source blocks (level 0) are horizontally adjacent, and the block below is either solid ground or another level 0 source block, the block organically overrides its target decay to `0`, successfully generating an infinite source pool without extra overhead or allocations.
+3. If `>= 2` native source blocks (level 0) are horizontally adjacent, and the block below is either solid ground or another level 0 source block,
+   the block organically overrides its target decay to `0`, successfully generating an infinite source pool without extra overhead or allocations.
 
 ---
 
@@ -190,7 +192,35 @@ to broken spread distances.
 
 **Root Cause:** Fluid flow evaluation always proceeded at 100% chance for all fluids.
 
-**Fix:** Added a `spreadChance` configuration `float` (0.0 - 1.0) to `BlockType.cs` and exposed it in the `BlockEditorWindow`. Inside `HandleFluidSpread`, `UnityEngine.Random.value` is rolled against this chance; if it fails, the horizontal spread step is cleanly aborted for that tick.
+**Fix:** Added a `spreadChance` configuration `float` (0.0 - 1.0) to `BlockType.cs` and exposed it in the `BlockEditorWindow`. Inside `HandleFluidSpread`, `UnityEngine.Random.value` is rolled against this chance; if it fails, the horizontal spread step is cleanly aborted for that
+tick.
+
+---
+
+### ~~10. Missing Dynamic Flow Direction Texturing~~
+
+**Severity:** Missing Feature (Visuals)  
+**Files:** `MeshGenerationJob.cs` (`VoxelMeshHelper.cs`), `UberLiquidShader.shader`  
+**Fixed:** March 2026
+
+**Symptom:** Water did not visually animate in the direction it was physically spreading, relying on a static world-space liquid shader.
+**Fix / Implementation:** Implemented flow derivative math in `VoxelMeshHelper.cs` (`CalculateCornerFlow` and `ProjectFlowToSideFace`).
+This calculates a 2D XZ flow vector based on surrounding fluid height differentials and maps it to the UV channels of the generated mesh.
+The `UberLiquidShader` receives this vector (`localFlowVector`) and uses a dual-phase crossfading technique to scroll the noise and simulate continuous directional flow.
+*(Note: As tracked in FLUID_BUGS.md #16, this is currently functionally operational but the math could be further refined in the future to eliminate surface stretching.)*
+
+---
+
+### ~~11. Missing Unique Textures for Falling Fluids (Waterfalls)~~
+
+**Severity:** Missing Feature (Visuals)  
+**Files:** `MeshGenerationJob.cs` (`VoxelMeshHelper.cs`), `UberLiquidShader.shader`  
+**Fixed:** March 2026
+
+**Symptom:** Falling fluid blocks (waterfalls) used the exact same visual properties as resting horizontal fluids.
+**Fix / Implementation:** In `VoxelMeshHelper.cs`, the mesh generation job now explicitly checks if the voxel has the falling flag (`fluidLevel >= 8`).
+If true, instead of calculating complex horizontal flow math, it bypasses the evaluation and forces a strict, high-velocity downward flow vector (`new Vector2(0f, 1.5f)`).
+The `UberLiquidShader` natively interprets this large V-axis vector, resulting in a fast-scrolling, distinct vertical waterfall effect that properly blends with horizontal pools at its base.
 
 ---
 
