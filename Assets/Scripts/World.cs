@@ -2141,6 +2141,161 @@ public class World : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// A diagnostic tool for analyzing fluid meshing derivatives.
+    /// Raycasts to the target fluid voxel and prints its complete smoothing context
+    /// and per-face side culling simulation to the console.
+    /// </summary>
+    public void DebugLogFluidSurfaceMath()
+    {
+        VoxelRaycastResult result = player.PlayerInteraction.RaycastForVoxel(overrideInteractWithFluids: true);
+        if (!result.DidHit) return;
+
+        VoxelState? centerState = worldData.GetVoxelState(result.HitPosition);
+        if (!centerState.HasValue || centerState.Value.Properties.fluidType == FluidType.None) return;
+
+        ushort id = centerState.Value.id;
+        byte level = centerState.Value.FluidLevel;
+
+        // --- Horizontal neighbours ---
+        VoxelState? n = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 0, 1));
+        VoxelState? s = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 0, -1));
+        VoxelState? e = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, 0));
+        VoxelState? w = worldData.GetVoxelState(result.HitPosition + new Vector3Int(-1, 0, 0));
+        VoxelState? ne = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, 1));
+        VoxelState? nw = worldData.GetVoxelState(result.HitPosition + new Vector3Int(-1, 0, 1));
+        VoxelState? se = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, -1));
+        VoxelState? sw = worldData.GetVoxelState(result.HitPosition + new Vector3Int(-1, 0, -1));
+
+        // --- Vertical neighbours ---
+        VoxelState? above = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 1, 0));
+        VoxelState? above_N = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 1, 1));
+        VoxelState? above_S = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 1, -1));
+        VoxelState? above_E = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 1, 0));
+        VoxelState? above_W = worldData.GetVoxelState(result.HitPosition + new Vector3Int(-1, 1, 0));
+
+        bool hasFluidAbove = above.HasValue && above.Value.id == id;
+
+        // --- Pre-compute corner smooth heights (reused for both surface and side-face reports) ---
+        float[] templates = FluidVertexTemplates.WaterVertexTemplates.ToArray();
+        float templateHeight = templates[level];
+
+        float neCorner = GetDebugSmoothHeight(level, n, e, ne, id);
+        float nwCorner = GetDebugSmoothHeight(level, n, w, nw, id);
+        float seCorner = GetDebugSmoothHeight(level, s, e, se, id);
+        float swCorner = GetDebugSmoothHeight(level, s, w, sw, id);
+
+        // --- Surface Report (original) ---
+        Debug.Log($"<color=cyan>--- FLUID SURFACE MATH REPORT ---</color>\n" +
+                  $"<b>Global Pos:</b> {result.HitPosition} | <b>Level:</b> {level} | " +
+                  $"<b>FluidAbove:</b> {hasFluidAbove} | <b>TemplateHeight:</b> {templateHeight:F4}\n\n" +
+                  $"[Corner Smooth Values]\n" +
+                  $"  <b>Top-Right (NE):</b> {neCorner}\n" +
+                  $"  <b>Top-Left  (NW):</b> {nwCorner}\n" +
+                  $"  <b>Bottom-Right (SE):</b> {seCorner}\n" +
+                  $"  <b>Bottom-Left  (SW):</b> {swCorner}");
+
+        // --- Side Face Diagnostic ---
+        // Each entry: (label, sideNeighbor, aboveNeighbor, cornerA_value, cornerA_name, cornerB_value, cornerB_name)
+        var faces = new (string label, VoxelState? neighbor, VoxelState? neighborAbove, float ca, string caName, float cb, string cbName)[]
+        {
+            ("North (+Z)", n, above_N, neCorner, "NE", nwCorner, "NW"),
+            ("South (-Z)", s, above_S, seCorner, "SE", swCorner, "SW"),
+            ("East  (+X)", e, above_E, neCorner, "NE", seCorner, "SE"),
+            ("West  (-X)", w, above_W, nwCorner, "NW", swCorner, "SW"),
+        };
+
+        StringBuilder sb = new StringBuilder();
+        sb.AppendLine("<color=yellow>--- FLUID SIDE FACE DIAGNOSTIC ---</color>");
+
+        foreach (var face in faces)
+        {
+            bool neighborIsSameFluid = face.neighbor.HasValue && face.neighbor.Value.id == id;
+            bool neighborIsAnyFluid = face.neighbor.HasValue && face.neighbor.Value.Properties.fluidType != FluidType.None;
+            bool neighborHasFluidAbove = face.neighborAbove.HasValue && face.neighborAbove.Value.id == id;
+
+            byte neighborLevel = neighborIsSameFluid ? face.neighbor.Value.FluidLevel : (byte)0;
+            float neighborTemplate = neighborIsSameFluid ? templates[neighborLevel] : 0f;
+
+            // Simulate the culling logic from VoxelMeshHelper (replicates colleague's patch)
+            string cullResult;
+            if (neighborIsSameFluid)
+            {
+                bool isFullHeight = hasFluidAbove || templateHeight >= 1.0f;
+                if (!isFullHeight)
+                    cullResult = "<color=red>CULLED</color> — same fluid, isFullHeight=false (smooth cull)";
+                else if (neighborTemplate >= 1.0f)
+                    cullResult = "<color=red>CULLED</color> — same fluid, neighbor templateHeight >= 1.0";
+                else if (neighborHasFluidAbove)
+                    cullResult = "<color=red>CULLED</color> — same fluid, neighbor has fluid above";
+                else
+                    cullResult = "<color=green>DRAWN</color> — same fluid, gap fill required";
+            }
+            else if (!face.neighbor.HasValue)
+            {
+                cullResult = "<color=green>DRAWN</color> — no neighbor (air/void)";
+            }
+            else if (face.neighbor.Value.Properties.fluidType == FluidType.None
+                     && !face.neighbor.Value.Properties.IsTransparentForMesh)
+            {
+                cullResult = "<color=red>CULLED</color> — opaque solid neighbor";
+            }
+            else
+            {
+                cullResult = "<color=green>DRAWN</color> — transparent or non-fluid neighbor";
+            }
+
+            // The smoothed top-Y for this face's top edge (average of its two relevant corners)
+            float smoothedEdgeTopY = (face.ca + face.cb) * 0.5f;
+            bool hasGeometryGap = smoothedEdgeTopY < templateHeight - 0.001f;
+
+            sb.AppendLine($"  <b>[{face.label}]</b>");
+            sb.AppendLine($"    Neighbor: id={(face.neighbor.HasValue ? face.neighbor.Value.id.ToString() : "none")} | " +
+                          $"SameFluid: {neighborIsSameFluid} | " +
+                          $"NeighborLevel: {(neighborIsSameFluid ? neighborLevel.ToString() : "n/a")} | " +
+                          $"NeighborTemplate: {neighborTemplate:F4} | " +
+                          $"NeighborHasFluidAbove: {neighborHasFluidAbove}");
+            sb.AppendLine($"    TopY → SmoothedEdge: {smoothedEdgeTopY:F4} " +
+                          $"(corners {face.caName}:{face.ca:F4} + {face.cbName}:{face.cb:F4}) | " +
+                          $"Template: {templateHeight:F4} | " +
+                          $"GeometryGap: {(hasGeometryGap ? "<color=magenta>YES</color>" : "no")}");
+            sb.AppendLine($"    Cull Decision: {cullResult}");
+        }
+
+        Debug.Log(sb.ToString());
+    }
+
+    private float GetDebugSmoothHeight(byte centerLevel, VoxelState? n1, VoxelState? n2, VoxelState? nDiag, ushort fluidId)
+    {
+        float[] templates = FluidVertexTemplates.WaterVertexTemplates.ToArray(); // Assume Water for debug
+        float totalHeight = templates[centerLevel];
+        int count = 1;
+
+        bool n1IsFluid = n1.HasValue && n1.Value.id == fluidId;
+        bool n2IsFluid = n2.HasValue && n2.Value.id == fluidId;
+
+        if (n1IsFluid)
+        {
+            totalHeight += templates[n1.Value.FluidLevel];
+            count++;
+        }
+
+        if (n2IsFluid)
+        {
+            totalHeight += templates[n2.Value.FluidLevel];
+            count++;
+        }
+
+        bool nDiagIsFluid = nDiag.HasValue && nDiag.Value.id == fluidId;
+        if ((n1IsFluid || n2IsFluid) && nDiagIsFluid)
+        {
+            totalHeight += templates[nDiag.Value.FluidLevel];
+            count++;
+        }
+
+        return totalHeight / count;
+    }
+
     #endregion
 
     /// <summary>
@@ -2212,11 +2367,19 @@ public class World : MonoBehaviour
     /// Determines if a voxel at the given world position is solid.
     /// </summary>
     /// <param name="worldPos">The world-space position.</param>
-    /// <returns>True if the voxel is solid; otherwise, false.</returns>
-    public bool CheckForVoxel(Vector3 worldPos)
+    /// <param name="includeFluids">If true, fluids will also count as a hit.</param>
+    /// <returns>True if the voxel is solid (or a fluid, if requested); otherwise, false.</returns>
+    public bool CheckForVoxel(Vector3 worldPos, bool includeFluids = false)
     {
         VoxelState? voxel = worldData.GetVoxelState(worldPos);
-        return voxel.HasValue && blockDatabase.blockTypes[voxel.Value.id].isSolid;
+        if (!voxel.HasValue) return false;
+
+        // If we want to target fluids (e.g. for buckets) and this is a fluid, return true
+        if (includeFluids && blockDatabase.blockTypes[voxel.Value.id].fluidType != FluidType.None)
+            return true;
+
+        // Otherwise, only hit solid blocks
+        return blockDatabase.blockTypes[voxel.Value.id].isSolid;
     }
 
     /// <summary>

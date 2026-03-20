@@ -175,7 +175,7 @@ namespace Helpers
             in BlockTypeJobData props,
             in NativeArray<float> templates,
             in NativeArray<BlockTypeJobData> blockTypes,
-            [ReadOnly] in NativeArray<OptionalVoxelState> neighbors, // 9 neighbors: N, E, S, W, NE, SE, SW, NW, Above, Below
+            [ReadOnly] in NativeArray<OptionalVoxelState> neighbors, // 14 neighbors: N, E, S, W, NE, SE, SW, NW, Above, Below, Above_N, Above_E, Above_S, Above_W
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> fluidTriangles,
             ref NativeList<Vector2> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals)
@@ -184,6 +184,7 @@ namespace Helpers
             OptionalVoxelState n_N = neighbors[0], n_E = neighbors[1], n_S = neighbors[2], n_W = neighbors[3];
             OptionalVoxelState n_NE = neighbors[4], n_SE = neighbors[5], n_SW = neighbors[6], n_NW = neighbors[7];
             OptionalVoxelState above = neighbors[8], below = neighbors[9];
+            OptionalVoxelState above_N = neighbors[10], above_E = neighbors[11], above_S = neighbors[12], above_W = neighbors[13];
 
             // --- 1. DETERMINE SHADER FLAGS ---
             float liquidType = props.FluidShaderID;
@@ -207,7 +208,6 @@ namespace Helpers
             // --- 2. GET HEIGHT DATA ---
             // First, get the LOGICAL top height based on the fluid level. This is ONLY used for face culling logic.
             byte fluidLevel = BurstVoxelDataBitMapping.GetFluidLevel(packedData);
-            float topHeight = templates[fluidLevel];
 
             // --- 3. CALCULATE FLOW VECTOR ---
             // Calculate 4 distinct corner flow vectors for bilinear interpolation across the top face
@@ -216,27 +216,29 @@ namespace Helpers
             Vector2 flow_br = CalculateCornerFlow(in props, fluidLevel, n_E, 1, n_S, -1, n_SE, in templates, in blockTypes);
             Vector2 flow_tr = CalculateCornerFlow(in props, fluidLevel, n_E, 1, n_N, 1, n_NE, in templates, in blockTypes);
 
-            // Second, set the visual height by default to full voxel size to avoid "air gaps"
-            const float fullBlockHeight = 1.0f;
-            float height_tr = fullBlockHeight;
-            float height_tl = fullBlockHeight;
-            float height_br = fullBlockHeight;
-            float height_bl = fullBlockHeight;
+            // Clamp smoothed corner heights to a small positive value to prevent z-fighting
+            // with the floor block's top face when a corner averages down to exactly 0.0f.
+            const float kMinFluidSurfaceHeight = 0.005f;
+            float smooth_tr = math.max(kMinFluidSurfaceHeight, GetSmoothedCornerHeight(in props, fluidLevel, n_N, n_E, n_NE, in templates, in blockTypes));
+            float smooth_tl = math.max(kMinFluidSurfaceHeight, GetSmoothedCornerHeight(in props, fluidLevel, n_N, n_W, n_NW, in templates, in blockTypes));
+            float smooth_br = math.max(kMinFluidSurfaceHeight, GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_E, n_SE, in templates, in blockTypes));
+            float smooth_bl = math.max(kMinFluidSurfaceHeight, GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_W, n_SW, in templates, in blockTypes));
 
+            // Check if we have fluid directly above us
+            bool hasFluidAbove = above.HasValue && blockTypes[above.State.id].FluidType == props.FluidType;
 
-            // Then, if above voxel is not a fluid of the same type, calculate heights based on current fluid level and neighbors
-            if (!above.HasValue || blockTypes[above.State.id].FluidType != props.FluidType)
-            {
-                height_tr = GetSmoothedCornerHeight(in props, fluidLevel, n_N, n_E, n_NE, in templates, in blockTypes); // Top-Right
-                height_tl = GetSmoothedCornerHeight(in props, fluidLevel, n_N, n_W, n_NW, in templates, in blockTypes); // Top-Left
-                height_br = GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_E, n_SE, in templates, in blockTypes); // Bottom-Right
-                height_bl = GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_W, n_SW, in templates, in blockTypes); // Bottom-Left
-            }
+            // Force all corners to 1.0 when submerged so the block connects seamlessly to the one above.
+            float height_tr = hasFluidAbove ? 1.0f : smooth_tr;
+            float height_tl = hasFluidAbove ? 1.0f : smooth_tl;
+            float height_br = hasFluidAbove ? 1.0f : smooth_br;
+            float height_bl = hasFluidAbove ? 1.0f : smooth_bl;
+
 
             // --- 4. GENERATE FACES ---
             // --- 4A. Top Face ---
-            // Only draw top face if above neighboring voxel is transparent and a different fluid.
-            if (!above.HasValue || blockTypes[above.State.id].IsTransparentForMesh && blockTypes[above.State.id].FluidType != props.FluidType)
+            // Draw unless the same fluid is directly above, that would make the face interior to the fluid body.
+            // Note: opaque blocks above (e.g. stone ceiling) must NOT suppress this face.
+            if (!above.HasValue || blockTypes[above.State.id].FluidType != props.FluidType)
             {
                 vertices.Add(pos + new Vector3(0, height_bl, 0)); // Back-Left
                 vertices.Add(pos + new Vector3(0, height_tl, 1)); // Front-Left
@@ -278,20 +280,70 @@ namespace Helpers
             {
                 int faceIndex = VoxelData.HorizontalFaceChecksIndices[n];
                 OptionalVoxelState sideNeighbor;
+                OptionalVoxelState sideNeighborAbove;
+
                 switch (faceIndex)
                 {
-                    case 1: sideNeighbor = n_N; break;
-                    case 0: sideNeighbor = n_S; break;
-                    case 5: sideNeighbor = n_E; break;
-                    case 4: sideNeighbor = n_W; break;
+                    case 1:
+                        sideNeighbor = n_N;
+                        sideNeighborAbove = above_N;
+                        break;
+                    case 0:
+                        sideNeighbor = n_S;
+                        sideNeighborAbove = above_S;
+                        break;
+                    case 5:
+                        sideNeighbor = n_E;
+                        sideNeighborAbove = above_E;
+                        break;
+                    case 4:
+                        sideNeighbor = n_W;
+                        sideNeighborAbove = above_W;
+                        break;
                     default: continue;
                 }
 
-                // Rule 1: Don't draw if neighbor is a higher or equal fluid block.
-                if (sideNeighbor.HasValue && blockTypes[sideNeighbor.State.id].FluidType == props.FluidType && templates[sideNeighbor.State.FluidLevel] >= topHeight) continue;
+                bool isNeighborSameFluid = sideNeighbor.HasValue && blockTypes[sideNeighbor.State.id].FluidType == props.FluidType;
 
-                // Rule 2: Don't draw if neighbor is an opaque solid block (like stone).
-                if (sideNeighbor.HasValue && !blockTypes[sideNeighbor.State.id].IsTransparentForMesh) continue;
+                // When true, the side face bottom is raised to the smooth surface level (waterfall curtain).
+                // When false, the face runs from y=0 up to the smooth heights (shallow edge gap-fill).
+                bool useSmoothBottom = false;
+
+                if (isNeighborSameFluid)
+                {
+                    bool isFullHeight = hasFluidAbove || templates[fluidLevel] >= 1.0f;
+                    bool neighborIsFullHeight = templates[sideNeighbor.State.FluidLevel] >= 1.0f;
+                    bool neighborHasFluidAbove = sideNeighborAbove.HasValue &&
+                                                 blockTypes[sideNeighborAbove.State.id].FluidType == props.FluidType;
+                    bool neighborIsEffectivelyFullHeight = neighborIsFullHeight || neighborHasFluidAbove;
+
+                    if (isFullHeight)
+                    {
+                        // We are submerged or a waterfall. Cull if the neighbor is also full-height — no gap between them.
+                        if (neighborIsEffectivelyFullHeight) continue;
+
+                        // Neighbor is shallower; draw a curtain from our top (1.0) down to its surface.
+                        useSmoothBottom = true;
+                    }
+                    else
+                    {
+                        // We are a shallow horizontal-flow block.
+                        // Cull toward any full-height neighbor — it draws the curtain on its own side.
+                        if (neighborIsEffectivelyFullHeight) continue;
+
+                        // Adjacent same-fluid surfaces tile seamlessly, so no top-surface face is needed between them.
+                        // However, culling both side faces exposes the void beneath the mesh when viewed horizontally.
+                        // We seal this with a gap-fill face, but only where it's actually visible:
+                        //   - neighbor template > 0.0f → interior pool edge → CULL (face would show through water surface above)
+                        //   - neighbor template = 0.0f → outermost pool edge → DRAW (void is directly exposed to the viewer)
+                        if (templates[sideNeighbor.State.FluidLevel] > 0f) continue;
+                    }
+                }
+                else
+                {
+                    // Neighbor is not the same fluid — cull only against opaque solids.
+                    if (sideNeighbor.HasValue && !blockTypes[sideNeighbor.State.id].IsTransparentForMesh) continue;
+                }
 
                 int v1 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 0];
                 int v2 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 1];
@@ -303,10 +355,20 @@ namespace Helpers
                 Vector3 p3 = BurstVoxelData.VoxelVerts.Data[v3];
                 Vector3 p4 = BurstVoxelData.VoxelVerts.Data[v4];
 
-                p1.y = p1.y > 0.5f ? GetCornerValue(in p1, height_tl, height_tr, height_bl, height_br) : 0;
-                p2.y = p2.y > 0.5f ? GetCornerValue(in p2, height_tl, height_tr, height_bl, height_br) : 0;
-                p3.y = p3.y > 0.5f ? GetCornerValue(in p3, height_tl, height_tr, height_bl, height_br) : 0;
-                p4.y = p4.y > 0.5f ? GetCornerValue(in p4, height_tl, height_tr, height_bl, height_br) : 0;
+                // Calculate the correct bottom vertex height to seal the gap seamlessly without extending down to 0
+                // - Waterfall curtain (useSmoothBottom=true): bottom raised to neighbor's surface → face fills gap from 1.0 down.
+                // - Shallow gap-fill (useSmoothBottom=false):  bottom stays at y=0  → face fills gap from 0 up to our surface.
+                // - Non-fluid neighbor (useSmoothBottom=false): bottom stays at y=0 → full-height wall face (original behavior).
+                float bottomHeight_p1 = useSmoothBottom ? GetCornerValue(in p1, smooth_tl, smooth_tr, smooth_bl, smooth_br) : 0f;
+                float bottomHeight_p2 = useSmoothBottom ? GetCornerValue(in p2, smooth_tl, smooth_tr, smooth_bl, smooth_br) : 0f;
+                float bottomHeight_p3 = useSmoothBottom ? GetCornerValue(in p3, smooth_tl, smooth_tr, smooth_bl, smooth_br) : 0f;
+                float bottomHeight_p4 = useSmoothBottom ? GetCornerValue(in p4, smooth_tl, smooth_tr, smooth_bl, smooth_br) : 0f;
+
+
+                p1.y = p1.y > 0.5f ? GetCornerValue(in p1, height_tl, height_tr, height_bl, height_br) : bottomHeight_p1;
+                p2.y = p2.y > 0.5f ? GetCornerValue(in p2, height_tl, height_tr, height_bl, height_br) : bottomHeight_p2;
+                p3.y = p3.y > 0.5f ? GetCornerValue(in p3, height_tl, height_tr, height_bl, height_br) : bottomHeight_p3;
+                p4.y = p4.y > 0.5f ? GetCornerValue(in p4, height_tl, height_tr, height_bl, height_br) : bottomHeight_p4;
 
                 vertices.Add(pos + p1);
                 vertices.Add(pos + p2);

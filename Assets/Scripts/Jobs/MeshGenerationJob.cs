@@ -80,9 +80,10 @@ namespace Jobs
         // --- HELPERS ---
         private static readonly Vector3Int[] s_fluidNeighborOffsets =
         {
-            new Vector3Int(0, 0, 1), new Vector3Int(1, 0, 0), new Vector3Int(0, 0, -1), new Vector3Int(-1, 0, 0),
-            new Vector3Int(1, 0, 1), new Vector3Int(1, 0, -1), new Vector3Int(-1, 0, -1), new Vector3Int(-1, 0, 1),
-            new Vector3Int(0, 1, 0), new Vector3Int(0, -1, 0),
+            new Vector3Int(0, 0, 1), new Vector3Int(1, 0, 0), new Vector3Int(0, 0, -1), new Vector3Int(-1, 0, 0), // N, E, S, W
+            new Vector3Int(1, 0, 1), new Vector3Int(1, 0, -1), new Vector3Int(-1, 0, -1), new Vector3Int(-1, 0, 1), // NE, SE, SW, NW
+            new Vector3Int(0, 1, 0), new Vector3Int(0, -1, 0), // Above, Below
+            new Vector3Int(0, 1, 1), new Vector3Int(1, 1, 0), new Vector3Int(0, 1, -1), new Vector3Int(-1, 1, 0), // Above_N, Above_E, Above_S, Above_W
         };
 
         /// <summary>
@@ -232,8 +233,8 @@ namespace Jobs
                 // Select template
                 NativeArray<float> templates = voxelProps.FluidType == FluidType.WaterLike ? WaterVertexTemplates : LavaVertexTemplates;
 
-                // Collect 9 neighbors for smoothing
-                NativeArray<OptionalVoxelState> neighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
+                // Collect 14 neighbors for smoothing & culling
+                NativeArray<OptionalVoxelState> neighbors = new NativeArray<OptionalVoxelState>(14, Allocator.Temp);
 
                 for (int i = 0; i < s_fluidNeighborOffsets.Length; i++)
                 {

@@ -12,6 +12,8 @@ public class PlayerInteraction : MonoBehaviour
     [Header("Block Interaction")]
     public bool showHighlightBlocks = true;
 
+    public bool interactWithFluids = false;
+
     public Transform highlightBlock;
     public Transform placeBlock;
     private Transform _highlightBlocksParent;
@@ -89,16 +91,20 @@ public class PlayerInteraction : MonoBehaviour
     /// Centralized method to cast a ray from the player's camera to find a voxel.
     /// Uses mathematical fractional offsets to accurately determine the placed block face.
     /// </summary>
+    /// <param name="overrideInteractWithFluids">If set, overrides the component's interactWithFluids toggle.</param>
     /// <returns>A VoxelRaycastResult struct containing information about the hit.</returns>
-    public VoxelRaycastResult RaycastForVoxel()
+    public VoxelRaycastResult RaycastForVoxel(bool? overrideInteractWithFluids = null)
     {
         float step = checkIncrement;
+
+        // Use the override if provided, otherwise fall back to the player's current setting
+        bool checkFluids = overrideInteractWithFluids ?? interactWithFluids;
 
         while (step < reach)
         {
             Vector3 pos = _playerCamera.position + _playerCamera.forward * step;
 
-            if (_world.CheckForVoxel(pos))
+            if (_world.CheckForVoxel(pos, checkFluids))
             {
                 VoxelRaycastResult result = new VoxelRaycastResult { DidHit = true };
                 result.HitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
@@ -165,7 +171,7 @@ public class PlayerInteraction : MonoBehaviour
             _blockPlaceable =
                 !isInsidePlayer &&
                 _world.worldData.IsVoxelInWorld(result.PlacePosition) &&
-                !_world.CheckForVoxel(result.PlacePosition) &&
+                !_world.CheckForCollision(result.PlacePosition) &&
                 toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem;
 
             // Set highlight objects active state

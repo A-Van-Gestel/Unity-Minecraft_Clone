@@ -6,15 +6,6 @@ This document outlines **open** bugs related to fluid behavior and simulation. R
 
 ---
 
-## 01. Side face rendering between different fluid levels
-
-**Severity:** Visual Artifact / Performance  
-**Files:** `MeshGenerationJob.cs` — fluid face cull logic
-
-Side faces between fluid voxels of different fluid levels are always rendered, causing internal faces to be incorrectly visible and hurting performance. This is currently intentional to allow waterfall-like faces to render, but a better solution should be found.
-
----
-
 ## 02. No player effect
 
 **Severity:** Missing Feature  

@@ -143,6 +143,25 @@ horizontal spread starts from `effectiveLevel + 1`, not from level 1.
 
 ---
 
+### ~~03. Side face rendering between different fluid levels (Internal Water Grids)~~
+
+**Severity:** Visual Artifact / Performance  
+**Files:** `MeshGenerationJob.cs` (`VoxelMeshHelper.cs` — fluid face cull logic)  
+**Fixed:** March 2026
+
+**Symptom:** Side faces between fluid voxels of different fluid levels (or fully submerged voxels) were incorrectly rendering full geometric quads from `y=0` to the surface height, causing massive internal overdraw and visible overlapping grid seams inside bodies of water.  
+**Root Cause:** The mesher conservatively rendered faces between differing fluid levels to prevent gaps near waterfalls, and failed to account for fully submerged neighbor blocks sharing a `1.0f` ceiling.  
+**Fix / Implementation:** We eliminated 100% of internal horizontal fluid faces and perfectly sealed vertical gaps using a three-part logic upgrade:
+
+1. **Mathematical Symmetry:** Exploited `GetSmoothedCornerHeight` to pre-calculate the exact surface heights of shared neighbor edges.
+   If a fluid block is adjacent to another, it now draws a "curtain" face extending *only* from the neighbor's sloped surface height up to our surface height, erasing geometry that would have plunged internally into the neighbor's volume.
+2. **Submerged Culling:** Expanded the Burst neighbor lookup to include `above_N, above_S, etc.`. If both the current block and the neighbor are submerged (`neighborHasFluidAbove`),
+   their top edges mathematically align at `1.0f`. There is zero gap to fill, so the face is completely culled.
+3. **Waterfall Preservation:** Added an `isFullHeight` fallback. Waterfalls erupting from under solid stone ceilings (`hasFluidAbove == false` but `template == 1.0f`) now correctly recognize their full height,
+   overriding the shallow puddle cull to draw a perfect gap-filler face down to the surface below.
+
+---
+
 ### ~~05. 7x7 Horizontal Spreading Cube in Mid-Air~~
 
 **Severity:** Gameplay / Physics bug  
