@@ -210,11 +210,13 @@ namespace Helpers
             byte fluidLevel = BurstVoxelDataBitMapping.GetFluidLevel(packedData);
 
             // --- 3. CALCULATE FLOW VECTOR ---
-            // Calculate 4 distinct corner flow vectors for bilinear interpolation across the top face
-            Vector2 flow_bl = CalculateCornerFlow(in props, fluidLevel, n_W, -1, n_S, -1, n_SW, in templates, in blockTypes);
-            Vector2 flow_tl = CalculateCornerFlow(in props, fluidLevel, n_W, -1, n_N, 1, n_NW, in templates, in blockTypes);
-            Vector2 flow_br = CalculateCornerFlow(in props, fluidLevel, n_E, 1, n_S, -1, n_SE, in templates, in blockTypes);
-            Vector2 flow_tr = CalculateCornerFlow(in props, fluidLevel, n_E, 1, n_N, 1, n_NE, in templates, in blockTypes);
+            // Calculate 4 distinct corner flow vectors symmetrically for seamless interpolation across blocks
+            OptionalVoxelState centerState = new OptionalVoxelState(new VoxelState(packedData));
+
+            Vector2 flow_bl = CalculateSymmetricCornerFlow(n_SW, n_S, n_W, centerState, props.FluidType, in templates, in blockTypes);
+            Vector2 flow_tl = CalculateSymmetricCornerFlow(n_W, centerState, n_NW, n_N, props.FluidType, in templates, in blockTypes);
+            Vector2 flow_br = CalculateSymmetricCornerFlow(n_S, n_SE, centerState, n_E, props.FluidType, in templates, in blockTypes);
+            Vector2 flow_tr = CalculateSymmetricCornerFlow(centerState, n_E, n_N, n_NE, props.FluidType, in templates, in blockTypes);
 
             // Clamp smoothed corner heights to a small positive value to prevent z-fighting
             // with the floor block's top face when a corner averages down to exactly 0.0f.
@@ -508,49 +510,51 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Calculates a discrete 2D flow-direction vector for a specific corner of a fluid block
-        /// to allow seamless bilinear interpolation across the surface.
-        /// Evaluates the height derivatives against adjacent and diagonal neighbors.
+        /// Calculates a discrete 2D flow-direction vector for a specific corner of a fluid block symmetrically.
+        /// By evaluating the 4 blocks that share this corner together, it guarantees mathematically identical
+        /// flow vectors across chunk and block boundaries, eliminating UV seams.
         /// </summary>
-        /// <param name="centerProps">The properties of the center fluid block.</param>
-        /// <param name="centerLevel">The fluid level of the center block.</param>
-        /// <param name="neighborX">The adjacent neighbor along the local X axis.</param>
-        /// <param name="signX">The sign multiplier for X-axis flow direction.</param>
-        /// <param name="neighborZ">The adjacent neighbor along the local Z axis.</param>
-        /// <param name="signZ">The sign multiplier for Z-axis flow direction.</param>
-        /// <param name="diag">The diagonal neighbor between X and Z.</param>
+        /// <param name="b00">The block at local (-x, -z) of the corner.</param>
+        /// <param name="b10">The block at local (+x, -z) of the corner.</param>
+        /// <param name="b01">The block at local (-x, +z) of the corner.</param>
+        /// <param name="b11">The block at local (+x, +z) of the corner.</param>
+        /// <param name="fluidType">The fluid type being evaluated.</param>
         /// <param name="templates">The pre-computed height templates for this fluid type.</param>
         /// <param name="blockTypes">The global block types data array.</param>
-        /// <returns>A normalized 2D vector representing the XZ flow direction at this corner.</returns>
+        /// <returns>A 2D vector representing the XZ flow direction at this corner.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static Vector2 CalculateCornerFlow(
-            in BlockTypeJobData centerProps, byte centerLevel,
-            OptionalVoxelState neighborX, int signX,
-            OptionalVoxelState neighborZ, int signZ,
-            OptionalVoxelState diag,
+        private static Vector2 CalculateSymmetricCornerFlow(
+            OptionalVoxelState b00, OptionalVoxelState b10,
+            OptionalVoxelState b01, OptionalVoxelState b11,
+            FluidType fluidType,
             in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
         {
-            float centerHeight = templates[centerLevel];
+            float h00 = GetEffectiveFluidHeight(b00, fluidType, templates, blockTypes);
+            float h10 = GetEffectiveFluidHeight(b10, fluidType, templates, blockTypes);
+            float h01 = GetEffectiveFluidHeight(b01, fluidType, templates, blockTypes);
+            float h11 = GetEffectiveFluidHeight(b11, fluidType, templates, blockTypes);
 
-            float hX = GetEffectiveFluidHeight(neighborX, centerProps.FluidType, templates, blockTypes);
-            float hZ = GetEffectiveFluidHeight(neighborZ, centerProps.FluidType, templates, blockTypes);
-            float hDiag = GetEffectiveFluidHeight(diag, centerProps.FluidType, templates, blockTypes);
+            // Obstacle handling: Find the highest actual fluid at this corner.
+            // Clamping solid walls (>1.0f) to be just slightly higher than the local fluid
+            // so they gently push fluid away, without dominating the gradient vector.
+            float maxFluidHeight = -1.0f;
+            if (h00 <= 1.0f) maxFluidHeight = math.max(maxFluidHeight, h00);
+            if (h10 <= 1.0f) maxFluidHeight = math.max(maxFluidHeight, h10);
+            if (h01 <= 1.0f) maxFluidHeight = math.max(maxFluidHeight, h01);
+            if (h11 <= 1.0f) maxFluidHeight = math.max(maxFluidHeight, h11);
 
             // Obstacle handling: Flow should mathematically push *away* from solid walls.
-            if (hX > 1.0f) hX = centerHeight + 0.05f;
-            if (hZ > 1.0f) hZ = centerHeight + 0.05f;
-            if (hDiag > 1.0f) hDiag = centerHeight + 0.05f;
+            float wallPushHeight = maxFluidHeight > -1.0f ? maxFluidHeight + 0.085f : 1.05f;
 
-            // To compute a generic 2D slope for any corner, we take the derivative across the two local axes (X and Z).
-            // We subtract the center's height from the neighbor's height so the resulting vector maps negatively downstream for the shader.
-            // We then multiply by sign to map it to global +X or +Z flow vectors.
-            float dx = (hX - centerHeight) * signX;
-            float dz = (hZ - centerHeight) * signZ;
+            if (h00 > 1.0f) h00 = wallPushHeight;
+            if (h10 > 1.0f) h10 = wallPushHeight;
+            if (h01 > 1.0f) h01 = wallPushHeight;
+            if (h11 > 1.0f) h11 = wallPushHeight;
 
-            // Factor in the diagonal for a slightly smoother sweep.
-            float dDiag = hDiag - centerHeight;
-            dx += dDiag * signX * 0.707f; // Cos(45)
-            dz += dDiag * signZ * 0.707f; // Sin(45)
+            // Calculate symmetric X and Z derivatives across the 2x2 block grid corner using Central Difference.
+            // Positive value means height increases in positive axis, therefore flow is negative (downstream).
+            float dx = ((h10 - h00) + (h11 - h01)) * 0.5f;
+            float dz = ((h01 - h00) + (h11 - h10)) * 0.5f;
 
             Vector2 cornerFlow = new Vector2(dx, dz);
             float sqrMag = cornerFlow.sqrMagnitude;
@@ -566,7 +570,6 @@ namespace Helpers
             // Steep drops/waterfalls (mag 1.0+) get boosted to 1.5.
             float speed = math.smoothstep(0.0f, 0.25f, mag) + math.smoothstep(0.8f, 1.2f, mag) * 0.5f;
 
-            // Return the pre-scaled vector. The shader will use this directly without normalizing.
             return dir * speed;
         }
 
