@@ -188,31 +188,19 @@ namespace Helpers
 
             // --- 1. DETERMINE SHADER FLAGS ---
             float liquidType = props.FluidShaderID;
-            float shorelineFlag = 0.0f;
 
-            // Check horizontal neighbors (N, E, S, W) for "shoreline" effect
-            for (int k = 0; k < 4; k++)
-            {
-                OptionalVoxelState shoreNeighbor = neighbors[k];
-                // Neighboring voxels need to be solid...
-                if (shoreNeighbor.HasValue && blockTypes[shoreNeighbor.State.id].IsSolid && blockTypes[shoreNeighbor.State.id].FluidType == FluidType.None)
-                {
-                    // But voxel above should not be a fluid
-                    if (above.HasValue && blockTypes[above.State.id].FluidType != FluidType.None) continue;
-
-                    shorelineFlag = 1.0f;
-                    break;
-                }
-            }
+            // Calculate an 8-bit shoreline mask encoding all 8 surrounding blocks for pixel-perfect shader rendering
+            float shoreMask = GetShoreMask(n_N, n_E, n_S, n_W, n_NE, n_SE, n_SW, n_NW, blockTypes);
 
             // --- 2. GET HEIGHT DATA ---
             // First, get the LOGICAL top height based on the fluid level. This is ONLY used for face culling logic.
             byte fluidLevel = BurstVoxelDataBitMapping.GetFluidLevel(packedData);
 
-            // --- 3. CALCULATE FLOW VECTOR ---
+            // --- 3. CALCULATE FLOW VECTOR & SHORELINES ---
             // Calculate 4 distinct corner flow vectors symmetrically for seamless interpolation across blocks
             OptionalVoxelState centerState = new OptionalVoxelState(new VoxelState(packedData));
 
+            // Calculate 4 distinct corner flow vectors for bilinear interpolation across the top face
             Vector2 flow_bl = CalculateSymmetricCornerFlow(n_SW, n_S, n_W, centerState, props.FluidType, in templates, in blockTypes);
             Vector2 flow_tl = CalculateSymmetricCornerFlow(n_W, centerState, n_NW, n_N, props.FluidType, in templates, in blockTypes);
             Vector2 flow_br = CalculateSymmetricCornerFlow(n_S, n_SE, centerState, n_E, props.FluidType, in templates, in blockTypes);
@@ -249,10 +237,10 @@ namespace Helpers
 
                 float lightLevel = above.HasValue ? above.State.lightAsFloat : 1.0f;
                 // v.color.r = liquidType
-                // v.color.g = shorelineFlag
+                // v.color.g = shorelineMask (Identical for all 4 vertices to prevent triangle interpolation!)
                 // v.color.b = Isometric Shadow Multiplier (Defaults to 1.0f for runtime fluids)
                 // v.color.a = lightLevel
-                Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
+                Color vertexColor = new Color(liquidType, shoreMask, 1.0f, lightLevel);
 
                 // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
                 normals.Add(Vector3.up);
@@ -378,8 +366,11 @@ namespace Helpers
                 vertices.Add(pos + p4);
 
                 float lightLevel = sideNeighbor.HasValue ? sideNeighbor.State.lightAsFloat : 1.0f;
-                // Use 1.0f for the b-channel so side faces default to full brightness (unshadowed) in game
-                Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
+
+                // Use 1.0f for the b-channel so side faces default to full brightness (unshadowed) in game.
+                // Side faces are vertical waterfalls. They don't typically have static surface shores,
+                // so we hardcode the shorelineFlag (g) to 0.0f. They will still get turbulence streams!
+                Color sideColor = new Color(liquidType, 0.0f, 1.0f, lightLevel);
 
                 Vector2 uv1, uv2, uv3, uv4;
 
@@ -404,16 +395,16 @@ namespace Helpers
                 }
 
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
-                colors.Add(vertexColor);
+                colors.Add(sideColor);
                 uvs.Add(uv1);
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
-                colors.Add(vertexColor);
+                colors.Add(sideColor);
                 uvs.Add(uv2);
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
-                colors.Add(vertexColor);
+                colors.Add(sideColor);
                 uvs.Add(uv3);
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
-                colors.Add(vertexColor);
+                colors.Add(sideColor);
                 uvs.Add(uv4);
 
                 fluidTriangles.Add(vertexIndex);
@@ -435,21 +426,22 @@ namespace Helpers
                 vertices.Add(pos + new Vector3(1, 0, 1)); // Front-Right (3)
 
                 float lightLevel = below.HasValue ? below.State.lightAsFloat : 1.0f;
+                // Bottom faces are internal. Hardcode shorelineFlag (g) to 0.0f.
                 // Use 1.0f for the b-channel so bottom faces default to full brightness (unshadowed) in game
-                Color vertexColor = new Color(liquidType, shorelineFlag, 1.0f, lightLevel);
+                Color bottomColor = new Color(liquidType, 0.0f, 1.0f, lightLevel);
 
                 // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
                 normals.Add(Vector3.down);
-                colors.Add(vertexColor);
+                colors.Add(bottomColor);
                 uvs.Add(flow_bl);
                 normals.Add(Vector3.down);
-                colors.Add(vertexColor);
+                colors.Add(bottomColor);
                 uvs.Add(flow_tl);
                 normals.Add(Vector3.down);
-                colors.Add(vertexColor);
+                colors.Add(bottomColor);
                 uvs.Add(flow_br);
                 normals.Add(Vector3.down);
-                colors.Add(vertexColor);
+                colors.Add(bottomColor);
                 uvs.Add(flow_tr);
 
                 // Clockwise winding order when viewed from below.
@@ -599,6 +591,38 @@ namespace Helpers
             if (nbProps.FluidType == centerFluidType) return templates[neighbor.State.FluidLevel];
 
             return 0f;
+        }
+
+        /// <summary>
+        /// Builds an 8-bit mask identifying exactly which of the 8 surrounding blocks are solid walls.
+        /// Evaluated per block and passed identically to all 4 vertices to bypass triangle interpolation.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float GetShoreMask(
+            OptionalVoxelState n_n, OptionalVoxelState n_e, OptionalVoxelState n_s, OptionalVoxelState n_w,
+            OptionalVoxelState n_ne, OptionalVoxelState n_se, OptionalVoxelState n_sw, OptionalVoxelState n_nw,
+            in NativeArray<BlockTypeJobData> blockTypes)
+        {
+            int mask = 0;
+            if (IsSolidWall(n_n, blockTypes)) mask |= 1;
+            if (IsSolidWall(n_e, blockTypes)) mask |= 2;
+            if (IsSolidWall(n_s, blockTypes)) mask |= 4;
+            if (IsSolidWall(n_w, blockTypes)) mask |= 8;
+
+            // Diagonals (Inner Corners)
+            if (IsSolidWall(n_ne, blockTypes)) mask |= 16;
+            if (IsSolidWall(n_se, blockTypes)) mask |= 32;
+            if (IsSolidWall(n_sw, blockTypes)) mask |= 64;
+            if (IsSolidWall(n_nw, blockTypes)) mask |= 128;
+
+            // Divide by 255.0 to safely pack into a 0.0 - 1.0 float channel (v.color.g)
+            return mask / 255.0f;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsSolidWall(OptionalVoxelState state, in NativeArray<BlockTypeJobData> blockTypes)
+        {
+            return state.HasValue && blockTypes[state.State.id].IsSolid && blockTypes[state.State.id].FluidType == FluidType.None;
         }
 
         /// <summary>

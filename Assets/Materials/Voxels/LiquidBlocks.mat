@@ -13,9 +13,11 @@ Material:
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
   m_InvalidKeywords:
+  - USE_SHORE_EFFECTS
   - _ALPHATEST_ON
   - _EDITORPREVIEWTYPE_WATER
   - _LIQUIDTYPE_WATER
+  - _USESHOREEFFECTS_ON
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
@@ -126,6 +128,8 @@ Material:
     - _InvertCutout: 0
     - _InvertMask: 0
     - _LavaFlowMultiplier: 0.35
+    - _LavaShoreCrust: 1
+    - _LavaShoreWidth: 0.4
     - _LiquidType: 1
     - _Metallic: 0
     - _Mode: 1
@@ -138,7 +142,7 @@ Material:
     - _RippleSpeed: 1.2
     - _Saturation: 0
     - _ShoreFoamWidth: 0.25
-    - _ShoreSize: 0.6
+    - _ShoreSize: 3
     - _SmoothnessTextureChannel: 0
     - _Source: 0
     - _SourceMask: 0
@@ -155,9 +159,11 @@ Material:
     - _UseAoFromMainProperties: 1
     - _UseBaseColorAlpha: 1
     - _UseEmissionFromMainProperties: 1
-    - _UseShoreEffects: 0
+    - _UseShoreEffects: 1
     - _VisualizeMask: 0
     - _WaterFlowMultiplier: 3.5
+    - _WaterShoreFoam: 0.65
+    - _WaterShoreWidth: 0.15
     - _WaveScale: 5
     - _WaveSpeed: 0.4
     - _ZTest: 4

@@ -5,11 +5,6 @@ Shader "Minecraft/UberLiquidShader"
         // This now correctly controls the preview in the editor
         [KeywordEnum(Water, Lava)] _EditorPreviewType("Editor Preview Type", Float) = 0
 
-        // --- Global Shoreline Controls ---
-        [Header(Shoreline Effects)]
-        [Toggle(USE_SHORE_EFFECTS)] _UseShoreEffects ("Enable Shore Effects", Float) = 0
-        _ShoreSize("Shore Effect Size", Range(0.0, 1.0)) = 0.6
-
         // --- Lava Properties ---
         [Header(Lava)]
         _BrightColor("Bright Color (Cracks)", Color) = (1, 0.9, 0.6, 1)
@@ -23,7 +18,11 @@ Shader "Minecraft/UberLiquidShader"
         _CrackBrightness("Crack Brightness", Range(0, 3)) = 1.5
         _PulseSpeed("Pulse Speed", Range(0, 5)) = 1.5
         _HeatDistortionAmount("Heat Distortion", Range(0, 0.1)) = 0.015
-        _FlowHighlight("Flow Highlight", Range(0, 2)) = 0.5
+
+        [Header(Lava Shores and Flow)]
+        _LavaShoreWidth("Shore Width", Range(0.01, 1.0)) = 0.4
+        _LavaShoreCrust("Shore Crust Amount", Range(0.0, 2.0)) = 1.5
+        _FlowHighlight("Flow Sparks", Range(0, 2)) = 0.5
 
         // --- Water Properties ---
         [Header(Water)]
@@ -36,8 +35,12 @@ Shader "Minecraft/UberLiquidShader"
         _RippleScale("Ripple Scale", Range(1, 20)) = 15.0
         _RippleSpeed("Ripple Speed", Range(0, 5)) = 1.2
         _FoamThreshold("Wave Foam Threshold", Range(0.5, 1.0)) = 0.8
-        _StreamEffect("Stream Foam Effect", Range(0.0, 3.0)) = 1.0
         _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.02
+
+        [Header(Water Shores and Flow)]
+        _WaterShoreWidth("Shore Width", Range(0.01, 1.0)) = 0.3
+        _WaterShoreFoam("Shore Foam Amount", Range(0.0, 3.0)) = 1.5
+        _StreamEffect("Stream Foam Amount", Range(0.0, 3.0)) = 1.0
     }
 
     SubShader
@@ -59,9 +62,6 @@ Shader "Minecraft/UberLiquidShader"
             #pragma fragment fragFunction
             #pragma target 3.0
 
-            // Keyword for the shoreline toggle
-            #pragma shader_feature USE_SHORE_EFFECTS
-
             #include "UnityCG.cginc"
             #include "UnityShaderVariables.cginc" // For unity_IsEditorPlaying
 
@@ -71,7 +71,7 @@ Shader "Minecraft/UberLiquidShader"
                 float4 vertex : POSITION;
                 float3 normal : NORMAL; // Normal is required for gradient
                 float2 uv : TEXCOORD0;
-                fixed4 color : COLOR; // r:LiquidType, g:Shoreline, b:Unused, a:LightLevel
+                fixed4 color : COLOR; // r:LiquidType, g:ShorelineFlag, b:ShadowMultiplier, a:LightLevel
             };
 
             struct v2f
@@ -84,22 +84,23 @@ Shader "Minecraft/UberLiquidShader"
                 float shorelineFlag : TEXCOORD4;
                 float lightLevel : TEXCOORD5;
                 float shadowMultiplier : TEXCOORD6;
-                float2 localFlowVector : TEXCOORD7; // Added physical flow XY vector from mesher
+                float2 localFlowVector : TEXCOORD7; // Physical flow XY vector from mesher
             };
 
             // Global Properties
             float _EditorPreviewType;
-            float _ShoreSize;
             sampler2D _GrabTexture;
             float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
 
             // Lava Properties
             fixed4 _BrightColor, _MidColor, _DarkColor, _CrustColor;
-            float _LavaFlowMultiplier, _NoiseScale, _CellDensity, _Speed, _CrackBrightness, _PulseSpeed, _HeatDistortionAmount, _FlowHighlight;
+            float _LavaFlowMultiplier, _NoiseScale, _CellDensity, _Speed, _CrackBrightness, _PulseSpeed, _HeatDistortionAmount;
+            float _LavaShoreWidth, _LavaShoreCrust, _FlowHighlight;
 
             // Water Properties
             fixed4 _DeepColor, _ShallowColor, _FoamColor;
-            float _WaterFlowMultiplier, _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _StreamEffect, _DistortionAmount;
+            float _WaterFlowMultiplier, _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _DistortionAmount;
+            float _WaterShoreWidth, _WaterShoreFoam, _StreamEffect;
 
             // Noise Functions
             float3 mod289(float3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
@@ -171,40 +172,60 @@ Shader "Minecraft/UberLiquidShader"
                 o.vertex = UnityObjectToClipPos(v.vertex);
                 o.worldPos = mul(unity_ObjectToWorld, v.vertex).xyz;
                 o.screenPos = ComputeGrabScreenPos(o.vertex);
-                o.worldNormal = UnityObjectToWorldNormal(v.normal); // ransform normal to world space
+                o.worldNormal = UnityObjectToWorldNormal(v.normal); // Pass normal to fragment
                 o.liquidType = v.color.r;
                 o.shorelineFlag = v.color.g;
                 o.lightLevel = v.color.a;
                 o.shadowMultiplier = v.color.b;
-                o.localFlowVector = v.uv; // Pass the flow direction vector
+                o.localFlowVector = v.uv; // Added physical flow XY vector from mesher
                 return o;
             }
 
-            // Helper function to calculate the shoreline gradient
-            float get_shore_factor(float3 worldPos, float3 worldNormal, float shoreSize)
+            // --- REUSABLE SHORELINE LOGIC ---
+            // Decodes the 8-bit shoreline mask and calculates a smoothed sub-voxel gradient
+            float GetShoreGradient(float shorelineFlag, float3 worldPos, float shoreWidth)
             {
-                // Determine which plane the quad is on based on the normal
-                float3 absNormal = abs(worldNormal);
-                float2 quadUV;
-                if (absNormal.y > absNormal.x && absNormal.y > absNormal.z)
-                    quadUV = frac(worldPos.xz); // Horizontal plane
-                else if (absNormal.x > absNormal.y && absNormal.x > absNormal.z)
-                    quadUV = frac(worldPos.yz); // X-facing vertical plane
-                else
-                    quadUV = frac(worldPos.xy); // Z-facing vertical plane
+                int mask = round(shorelineFlag * 255.0);
+                float minDist = 1.0;
 
-                // Calculate distance from the center of the quad (0-0.5)
-                float2 distFromCenter = abs(quadUV - 0.5);
-                float maxDist = max(distFromCenter.x, distFromCenter.y);
+                if (mask > 0)
+                {
+                    // Derive block-local UV from world position (0.0 to 1.0 across the face)
+                    // Clamp prevents frac() from wrapping exactly at the 1.0 boundary
+                    float2 localUV = clamp(frac(worldPos.xz), 0.001, 0.999);
 
-                // Create a smooth gradient that starts from the edge and moves inwards
-                // The 'shoreSize' property now controls the width of this gradient
-                return 1.0 - smoothstep(0.5 - (shoreSize * 0.5), 0.5, maxDist);
+                    float dN = 1.0 - localUV.y; // North (+Z)
+                    float dE = 1.0 - localUV.x; // East (+X)
+                    float dS = localUV.y; // South (-Z)
+                    float dW = localUV.x; // West (-X)
+
+                    // Edge distances
+                    if ((mask & 1) != 0) minDist = min(minDist, dN);
+                    if ((mask & 2) != 0) minDist = min(minDist, dE);
+                    if ((mask & 4) != 0) minDist = min(minDist, dS);
+                    if ((mask & 8) != 0) minDist = min(minDist, dW);
+
+                    // Corner distances (Euclidean)
+                    if ((mask & 16) != 0) minDist = min(minDist, length(float2(dE, dN))); // NE
+                    if ((mask & 32) != 0) minDist = min(minDist, length(float2(dE, dS))); // SE
+                    if ((mask & 64) != 0) minDist = min(minDist, length(float2(dW, dS))); // SW
+                    if ((mask & 128) != 0) minDist = min(minDist, length(float2(dW, dN))); // NW
+                }
+
+                // Create a sub-voxel gradient: 1.0 at the wall, fading out exactly at the specified shoreWidth
+                float shore_gradient = saturate(1.0 - (minDist / max(0.001, shoreWidth)));
+                return smoothstep(0.0, 1.0, shore_gradient);
             }
 
             void EvaluateLava(v2f i, float phaseTime, out float3 lavaCol, out float2 heatNormal)
             {
                 float t_boil = _Time.y * _Speed;
+                float rawSpeed = length(i.localFlowVector);
+
+                // Turbulence is 1.0 near shores/waterfalls and drops to 0.0 in still lava
+                float turbulence = smoothstep(0.1, 0.8, rawSpeed);
+                // Idle is 1.0 when perfectly still, 0.0 when rushing
+                float idle = 1.0 - turbulence;
 
                 // Use the interpolated vector directly. No normalization!
                 // This guarantees C0 mathematical continuity across the whole block, stopping the "star" pinching.
@@ -237,12 +258,6 @@ Shader "Minecraft/UberLiquidShader"
                 float base_fbm = fbm(p1, 5);
                 float base_noise = (base_fbm + 1.0) * 0.5;
 
-                float2 offset = float2(0.01, 0.0);
-                float normal_dx = fbm(p1 + offset.xyy, 4) - base_fbm;
-                float normal_dz = fbm(p1 + offset.yxy, 4) - base_fbm;
-                float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
-                heatNormal = normal.xz * _HeatDistortionAmount;
-
                 float noise1 = fbm(p1 * _CellDensity, 5);
                 float noise2 = fbm(p2 * _CellDensity, 5);
                 float crack_pattern = pow(abs(noise1 - noise2), 2.0) * _CrackBrightness;
@@ -250,20 +265,41 @@ Shader "Minecraft/UberLiquidShader"
                 fixed3 col = lerp(_DarkColor.rgb, _MidColor.rgb, smoothstep(0.3, 0.7, base_noise));
                 lavaCol = lerp(col, _BrightColor.rgb, smoothstep(0.1, 0.35, crack_pattern));
 
-                // Flow Highlight
+                // --- FLOW & SHORE EFFECTS ---
+
+                // Decode Shore Mask
+                float shore_gradient = GetShoreGradient(i.shorelineFlag, i.worldPos, _LavaShoreWidth);
+
+                // 1. Cooling Crust (Idle Shorelines)
+                float3 crust_p = i.worldPos * _NoiseScale * 2.0 - flow3D + float3(0, t_boil * 0.5, 0);
+                float crust_noise = (fbm(crust_p, 3) + 1.0) * 0.5;
+
+                // Multiply by 'idle' so fast-flowing lava rivers don't crust over, even at the shores!
+                float crust_mask = smoothstep(0.4, 0.8, crust_noise) * shore_gradient * idle;
+                lavaCol = lerp(lavaCol, _CrustColor.rgb, saturate(crust_mask * _LavaShoreCrust));
+
+                // 2. Bright Sparks where flow is strong (Turbulence)
                 float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + (flow3D * 2.0);
 
                 float flow_mask = (fbm(flow_mask_p, 4) + 1.0) * 0.5;
-                lavaCol += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * _FlowHighlight;
+                lavaCol += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * turbulence * _FlowHighlight;
+
+                // Distortion Normal
+                float2 offset = float2(0.01, 0.0);
+                float normal_dx = fbm(p1 + offset.xyy, 4) - base_fbm;
+                float normal_dz = fbm(p1 + offset.yxy, 4) - base_fbm;
+                float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
+                heatNormal = normal.xz * _HeatDistortionAmount;
             }
 
             void EvaluateWater(v2f i, float phaseTime, out float3 waterCol, out float foamAmt, out float2 waterNormal)
             {
-                // Use the continuous vector directly.
-                float2 flow = i.localFlowVector * phaseTime * _WaterFlowMultiplier * _Speed;
-
-                // We keep rawSpeed solely to mask out the stream sparks on still water
                 float rawSpeed = length(i.localFlowVector);
+
+                // Turbulence is 1.0 near shores/waterfalls and drops to 0.0 in still water
+                float turbulence = smoothstep(0.1, 0.8, rawSpeed);
+
+                float2 flow = i.localFlowVector * phaseTime * _WaterFlowMultiplier * _Speed;
 
                 // Route 2D flow to 3D based on surface normal
                 float3 flow3D;
@@ -289,12 +325,6 @@ Shader "Minecraft/UberLiquidShader"
                 float wave_fbm = fbm(wave_p, 4);
                 float ripple_noise = fbm(ripple_p, 4);
 
-                float2 offset = float2(0.01, 0.0);
-                float normal_dx = fbm(wave_p + offset.xyy, 3) - wave_fbm;
-                float normal_dz = fbm(wave_p + offset.yxy, 3) - wave_fbm;
-                float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
-                waterNormal = normal.xz * _DistortionAmount;
-
                 fixed4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
 
                 float combined_noise = (wave_fbm + ripple_noise) * 0.5;
@@ -303,20 +333,29 @@ Shader "Minecraft/UberLiquidShader"
                 waterCol = lerp(water_base_color.rgb, _ShallowColor.rgb, combined_noise);
                 foamAmt = smoothstep(_FoamThreshold - 0.1, _FoamThreshold + 0.1, combined_noise);
 
-                // --- Streamy Flow Highlights ---
-                // Because rawSpeed naturally interpolates to 0 at the center of opposing flows,
-                // the stream sparks will gently fade out at the seams instead of tearing violently!
-                float isFlowing = smoothstep(0.1, 0.8, rawSpeed);
+                // --- SHORE & STREAM EFFECTS ---
 
-                // 2. Sample a higher-frequency noise that moves significantly faster along the flow vector
+                // Decode Shore Mask
+                float shore_gradient = GetShoreGradient(i.shorelineFlag, i.worldPos, _WaterShoreWidth);
+
                 float3 stream_p = i.worldPos * _WaveScale * 2.0 + (flow3D * 3.0);
                 float stream_noise = (fbm(stream_p, 3) + 1.0) * 0.5;
 
-                // 3. Threshold it sharply to create isolated "sparks" and streaks, multiplying by our flow mask
-                float stream_foam = smoothstep(0.55, 0.75, stream_noise) * isFlowing * _StreamEffect;
+                // 1. Stream Foam (Turbulence-based)
+                // Create isolated streaks that only appear where turbulence is high (at drops/fast flow)
+                float stream_foam = smoothstep(0.55, 0.75, stream_noise) * turbulence * _StreamEffect;
 
-                // 4. Add the stream foam to the base foam, saturating to keep it between 0.0 and 1.0
-                foamAmt = saturate(foamAmt + stream_foam);
+                // 2. Shore Foam (Mask Distance-based)
+                float shore_foam = smoothstep(0.4, 0.75, stream_noise) * shore_gradient * _WaterShoreFoam;
+
+                foamAmt = saturate(foamAmt + stream_foam + shore_foam);
+
+                // Distortion Normal
+                float2 offset = float2(0.01, 0.0);
+                float normal_dx = fbm(wave_p + offset.xyy, 3) - wave_fbm;
+                float normal_dz = fbm(wave_p + offset.yxy, 3) - wave_fbm;
+                float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
+                waterNormal = normal.xz * _DistortionAmount;
             }
 
             fixed4 fragFunction(v2f i) : SV_Target
@@ -358,13 +397,6 @@ Shader "Minecraft/UberLiquidShader"
                     float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
                     fixed4 background = tex2D(_GrabTexture, distortedUV);
 
-                    #if defined(USE_SHORE_EFFECTS)
-                    float crust_noise = (snoise(i.worldPos.xzy * 0.7) + 1.0) * 0.5;
-                    float shore_factor = get_shore_factor(i.worldPos, i.worldNormal, _ShoreSize);
-                    float crust_amount = i.shorelineFlag * shore_factor * crust_noise;
-                    lava_col = lerp(lava_col, _CrustColor.rgb, crust_amount);
-                    #endif
-
                     float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
                     lava_col *= pulse;
                     lava_col = lerp(lava_col, lava_col * 0.1, shade);
@@ -382,20 +414,15 @@ Shader "Minecraft/UberLiquidShader"
                     EvaluateWater(i, time1, col1, foam1, norm1);
 
                     fixed3 water_surface_color = col0 * weight0 + col1 * weight1;
-                    float wave_foam = foam0 * weight0 + foam1 * weight1;
+
+                    // Because foam0 and foam1 are phase-blended here, the shore effect
+                    // seamlessly fades and loops along with the flow!
+                    float total_foam = foam0 * weight0 + foam1 * weight1;
+
                     float2 final_normal = norm0 * weight0 + norm1 * weight1;
 
                     float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
                     fixed4 background = tex2D(_GrabTexture, distortedUV);
-
-                    float total_foam = wave_foam;
-
-                    #if defined(USE_SHORE_EFFECTS)
-                    float shore_foam_noise = (snoise(i.worldPos.xzy * 0.5) + 1.0) * 0.5;
-                    float shore_factor = get_shore_factor(i.worldPos, i.worldNormal, _ShoreSize);
-                    float shore_foam = i.shorelineFlag * shore_factor * shore_foam_noise;
-                    total_foam = saturate(total_foam + shore_foam);
-                    #endif
 
                     fixed3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
                     final_color = lerp(final_color, final_color * 0.1, shade);
