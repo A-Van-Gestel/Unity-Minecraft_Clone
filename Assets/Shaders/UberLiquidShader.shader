@@ -5,6 +5,10 @@ Shader "Minecraft/UberLiquidShader"
         // This now correctly controls the preview in the editor
         [KeywordEnum(Water, Lava)] _EditorPreviewType("Editor Preview Type", Float) = 0
 
+        // --- Global Shoreline Controls ---
+        [Header(Shoreline Effects)]
+        _ShorePushSpeed("Shore Push Speed", Range(0.0, 3.0)) = 0.8
+
         // --- Lava Properties ---
         [Header(Lava)]
         _BrightColor("Bright Color (Cracks)", Color) = (1, 0.9, 0.6, 1)
@@ -21,7 +25,7 @@ Shader "Minecraft/UberLiquidShader"
 
         [Header(Lava Shores and Flow)]
         _LavaShoreWidth("Shore Width", Range(0.01, 1.0)) = 0.4
-        _LavaShoreCrust("Shore Crust Amount", Range(0.0, 2.0)) = 1.5
+        _LavaShoreCrust("Shore Crust Amount", Range(0.0, 2.0)) = 1.0
         _FlowHighlight("Flow Sparks", Range(0, 2)) = 0.5
 
         // --- Water Properties ---
@@ -38,8 +42,8 @@ Shader "Minecraft/UberLiquidShader"
         _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.02
 
         [Header(Water Shores and Flow)]
-        _WaterShoreWidth("Shore Width", Range(0.01, 1.0)) = 0.3
-        _WaterShoreFoam("Shore Foam Amount", Range(0.0, 3.0)) = 1.5
+        _WaterShoreWidth("Shore Width", Range(0.01, 1.0)) = 0.15
+        _WaterShoreFoam("Shore Foam Amount", Range(0.0, 3.0)) = 0.65
         _StreamEffect("Stream Foam Amount", Range(0.0, 3.0)) = 1.0
     }
 
@@ -69,7 +73,7 @@ Shader "Minecraft/UberLiquidShader"
             struct appdata
             {
                 float4 vertex : POSITION;
-                float3 normal : NORMAL; // Normal is required for gradient
+                float3 normal : NORMAL;
                 float2 uv : TEXCOORD0;
                 fixed4 color : COLOR; // r:LiquidType, g:ShorelineFlag, b:ShadowMultiplier, a:LightLevel
             };
@@ -79,7 +83,7 @@ Shader "Minecraft/UberLiquidShader"
                 float4 vertex : SV_POSITION;
                 float3 worldPos : TEXCOORD0;
                 float4 screenPos : TEXCOORD1;
-                float3 worldNormal : TEXCOORD2; // Pass normal to fragment
+                float3 worldNormal : TEXCOORD2;
                 float liquidType : TEXCOORD3;
                 float shorelineFlag : TEXCOORD4;
                 float lightLevel : TEXCOORD5;
@@ -89,6 +93,7 @@ Shader "Minecraft/UberLiquidShader"
 
             // Global Properties
             float _EditorPreviewType;
+            float _ShorePushSpeed;
             sampler2D _GrabTexture;
             float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
 
@@ -182,11 +187,12 @@ Shader "Minecraft/UberLiquidShader"
             }
 
             // --- REUSABLE SHORELINE LOGIC ---
-            // Decodes the 8-bit shoreline mask and calculates a smoothed sub-voxel gradient
-            float GetShoreGradient(float shorelineFlag, float3 worldPos, float shoreWidth)
+            // Decodes the 8-bit mask and returns BOTH the gradient intensity and a continuous 2D push vector
+            void GetShoreData(float shorelineFlag, float3 worldPos, float shoreWidth, out float shore_gradient, out float2 shore_push)
             {
                 int mask = round(shorelineFlag * 255.0);
                 float minDist = 1.0;
+                shore_push = float2(0, 0);
 
                 if (mask > 0)
                 {
@@ -199,37 +205,99 @@ Shader "Minecraft/UberLiquidShader"
                     float dS = localUV.y; // South (-Z)
                     float dW = localUV.x; // West (-X)
 
-                    // Edge distances
-                    if ((mask & 1) != 0) minDist = min(minDist, dN);
-                    if ((mask & 2) != 0) minDist = min(minDist, dE);
-                    if ((mask & 4) != 0) minDist = min(minDist, dS);
-                    if ((mask & 8) != 0) minDist = min(minDist, dW);
+                    // 1. Cardinal pushes.
+                    // The weight (1.0 - d) guarantees the push fades exactly to 0.0 at the opposite edge of the block.
+                    if ((mask & 1) != 0)
+                    {
+                        minDist = min(minDist, dN);
+                        shore_push += float2(0, 1) * (1.0 - dN);
+                    }
+                    if ((mask & 2) != 0)
+                    {
+                        minDist = min(minDist, dE);
+                        shore_push += float2(1, 0) * (1.0 - dE);
+                    }
+                    if ((mask & 4) != 0)
+                    {
+                        minDist = min(minDist, dS);
+                        shore_push += float2(0, -1) * (1.0 - dS);
+                    }
+                    if ((mask & 8) != 0)
+                    {
+                        minDist = min(minDist, dW);
+                        shore_push += float2(-1, 0) * (1.0 - dW);
+                    }
 
-                    // Corner distances (Euclidean)
-                    if ((mask & 16) != 0) minDist = min(minDist, length(float2(dE, dN))); // NE
-                    if ((mask & 32) != 0) minDist = min(minDist, length(float2(dE, dS))); // SE
-                    if ((mask & 64) != 0) minDist = min(minDist, length(float2(dW, dS))); // SW
-                    if ((mask & 128) != 0) minDist = min(minDist, length(float2(dW, dN))); // NW
+                    // 2. Outer corner pushes.
+                    // We ONLY apply these if the adjacent cardinals are empty (e.g. if N is solid, the N push handles it).
+                    // We use max(0.0, 1.0 - d) to prevent the influence from going negative across block boundaries!
+                    if ((mask & 16) != 0 && (mask & 3) == 0)
+                    {
+                        // NE is solid, N(1) & E(2) are empty
+                        float d = length(float2(dE, dN));
+                        minDist = min(minDist, d);
+                        shore_push += normalize(float2(1, 1)) * max(0.0, 1.0 - d);
+                    }
+                    if ((mask & 32) != 0 && (mask & 6) == 0)
+                    {
+                        // SE is solid, E(2) & S(4) are empty
+                        float d = length(float2(dE, dS));
+                        minDist = min(minDist, d);
+                        shore_push += normalize(float2(1, -1)) * max(0.0, 1.0 - d);
+                    }
+                    if ((mask & 64) != 0 && (mask & 12) == 0)
+                    {
+                        // SW is solid, S(4) & W(8) are empty
+                        float d = length(float2(dW, dS));
+                        minDist = min(minDist, d);
+                        shore_push += normalize(float2(-1, -1)) * max(0.0, 1.0 - d);
+                    }
+                    if ((mask & 128) != 0 && (mask & 9) == 0)
+                    {
+                        // NW is solid, W(8) & N(1) are empty
+                        float d = length(float2(dW, dN));
+                        minDist = min(minDist, d);
+                        shore_push += normalize(float2(-1, 1)) * max(0.0, 1.0 - d);
+                    }
                 }
 
-                // Create a sub-voxel gradient: 1.0 at the wall, fading out exactly at the specified shoreWidth
-                float shore_gradient = saturate(1.0 - (minDist / max(0.001, shoreWidth)));
-                return smoothstep(0.0, 1.0, shore_gradient);
+                // Sub-voxel shore gradient: 1.0 at the wall, fading out exactly at shoreWidth
+                shore_gradient = saturate(1.0 - (minDist / max(0.001, shoreWidth)));
+                shore_gradient = smoothstep(0.0, 1.0, shore_gradient);
+
+                // Normalize push direction and scale it so it is strongest exactly at the wall
+                if (length(shore_push) > 0.001)
+                {
+                    shore_push = normalize(shore_push) * shore_gradient;
+                }
             }
 
             void EvaluateLava(v2f i, float phaseTime, out float3 lavaCol, out float2 heatNormal)
             {
                 float t_boil = _Time.y * _Speed;
-                float rawSpeed = length(i.localFlowVector);
+
+                float shore_gradient;
+                float2 shore_push;
+                GetShoreData(i.shorelineFlag, i.worldPos, _LavaShoreWidth, shore_gradient, shore_push);
+
+                float rawMacroSpeed = length(i.localFlowVector);
+
+                // The user's setting acts as the guaranteed minimum baseline for idle pools.
+                // We add the raw macro speed on top of it so that fast-moving rivers
+                // push back proportionally harder to fix diagonal artifacts.
+                float dynamicPush = _ShorePushSpeed + rawMacroSpeed;
+
+                // Combine C# macro flow with Shader micro shore repulsion
+                float2 totalFlow = i.localFlowVector + shore_push * dynamicPush;
+
+                float rawSpeed = length(totalFlow);
 
                 // Turbulence is 1.0 near shores/waterfalls and drops to 0.0 in still lava
                 float turbulence = smoothstep(0.1, 0.8, rawSpeed);
                 // Idle is 1.0 when perfectly still, 0.0 when rushing
                 float idle = 1.0 - turbulence;
 
-                // Use the interpolated vector directly. No normalization!
-                // This guarantees C0 mathematical continuity across the whole block, stopping the "star" pinching.
-                float2 flow = i.localFlowVector * phaseTime * _LavaFlowMultiplier;
+                float2 flow = totalFlow * phaseTime * _LavaFlowMultiplier;
 
                 // Route 2D flow to 3D based on surface normal
                 float3 flow3D;
@@ -267,9 +335,6 @@ Shader "Minecraft/UberLiquidShader"
 
                 // --- FLOW & SHORE EFFECTS ---
 
-                // Decode Shore Mask
-                float shore_gradient = GetShoreGradient(i.shorelineFlag, i.worldPos, _LavaShoreWidth);
-
                 // 1. Cooling Crust (Idle Shorelines)
                 float3 crust_p = i.worldPos * _NoiseScale * 2.0 - flow3D + float3(0, t_boil * 0.5, 0);
                 float crust_noise = (fbm(crust_p, 3) + 1.0) * 0.5;
@@ -294,12 +359,24 @@ Shader "Minecraft/UberLiquidShader"
 
             void EvaluateWater(v2f i, float phaseTime, out float3 waterCol, out float foamAmt, out float2 waterNormal)
             {
-                float rawSpeed = length(i.localFlowVector);
+                float shore_gradient;
+                float2 shore_push;
+                GetShoreData(i.shorelineFlag, i.worldPos, _WaterShoreWidth, shore_gradient, shore_push);
 
-                // Turbulence is 1.0 near shores/waterfalls and drops to 0.0 in still water
+                float rawMacroSpeed = length(i.localFlowVector);
+
+                // The user's setting acts as the guaranteed minimum baseline for idle pools.
+                // We add the raw macro speed on top of it so that fast-moving rivers
+                // push back proportionally harder to fix diagonal artifacts.
+                float dynamicPush = _ShorePushSpeed + rawMacroSpeed;
+
+                // Combine C# macro flow with Shader micro shore repulsion
+                float2 totalFlow = i.localFlowVector + shore_push * dynamicPush;
+
+                float rawSpeed = length(totalFlow);
                 float turbulence = smoothstep(0.1, 0.8, rawSpeed);
 
-                float2 flow = i.localFlowVector * phaseTime * _WaterFlowMultiplier * _Speed;
+                float2 flow = totalFlow * phaseTime * _WaterFlowMultiplier * _Speed;
 
                 // Route 2D flow to 3D based on surface normal
                 float3 flow3D;
@@ -334,9 +411,6 @@ Shader "Minecraft/UberLiquidShader"
                 foamAmt = smoothstep(_FoamThreshold - 0.1, _FoamThreshold + 0.1, combined_noise);
 
                 // --- SHORE & STREAM EFFECTS ---
-
-                // Decode Shore Mask
-                float shore_gradient = GetShoreGradient(i.shorelineFlag, i.worldPos, _WaterShoreWidth);
 
                 float3 stream_p = i.worldPos * _WaveScale * 2.0 + (flow3D * 3.0);
                 float stream_noise = (fbm(stream_p, 3) + 1.0) * 0.5;

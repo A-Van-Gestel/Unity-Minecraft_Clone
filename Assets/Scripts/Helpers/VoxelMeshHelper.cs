@@ -535,13 +535,15 @@ namespace Helpers
             if (h01 <= 1.0f) maxFluidHeight = math.max(maxFluidHeight, h01);
             if (h11 <= 1.0f) maxFluidHeight = math.max(maxFluidHeight, h11);
 
-            // Obstacle handling: Flow should mathematically push *away* from solid walls.
-            float wallPushHeight = maxFluidHeight > -1.0f ? maxFluidHeight + 0.085f : 1.05f;
+            // Clamping solid walls (>1.0f) to be exactly equal to the highest local fluid.
+            // This prevents walls from creating steep "funnels" in the macro flow vector (which caused diagonal seams).
+            // The actual visual "wall push" is now handled dynamically in the fragment shader!
+            float clampHeight = maxFluidHeight > -1.0f ? maxFluidHeight : 1.0f;
 
-            if (h00 > 1.0f) h00 = wallPushHeight;
-            if (h10 > 1.0f) h10 = wallPushHeight;
-            if (h01 > 1.0f) h01 = wallPushHeight;
-            if (h11 > 1.0f) h11 = wallPushHeight;
+            if (h00 > 1.0f) h00 = clampHeight;
+            if (h10 > 1.0f) h10 = clampHeight;
+            if (h01 > 1.0f) h01 = clampHeight;
+            if (h11 > 1.0f) h11 = clampHeight;
 
             // Calculate symmetric X and Z derivatives across the 2x2 block grid corner using Central Difference.
             // Positive value means height increases in positive axis, therefore flow is negative (downstream).

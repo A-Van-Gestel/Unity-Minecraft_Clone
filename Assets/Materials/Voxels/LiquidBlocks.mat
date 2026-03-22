@@ -24,7 +24,7 @@ Material:
   m_CustomRenderQueue: -1
   stringTagMap: {}
   disabledShaderPasses: []
-  m_LockedProperties: 
+  m_LockedProperties:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
@@ -142,6 +142,7 @@ Material:
     - _RippleSpeed: 1.2
     - _Saturation: 0
     - _ShoreFoamWidth: 0.25
+    - _ShorePushSpeed: 0.23
     - _ShoreSize: 3
     - _SmoothnessTextureChannel: 0
     - _Source: 0
