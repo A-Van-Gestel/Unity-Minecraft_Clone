@@ -74,8 +74,8 @@ Shader "Minecraft/UberLiquidShader"
             {
                 float4 vertex : POSITION;
                 float3 normal : NORMAL;
-                float2 uv : TEXCOORD0;
-                fixed4 color : COLOR; // r:LiquidType, g:ShorelineFlag, b:ShadowMultiplier, a:LightLevel
+                float4 uv : TEXCOORD0; // xy = localFlowVector, zw = shorePush (normalized direction)
+                fixed4 color : COLOR; // r=LiquidType, g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier, a=LightLevel
             };
 
             struct v2f
@@ -85,10 +85,11 @@ Shader "Minecraft/UberLiquidShader"
                 float4 screenPos : TEXCOORD1;
                 float3 worldNormal : TEXCOORD2;
                 float liquidType : TEXCOORD3;
-                float shorelineFlag : TEXCOORD4;
-                float lightLevel : TEXCOORD5;
-                float shadowMultiplier : TEXCOORD6;
-                float2 localFlowVector : TEXCOORD7; // Physical flow XY vector from mesher
+                float lightLevel : TEXCOORD4;
+                float shadowMultiplier : TEXCOORD5;
+                float2 localFlowVector : TEXCOORD6; // Physical flow XY vector from mesher
+                float2 shorePush : TEXCOORD7; // Normalized push direction from C# mesher
+                float packedShoreMask : TEXCOORD8; // Bit-packed 8-bit wall neighbor flags (constant across quad)
             };
 
             // Global Properties
@@ -179,98 +180,68 @@ Shader "Minecraft/UberLiquidShader"
                 o.screenPos = ComputeGrabScreenPos(o.vertex);
                 o.worldNormal = UnityObjectToWorldNormal(v.normal); // Pass normal to fragment
                 o.liquidType = v.color.r;
-                o.shorelineFlag = v.color.g;
                 o.lightLevel = v.color.a;
                 o.shadowMultiplier = v.color.b;
-                o.localFlowVector = v.uv; // Added physical flow XY vector from mesher
+                o.localFlowVector = v.uv.xy; // flow XZ
+                o.shorePush = v.uv.zw; // shore push direction (normalized)
+                o.packedShoreMask = v.color.g; // packed 8-bit wall neighbor flags
                 return o;
             }
 
-            // --- REUSABLE SHORELINE LOGIC ---
-            // Decodes the 8-bit mask and returns BOTH the gradient intensity and a continuous 2D push vector
-            void GetShoreData(float shorelineFlag, float3 worldPos, float shoreWidth, out float shore_gradient, out float2 shore_push)
+            // Decodes 8-bit wall neighbor flags from color.g and computes per-pixel
+            // minimum distance to the nearest wall edge. Cardinal walls use perpendicular
+            // distance; diagonal corners use L-infinity (max of both axes) for sharp shapes.
+            void GetShoreData(float packedMask, float3 worldPos, float3 worldNormal,
+                              float2 shorePush_in, float shoreWidth,
+                              out float shore_gradient, out float2 shore_push)
             {
-                int mask = round(shorelineFlag * 255.0);
+                // Decode the 8 wall flags from the packed bitmask.
+                // Encoding: (wallN*1 + wallS*2 + wallE*4 + wallW*8 +
+                //            diagNE*16 + diagNW*32 + diagSE*64 + diagSW*128) / 255.0
+                float packed = round(packedMask * 255.0);
+                float wallN = fmod(packed, 2.0);
+                float wallS = fmod(floor(packed / 2.0), 2.0);
+                float wallE = fmod(floor(packed / 4.0), 2.0);
+                float wallW = fmod(floor(packed / 8.0), 2.0);
+                float diagNE = fmod(floor(packed / 16.0), 2.0);
+                float diagNW = fmod(floor(packed / 32.0), 2.0);
+                float diagSE = fmod(floor(packed / 64.0), 2.0);
+                float diagSW = fmod(floor(packed / 128.0), 2.0);
+
+                // Get sub-voxel fractional position.
+                // Route axes based on surface normal (same convention as flow routing).
+                float3 absNorm = abs(worldNormal);
+                float2 t;
+                if (absNorm.y > 0.5)
+                    t = frac(worldPos.xz); // Top/Bottom face
+                else if (absNorm.x > 0.5)
+                    t = frac(worldPos.zy); // East/West face
+                else
+                    t = frac(worldPos.xy); // North/South face
+
+                // Compute minimum distance to the nearest wall.
+                // Cardinal walls: perpendicular distance = frac coordinate on the relevant axis.
+                // Diagonal corners: L-infinity distance = max(dx, dy) for a sharp square falloff.
                 float minDist = 1.0;
-                shore_push = float2(0, 0);
+                if (wallN > 0.5) minDist = min(minDist, 1.0 - t.y); // North wall at z=1
+                if (wallS > 0.5) minDist = min(minDist, t.y); // South wall at z=0
+                if (wallE > 0.5) minDist = min(minDist, 1.0 - t.x); // East wall at x=1
+                if (wallW > 0.5) minDist = min(minDist, t.x); // West wall at x=0
+                if (diagNE > 0.5) minDist = min(minDist, max(1.0 - t.x, 1.0 - t.y));
+                if (diagNW > 0.5) minDist = min(minDist, max(t.x, 1.0 - t.y));
+                if (diagSE > 0.5) minDist = min(minDist, max(1.0 - t.x, t.y));
+                if (diagSW > 0.5) minDist = min(minDist, max(t.x, t.y));
 
-                if (mask > 0)
-                {
-                    // Derive block-local UV from world position (0.0 to 1.0 across the face)
-                    // Clamp prevents frac() from wrapping exactly at the 1.0 boundary
-                    float2 localUV = clamp(frac(worldPos.xz), 0.001, 0.999);
-
-                    float dN = 1.0 - localUV.y; // North (+Z)
-                    float dE = 1.0 - localUV.x; // East (+X)
-                    float dS = localUV.y; // South (-Z)
-                    float dW = localUV.x; // West (-X)
-
-                    // 1. Cardinal pushes.
-                    // The weight (1.0 - d) guarantees the push fades exactly to 0.0 at the opposite edge of the block.
-                    if ((mask & 1) != 0)
-                    {
-                        minDist = min(minDist, dN);
-                        shore_push += float2(0, 1) * (1.0 - dN);
-                    }
-                    if ((mask & 2) != 0)
-                    {
-                        minDist = min(minDist, dE);
-                        shore_push += float2(1, 0) * (1.0 - dE);
-                    }
-                    if ((mask & 4) != 0)
-                    {
-                        minDist = min(minDist, dS);
-                        shore_push += float2(0, -1) * (1.0 - dS);
-                    }
-                    if ((mask & 8) != 0)
-                    {
-                        minDist = min(minDist, dW);
-                        shore_push += float2(-1, 0) * (1.0 - dW);
-                    }
-
-                    // 2. Outer corner pushes.
-                    // We ONLY apply these if the adjacent cardinals are empty (e.g. if N is solid, the N push handles it).
-                    // We use max(0.0, 1.0 - d) to prevent the influence from going negative across block boundaries!
-                    if ((mask & 16) != 0 && (mask & 3) == 0)
-                    {
-                        // NE is solid, N(1) & E(2) are empty
-                        float d = length(float2(dE, dN));
-                        minDist = min(minDist, d);
-                        shore_push += normalize(float2(1, 1)) * max(0.0, 1.0 - d);
-                    }
-                    if ((mask & 32) != 0 && (mask & 6) == 0)
-                    {
-                        // SE is solid, E(2) & S(4) are empty
-                        float d = length(float2(dE, dS));
-                        minDist = min(minDist, d);
-                        shore_push += normalize(float2(1, -1)) * max(0.0, 1.0 - d);
-                    }
-                    if ((mask & 64) != 0 && (mask & 12) == 0)
-                    {
-                        // SW is solid, S(4) & W(8) are empty
-                        float d = length(float2(dW, dS));
-                        minDist = min(minDist, d);
-                        shore_push += normalize(float2(-1, -1)) * max(0.0, 1.0 - d);
-                    }
-                    if ((mask & 128) != 0 && (mask & 9) == 0)
-                    {
-                        // NW is solid, W(8) & N(1) are empty
-                        float d = length(float2(dW, dN));
-                        minDist = min(minDist, d);
-                        shore_push += normalize(float2(-1, 1)) * max(0.0, 1.0 - d);
-                    }
-                }
-
-                // Sub-voxel shore gradient: 1.0 at the wall, fading out exactly at shoreWidth
-                shore_gradient = saturate(1.0 - (minDist / max(0.001, shoreWidth)));
+                // Convert distance to shore gradient: 1.0 at the wall, 0.0 at shoreWidth distance.
+                shore_gradient = saturate(1.0 - minDist / max(0.001, shoreWidth));
                 shore_gradient = smoothstep(0.0, 1.0, shore_gradient);
 
-                // Normalize push direction and scale it so it is strongest exactly at the wall
-                if (length(shore_push) > 0.001)
-                {
-                    shore_push = normalize(shore_push) * shore_gradient;
-                }
+                // Push direction: normalize the interpolated push vector for displacement.
+                float pushLen = length(shorePush_in);
+                float2 push_dir = pushLen > 0.001 ? (shorePush_in / pushLen) : float2(0, 0);
+                shore_push = push_dir * shore_gradient;
             }
+
 
             void EvaluateLava(v2f i, float phaseTime, out float3 lavaCol, out float2 heatNormal)
             {
@@ -278,7 +249,8 @@ Shader "Minecraft/UberLiquidShader"
 
                 float shore_gradient;
                 float2 shore_push;
-                GetShoreData(i.shorelineFlag, i.worldPos, _LavaShoreWidth, shore_gradient, shore_push);
+                GetShoreData(i.packedShoreMask, i.worldPos, i.worldNormal,
+     i.shorePush, _LavaShoreWidth, shore_gradient, shore_push);
 
                 float rawMacroSpeed = length(i.localFlowVector);
 
@@ -361,7 +333,8 @@ Shader "Minecraft/UberLiquidShader"
             {
                 float shore_gradient;
                 float2 shore_push;
-                GetShoreData(i.shorelineFlag, i.worldPos, _WaterShoreWidth, shore_gradient, shore_push);
+                GetShoreData(i.packedShoreMask, i.worldPos, i.worldNormal,
+                   i.shorePush, _WaterShoreWidth, shore_gradient, shore_push);
 
                 float rawMacroSpeed = length(i.localFlowVector);
 

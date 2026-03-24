@@ -15,7 +15,7 @@ public class SectionRenderer
     private static readonly VertexAttributeDescriptor[] s_layout =
     {
         new VertexAttributeDescriptor(VertexAttribute.Position),
-        new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 1),
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 4, stream: 1),
         new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, stream: 2),
         new VertexAttributeDescriptor(VertexAttribute.Normal, stream: 3),
     };
@@ -45,7 +45,7 @@ public class SectionRenderer
     /// </para>
     /// </summary>
     public void UpdateMeshNative(
-        NativeArray<Vector3> verts, NativeArray<Vector2> uvs, NativeArray<Color> colors, NativeArray<Vector3> normals, int vertexStart, int vertexCount,
+        NativeArray<Vector3> verts, NativeArray<Vector4> uvs, NativeArray<Color> colors, NativeArray<Vector3> normals, int vertexStart, int vertexCount,
         NativeArray<int> opaqueTris, int opaqueStart, int opaqueCount,
         NativeArray<int> transparentTris, int transparentStart, int transparentCount,
         NativeArray<int> fluidTris, int fluidStart, int fluidCount)

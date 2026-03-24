@@ -2211,7 +2211,6 @@ public class World : MonoBehaviour
         foreach (var face in faces)
         {
             bool neighborIsSameFluid = face.neighbor.HasValue && face.neighbor.Value.id == id;
-            bool neighborIsAnyFluid = face.neighbor.HasValue && face.neighbor.Value.Properties.fluidType != FluidType.None;
             bool neighborHasFluidAbove = face.neighborAbove.HasValue && face.neighborAbove.Value.id == id;
 
             byte neighborLevel = neighborIsSameFluid ? face.neighbor.Value.FluidLevel : (byte)0;
@@ -2261,6 +2260,111 @@ public class World : MonoBehaviour
                           $"GeometryGap: {(hasGeometryGap ? "<color=magenta>YES</color>" : "no")}");
             sb.AppendLine($"    Cull Decision: {cullResult}");
         }
+
+        // ── Shore Gradient / Push Report ─────────────────────────────────────────
+        // The shore gradient is computed per-pixel in the shader from an 8-neighbor wall mask.
+        // The push direction is still computed per-corner via the symmetric 4-block neighborhood.
+        sb.AppendLine("\n<color=lime>--- SHORE DATA ---</color>");
+        sb.AppendLine("  Wall mask: 8-neighbor flags (N/S/E/W + diagonals) packed into color.g.");
+        sb.AppendLine("  Push: per-corner normalized displacement direction (symmetric 4-block neighborhood).\n");
+
+        // ── Per-voxel wall mask (drives the per-pixel shore gradient in the shader) ──
+        static bool IsWall(VoxelState? s) =>
+            s.HasValue && s.Value.Properties.isSolid &&
+            s.Value.Properties.fluidType == FluidType.None;
+
+        bool wallN = IsWall(n);
+        bool wallS = IsWall(s);
+        bool wallE = IsWall(e);
+        bool wallW = IsWall(w);
+        bool diagNE = !wallN && !wallE && IsWall(ne);
+        bool diagNW = !wallN && !wallW && IsWall(nw);
+        bool diagSE = !wallS && !wallE && IsWall(se);
+        bool diagSW = !wallS && !wallW && IsWall(sw);
+
+        int mask = (wallN ? 1 : 0) | (wallS ? 2 : 0) | (wallE ? 4 : 0) | (wallW ? 8 : 0) |
+                   (diagNE ? 16 : 0) | (diagNW ? 32 : 0) | (diagSE ? 64 : 0) | (diagSW ? 128 : 0);
+
+        sb.AppendLine($"  Wall Mask: 0x{mask:X2} (N={wallN} S={wallS} E={wallE} W={wallW}" +
+                      $" NE={diagNE} NW={diagNW} SE={diagSE} SW={diagSW})");
+        sb.AppendLine($"  Packed color.g = {mask / 255f:F4}\n");
+
+        // ── Per-corner push directions (drive the shore push displacement effect) ──
+        // Local helper: replicates CalculateSymmetricCornerShorePush for the main thread.
+        static Vector2 DebugCornerShorePush(
+            VoxelState? b00, VoxelState? b10, VoxelState? b01, VoxelState? b11)
+        {
+            bool s00 = IsWall(b00); // SW
+            bool s10 = IsWall(b10); // SE
+            bool s01 = IsWall(b01); // NW
+            bool s11 = IsWall(b11); // NE
+
+            float x_push = 0f;
+            float z_push = 0f;
+
+            if (s00 && s01) x_push -= 1f;
+            if (s10 && s11) x_push += 1f;
+            if (s00 && s10) z_push -= 1f;
+            if (s01 && s11) z_push += 1f;
+
+            if (x_push == 0f && z_push == 0f)
+            {
+                if (s00)
+                {
+                    x_push -= 1f;
+                    z_push -= 1f;
+                }
+                else if (s10)
+                {
+                    x_push += 1f;
+                    z_push -= 1f;
+                }
+                else if (s01)
+                {
+                    x_push -= 1f;
+                    z_push += 1f;
+                }
+                else if (s11)
+                {
+                    x_push += 1f;
+                    z_push += 1f;
+                }
+            }
+
+            float len = Mathf.Sqrt(x_push * x_push + z_push * z_push);
+            return len > 0.001f ? new Vector2(x_push / len, z_push / len) : Vector2.zero;
+        }
+
+        Vector2 p_bl = DebugCornerShorePush(sw, s, w, centerState);
+        Vector2 p_tl = DebugCornerShorePush(w, centerState, nw, n);
+        Vector2 p_br = DebugCornerShorePush(s, se, centerState, e);
+        Vector2 p_tr = DebugCornerShorePush(centerState, e, n, ne);
+
+        sb.AppendLine($"  BL (SW / x=0 z=0)  push={p_bl}");
+        sb.AppendLine($"  TL (NW / x=0 z=1)  push={p_tl}");
+        sb.AppendLine($"  BR (SE / x=1 z=0)  push={p_br}");
+        sb.AppendLine($"  TR (NE / x=1 z=1)  push={p_tr}");
+
+        // ── Seam check: NE corner of THIS voxel vs NW corner of the East neighbor ──
+        // These represent the SAME physical world vertex and must have identical push vectors.
+        VoxelState? eastVoxel = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, 0));
+        VoxelState? eastNorth = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, 1));
+        Vector2 p_eastNW = DebugCornerShorePush(
+            centerState, // East's SW
+            eastVoxel, // East's SE
+            n, // East's NW
+            eastNorth // East's NE
+        );
+
+        bool pushMatch = Vector2.Distance(p_tr, p_eastNW) < 0.005f;
+        string seamResult = pushMatch
+            ? "<color=green>✓ MATCH — shared vertex push is identical.</color>"
+            : "<color=red>✗ MISMATCH — shared vertex push differs.</color>";
+
+        sb.AppendLine($"\n  [Seam Check: NE of center vs NW of East neighbor]");
+        sb.AppendLine($"    Center NE   → push={p_tr}");
+        sb.AppendLine($"    East   NW   → push={p_eastNW}");
+        sb.AppendLine($"    Result: {seamResult}");
 
         Debug.Log(sb.ToString());
     }

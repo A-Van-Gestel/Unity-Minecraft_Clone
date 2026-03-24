@@ -341,7 +341,7 @@ namespace Data
         public NativeList<int> Triangles;
         public NativeList<int> TransparentTriangles;
         public NativeList<int> FluidTriangles;
-        public NativeList<Vector2> Uvs;
+        public NativeList<Vector4> Uvs; // xy = flow/atlas UV, zw = shore push (fluid top face) or (0,0)
         public NativeList<Color> Colors;
         public NativeList<Vector3> Normals;
 
@@ -354,12 +354,11 @@ namespace Data
             Triangles = new NativeList<int>(allocator);
             TransparentTriangles = new NativeList<int>(allocator);
             FluidTriangles = new NativeList<int>(allocator);
-            Uvs = new NativeList<Vector2>(allocator);
+            Uvs = new NativeList<Vector4>(allocator);
             Colors = new NativeList<Color>(allocator);
             Normals = new NativeList<Vector3>(allocator);
 
             // 8 Sections per chunk (128 / 16).
-            // TODO: Make this dynamic based on ChunkHeight if needed later.
             SectionStats = new NativeArray<MeshSectionStats>(VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE, allocator);
         }
 

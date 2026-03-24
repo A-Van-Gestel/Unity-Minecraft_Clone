@@ -22,7 +22,7 @@ namespace Editor.BlockEditor.Helpers
             List<Vector3> vertices = new List<Vector3>();
             List<int> opaqueTriangles = new List<int>();
             List<int> transparentTriangles = new List<int>();
-            List<Vector2> uvs = new List<Vector2>();
+            List<Vector4> uvs = new List<Vector4>();
             List<Color> colors = new List<Color>();
             List<Vector3> normals = new List<Vector3>();
 
@@ -34,7 +34,7 @@ namespace Editor.BlockEditor.Helpers
             NativeList<int> nativeOpaqueTris = new NativeList<int>(Allocator.Temp);
             NativeList<int> nativeTransparentTris = new NativeList<int>(Allocator.Temp);
             NativeList<int> nativeFluidTris = new NativeList<int>(Allocator.Temp);
-            NativeList<Vector2> nativeUvs = new NativeList<Vector2>(Allocator.Temp);
+            NativeList<Vector4> nativeUvs = new NativeList<Vector4>(Allocator.Temp);
             NativeList<Color> nativeColors = new NativeList<Color>(Allocator.Temp);
             NativeList<Vector3> nativeNormals = new NativeList<Vector3>(Allocator.Temp);
             int vertexIndex = 0;
@@ -92,9 +92,10 @@ namespace Editor.BlockEditor.Helpers
                     foreach (VertData vertData in face.vertData)
                     {
                         vertices.Add(vertData.position);
-                        uvs.Add(new Vector2(
+                        uvs.Add(new Vector4(
                             baseUv.x + vertData.uv.x * VoxelData.NormalizedBlockTextureSize,
-                            baseUv.y + vertData.uv.y * VoxelData.NormalizedBlockTextureSize
+                            baseUv.y + vertData.uv.y * VoxelData.NormalizedBlockTextureSize,
+                            0f, 0f
                         ));
                         colors.Add(Color.white);
                         normals.Add(VoxelData.FaceChecks[p]);
@@ -153,7 +154,7 @@ namespace Editor.BlockEditor.Helpers
             }
 
             mesh.vertices = vertices.ToArray();
-            mesh.uv = uvs.ToArray();
+            mesh.SetUVs(0, uvs);
             mesh.colors = colors.ToArray();
             mesh.normals = normals.ToArray();
 

@@ -392,7 +392,7 @@ public class Chunk
 
         // Obtain raw NativeArray views from the lists
         NativeArray<Vector3> allVerts = meshData.Vertices.AsArray();
-        NativeArray<Vector2> allUvs = meshData.Uvs.AsArray();
+        NativeArray<Vector4> allUvs = meshData.Uvs.AsArray(); // Vector4: xy=flow/atlas, zw=shorePush
         NativeArray<Color> allColors = meshData.Colors.AsArray();
         NativeArray<Vector3> allNormals = meshData.Normals.AsArray();
         NativeArray<int> allOpaqueTris = meshData.Triangles.AsArray();

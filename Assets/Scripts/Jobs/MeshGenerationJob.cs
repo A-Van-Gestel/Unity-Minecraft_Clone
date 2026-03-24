@@ -247,9 +247,11 @@ namespace Jobs
 
                 // Dispose the temporary native array.
                 neighbors.Dispose();
+                return; // Fluid blocks are never also a custom mesh or standard cube.
             }
+
             // --- CASE 2: CUSTOM MESH ---
-            else if (voxelProps.CustomMeshIndex > -1)
+            if (voxelProps.CustomMeshIndex > -1)
             {
                 byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
                 float rotation = VoxelHelper.GetRotationAngle(orientation);
@@ -269,7 +271,7 @@ namespace Jobs
                         float lightLevel = neighborVoxel?.lightAsFloat ?? 1.0f;
 
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, lightLevel, pos, rotation,
-                            voxelProps.CustomMeshIndex, ref CustomMeshes, ref CustomFaces, ref CustomVerts, ref CustomTris,
+                            voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
                             ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
                     }
