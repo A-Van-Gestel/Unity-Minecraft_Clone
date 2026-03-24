@@ -2261,6 +2261,120 @@ public class World : MonoBehaviour
             sb.AppendLine($"    Cull Decision: {cullResult}");
         }
 
+        // ── Per-Corner Flow Vector Report ─────────────────────────────────────────
+        // Mirrors CalculateSymmetricCornerFlow: IsSolidWall + accessibility guard + GetEffectiveFluidHeight.
+        sb.AppendLine("\n<color=lime>--- FLOW VECTORS (Per-Corner, Symmetric) ---</color>");
+        sb.AppendLine("  Uses IsSolidWall + accessibility guard (non-fluid blocks need ≥1 fluid grid-neighbor).");
+        sb.AppendLine("  Flow = normalized gradient × speed curve.\n");
+
+        ushort fluidId = id;
+        static bool IsFluid(VoxelState? vs, ushort fId) => vs.HasValue && vs.Value.id == fId;
+
+        // Debug equivalent of GetEffectiveFluidHeight.
+        static float DebugEffHeight(VoxelState? vs, ushort fId, float[] tmpl)
+        {
+            if (!vs.HasValue) return 0f;
+            bool isSolid = vs.Value.Properties.isSolid;
+            bool isTransparent = vs.Value.Properties.IsTransparentForMesh;
+            if (isSolid && !isTransparent) return 2.0f;
+            if (vs.Value.Properties.fluidType == FluidType.None && !isSolid) return -1.0f;
+            if (vs.Value.id == fId) return tmpl[vs.Value.FluidLevel];
+            return 0f;
+        }
+
+        static (Vector2 flow, string detail) DebugCornerFlow(
+            VoxelState? b00, VoxelState? b10, VoxelState? b01, VoxelState? b11,
+            ushort fId, float[] tmpl)
+        {
+            // Wall check
+            static bool W(VoxelState? v) => v.HasValue && v.Value.Properties.isSolid &&
+                                            v.Value.Properties.fluidType == FluidType.None;
+
+            bool w00 = W(b00);
+            bool w10 = W(b10);
+            bool w01 = W(b01);
+            bool w11 = W(b11);
+
+            // Fluid check
+            bool f00 = IsFluid(b00, fId);
+            bool f10 = IsFluid(b10, fId);
+            bool f01 = IsFluid(b01, fId);
+            bool f11 = IsFluid(b11, fId);
+
+            // Accessibility guard
+            if (!w00 && !f00 && !f10 && !f01) w00 = true;
+            if (!w10 && !f10 && !f00 && !f11) w10 = true;
+            if (!w01 && !f01 && !f00 && !f11) w01 = true;
+            if (!w11 && !f11 && !f10 && !f01) w11 = true;
+
+            float h00 = w00 ? 0f : DebugEffHeight(b00, fId, tmpl);
+            float h10 = w10 ? 0f : DebugEffHeight(b10, fId, tmpl);
+            float h01 = w01 ? 0f : DebugEffHeight(b01, fId, tmpl);
+            float h11 = w11 ? 0f : DebugEffHeight(b11, fId, tmpl);
+
+            float dx = 0f;
+            int dxc = 0;
+            if (!w01 && !w11)
+            {
+                dx += h11 - h01;
+                dxc++;
+            }
+
+            if (!w00 && !w10)
+            {
+                dx += h10 - h00;
+                dxc++;
+            }
+
+            if (dxc > 0) dx /= dxc;
+
+            float dz = 0f;
+            int dzc = 0;
+            if (!w10 && !w11)
+            {
+                dz += h11 - h10;
+                dzc++;
+            }
+
+            if (!w00 && !w01)
+            {
+                dz += h01 - h00;
+                dzc++;
+            }
+
+            if (dzc > 0) dz /= dzc;
+
+            string Blk(VoxelState? v, bool isW, bool isF, float h) =>
+                isF ? $"fluid(h={h:F3})" :
+                isW ? "wall(skip)" :
+                (v.HasValue ? $"id={v.Value.id}(h={h:F3})" : "void(skip)");
+
+            string detail = $"b00={Blk(b00, w00, f00, h00)} b10={Blk(b10, w10, f10, h10)} " +
+                            $"b01={Blk(b01, w01, f01, h01)} b11={Blk(b11, w11, f11, h11)}" +
+                            $"\n               dx={dx:F4}(pairs:{dxc}) dz={dz:F4}(pairs:{dzc})";
+
+            Vector2 flow = new Vector2(dx, dz);
+            float sqrMag = flow.sqrMagnitude;
+            if (sqrMag < 0.0001f) return (Vector2.zero, detail + " → zero");
+
+            float mag = Mathf.Sqrt(sqrMag);
+            Vector2 dir = flow / mag;
+            float speed = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0f, 0.25f, mag)) +
+                          Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.8f, 1.2f, mag)) * 0.5f;
+
+            return (dir * speed, detail + $" → dir={dir} speed={speed:F3}");
+        }
+
+        var (fBL, dBL) = DebugCornerFlow(sw, s, w, centerState, fluidId, templates);
+        var (fTL, dTL) = DebugCornerFlow(w, centerState, nw, n, fluidId, templates);
+        var (fBR, dBR) = DebugCornerFlow(s, se, centerState, e, fluidId, templates);
+        var (fTR, dTR) = DebugCornerFlow(centerState, e, n, ne, fluidId, templates);
+
+        sb.AppendLine($"  BL (x=0 z=0)  flow={fBL}\n               {dBL}");
+        sb.AppendLine($"  TL (x=0 z=1)  flow={fTL}\n               {dTL}");
+        sb.AppendLine($"  BR (x=1 z=0)  flow={fBR}\n               {dBR}");
+        sb.AppendLine($"  TR (x=1 z=1)  flow={fTR}\n               {dTR}");
+
         // ── Shore Gradient / Push Report ─────────────────────────────────────────
         // The shore gradient is computed per-pixel in the shader from an 8-neighbor wall mask.
         // The push direction is still computed per-corner via the symmetric 4-block neighborhood.

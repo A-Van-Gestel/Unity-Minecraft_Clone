@@ -554,6 +554,25 @@ namespace Helpers
             bool w01 = IsSolidWall(b01, in blockTypes);
             bool w11 = IsSolidWall(b11, in blockTypes);
 
+            // Accessibility guard: a non-wall, non-fluid block (e.g., air) is only included
+            // if at least one of its two grid-adjacent neighbors is matching fluid. This prevents
+            // isolated non-fluid blocks (diagonal air behind two walls) from creating artificial
+            // pull gradients, while preserving the natural pull toward waterfall edges and drops
+            // where the air IS accessible from the fluid surface.
+            bool f00 = IsMatchingFluid(b00, fluidType, in blockTypes);
+            bool f10 = IsMatchingFluid(b10, fluidType, in blockTypes);
+            bool f01 = IsMatchingFluid(b01, fluidType, in blockTypes);
+            bool f11 = IsMatchingFluid(b11, fluidType, in blockTypes);
+
+            // b00 adjacent to b10, b01 — inaccessible if neither is fluid
+            if (!w00 && !f00 && !f10 && !f01) w00 = true;
+            // b10 adjacent to b00, b11 — inaccessible if neither is fluid
+            if (!w10 && !f10 && !f00 && !f11) w10 = true;
+            // b01 adjacent to b00, b11 — inaccessible if neither is fluid
+            if (!w01 && !f01 && !f00 && !f11) w01 = true;
+            // b11 adjacent to b10, b01 — inaccessible if neither is fluid
+            if (!w11 && !f11 && !f10 && !f01) w11 = true;
+
             float h00 = w00 ? 0 : GetEffectiveFluidHeight(b00, fluidType, templates, blockTypes);
             float h10 = w10 ? 0 : GetEffectiveFluidHeight(b10, fluidType, templates, blockTypes);
             float h01 = w01 ? 0 : GetEffectiveFluidHeight(b01, fluidType, templates, blockTypes);
@@ -725,6 +744,17 @@ namespace Helpers
         private static bool IsSolidWall(OptionalVoxelState state, in NativeArray<BlockTypeJobData> blockTypes)
         {
             return state.HasValue && blockTypes[state.State.id].IsSolid && blockTypes[state.State.id].FluidType == FluidType.None;
+        }
+
+        /// <summary>
+        /// Returns true if the given voxel contains the same type of fluid as the center block.
+        /// Used by <see cref="CalculateSymmetricCornerFlow"/> to restrict derivative computation
+        /// to same-type fluid blocks, preventing air and walls from creating artificial gradients.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsMatchingFluid(OptionalVoxelState state, FluidType fluidType, in NativeArray<BlockTypeJobData> blockTypes)
+        {
+            return state.HasValue && blockTypes[state.State.id].FluidType == fluidType;
         }
 
         /// <summary>
