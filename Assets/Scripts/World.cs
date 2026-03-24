@@ -2413,6 +2413,12 @@ public class World : MonoBehaviour
             bool s01 = IsWall(b01); // NW
             bool s11 = IsWall(b11); // NE
 
+            // Accessibility guard: promote enclosed non-fluid blocks to wall status.
+            if (!s00 && s10 && s01 && b00.HasValue && b00.Value.Properties.fluidType == FluidType.None) s00 = true;
+            if (!s10 && s00 && s11 && b10.HasValue && b10.Value.Properties.fluidType == FluidType.None) s10 = true;
+            if (!s01 && s00 && s11 && b01.HasValue && b01.Value.Properties.fluidType == FluidType.None) s01 = true;
+            if (!s11 && s10 && s01 && b11.HasValue && b11.Value.Properties.fluidType == FluidType.None) s11 = true;
+
             float x_push = 0f;
             float z_push = 0f;
 

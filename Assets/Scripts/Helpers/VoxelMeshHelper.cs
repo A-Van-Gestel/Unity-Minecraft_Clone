@@ -693,6 +693,15 @@ namespace Helpers
             bool s01 = IsSolidWall(b01, in blockTypes); // (-x, +z) = NW
             bool s11 = IsSolidWall(b11, in blockTypes); // (+x, +z) = NE
 
+            // Accessibility guard: if a NON-FLUID, non-wall block is enclosed by walls on both
+            // grid-adjacent edges, promote it to wall status. This prevents diagonal air (e.g., SW)
+            // behind two walls (S + W) from breaking wall-pair detection for shore push.
+            // IMPORTANT: fluid blocks must NEVER be promoted — they are valid fluid surfaces.
+            if (!s00 && s10 && s01 && b00.HasValue && blockTypes[b00.State.id].FluidType == FluidType.None) s00 = true;
+            if (!s10 && s00 && s11 && b10.HasValue && blockTypes[b10.State.id].FluidType == FluidType.None) s10 = true;
+            if (!s01 && s00 && s11 && b01.HasValue && blockTypes[b01.State.id].FluidType == FluidType.None) s01 = true;
+            if (!s11 && s10 && s01 && b11.HasValue && blockTypes[b11.State.id].FluidType == FluidType.None) s11 = true;
+
             float x_push = 0f;
             float z_push = 0f;
 
