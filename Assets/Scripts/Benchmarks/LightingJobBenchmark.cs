@@ -10,6 +10,7 @@ using Jobs.Data;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
@@ -103,7 +104,7 @@ namespace Benchmarks
 
         [Header("Keybinding")]
         [SerializeField]
-        private KeyCode _triggerKey = KeyCode.L;
+        private Key _triggerKey = Key.L;
 
         #endregion
 
@@ -143,7 +144,7 @@ namespace Benchmarks
 
         private void Update()
         {
-            if (Input.GetKeyDown(_triggerKey))
+            if (Keyboard.current[_triggerKey].wasPressedThisFrame)
             {
                 TriggerBenchmark();
             }

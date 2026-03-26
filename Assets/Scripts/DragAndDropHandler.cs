@@ -23,12 +23,14 @@ public class DragAndDropHandler : MonoBehaviour
     private EventSystem _m_EventSystem;
 
     private World _world;
+    private InputManager _input;
 
     private CreativeInventory _creativeInventory;
 
     private void Start()
     {
         _world = GameObject.Find("World").GetComponent<World>();
+        _input = InputManager.Instance;
 
         _cursorItemSlot = new ItemSlot(_cursorSlot);
     }
@@ -49,14 +51,14 @@ public class DragAndDropHandler : MonoBehaviour
             return;
         }
 
-        _cursorSlot.transform.position = Input.mousePosition;
+        _cursorSlot.transform.position = _input.MousePosition;
 
         // Left click behavior: Take full stack, place full stack, swap stack if different items
-        if (Input.GetMouseButtonDown(0))
+        if (_input.UIClickPressed)
             HandleSlotLeftClick(CheckForSlot());
 
         // Right click behavior: Take halve stack, place one item
-        if (Input.GetMouseButtonDown(1))
+        if (_input.UIRightClickPressed)
             HandleSlotRightClick(CheckForSlot());
     }
 
@@ -278,7 +280,7 @@ public class DragAndDropHandler : MonoBehaviour
     private UIItemSlot CheckForSlot()
     {
         _m_PointerEventData = new PointerEventData(_m_EventSystem);
-        _m_PointerEventData.position = Input.mousePosition;
+        _m_PointerEventData.position = _input.MousePosition;
 
         List<RaycastResult> results = new List<RaycastResult>();
         _m_Raycaster.Raycast(_m_PointerEventData, results);

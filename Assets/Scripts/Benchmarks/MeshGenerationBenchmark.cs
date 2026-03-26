@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -9,6 +9,7 @@ using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
 
 namespace Benchmarks
@@ -86,7 +87,7 @@ namespace Benchmarks
         [Header("Keybinding")]
         [Tooltip("Press this key to manually trigger the benchmark.")]
         [SerializeField]
-        private KeyCode _triggerKey = KeyCode.M;
+        private Key _triggerKey = Key.M;
 
         #endregion
 
@@ -125,7 +126,7 @@ namespace Benchmarks
 
         private void Update()
         {
-            if (Input.GetKeyDown(_triggerKey))
+            if (Keyboard.current[_triggerKey].wasPressedThisFrame)
             {
                 TriggerBenchmark();
             }

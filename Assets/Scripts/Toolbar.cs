@@ -10,21 +10,12 @@ public class Toolbar : MonoBehaviour
     public UIItemSlot[] slots;
     public int slotIndex;
 
-    private readonly KeyCode[] _keyCodes =
-    {
-        KeyCode.Alpha1,
-        KeyCode.Alpha2,
-        KeyCode.Alpha3,
-        KeyCode.Alpha4,
-        KeyCode.Alpha5,
-        KeyCode.Alpha6,
-        KeyCode.Alpha7,
-        KeyCode.Alpha8,
-        KeyCode.Alpha9,
-    };
+    private InputManager _input;
 
     private void Start()
     {
+        _input = InputManager.Instance;
+
         byte index = 1;
         foreach (UIItemSlot s in slots)
         {
@@ -37,9 +28,9 @@ public class Toolbar : MonoBehaviour
     private void Update()
     {
         // SCROLL WHEEL
-        float scroll = Input.GetAxis("Mouse ScrollWheel");
+        float scroll = _input.ScrollValue;
 
-        if (scroll != 0 && !Input.GetKey(KeyCode.LeftAlt))
+        if (scroll != 0 && !_input.AltModifierHeld)
         {
             if (scroll > 0)
                 slotIndex--;
@@ -57,9 +48,9 @@ public class Toolbar : MonoBehaviour
 
 
         // NUMBER KEYS
-        for (int i = 0; i < _keyCodes.Length; i++)
+        for (int i = 0; i < 9; i++)
         {
-            if (Input.GetKeyDown(_keyCodes[i]))
+            if (_input.HotbarPressed(i))
             {
                 slotIndex = i;
                 SetItemSlot();

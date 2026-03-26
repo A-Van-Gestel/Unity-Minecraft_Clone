@@ -66,6 +66,7 @@ public class DebugScreen : MonoBehaviour
 
     // --- Private Fields ---
     private World _world;
+    private InputManager _input;
     private readonly StringBuilder _topLeftBuilder = new StringBuilder();
     private readonly StringBuilder _middleLeftBuilder = new StringBuilder();
     private readonly StringBuilder _bottomLeftBuilder = new StringBuilder();
@@ -157,6 +158,7 @@ public class DebugScreen : MonoBehaviour
     {
         // Get references once.
         _world = World.Instance;
+        _input = InputManager.Instance;
 
         // Fail-safe if references aren't set in the inspector
         if (!_player)
@@ -335,9 +337,9 @@ public class DebugScreen : MonoBehaviour
         // --- Player & Speed Info ---
         _topLeftBuilder.AppendLine("PLAYER:");
         _topLeftBuilder.Append("isGrounded: ").Append(_player.isGrounded)
-            .Append($" | isFlying ({_player.toggleFlyingKey.ToString()}): ").Append(_player.isFlying)
-            .Append($" | isNoclipping ({_player.toggleNoclipKey.ToString()}): ").Append(_player.isNoclipping)
-            .Append($" | showHighlight ({_player.toggleBlockHighlightKey.ToString()}): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
+            .Append(" | isFlying (").Append(_input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.isFlying)
+            .Append(" | isNoclipping (").Append(_input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.isNoclipping)
+            .Append(" | showHighlight (").Append(_input.GetBindingDisplayString(GameAction.ToggleBlockHighlight)).Append("): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
         _topLeftBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", _player.MoveSpeed)
             .Append(" | Flying: ").AppendFormat("{0:F1}", _player.VoxelRigidbody.flyingSpeed).AppendLine();
         _topLeftBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", _player.Velocity.x, _player.Velocity.y, _player.Velocity.z).AppendLine();
@@ -408,7 +410,7 @@ public class DebugScreen : MonoBehaviour
 
         // --- Display Current Visualization Mode ---
         _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
-        _topRightBuilder.Append($"Mode ({_player.cycleVisModeKey.ToString()} to cycle): ").AppendLine(_world.visualizationMode.ToString());
+        _topRightBuilder.Append("Mode (").Append(_input.GetBindingDisplayString(GameAction.CycleVisMode)).Append(" to cycle): ").AppendLine(_world.visualizationMode.ToString());
         _topRightBuilder.AppendLine($" └ Unused in Pool: {_world.ChunkPool.PooledVisualizers}");
 
         _topRightBuilder.AppendLine();

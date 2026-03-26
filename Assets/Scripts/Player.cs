@@ -11,6 +11,7 @@ public class Player : MonoBehaviour
     public VoxelRigidbody VoxelRigidbody { get; private set; }
     private Transform _playerCamera;
     private World _world;
+    private InputManager _input;
 
     [Tooltip("Makes the player not be affected by gravity.")]
     public bool isFlying
@@ -50,31 +51,6 @@ public class Player : MonoBehaviour
 
     public byte orientation;
 
-    [Header("Debug Keybindings")]
-    [Tooltip("Key to toggle the debug screen. (Defaults to F3)")]
-    public KeyCode toggleDebugScreenKey = KeyCode.F3;
-
-    [Tooltip("Key to toggle flying. (Defaults to F1)")]
-    public KeyCode toggleFlyingKey = KeyCode.F1;
-
-    [Tooltip("Key to toggle noclip. (Defaults to F6)")]
-    public KeyCode toggleNoclipKey = KeyCode.F6;
-
-    [Tooltip("Key to toggle block highlight. (Defaults to F2)")]
-    public KeyCode toggleBlockHighlightKey = KeyCode.F2;
-
-    [Tooltip("Key to save the World on demand. (Defaults to F4)")]
-    public KeyCode saveWorldKey = KeyCode.F4;
-
-    [Tooltip("Key to toggle Chunk Border visualization. (Defaults to F5)")]
-    public KeyCode toggleChunkBordersKey = KeyCode.F5;
-
-    [Tooltip("Key to cycle through the internal VoxelData visualization modes. (Defaults to F7)")]
-    public KeyCode cycleVisModeKey = KeyCode.F7;
-
-    [Tooltip("Key to print debug info regarding. (Defaults to F8)")]
-    public KeyCode debugCodeKey = KeyCode.F8;
-
 
     private void Start()
     {
@@ -82,6 +58,7 @@ public class Player : MonoBehaviour
         VoxelRigidbody = GetComponent<VoxelRigidbody>();
         _playerCamera = Camera.main?.transform;
         _world = World.Instance;
+        _input = InputManager.Instance;
 
         // Scale playerBody to match the width and height settings.
         if (playerBody)
@@ -97,7 +74,7 @@ public class Player : MonoBehaviour
 
     private void Update()
     {
-        if (Input.GetKeyDown(KeyCode.I))
+        if (_input.ToggleInventoryPressed)
         {
             _world.inUI = !_world.inUI;
         }
@@ -142,7 +119,7 @@ public class Player : MonoBehaviour
     private void GetPlayerInputs()
     {
         // CLOSE GAME ON ESC BUTTON PRESS
-        if (Input.GetKeyDown(KeyCode.Escape))
+        if (_input.EscapePressed)
         {
 #if UNITY_EDITOR
             EditorApplication.isPlaying = false;
@@ -152,31 +129,33 @@ public class Player : MonoBehaviour
         }
 
         // MOVEMENT & CAMERA
-        _horizontal = Input.GetAxis("Horizontal");
-        _vertical = Input.GetAxis("Vertical");
-        _mouseHorizontal = Input.GetAxis("Mouse X");
-        _mouseVertical = Input.GetAxis("Mouse Y");
+        Vector2 move = _input.MoveInput;
+        _horizontal = move.x;
+        _vertical = move.y;
+        Vector2 look = _input.LookInput;
+        _mouseHorizontal = look.x;
+        _mouseVertical = look.y;
 
         // SPRINTING
-        if (Input.GetButtonDown("Sprint"))
+        if (_input.SprintPressed)
             isSprinting = true;
-        if (Input.GetButtonUp("Sprint"))
+        if (_input.SprintReleased)
             isSprinting = false;
 
         // --- DEBUG ACTIONS ---
-        if (Input.GetKeyDown(toggleDebugScreenKey))
+        if (_input.ToggleDebugScreenPressed)
             _world.ToggleDebugScreen();
 
-        if (Input.GetKeyDown(saveWorldKey))
+        if (_input.SaveWorldPressed)
             _world.SaveWorldData();
 
-        if (Input.GetKeyDown(toggleChunkBordersKey))
+        if (_input.ToggleChunkBordersPressed)
             _world.settings.showChunkBorders = !_world.settings.showChunkBorders;
 
-        if (Input.GetKeyDown(cycleVisModeKey))
+        if (_input.CycleVisModePressed)
             _world.CycleVisualizationMode();
 
-        if (Input.GetKeyDown(debugCodeKey))
+        if (_input.DebugCodePressed)
         {
             // Debug method here
             _world.DebugLogFluidSurfaceMath();
@@ -184,14 +163,14 @@ public class Player : MonoBehaviour
 
 
         // FLYING
-        if (Input.GetKeyDown(toggleFlyingKey))
+        if (_input.ToggleFlyingPressed)
         {
             isFlying = !isFlying;
             if (!isFlying) isNoclipping = false; // Disable noclip when flight is disabled
         }
 
         // NOCLIP (GHOST MODE)
-        if (Input.GetKeyDown(toggleNoclipKey))
+        if (_input.ToggleNoclipPressed)
         {
             isNoclipping = !isNoclipping;
             if (isNoclipping) isFlying = true; // Noclip requires flying
@@ -199,17 +178,17 @@ public class Player : MonoBehaviour
 
         if (!isFlying)
         {
-            if (isGrounded && Input.GetButton("Jump"))
+            if (isGrounded && _input.JumpHeld)
                 VoxelRigidbody.RequestJump();
         }
         else
         {
-            float flyingUp = Input.GetAxis("Jump");
-            float flyingDown = Input.GetAxis("Crouch");
+            float flyingUp = _input.JumpValue;
+            float flyingDown = _input.CrouchValue;
             VoxelRigidbody.SetVerticalFlyingIntent(flyingUp - flyingDown);
 
-            float scroll = Input.GetAxis("Mouse ScrollWheel");
-            if (Input.GetKey(KeyCode.LeftAlt) && scroll != 0)
+            float scroll = _input.ScrollValue;
+            if (_input.AltModifierHeld && scroll != 0)
             {
                 if (scroll > 0)
                     VoxelRigidbody.IncrementFlyingSpeed(flyingSpeedIncrement);

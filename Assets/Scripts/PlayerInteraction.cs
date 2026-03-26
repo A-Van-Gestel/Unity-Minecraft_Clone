@@ -8,6 +8,7 @@ public class PlayerInteraction : MonoBehaviour
     private Player _player;
     private World _world;
     private Transform _playerCamera;
+    private InputManager _input;
 
     [Header("Block Interaction")]
     public bool showHighlightBlocks = true;
@@ -41,6 +42,7 @@ public class PlayerInteraction : MonoBehaviour
     private void Start()
     {
         _world = World.Instance;
+        _input = InputManager.Instance;
         _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
     }
 
@@ -55,13 +57,13 @@ public class PlayerInteraction : MonoBehaviour
     private void HandleBlockModificationInput()
     {
         // PLACING & DESTROYING BLOCKS
-        if (Input.GetKeyDown(_player.toggleBlockHighlightKey))
+        if (_input.ToggleBlockHighlightPressed)
             showHighlightBlocks = !showHighlightBlocks;
 
         if (highlightBlock.gameObject.activeSelf)
         {
             // Destroy block.
-            if (Input.GetMouseButtonDown(0))
+            if (_input.AttackPressed)
             {
                 _world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: BlockIDs.Air)
                 {
@@ -70,7 +72,7 @@ public class PlayerInteraction : MonoBehaviour
             }
 
             // Place block.
-            if (Input.GetMouseButtonDown(1))
+            if (_input.UsePressed)
             {
                 // Don't place blocks inside the player or other voxels or when current itemSlot is empty by returning early.
                 if (!_blockPlaceable) return;
