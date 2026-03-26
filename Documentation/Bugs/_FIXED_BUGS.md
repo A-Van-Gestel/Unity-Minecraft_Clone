@@ -324,6 +324,18 @@ subsequent chunk modifications re-triggered the upward animation natively since 
 
 ## Player
 
+### ~~01. Mouse input uses `Time.timeScale` instead of frame-rate independent delta~~
+
+**Severity:** Quirk  
+**Files:** `Player.cs` — `Update`  
+**Fixed:** March 2026
+
+**Symptom:** Camera rotation scaled by `Time.timeScale` instead of using the raw mouse delta, making sensitivity inconsistent at different frame rates and freezing look when `timeScale = 0`.  
+**Root Cause:** Legacy `Input.GetAxis("Mouse X/Y")` baked in its own sensitivity, masking the issue. After migrating to the new Input System, `Mouse.delta` provides raw per-frame deltas; multiplying by `timeScale` was doubly wrong.  
+**Fix:** Removed `Time.timeScale` from the rotation calculations entirely. The `MOUSE_DELTA_SCALE` constant in `InputManager.cs` (0.1f) already normalizes raw deltas to match the legacy sensitivity feel.
+
+---
+
 ### ~~03. Player falls through the world during loading~~
 
 **Severity:** Bug  
