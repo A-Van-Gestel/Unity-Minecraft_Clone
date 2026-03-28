@@ -10,37 +10,47 @@ Shader "Minecraft/Transparent Blocks"
     {
         Tags
         {
-            "Queue"="AlphaTest" "IgnoreProjector"="True" "RenderType"="TransparentCutout"
+            "Queue"="AlphaTest" "IgnoreProjector"="True" "RenderType"="TransparentCutout" "RenderPipeline"="UniversalPipeline"
         }
         LOD 100
-        Lighting Off
 
         Pass
         {
+            Name "ForwardLit"
+            Tags
+            {
+                "LightMode"="SRPDefaultUnlit"
+            }
 
-            CGPROGRAM
+            HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
             #pragma target 2.0
 
-            #include "UnityCG.cginc"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             struct appdata
             {
                 float4 vertex : POSITION;
                 float2 uv : TEXCOORD0;
-                fixed4 color : COLOR;
+                half4 color : COLOR;
             };
 
             struct v2f
             {
                 float4 vertex : SV_POSITION;
                 float2 uv : TEXCOORD0;
-                fixed4 color : COLOR;
+                half4 color : COLOR;
             };
 
-            sampler2D _MainTex;
-            float _AlphaCutout;
+            TEXTURE2D(_MainTex);
+            SAMPLER(sampler_MainTex);
+
+            CBUFFER_START(UnityPerMaterial)
+                float _AlphaCutout;
+            CBUFFER_END
+
+            // Global properties set by World.cs via Shader.SetGlobalFloat — must be outside CBUFFER
             float GlobalLightLevel;
             float minGlobalLightLevel;
             float maxGlobalLightLevel;
@@ -49,16 +59,16 @@ Shader "Minecraft/Transparent Blocks"
             {
                 v2f o;
 
-                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.vertex = TransformObjectToHClip(v.vertex.xyz);
                 o.uv = v.uv;
                 o.color = v.color;
 
                 return o;
             }
 
-            fixed4 fragFunction(v2f i) : SV_Target
+            half4 fragFunction(v2f i) : SV_Target
             {
-                fixed4 col = tex2D(_MainTex, i.uv);
+                half4 col = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uv);
 
 
                 // Calculate block shade level
@@ -70,7 +80,7 @@ Shader "Minecraft/Transparent Blocks"
                 shade *= i.color.a;
                 // 1 = Absulute darkest, so reverse shade so that 1 equels absulute lightest --> 1 - 0.95 = 0.05
                 shade = clamp(1 - shade, minGlobalLightLevel, maxGlobalLightLevel);
-                
+
                 // const float localLightLevel = clamp(GlobalLightLevel + i.color.a, 0, 1);
 
                 // Remove pixels from the alpha channel below a certain threshold.
@@ -84,7 +94,7 @@ Shader "Minecraft/Transparent Blocks"
 
                 return col;
             }
-            ENDCG
+            ENDHLSL
         }
     }
 }

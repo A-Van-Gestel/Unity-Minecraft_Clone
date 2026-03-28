@@ -1,4 +1,4 @@
-﻿Shader "Minecraft/Debug/VoxelVisualizer"
+Shader "Minecraft/Debug/VoxelVisualizer"
 {
     Properties
     {
@@ -8,49 +8,50 @@
     {
         Tags
         {
-            "Queue"="Transparent+100" "RenderType"="Transparent"
+            "Queue"="Transparent+100" "RenderType"="Transparent" "RenderPipeline"="UniversalPipeline"
         } // Increased queue for good measure
         LOD 100
 
         Pass
         {
+            Name "DebugOverlay"
             Blend SrcAlpha OneMinusSrcAlpha // Standard transparency
             ZWrite Off // Don't write to the depth buffer
             ZTest Always // Always draw this, ignoring what's behind it.
             Cull Off // Render both front and back faces
-            Lighting Off // Unlit
 
-            CGPROGRAM
+            HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #include "UnityCG.cginc"
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
             struct appdata
             {
                 float4 vertex : POSITION;
-                fixed4 color : COLOR; // Input color from the mesh
+                half4 color : COLOR; // Input color from the mesh
             };
 
             struct v2f
             {
                 float4 vertex : SV_POSITION;
-                fixed4 color : COLOR; // Pass color to the fragment shader
+                half4 color : COLOR; // Pass color to the fragment shader
             };
 
             v2f vert(appdata v)
             {
                 v2f o;
-                o.vertex = UnityObjectToClipPos(v.vertex);
+                o.vertex = TransformObjectToHClip(v.vertex.xyz);
                 o.color = v.color;
                 return o;
             }
 
-            fixed4 frag(v2f i) : SV_Target
+            half4 frag(v2f i) : SV_Target
             {
                 // The final color is just the vertex color from the mesh.
                 return i.color;
             }
-            ENDCG
+            ENDHLSL
         }
     }
 }

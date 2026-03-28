@@ -51,23 +51,24 @@ Shader "Minecraft/UberLiquidShader"
     {
         Tags
         {
-            "Queue"="Transparent" "RenderType"="Transparent"
-        }
-
-        GrabPass
-        {
-            "_GrabTexture"
+            "Queue"="Transparent" "RenderType"="Transparent" "RenderPipeline"="UniversalPipeline"
         }
 
         Pass
         {
-            CGPROGRAM
+            Name "LiquidForward"
+            Tags
+            {
+                "LightMode"="SRPDefaultUnlit"
+            }
+
+            HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
             #pragma target 3.0
 
-            #include "UnityCG.cginc"
-            #include "UnityShaderVariables.cginc" // For unity_IsEditorPlaying
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
 
             // Structs
             struct appdata
@@ -75,7 +76,7 @@ Shader "Minecraft/UberLiquidShader"
                 float4 vertex : POSITION;
                 float3 normal : NORMAL;
                 float4 uv : TEXCOORD0; // xy = localFlowVector, zw = shorePush (normalized direction)
-                fixed4 color : COLOR; // r=LiquidType, g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier, a=LightLevel
+                half4 color : COLOR; // r=LiquidType, g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier, a=LightLevel
             };
 
             struct v2f
@@ -95,16 +96,15 @@ Shader "Minecraft/UberLiquidShader"
             // Global Properties
             float _EditorPreviewType;
             float _ShorePushSpeed;
-            sampler2D _GrabTexture;
             float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
 
             // Lava Properties
-            fixed4 _BrightColor, _MidColor, _DarkColor, _CrustColor;
+            half4 _BrightColor, _MidColor, _DarkColor, _CrustColor;
             float _LavaFlowMultiplier, _NoiseScale, _CellDensity, _Speed, _CrackBrightness, _PulseSpeed, _HeatDistortionAmount;
             float _LavaShoreWidth, _LavaShoreCrust, _FlowHighlight;
 
             // Water Properties
-            fixed4 _DeepColor, _ShallowColor, _FoamColor;
+            half4 _DeepColor, _ShallowColor, _FoamColor;
             float _WaterFlowMultiplier, _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _DistortionAmount;
             float _WaterShoreWidth, _WaterShoreFoam, _StreamEffect;
 
@@ -175,10 +175,10 @@ Shader "Minecraft/UberLiquidShader"
             v2f vertFunction(appdata v)
             {
                 v2f o;
-                o.vertex = UnityObjectToClipPos(v.vertex);
-                o.worldPos = mul(unity_ObjectToWorld, v.vertex).xyz;
-                o.screenPos = ComputeGrabScreenPos(o.vertex);
-                o.worldNormal = UnityObjectToWorldNormal(v.normal); // Pass normal to fragment
+                o.vertex = TransformObjectToHClip(v.vertex.xyz);
+                o.worldPos = TransformObjectToWorld(v.vertex.xyz);
+                o.screenPos = ComputeScreenPos(o.vertex);
+                o.worldNormal = TransformObjectToWorldNormal(v.normal);
                 o.liquidType = v.color.r;
                 o.lightLevel = v.color.a;
                 o.shadowMultiplier = v.color.b;
@@ -250,7 +250,7 @@ Shader "Minecraft/UberLiquidShader"
                 float shore_gradient;
                 float2 shore_push;
                 GetShoreData(i.packedShoreMask, i.worldPos, i.worldNormal,
-     i.shorePush, _LavaShoreWidth, shore_gradient, shore_push);
+                             i.shorePush, _LavaShoreWidth, shore_gradient, shore_push);
 
                 float rawMacroSpeed = length(i.localFlowVector);
 
@@ -302,7 +302,7 @@ Shader "Minecraft/UberLiquidShader"
                 float noise2 = fbm(p2 * _CellDensity, 5);
                 float crack_pattern = pow(abs(noise1 - noise2), 2.0) * _CrackBrightness;
 
-                fixed3 col = lerp(_DarkColor.rgb, _MidColor.rgb, smoothstep(0.3, 0.7, base_noise));
+                half3 col = lerp(_DarkColor.rgb, _MidColor.rgb, smoothstep(0.3, 0.7, base_noise));
                 lavaCol = lerp(col, _BrightColor.rgb, smoothstep(0.1, 0.35, crack_pattern));
 
                 // --- FLOW & SHORE EFFECTS ---
@@ -334,7 +334,7 @@ Shader "Minecraft/UberLiquidShader"
                 float shore_gradient;
                 float2 shore_push;
                 GetShoreData(i.packedShoreMask, i.worldPos, i.worldNormal,
-                   i.shorePush, _WaterShoreWidth, shore_gradient, shore_push);
+                                                     i.shorePush, _WaterShoreWidth, shore_gradient, shore_push);
 
                 float rawMacroSpeed = length(i.localFlowVector);
 
@@ -375,7 +375,7 @@ Shader "Minecraft/UberLiquidShader"
                 float wave_fbm = fbm(wave_p, 4);
                 float ripple_noise = fbm(ripple_p, 4);
 
-                fixed4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
+                half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
 
                 float combined_noise = (wave_fbm + ripple_noise) * 0.5;
                 combined_noise = (combined_noise + 1.0) * 0.5;
@@ -405,7 +405,7 @@ Shader "Minecraft/UberLiquidShader"
                 waterNormal = normal.xz * _DistortionAmount;
             }
 
-            fixed4 fragFunction(v2f i) : SV_Target
+            half4 fragFunction(v2f i) : SV_Target
             {
                 float finalLiquidType = i.liquidType;
 
@@ -438,18 +438,18 @@ Shader "Minecraft/UberLiquidShader"
                     EvaluateLava(i, time0, col0, norm0);
                     EvaluateLava(i, time1, col1, norm1);
 
-                    fixed3 lava_col = col0 * weight0 + col1 * weight1;
+                    half3 lava_col = col0 * weight0 + col1 * weight1;
                     float2 final_normal = norm0 * weight0 + norm1 * weight1;
 
                     float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
-                    fixed4 background = tex2D(_GrabTexture, distortedUV);
+                    half4 background = half4(SampleSceneColor(distortedUV), 1.0);
 
                     float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
                     lava_col *= pulse;
                     lava_col = lerp(lava_col, lava_col * 0.1, shade);
 
                     lava_col *= i.shadowMultiplier;
-                    return lerp(background, fixed4(lava_col, 1.0), 0.95);
+                    return lerp(background, half4(lava_col, 1.0), 0.95);
                 }
                 else // Water
                 {
@@ -460,7 +460,7 @@ Shader "Minecraft/UberLiquidShader"
                     EvaluateWater(i, time0, col0, foam0, norm0);
                     EvaluateWater(i, time1, col1, foam1, norm1);
 
-                    fixed3 water_surface_color = col0 * weight0 + col1 * weight1;
+                    half3 water_surface_color = col0 * weight0 + col1 * weight1;
 
                     // Because foam0 and foam1 are phase-blended here, the shore effect
                     // seamlessly fades and loops along with the flow!
@@ -469,18 +469,18 @@ Shader "Minecraft/UberLiquidShader"
                     float2 final_normal = norm0 * weight0 + norm1 * weight1;
 
                     float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
-                    fixed4 background = tex2D(_GrabTexture, distortedUV);
+                    half4 background = half4(SampleSceneColor(distortedUV), 1.0);
 
-                    fixed3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
+                    half3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
                     final_color = lerp(final_color, final_color * 0.1, shade);
                     final_color *= i.shadowMultiplier;
 
-                    fixed4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
-                    return lerp(background, fixed4(final_color, 1.0), water_base_color.a);
+                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
+                    return lerp(background, half4(final_color, 1.0), water_base_color.a);
                 }
             }
-            ENDCG
+            ENDHLSL
         }
     }
-    FallBack "Transparent/VertexLit"
+    FallBack "Universal Render Pipeline/Unlit"
 }
