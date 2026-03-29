@@ -1,8 +1,12 @@
-Shader "Minecraft/UberLiquidShader"
+Shader "Hidden/Editor/FluidPreview"
 {
+    // Editor preview shader for fluid block types (Water, Lava).
+    // Uses the same LiquidCore.hlsl include as the game shader for all animation,
+    // noise, shore, and flow logic. Substitutes a solid base color instead of
+    // SampleSceneColor (which requires a rendered scene that doesn't exist in
+    // PreviewRenderUtility).
     Properties
     {
-        // This now correctly controls the preview in the editor
         [KeywordEnum(Water, Lava)] _EditorPreviewType("Editor Preview Type", Float) = 0
 
         // --- Global Shoreline Controls ---
@@ -51,31 +55,30 @@ Shader "Minecraft/UberLiquidShader"
     {
         Tags
         {
-            "Queue"="Transparent" "RenderType"="Transparent" "RenderPipeline"="UniversalPipeline"
+            "RenderPipeline"="UniversalPipeline"
+            "Queue"="Transparent" "RenderType"="Transparent"
         }
 
         Pass
         {
-            Name "LiquidForward"
-            Tags
-            {
-                "LightMode"="SRPDefaultUnlit"
-            }
+            Name "FluidEditorPreview"
+            // No LightMode tag — defaults to SRPDefaultUnlit, works in preview cameras
+
+            Cull Back
+            ZWrite On
+            ZTest LEqual
+            Blend SrcAlpha OneMinusSrcAlpha
 
             HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
             #pragma target 3.0
 
-            // Shared liquid logic (structs, vertex, noise, shore, evaluate)
-            #include "Includes/LiquidCore.hlsl"
+            // Shared liquid logic (identical to the game shader)
+            #include "../Includes/LiquidCore.hlsl"
 
-            // Game-only: scene refraction via URP Opaque Texture
-            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
-
-            // Game-only: global light uniforms from World.cs
+            // Editor-only property (no global light uniforms needed)
             float _EditorPreviewType;
-            float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
 
             LiquidV2F vertFunction(LiquidAppdata v)
             {
@@ -86,13 +89,15 @@ Shader "Minecraft/UberLiquidShader"
             {
                 float finalLiquidType = i.liquidType;
 
+                // In editor (not playing), use the material's preview type selector
                 #if defined(UNITY_EDITOR)
                 if (!unity_IsEditorPlaying) finalLiquidType = _EditorPreviewType;
                 #endif
 
-                float shade = (maxGlobalLightLevel - minGlobalLightLevel) * GlobalLightLevel + minGlobalLightLevel;
+                // Hardcoded editor daylight (no runtime globals available in preview)
+                float shade = (1.0 - 0.15) * 1.0 + 0.15; // maxLight=1.0, minLight=0.15, globalLight=1.0
                 shade *= i.lightLevel;
-                shade = clamp(1.0 - shade, minGlobalLightLevel, maxGlobalLightLevel);
+                shade = clamp(1.0 - shade, 0.15, 1.0);
 
                 // --- FLOW MAPPING TIME SETUP ---
                 float time0, time1, weight0, weight1;
@@ -107,17 +112,15 @@ Shader "Minecraft/UberLiquidShader"
                     EvaluateLava(i, time1, col1, norm1);
 
                     half3 lava_col = col0 * weight0 + col1 * weight1;
-                    float2 final_normal = norm0 * weight0 + norm1 * weight1;
-
-                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
-                    half4 background = half4(SampleSceneColor(distortedUV), 1.0);
 
                     float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
                     lava_col *= pulse;
                     lava_col = lerp(lava_col, lava_col * 0.1, shade);
-
                     lava_col *= i.shadowMultiplier;
-                    return lerp(background, half4(lava_col, 1.0), 0.95);
+
+                    // Preview: solid background instead of SampleSceneColor
+                    half3 background = half3(0.15, 0.08, 0.04); // Dark warm background for lava
+                    return half4(lerp(background, lava_col, 0.95), 1.0);
                 }
                 else // Water
                 {
@@ -129,26 +132,21 @@ Shader "Minecraft/UberLiquidShader"
                     EvaluateWater(i, time1, col1, foam1, norm1);
 
                     half3 water_surface_color = col0 * weight0 + col1 * weight1;
-
-                    // Because foam0 and foam1 are phase-blended here, the shore effect
-                    // seamlessly fades and loops along with the flow!
                     float total_foam = foam0 * weight0 + foam1 * weight1;
-
-                    float2 final_normal = norm0 * weight0 + norm1 * weight1;
-
-                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
-                    half4 background = half4(SampleSceneColor(distortedUV), 1.0);
 
                     half3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
                     final_color = lerp(final_color, final_color * 0.1, shade);
                     final_color *= i.shadowMultiplier;
 
+                    // Preview: solid background instead of SampleSceneColor
                     half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
-                    return lerp(background, half4(final_color, 1.0), water_base_color.a);
+                    half3 background = half3(0.05, 0.1, 0.15); // Dark cool background for water
+                    return half4(lerp(background, final_color, water_base_color.a), water_base_color.a);
                 }
             }
             ENDHLSL
         }
     }
+
     FallBack "Universal Render Pipeline/Unlit"
 }

@@ -546,7 +546,7 @@ namespace Editor.BlockEditor
                 else EditorUtility.DisplayDialog("Error", "Opaque material not found.", "OK");
             }
 
-            _meshPreviewWidget.UpdatePreview(newMesh, targetMaterial);
+            _meshPreviewWidget.UpdatePreview(newMesh, targetMaterial, _selectedBlock.fluidType != FluidType.None);
         }
 
         private void Draw3DPreview()
