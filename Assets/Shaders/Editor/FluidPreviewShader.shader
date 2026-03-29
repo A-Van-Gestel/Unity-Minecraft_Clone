@@ -8,6 +8,7 @@ Shader "Hidden/Editor/FluidPreview"
     Properties
     {
         [KeywordEnum(Water, Lava)] _EditorPreviewType("Editor Preview Type", Float) = 0
+        [HideInInspector] _ForceOpaque("Force Opaque", Float) = 0.0
 
         // --- Global Shoreline Controls ---
         [Header(Shoreline Effects)]
@@ -77,6 +78,8 @@ Shader "Hidden/Editor/FluidPreview"
             // Shared liquid logic (identical to the game shader)
             #include "../Includes/LiquidCore.hlsl"
             #include "../Includes/VoxelLighting.hlsl"
+
+            float _ForceOpaque;
 
             LiquidV2F vertFunction(LiquidAppdata v)
             {
@@ -150,9 +153,13 @@ Shader "Hidden/Editor/FluidPreview"
                     final_color *= i.shadowMultiplier;
 
                     // Preview: solid background instead of SampleSceneColor
+                    // By conditionally forcing the alpha to 1.0, the generated icon can be rendered fully opaque for the UI
+                    // while retaining its transparent nature for in-editor 3D previews.
                     half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
                     half3 background = half3(0.05, 0.1, 0.15); // Dark cool background for water
-                    return half4(lerp(background, final_color, water_base_color.a), water_base_color.a);
+
+                    float finalAlpha = lerp(water_base_color.a, 1.0, _ForceOpaque);
+                    return half4(lerp(background, final_color, water_base_color.a), finalAlpha);
                 }
             }
             ENDHLSL

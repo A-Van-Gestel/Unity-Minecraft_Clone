@@ -26,6 +26,7 @@ namespace Editor.BlockEditor.Helpers
     public static class BlockIconGenerator
     {
         private static readonly int s_mainTex = Shader.PropertyToID("_MainTex");
+        private static readonly int s_forceOpaque = Shader.PropertyToID("_ForceOpaque");
 
         // --- Mesh Rotation Constants ---
         // Matches the exact initial rotation of the BlockEditorWindow 3D preview
@@ -116,6 +117,9 @@ namespace Editor.BlockEditor.Helpers
                     renderMaterial.SetTexture(s_mainTex, sourceMaterial.GetTexture(s_mainTex));
                 }
             }
+
+            // Rendered UI icons must always be fully opaque, even for transparent blocks (water, glass)
+            renderMaterial.SetFloat(s_forceOpaque, 1.0f);
 
             // --- Set up the preview renderer ---
             PreviewRenderUtility previewUtility = new PreviewRenderUtility();

@@ -6,6 +6,7 @@ Shader "Hidden/Editor/BlockPreview"
     Properties
     {
         _MainTex ("Texture Atlas", 2D) = "white" {}
+        [HideInInspector] _ForceOpaque("Force Opaque", Float) = 0.0
     }
 
     SubShader
@@ -33,6 +34,8 @@ Shader "Hidden/Editor/BlockPreview"
             #include "../Includes/VoxelCommon.hlsl"
             #include "../Includes/VoxelLighting.hlsl"
 
+            float _ForceOpaque;
+
             VoxelV2F vertFunction(VoxelAppdata v)
             {
                 return VoxelVert(v);
@@ -54,6 +57,9 @@ Shader "Hidden/Editor/BlockPreview"
 
                 // Multiply by vertex RGB (supports BlockIconGenerator isometric shadows)
                 col.rgb *= i.color.rgb;
+
+                // Dynamically force alpha to 1.0 when _ForceOpaque is enabled (e.g. for UI icons)
+                col.a = lerp(col.a, 1.0, _ForceOpaque);
 
                 return col;
             }
