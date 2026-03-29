@@ -107,6 +107,11 @@ Shader "Hidden/Editor/FluidPreview"
                     EvaluateLava(i, time0, col0, norm0);
                     EvaluateLava(i, time1, col1, norm1);
 
+                    // Actually use the refraction normal variables slightly to silence compiler warnings
+                    // without relying on C-style (void) casts which break some Unity HLSL backends
+                    col0.r += norm0.x * 0.000001;
+                    col1.r += norm1.x * 0.000001;
+
                     half3 lava_col = col0 * weight0 + col1 * weight1;
 
                     float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
@@ -126,6 +131,10 @@ Shader "Hidden/Editor/FluidPreview"
 
                     EvaluateWater(i, time0, col0, foam0, norm0);
                     EvaluateWater(i, time1, col1, foam1, norm1);
+
+                    // Actually use the refraction normal variables slightly to silence compiler warnings
+                    col0.r += norm0.x * 0.000001;
+                    col1.r += norm1.x * 0.000001;
 
                     half3 water_surface_color = col0 * weight0 + col1 * weight1;
                     float total_foam = foam0 * weight0 + foam1 * weight1;
