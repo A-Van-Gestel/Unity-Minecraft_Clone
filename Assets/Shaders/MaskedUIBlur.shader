@@ -1,4 +1,5 @@
-// Based on cician's shader from https://forum.unity3d.com/threads/simple-optimized-blur-shader.185327/#post-1267642
+// URP replacement for the legacy GrabPass-based MaskedUIBlur.
+// Samples the pre-blurred _UIBlurTexture provided by UIBlurRendererFeature.
 
 Shader "Custom/MaskedUIBlur"
 {
@@ -10,187 +11,82 @@ Shader "Custom/MaskedUIBlur"
         _MultiplyColor ("Multiply Tint color", Color) = (1, 1, 1, 1)
     }
 
-    Category
+    SubShader
     {
-
-        // We must be transparent, so other objects are drawn before this one.
         Tags
         {
-            "Queue"="Transparent" "IgnoreProjector"="True" "RenderType"="Opaque"
+            "Queue"="Transparent" "IgnoreProjector"="True" "RenderType"="Opaque" "RenderPipeline"="UniversalPipeline"
         }
 
+        Cull Off
+        ZWrite Off
+        ZTest [unity_GUIZTestMode]
+        Blend SrcAlpha OneMinusSrcAlpha
 
-        SubShader
+        Pass
         {
-            // Horizontal blur
-            GrabPass
+            Name "UIBlurSample"
+
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct appdata_t
             {
-                "_HBlur"
-            }
-            /*
-            ZTest Off
-            Blend SrcAlpha OneMinusSrcAlpha
-            */
+                float4 vertex : POSITION;
+                float2 texcoord : TEXCOORD0;
+            };
 
-            Cull Off
-            Lighting Off
-            ZWrite Off
-            ZTest [unity_GUIZTestMode]
-            Blend SrcAlpha OneMinusSrcAlpha
-
-            Pass
+            struct v2f
             {
-                CGPROGRAM
-                #pragma vertex vert
-                #pragma fragment frag
-                #pragma fragmentoption ARB_precision_hint_fastest
-                #include "UnityCG.cginc"
+                float4 vertex : SV_POSITION;
+                float4 screenPos : TEXCOORD0;
+                float2 uvmain : TEXCOORD1;
+            };
 
-                struct appdata_t
-                {
-                    float4 vertex : POSITION;
-                    float2 texcoord : TEXCOORD0;
-                };
+            TEXTURE2D(_MainTex);
+            SAMPLER(sampler_MainTex);
+            float4 _MainTex_ST;
 
-                struct v2f
-                {
-                    float4 vertex : POSITION;
-                    float4 uvgrab : TEXCOORD0;
-                    float2 uvmain : TEXCOORD1;
-                };
+            // The pre-blurred screen texture provided by UIBlurRendererFeature
+            TEXTURE2D(_UIBlurTexture);
+            SAMPLER(sampler_UIBlurTexture);
 
-                sampler2D _MainTex;
-                float4 _MainTex_ST;
-
-                v2f vert(appdata_t v)
-                {
-                    v2f o;
-                    o.vertex = UnityObjectToClipPos(v.vertex);
-
-                    #if UNITY_UV_STARTS_AT_TOP
-                    float scale = -1.0;
-                    #else
-                    float scale = 1.0;
-                    #endif
-
-                    o.uvgrab.xy = (float2(o.vertex.x, o.vertex.y * scale) + o.vertex.w) * 0.5;
-                    o.uvgrab.zw = o.vertex.zw;
-
-                    o.uvmain = TRANSFORM_TEX(v.texcoord, _MainTex);
-                    return o;
-                }
-
-                sampler2D _HBlur;
-                float4 _HBlur_TexelSize;
+            CBUFFER_START(UnityPerMaterial)
+                half4 _AdditiveColor;
+                half4 _MultiplyColor;
                 float _Size;
-                float4 _AdditiveColor;
-                float4 _MultiplyColor;
+            CBUFFER_END
 
-                half4 frag(v2f i) : COLOR
-                {
-                    half4 sum = half4(0, 0, 0, 0);
-
-                    #define GRABPIXEL(weight,kernelx) tex2Dproj( _HBlur, UNITY_PROJ_COORD(float4(i.uvgrab.x + _HBlur_TexelSize.x * kernelx * _Size, i.uvgrab.y, i.uvgrab.z, i.uvgrab.w))) * weight
-
-                    sum += GRABPIXEL(0.05, -4.0);
-                    sum += GRABPIXEL(0.09, -3.0);
-                    sum += GRABPIXEL(0.12, -2.0);
-                    sum += GRABPIXEL(0.15, -1.0);
-                    sum += GRABPIXEL(0.18, 0.0);
-                    sum += GRABPIXEL(0.15, +1.0);
-                    sum += GRABPIXEL(0.12, +2.0);
-                    sum += GRABPIXEL(0.09, +3.0);
-                    sum += GRABPIXEL(0.05, +4.0);
-
-
-                    half4 result = half4(sum.r * _MultiplyColor.r + _AdditiveColor.r,
-                                         sum.g * _MultiplyColor.g + _AdditiveColor.g,
-                                         sum.b * _MultiplyColor.b + _AdditiveColor.b,
-                                         tex2D(_MainTex, i.uvmain).a);
-                    return result;
-                }
-                ENDCG
-            }
-
-            // Vertical blur
-            GrabPass
+            v2f vert(appdata_t v)
             {
-                "_VBlur"
+                v2f o;
+                o.vertex = TransformObjectToHClip(v.vertex.xyz);
+                o.screenPos = ComputeScreenPos(o.vertex);
+                o.uvmain = TRANSFORM_TEX(v.texcoord, _MainTex);
+                return o;
             }
 
-            Pass
+            half4 frag(v2f i) : SV_Target
             {
-                CGPROGRAM
-                #pragma vertex vert
-                #pragma fragment frag
-                #pragma fragmentoption ARB_precision_hint_fastest
-                #include "UnityCG.cginc"
+                float2 screenUV = i.screenPos.xy / i.screenPos.w;
 
-                struct appdata_t
-                {
-                    float4 vertex : POSITION;
-                    float2 texcoord: TEXCOORD0;
-                };
+                // Sample the pre-blurred screen texture from UIBlurRendererFeature
+                half4 blurred = SAMPLE_TEXTURE2D(_UIBlurTexture, sampler_UIBlurTexture, screenUV);
 
-                struct v2f
-                {
-                    float4 vertex : POSITION;
-                    float4 uvgrab : TEXCOORD0;
-                    float2 uvmain : TEXCOORD1;
-                };
+                // Apply tinting (same as original shader)
+                half4 result = half4(
+                    blurred.r * _MultiplyColor.r + _AdditiveColor.r,
+                    blurred.g * _MultiplyColor.g + _AdditiveColor.g,
+                    blurred.b * _MultiplyColor.b + _AdditiveColor.b,
+                    SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, i.uvmain).a
+                );
 
-                sampler2D _MainTex;
-                float4 _MainTex_ST;
-
-                v2f vert(appdata_t v)
-                {
-                    v2f o;
-                    o.vertex = UnityObjectToClipPos(v.vertex);
-
-                    #if UNITY_UV_STARTS_AT_TOP
-                    float scale = -1.0;
-                    #else
-                    float scale = 1.0;
-                    #endif
-
-                    o.uvgrab.xy = (float2(o.vertex.x, o.vertex.y * scale) + o.vertex.w) * 0.5;
-                    o.uvgrab.zw = o.vertex.zw;
-
-                    o.uvmain = TRANSFORM_TEX(v.texcoord, _MainTex);
-
-                    return o;
-                }
-
-                sampler2D _VBlur;
-                float4 _VBlur_TexelSize;
-                float _Size;
-                float4 _AdditiveColor;
-                float4 _MultiplyColor;
-
-                half4 frag(v2f i) : COLOR
-                {
-                    half4 sum = half4(0, 0, 0, 0);
-
-                    #define GRABPIXEL(weight,kernely) tex2Dproj( _VBlur, UNITY_PROJ_COORD(float4(i.uvgrab.x, i.uvgrab.y + _VBlur_TexelSize.y * kernely * _Size, i.uvgrab.z, i.uvgrab.w))) * weight
-
-                    sum += GRABPIXEL(0.05, -4.0);
-                    sum += GRABPIXEL(0.09, -3.0);
-                    sum += GRABPIXEL(0.12, -2.0);
-                    sum += GRABPIXEL(0.15, -1.0);
-                    sum += GRABPIXEL(0.18, 0.0);
-                    sum += GRABPIXEL(0.15, +1.0);
-                    sum += GRABPIXEL(0.12, +2.0);
-                    sum += GRABPIXEL(0.09, +3.0);
-                    sum += GRABPIXEL(0.05, +4.0);
-
-                    half4 result = half4(sum.r * _MultiplyColor.r + _AdditiveColor.r,
-                                         sum.g * _MultiplyColor.g + _AdditiveColor.g,
-                                         sum.b * _MultiplyColor.b + _AdditiveColor.b,
-                                         tex2D(_MainTex, i.uvmain).a);
-                    return result;
-                }
-                ENDCG
+                return result;
             }
+            ENDHLSL
         }
     }
 }

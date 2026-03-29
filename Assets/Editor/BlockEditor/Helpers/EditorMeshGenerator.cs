@@ -49,7 +49,7 @@ namespace Editor.BlockEditor.Helpers
                 uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0, 1, (byte)fluidLevel);
 
                 // For a simple, flat preview, an empty (default) array is sufficient.
-                NativeArray<OptionalVoxelState> mockNeighbors = new NativeArray<OptionalVoxelState>(10, Allocator.Temp);
+                NativeArray<OptionalVoxelState> mockNeighbors = new NativeArray<OptionalVoxelState>(14, Allocator.Temp);
 
                 // Load fluid templates using the new helper - works perfectly in the editor.
                 FluidTemplates fluidTemplates = ResourceLoader.LoadFluidTemplates();

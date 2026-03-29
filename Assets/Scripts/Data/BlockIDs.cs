@@ -6,6 +6,7 @@
 // ==========================================================================
 
 // ReSharper disable UnusedMember.Global
+
 namespace Data
 {
     /// <summary>

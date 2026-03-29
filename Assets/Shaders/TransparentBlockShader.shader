@@ -10,81 +10,57 @@ Shader "Minecraft/Transparent Blocks"
     {
         Tags
         {
-            "Queue"="AlphaTest" "IgnoreProjector"="True" "RenderType"="TransparentCutout"
+            "Queue"="AlphaTest" "IgnoreProjector"="True" "RenderType"="TransparentCutout" "RenderPipeline"="UniversalPipeline"
         }
         LOD 100
-        Lighting Off
 
         Pass
         {
+            Name "ForwardLit"
+            Tags
+            {
+                "LightMode"="UniversalForward"
+            }
 
-            CGPROGRAM
+            HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
             #pragma target 2.0
 
-            #include "UnityCG.cginc"
+            #include "Includes/VoxelCommon.hlsl"
+            #include "Includes/VoxelLighting.hlsl"
 
-            struct appdata
-            {
-                float4 vertex : POSITION;
-                float2 uv : TEXCOORD0;
-                fixed4 color : COLOR;
-            };
+            CBUFFER_START(UnityPerMaterial)
+                float _AlphaCutout;
+            CBUFFER_END
 
-            struct v2f
-            {
-                float4 vertex : SV_POSITION;
-                float2 uv : TEXCOORD0;
-                fixed4 color : COLOR;
-            };
-
-            sampler2D _MainTex;
-            float _AlphaCutout;
+            // Global properties set by World.cs via Shader.SetGlobalFloat — must be outside CBUFFER
             float GlobalLightLevel;
             float minGlobalLightLevel;
             float maxGlobalLightLevel;
 
-            v2f vertFunction(appdata v)
+            VoxelV2F vertFunction(VoxelAppdata v)
             {
-                v2f o;
-
-                o.vertex = UnityObjectToClipPos(v.vertex);
-                o.uv = v.uv;
-                o.color = v.color;
-
-                return o;
+                return VoxelVert(v);
             }
 
-            fixed4 fragFunction(v2f i) : SV_Target
+            half4 fragFunction(VoxelV2F i) : SV_Target
             {
-                fixed4 col = tex2D(_MainTex, i.uv);
-
-
-                // Calculate block shade level
-                // (0.75 - 0.25) = 0.5  // Total range available
-                // 0.5 * 0.4 = 0.2  // Use certain percent of range available
-                // 0.2 + 0.25 = 0.45  // Re-add the minimum light value to calculate final shade
-                float shade = (maxGlobalLightLevel - minGlobalLightLevel) * GlobalLightLevel + minGlobalLightLevel;
-                // Apply block light level onto block shade level
-                shade *= i.color.a;
-                // 1 = Absulute darkest, so reverse shade so that 1 equels absulute lightest --> 1 - 0.95 = 0.05
-                shade = clamp(1 - shade, minGlobalLightLevel, maxGlobalLightLevel);
-                
-                // const float localLightLevel = clamp(GlobalLightLevel + i.color.a, 0, 1);
+                half4 col = SampleBlockTexture(i.uv);
 
                 // Remove pixels from the alpha channel below a certain threshold.
                 clip(col.a - _AlphaCutout);
 
-                // Darken block based on block light level.
-                col = lerp(col, col * .10, shade);
+                // Apply voxel lighting using runtime globals from World.cs
+                col.rgb = ApplyVoxelLighting(col.rgb, i.color.a,
+                                             GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // Multiply by vertex RGB to support BlockIconGenerator shadows and tinting
                 col.rgb *= i.color.rgb;
 
                 return col;
             }
-            ENDCG
+            ENDHLSL
         }
     }
 }

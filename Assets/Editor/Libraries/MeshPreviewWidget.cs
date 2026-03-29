@@ -27,8 +27,13 @@ namespace Editor.Libraries
         public Vector3 CameraPosition { get; set; } = new Vector3(0, 0, -3.5f);
         public float CameraFieldOfView { get; set; } = 30f;
         public float LightIntensity { get; set; } = 1.2f;
-        private Material _previewMaterial;
+
+        private Material _blockPreviewMaterial;
+        private Material _fluidPreviewMaterial;
+        private Material _activePreviewMaterial;
         private Mesh _previewMesh;
+
+        private static readonly int s_mainTexId = Shader.PropertyToID("_MainTex");
 
         public bool HasMesh => _previewMesh != null;
 
@@ -72,9 +77,27 @@ namespace Editor.Libraries
                 light.intensity = LightIntensity;
                 light.transform.rotation = Quaternion.Euler(30, 30, 0);
 
-                // Initialize a base material
-                _previewMaterial = new Material(Shader.Find("Standard"));
+                // Initialize preview materials with dedicated editor shaders.
+                // These shaders share includes with the game shaders but substitute
+                // hardcoded lighting defaults and solid backgrounds for SampleSceneColor.
+                _blockPreviewMaterial = CreatePreviewMaterial("Hidden/Editor/BlockPreview");
+                _fluidPreviewMaterial = CreatePreviewMaterial("Hidden/Editor/FluidPreview");
             }
+        }
+
+        /// <summary>
+        /// Creates a preview material from a shader name with a fallback to URP/Unlit.
+        /// </summary>
+        private static Material CreatePreviewMaterial(string shaderName)
+        {
+            Shader shader = Shader.Find(shaderName);
+            if (shader == null)
+            {
+                Debug.LogError($"MeshPreviewWidget: Could not find '{shaderName}' shader. Using URP/Unlit fallback.");
+                shader = Shader.Find("Universal Render Pipeline/Unlit");
+            }
+
+            return new Material(shader);
         }
 
         /// <summary>
@@ -95,18 +118,29 @@ namespace Editor.Libraries
                 _previewMesh = null;
             }
 
-            if (_previewMaterial != null)
+            if (_blockPreviewMaterial != null)
             {
-                Object.DestroyImmediate(_previewMaterial);
-                _previewMaterial = null;
+                Object.DestroyImmediate(_blockPreviewMaterial);
+                _blockPreviewMaterial = null;
             }
+
+            if (_fluidPreviewMaterial != null)
+            {
+                Object.DestroyImmediate(_fluidPreviewMaterial);
+                _fluidPreviewMaterial = null;
+            }
+
+            _activePreviewMaterial = null;
         }
 
         /// <summary>
         /// Updates the mesh and material used for the preview.
         /// Automatically destroys the old mesh to prevent memory leaks.
         /// </summary>
-        public void UpdatePreview(Mesh mesh, Material targetMaterial)
+        /// <param name="mesh">The generated block mesh to preview.</param>
+        /// <param name="targetMaterial">The game material to copy properties from.</param>
+        /// <param name="isFluid">True if the block is a fluid type (water/lava).</param>
+        public void UpdatePreview(Mesh mesh, Material targetMaterial, bool isFluid)
         {
             if (_previewMesh != null)
             {
@@ -115,10 +149,25 @@ namespace Editor.Libraries
 
             _previewMesh = mesh;
 
-            if (targetMaterial != null && _previewMaterial != null)
+            if (targetMaterial == null) return;
+
+            if (isFluid)
             {
-                _previewMaterial.shader = targetMaterial.shader;
-                _previewMaterial.CopyPropertiesFromMaterial(targetMaterial);
+                // Fluid blocks: use dedicated fluid preview shader with all material properties
+                _activePreviewMaterial = _fluidPreviewMaterial;
+                if (_activePreviewMaterial != null)
+                {
+                    _activePreviewMaterial.CopyPropertiesFromMaterial(targetMaterial);
+                }
+            }
+            else
+            {
+                // Standard/transparent blocks: use block preview shader with texture atlas only
+                _activePreviewMaterial = _blockPreviewMaterial;
+                if (_activePreviewMaterial != null && targetMaterial.HasTexture(s_mainTexId))
+                {
+                    _activePreviewMaterial.SetTexture(s_mainTexId, targetMaterial.GetTexture(s_mainTexId));
+                }
             }
         }
 
@@ -145,7 +194,7 @@ namespace Editor.Libraries
                 EditorGUIHelper.DrawCheckerboardBackground(previewRect);
             }
 
-            if (_previewMesh != null && _previewRenderUtility != null)
+            if (_previewMesh != null && _previewRenderUtility != null && _activePreviewMaterial != null)
             {
                 PreviewRotation = EditorGUIHelper.HandleDragRotation(previewRect, PreviewRotation, DragSensitivity);
 
@@ -155,12 +204,12 @@ namespace Editor.Libraries
                 Matrix4x4 rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
 
                 // Draw sub-mesh 0 (Opaque parts)
-                _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _previewMaterial, 0);
+                _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _activePreviewMaterial, 0);
 
                 // Draw sub-mesh 1 (Transparent parts, if they exist on the mesh)
                 if (_previewMesh.subMeshCount > 1)
                 {
-                    _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _previewMaterial, 1);
+                    _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _activePreviewMaterial, 1);
                 }
 
                 _previewRenderUtility.Render();

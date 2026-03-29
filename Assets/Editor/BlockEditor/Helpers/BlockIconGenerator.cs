@@ -24,6 +24,8 @@ namespace Editor.BlockEditor.Helpers
     /// </remarks>
     public static class BlockIconGenerator
     {
+        private static readonly int s_mainTex = Shader.PropertyToID("_MainTex");
+
         // --- Mesh Rotation Constants ---
         // Matches the exact initial rotation of the BlockEditorWindow 3D preview
         // which the user confirmed displays the correct faces and orientation.
@@ -86,11 +88,33 @@ namespace Editor.BlockEditor.Helpers
                 return null;
             }
 
-            // We safely use the exact native material from the block database.
-            // The voxel shaders (StandardBlockShader/TransparentBlockShader) have been updated
-            // to support vertex RGB tinting, so our shadows will render cleanly
-            // while preserving perfect ZWrite depth sorting and Culling from the game settings.
-            Material renderMaterial = new Material(sourceMaterial);
+            // Create a preview material using the dedicated editor preview shaders.
+            // These share include files with the game shaders but substitute hardcoded
+            // lighting defaults and solid backgrounds for SampleSceneColor.
+            bool isFluid = blockType.fluidType != FluidType.None;
+            string shaderName = isFluid ? "Hidden/Editor/FluidPreview" : "Hidden/Editor/BlockPreview";
+            Shader previewShader = Shader.Find(shaderName);
+            if (previewShader == null)
+            {
+                Debug.LogError($"BlockIconGenerator: Could not find '{shaderName}' shader.");
+                Object.DestroyImmediate(mesh);
+                return null;
+            }
+
+            Material renderMaterial = new Material(previewShader);
+            if (isFluid)
+            {
+                // Fluid: copy all material properties (colors, scales, speeds)
+                renderMaterial.CopyPropertiesFromMaterial(sourceMaterial);
+            }
+            else
+            {
+                // Standard/transparent: copy only the texture atlas
+                if (sourceMaterial.HasTexture(s_mainTex))
+                {
+                    renderMaterial.SetTexture(s_mainTex, sourceMaterial.GetTexture(s_mainTex));
+                }
+            }
 
             // --- Set up the preview renderer ---
             PreviewRenderUtility previewUtility = new PreviewRenderUtility();
@@ -365,7 +389,7 @@ namespace Editor.BlockEditor.Helpers
                 else
                 {
                     // For fluid blocks, the R and G channels hold packed data (LiquidType, ShorelineFlag).
-                    // The B channel is completely unused, so we strictly inject our shadow multiplier 
+                    // The B channel is completely unused, so we strictly inject our shadow multiplier
                     // into colors[i].b, which the UberLiquidShader will extract and apply natively.
                     colors[i] = new Color(colors[i].r, colors[i].g, multiplier, colors[i].a);
                 }
