@@ -59,7 +59,7 @@ Shader "Minecraft/UberLiquidShader"
             Name "LiquidForward"
             Tags
             {
-                "LightMode"="SRPDefaultUnlit"
+                "LightMode"="UniversalForward"
             }
 
             HLSLPROGRAM

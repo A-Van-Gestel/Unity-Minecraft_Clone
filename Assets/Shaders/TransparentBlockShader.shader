@@ -19,7 +19,7 @@ Shader "Minecraft/Transparent Blocks"
             Name "ForwardLit"
             Tags
             {
-                "LightMode"="SRPDefaultUnlit"
+                "LightMode"="UniversalForward"
             }
 
             HLSLPROGRAM
