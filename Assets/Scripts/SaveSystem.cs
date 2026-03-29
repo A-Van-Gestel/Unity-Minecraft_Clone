@@ -59,14 +59,14 @@ public static class SaveSystem
             saveData.player = world.player.GetSaveData();
 
             // Gather Inventory
-            Toolbar toolbar = Object.FindFirstObjectByType<Toolbar>();
+            Toolbar toolbar = Object.FindAnyObjectByType<Toolbar>();
             if (toolbar != null)
             {
                 saveData.player.inventory = toolbar.GetInventoryData();
             }
 
             // Gather Cursor Item
-            DragAndDropHandler cursorHandler = Object.FindFirstObjectByType<DragAndDropHandler>();
+            DragAndDropHandler cursorHandler = Object.FindAnyObjectByType<DragAndDropHandler>();
             if (cursorHandler != null)
             {
                 saveData.player.cursorItem = cursorHandler.GetCursorData();
@@ -131,14 +131,14 @@ public static class SaveSystem
         world.player.LoadSaveData(data.player);
 
         // Apply Inventory
-        Toolbar toolbar = Object.FindFirstObjectByType<Toolbar>();
+        Toolbar toolbar = Object.FindAnyObjectByType<Toolbar>();
         if (toolbar != null)
         {
             toolbar.LoadInventoryData(data.player.inventory);
         }
 
         // Apply Cursor Item
-        DragAndDropHandler cursorHandler = Object.FindFirstObjectByType<DragAndDropHandler>();
+        DragAndDropHandler cursorHandler = Object.FindAnyObjectByType<DragAndDropHandler>();
         if (cursorHandler != null)
         {
             cursorHandler.LoadCursorData(data.player.cursorItem);

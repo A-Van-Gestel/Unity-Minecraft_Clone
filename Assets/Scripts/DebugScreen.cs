@@ -162,7 +162,7 @@ public class DebugScreen : MonoBehaviour
 
         // Fail-safe if references aren't set in the inspector
         if (!_player)
-            _player = FindFirstObjectByType<Player>(); // Slower fallback
+            _player = FindAnyObjectByType<Player>(); // Slower fallback
         if (!_playerCamera && Camera.main)
             _playerCamera = Camera.main.transform; // Common fallback
 
