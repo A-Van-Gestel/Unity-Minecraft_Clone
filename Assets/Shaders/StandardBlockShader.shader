@@ -29,10 +29,6 @@ Shader "Minecraft/Blocks"
             #include "Includes/VoxelCommon.hlsl"
             #include "Includes/VoxelLighting.hlsl"
 
-            CBUFFER_START(UnityPerMaterial)
-                // (No per-material properties for this shader)
-            CBUFFER_END
-
             // Global properties set by World.cs via Shader.SetGlobalFloat — must be outside CBUFFER
             float GlobalLightLevel;
             float minGlobalLightLevel;

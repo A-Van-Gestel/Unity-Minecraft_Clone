@@ -33,10 +33,6 @@ Shader "Hidden/Editor/BlockPreview"
             #include "../Includes/VoxelCommon.hlsl"
             #include "../Includes/VoxelLighting.hlsl"
 
-            CBUFFER_START(UnityPerMaterial)
-                float4 _MainTex_ST;
-            CBUFFER_END
-
             VoxelV2F vertFunction(VoxelAppdata v)
             {
                 return VoxelVert(v);
@@ -52,9 +48,9 @@ Shader "Hidden/Editor/BlockPreview"
                 // Apply voxel lighting with hardcoded editor daylight defaults
                 // (VoxelData.MinLightLevel = 0.15, MaxLightLevel = 1.0, full daylight = 1.0)
                 col.rgb = ApplyVoxelLighting(col.rgb, i.color.a,
-                    1.0,   // globalLight  — full daylight
-                    0.15,  // minLight     — VoxelData.MinLightLevel
-                    1.0);  // maxLight     — VoxelData.MaxLightLevel
+                                             1.0, // globalLight  — full daylight
+                                             0.15, // minLight     — VoxelData.MinLightLevel
+                                             1.0); // maxLight     — VoxelData.MaxLightLevel
 
                 // Multiply by vertex RGB (supports BlockIconGenerator isometric shadows)
                 col.rgb *= i.color.rgb;

@@ -42,18 +42,23 @@ struct LiquidV2F
 // Material Property Declarations
 // =============================================================================
 
-// --- Global Shoreline Controls ---
-float _ShorePushSpeed;
+CBUFFER_START(UnityPerMaterial)
+    // Editor preview type selector (shared between game and preview shaders)
+    float _EditorPreviewType;
 
-// --- Lava Properties ---
-half4 _BrightColor, _MidColor, _DarkColor, _CrustColor;
-float _LavaFlowMultiplier, _NoiseScale, _CellDensity, _Speed, _CrackBrightness, _PulseSpeed, _HeatDistortionAmount;
-float _LavaShoreWidth, _LavaShoreCrust, _FlowHighlight;
+    // --- Global Shoreline Controls ---
+    float _ShorePushSpeed;
 
-// --- Water Properties ---
-half4 _DeepColor, _ShallowColor, _FoamColor;
-float _WaterFlowMultiplier, _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _DistortionAmount;
-float _WaterShoreWidth, _WaterShoreFoam, _StreamEffect;
+    // --- Lava Properties ---
+    half4 _BrightColor, _MidColor, _DarkColor, _CrustColor;
+    float _LavaFlowMultiplier, _NoiseScale, _CellDensity, _Speed, _CrackBrightness, _PulseSpeed, _HeatDistortionAmount;
+    float _LavaShoreWidth, _LavaShoreCrust, _FlowHighlight;
+
+    // --- Water Properties ---
+    half4 _DeepColor, _ShallowColor, _FoamColor;
+    float _WaterFlowMultiplier, _WaveScale, _WaveSpeed, _RippleScale, _RippleSpeed, _FoamThreshold, _DistortionAmount;
+    float _WaterShoreWidth, _WaterShoreFoam, _StreamEffect;
+CBUFFER_END
 
 // =============================================================================
 // Vertex Function

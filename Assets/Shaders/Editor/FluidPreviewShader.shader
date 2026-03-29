@@ -76,9 +76,7 @@ Shader "Hidden/Editor/FluidPreview"
 
             // Shared liquid logic (identical to the game shader)
             #include "../Includes/LiquidCore.hlsl"
-
-            // Editor-only property (no global light uniforms needed)
-            float _EditorPreviewType;
+            #include "../Includes/VoxelLighting.hlsl"
 
             LiquidV2F vertFunction(LiquidAppdata v)
             {
@@ -94,10 +92,8 @@ Shader "Hidden/Editor/FluidPreview"
                 if (!unity_IsEditorPlaying) finalLiquidType = _EditorPreviewType;
                 #endif
 
-                // Hardcoded editor daylight (no runtime globals available in preview)
-                float shade = (1.0 - 0.15) * 1.0 + 0.15; // maxLight=1.0, minLight=0.15, globalLight=1.0
-                shade *= i.lightLevel;
-                shade = clamp(1.0 - shade, 0.15, 1.0);
+                // Calculate shade using shared lighting function with editor daylight defaults
+                float shade = CalculateVoxelShade(i.lightLevel, 1.0, 0.15, 1.0);
 
                 // --- FLOW MAPPING TIME SETUP ---
                 float time0, time1, weight0, weight1;

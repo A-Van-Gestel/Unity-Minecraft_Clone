@@ -69,12 +69,12 @@ Shader "Minecraft/UberLiquidShader"
 
             // Shared liquid logic (structs, vertex, noise, shore, evaluate)
             #include "Includes/LiquidCore.hlsl"
+            #include "Includes/VoxelLighting.hlsl"
 
             // Game-only: scene refraction via URP Opaque Texture
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
 
             // Game-only: global light uniforms from World.cs
-            float _EditorPreviewType;
             float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
 
             LiquidV2F vertFunction(LiquidAppdata v)
@@ -90,9 +90,8 @@ Shader "Minecraft/UberLiquidShader"
                 if (!unity_IsEditorPlaying) finalLiquidType = _EditorPreviewType;
                 #endif
 
-                float shade = (maxGlobalLightLevel - minGlobalLightLevel) * GlobalLightLevel + minGlobalLightLevel;
-                shade *= i.lightLevel;
-                shade = clamp(1.0 - shade, minGlobalLightLevel, maxGlobalLightLevel);
+                float shade = CalculateVoxelShade(i.lightLevel,
+                                                  GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // --- FLOW MAPPING TIME SETUP ---
                 float time0, time1, weight0, weight1;
