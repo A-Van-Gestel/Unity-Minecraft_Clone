@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using Data;
+using Helpers;
 using UnityEditor;
 using UnityEngine;
 
@@ -174,6 +175,12 @@ namespace Editor.BlockEditor.Helpers
                 RenderTexture previousActive = RenderTexture.active;
                 RenderTexture.active = renderTexture;
                 resultTexture.ReadPixels(new Rect(0, 0, size, size), 0, 0, false);
+
+                // If the project is in Linear space, the render texture holds linear bytes.
+                // We MUST gamma-correct them before saving to PNG, otherwise the image
+                // data will be interpreted implicitly as sRGB and look extremely dark.
+                TextureUtils.ApplyLinearToGammaCorrection(resultTexture);
+
                 resultTexture.Apply();
                 RenderTexture.active = previousActive;
 

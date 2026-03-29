@@ -26,6 +26,21 @@ float CalculateVoxelShade(float lightLevel,
     return clamp(1.0 - shade, minLight, maxLight);
 }
 
+// --- Lighting Constants ---
+static const float MAX_SHADOW_DARKNESS = 0.10;
+static const float GAMMA_CORRECTION_CURVE = 2.2;
+
+/// Emulates the legacy Gamma-space block shadow falloff in Linear color space.
+/// Use this to multiply against your final color instead of a raw lerp.
+///
+/// @param shade    The voxel shade value (0 = fully lit, 1 = fully dark).
+/// @return         A linear-space multiplier that maps correctly back to monitor gamma.
+float CalculateLinearVoxelShadow(float shade)
+{
+    float shadowMultiplier = lerp(1.0, MAX_SHADOW_DARKNESS, shade);
+    return pow(shadowMultiplier, GAMMA_CORRECTION_CURVE);
+}
+
 /// Applies the engine's voxel lighting model to a base color.
 ///
 /// @param color        The base texture color (RGB).
@@ -38,9 +53,7 @@ half3 ApplyVoxelLighting(half3 color, float lightLevel,
                          float globalLight, float minLight, float maxLight)
 {
     float shade = CalculateVoxelShade(lightLevel, globalLight, minLight, maxLight);
-
-    // Darken block based on calculated shade
-    return lerp(color, color * 0.10, shade);
+    return color * CalculateLinearVoxelShadow(shade);
 }
 
 #endif // VOXEL_LIGHTING_INCLUDED

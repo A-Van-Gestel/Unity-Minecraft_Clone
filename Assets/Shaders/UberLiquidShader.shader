@@ -11,10 +11,10 @@ Shader "Minecraft/UberLiquidShader"
 
         // --- Lava Properties ---
         [Header(Lava)]
-        _BrightColor("Bright Color (Cracks)", Color) = (1, 0.9, 0.6, 1)
-        _MidColor("Mid Color", Color) = (1, 0.5, 0, 1)
-        _DarkColor("Dark Color (Crust)", Color) = (0.6, 0.1, 0, 1)
-        _CrustColor("Cooled Crust Color (Shore)", Color) = (0.2, 0.05, 0.0, 1)
+        _BrightColor("Bright Color (Cracks)", Color) = (1.0, 0.941, 0.588, 1.0)
+        _MidColor("Mid Color", Color) = (1.0, 0.434, 0.0, 1.0)
+        _DarkColor("Dark Color (Crust)", Color) = (0.51, 0.02, 0.0, 1.0)
+        _CrustColor("Cooled Crust Color (Shore)", Color) = (0.118, 0.039, 0.02, 1.0)
         _LavaFlowMultiplier("Lava Flow Multiplier", Range(0.0, 5.0)) = 0.35
         _NoiseScale("Lava Scale", Range(0.1, 10)) = 2.0
         _CellDensity("Cell Density", Range(1, 4)) = 2.5
@@ -30,9 +30,9 @@ Shader "Minecraft/UberLiquidShader"
 
         // --- Water Properties ---
         [Header(Water)]
-        _DeepColor("Deep Color (Low Light)", Color) = (0.1, 0.2, 0.5, 0.85)
-        _ShallowColor("Shallow Color (High Light)", Color) = (0.3, 0.5, 0.9, 0.7)
-        _FoamColor("Foam Color", Color) = (0.9, 0.9, 0.9, 1)
+        _DeepColor("Deep Color (Low Light)", Color) = (0.098, 0.232, 0.502, 0.85)
+        _ShallowColor("Shallow Color (High Light)", Color) = (0.165, 0.463, 0.945, 0.75)
+        _FoamColor("Foam Color", Color) = (0.941, 0.961, 1.0, 1.0)
         _WaterFlowMultiplier("Water Flow Multiplier", Range(0.0, 5.0)) = 2.5
         _WaveScale("Wave Scale", Range(0.1, 10)) = 5.0
         _WaveSpeed("Wave Speed", Range(0, 2)) = 0.4
@@ -113,7 +113,9 @@ Shader "Minecraft/UberLiquidShader"
 
                     float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
                     lava_col *= pulse;
-                    lava_col = lerp(lava_col, lava_col * 0.1, shade);
+
+                    // Apply gamma shadow in linear space using shared helper
+                    lava_col *= CalculateLinearVoxelShadow(shade);
 
                     lava_col *= i.shadowMultiplier;
                     return lerp(background, half4(lava_col, 1.0), 0.95);
@@ -139,7 +141,10 @@ Shader "Minecraft/UberLiquidShader"
                     half4 background = half4(SampleSceneColor(distortedUV), 1.0);
 
                     half3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
-                    final_color = lerp(final_color, final_color * 0.1, shade);
+
+                    // Apply gamma shadow in linear space using shared helper
+                    final_color *= CalculateLinearVoxelShadow(shade);
+
                     final_color *= i.shadowMultiplier;
 
                     half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
