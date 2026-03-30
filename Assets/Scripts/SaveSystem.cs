@@ -9,7 +9,9 @@ public static class SaveSystem
 {
     // v1 → v2: Fixed region file layout (voxel-space → chunk-index-space coordinates).
     //          All V1 worlds are automatically migrated by MigrationV1ToV2RegionRepack.
-    public const int CURRENT_VERSION = 2;
+    // v2 → v3: Removed bug where 'IsEmpty' sections (all-air w/ light) were skipped.
+    //          Migration triggers full initial lighting job for existing chunks to restore sky & cave light.
+    public const int CURRENT_VERSION = 3;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.

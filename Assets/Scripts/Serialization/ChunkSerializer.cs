@@ -15,7 +15,7 @@ namespace Serialization
     /// </summary>
     public static class ChunkSerializer
     {
-        private const byte CURRENT_CHUNK_VERSION = 2;
+        private const byte CURRENT_CHUNK_VERSION = 3;
 
         // FUTURE-PROOFING: Version header for individual sections.
         // Allows upgrading section format (e.g. adding Palettes) without breaking the chunk header.
@@ -120,7 +120,7 @@ namespace Serialization
                 // our local 'sec' variable still safely points  to the object in memory, preventing NREs.
                 ChunkSection sec = data.sections[i];
 
-                if (sec != null && !sec.IsEmpty)
+                if (sec != null)
                 {
                     sectionBitmask |= 1 << i;
                     safeSections[i] = sec;
@@ -152,10 +152,11 @@ namespace Serialization
             try
             {
                 // --- Chunk Header ---
-                // Safety check: Don't try to load chunks from the future.
+                // Safety check: The AOT Migration Manager handles historical versions offline.
+                // The live game serializer strictly expects the current fully up-to-date version.
                 byte version = reader.ReadByte();
-                if (version > CURRENT_CHUNK_VERSION)
-                    throw new InvalidDataException($"Unsupported Version: {version}");
+                if (version != CURRENT_CHUNK_VERSION)
+                    throw new InvalidDataException($"Unsupported Version: {version}. Expected: {CURRENT_CHUNK_VERSION}. World is either corrupt or bypassed AOT migration.");
 
                 int x = reader.ReadInt32();
                 int z = reader.ReadInt32();
@@ -170,20 +171,10 @@ namespace Serialization
                 chunk.NeedsInitialLighting = reader.ReadBoolean();
 
                 // --- Height Map ---
-                if (version == 1)
-                {
-                    byte[] oldHm = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth);
-                    if (oldHm.Length != VoxelData.ChunkWidth * VoxelData.ChunkWidth)
-                        throw new EndOfStreamException("Heightmap truncated");
-                    for (int hmIdx = 0; hmIdx < oldHm.Length; hmIdx++) chunk.heightMap[hmIdx] = oldHm[hmIdx];
-                }
-                else
-                {
-                    byte[] hmBytes = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth * sizeof(ushort));
-                    if (hmBytes.Length != VoxelData.ChunkWidth * VoxelData.ChunkWidth * sizeof(ushort))
-                        throw new EndOfStreamException("Heightmap truncated");
-                    Buffer.BlockCopy(hmBytes, 0, chunk.heightMap, 0, hmBytes.Length);
-                }
+                byte[] hmBytes = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth * sizeof(ushort));
+                if (hmBytes.Length != VoxelData.ChunkWidth * VoxelData.ChunkWidth * sizeof(ushort))
+                    throw new EndOfStreamException("Heightmap truncated");
+                Buffer.BlockCopy(hmBytes, 0, chunk.heightMap, 0, hmBytes.Length);
 
                 // --- Sections ---
                 int sectionBitmask = reader.ReadInt32();

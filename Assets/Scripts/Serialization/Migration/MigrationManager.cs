@@ -24,6 +24,7 @@ namespace Serialization.Migration
         {
             // new MigrationV1ToV2Dummy()
             new MigrationV1ToV2RegionRepack(),
+            new MigrationV2ToV3RestoreLighting(),
         };
 
         // Track the path of the backup we create so we can roll it back if needed.
