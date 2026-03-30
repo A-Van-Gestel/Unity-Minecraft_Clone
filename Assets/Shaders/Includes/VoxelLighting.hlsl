@@ -38,7 +38,9 @@ static const float GAMMA_CORRECTION_CURVE = 2.2;
 float CalculateLinearVoxelShadow(float shade)
 {
     float shadowMultiplier = lerp(1.0, MAX_SHADOW_DARKNESS, shade);
-    return pow(shadowMultiplier, GAMMA_CORRECTION_CURVE);
+    // max(0.0, ...) is used strictly to silence the DirectX HLSL static analysis compiler warning
+    // about pow(f, e) not working for fractional exponents on negative bases.
+    return pow(max(0.0, shadowMultiplier), GAMMA_CORRECTION_CURVE);
 }
 
 /// Applies the engine's voxel lighting model to a base color.
