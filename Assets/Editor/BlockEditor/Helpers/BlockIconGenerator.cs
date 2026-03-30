@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using Data;
+using Helpers;
 using UnityEditor;
 using UnityEngine;
 
@@ -25,6 +26,7 @@ namespace Editor.BlockEditor.Helpers
     public static class BlockIconGenerator
     {
         private static readonly int s_mainTex = Shader.PropertyToID("_MainTex");
+        private static readonly int s_forceOpaque = Shader.PropertyToID("_ForceOpaque");
 
         // --- Mesh Rotation Constants ---
         // Matches the exact initial rotation of the BlockEditorWindow 3D preview
@@ -116,6 +118,9 @@ namespace Editor.BlockEditor.Helpers
                 }
             }
 
+            // Rendered UI icons must always be fully opaque, even for transparent blocks (water, glass)
+            renderMaterial.SetFloat(s_forceOpaque, 1.0f);
+
             // --- Set up the preview renderer ---
             PreviewRenderUtility previewUtility = new PreviewRenderUtility();
 
@@ -174,6 +179,12 @@ namespace Editor.BlockEditor.Helpers
                 RenderTexture previousActive = RenderTexture.active;
                 RenderTexture.active = renderTexture;
                 resultTexture.ReadPixels(new Rect(0, 0, size, size), 0, 0, false);
+
+                // If the project is in Linear space, the render texture holds linear bytes.
+                // We MUST gamma-correct them before saving to PNG, otherwise the image
+                // data will be interpreted implicitly as sRGB and look extremely dark.
+                TextureUtils.ApplyLinearToGammaCorrection(resultTexture);
+
                 resultTexture.Apply();
                 RenderTexture.active = previousActive;
 

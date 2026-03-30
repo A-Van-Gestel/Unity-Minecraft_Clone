@@ -6,7 +6,6 @@
 // ==========================================================================
 
 // ReSharper disable UnusedMember.Global
-
 namespace Data
 {
     /// <summary>
@@ -21,42 +20,29 @@ namespace Data
         public const ushort Dirt = 3;
         public const ushort Sand = 4;
         public const ushort Snow = 5;
-
         /// <summary>Original name: "Grass Snowy"</summary>
         public const ushort GrassSnowy = 6;
-
         /// <summary>Original name: "Stone Walkway"</summary>
         public const ushort StoneWalkway = 7;
-
         public const ushort Bedrock = 8;
-
         /// <summary>Original name: "Desert Cracked"</summary>
         public const ushort DesertCracked = 9;
-
         /// <summary>Original name: "Grass Rocky"</summary>
         public const ushort GrassRocky = 10;
-
         public const ushort Tile = 11;
         public const ushort Wood = 12;
         public const ushort Facade = 13;
-
         /// <summary>Original name: "Oak Log"</summary>
         public const ushort OakLog = 14;
-
         /// <summary>Original name: "Oak Leaves"</summary>
         public const ushort OakLeaves = 15;
-
         public const ushort Cactus = 16;
-
         /// <summary>Original name: "Stone Half Slab"</summary>
         public const ushort StoneHalfSlab = 17;
-
         /// <summary>Original name: "Directional Block"</summary>
         public const ushort DirectionalBlock = 18;
-
         public const ushort Water = 19;
         public const ushort Lava = 20;
-
         /// <summary>Original name: "Coal Ore"</summary>
         public const ushort CoalOre = 21;
     }

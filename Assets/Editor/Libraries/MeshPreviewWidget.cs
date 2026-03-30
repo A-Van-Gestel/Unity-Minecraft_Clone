@@ -23,6 +23,7 @@ namespace Editor.Libraries
         /// </summary>
         public Vector2 DragSensitivity { get; set; }
 
+        public bool ForceOpaque { get; set; } = false;
         public Color BackgroundColor { get; set; } = new Color(0, 0, 0, 0);
         public Vector3 CameraPosition { get; set; } = new Vector3(0, 0, -3.5f);
         public float CameraFieldOfView { get; set; } = 30f;
@@ -34,6 +35,7 @@ namespace Editor.Libraries
         private Mesh _previewMesh;
 
         private static readonly int s_mainTexId = Shader.PropertyToID("_MainTex");
+        private static readonly int s_forceOpaqueId = Shader.PropertyToID("_ForceOpaque");
 
         public bool HasMesh => _previewMesh != null;
 
@@ -199,6 +201,8 @@ namespace Editor.Libraries
                 PreviewRotation = EditorGUIHelper.HandleDragRotation(previewRect, PreviewRotation, DragSensitivity);
 
                 _previewRenderUtility.BeginPreview(previewRect, GUIStyle.none);
+
+                _activePreviewMaterial.SetFloat(s_forceOpaqueId, ForceOpaque ? 1.0f : 0.0f);
 
                 // Center the rotation matrix
                 Matrix4x4 rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);

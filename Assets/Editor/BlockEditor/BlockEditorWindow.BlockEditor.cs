@@ -394,6 +394,16 @@ namespace Editor.BlockEditor
                 // --- 3D Preview ---
                 EditorGUILayout.Space(20);
                 EditorGUILayout.LabelField("3D Preview", EditorStyles.boldLabel);
+
+                // Add toggle for Force Opaque immediately under the header
+                EditorGUI.BeginChangeCheck();
+                _forceOpaquePreview = EditorGUILayout.Toggle(new GUIContent("Force Opaque", "If true, renders transparent blocks (like water or glass) as fully opaque in the preview instead of faintly transparent."), _forceOpaquePreview);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    // Trigger repaint on change
+                    Repaint();
+                }
+
                 if (GUILayout.Button("Refresh Preview", GUILayout.Height(25)))
                 {
                     UpdatePreviewMesh();
@@ -561,6 +571,9 @@ namespace Editor.BlockEditor
                     UpdatePreviewMesh();
                 }
             }
+
+            // Sync the opacity setting before drawing
+            _meshPreviewWidget.ForceOpaque = _forceOpaquePreview;
 
             // The widget internally handles the checkerboard background, interactive rotation, and mesh rendering.
             _meshPreviewWidget.Draw(previewRect);

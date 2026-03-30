@@ -42,6 +42,7 @@ namespace Editor.BlockEditor
 
         // Stores the editor-only state of the fluid preview slider.
         private int _previewFluidLevel = 0;
+        private bool _forceOpaquePreview = false;
 
         // --- Custom GUI Style ---
         private GUIStyle _listButtonStyle;
