@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -114,7 +114,11 @@ namespace Serialization.Migration
 
             bool needsLayoutMigration = migrationPath.Any(s => s.RequiresRegionLayoutMigration);
 
-            if (needsLayoutMigration)
+            if (!Directory.Exists(regionPath))
+            {
+                Debug.Log($"[MigrationManager] Region folder '{regionPath}' not found (world has no chunks generated). Skipping region migration.");
+            }
+            else if (needsLayoutMigration)
             {
                 // ── Layout migration: chunks may move between region files ──────────
                 // A dedicated step reads the entire old Region folder and writes a
