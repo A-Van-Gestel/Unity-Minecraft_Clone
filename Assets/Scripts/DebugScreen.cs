@@ -56,6 +56,7 @@ public class DebugScreen : MonoBehaviour
     public enum DebugMode
     {
         FPSOnly,
+        Performance,
         Full,
     }
 
@@ -137,11 +138,13 @@ public class DebugScreen : MonoBehaviour
         CurrentMode = mode;
         _textUpdateTimer = _textUpdateRate; // Force an immediate text update
 
-        // Disable unused TextMeshPro components so they don't consume layout/render time
+        // Disable unused TextMeshPro components so they don't consume layout/render time.
+        // Performance mode shows FPS (top-left) + performance panel (top-right) only.
+        bool showPerf = mode is DebugMode.Performance or DebugMode.Full;
         bool isFull = mode == DebugMode.Full;
         _middleLeftText.gameObject.SetActive(isFull);
         _bottomLeftText.gameObject.SetActive(isFull);
-        _topRightText.gameObject.SetActive(isFull);
+        _topRightText.gameObject.SetActive(showPerf);
         _middleRightText.gameObject.SetActive(isFull);
         _bottomRightText.gameObject.SetActive(isFull);
     }
@@ -197,7 +200,16 @@ public class DebugScreen : MonoBehaviour
         // Skip building the rest of the strings if we are in FPS Only mode
         if (CurrentMode == DebugMode.FPSOnly) return;
 
-        // Clear remaining builders from the previous frame.
+        // Performance mode: only build the performance panel (top-right)
+        if (CurrentMode == DebugMode.Performance)
+        {
+            _topRightBuilder.Clear();
+            PopulateTopRightBuilder();
+            _topRightText.text = _topRightBuilder.ToString();
+            return;
+        }
+
+        // Full mode: build all panels
         _topLeftBuilder.Clear();
         _middleLeftBuilder.Clear();
         _bottomLeftBuilder.Clear();
@@ -231,8 +243,8 @@ public class DebugScreen : MonoBehaviour
         int wallFps = perf != null ? Mathf.RoundToInt(perf.WallFPS) : 0;
         _topLeftBuilder.Append(wallFps).AppendLine(" fps");
 
-        // Skip building the rest of the strings if we are in FPS Only mode
-        if (CurrentMode == DebugMode.FPSOnly) return;
+        // Skip building the rest of the top-left panel for non-Full modes
+        if (CurrentMode != DebugMode.Full) return;
         _topLeftBuilder.AppendLine();
 
         // --- World & Orientation Info ---

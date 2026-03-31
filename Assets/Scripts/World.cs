@@ -2690,12 +2690,17 @@ public class World : MonoBehaviour
             DebugScreen dbg = debugScreen.GetComponent<DebugScreen>();
             if (dbg.CurrentMode == DebugScreen.DebugMode.FPSOnly)
             {
-                // State 2: FPS Only -> Full Debug
+                // State 2: FPS Only -> Performance
+                dbg.SetMode(DebugScreen.DebugMode.Performance);
+            }
+            else if (dbg.CurrentMode == DebugScreen.DebugMode.Performance)
+            {
+                // State 3: Performance -> Full Debug
                 dbg.SetMode(DebugScreen.DebugMode.Full);
             }
             else
             {
-                // State 3: Full Debug -> Off
+                // State 4: Full Debug -> Off
                 debugScreen.SetActive(false);
             }
         }
