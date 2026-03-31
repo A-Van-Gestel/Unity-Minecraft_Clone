@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using Data;
+using Helpers.UI;
 using JetBrains.Annotations;
 using MyBox;
 using TMPro;
@@ -41,6 +42,11 @@ public class DebugScreen : MonoBehaviour
     [Tooltip("The TextMeshPro object anchored to the bottom-right of the screen.")]
     [SerializeField]
     private TextMeshProUGUI _bottomRightText;
+
+    [Header("Graph References")]
+    [Tooltip("The GraphRenderer used to draw performance lines.")]
+    [SerializeField]
+    private GraphRenderer _perfGraph;
 
 
     [Header("Update Rates")]
@@ -87,7 +93,7 @@ public class DebugScreen : MonoBehaviour
     // --- Timers ---
     private float _textUpdateTimer;
     private float _infrequentUpdateTimer;
-
+    private float _graphUpdateTimer;
 
     private void Start()
     {
@@ -106,6 +112,21 @@ public class DebugScreen : MonoBehaviour
         {
             Debug.LogError("One or more TextMeshProUGUI references are not set in the DebugScreen inspector!", this);
             enabled = false;
+        }
+
+        // Initialize Performance Graph with Cyan (CPU) and Red (Wall) lines.
+        if (_perfGraph != null)
+        {
+            // Graph
+            _perfGraph.Initialize(new GraphRenderer.GraphConfig
+            {
+                Lines = new[]
+                {
+                    new GraphRenderer.LineEntry { Color = Color.cyan, Name = "CPU Time" },
+                    new GraphRenderer.LineEntry { Color = Color.red, Name = "Wall Time" }
+                },
+                HistorySize = 200
+            });
         }
     }
 
@@ -128,6 +149,26 @@ public class DebugScreen : MonoBehaviour
             BuildDebugStrings();
             _textUpdateTimer = 0;
         }
+
+        // --- Graph Update (Throttled 20Hz) ---
+        if (CurrentMode is DebugMode.Performance or DebugMode.Full)
+        {
+            _graphUpdateTimer += Time.unscaledDeltaTime;
+            if (_graphUpdateTimer >= 0.05f)
+            {
+                PerformanceMonitor perf = PerformanceMonitor.Instance;
+                if (perf != null && _perfGraph != null)
+                {
+                    _perfGraph.AddSamples(new[]
+                    {
+                        (float)(perf.CpuFrameTime.GetAverage() * s_tickToMS),
+                        (float)(perf.WallFrameTime.GetAverage() * s_tickToMS)
+                    });
+                }
+
+                _graphUpdateTimer = 0f;
+            }
+        }
     }
 
     /// <summary>
@@ -145,6 +186,7 @@ public class DebugScreen : MonoBehaviour
         _middleLeftText.gameObject.SetActive(isFull);
         _bottomLeftText.gameObject.SetActive(isFull);
         _topRightText.gameObject.SetActive(showPerf);
+        if (_perfGraph != null) _perfGraph.gameObject.SetActive(showPerf);
         _middleRightText.gameObject.SetActive(isFull);
         _bottomRightText.gameObject.SetActive(isFull);
     }
