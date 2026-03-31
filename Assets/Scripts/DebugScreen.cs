@@ -1,11 +1,12 @@
+using System;
 using System.Text;
 using Data;
 using JetBrains.Annotations;
 using MyBox;
 using TMPro;
-using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Profiling;
+using Stopwatch = System.Diagnostics.Stopwatch;
 
 public class DebugScreen : MonoBehaviour
 {
@@ -47,10 +48,6 @@ public class DebugScreen : MonoBehaviour
     [SerializeField]
     private float _textUpdateRate = 0.1f;
 
-    [Tooltip("How many times per second the frame rate counter will be updated.")]
-    [SerializeField]
-    private float _frameRateUpdateRate = 0.25f;
-
     [Tooltip("How many times per second expensive debug info is updated.")]
     [SerializeField]
     private float _infrequentUpdateRate = 0.2f;
@@ -74,22 +71,10 @@ public class DebugScreen : MonoBehaviour
     private readonly StringBuilder _middleRightBuilder = new StringBuilder();
     private readonly StringBuilder _bottomRightBuilder = new StringBuilder();
 
-
-    // --- Profiler Recorders ---
-    // CPU Timings
-    private ProfilerRecorder _mainThreadTimeRecorder;
-    private ProfilerRecorder _renderThreadTimeRecorder;
-
-    // Memory
-    private ProfilerRecorder _gcAllocatedInFrameRecorder;
-    private ProfilerRecorder _systemUsedMemoryRecorder;
-    private ProfilerRecorder _gcReservedMemoryRecorder;
-
-    private bool _profilerRecordersAreValid;
-    private bool _didIEnableTheProfiler;
+    // --- Cached Conversion Factor ---
+    private static readonly double s_tickToMS = 1000.0 / Stopwatch.Frequency;
 
     // --- Cached Data (updated periodically) ---
-    private float _frameRate;
     private VoxelState? _groundVoxelState;
     private Vector3Int? _groundVoxelPos;
     private VoxelState? _targetVoxelState;
@@ -98,61 +83,10 @@ public class DebugScreen : MonoBehaviour
     [CanBeNull]
     private Chunk _currentChunk;
 
-    // Profiler data
-    private long _mainThreadTime;
-    private long _renderThreadTime;
-    private long _gcAllocatedInFrame;
-    private long _systemUsedMemory;
-    private long _gcReservedMemory;
-
     // --- Timers ---
     private float _textUpdateTimer;
-    private float _frameRateTimer;
     private float _infrequentUpdateTimer;
 
-    // OnEnable is called when the object becomes enabled and active.
-    private void OnEnable()
-    {
-        // For ProfilerRecorder to work, the Profiler needs to be enabled.
-        // This is often disabled in the editor unless the Profiler window is open.
-        // We can force it to be enabled.
-        if (!Profiler.enabled)
-        {
-            Profiler.enabled = true;
-            _didIEnableTheProfiler = true;
-        }
-
-        // Initialize CPU Recorders
-        _mainThreadTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Main Thread Frame Time");
-        _renderThreadTimeRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Render, "CPU Render Thread Frame Time");
-
-        // Initialize Memory Recorders
-        _gcAllocatedInFrameRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame");
-        _systemUsedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "System Used Memory");
-        _gcReservedMemoryRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Reserved Memory");
-
-        // Check that the main recorders were created successfully. They might not be in certain build types.
-        _profilerRecordersAreValid = _mainThreadTimeRecorder.Valid && _systemUsedMemoryRecorder.Valid;
-    }
-
-    // OnDisable is called when the behaviour becomes disabled or inactive.
-    private void OnDisable()
-    {
-        // Clean up the recorders when the object is disabled to prevent memory leaks.
-        _mainThreadTimeRecorder.Dispose();
-        _renderThreadTimeRecorder.Dispose();
-        _gcAllocatedInFrameRecorder.Dispose();
-        _systemUsedMemoryRecorder.Dispose();
-        _gcReservedMemoryRecorder.Dispose();
-
-        // Only disable the profiler if this script was the one that enabled it.
-        // This prevents the script from turning off the profiler if the user has the Profiler Window open.
-        if (_didIEnableTheProfiler)
-        {
-            Profiler.enabled = false;
-            _didIEnableTheProfiler = false;
-        }
-    }
 
     private void Start()
     {
@@ -178,13 +112,6 @@ public class DebugScreen : MonoBehaviour
     {
         // --- Timed Updates ---
         // Update expensive data on a timer to reduce per-frame cost.
-        _frameRateTimer += Time.unscaledDeltaTime;
-        if (_frameRateTimer >= _frameRateUpdateRate)
-        {
-            UpdateFrameRate();
-            _frameRateTimer = 0;
-        }
-
         _infrequentUpdateTimer += Time.deltaTime;
         if (_infrequentUpdateTimer >= _infrequentUpdateRate)
         {
@@ -219,13 +146,6 @@ public class DebugScreen : MonoBehaviour
         _bottomRightText.gameObject.SetActive(isFull);
     }
 
-    /// <summary>
-    /// Updates the cached frame rate.
-    /// </summary>
-    private void UpdateFrameRate()
-    {
-        _frameRate = 1f / Time.unscaledDeltaTime;
-    }
 
     /// <summary>
     /// Updates the cached data that should be updated infrequently due to their higher performance cost.
@@ -243,15 +163,6 @@ public class DebugScreen : MonoBehaviour
 
         // Update Current Chunk
         _currentChunk = _world.worldData.IsVoxelInWorld(playerPos) ? _world.GetChunkFromVector3(playerPos) : null;
-
-        // Update CPU times
-        _gcAllocatedInFrame = _mainThreadTimeRecorder.LastValue;
-        _renderThreadTime = _renderThreadTimeRecorder.LastValue;
-
-        // Update Memory
-        _gcAllocatedInFrame = _gcAllocatedInFrameRecorder.LastValue;
-        _gcReservedMemory = _gcReservedMemoryRecorder.LastValue;
-        _systemUsedMemory = _systemUsedMemoryRecorder.LastValue;
     }
 
     /// <summary>
@@ -316,7 +227,9 @@ public class DebugScreen : MonoBehaviour
 
         // --- General Info (Always Show) ---
         _topLeftBuilder.AppendLine("Minecraft Clone in Unity");
-        _topLeftBuilder.Append(Mathf.RoundToInt(_frameRate)).AppendLine(" fps");
+        PerformanceMonitor perf = PerformanceMonitor.Instance;
+        int wallFps = perf != null ? Mathf.RoundToInt(perf.WallFPS) : 0;
+        _topLeftBuilder.Append(wallFps).AppendLine(" fps");
 
         // Skip building the rest of the strings if we are in FPS Only mode
         if (CurrentMode == DebugMode.FPSOnly) return;
@@ -384,34 +297,65 @@ public class DebugScreen : MonoBehaviour
 
     private void PopulateTopRightBuilder()
     {
+        var perf = PerformanceMonitor.Instance;
+
         // --- Performance Info ---
         _topRightBuilder.AppendLine("PERFORMANCE:");
 
-        // Display profiler status and memory info
-        if (_profilerRecordersAreValid)
+        if (perf == null)
         {
-            // Display CPU times
-            _topRightBuilder.Append("CPU Main: ").AppendLine(FormatMilliseconds(_mainThreadTime));
-            _topRightBuilder.Append("CPU Render: ").AppendLine(FormatMilliseconds(_renderThreadTime));
-
-            // Display Memory
-            _topRightBuilder.Append("GC Alloc/frame: ").AppendLine(FormatBytes(_gcAllocatedInFrame));
-            _topRightBuilder.Append("GC Reserved Memory: ").AppendLine(FormatBytes(_gcReservedMemory));
-            _topRightBuilder.Append("System Memory: ").AppendLine(FormatBytes(_systemUsedMemory));
+            _topRightBuilder.AppendLine("PerformanceMonitor not found.");
         }
         else
         {
-            _topRightBuilder.AppendLine("Profiler recorders are invalid.");
+            // --- FPS & Frame Time ---
+            _topRightBuilder.Append("CPU FPS:  ").AppendLine(Mathf.RoundToInt(perf.CpuFPS).ToString());
+            _topRightBuilder.Append("Wall FPS: ").AppendLine(Mathf.RoundToInt(perf.WallFPS).ToString());
+            _topRightBuilder.Append("CPU Time:   ").AppendLine(FormatTicksAsMs(perf.CpuFrameTime.GetAverage()));
+            _topRightBuilder.Append("Wall Time:  ").AppendLine(FormatTicksAsMs(perf.WallFrameTime.GetAverage()));
+            _topRightBuilder.Append("Idle/Other: ").Append(perf.IdleTimeMs.ToString("F2")).AppendLine(" ms");
+            _topRightBuilder.AppendLine();
+
+            // --- Phase Breakdown ---
+            _topRightBuilder.AppendLine("--- CPU Phases ---");
+            _topRightBuilder.Append("FixedUpdate: ").AppendLine(FormatTicksAsMs(perf.FixedUpdateTime.GetAverage()));
+            _topRightBuilder.Append("Update:      ").AppendLine(FormatTicksAsMs(perf.UpdatePhaseTime.GetAverage()));
+            _topRightBuilder.Append("Coroutine:   ").AppendLine(FormatTicksAsMs(perf.CoroutinePhaseTime.GetAverage()));
+            _topRightBuilder.Append("LateUpdate:  ").AppendLine(FormatTicksAsMs(perf.LateUpdateTime.GetAverage()));
+            _topRightBuilder.Append("Render/GUI:  ").AppendLine(FormatTicksAsMs(perf.RenderTime.GetAverage()));
+            _topRightBuilder.AppendLine();
+
+            // --- Memory ---
+            _topRightBuilder.AppendLine("--- Memory ---");
+
+            // Unity Native Memory
+            long totalAllocated = Profiler.GetTotalAllocatedMemoryLong();
+            long totalReserved = Profiler.GetTotalReservedMemoryLong();
+            _topRightBuilder.Append("Native Alloc: ").AppendLine(FormatBytes(totalAllocated));
+            _topRightBuilder.Append("Native Rsvd:  ").AppendLine(FormatBytes(totalReserved));
+
+            // Managed GC Memory
+            long gcMemory = GC.GetTotalMemory(false);
+            _topRightBuilder.Append("Managed GC:   ").AppendLine(FormatBytes(gcMemory));
+
+            // GC Allocation per frame: directly shows how much managed garbage each frame produces.
+            // A high value here indicates excessive allocations that will trigger frequent GC collections.
+            _topRightBuilder.Append("GC Alloc/frame: ").AppendLine(FormatBytes(perf.GcAllocationPerFrame.GetAverage()));
+
+            // Read generational collections directly, offset by the session baseline.
+            for (int g = 0; g <= GC.MaxGeneration; g++)
+            {
+                int sessionHits = GC.CollectionCount(g) - perf.BaselineGcCounts[g];
+                _topRightBuilder.Append("GC Gen").Append(g).Append(" Hits: ").AppendLine(sessionHits.ToString());
+            }
         }
 
-        // Self-diagnostic line
-        _topRightBuilder.Append("Profiler Status: ").AppendLine(BoolToEnabledDisabledString(Profiler.enabled));
         _topRightBuilder.AppendLine();
 
         // --- Display Current Visualization Mode ---
         _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
         _topRightBuilder.Append("Mode (").Append(_input.GetBindingDisplayString(GameAction.CycleVisMode)).Append(" to cycle): ").AppendLine(_world.visualizationMode.ToString());
-        _topRightBuilder.AppendLine($" └ Unused in Pool: {_world.ChunkPool.PooledVisualizers}");
+        _topRightBuilder.AppendLine(" └ Unused in Pool: ").Append(_world.ChunkPool.PooledVisualizers);
 
         _topRightBuilder.AppendLine();
     }
@@ -484,13 +428,12 @@ public class DebugScreen : MonoBehaviour
     #region Formatting Methods
 
     /// <summary>
-    /// Formats a time in nanoseconds into a human-readable string in milliseconds.
+    /// Formats Stopwatch ticks into a human-readable milliseconds string.
     /// </summary>
-    private static string FormatMilliseconds(long nanoseconds)
+    private static string FormatTicksAsMs(long ticks)
     {
-        // 1 Millisecond = 1,000,000 Nanoseconds
-        double milliseconds = nanoseconds / 1_000_000.0;
-        return $"{milliseconds:F2} ms"; // Format to 2 decimal places
+        double milliseconds = ticks * s_tickToMS;
+        return $"{milliseconds:F2} ms";
     }
 
     /// <summary>
@@ -545,8 +488,6 @@ public class DebugScreen : MonoBehaviour
             _ => "North",
         };
     }
-
-    private static string BoolToEnabledDisabledString(bool value) => value ? "Enabled" : "Disabled";
 
     private static string BoolToYesNoString(bool value) => value ? "Yes" : "No";
 

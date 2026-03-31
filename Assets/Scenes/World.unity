@@ -2184,6 +2184,7 @@ GameObject:
   - component: {fileID: 884714900}
   - component: {fileID: 884714902}
   - component: {fileID: 884714903}
+  - component: {fileID: 884714904}
   m_Layer: 5
   m_Name: Debug Screen
   m_TagString: Untagged
@@ -2245,8 +2246,19 @@ MonoBehaviour:
   _middleRightText: {fileID: 1107507290}
   _bottomRightText: {fileID: 806899027}
   _textUpdateRate: 0.1
-  _frameRateUpdateRate: 0.25
   _infrequentUpdateRate: 0.2
+--- !u!114 &884714904
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 884714899}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7268af625dc1e9646b8f5ca594c705d3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PerformanceMonitor
 --- !u!1 &963194225
 GameObject:
   m_ObjectHideFlags: 0

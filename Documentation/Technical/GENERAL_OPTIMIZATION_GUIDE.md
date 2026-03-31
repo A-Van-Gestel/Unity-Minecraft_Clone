@@ -332,8 +332,9 @@ void HandleError() { /* Expensive string formatting */ }
    Debug.Log($"Time: {sw.ElapsedMilliseconds} ms");
    ```
 
-2. **ProfilerRecorder:**
-   Used in `DebugScreen.cs`. Gives real-time stats in builds with zero overhead.
+2. **PerformanceMonitor (Stopwatch-Based):**
+   `PerformanceMonitor.cs` uses `System.Diagnostics.Stopwatch` with a dual-hook pattern (`[DefaultExecutionOrder(int.MinValue)]` / `int.MaxValue`) to measure per-phase CPU timings (FixedUpdate, Update, Coroutine, LateUpdate, Render).
+   This replaced the earlier `ProfilerRecorder`-based approach, which returned invalid data in non-Development Release builds.
 
 3. **Unity Profiler:**
     * **Warning:** "Deep Profile" mode adds massive overhead to every method call. It distorts timing data, making small, frequent functions look like bottlenecks. Use **Standard Profiling** first. Only use Deep Profile if you are completely lost.

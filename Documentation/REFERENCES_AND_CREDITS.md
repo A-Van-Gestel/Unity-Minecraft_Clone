@@ -11,6 +11,7 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 | **FastNoiseLite**           | [Auburn](https://github.com/Auburn/FastNoiseLite) (Burst port by Project Developer)                  | MIT                                    | Burst-compatible port of the v1.1 C# version used for high-performance `Standard` terrain generation. Located at `Assets/Scripts/Libraries/FastNoiseLite.cs`. |
 | **Perlin Noise**            | Unity Technologies                                                                                   | Proprietary                            | Used via `Mathf.PerlinNoise` for `Legacy` world terrain generation.                                                                                           |
 | **Spiral Loop**             | [Unity Discussions](https://discussions.unity.com/t/how-to-generate-a-grid-from-the-center/171186/2) | N/A                                    | Math logic for chunk loading iteration in a Spiral Loop.                                                                                                      |
+| **FPSCounter**              | [ManlyMarco](https://github.com/ManlyMarco/FPSCounter)                                               | Apache License 2.0                     | Implementation reference for the `PerformanceMonitor` dual-hook `Stopwatch` architecture and per-phase CPU timing methodology.                                |
 
 ## 🎨 Graphics & Textures
 
