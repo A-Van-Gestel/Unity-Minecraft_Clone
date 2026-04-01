@@ -2381,7 +2381,7 @@ MonoBehaviour:
   _middleRightText: {fileID: 1107507290}
   _bottomRightText: {fileID: 806899027}
   _perfGraph: {fileID: 137232506}
-  _memoryGraph: {fileID: 709005383}
+  _gcMemoryGraph: {fileID: 709005383}
   _textUpdateRate: 0.1
   _infrequentUpdateRate: 0.2
 --- !u!114 &884714904
