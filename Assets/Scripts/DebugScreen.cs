@@ -48,6 +48,10 @@ public class DebugScreen : MonoBehaviour
     [SerializeField]
     private GraphRenderer _perfGraph;
 
+    [Tooltip("The GraphRenderer used to draw GC memory allocations per frame.")]
+    [SerializeField]
+    private GraphRenderer _gcMemoryGraph;
+
 
     [Header("Update Rates")]
     [Tooltip("How many times per second the text UI is rebuilt and rendered (e.g. 0.1 = 10 times a second).")]
@@ -79,7 +83,7 @@ public class DebugScreen : MonoBehaviour
     private readonly StringBuilder _bottomRightBuilder = new StringBuilder();
 
     // --- Cached Conversion Factor ---
-    private static readonly double s_tickToMS = 1000.0 / Stopwatch.Frequency;
+    private static readonly double s_tickToMs = 1000.0 / Stopwatch.Frequency;
 
     // --- Cached Data (updated periodically) ---
     private VoxelState? _groundVoxelState;
@@ -128,6 +132,18 @@ public class DebugScreen : MonoBehaviour
                 HistorySize = 200
             });
         }
+
+        if (_gcMemoryGraph != null)
+        {
+            _gcMemoryGraph.Initialize(new GraphRenderer.GraphConfig
+            {
+                Lines = new[]
+                {
+                    new GraphRenderer.LineEntry { Color = new Color(1f, 0.5f, 0f), Name = "GC Alloc / Frame" }
+                },
+                HistorySize = 200,
+            });
+        }
     }
 
     private void Update()
@@ -157,13 +173,23 @@ public class DebugScreen : MonoBehaviour
             if (_graphUpdateTimer >= 0.05f)
             {
                 PerformanceMonitor perf = PerformanceMonitor.Instance;
-                if (perf != null && _perfGraph != null)
+                if (perf != null)
                 {
-                    _perfGraph.AddSamples(new[]
+                    if (_perfGraph != null)
                     {
-                        (float)(perf.CpuFrameTime.GetAverage() * s_tickToMS),
-                        (float)(perf.WallFrameTime.GetAverage() * s_tickToMS)
-                    });
+                        _perfGraph.AddSamples(new[]
+                        {
+                            (float)(perf.CpuFrameTime.GetAverage() * s_tickToMs),
+                            (float)(perf.WallFrameTime.GetAverage() * s_tickToMs)
+                        });
+                    }
+
+                    if (_gcMemoryGraph != null)
+                    {
+                        // Convert bytes to kilobytes
+                        float gcAllocKb = perf.GcAllocationPerFrame.GetAverage() / 1024f;
+                        _gcMemoryGraph.AddSamples(new[] { gcAllocKb });
+                    }
                 }
 
                 _graphUpdateTimer = 0f;
@@ -187,6 +213,7 @@ public class DebugScreen : MonoBehaviour
         _bottomLeftText.gameObject.SetActive(isFull);
         _topRightText.gameObject.SetActive(showPerf);
         if (_perfGraph != null) _perfGraph.gameObject.SetActive(showPerf);
+        if (_gcMemoryGraph != null) _gcMemoryGraph.gameObject.SetActive(showPerf);
         _middleRightText.gameObject.SetActive(isFull);
         _bottomRightText.gameObject.SetActive(isFull);
     }
@@ -486,7 +513,7 @@ public class DebugScreen : MonoBehaviour
     /// </summary>
     private static string FormatTicksAsMs(long ticks)
     {
-        double milliseconds = ticks * s_tickToMS;
+        double milliseconds = ticks * s_tickToMs;
         return $"{milliseconds:F2} ms";
     }
 
