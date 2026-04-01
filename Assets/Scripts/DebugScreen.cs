@@ -97,7 +97,38 @@ public class DebugScreen : MonoBehaviour
     // --- Timers ---
     private float _textUpdateTimer;
     private float _infrequentUpdateTimer;
-    private float _graphUpdateTimer;
+
+
+    private void Awake()
+    {
+        // Initialize graphs here so they are ready before OnEnable triggers Sync
+        int historySize = PerformanceMonitor.Instance != null ? PerformanceMonitor.Instance.HistorySize : 200;
+
+        if (_perfGraph != null)
+        {
+            _perfGraph.Initialize(new GraphRenderer.GraphConfig
+            {
+                Lines = new[]
+                {
+                    new GraphRenderer.LineEntry { Color = Color.cyan, Name = "CPU Time" },
+                    new GraphRenderer.LineEntry { Color = Color.red, Name = "Wall Time" },
+                },
+                HistorySize = historySize,
+            });
+        }
+
+        if (_gcMemoryGraph != null)
+        {
+            _gcMemoryGraph.Initialize(new GraphRenderer.GraphConfig
+            {
+                Lines = new[]
+                {
+                    new GraphRenderer.LineEntry { Color = new Color(1f, 0.5f, 0f), Name = "GC Alloc / Frame" },
+                },
+                HistorySize = historySize,
+            });
+        }
+    }
 
     private void Start()
     {
@@ -117,32 +148,22 @@ public class DebugScreen : MonoBehaviour
             Debug.LogError("One or more TextMeshProUGUI references are not set in the DebugScreen inspector!", this);
             enabled = false;
         }
+    }
 
-        // Initialize Performance Graph with Cyan (CPU) and Red (Wall) lines.
-        if (_perfGraph != null)
+    private void OnEnable()
+    {
+        if (PerformanceMonitor.Instance != null)
         {
-            // Graph
-            _perfGraph.Initialize(new GraphRenderer.GraphConfig
-            {
-                Lines = new[]
-                {
-                    new GraphRenderer.LineEntry { Color = Color.cyan, Name = "CPU Time" },
-                    new GraphRenderer.LineEntry { Color = Color.red, Name = "Wall Time" }
-                },
-                HistorySize = 200
-            });
+            PerformanceMonitor.Instance.OnMetricsSampled += HandleNewMetrics;
+            SyncGraphsWithHistory();
         }
+    }
 
-        if (_gcMemoryGraph != null)
+    private void OnDisable()
+    {
+        if (PerformanceMonitor.Instance != null)
         {
-            _gcMemoryGraph.Initialize(new GraphRenderer.GraphConfig
-            {
-                Lines = new[]
-                {
-                    new GraphRenderer.LineEntry { Color = new Color(1f, 0.5f, 0f), Name = "GC Alloc / Frame" }
-                },
-                HistorySize = 200,
-            });
+            PerformanceMonitor.Instance.OnMetricsSampled -= HandleNewMetrics;
         }
     }
 
@@ -165,35 +186,46 @@ public class DebugScreen : MonoBehaviour
             BuildDebugStrings();
             _textUpdateTimer = 0;
         }
+    }
 
-        // --- Graph Update (Throttled 20Hz) ---
+    private void HandleNewMetrics(PerformanceMonitor.FrameMetricSnapshot snapshot)
+    {
         if (CurrentMode is DebugMode.Performance or DebugMode.Full)
         {
-            _graphUpdateTimer += Time.unscaledDeltaTime;
-            if (_graphUpdateTimer >= 0.05f)
+            if (_perfGraph != null && _perfGraph.gameObject.activeSelf)
+                _perfGraph.AddSamples(new[] { snapshot.CpuTimeMs, snapshot.WallTimeMs });
+
+            if (_gcMemoryGraph != null && _gcMemoryGraph.gameObject.activeSelf)
+                _gcMemoryGraph.AddSamples(new[] { snapshot.GcAllocKb });
+        }
+    }
+
+    private void SyncGraphsWithHistory()
+    {
+        PerformanceMonitor perf = PerformanceMonitor.Instance;
+        if (perf == null) return;
+
+        if (_perfGraph != null && _perfGraph.gameObject.activeSelf)
+        {
+            float[,] perfHistory = new float[2, perf.HistorySize];
+            for (int i = 0; i < perf.HistorySize; i++)
             {
-                PerformanceMonitor perf = PerformanceMonitor.Instance;
-                if (perf != null)
-                {
-                    if (_perfGraph != null)
-                    {
-                        _perfGraph.AddSamples(new[]
-                        {
-                            (float)(perf.CpuFrameTime.GetAverage() * s_tickToMs),
-                            (float)(perf.WallFrameTime.GetAverage() * s_tickToMs)
-                        });
-                    }
-
-                    if (_gcMemoryGraph != null)
-                    {
-                        // Convert bytes to kilobytes
-                        float gcAllocKb = perf.GcAllocationPerFrame.GetAverage() / 1024f;
-                        _gcMemoryGraph.AddSamples(new[] { gcAllocKb });
-                    }
-                }
-
-                _graphUpdateTimer = 0f;
+                perfHistory[0, i] = perf.MetricsHistory[i].CpuTimeMs;
+                perfHistory[1, i] = perf.MetricsHistory[i].WallTimeMs;
             }
+
+            _perfGraph.InjectHistory(perfHistory, perf.HistoryHeadIndex, perf.HistoryPollRate);
+        }
+
+        if (_gcMemoryGraph != null && _gcMemoryGraph.gameObject.activeSelf)
+        {
+            float[,] gcHistory = new float[1, perf.HistorySize];
+            for (int i = 0; i < perf.HistorySize; i++)
+            {
+                gcHistory[0, i] = perf.MetricsHistory[i].GcAllocKb;
+            }
+
+            _gcMemoryGraph.InjectHistory(gcHistory, perf.HistoryHeadIndex, perf.HistoryPollRate);
         }
     }
 

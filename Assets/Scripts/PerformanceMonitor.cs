@@ -35,6 +35,47 @@ public class PerformanceMonitor : MonoBehaviour
     /// </summary>
     public static PerformanceMonitor Instance { get; private set; }
 
+    /// <summary>
+    /// A chronological snapshot of all tracked performance metrics at a specific point in time.
+    /// </summary>
+    public struct FrameMetricSnapshot
+    {
+        /// <summary>The total time the CPU spent executing engine code during the frame.</summary>
+        public float CpuTimeMs;
+
+        /// <summary>The real-world wall clock time for the frame, including VSync and GPU idle time.</summary>
+        public float WallTimeMs;
+
+        /// <summary>The amount of managed GC memory allocated during the frame in Kilobytes.</summary>
+        public float GcAllocKb;
+    }
+
+    [Header("History Tracking")]
+    [Tooltip("How many seconds of history to keep in memory (Rolling Window).")]
+    [SerializeField]
+    private float _historyTimeframeSeconds = 10f;
+
+    [Tooltip("How often (in seconds) to capture a sample for the history graphs.")]
+    [SerializeField]
+    private float _historyPollRate = 0.05f;
+
+    public float HistoryPollRate => _historyPollRate;
+    public int HistorySize { get; private set; }
+    public int HistoryHeadIndex { get; private set; }
+
+    /// <summary>
+    /// The ring buffer containing the historical snapshots of performance metrics.
+    /// </summary>
+    public FrameMetricSnapshot[] MetricsHistory { get; private set; }
+
+    /// <summary>
+    /// Fired every time a new history snapshot is recorded.
+    /// </summary>
+    public event Action<FrameMetricSnapshot> OnMetricsSampled;
+
+    private float _historyTimer;
+    private static readonly double s_tickToMs = 1000.0 / Stopwatch.Frequency;
+
     // --- Phase Timings (Moving Averages of Stopwatch Ticks) ---
 
     /// <summary>Average time spent in the FixedUpdate phase (all iterations this frame).</summary>
@@ -127,6 +168,13 @@ public class PerformanceMonitor : MonoBehaviour
         _frameStopwatch = Stopwatch.StartNew();
         _lastGcMemory = GC.GetTotalMemory(false);
 
+        // --- Initialize History Buffers ---
+        _historyTimeframeSeconds = Mathf.Clamp(_historyTimeframeSeconds, 1f, 60f);
+        _historyPollRate = Mathf.Clamp(_historyPollRate, 0.01f, 1f);
+        HistorySize = Mathf.CeilToInt(_historyTimeframeSeconds / _historyPollRate);
+
+        MetricsHistory = new FrameMetricSnapshot[HistorySize];
+
         // Capture baseline GC counts for session-relative display in the Editor.
         // GC.CollectionCount returns process-lifetime totals, so we subtract these
         // baselines to show clean per-session metrics.
@@ -162,6 +210,7 @@ public class PerformanceMonitor : MonoBehaviour
     /// <see cref="_currentFrameCpuTicks"/>, restarts the stopwatch, and returns
     /// the sampled ticks.
     /// </summary>
+    /// <returns>The number of high-resolution stopwatch ticks accumulated since the last sample.</returns>
     private long SampleAndRestart()
     {
         long ticks = _phaseStopwatch.ElapsedTicks;
@@ -243,6 +292,26 @@ public class PerformanceMonitor : MonoBehaviour
             // GC collection occurred — we clamp to 0 for the allocation metric.
             GcAllocationPerFrame.Sample(Math.Max(0, delta));
             _lastGcMemory = currentGcMemory;
+
+            // --- HISTORY TRACKING ---
+            _historyTimer += Time.unscaledDeltaTime;
+            if (_historyTimer >= _historyPollRate)
+            {
+                _historyTimer = 0f;
+
+                FrameMetricSnapshot snapshot = new FrameMetricSnapshot
+                {
+                    CpuTimeMs = (float)(CpuFrameTime.GetAverage() * s_tickToMs),
+                    WallTimeMs = (float)(WallFrameTime.GetAverage() * s_tickToMs),
+                    GcAllocKb = GcAllocationPerFrame.GetAverage() / 1024f,
+                };
+
+                MetricsHistory[HistoryHeadIndex] = snapshot;
+                HistoryHeadIndex = (HistoryHeadIndex + 1) % HistorySize;
+
+                // Fire event with the bundled struct
+                OnMetricsSampled?.Invoke(snapshot);
+            }
         }
         // ReSharper disable once IteratorNeverReturns
     }

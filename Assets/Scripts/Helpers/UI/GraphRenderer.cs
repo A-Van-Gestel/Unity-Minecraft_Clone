@@ -75,8 +75,9 @@ namespace Helpers.UI
         private TMP_Text[] _xAxisLabels;
 
         /// <summary>
-        /// Initializes the graph with the provided configuration.
+        /// Initializes the graph setup by pre-allocating the history ring buffer and generating text UI labels based on the given configuration.
         /// </summary>
+        /// <param name="config">The structural configuration containing line definitions, colors, names, and total history size.</param>
         public void Initialize(GraphConfig config)
         {
             _lines = config.Lines;
@@ -182,8 +183,90 @@ namespace Helpers.UI
         }
 
         /// <summary>
-        /// Appends a new set of data samples to the rightmost edge of the graph and flags it for a visual update.
+        /// Injects a pre-populated history buffer and syncs the graph to a specific head index.
+        /// Useful when the graph was disabled but data was still being recorded elsewhere, allowing it to instantly snap to the correct layout on awake.
         /// </summary>
+        /// <param name="history">The 2D history float array structured as [lineIndex, historySampleIndex].</param>
+        /// <param name="headIndex">The currently active ring buffer head index to continue appending from.</param>
+        /// <param name="inputSampleRate">The data poll rate in seconds to correctly configure the X-Axis timeline labels.</param>
+        public void InjectHistory(float[,] history, int headIndex, float inputSampleRate)
+        {
+            if (!_isInitialized) return;
+
+            int newLineCount = history.GetLength(0);
+            int newHistorySize = history.GetLength(1);
+
+            if (_lineCount != newLineCount || _historySize != newHistorySize)
+            {
+                Debug.LogWarning("InjectHistory dimensions must match the initialized GraphConfig bounds.");
+                return;
+            }
+
+            _history = history;
+            _headIndex = headIndex;
+            sampleRate = inputSampleRate;
+
+            // Force immediate recalculation of max bounds without anti-jitter smoothing
+            float absoluteMax = 0.0001f;
+            for (int i = 0; i < _lineCount; i++)
+            {
+                for (int j = 0; j < _historySize; j++)
+                {
+                    if (_history[i, j] > absoluteMax)
+                    {
+                        absoluteMax = _history[i, j];
+                    }
+                }
+            }
+
+            _currentVisualMaxY = absoluteMax * 1.1f;
+
+            // Update Dynamic Y-Axis Labels
+            if (_gridLabels != null)
+            {
+                float rectHeight = rectTransform.rect.height - (padding.y * 2) - bottomLegendSpace;
+                int totalGridLines = gridLineCount + 1;
+
+                for (int i = 0; i < totalGridLines; i++)
+                {
+                    float fraction = (float)(i + 1) / totalGridLines;
+                    float val = _currentVisualMaxY * fraction;
+
+                    _gridLabels[i].text = string.Format(yFormat, val);
+
+                    float py = padding.y + bottomLegendSpace + (fraction * rectHeight);
+                    _gridLabels[i].rectTransform.anchoredPosition = new Vector2(padding.x - 5f, py);
+                }
+            }
+
+            // Update Dynamic X-Axis Labels
+            if (_xAxisLabels != null)
+            {
+                float graphWidth = rectTransform.rect.width - (padding.x * 2);
+                int totalXLabels = xGridLineCount + 2;
+                float fullTimeSpan = _historySize * sampleRate;
+
+                for (int i = 0; i < totalXLabels; i++)
+                {
+                    float fraction = (float)i / (totalXLabels - 1);
+                    float px = padding.x + (fraction * graphWidth);
+
+                    // Hang slightly beneath the bottom rendered line of the graph
+                    _xAxisLabels[i].rectTransform.anchoredPosition = new Vector2(px, padding.y + bottomLegendSpace - 2f);
+
+                    float timeVal = -fullTimeSpan + (fraction * fullTimeSpan);
+                    _xAxisLabels[i].text = string.Format(xFormat, timeVal);
+                }
+            }
+
+            SetVerticesDirty();
+        }
+
+        /// <summary>
+        /// Appends a new set of data samples to the rightmost edge of the graph and flags the geometry for a visual UI update.
+        /// Automatically recalculates bounding maximums and anti-jitter smoothing.
+        /// </summary>
+        /// <param name="samples">The raw float metrics for the current frame. The array length must exactly match the number of lines configured in <see cref="Initialize"/>.</param>
         public void AddSamples(float[] samples)
         {
             if (!_isInitialized || samples.Length != _lineCount) return;
