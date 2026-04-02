@@ -340,6 +340,10 @@ public class DebugScreen : MonoBehaviour
 
         // --- General Info (Always Show) ---
         _topLeftBuilder.AppendLine("Minecraft Clone in Unity");
+        if (CurrentMode != DebugMode.FPSOnly)
+        {
+            _topLeftBuilder.Append("Graphics API: ").AppendLine(SystemInfo.graphicsDeviceType.ToString());
+        }
         PerformanceMonitor perf = PerformanceMonitor.Instance;
         int wallFps = perf != null ? Mathf.RoundToInt(perf.WallFPS) : 0;
         _topLeftBuilder.Append(wallFps).AppendLine(" fps");
