@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using Data;
-using Jobs;
 using Jobs.Data;
 using Unity.Collections;
 using Unity.Jobs;
@@ -275,41 +274,12 @@ namespace Benchmarks
         /// <returns>A GenerationJobData struct containing the job handle and output data containers.</returns>
         private GenerationJobData ScheduleBenchmarkGeneration(ChunkCoord chunkCoord, BenchmarkMode benchmarkMode, int parallelBatchSize)
         {
-            NativeQueue<VoxelMod> modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
-            ChunkGenerationJob job = new ChunkGenerationJob
-            {
-                Seed = VoxelData.Seed,
-                ChunkPosition = chunkCoord.ToVoxelOrigin(),
-                BlockTypes = _world.JobDataManager.BlockTypesJobData,
-                Biomes = _world.JobDataManager.BiomesJobData,
-                AllLodes = _world.JobDataManager.AllLodesJobData,
-                OutputMap = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent),
-                OutputHeightMap = new NativeArray<ushort>(VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent),
-                Modifications = modificationsQueue.AsParallelWriter(),
-            };
-
-            JobHandle handle;
-            const int totalColumns = VoxelData.ChunkWidth * VoxelData.ChunkWidth;
-
-            if (benchmarkMode == BenchmarkMode.Parallel)
-            {
-                // Schedule job to run on multiple worker threads.
-                handle = job.ScheduleParallelByRef(totalColumns, parallelBatchSize, default);
-            }
-            else // Serial
-            {
-                // Schedule job to run all iterations sequentially on a single worker thread.
-                handle = job.ScheduleByRef(totalColumns, default);
-            }
-
-            // Return the data needed for completion and cleanup.
-            return new GenerationJobData
-            {
-                Handle = handle,
-                Map = job.OutputMap,
-                HeightMap = job.OutputHeightMap,
-                Mods = modificationsQueue,
-            };
+            // Delegate to WorldJobManager's active generator strategy for benchmarking.
+            // This measures the actual generation path (Legacy or Standard) that the world uses.
+            // The serial/parallel mode distinction is not applicable when delegating —
+            // the generator always uses its own preferred scheduling mode.
+            GenerationJobData jobData = _world.JobManager.ScheduleBenchmarkGeneration(chunkCoord);
+            return jobData;
         }
 
         /// <summary>

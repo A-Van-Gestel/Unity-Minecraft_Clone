@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Data;
 using Data.JobData;
 using Data.NativeData;
+using Data.WorldTypes;
 using DebugVisualizations;
 using Helpers;
 using JetBrains.Annotations;
@@ -28,8 +29,16 @@ public class World : MonoBehaviour
 {
     public Settings settings;
 
-    [Header("World Generation Values")]
-    public BiomeAttributes[] biomes;
+    [Header("World Configuration")]
+    [SerializeField]
+    [Tooltip("The registry that maps WorldTypeIDs to their definitions. Must be assigned in the Inspector.")]
+    private WorldTypeRegistry worldTypeRegistry;
+
+    /// <summary>
+    /// The resolved world type definition for the current session.
+    /// Set during <see cref="StartWorld"/> after determining the world type from save data or UI selection.
+    /// </summary>
+    public WorldTypeDefinition ActiveWorldType { get; private set; }
 
     [Header("Lighting")]
     [Range(0f, 1f)]
@@ -169,14 +178,13 @@ public class World : MonoBehaviour
             Instance = this;
             appSaveDataPath = Application.persistentDataPath;
 
-            // Initialize World Job Manager
-            JobManager = new WorldJobManager(this);
+            // NOTE: JobManager is now created in StartWorld() after the world type is resolved.
 
             // Initialize Pool Manager
             ChunkPool = new ChunkPoolManager(transform);
 
-            // --- Prepare Job-Safe Data ---
-            PrepareJobData();
+            // --- Prepare Job-Safe Data (Block Types & Custom Meshes only — biomes are owned by the generator) ---
+            PrepareGlobalJobData();
         }
     }
 
@@ -230,40 +238,15 @@ public class World : MonoBehaviour
     // Cleanup for NativeArrays
     private void OnDestroy()
     {
-        // 1. Complete any running jobs immediately. This is crucial.
-        //    Failing to do this before disposing their data will cause errors.
-        // -- World generation jobs --
-        foreach (GenerationJobData job in JobManager.generationJobs.Values)
-        {
-            job.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
-            job.Dispose();
-        }
-
-        JobManager.generationJobs.Clear();
-
-        // -- Mesh generation jobs --
-        foreach ((JobHandle handle, MeshDataJobOutput meshData) job in JobManager.meshJobs.Values) // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
-        {
-            job.handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
-            job.meshData.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
-        }
-
-        JobManager.meshJobs.Clear();
-
-        // -- Lighting jobs --
-        foreach (LightingJobData jobData in JobManager.lightingJobs.Values)
-        {
-            jobData.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
-            jobData.Dispose();
-        }
-
-        JobManager.lightingJobs.Clear();
+        // 1. Complete any running jobs and dispose the generator strategy.
+        //    WorldJobManager.Dispose() handles all job completion and NativeArray disposal.
+        JobManager?.Dispose();
 
         // 2. Dispose of the persistent global data.
-        JobDataManager.Dispose();
+        JobDataManager?.Dispose();
 
         // 3. Dispose of fluid vertex templates.
-        FluidVertexTemplates.Dispose();
+        FluidVertexTemplates?.Dispose();
 
         // --- Save system ---
         // Ensure storage is flushed even if OnApplicationQuit didn't run
@@ -361,6 +344,7 @@ public class World : MonoBehaviour
 
         // 3. Load Global Metadata (Level.dat & Pending Mods)
         // Only load if it's NOT a new game AND Persistence is actually enabled.
+        WorldTypeID loadedWorldType = WorldTypeID.Legacy; // Default for old saves / new legacy games
         if (!isNewGame && settings.EnablePersistence)
         {
             // Load Pending Mods
@@ -375,11 +359,30 @@ public class World : MonoBehaviour
                 SaveSystem.LoadWorldGameState(this, metadata);
                 VoxelData.Seed = metadata.seed; // Re-affirm seed from save just in case
                 worldData.seed = metadata.seed;
+                loadedWorldType = metadata.worldType;
             }
         }
 
         // Initialize world seed
         Random.InitState(VoxelData.Seed);
+
+        // --- DETERMINE WORLD TYPE ---
+        WorldTypeID typeToLoad = isNewGame
+            ? WorldLaunchState.SelectedWorldType
+            : loadedWorldType;
+
+        // Safe fallback for unimplemented types
+        if (typeToLoad == WorldTypeID.Amplified)
+        {
+            Debug.LogWarning("[World] Amplified world type is not yet implemented. Falling back to Standard.");
+            typeToLoad = WorldTypeID.Standard;
+        }
+
+        ActiveWorldType = worldTypeRegistry.GetWorldType(typeToLoad);
+        Debug.Log($"[World] Active World Type: {ActiveWorldType.DisplayName} (ID: {ActiveWorldType.TypeID})");
+
+        // Initialize World Job Manager with the resolved world type strategy
+        JobManager = new WorldJobManager(this, ActiveWorldType, JobDataManager);
 
         // Initialize global shader properties
         Shader.SetGlobalFloat(s_shaderMinGlobalLightLevel, VoxelData.MinLightLevel);
@@ -1037,38 +1040,12 @@ public class World : MonoBehaviour
     }
 
     // --- JOB-RELATED METHODS ---
-    private void PrepareJobData()
+    private void PrepareGlobalJobData()
     {
-        // --- Biomes: Biome and Lode ---
-        // Pass 1: Calculate the total number of lodes across all biomes.
-        int totalLodeCount = 0;
-        foreach (BiomeAttributes biome in biomes)
-        {
-            totalLodeCount += biome.lodes.Length;
-        }
-
-        // Pass 2: Allocate memory and populate the flattened arrays.
-        NativeArray<BiomeAttributesJobData> biomesJobData = new NativeArray<BiomeAttributesJobData>(biomes.Length, Allocator.Persistent);
-        NativeArray<LodeJobData> allLodesJobData = new NativeArray<LodeJobData>(totalLodeCount, Allocator.Persistent);
-
-        int currentLodeIndex = 0;
-        for (int i = 0; i < biomes.Length; i++)
-        {
-            // Copy the lodes for the current biome into the single large array.
-            for (int j = 0; j < biomes[i].lodes.Length; j++)
-            {
-                Lode lode = biomes[i].lodes[j];
-                allLodesJobData[currentLodeIndex + j] = new LodeJobData(lode);
-            }
-
-            // Populate the biome data, including the start index and count for its lodes.
-            biomesJobData[i] = new BiomeAttributesJobData(biomes[i], currentLodeIndex);
-
-            // Advance the master lode index for the next biome.
-            currentLodeIndex += biomes[i].lodes.Length;
-        }
-
         // --- Block Types & Custom Meshes ---
+        // Biome and Lode data is now owned by each IChunkGenerator implementation,
+        // allocated during IChunkGenerator.Initialize().
+
         // --- Step 1: Collect all unique custom mesh assets
         List<VoxelMeshData> uniqueCustomMeshes = new List<VoxelMeshData>();
         foreach (BlockType blockType in blockDatabase.blockTypes)
@@ -1137,8 +1114,6 @@ public class World : MonoBehaviour
 
         // --- Step 5: Create the final JobDataManager ---
         JobDataManager = new JobDataManager(
-            biomesJobData,
-            allLodesJobData,
             blockTypesJobData,
             customMeshesJobData,
             customFacesJobData,
@@ -2575,8 +2550,7 @@ public class World : MonoBehaviour
         for (int i = yMax; i > 0; i--)
         {
             Vector3Int currentVoxel = new Vector3Int(x, i, z);
-            byte voxelBlockId = WorldGen.GetVoxel(currentVoxel, VoxelData.Seed, JobDataManager.BiomesJobData,
-                JobDataManager.AllLodesJobData);
+            byte voxelBlockId = JobManager.GetVoxel(currentVoxel);
             if (!blockDatabase.blockTypes[voxelBlockId].isSolid) continue;
             Debug.Log($"Highest voxel in chunk {chunkCoord.X} / {chunkCoord.Z} is {currentVoxel}.");
             return currentVoxel;

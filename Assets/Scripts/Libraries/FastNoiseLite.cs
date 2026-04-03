@@ -11,7 +11,9 @@ namespace Libraries
     /// Original Author: Jordan Peck (Auburn)
     /// Burst Port: Adapted for Unity 6.2+
     /// </summary>
-    [BurstCompile]
+    // NOTE: [BurstCompile] was intentionally removed from this struct declaration.
+    // The attribute only has effect on IJob* structs and static methods — on a plain struct it is a no-op.
+    // FastNoiseLite is Burst-compatible by virtue of being fully blittable (72 bytes, 18 value-type fields).
     [SuppressMessage("ReSharper", "InconsistentNaming")]
     [SuppressMessage("ReSharper", "PrivateFieldCanBeConvertedToLocalVariable")]
     public struct FastNoiseLite

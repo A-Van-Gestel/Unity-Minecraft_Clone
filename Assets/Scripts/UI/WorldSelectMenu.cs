@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Data;
+using Data.WorldTypes;
 using Helpers;
 using Serialization;
 using Serialization.Migration;
@@ -49,6 +50,9 @@ namespace UI
         public TMP_InputField newWorldNameInput;
 
         public TMP_InputField seedInput;
+
+        [Tooltip("Dropdown for selecting the world generation type (Legacy, Standard, etc.).")]
+        public TMP_Dropdown worldTypeDropdown;
 
         private WorldSaveData _selectedWorld;
         private List<WorldListItem> _spawnedItems = new List<WorldListItem>();
@@ -276,6 +280,12 @@ namespace UI
             SwitchToSelectMode();
         }
 
+        /// <summary>
+        /// Lookup table mapping dropdown option indices to WorldTypeIDs.
+        /// Must match the order of options configured on the TMP_Dropdown in the Unity scene.
+        /// </summary>
+        private static readonly WorldTypeID[] s_dropdownMapping = { WorldTypeID.Legacy, WorldTypeID.Standard };
+
         public void OnConfirmCreateClicked()
         {
             string worldName = newWorldNameInput.text;
@@ -288,6 +298,16 @@ namespace UI
             WorldLaunchState.WorldName = worldName;
             WorldLaunchState.Seed = seed;
             WorldLaunchState.IsNewGame = true;
+
+            // Map dropdown selection to WorldTypeID using a safe lookup array
+            if (worldTypeDropdown != null && worldTypeDropdown.value < s_dropdownMapping.Length)
+            {
+                WorldLaunchState.SelectedWorldType = s_dropdownMapping[worldTypeDropdown.value];
+            }
+            else
+            {
+                WorldLaunchState.SelectedWorldType = WorldTypeID.Standard; // Default for new worlds
+            }
 
             LoadGameScene();
         }

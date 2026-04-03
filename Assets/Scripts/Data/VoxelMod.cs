@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using UnityEngine;
 
 namespace Data
@@ -12,6 +13,7 @@ namespace Data
         public ushort ID;
         public byte Orientation;
         public byte FluidLevel;
+        [MarshalAs(UnmanagedType.U1)]
         public bool ImmediateUpdate;
 
         /// <summary>

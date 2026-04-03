@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Data.WorldTypes;
 using Serialization;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -11,7 +12,8 @@ public static class SaveSystem
     //          All V1 worlds are automatically migrated by MigrationV1ToV2RegionRepack.
     // v2 → v3: Removed bug where 'IsEmpty' sections (all-air w/ light) were skipped.
     //          Migration triggers full initial lighting job for existing chunks to restore sky & cave light.
-    public const int CURRENT_VERSION = 3;
+    // v3 → v4: Added WorldType metadata to level.dat. See Migration_v3_to_v4_WorldTypes.cs.
+    public const int CURRENT_VERSION = 4;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.
@@ -46,6 +48,7 @@ public static class SaveSystem
             version = CURRENT_VERSION,
             worldName = worldName,
             seed = world.worldData.seed,
+            worldType = world.ActiveWorldType != null ? world.ActiveWorldType.TypeID : WorldTypeID.Legacy,
             creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.Now.Ticks,
             lastPlayed = DateTime.Now.Ticks,
 

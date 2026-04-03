@@ -1,0 +1,103 @@
+﻿%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 315235deccdab354db2e60ccb94ed992, type: 3}
+  m_Name: Mountain
+  m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
+  TerrainNoiseConfig:
+    SeedOffset: -231
+    Frequency: 0.01          # Legacy terrainScale 0.16 / 16
+    NoiseType: 3             # Perlin
+    RotationType3D: 0
+    FractalType: 0
+    Octaves: 1
+    Gain: 0.5
+    Lacunarity: 2.0
+    WeightedStrength: 0
+    PingPongStrength: 2.0
+    CellularDistanceFunction: 0
+    CellularReturnType: 0
+    CellularJitter: 1.0
+  BiomeWeightNoiseConfig:
+    SeedOffset: -231
+    Frequency: 0.05          # Legacy scale 0.8 / 16
+    NoiseType: 2             # Cellular
+    RotationType3D: 0
+    FractalType: 0
+    Octaves: 1
+    Gain: 0.5
+    Lacunarity: 2.0
+    WeightedStrength: 0
+    PingPongStrength: 2.0
+    CellularDistanceFunction: 0
+    CellularReturnType: 0
+    CellularJitter: 1.0
+  BaseTerrainHeight: 97      # Legacy 42 + (110 / 2)
+  TerrainAmplitude: 55       # Legacy 110 / 2
+  SurfaceBlockID: 1          # Stone
+  SubSurfaceBlockID: 1       # Stone
+  MajorFloraPlacementThreshold: 1.0 # placeMajorFlora = 0 (0% chance)
+  MajorFloraIndex: 0
+  Lodes:
+  - nodeName: Dirt
+    blockID: 3
+    minHeight: 1
+    maxHeight: 255
+    noiseConfig:
+      SeedOffset: 0
+      Frequency: 0.00625
+      NoiseType: 3
+      RotationType3D: 0
+      FractalType: 0
+      Octaves: 1
+      Gain: 0.5
+      Lacunarity: 2.0
+      WeightedStrength: 0
+      PingPongStrength: 2.0
+      CellularDistanceFunction: 0
+      CellularReturnType: 0
+      CellularJitter: 1.0
+  - nodeName: Sand
+    blockID: 4
+    minHeight: 30
+    maxHeight: 60
+    noiseConfig:
+      SeedOffset: 500
+      Frequency: 0.0125
+      NoiseType: 3
+      RotationType3D: 0
+      FractalType: 0
+      Octaves: 1
+      Gain: 0.5
+      Lacunarity: 2.0
+      WeightedStrength: 0
+      PingPongStrength: 2.0
+      CellularDistanceFunction: 0
+      CellularReturnType: 0
+      CellularJitter: 1.0
+  - nodeName: Caves
+    blockID: 0
+    minHeight: 5
+    maxHeight: 60
+    noiseConfig:
+      SeedOffset: 43534
+      Frequency: 0.00625
+      NoiseType: 3
+      RotationType3D: 0
+      FractalType: 0
+      Octaves: 1
+      Gain: 0.5
+      Lacunarity: 2.0
+      WeightedStrength: 0
+      PingPongStrength: 2.0
+      CellularDistanceFunction: 0
+      CellularReturnType: 0
+      CellularJitter: 1.0

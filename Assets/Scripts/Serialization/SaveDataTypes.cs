@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Data.WorldTypes;
 using UnityEngine;
 
 namespace Serialization
@@ -18,6 +19,13 @@ namespace Serialization
         public int version = 1;
         public string worldName;
         public int seed;
+
+        /// <summary>
+        /// The world generation type. Defaults to Legacy (0) when the field is absent in old JSON files,
+        /// ensuring backwards compatibility with saves created before the World Type system was introduced.
+        /// </summary>
+        public WorldTypeID worldType;
+
         public long creationDate; // Ticks
         public long lastPlayed; // Ticks
 
