@@ -16,6 +16,7 @@ using JetBrains.Annotations;
 using Jobs;
 using Jobs.BurstData;
 using Jobs.Data;
+using Libraries;
 using MyBox;
 using Serialization;
 using Unity.Collections;
@@ -247,6 +248,9 @@ public class World : MonoBehaviour
 
         // 3. Dispose of fluid vertex templates.
         FluidVertexTemplates?.Dispose();
+
+        // 4. Dispose of FastNoiseLite unmanaged lookup tables.
+        FastNoiseLite.ShutdownLookupTables();
 
         // --- Save system ---
         // Ensure storage is flushed even if OnApplicationQuit didn't run

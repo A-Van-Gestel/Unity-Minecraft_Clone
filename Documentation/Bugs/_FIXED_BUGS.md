@@ -379,6 +379,18 @@ subsequent chunk modifications re-triggered the upward animation natively since 
 
 ## World Generation & Data
 
+### ~~02. `ProcessGenerationJobs` always uses `biomes[0]` for flora generation~~
+
+**Severity:** Bug
+**Files:** `WorldJobManager.cs` -> (Now handled by `IChunkGenerator.ExpandFlora`)
+**Fixed:** April 2026
+
+**Symptom:** In a multi-biome world, trees in non-default biomes received incorrect height distributions because the code hardcoded `_world.biomes[0].minHeight`.
+**Root Cause:** During chunk generation, tree flora placement logic always evaluated the 0-th index biome definition rather than checking the local biome at the tree's physical coordinates.
+**Fix:** Resolved during the Modular World Generation refactor. `WorldJobManager` now delegates this to `IChunkGenerator.ExpandFlora()`, which internally resolves the correctly mapped biome per local coordinate before handing off constraints to the `Structure` generator.
+
+---
+
 ### ~~04. `heightMap` uses `byte` which limits world height to 255~~
 
 **Severity:** Improvement  

@@ -37,10 +37,10 @@ namespace Jobs.Generators
             _blockTypesJobData = globalJobData.BlockTypesJobData;
 
             // --- Lookup Table Warmup (CRITICAL) ---
-            // Forces the FastNoiseLite SharedStatic lookup constructor to fire and pin gradient arrays
-            // via GCHandle on the main thread. Without this, the SharedStatic pointers are null when
+            // Forces the FastNoiseLite SharedStatic lookup tables to allocate unmanaged memory
+            // via UnsafeUtility on the main thread. Without this, the SharedStatic pointers are null when
             // the first Burst worker thread executes GradCoord, resulting in a native crash.
-            FastNoiseLite.Create(0).GetNoise(0f, 0f);
+            FastNoiseLite.InitializeLookupTables();
 
             // Cast BiomeBase[] → StandardBiomeAttributes[]
             _standardBiomes = new StandardBiomeAttributes[worldType.Biomes.Length];

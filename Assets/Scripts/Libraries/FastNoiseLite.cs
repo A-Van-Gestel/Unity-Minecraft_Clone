@@ -1,7 +1,8 @@
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Unity.Burst;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 
 namespace Libraries
@@ -1866,6 +1867,23 @@ namespace Libraries
         // ========================================================================
 
         /// <summary>
+        /// Allocates unmanaged memory for the lookup tables. Must be called on the main thread
+        /// before any Burst jobs use FastNoiseLite.
+        /// </summary>
+        public static void InitializeLookupTables()
+        {
+            Lookup.Initialize();
+        }
+
+        /// <summary>
+        /// Frees the unmanaged memory for the lookup tables. Should be called during application shutdown.
+        /// </summary>
+        public static void ShutdownLookupTables()
+        {
+            Lookup.Shutdown();
+        }
+
+        /// <summary>
         /// Holds pointers to the constant lookup tables.
         /// Accessed via SharedStatic to allow Burst to read global constant data.
         /// </summary>
@@ -1879,31 +1897,64 @@ namespace Libraries
 
         /// <summary>
         /// Static wrapper to initialize and hold the lookup pointers.
+        /// Uses <see cref="UnsafeUtility.Malloc"/> to allocate unmanaged memory, avoiding the
+        /// <c>GCHandle.AddrOfPinnedObject()</c> call that triggers Burst error BC1091 in static constructors.
         /// </summary>
         private static class Lookup
         {
             public static readonly SharedStatic<LookupPointers> Ref = SharedStatic<LookupPointers>.GetOrCreate<LookupPointers>();
             public static ref LookupPointers Data => ref Ref.Data;
 
-            // Arrays are kept in managed memory but pinned so Burst can read them via pointers
-            private static readonly GCHandle G2DHandle;
-            private static readonly GCHandle G3DHandle;
-            private static readonly GCHandle R2DHandle;
-            private static readonly GCHandle R3DHandle;
+            private static bool s_initialized;
 
-            static unsafe Lookup()
+            /// <summary>
+            /// Allocates unmanaged memory for the lookup tables and copies the managed source data into them.
+            /// Must be called on the main thread before any Burst jobs use <see cref="FastNoiseLite"/>.
+            /// Safe to call multiple times — subsequent calls are no-ops.
+            /// </summary>
+            public static unsafe void Initialize()
             {
-                // Pin the arrays so the garbage collector doesn't move them
-                G2DHandle = GCHandle.Alloc(Gradients2DArray, GCHandleType.Pinned);
-                G3DHandle = GCHandle.Alloc(Gradients3DArray, GCHandleType.Pinned);
-                R2DHandle = GCHandle.Alloc(RandVecs2DArray, GCHandleType.Pinned);
-                R3DHandle = GCHandle.Alloc(RandVecs3DArray, GCHandleType.Pinned);
+                if (s_initialized) return;
 
-                // Store pointers in SharedStatic for Burst access
-                Ref.Data.Gradients2D = (float*)G2DHandle.AddrOfPinnedObject();
-                Ref.Data.Gradients3D = (float*)G3DHandle.AddrOfPinnedObject();
-                Ref.Data.RandVecs2D = (float*)R2DHandle.AddrOfPinnedObject();
-                Ref.Data.RandVecs3D = (float*)R3DHandle.AddrOfPinnedObject();
+                Ref.Data.Gradients2D = AllocAndCopy(Gradients2DArray);
+                Ref.Data.Gradients3D = AllocAndCopy(Gradients3DArray);
+                Ref.Data.RandVecs2D = AllocAndCopy(RandVecs2DArray);
+                Ref.Data.RandVecs3D = AllocAndCopy(RandVecs3DArray);
+
+                s_initialized = true;
+            }
+
+            /// <summary>
+            /// Frees the unmanaged memory allocated by <see cref="Initialize"/>.
+            /// Must be called during application shutdown (e.g., from <c>World.OnDestroy</c>).
+            /// </summary>
+            public static unsafe void Shutdown()
+            {
+                if (!s_initialized) return;
+
+                UnsafeUtility.Free(Ref.Data.Gradients2D, Allocator.Persistent);
+                UnsafeUtility.Free(Ref.Data.Gradients3D, Allocator.Persistent);
+                UnsafeUtility.Free(Ref.Data.RandVecs2D, Allocator.Persistent);
+                UnsafeUtility.Free(Ref.Data.RandVecs3D, Allocator.Persistent);
+
+                Ref.Data = default;
+                s_initialized = false;
+            }
+
+            /// <summary>
+            /// Allocates a persistent unmanaged buffer and copies the source managed array into it.
+            /// </summary>
+            private static unsafe float* AllocAndCopy(float[] source)
+            {
+                long sizeInBytes = (long)source.Length * sizeof(float);
+                float* dst = (float*)UnsafeUtility.Malloc(sizeInBytes, UnsafeUtility.AlignOf<float>(), Allocator.Persistent);
+
+                fixed (float* src = source)
+                {
+                    UnsafeUtility.MemCpy(dst, src, sizeInBytes);
+                }
+
+                return dst;
             }
 
             // Raw Data Arrays
