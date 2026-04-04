@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 315235deccdab354db2e60ccb94ed992, type: 3}
   m_Name: Grasslands
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
+  BiomeName: Grasslands
   TerrainNoiseConfig:
     SeedOffset: 250
     Frequency: 0.015625
@@ -44,7 +45,8 @@ MonoBehaviour:
   TerrainAmplitude: 21
   SurfaceBlockID: 2
   SubSurfaceBlockID: 3
-  MajorFloraPlacementThreshold: 0.95
+  EnableMajorFlora: 1
+  MajorFloraPlacementThreshold: 0.997
   MajorFloraIndex: 0
   Lodes:
   - nodeName: Dirt

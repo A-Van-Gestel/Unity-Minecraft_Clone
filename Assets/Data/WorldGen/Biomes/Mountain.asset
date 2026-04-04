@@ -1,4 +1,4 @@
-﻿%YAML 1.1
+%YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
 --- !u!114 &11400000
 MonoBehaviour:
@@ -12,39 +12,41 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 315235deccdab354db2e60ccb94ed992, type: 3}
   m_Name: Mountain
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
+  BiomeName: Mountain
   TerrainNoiseConfig:
     SeedOffset: -231
-    Frequency: 0.01          # Legacy terrainScale 0.16 / 16
-    NoiseType: 3             # Perlin
+    Frequency: 0.01
+    NoiseType: 3
     RotationType3D: 0
     FractalType: 0
     Octaves: 1
     Gain: 0.5
-    Lacunarity: 2.0
+    Lacunarity: 2
     WeightedStrength: 0
-    PingPongStrength: 2.0
+    PingPongStrength: 2
     CellularDistanceFunction: 0
     CellularReturnType: 0
-    CellularJitter: 1.0
+    CellularJitter: 1
   BiomeWeightNoiseConfig:
     SeedOffset: -231
-    Frequency: 0.05          # Legacy scale 0.8 / 16
-    NoiseType: 2             # Cellular
+    Frequency: 0.05
+    NoiseType: 2
     RotationType3D: 0
     FractalType: 0
     Octaves: 1
     Gain: 0.5
-    Lacunarity: 2.0
+    Lacunarity: 2
     WeightedStrength: 0
-    PingPongStrength: 2.0
+    PingPongStrength: 2
     CellularDistanceFunction: 0
     CellularReturnType: 0
-    CellularJitter: 1.0
-  BaseTerrainHeight: 97      # Legacy 42 + (110 / 2)
-  TerrainAmplitude: 55       # Legacy 110 / 2
-  SurfaceBlockID: 1          # Stone
-  SubSurfaceBlockID: 1       # Stone
-  MajorFloraPlacementThreshold: 1.0 # placeMajorFlora = 0 (0% chance)
+    CellularJitter: 1
+  BaseTerrainHeight: 97
+  TerrainAmplitude: 55
+  SurfaceBlockID: 1
+  SubSurfaceBlockID: 1
+  EnableMajorFlora: 0
+  MajorFloraPlacementThreshold: 1
   MajorFloraIndex: 0
   Lodes:
   - nodeName: Dirt
@@ -59,12 +61,12 @@ MonoBehaviour:
       FractalType: 0
       Octaves: 1
       Gain: 0.5
-      Lacunarity: 2.0
+      Lacunarity: 2
       WeightedStrength: 0
-      PingPongStrength: 2.0
+      PingPongStrength: 2
       CellularDistanceFunction: 0
       CellularReturnType: 0
-      CellularJitter: 1.0
+      CellularJitter: 1
   - nodeName: Sand
     blockID: 4
     minHeight: 30
@@ -77,12 +79,12 @@ MonoBehaviour:
       FractalType: 0
       Octaves: 1
       Gain: 0.5
-      Lacunarity: 2.0
+      Lacunarity: 2
       WeightedStrength: 0
-      PingPongStrength: 2.0
+      PingPongStrength: 2
       CellularDistanceFunction: 0
       CellularReturnType: 0
-      CellularJitter: 1.0
+      CellularJitter: 1
   - nodeName: Caves
     blockID: 0
     minHeight: 5
@@ -95,9 +97,9 @@ MonoBehaviour:
       FractalType: 0
       Octaves: 1
       Gain: 0.5
-      Lacunarity: 2.0
+      Lacunarity: 2
       WeightedStrength: 0
-      PingPongStrength: 2.0
+      PingPongStrength: 2
       CellularDistanceFunction: 0
       CellularReturnType: 0
-      CellularJitter: 1.0
+      CellularJitter: 1

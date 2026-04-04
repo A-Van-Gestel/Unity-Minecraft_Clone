@@ -83,6 +83,7 @@ namespace Jobs.Generators
                     TerrainAmplitude = biome.TerrainAmplitude,
                     SurfaceBlockID = biome.SurfaceBlockID,
                     SubSurfaceBlockID = biome.SubSurfaceBlockID,
+                    EnableMajorFlora = biome.EnableMajorFlora,
                     MajorFloraPlacementThreshold = biome.MajorFloraPlacementThreshold,
                     MajorFloraIndex = biome.MajorFloraIndex,
                     LodeStartIndex = currentLodeIndex,

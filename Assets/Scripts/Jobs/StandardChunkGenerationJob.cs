@@ -175,7 +175,7 @@ namespace Jobs
                     uint deterministicSeed = math.max(1u, math.hash(new int3(globalX, globalZ, BaseSeed)));
                     var random = new Random(deterministicSeed);
 
-                    if (random.NextFloat() > biome.MajorFloraPlacementThreshold)
+                    if (biome.EnableMajorFlora && random.NextFloat() > biome.MajorFloraPlacementThreshold)
                     {
                         // Enqueue a flora root point for main-thread structure generation.
                         Modifications.Enqueue(new VoxelMod(

@@ -28,6 +28,9 @@ namespace Jobs.Data
         /// <summary>Block ID for the sub-surface layers (e.g., Dirt).</summary>
         public byte SubSurfaceBlockID;
 
+        /// <summary>If true, flora like trees or cacti will be generated in this biome.</summary>
+        public bool EnableMajorFlora;
+
         /// <summary>Threshold for flora placement. Higher = fewer trees.</summary>
         public float MajorFloraPlacementThreshold;
 

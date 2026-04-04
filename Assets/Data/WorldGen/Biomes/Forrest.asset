@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 315235deccdab354db2e60ccb94ed992, type: 3}
   m_Name: Forrest
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
+  BiomeName: Forrest
   TerrainNoiseConfig:
     SeedOffset: 875465
     Frequency: 0.01875
@@ -44,7 +45,8 @@ MonoBehaviour:
   TerrainAmplitude: 30
   SurfaceBlockID: 3
   SubSurfaceBlockID: 3
-  MajorFloraPlacementThreshold: 0.85
+  EnableMajorFlora: 1
+  MajorFloraPlacementThreshold: 0.95
   MajorFloraIndex: 0
   Lodes:
   - nodeName: Dirt

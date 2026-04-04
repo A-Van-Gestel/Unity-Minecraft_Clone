@@ -11,6 +11,9 @@ namespace Data.WorldTypes
     [CreateAssetMenu(fileName = "New Standard Biome", menuName = "Minecraft/Standard Biome Attributes")]
     public class StandardBiomeAttributes : BiomeBase
     {
+        [Tooltip("The name of the biome, mostly for debug purposes.")]
+        public string BiomeName = "New Biome";
+
         [Header("Terrain Noise")]
         [Tooltip("Noise configuration for the terrain heightmap.")]
         public FastNoiseConfig TerrainNoiseConfig;
@@ -34,6 +37,9 @@ namespace Data.WorldTypes
         public byte SubSurfaceBlockID;
 
         [Header("Major Flora")]
+        [Tooltip("If true, flora like trees or cacti will be generated in this biome.")]
+        public bool EnableMajorFlora = true;
+
         [Tooltip("Placement threshold for major flora. Higher value = fewer trees/cacti.")]
         public float MajorFloraPlacementThreshold;
 

@@ -12,6 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 315235deccdab354db2e60ccb94ed992, type: 3}
   m_Name: Desert
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
+  BiomeName: Desert
   TerrainNoiseConfig:
     SeedOffset: 1250
     Frequency: 0.003125
@@ -44,7 +45,8 @@ MonoBehaviour:
   TerrainAmplitude: 5
   SurfaceBlockID: 4
   SubSurfaceBlockID: 9
-  MajorFloraPlacementThreshold: 0.92
+  EnableMajorFlora: 1
+  MajorFloraPlacementThreshold: 0.97
   MajorFloraIndex: 1
   Lodes:
   - nodeName: Dirt
