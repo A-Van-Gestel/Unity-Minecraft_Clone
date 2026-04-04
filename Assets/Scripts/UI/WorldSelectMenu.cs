@@ -54,8 +54,12 @@ namespace UI
         [Tooltip("Dropdown for selecting the world generation type (Legacy, Standard, etc.).")]
         public TMP_Dropdown worldTypeDropdown;
 
+        [Tooltip("Reference to the global world type registry.")]
+        public WorldTypeRegistry worldTypeRegistry;
+
         private WorldSaveData _selectedWorld;
         private List<WorldListItem> _spawnedItems = new List<WorldListItem>();
+        private List<WorldTypeID> _dropdownMapping = new List<WorldTypeID>();
 
         private Settings _settings;
 
@@ -63,7 +67,6 @@ namespace UI
         {
             LoadSettings();
         }
-
 
         private void LoadSettings()
         {
@@ -273,18 +276,46 @@ namespace UI
             // Defaults
             newWorldNameInput.text = "New World";
             seedInput.text = "";
+
+            PopulateWorldTypeDropdown();
+        }
+
+        private void PopulateWorldTypeDropdown()
+        {
+            if (worldTypeDropdown == null || worldTypeRegistry == null) return;
+
+            worldTypeDropdown.ClearOptions();
+            _dropdownMapping.Clear();
+
+            List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>();
+
+            foreach (var typeDef in worldTypeRegistry.Types)
+            {
+                if (typeDef == null) continue;
+
+                options.Add(new TMP_Dropdown.OptionData(typeDef.DisplayName));
+                _dropdownMapping.Add(typeDef.TypeID);
+            }
+
+            worldTypeDropdown.AddOptions(options);
+
+            // Try to default to "Standard"
+            int defaultIndex = _dropdownMapping.IndexOf(WorldTypeID.Standard);
+            if (defaultIndex >= 0)
+            {
+                worldTypeDropdown.value = defaultIndex;
+            }
+            else
+            {
+                worldTypeDropdown.value = 0;
+            }
+            worldTypeDropdown.RefreshShownValue();
         }
 
         public void OnCancelCreateClicked()
         {
             SwitchToSelectMode();
         }
-
-        /// <summary>
-        /// Lookup table mapping dropdown option indices to WorldTypeIDs.
-        /// Must match the order of options configured on the TMP_Dropdown in the Unity scene.
-        /// </summary>
-        private static readonly WorldTypeID[] s_dropdownMapping = { WorldTypeID.Legacy, WorldTypeID.Standard };
 
         public void OnConfirmCreateClicked()
         {
@@ -299,10 +330,10 @@ namespace UI
             WorldLaunchState.Seed = seed;
             WorldLaunchState.IsNewGame = true;
 
-            // Map dropdown selection to WorldTypeID using a safe lookup array
-            if (worldTypeDropdown != null && worldTypeDropdown.value < s_dropdownMapping.Length)
+            // Map dropdown selection to WorldTypeID using a safe lookup list
+            if (worldTypeDropdown != null && worldTypeDropdown.value < _dropdownMapping.Count)
             {
-                WorldLaunchState.SelectedWorldType = s_dropdownMapping[worldTypeDropdown.value];
+                WorldLaunchState.SelectedWorldType = _dropdownMapping[worldTypeDropdown.value];
             }
             else
             {

@@ -2866,6 +2866,7 @@ MonoBehaviour:
   newWorldNameInput: {fileID: 537536344}
   seedInput: {fileID: 1939141418}
   worldTypeDropdown: {fileID: 54229080}
+  worldTypeRegistry: {fileID: 11400000, guid: 3038e8b8e1ab9ae44802528aa73aa06a, type: 2}
 --- !u!1 &952267850
 GameObject:
   m_ObjectHideFlags: 0

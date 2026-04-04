@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: Standard
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.WorldTypeDefinition
   TypeID: 1
-  DisplayName: Standard (new)
+  DisplayName: Standard (WIP)
   Biomes:
   - {fileID: 11400000, guid: 4e2d8d59432ce5a4fbba25dc1f2e942c, type: 2}
   BaseTerrainHeight: 42
