@@ -21,7 +21,7 @@ namespace Jobs.Data
         /// <param name="lode">The authoring lode data.</param>
         public StandardLodeJobData(StandardLode lode)
         {
-            BlockID = lode.blockID;
+            BlockID = (byte)lode.blockID;
             MinHeight = lode.minHeight;
             MaxHeight = lode.maxHeight;
             NoiseConfig = lode.noiseConfig;

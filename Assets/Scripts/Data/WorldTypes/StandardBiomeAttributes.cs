@@ -1,5 +1,6 @@
 using System;
 using Jobs.Data;
+using MyBox;
 using UnityEngine;
 
 namespace Data.WorldTypes
@@ -30,11 +31,13 @@ namespace Data.WorldTypes
         public float terrainAmplitude = 20f;
 
         [Header("Surface Blocks")]
+        [ConstantsSelection(typeof(BlockIDs))]
         [Tooltip("Block ID for the surface layer (e.g., Grass).")]
-        public byte surfaceBlockID;
+        public ushort surfaceBlockID;
 
+        [ConstantsSelection(typeof(BlockIDs))]
         [Tooltip("Block ID for the sub-surface layers (e.g., Dirt).")]
-        public byte subSurfaceBlockID;
+        public ushort subSurfaceBlockID;
 
         [Header("Major Flora")]
         [Tooltip("If true, flora like trees or cacti will be generated in this biome.")]
@@ -89,8 +92,9 @@ namespace Data.WorldTypes
         [Tooltip("Editor Preview Color for Composite visualizer tool.")]
         public Color previewColor = Color.yellow;
 
+        [ConstantsSelection(typeof(BlockIDs))]
         [Tooltip("ID of the block that will be generated.")]
-        public byte blockID;
+        public ushort blockID;
 
         [Tooltip("Blocks will not be generated below this height.")]
         public int minHeight;
