@@ -27,6 +27,7 @@ namespace Jobs.Generators
         private NativeArray<FastNoiseLite> _biomeTerrainNoises;
         private NativeArray<FastNoiseLite> _lodeNoises;
         private NativeArray<FastNoiseLite> _caveNoises;
+        private NativeArray<FastNoiseLite> _floraZoneNoises;
         private FastNoiseLite _biomeSelectionNoise;
         private StandardBiomeAttributes[] _standardBiomes;
 
@@ -67,6 +68,7 @@ namespace Jobs.Generators
 
             _allCaveLayersJobData = new NativeArray<StandardCaveLayerJobData>(totalCaveLayerCount, Allocator.Persistent);
             _caveNoises = new NativeArray<FastNoiseLite>(totalCaveLayerCount, Allocator.Persistent);
+            _floraZoneNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
 
             int currentLodeIndex = 0;
             int currentCaveLayerIndex = 0;
@@ -100,7 +102,10 @@ namespace Jobs.Generators
                     SurfaceBlockID = biome.SurfaceBlockID,
                     SubSurfaceBlockID = biome.SubSurfaceBlockID,
                     EnableMajorFlora = biome.EnableMajorFlora,
-                    MajorFloraPlacementThreshold = biome.MajorFloraPlacementThreshold,
+                    MajorFloraZoneCoverage = biome.MajorFloraZoneCoverage,
+                    MajorFloraPlacementSpacing = biome.MajorFloraPlacementSpacing,
+                    MajorFloraPlacementJitter = biome.MajorFloraPlacementJitter,
+                    MajorFloraPlacementChance = biome.MajorFloraPlacementChance,
                     MajorFloraIndex = biome.MajorFloraIndex,
                     LodeStartIndex = currentLodeIndex,
                     LodeCount = lodeCount,
@@ -110,6 +115,9 @@ namespace Jobs.Generators
 
                 // Build per-biome terrain noise
                 _biomeTerrainNoises[i] = CreateNoiseFromConfig(biome.TerrainNoiseConfig);
+
+                // Build per-biome flora zone noise
+                _floraZoneNoises[i] = CreateNoiseFromConfig(biome.MajorFloraZoneNoiseConfig);
 
                 currentLodeIndex += lodeCount;
                 currentCaveLayerIndex += caveLayerCount;
@@ -154,6 +162,7 @@ namespace Jobs.Generators
                 BiomeTerrainNoises = _biomeTerrainNoises,
                 LodeNoises = _lodeNoises,
                 CaveNoises = _caveNoises,
+                FloraZoneNoises = _floraZoneNoises,
                 BiomeSelectionNoise = _biomeSelectionNoise,
                 OutputMap = outputMap,
                 OutputHeightMap = outputHeightMap,

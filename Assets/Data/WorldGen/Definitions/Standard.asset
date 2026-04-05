@@ -15,5 +15,5 @@ MonoBehaviour:
   TypeID: 1
   DisplayName: Standard (WIP)
   Biomes:
-  - {fileID: 11400000, guid: 4e2d8d59432ce5a4fbba25dc1f2e942c, type: 2}
-  BaseTerrainHeight: 42
+  - {fileID: 11400000, guid: 97ca01180be04a8f8433fd2d62859595, type: 2}
+  BaseTerrainHeight: 62

@@ -1,6 +1,7 @@
 using System;
 using Jobs.Data;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Data.WorldTypes
 {
@@ -40,8 +41,31 @@ namespace Data.WorldTypes
         [Tooltip("If true, flora like trees or cacti will be generated in this biome.")]
         public bool EnableMajorFlora = true;
 
-        [Tooltip("Placement threshold for major flora. Higher value = fewer trees/cacti.")]
-        public float MajorFloraPlacementThreshold;
+        [Tooltip("2D noise defining coherent regions (groves/forests) where flora can generate. " +
+                 "Only positions where this noise exceeds MajorFloraZoneThreshold are eligible for placement.")]
+        public FastNoiseConfig MajorFloraZoneNoiseConfig;
+
+        [Tooltip("Percentage of the biome covered by flora zones. " +
+                 "Larger = larger/more frequent zones, lower = smaller/rarer zones. 1.0 = entire biome is a zone.")]
+        [Range(0f, 1f)]
+        [FormerlySerializedAs("MajorFloraZoneThreshold")]
+        public float MajorFloraZoneCoverage = 0.4f;
+
+        [Header("Flora Placement (Spacing)")]
+        [Tooltip("The minimum grid size for flora. Smaller = denser forest, Larger = sparser forest. Evaluated deterministically.")]
+        [Range(1, 64)]
+        public int MajorFloraPlacementSpacing = 5;
+        
+        [Tooltip("Max blocks a tree can randomly deviate from its grid center. " +
+                 "-1 = Automatic safe distance (prevents edge overlaps). " +
+                 "0 = Perfectly rigid orchard grid. " +
+                 "Larger values (e.g. equal to Spacing) allow trees to naturally cluster or touch.")]
+        public int MajorFloraPlacementJitter = -1;
+
+        [Tooltip("Probability that a valid spacing slot will actually spawn a tree. 1.0 = every slot is filled, lower = sparser.")]
+        [Range(0f, 1f)]
+        [FormerlySerializedAs("MajorFloraPlacementThreshold")]
+        public float MajorFloraPlacementChance = 0.5f;
 
         [Tooltip("Flora type index dispatched to ExpandFlora (0 = tree, 1 = cactus, etc.).")]
         public byte MajorFloraIndex;

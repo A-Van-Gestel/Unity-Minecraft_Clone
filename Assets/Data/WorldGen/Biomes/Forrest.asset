@@ -19,7 +19,7 @@ MonoBehaviour:
     NoiseType: 3
     RotationType3D: 0
     FractalType: 0
-    Octaves: 1
+    Octaves: 3
     Gain: 0.5
     Lacunarity: 2
     WeightedStrength: 0
@@ -43,12 +43,30 @@ MonoBehaviour:
     CellularReturnType: 0
     CellularJitter: 1
     NormalizeToZeroOne: 0
-  BaseTerrainHeight: 72
-  TerrainAmplitude: 30
+  BaseTerrainHeight: 60
+  TerrainAmplitude: 16
   SurfaceBlockID: 3
   SubSurfaceBlockID: 3
   EnableMajorFlora: 1
-  MajorFloraPlacementThreshold: 0.95
+  MajorFloraZoneNoiseConfig:
+    SeedOffset: -99823
+    Frequency: 0.5
+    NoiseType: 0
+    RotationType3D: 0
+    FractalType: 0
+    Octaves: 1
+    Gain: 0.5
+    Lacunarity: 2
+    WeightedStrength: 0
+    PingPongStrength: 2
+    CellularDistanceFunction: 0
+    CellularReturnType: 0
+    CellularJitter: 1
+    NormalizeToZeroOne: 1
+  MajorFloraZoneCoverage: 0.86
+  MajorFloraPlacementSpacing: 4
+  MajorFloraPlacementJitter: 3
+  MajorFloraPlacementChance: 0.88
   MajorFloraIndex: 0
   Lodes:
   - nodeName: Dirt
@@ -109,8 +127,8 @@ MonoBehaviour:
       NormalizeToZeroOne: 1
     Threshold: 0.55
     MinHeight: 5
-    MaxHeight: 60
-    DepthFadeMargin: 8
+    MaxHeight: 66
+    DepthFadeMargin: 24
   - LayerName: Deep Chambers
     Mode: 0
     NoiseConfig:

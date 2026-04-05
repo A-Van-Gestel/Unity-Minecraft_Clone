@@ -55,6 +55,11 @@ namespace Jobs
         [ReadOnly] public NativeArray<FastNoiseLite> CaveNoises;
 
         /// <summary>
+        /// Pre-constructed FastNoiseLite instances for each biome's flora zones.
+        /// </summary>
+        [ReadOnly] public NativeArray<FastNoiseLite> FloraZoneNoises;
+
+        /// <summary>
         /// Global biome selection noise (Cellular/Voronoi).
         /// </summary>
         public FastNoiseLite BiomeSelectionNoise;
@@ -239,18 +244,52 @@ namespace Jobs
                 // --- Flora placement ---
                 // We only place flora on non-Air, non-Fluid, solid surface blocks
                 if (y == terrainHeight && voxelValue != BlockIDs.Air &&
-                    voxelProps.FluidType == FluidType.None)
+                    voxelProps.FluidType == FluidType.None && biome.EnableMajorFlora)
                 {
-                    // Deterministic random per column for flora placement
-                    uint deterministicSeed = math.max(1u, math.hash(new int3(globalX, globalZ, BaseSeed)));
-                    var random = new Random(deterministicSeed);
+                    FastNoiseLite floraZoneNoise = FloraZoneNoises[biomeIndex];
+                    float zoneNoiseVal = floraZoneNoise.GetNoise(globalX, globalZ);
 
-                    if (biome.EnableMajorFlora && random.NextFloat() > biome.MajorFloraPlacementThreshold)
+                    // Tier 1: Are we inside a flora zone (e.g., a forest/grove)?
+                    // FastNoiseLite.NormalizeToZeroOne config is recommended for flora zone noises to easily use 0..1 ranges.
+                    if (zoneNoiseVal > (1f - biome.MajorFloraZoneCoverage))
                     {
-                        // Enqueue a flora root point for main-thread structure generation.
-                        Modifications.Enqueue(new VoxelMod(
-                            new Vector3Int(globalX, y, globalZ),
-                            biome.MajorFloraIndex));
+                        // Tier 2: The Grid. Divide the world into Spacing x Spacing cells.
+                        int spacing = math.max(1, biome.MajorFloraPlacementSpacing);
+                        
+                        // Use float division to gracefully handle negative coordinates mathematically
+                        int cellX = (int)math.floor((float)globalX / spacing);
+                        int cellZ = (int)math.floor((float)globalZ / spacing);
+
+                        // Seed a random generator specifically for this grid cell
+                        uint cellHash = math.hash(new int3(cellX, cellZ, BaseSeed));
+                        var cellRandom = new Random(math.max(1u, cellHash));
+
+                        // Find the exact mathematical center of this cell
+                        int centerX = cellX * spacing + spacing / 2;
+                        int centerZ = cellZ * spacing + spacing / 2;
+
+                        // Calculate jitter range. -1 = Automatic safe distance (prevents edge overlapping).
+                        int maxJitterPotential = math.max(0, (spacing / 2) - 1);
+                        int jitter = biome.MajorFloraPlacementJitter < 0 
+                            ? maxJitterPotential 
+                            : biome.MajorFloraPlacementJitter;
+
+                        // Pick exactly one target column within this cell
+                        int targetX = centerX + cellRandom.NextInt(-jitter, jitter + 1);
+                        int targetZ = centerZ + cellRandom.NextInt(-jitter, jitter + 1);
+
+                        // Is THIS column the elected structural point for this local grid cell?
+                        if (globalX == targetX && globalZ == targetZ)
+                        {
+                            // Tier 3: Chance. Does the elected cell actually spawn a tree?
+                            if (cellRandom.NextFloat() <= biome.MajorFloraPlacementChance)
+                            {
+                                // Enqueue a flora root point for main-thread structure generation.
+                                Modifications.Enqueue(new VoxelMod(
+                                    new Vector3Int(globalX, y, globalZ),
+                                    biome.MajorFloraIndex));
+                            }
+                        }
                     }
                 }
             }

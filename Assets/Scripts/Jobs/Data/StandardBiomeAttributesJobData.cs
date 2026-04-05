@@ -31,8 +31,17 @@ namespace Jobs.Data
         /// <summary>If true, flora like trees or cacti will be generated in this biome.</summary>
         public bool EnableMajorFlora;
 
-        /// <summary>Threshold for flora placement. Higher = fewer trees.</summary>
-        public float MajorFloraPlacementThreshold;
+        /// <summary>Percentage of the biome covered by flora zones. Larger = larger zones, 1.0 = entire biome is a zone.</summary>
+        public float MajorFloraZoneCoverage;
+
+        /// <summary>The minimum grid size for flora. Smaller = denser forest, Larger = sparser forest.</summary>
+        public int MajorFloraPlacementSpacing;
+        
+        /// <summary>Max blocks a tree can randomly deviate from its grid center. -1 = Automatic safe distance.</summary>
+        public int MajorFloraPlacementJitter;
+
+        /// <summary>Probability that a valid spacing slot will actually spawn a tree.</summary>
+        public float MajorFloraPlacementChance;
 
         /// <summary>Flora type index dispatched to ExpandFlora (0 = tree, 1 = cactus, etc.).</summary>
         public byte MajorFloraIndex;
