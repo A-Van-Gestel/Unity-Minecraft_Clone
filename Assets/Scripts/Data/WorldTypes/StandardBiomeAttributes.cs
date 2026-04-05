@@ -1,7 +1,6 @@
 using System;
 using Jobs.Data;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace Data.WorldTypes
 {
@@ -13,71 +12,68 @@ namespace Data.WorldTypes
     public class StandardBiomeAttributes : BiomeBase
     {
         [Tooltip("The name of the biome, mostly for debug purposes.")]
-        public string BiomeName = "New Biome";
+        public string biomeName = "New Biome";
 
         [Header("Terrain Noise")]
         [Tooltip("Noise configuration for the terrain heightmap.")]
-        public FastNoiseConfig TerrainNoiseConfig;
+        public FastNoiseConfig terrainNoiseConfig;
 
         [Tooltip("Noise configuration for biome weight / Voronoi selection.")]
-        public FastNoiseConfig BiomeWeightNoiseConfig;
+        public FastNoiseConfig biomeWeightNoiseConfig;
 
         [Header("Terrain Shape")]
         [Tooltip("Base terrain height in blocks. Noise output is added to this value.")]
-        public float BaseTerrainHeight = 42f;
+        public float baseTerrainHeight = 42f;
 
         [Tooltip("Vertical multiplier for terrain noise (e.g., 20 means hills reach BaseTerrainHeight ± 20). " +
                  "FastNoiseLite returns normalized -1.0 to 1.0; this gives it physical scale.")]
-        public float TerrainAmplitude = 20f;
+        public float terrainAmplitude = 20f;
 
         [Header("Surface Blocks")]
         [Tooltip("Block ID for the surface layer (e.g., Grass).")]
-        public byte SurfaceBlockID;
+        public byte surfaceBlockID;
 
         [Tooltip("Block ID for the sub-surface layers (e.g., Dirt).")]
-        public byte SubSurfaceBlockID;
+        public byte subSurfaceBlockID;
 
         [Header("Major Flora")]
         [Tooltip("If true, flora like trees or cacti will be generated in this biome.")]
-        public bool EnableMajorFlora = true;
+        public bool enableMajorFlora = true;
 
         [Tooltip("2D noise defining coherent regions (groves/forests) where flora can generate. " +
                  "Only positions where this noise exceeds MajorFloraZoneThreshold are eligible for placement.")]
-        public FastNoiseConfig MajorFloraZoneNoiseConfig;
+        public FastNoiseConfig majorFloraZoneNoiseConfig;
 
         [Tooltip("Percentage of the biome covered by flora zones. " +
                  "Larger = larger/more frequent zones, lower = smaller/rarer zones. 1.0 = entire biome is a zone.")]
         [Range(0f, 1f)]
-        [FormerlySerializedAs("MajorFloraZoneThreshold")]
-        public float MajorFloraZoneCoverage = 0.4f;
+        public float majorFloraZoneCoverage = 0.4f;
 
         [Header("Flora Placement (Spacing)")]
         [Tooltip("The minimum grid size for flora. Smaller = denser forest, Larger = sparser forest. Evaluated deterministically.")]
         [Range(1, 64)]
-        public int MajorFloraPlacementSpacing = 5;
-        
+        public int majorFloraPlacementSpacing = 5;
+
         [Tooltip("Minimum empty blocks to maintain between the tree and the grid cell edges. " +
                  "-1 = Automatic (Allows touching in dense small grids, prevents touching in larger grids >= 5). " +
                  "0 = Full random placement allowing trees to naturally clump and touch. " +
                  "Higher values force trees closer to the exact center of the grid cell.")]
-        [FormerlySerializedAs("MajorFloraPlacementJitter")]
-        public int MajorFloraPlacementPadding = -1;
+        public int majorFloraPlacementPadding = -1;
 
         [Tooltip("Probability that a valid spacing slot will actually spawn a tree. 1.0 = every slot is filled, lower = sparser.")]
         [Range(0f, 1f)]
-        [FormerlySerializedAs("MajorFloraPlacementThreshold")]
-        public float MajorFloraPlacementChance = 0.5f;
+        public float majorFloraPlacementChance = 0.5f;
 
         [Tooltip("Flora type index dispatched to ExpandFlora (0 = tree, 1 = cactus, etc.).")]
-        public byte MajorFloraIndex;
+        public byte majorFloraIndex;
 
         [Header("Lodes (Ore Veins)")]
         [Tooltip("Ore vein configurations for this biome.")]
-        public StandardLode[] Lodes;
+        public StandardLode[] lodes;
 
         [Header("Cave Generation")]
         [Tooltip("Layered noise configurations for generating 3D caves (e.g., cheese and spaghetti networks).")]
-        public StandardCaveLayer[] CaveLayers;
+        public StandardCaveLayer[] caveLayers;
     }
 
     /// <summary>
@@ -89,6 +85,9 @@ namespace Data.WorldTypes
     {
         [Tooltip("Name of the lode.")]
         public string nodeName;
+
+        [Tooltip("Editor Preview Color for Composite visualizer tool.")]
+        public Color previewColor = Color.yellow;
 
         [Tooltip("ID of the block that will be generated.")]
         public byte blockID;
@@ -124,26 +123,29 @@ namespace Data.WorldTypes
     public class StandardCaveLayer
     {
         [Tooltip("Name of the cave layer configuration.")]
-        public string LayerName = "New Cave Layer";
+        public string layerName = "New Cave Layer";
+
+        [Tooltip("Editor Preview Color for Composite visualizer tool.")]
+        public Color previewColor = Color.red;
 
         [Tooltip("Blob (Single Noise) produces chambers. Spaghetti (Axis-Pair Average) produces interconnected tunnel networks.")]
-        public CaveMode Mode = CaveMode.Blob;
+        public CaveMode mode = CaveMode.Blob;
 
         [Tooltip("FastNoiseLite noise configuration for defining the cave shapes.")]
-        public FastNoiseConfig NoiseConfig;
+        public FastNoiseConfig noiseConfig;
 
         [Tooltip("If the evaluated noise exceeds this threshold, the block is carved into air.")]
-        public float Threshold = 0.5f;
+        public float threshold = 0.5f;
 
         [Header("Depth Bounds")]
         [Tooltip("Caves will not generate below this Y level.")]
-        public int MinHeight = 5;
+        public int minHeight = 5;
 
         [Tooltip("Caves will not generate above this Y level.")]
-        public int MaxHeight = 60;
+        public int maxHeight = 60;
 
         [Tooltip("Number of blocks over which the carving fades in/out near MinHeight and MaxHeight bounds. 0 = hard cutoff.")]
         [Range(0, 32)]
-        public int DepthFadeMargin = 8;
+        public int depthFadeMargin = 8;
     }
 }

@@ -9,27 +9,27 @@ namespace Jobs.Data
     public struct StandardCaveLayerJobData
     {
         /// <summary>Noise evaluation strategy.</summary>
-        public CaveMode Mode;
+        public readonly CaveMode Mode;
 
         /// <summary>If the evaluated noise exceeds this threshold, the block is carved into air.</summary>
-        public float Threshold;
+        public readonly float Threshold;
 
         /// <summary>Caves will not generate below this Y level.</summary>
-        public int MinHeight;
+        public readonly int MinHeight;
 
         /// <summary>Caves will not generate above this Y level.</summary>
-        public int MaxHeight;
+        public readonly int MaxHeight;
 
         /// <summary>Number of blocks over which carving fades in/out near depth bounds. 0 = hard cutoff.</summary>
-        public int DepthFadeMargin;
+        public readonly int DepthFadeMargin;
 
         public StandardCaveLayerJobData(StandardCaveLayer layerConfig)
         {
-            Mode = layerConfig.Mode;
-            Threshold = layerConfig.Threshold;
-            MinHeight = layerConfig.MinHeight;
-            MaxHeight = layerConfig.MaxHeight;
-            DepthFadeMargin = layerConfig.DepthFadeMargin;
+            Mode = layerConfig.mode;
+            Threshold = layerConfig.threshold;
+            MinHeight = layerConfig.minHeight;
+            MaxHeight = layerConfig.maxHeight;
+            DepthFadeMargin = layerConfig.depthFadeMargin;
         }
     }
 }

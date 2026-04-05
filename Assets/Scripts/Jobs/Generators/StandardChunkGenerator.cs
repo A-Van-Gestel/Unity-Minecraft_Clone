@@ -57,8 +57,8 @@ namespace Jobs.Generators
             int totalCaveLayerCount = 0;
             foreach (StandardBiomeAttributes biome in _standardBiomes)
             {
-                totalLodeCount += (biome.Lodes != null ? biome.Lodes.Length : 0);
-                totalCaveLayerCount += (biome.CaveLayers != null ? biome.CaveLayers.Length : 0);
+                totalLodeCount += (biome.lodes != null ? biome.lodes.Length : 0);
+                totalCaveLayerCount += (biome.caveLayers != null ? biome.caveLayers.Length : 0);
             }
 
             _biomesJobData = new NativeArray<StandardBiomeAttributesJobData>(_standardBiomes.Length, Allocator.Persistent);
@@ -75,38 +75,38 @@ namespace Jobs.Generators
             for (int i = 0; i < _standardBiomes.Length; i++)
             {
                 StandardBiomeAttributes biome = _standardBiomes[i];
-                int lodeCount = biome.Lodes != null ? biome.Lodes.Length : 0;
-                int caveLayerCount = biome.CaveLayers != null ? biome.CaveLayers.Length : 0;
+                int lodeCount = biome.lodes != null ? biome.lodes.Length : 0;
+                int caveLayerCount = biome.caveLayers != null ? biome.caveLayers.Length : 0;
 
                 // Build lode data + noise
                 for (int j = 0; j < lodeCount; j++)
                 {
-                    _allLodesJobData[currentLodeIndex + j] = new StandardLodeJobData(biome.Lodes[j]);
-                    _lodeNoises[currentLodeIndex + j] = CreateNoiseFromConfig(biome.Lodes[j].noiseConfig);
+                    _allLodesJobData[currentLodeIndex + j] = new StandardLodeJobData(biome.lodes[j]);
+                    _lodeNoises[currentLodeIndex + j] = CreateNoiseFromConfig(biome.lodes[j].noiseConfig);
                 }
 
                 // Build cave layer data + noise
                 for (int j = 0; j < caveLayerCount; j++)
                 {
-                    _allCaveLayersJobData[currentCaveLayerIndex + j] = new StandardCaveLayerJobData(biome.CaveLayers[j]);
-                    _caveNoises[currentCaveLayerIndex + j] = CreateNoiseFromConfig(biome.CaveLayers[j].NoiseConfig);
+                    _allCaveLayersJobData[currentCaveLayerIndex + j] = new StandardCaveLayerJobData(biome.caveLayers[j]);
+                    _caveNoises[currentCaveLayerIndex + j] = CreateNoiseFromConfig(biome.caveLayers[j].noiseConfig);
                 }
 
                 // Build biome job data
                 _biomesJobData[i] = new StandardBiomeAttributesJobData
                 {
-                    TerrainNoiseConfig = biome.TerrainNoiseConfig,
-                    BiomeWeightNoiseConfig = biome.BiomeWeightNoiseConfig,
-                    BaseTerrainHeight = biome.BaseTerrainHeight,
-                    TerrainAmplitude = biome.TerrainAmplitude,
-                    SurfaceBlockID = biome.SurfaceBlockID,
-                    SubSurfaceBlockID = biome.SubSurfaceBlockID,
-                    EnableMajorFlora = biome.EnableMajorFlora,
-                    MajorFloraZoneCoverage = biome.MajorFloraZoneCoverage,
-                    MajorFloraPlacementSpacing = biome.MajorFloraPlacementSpacing,
-                    MajorFloraPlacementPadding = biome.MajorFloraPlacementPadding,
-                    MajorFloraPlacementChance = biome.MajorFloraPlacementChance,
-                    MajorFloraIndex = biome.MajorFloraIndex,
+                    TerrainNoiseConfig = biome.terrainNoiseConfig,
+                    BiomeWeightNoiseConfig = biome.biomeWeightNoiseConfig,
+                    BaseTerrainHeight = biome.baseTerrainHeight,
+                    TerrainAmplitude = biome.terrainAmplitude,
+                    SurfaceBlockID = biome.surfaceBlockID,
+                    SubSurfaceBlockID = biome.subSurfaceBlockID,
+                    EnableMajorFlora = biome.enableMajorFlora,
+                    MajorFloraZoneCoverage = biome.majorFloraZoneCoverage,
+                    MajorFloraPlacementSpacing = biome.majorFloraPlacementSpacing,
+                    MajorFloraPlacementPadding = biome.majorFloraPlacementPadding,
+                    MajorFloraPlacementChance = biome.majorFloraPlacementChance,
+                    MajorFloraIndex = biome.majorFloraIndex,
                     LodeStartIndex = currentLodeIndex,
                     LodeCount = lodeCount,
                     CaveLayerStartIndex = currentCaveLayerIndex,
@@ -114,10 +114,10 @@ namespace Jobs.Generators
                 };
 
                 // Build per-biome terrain noise
-                _biomeTerrainNoises[i] = CreateNoiseFromConfig(biome.TerrainNoiseConfig);
+                _biomeTerrainNoises[i] = CreateNoiseFromConfig(biome.terrainNoiseConfig);
 
                 // Build per-biome flora zone noise
-                _floraZoneNoises[i] = CreateNoiseFromConfig(biome.MajorFloraZoneNoiseConfig);
+                _floraZoneNoises[i] = CreateNoiseFromConfig(biome.majorFloraZoneNoiseConfig);
 
                 currentLodeIndex += lodeCount;
                 currentCaveLayerIndex += caveLayerCount;
@@ -127,7 +127,7 @@ namespace Jobs.Generators
             // If the first biome has a BiomeWeightNoiseConfig, use it as the global biome selection noise.
             // Otherwise, use sensible defaults for Cellular noise.
             FastNoiseConfig selectionConfig = _standardBiomes.Length > 0
-                ? _standardBiomes[0].BiomeWeightNoiseConfig
+                ? _standardBiomes[0].biomeWeightNoiseConfig
                 : new FastNoiseConfig
                 {
                     NoiseType = FastNoiseLite.NoiseType.Cellular,

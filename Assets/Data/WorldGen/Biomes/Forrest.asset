@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 315235deccdab354db2e60ccb94ed992, type: 3}
   m_Name: Forrest
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
-  BiomeName: New Biome
-  TerrainNoiseConfig:
+  biomeName: Forrest
+  terrainNoiseConfig:
     SeedOffset: 875465
     Frequency: 0.01875
     NoiseType: 3
@@ -28,7 +28,7 @@ MonoBehaviour:
     CellularReturnType: 0
     CellularJitter: 1
     NormalizeToZeroOne: 0
-  BiomeWeightNoiseConfig:
+  biomeWeightNoiseConfig:
     SeedOffset: 875465
     Frequency: 0.010625
     NoiseType: 2
@@ -43,12 +43,12 @@ MonoBehaviour:
     CellularReturnType: 0
     CellularJitter: 1
     NormalizeToZeroOne: 0
-  BaseTerrainHeight: 60
-  TerrainAmplitude: 16
-  SurfaceBlockID: 3
-  SubSurfaceBlockID: 3
-  EnableMajorFlora: 1
-  MajorFloraZoneNoiseConfig:
+  baseTerrainHeight: 60
+  terrainAmplitude: 16
+  surfaceBlockID: 3
+  subSurfaceBlockID: 3
+  enableMajorFlora: 1
+  majorFloraZoneNoiseConfig:
     SeedOffset: -99823
     Frequency: 0.5
     NoiseType: 0
@@ -63,13 +63,14 @@ MonoBehaviour:
     CellularReturnType: 0
     CellularJitter: 1
     NormalizeToZeroOne: 1
-  MajorFloraZoneCoverage: 0.86
-  MajorFloraPlacementSpacing: 3
-  MajorFloraPlacementPadding: 0
-  MajorFloraPlacementChance: 0.88
-  MajorFloraIndex: 0
-  Lodes:
+  majorFloraZoneCoverage: 0.86
+  majorFloraPlacementSpacing: 3
+  majorFloraPlacementPadding: 0
+  majorFloraPlacementChance: 0.88
+  majorFloraIndex: 0
+  lodes:
   - nodeName: Dirt
+    previewColor: {r: 0.6784314, g: 0.3254902, b: 0.08627451, a: 1}
     blockID: 3
     minHeight: 1
     maxHeight: 255
@@ -89,6 +90,7 @@ MonoBehaviour:
       CellularJitter: 1
       NormalizeToZeroOne: 0
   - nodeName: Sand
+    previewColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
     blockID: 4
     minHeight: 30
     maxHeight: 60
@@ -107,10 +109,11 @@ MonoBehaviour:
       CellularReturnType: 0
       CellularJitter: 1
       NormalizeToZeroOne: 0
-  CaveLayers:
-  - LayerName: Cave Network
-    Mode: 1
-    NoiseConfig:
+  caveLayers:
+  - layerName: Cave Network
+    previewColor: {r: 1, g: 0, b: 0, a: 1}
+    mode: 1
+    noiseConfig:
       SeedOffset: 43534
       Frequency: 0.1
       NoiseType: 3
@@ -125,13 +128,14 @@ MonoBehaviour:
       CellularReturnType: 0
       CellularJitter: 1
       NormalizeToZeroOne: 1
-    Threshold: 0.55
-    MinHeight: 5
-    MaxHeight: 66
-    DepthFadeMargin: 24
-  - LayerName: Deep Chambers
-    Mode: 0
-    NoiseConfig:
+    threshold: 0.55
+    minHeight: 5
+    maxHeight: 66
+    depthFadeMargin: 24
+  - layerName: Deep Chambers
+    previewColor: {r: 1, g: 0.72156864, b: 0, a: 1}
+    mode: 0
+    noiseConfig:
       SeedOffset: 91234
       Frequency: 0.015
       NoiseType: 0
@@ -146,7 +150,7 @@ MonoBehaviour:
       CellularReturnType: 0
       CellularJitter: 1
       NormalizeToZeroOne: 0
-    Threshold: 0.55
-    MinHeight: 5
-    MaxHeight: 40
-    DepthFadeMargin: 8
+    threshold: 0.55
+    minHeight: 5
+    maxHeight: 40
+    depthFadeMargin: 8
