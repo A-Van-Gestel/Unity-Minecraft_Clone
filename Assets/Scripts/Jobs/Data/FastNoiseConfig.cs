@@ -53,5 +53,10 @@ namespace Jobs.Data
 
         /// <summary>Jitter factor for Cellular noise cell points.</summary>
         public float CellularJitter;
+
+        // Output range
+
+        /// <summary>When true, remaps GetNoise output from [-1, 1] to [0, 1].</summary>
+        public bool NormalizeToZeroOne;
     }
 }

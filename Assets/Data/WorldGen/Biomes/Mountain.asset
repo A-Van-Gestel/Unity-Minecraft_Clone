@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 315235deccdab354db2e60ccb94ed992, type: 3}
   m_Name: Mountain
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
-  BiomeName: Mountain
+  BiomeName: New Biome
   TerrainNoiseConfig:
     SeedOffset: -231
     Frequency: 0.01
@@ -27,6 +27,7 @@ MonoBehaviour:
     CellularDistanceFunction: 0
     CellularReturnType: 0
     CellularJitter: 1
+    NormalizeToZeroOne: 0
   BiomeWeightNoiseConfig:
     SeedOffset: -231
     Frequency: 0.05
@@ -41,6 +42,7 @@ MonoBehaviour:
     CellularDistanceFunction: 0
     CellularReturnType: 0
     CellularJitter: 1
+    NormalizeToZeroOne: 0
   BaseTerrainHeight: 97
   TerrainAmplitude: 55
   SurfaceBlockID: 1
@@ -67,6 +69,7 @@ MonoBehaviour:
       CellularDistanceFunction: 0
       CellularReturnType: 0
       CellularJitter: 1
+      NormalizeToZeroOne: 0
   - nodeName: Sand
     blockID: 4
     minHeight: 30
@@ -85,13 +88,13 @@ MonoBehaviour:
       CellularDistanceFunction: 0
       CellularReturnType: 0
       CellularJitter: 1
-  - nodeName: Caves
-    blockID: 0
-    minHeight: 5
-    maxHeight: 60
-    noiseConfig:
+      NormalizeToZeroOne: 0
+  CaveLayers:
+  - LayerName: Cave Network
+    Mode: 1
+    NoiseConfig:
       SeedOffset: 43534
-      Frequency: 0.00625
+      Frequency: 0.1
       NoiseType: 3
       RotationType3D: 0
       FractalType: 0
@@ -103,3 +106,29 @@ MonoBehaviour:
       CellularDistanceFunction: 0
       CellularReturnType: 0
       CellularJitter: 1
+      NormalizeToZeroOne: 1
+    Threshold: 0.55
+    MinHeight: 5
+    MaxHeight: 60
+    DepthFadeMargin: 8
+  - LayerName: Deep Chambers
+    Mode: 0
+    NoiseConfig:
+      SeedOffset: 91234
+      Frequency: 0.015
+      NoiseType: 0
+      RotationType3D: 0
+      FractalType: 0
+      Octaves: 1
+      Gain: 0.5
+      Lacunarity: 2
+      WeightedStrength: 0
+      PingPongStrength: 2
+      CellularDistanceFunction: 0
+      CellularReturnType: 0
+      CellularJitter: 1
+      NormalizeToZeroOne: 0
+    Threshold: 0.55
+    MinHeight: 5
+    MaxHeight: 40
+    DepthFadeMargin: 8

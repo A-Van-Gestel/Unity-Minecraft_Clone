@@ -1,4 +1,5 @@
 using Data;
+using Data.WorldTypes;
 using Helpers;
 using Jobs.BurstData;
 using Jobs.Data;
@@ -33,6 +34,7 @@ namespace Jobs
         [ReadOnly] public NativeArray<BlockTypeJobData> BlockTypes;
         [ReadOnly] public NativeArray<StandardBiomeAttributesJobData> Biomes;
         [ReadOnly] public NativeArray<StandardLodeJobData> AllLodes;
+        [ReadOnly] public NativeArray<StandardCaveLayerJobData> AllCaveLayers;
 
         /// <summary>
         /// Pre-constructed FastNoiseLite instances for each biome's terrain noise.
@@ -45,6 +47,12 @@ namespace Jobs
         /// Indexed matching AllLodes array.
         /// </summary>
         [ReadOnly] public NativeArray<FastNoiseLite> LodeNoises;
+
+        /// <summary>
+        /// Pre-constructed FastNoiseLite instances for each biome's cave layers.
+        /// Indexed alongside AllCaveLayers.
+        /// </summary>
+        [ReadOnly] public NativeArray<FastNoiseLite> CaveNoises;
 
         /// <summary>
         /// Global biome selection noise (Cellular/Voronoi).
@@ -107,7 +115,7 @@ namespace Jobs
                 // ----- IMMUTABLE PASS -----
                 if (y == 0)
                 {
-                    voxelValue = 8; // Bedrock
+                    voxelValue = (byte)BlockIDs.Bedrock;
                 }
                 // ----- BASIC TERRAIN PASS -----
                 else if (y == terrainHeight)
@@ -122,20 +130,78 @@ namespace Jobs
                 {
                     if (y < VoxelData.SeaLevel)
                     {
-                        voxelValue = 19; // Water
+                        voxelValue = (byte)BlockIDs.Water;
                     }
                     else
                     {
-                        voxelValue = 0; // Air
+                        voxelValue = (byte)BlockIDs.Air;
                     }
                 }
                 else
                 {
-                    voxelValue = 1; // Stone
+                    voxelValue = (byte)BlockIDs.Stone;
                 }
 
-                // ----- SECOND PASS (Lodes) -----
-                if (voxelValue == 1)
+                // ----- SECOND PASS (Caves) -----
+                // We do not carve Air, Fluids, or Bedrock
+                if (voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
+                    BlockTypes[voxelValue].FluidType == FluidType.None)
+                {
+                    for (int i = 0; i < biome.CaveLayerCount; i++)
+                    {
+                        int caveIdx = biome.CaveLayerStartIndex + i;
+                        StandardCaveLayerJobData caveLayer = AllCaveLayers[caveIdx];
+
+                        // --- Depth bounds check ---
+                        if (y < caveLayer.MinHeight || y > caveLayer.MaxHeight)
+                            continue;
+
+                        // --- Depth fade (gradient attenuation near bounds) ---
+                        float depthFade = 1f;
+                        if (caveLayer.DepthFadeMargin > 0)
+                        {
+                            int distFromMin = y - caveLayer.MinHeight;
+                            int distFromMax = caveLayer.MaxHeight - y;
+                            int distFromEdge = math.min(distFromMin, distFromMax);
+                            depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
+                        }
+
+                        // --- Noise evaluation (branched by CaveMode) ---
+                        FastNoiseLite caveNoise = CaveNoises[caveIdx];
+                        float noiseVal;
+
+                        if (caveLayer.Mode == CaveMode.Spaghetti)
+                        {
+                            // Legacy-style 6-way axis-pair 2D noise averaging.
+                            // Creates intersecting ridges that form interconnected tunnel networks.
+                            // Normalization to [0,1] is handled by FastNoiseLite.NormalizeToZeroOne via config.
+                            float ab = caveNoise.GetNoise(globalX, y);
+                            float bc = caveNoise.GetNoise(y, globalZ);
+                            float ac = caveNoise.GetNoise(globalX, globalZ);
+                            float ba = caveNoise.GetNoise(y, globalX);
+                            float cb = caveNoise.GetNoise(globalZ, y);
+                            float ca = caveNoise.GetNoise(globalZ, globalX);
+                            noiseVal = (ab + bc + ac + ba + cb + ca) / 6f;
+                        }
+                        else // CaveMode.Blob
+                        {
+                            noiseVal = caveNoise.GetNoise(globalX, y, globalZ);
+                        }
+
+                        // Apply depth fade: raise the effective threshold near depth bounds
+                        // (depthFade=0 at edge → threshold becomes unreachable, depthFade=1 inside → normal threshold)
+                        float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
+
+                        if (noiseVal > effectiveThreshold)
+                        {
+                            voxelValue = (byte)BlockIDs.Air;
+                            break;
+                        }
+                    }
+                }
+
+                // ----- THIRD PASS (Lodes) -----
+                if (voxelValue == BlockIDs.Stone)
                 {
                     for (int i = 0; i < biome.LodeCount; i++)
                     {
@@ -154,8 +220,10 @@ namespace Jobs
                     }
                 }
 
-                // --- Pack voxel data ---
+                // --- Cache block properties (after all passes have finalized voxelValue) ---
                 BlockTypeJobData voxelProps = BlockTypes[voxelValue];
+
+                // --- Pack voxel data ---
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
                 OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(
                     voxelValue, 0, voxelProps.LightEmission, 1, voxelProps.FluidLevel);
@@ -169,7 +237,9 @@ namespace Jobs
                 }
 
                 // --- Flora placement ---
-                if (y == terrainHeight && voxelValue != 0 && voxelValue != 19)
+                // We only place flora on non-Air, non-Fluid, solid surface blocks
+                if (y == terrainHeight && voxelValue != BlockIDs.Air &&
+                    voxelProps.FluidType == FluidType.None)
                 {
                     // Deterministic random per column for flora placement
                     uint deterministicSeed = math.max(1u, math.hash(new int3(globalX, globalZ, BaseSeed)));

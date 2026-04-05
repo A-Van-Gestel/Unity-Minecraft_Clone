@@ -49,6 +49,10 @@ namespace Data.WorldTypes
         [Header("Lodes (Ore Veins)")]
         [Tooltip("Ore vein configurations for this biome.")]
         public StandardLode[] Lodes;
+
+        [Header("Cave Generation")]
+        [Tooltip("Layered noise configurations for generating 3D caves (e.g., cheese and spaghetti networks).")]
+        public StandardCaveLayer[] CaveLayers;
     }
 
     /// <summary>
@@ -72,5 +76,49 @@ namespace Data.WorldTypes
 
         [Tooltip("FastNoiseLite noise configuration for this lode's generation pattern.")]
         public FastNoiseConfig noiseConfig;
+    }
+
+    /// <summary>
+    /// Determines the noise evaluation strategy for a cave layer.
+    /// </summary>
+    public enum CaveMode : byte
+    {
+        /// <summary>Blob (Single Noise) — Standard single 3D noise threshold. Produces chambers and pockets.</summary>
+        Blob,
+
+        /// <summary>Spaghetti (Axis-Pair Average) — Legacy-style 6-way 2D noise averaging. Produces interconnected tunnel networks.</summary>
+        Spaghetti,
+    }
+
+    /// <summary>
+    /// Authoring class for a 3D cave layer.
+    /// Evaluates 3D noise locally inside a biome to carve out solid terrain blocks.
+    /// Supports multiple evaluation modes via <see cref="CaveMode"/>.
+    /// </summary>
+    [Serializable]
+    public class StandardCaveLayer
+    {
+        [Tooltip("Name of the cave layer configuration.")]
+        public string LayerName = "New Cave Layer";
+
+        [Tooltip("Blob (Single Noise) produces chambers. Spaghetti (Axis-Pair Average) produces interconnected tunnel networks.")]
+        public CaveMode Mode = CaveMode.Blob;
+
+        [Tooltip("FastNoiseLite noise configuration for defining the cave shapes.")]
+        public FastNoiseConfig NoiseConfig;
+
+        [Tooltip("If the evaluated noise exceeds this threshold, the block is carved into air.")]
+        public float Threshold = 0.5f;
+
+        [Header("Depth Bounds")]
+        [Tooltip("Caves will not generate below this Y level.")]
+        public int MinHeight = 5;
+
+        [Tooltip("Caves will not generate above this Y level.")]
+        public int MaxHeight = 60;
+
+        [Tooltip("Number of blocks over which the carving fades in/out near MinHeight and MaxHeight bounds. 0 = hard cutoff.")]
+        [Range(0, 32)]
+        public int DepthFadeMargin = 8;
     }
 }

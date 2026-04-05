@@ -100,6 +100,12 @@ namespace Libraries
         private TransformType3D mWarpTransformType3D;
         private float mDomainWarpAmp;
 
+        /// <summary>
+        /// When true, remaps noise output from [-1, 1] to [0, 1].
+        /// Useful for matching legacy Mathf.PerlinNoise range expectations.
+        /// </summary>
+        private bool mNormalizeToZeroOne;
+
         // Constants
         private const int PrimeX = 501125321;
         private const int PrimeY = 1136930381;
@@ -213,30 +219,41 @@ namespace Libraries
             mDomainWarpAmp = domainWarpAmp;
         }
 
+        /// <summary>
+        /// When enabled, remaps all GetNoise output from [-1, 1] to [0, 1].
+        /// Useful for matching legacy Mathf.PerlinNoise range expectations.
+        /// </summary>
+        public void SetNormalizeToZeroOne(bool normalize)
+        {
+            mNormalizeToZeroOne = normalize;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float GetNoise(float x, float y)
         {
             TransformNoiseCoordinate(ref x, ref y);
-            return mFractalType switch
+            float result = mFractalType switch
             {
                 FractalType.FBm => GenFractalFBm(x, y),
                 FractalType.Ridged => GenFractalRidged(x, y),
                 FractalType.PingPong => GenFractalPingPong(x, y),
                 _ => GenNoiseSingle(mSeed, x, y),
             };
+            return mNormalizeToZeroOne ? (result + 1f) * 0.5f : result;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float GetNoise(float x, float y, float z)
         {
             TransformNoiseCoordinate(ref x, ref y, ref z);
-            return mFractalType switch
+            float result = mFractalType switch
             {
                 FractalType.FBm => GenFractalFBm(x, y, z),
                 FractalType.Ridged => GenFractalRidged(x, y, z),
                 FractalType.PingPong => GenFractalPingPong(x, y, z),
                 _ => GenNoiseSingle(mSeed, x, y, z),
             };
+            return mNormalizeToZeroOne ? (result + 1f) * 0.5f : result;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -22,9 +22,11 @@ namespace Jobs.Generators
         private int _seed;
         private NativeArray<StandardBiomeAttributesJobData> _biomesJobData;
         private NativeArray<StandardLodeJobData> _allLodesJobData;
+        private NativeArray<StandardCaveLayerJobData> _allCaveLayersJobData;
         private NativeArray<BlockTypeJobData> _blockTypesJobData;
         private NativeArray<FastNoiseLite> _biomeTerrainNoises;
         private NativeArray<FastNoiseLite> _lodeNoises;
+        private NativeArray<FastNoiseLite> _caveNoises;
         private FastNoiseLite _biomeSelectionNoise;
         private StandardBiomeAttributes[] _standardBiomes;
 
@@ -49,11 +51,13 @@ namespace Jobs.Generators
                 _standardBiomes[i] = (StandardBiomeAttributes)worldType.Biomes[i];
             }
 
-            // --- Flatten biomes + lodes into NativeArrays ---
+            // --- Flatten biomes + lodes + caves into NativeArrays ---
             int totalLodeCount = 0;
+            int totalCaveLayerCount = 0;
             foreach (StandardBiomeAttributes biome in _standardBiomes)
             {
                 totalLodeCount += (biome.Lodes != null ? biome.Lodes.Length : 0);
+                totalCaveLayerCount += (biome.CaveLayers != null ? biome.CaveLayers.Length : 0);
             }
 
             _biomesJobData = new NativeArray<StandardBiomeAttributesJobData>(_standardBiomes.Length, Allocator.Persistent);
@@ -61,17 +65,29 @@ namespace Jobs.Generators
             _biomeTerrainNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _lodeNoises = new NativeArray<FastNoiseLite>(totalLodeCount, Allocator.Persistent);
 
+            _allCaveLayersJobData = new NativeArray<StandardCaveLayerJobData>(totalCaveLayerCount, Allocator.Persistent);
+            _caveNoises = new NativeArray<FastNoiseLite>(totalCaveLayerCount, Allocator.Persistent);
+
             int currentLodeIndex = 0;
+            int currentCaveLayerIndex = 0;
             for (int i = 0; i < _standardBiomes.Length; i++)
             {
                 StandardBiomeAttributes biome = _standardBiomes[i];
                 int lodeCount = biome.Lodes != null ? biome.Lodes.Length : 0;
+                int caveLayerCount = biome.CaveLayers != null ? biome.CaveLayers.Length : 0;
 
                 // Build lode data + noise
                 for (int j = 0; j < lodeCount; j++)
                 {
                     _allLodesJobData[currentLodeIndex + j] = new StandardLodeJobData(biome.Lodes[j]);
                     _lodeNoises[currentLodeIndex + j] = CreateNoiseFromConfig(biome.Lodes[j].noiseConfig);
+                }
+
+                // Build cave layer data + noise
+                for (int j = 0; j < caveLayerCount; j++)
+                {
+                    _allCaveLayersJobData[currentCaveLayerIndex + j] = new StandardCaveLayerJobData(biome.CaveLayers[j]);
+                    _caveNoises[currentCaveLayerIndex + j] = CreateNoiseFromConfig(biome.CaveLayers[j].NoiseConfig);
                 }
 
                 // Build biome job data
@@ -88,12 +104,15 @@ namespace Jobs.Generators
                     MajorFloraIndex = biome.MajorFloraIndex,
                     LodeStartIndex = currentLodeIndex,
                     LodeCount = lodeCount,
+                    CaveLayerStartIndex = currentCaveLayerIndex,
+                    CaveLayerCount = caveLayerCount,
                 };
 
                 // Build per-biome terrain noise
                 _biomeTerrainNoises[i] = CreateNoiseFromConfig(biome.TerrainNoiseConfig);
 
                 currentLodeIndex += lodeCount;
+                currentCaveLayerIndex += caveLayerCount;
             }
 
             // --- Biome Selection Noise (Cellular / Voronoi) ---
@@ -131,8 +150,10 @@ namespace Jobs.Generators
                 BlockTypes = _blockTypesJobData,
                 Biomes = _biomesJobData,
                 AllLodes = _allLodesJobData,
+                AllCaveLayers = _allCaveLayersJobData,
                 BiomeTerrainNoises = _biomeTerrainNoises,
                 LodeNoises = _lodeNoises,
+                CaveNoises = _caveNoises,
                 BiomeSelectionNoise = _biomeSelectionNoise,
                 OutputMap = outputMap,
                 OutputHeightMap = outputHeightMap,
@@ -222,6 +243,8 @@ namespace Jobs.Generators
             if (_allLodesJobData.IsCreated) _allLodesJobData.Dispose();
             if (_biomeTerrainNoises.IsCreated) _biomeTerrainNoises.Dispose();
             if (_lodeNoises.IsCreated) _lodeNoises.Dispose();
+            if (_allCaveLayersJobData.IsCreated) _allCaveLayersJobData.Dispose();
+            if (_caveNoises.IsCreated) _caveNoises.Dispose();
         }
 
         #endregion
@@ -247,6 +270,7 @@ namespace Jobs.Generators
             noise.SetCellularDistanceFunction(config.CellularDistanceFunction);
             noise.SetCellularReturnType(config.CellularReturnType);
             noise.SetCellularJitter(config.CellularJitter);
+            noise.SetNormalizeToZeroOne(config.NormalizeToZeroOne);
             return noise;
         }
 

@@ -42,5 +42,11 @@ namespace Jobs.Data
 
         /// <summary>Number of lodes for this biome in the shared array.</summary>
         public int LodeCount;
+
+        /// <summary>Index into the shared NativeArray&lt;StandardCaveLayerJobData&gt; owned by StandardChunkGenerator.</summary>
+        public int CaveLayerStartIndex;
+
+        /// <summary>Number of cave layers for this biome in the shared array.</summary>
+        public int CaveLayerCount;
     }
 }
