@@ -130,11 +130,11 @@ namespace Jobs.Generators
                 ? _standardBiomes[0].biomeWeightNoiseConfig
                 : new FastNoiseConfig
                 {
-                    NoiseType = FastNoiseLite.NoiseType.Cellular,
-                    Frequency = 0.005f,
-                    CellularDistanceFunction = FastNoiseLite.CellularDistanceFunction.EuclideanSq,
-                    CellularReturnType = FastNoiseLite.CellularReturnType.CellValue,
-                    CellularJitter = 1.0f,
+                    noiseType = FastNoiseLite.NoiseType.Cellular,
+                    frequency = 0.005f,
+                    cellularDistanceFunction = FastNoiseLite.CellularDistanceFunction.EuclideanSq,
+                    cellularReturnType = FastNoiseLite.CellularReturnType.CellValue,
+                    cellularJitter = 1.0f,
                 };
 
             _biomeSelectionNoise = CreateNoiseFromConfig(selectionConfig);
@@ -266,20 +266,20 @@ namespace Jobs.Generators
         /// </summary>
         private FastNoiseLite CreateNoiseFromConfig(FastNoiseConfig config)
         {
-            FastNoiseLite noise = FastNoiseLite.Create(_seed + config.SeedOffset);
-            noise.SetFrequency(config.Frequency);
-            noise.SetNoiseType(config.NoiseType);
-            noise.SetRotationType3D(config.RotationType3D);
-            noise.SetFractalType(config.FractalType);
-            noise.SetFractalOctaves(config.Octaves);
-            noise.SetFractalGain(config.Gain);
-            noise.SetFractalLacunarity(config.Lacunarity);
-            noise.SetFractalWeightedStrength(config.WeightedStrength);
-            noise.SetFractalPingPongStrength(config.PingPongStrength);
-            noise.SetCellularDistanceFunction(config.CellularDistanceFunction);
-            noise.SetCellularReturnType(config.CellularReturnType);
-            noise.SetCellularJitter(config.CellularJitter);
-            noise.SetNormalizeToZeroOne(config.NormalizeToZeroOne);
+            FastNoiseLite noise = FastNoiseLite.Create(_seed + config.seedOffset);
+            noise.SetFrequency(config.frequency);
+            noise.SetNoiseType(config.noiseType);
+            noise.SetRotationType3D(config.rotationType3D);
+            noise.SetFractalType(config.fractalType);
+            noise.SetFractalOctaves(config.octaves);
+            noise.SetFractalGain(config.gain);
+            noise.SetFractalLacunarity(config.lacunarity);
+            noise.SetFractalWeightedStrength(config.weightedStrength);
+            noise.SetFractalPingPongStrength(config.pingPongStrength);
+            noise.SetCellularDistanceFunction(config.cellularDistanceFunction);
+            noise.SetCellularReturnType(config.cellularReturnType);
+            noise.SetCellularJitter(config.cellularJitter);
+            noise.SetNormalizeToZeroOne(config.normalizeToZeroOne);
             return noise;
         }
 

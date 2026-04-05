@@ -14,55 +14,55 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Forrest
   terrainNoiseConfig:
-    SeedOffset: 875465
-    Frequency: 0.01875
-    NoiseType: 3
-    RotationType3D: 0
-    FractalType: 0
-    Octaves: 3
-    Gain: 0.5
-    Lacunarity: 2
-    WeightedStrength: 0
-    PingPongStrength: 2
-    CellularDistanceFunction: 0
-    CellularReturnType: 0
-    CellularJitter: 1
-    NormalizeToZeroOne: 0
+    seedOffset: 875465
+    frequency: 0.01875
+    noiseType: 3
+    rotationType3D: 0
+    fractalType: 0
+    octaves: 3
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 2
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 1
+    normalizeToZeroOne: 0
   biomeWeightNoiseConfig:
-    SeedOffset: 875465
-    Frequency: 0.010625
-    NoiseType: 2
-    RotationType3D: 0
-    FractalType: 0
-    Octaves: 1
-    Gain: 0.5
-    Lacunarity: 2
-    WeightedStrength: 0
-    PingPongStrength: 2
-    CellularDistanceFunction: 0
-    CellularReturnType: 0
-    CellularJitter: 1
-    NormalizeToZeroOne: 0
+    seedOffset: 875465
+    frequency: 0.010625
+    noiseType: 2
+    rotationType3D: 0
+    fractalType: 0
+    octaves: 1
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 2
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 1
+    normalizeToZeroOne: 0
   baseTerrainHeight: 60
   terrainAmplitude: 16
   surfaceBlockID: 3
   subSurfaceBlockID: 3
   enableMajorFlora: 1
   majorFloraZoneNoiseConfig:
-    SeedOffset: -99823
-    Frequency: 0.5
-    NoiseType: 0
-    RotationType3D: 0
-    FractalType: 0
-    Octaves: 1
-    Gain: 0.5
-    Lacunarity: 2
-    WeightedStrength: 0
-    PingPongStrength: 2
-    CellularDistanceFunction: 0
-    CellularReturnType: 0
-    CellularJitter: 1
-    NormalizeToZeroOne: 1
+    seedOffset: -99823
+    frequency: 0.5
+    noiseType: 0
+    rotationType3D: 0
+    fractalType: 0
+    octaves: 1
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 2
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 1
+    normalizeToZeroOne: 1
   majorFloraZoneCoverage: 0.86
   majorFloraPlacementSpacing: 3
   majorFloraPlacementPadding: 0
@@ -75,59 +75,59 @@ MonoBehaviour:
     minHeight: 1
     maxHeight: 255
     noiseConfig:
-      SeedOffset: 0
-      Frequency: 0.00625
-      NoiseType: 3
-      RotationType3D: 0
-      FractalType: 0
-      Octaves: 1
-      Gain: 0.5
-      Lacunarity: 2
-      WeightedStrength: 0
-      PingPongStrength: 2
-      CellularDistanceFunction: 0
-      CellularReturnType: 0
-      CellularJitter: 1
-      NormalizeToZeroOne: 0
+      seedOffset: 0
+      frequency: 0.00625
+      noiseType: 3
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 1
+      gain: 0.5
+      lacunarity: 2
+      weightedStrength: 0
+      pingPongStrength: 2
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 1
+      normalizeToZeroOne: 0
   - nodeName: Sand
     previewColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
     blockID: 4
     minHeight: 30
     maxHeight: 60
     noiseConfig:
-      SeedOffset: 500
-      Frequency: 0.0125
-      NoiseType: 3
-      RotationType3D: 0
-      FractalType: 0
-      Octaves: 1
-      Gain: 0.5
-      Lacunarity: 2
-      WeightedStrength: 0
-      PingPongStrength: 2
-      CellularDistanceFunction: 0
-      CellularReturnType: 0
-      CellularJitter: 1
-      NormalizeToZeroOne: 0
+      seedOffset: 500
+      frequency: 0.0125
+      noiseType: 3
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 1
+      gain: 0.5
+      lacunarity: 2
+      weightedStrength: 0
+      pingPongStrength: 2
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 1
+      normalizeToZeroOne: 0
   caveLayers:
   - layerName: Cave Network
     previewColor: {r: 1, g: 0, b: 0, a: 1}
     mode: 1
     noiseConfig:
-      SeedOffset: 43534
-      Frequency: 0.1
-      NoiseType: 3
-      RotationType3D: 0
-      FractalType: 0
-      Octaves: 1
-      Gain: 0.5
-      Lacunarity: 2
-      WeightedStrength: 0
-      PingPongStrength: 2
-      CellularDistanceFunction: 0
-      CellularReturnType: 0
-      CellularJitter: 1
-      NormalizeToZeroOne: 1
+      seedOffset: 43534
+      frequency: 0.1
+      noiseType: 3
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 1
+      gain: 0.5
+      lacunarity: 2
+      weightedStrength: 0
+      pingPongStrength: 2
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 1
+      normalizeToZeroOne: 1
     threshold: 0.55
     minHeight: 5
     maxHeight: 66
@@ -136,20 +136,20 @@ MonoBehaviour:
     previewColor: {r: 1, g: 0.72156864, b: 0, a: 1}
     mode: 0
     noiseConfig:
-      SeedOffset: 91234
-      Frequency: 0.015
-      NoiseType: 0
-      RotationType3D: 0
-      FractalType: 0
-      Octaves: 1
-      Gain: 0.5
-      Lacunarity: 2
-      WeightedStrength: 0
-      PingPongStrength: 2
-      CellularDistanceFunction: 0
-      CellularReturnType: 0
-      CellularJitter: 1
-      NormalizeToZeroOne: 0
+      seedOffset: 91234
+      frequency: 0.015
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 1
+      gain: 0.5
+      lacunarity: 2
+      weightedStrength: 0
+      pingPongStrength: 2
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 1
+      normalizeToZeroOne: 0
     threshold: 0.55
     minHeight: 5
     maxHeight: 40

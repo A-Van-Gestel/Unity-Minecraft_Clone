@@ -345,7 +345,7 @@ namespace Editor.WorldTools
             Color[] pixels = new Color[texSize * texSize];
 
             FastNoiseLite terrainNoise = CreateNoiseFromConfig(_biome.terrainNoiseConfig);
-            bool terrainNormalized = _biome.terrainNoiseConfig.NormalizeToZeroOne;
+            bool terrainNormalized = _biome.terrainNoiseConfig.normalizeToZeroOne;
 
             // Setup composite arrays
             FastNoiseLite[] layerNoises = null;
@@ -454,8 +454,8 @@ namespace Editor.WorldTools
                             {
                                 // Show raw grayscale of the noise (simulate Normalize behavior)
                                 bool isNorm = false;
-                                if (_target == NoiseTarget.CaveLayer) isNorm = _biome.caveLayers[_targetIndex].noiseConfig.NormalizeToZeroOne;
-                                else if (_target == NoiseTarget.Lode) isNorm = _biome.lodes[_targetIndex].noiseConfig.NormalizeToZeroOne;
+                                if (_target == NoiseTarget.CaveLayer) isNorm = _biome.caveLayers[_targetIndex].noiseConfig.normalizeToZeroOne;
+                                else if (_target == NoiseTarget.Lode) isNorm = _biome.lodes[_targetIndex].noiseConfig.normalizeToZeroOne;
 
                                 float rawDisplay = isNorm ? noiseVal : (noiseVal + 1f) / 2f;
                                 rawDisplay = math.clamp(rawDisplay, 0f, 1f);
@@ -577,20 +577,20 @@ namespace Editor.WorldTools
 
         private FastNoiseLite CreateNoiseFromConfig(FastNoiseConfig config)
         {
-            FastNoiseLite noise = FastNoiseLite.Create(_seed + config.SeedOffset);
-            noise.SetFrequency(config.Frequency);
-            noise.SetNoiseType(config.NoiseType);
-            noise.SetRotationType3D(config.RotationType3D);
-            noise.SetFractalType(config.FractalType);
-            noise.SetFractalOctaves(config.Octaves);
-            noise.SetFractalGain(config.Gain);
-            noise.SetFractalLacunarity(config.Lacunarity);
-            noise.SetFractalWeightedStrength(config.WeightedStrength);
-            noise.SetFractalPingPongStrength(config.PingPongStrength);
-            noise.SetCellularDistanceFunction(config.CellularDistanceFunction);
-            noise.SetCellularReturnType(config.CellularReturnType);
-            noise.SetCellularJitter(config.CellularJitter);
-            noise.SetNormalizeToZeroOne(config.NormalizeToZeroOne);
+            FastNoiseLite noise = FastNoiseLite.Create(_seed + config.seedOffset);
+            noise.SetFrequency(config.frequency);
+            noise.SetNoiseType(config.noiseType);
+            noise.SetRotationType3D(config.rotationType3D);
+            noise.SetFractalType(config.fractalType);
+            noise.SetFractalOctaves(config.octaves);
+            noise.SetFractalGain(config.gain);
+            noise.SetFractalLacunarity(config.lacunarity);
+            noise.SetFractalWeightedStrength(config.weightedStrength);
+            noise.SetFractalPingPongStrength(config.pingPongStrength);
+            noise.SetCellularDistanceFunction(config.cellularDistanceFunction);
+            noise.SetCellularReturnType(config.cellularReturnType);
+            noise.SetCellularJitter(config.cellularJitter);
+            noise.SetNormalizeToZeroOne(config.normalizeToZeroOne);
             return noise;
         }
     }

@@ -1,5 +1,7 @@
 using System;
 using Libraries;
+using MyBox;
+using UnityEngine;
 
 namespace Jobs.Data
 {
@@ -12,51 +14,72 @@ namespace Jobs.Data
     public struct FastNoiseConfig
     {
         /// <summary>Added to the world seed to differentiate noise layers.</summary>
-        public int SeedOffset;
+        [Separator("Base Settings")]
+        [Tooltip("Added to the world seed to differentiate noise layers.")]
+        public int seedOffset;
 
         /// <summary>Base frequency for the noise evaluation.</summary>
-        public float Frequency;
+        [Tooltip("Base frequency for the noise evaluation.")]
+        public float frequency;
 
         /// <summary>The noise algorithm to use.</summary>
-        public FastNoiseLite.NoiseType NoiseType;
+        [Tooltip("The noise algorithm to use.")]
+        public FastNoiseLite.NoiseType noiseType;
 
         /// <summary>3D rotation type. ImproveXZPlanes is recommended for terrain generation.</summary>
-        public FastNoiseLite.RotationType3D RotationType3D;
-
-        // Fractal parameters
+        [Tooltip("3D rotation type. ImproveXZPlanes is recommended for terrain generation.")]
+        public FastNoiseLite.RotationType3D rotationType3D;
 
         /// <summary>Fractal type for layered noise. None for single-pass evaluation.</summary>
-        public FastNoiseLite.FractalType FractalType;
+        [Separator("Fractal Settings")]
+        [Tooltip("Fractal type for layered noise. None for single-pass evaluation.")]
+        public FastNoiseLite.FractalType fractalType;
 
         /// <summary>Number of fractal octaves (1-16).</summary>
-        public int Octaves;
+        [ConditionalField(nameof(fractalType), true, FastNoiseLite.FractalType.None)]
+        [Tooltip("Number of fractal octaves (1-16).")]
+        public int octaves;
 
         /// <summary>Fractal gain per octave.</summary>
-        public float Gain;
+        [ConditionalField(nameof(fractalType), true, FastNoiseLite.FractalType.None)]
+        [Tooltip("Fractal gain per octave.")]
+        public float gain;
 
         /// <summary>Fractal lacunarity (frequency multiplier per octave).</summary>
-        public float Lacunarity;
+        [ConditionalField(nameof(fractalType), true, FastNoiseLite.FractalType.None)]
+        [Tooltip("Fractal lacunarity (frequency multiplier per octave).")]
+        public float lacunarity;
 
         /// <summary>FBm weighted strength. 0 = standard FBm.</summary>
-        public float WeightedStrength;
+        [ConditionalField(nameof(fractalType), true, FastNoiseLite.FractalType.None)]
+        [Tooltip("FBm weighted strength. 0 = standard FBm.")]
+        public float weightedStrength;
 
         /// <summary>Only meaningful when FractalType == PingPong.</summary>
-        public float PingPongStrength;
-
-        // Cellular parameters — only meaningful when NoiseType == Cellular
+        [ConditionalField(nameof(fractalType), false, FastNoiseLite.FractalType.PingPong)]
+        [Tooltip("Only meaningful when FractalType == PingPong.")]
+        public float pingPongStrength;
 
         /// <summary>Distance function for Cellular noise.</summary>
-        public FastNoiseLite.CellularDistanceFunction CellularDistanceFunction;
+        [Separator("Cellular Settings")]
+        [ConditionalField(nameof(noiseType), false, FastNoiseLite.NoiseType.Cellular)]
+        [Tooltip("Distance function for Cellular noise.")]
+        public FastNoiseLite.CellularDistanceFunction cellularDistanceFunction;
 
         /// <summary>Return type for Cellular noise.</summary>
-        public FastNoiseLite.CellularReturnType CellularReturnType;
+        [ConditionalField(nameof(noiseType), false, FastNoiseLite.NoiseType.Cellular)]
+        [Tooltip("Return type for Cellular noise.")]
+        public FastNoiseLite.CellularReturnType cellularReturnType;
 
         /// <summary>Jitter factor for Cellular noise cell points.</summary>
-        public float CellularJitter;
-
-        // Output range
+        [ConditionalField(nameof(noiseType), false, FastNoiseLite.NoiseType.Cellular)]
+        [Tooltip("Jitter factor for Cellular noise cell points.")]
+        public float cellularJitter;
 
         /// <summary>When true, remaps GetNoise output from [-1, 1] to [0, 1].</summary>
-        public bool NormalizeToZeroOne;
+        [Separator("Output Settings")]
+        [OverrideLabel("Normalize to [0, 1]")]
+        [Tooltip("When true, remaps GetNoise output from [-1, 1] to [0, 1].")]
+        public bool normalizeToZeroOne;
     }
 }
