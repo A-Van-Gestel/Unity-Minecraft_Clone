@@ -56,11 +56,12 @@ namespace Data.WorldTypes
         [Range(1, 64)]
         public int MajorFloraPlacementSpacing = 5;
         
-        [Tooltip("Max blocks a tree can randomly deviate from its grid center. " +
-                 "-1 = Automatic safe distance (prevents edge overlaps). " +
-                 "0 = Perfectly rigid orchard grid. " +
-                 "Larger values (e.g. equal to Spacing) allow trees to naturally cluster or touch.")]
-        public int MajorFloraPlacementJitter = -1;
+        [Tooltip("Minimum empty blocks to maintain between the tree and the grid cell edges. " +
+                 "-1 = Automatic (Allows touching in dense small grids, prevents touching in larger grids >= 5). " +
+                 "0 = Full random placement allowing trees to naturally clump and touch. " +
+                 "Higher values force trees closer to the exact center of the grid cell.")]
+        [FormerlySerializedAs("MajorFloraPlacementJitter")]
+        public int MajorFloraPlacementPadding = -1;
 
         [Tooltip("Probability that a valid spacing slot will actually spawn a tree. 1.0 = every slot is filled, lower = sparser.")]
         [Range(0f, 1f)]

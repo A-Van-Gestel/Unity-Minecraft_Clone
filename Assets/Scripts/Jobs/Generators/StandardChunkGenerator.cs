@@ -104,7 +104,7 @@ namespace Jobs.Generators
                     EnableMajorFlora = biome.EnableMajorFlora,
                     MajorFloraZoneCoverage = biome.MajorFloraZoneCoverage,
                     MajorFloraPlacementSpacing = biome.MajorFloraPlacementSpacing,
-                    MajorFloraPlacementJitter = biome.MajorFloraPlacementJitter,
+                    MajorFloraPlacementPadding = biome.MajorFloraPlacementPadding,
                     MajorFloraPlacementChance = biome.MajorFloraPlacementChance,
                     MajorFloraIndex = biome.MajorFloraIndex,
                     LodeStartIndex = currentLodeIndex,

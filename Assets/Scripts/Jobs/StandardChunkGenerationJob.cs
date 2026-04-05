@@ -264,19 +264,32 @@ namespace Jobs
                         uint cellHash = math.hash(new int3(cellX, cellZ, BaseSeed));
                         var cellRandom = new Random(math.max(1u, cellHash));
 
-                        // Find the exact mathematical center of this cell
-                        int centerX = cellX * spacing + spacing / 2;
-                        int centerZ = cellZ * spacing + spacing / 2;
+                        // Calculate padding (minimum empty blocks from the grid cell edges)
+                        int edgePadding = 0;
+                        if (biome.MajorFloraPlacementPadding < 0)
+                        {
+                            // Automatic mode: Prevent edge overlapping natively, 
+                            // but if the grid allows very dense placement (spacing < 5),
+                            // we disable padding to allow natural clustering and avoid strict Orchard grids.
+                            edgePadding = spacing >= 5 ? 1 : 0;
+                        }
+                        else
+                        {
+                            // Developer Override
+                            int maxPossiblePadding = (spacing - 1) / 2;
+                            edgePadding = math.clamp(biome.MajorFloraPlacementPadding, 0, maxPossiblePadding);
+                        }
 
-                        // Calculate jitter range. -1 = Automatic safe distance (prevents edge overlapping).
-                        int maxJitterPotential = math.max(0, (spacing / 2) - 1);
-                        int jitter = biome.MajorFloraPlacementJitter < 0 
-                            ? maxJitterPotential 
-                            : biome.MajorFloraPlacementJitter;
+                        // Define valid internal placement area
+                        int innerMinX = cellX * spacing + edgePadding;
+                        int innerMaxX = cellX * spacing + spacing - edgePadding;
+                        
+                        int innerMinZ = cellZ * spacing + edgePadding;
+                        int innerMaxZ = cellZ * spacing + spacing - edgePadding;
 
-                        // Pick exactly one target column within this cell
-                        int targetX = centerX + cellRandom.NextInt(-jitter, jitter + 1);
-                        int targetZ = centerZ + cellRandom.NextInt(-jitter, jitter + 1);
+                        // Pick exactly one target column within this validated boundary range
+                        int targetX = cellRandom.NextInt(innerMinX, innerMaxX);
+                        int targetZ = cellRandom.NextInt(innerMinZ, innerMaxZ);
 
                         // Is THIS column the elected structural point for this local grid cell?
                         if (globalX == targetX && globalZ == targetZ)

@@ -64,8 +64,8 @@ MonoBehaviour:
     CellularJitter: 1
     NormalizeToZeroOne: 1
   MajorFloraZoneCoverage: 0.86
-  MajorFloraPlacementSpacing: 4
-  MajorFloraPlacementJitter: 3
+  MajorFloraPlacementSpacing: 3
+  MajorFloraPlacementPadding: 0
   MajorFloraPlacementChance: 0.88
   MajorFloraIndex: 0
   Lodes:

@@ -37,8 +37,8 @@ namespace Jobs.Data
         /// <summary>The minimum grid size for flora. Smaller = denser forest, Larger = sparser forest.</summary>
         public int MajorFloraPlacementSpacing;
         
-        /// <summary>Max blocks a tree can randomly deviate from its grid center. -1 = Automatic safe distance.</summary>
-        public int MajorFloraPlacementJitter;
+        /// <summary>Minimum empty blocks to maintain between the tree and the grid cell edges.</summary>
+        public int MajorFloraPlacementPadding;
 
         /// <summary>Probability that a valid spacing slot will actually spawn a tree.</summary>
         public float MajorFloraPlacementChance;
