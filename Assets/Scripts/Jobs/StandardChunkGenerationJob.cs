@@ -23,6 +23,7 @@ namespace Jobs
     {
         #region Input Data
 
+        [ReadOnly] public int SeaLevel;
         [ReadOnly] public int BaseSeed;
 
         /// <summary>
@@ -133,7 +134,7 @@ namespace Jobs
                 }
                 else if (y > terrainHeight)
                 {
-                    if (y < VoxelData.SeaLevel)
+                    if (y < SeaLevel)
                     {
                         voxelValue = (byte)BlockIDs.Water;
                     }

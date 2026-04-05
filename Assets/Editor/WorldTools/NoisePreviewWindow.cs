@@ -53,6 +53,7 @@ namespace Editor.WorldTools
         private bool _showTerrainBackdrop = true;
         private bool _showChunkBorders = true;
         private bool _showWaterLevel = false;
+        private int _seaLevel = 45;
 
         private Texture2D _previewTexture;
         private DateTime _lastAssetWriteTime;
@@ -194,6 +195,10 @@ namespace Editor.WorldTools
             else
             {
                 _showWaterLevel = EditorGUILayout.Toggle("Show Water Level (Sea Level)", _showWaterLevel);
+                if (_showWaterLevel)
+                {
+                    _seaLevel = EditorGUILayout.IntSlider("Sea Level Height", _seaLevel, 0, 128);
+                }
             }
 
             _showChunkBorders = EditorGUILayout.Toggle("Show Chunk Borders", _showChunkBorders);
@@ -421,7 +426,7 @@ namespace Editor.WorldTools
                         if (_target == NoiseTarget.Terrain && _showWaterLevel)
                         {
                             int terrainHeight = (int)math.floor(_biome.baseTerrainHeight + tNoise * _biome.terrainAmplitude);
-                            if (terrainHeight < VoxelData.SeaLevel)
+                            if (terrainHeight < _seaLevel)
                             {
                                 // Show water mask
                                 pixelColor = new Color(0.15f, 0.45f, 0.85f, 1f); // Nice deep ocean blue

@@ -33,7 +33,11 @@ namespace Data.WorldTypes
         [Tooltip("The specific biomes available to this world type.")]
         public BiomeBase[] Biomes;
 
-        [Tooltip("Global terrain scaling parameters for this specific world type.")]
-        public float BaseTerrainHeight = 42f;
+        [Header("Global Settings")]
+        [Tooltip("The global sea level for this world type. Empty spaces below this level generate as water. Defaults to 45 (Minecraft is 62).")]
+        public int SeaLevel = 45;
+
+        [Tooltip("Legacy field. Only used by LegacyWorldGen format. Standard generation uses Biome-specific BaseTerrainHeight.")]
+        public int SolidGroundHeight = 42; 
     }
 }

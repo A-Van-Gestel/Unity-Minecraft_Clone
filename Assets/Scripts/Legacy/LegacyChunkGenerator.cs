@@ -18,6 +18,8 @@ namespace Legacy
     public class LegacyChunkGenerator : IChunkGenerator
     {
         private int _seed;
+        private int _seaLevel;
+        private int _solidGroundHeight;
         private NativeArray<LegacyBiomeAttributesJobData> _biomesJobData;
         private NativeArray<LegacyLodeJobData> _allLodesJobData;
         private NativeArray<BlockTypeJobData> _blockTypesJobData;
@@ -29,6 +31,8 @@ namespace Legacy
         public void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData)
         {
             _seed = seed;
+            _seaLevel = worldType.SeaLevel;
+            _solidGroundHeight = worldType.SolidGroundHeight;
             _blockTypesJobData = globalJobData.BlockTypesJobData;
 
             // Cast BiomeBase[] → LegacyBiomeAttributes[]
@@ -75,7 +79,9 @@ namespace Legacy
             var job = new LegacyChunkGenerationJob
             {
                 Seed = _seed,
-                ChunkPosition = chunkVoxelPos,
+                SeaLevel = _seaLevel,
+                SolidGroundHeight = _solidGroundHeight,
+                ChunkPosition = new Vector2Int(chunkVoxelPos.x, chunkVoxelPos.y),
                 BlockTypes = _blockTypesJobData,
                 Biomes = _biomesJobData,
                 AllLodes = _allLodesJobData,
@@ -98,7 +104,7 @@ namespace Legacy
         /// <inheritdoc />
         public byte GetVoxel(Vector3Int globalPos)
         {
-            return LegacyWorldGen.GetVoxel(globalPos, _seed, _biomesJobData, _allLodesJobData);
+            return LegacyWorldGen.GetVoxel(globalPos, _seed, _biomesJobData, _allLodesJobData, _solidGroundHeight, _seaLevel);
         }
 
         /// <inheritdoc />

@@ -22,7 +22,10 @@ namespace Legacy
             Vector3 pos,
             int seed,
             NativeArray<LegacyBiomeAttributesJobData> biomes,
-            NativeArray<LegacyLodeJobData> allLodes)
+            NativeArray<LegacyLodeJobData> allLodes,
+            int solidGroundHeight,
+            int seaLevel
+        )
         {
             int yPos = Mathf.FloorToInt(pos.y);
 
@@ -59,7 +62,7 @@ namespace Legacy
             LegacyBiomeAttributesJobData biome = biomes[strongestBiomeIndex];
 
             sumOfHeights /= count;
-            int terrainHeight = Mathf.FloorToInt(sumOfHeights + VoxelData.SolidGroundHeight);
+            int terrainHeight = Mathf.FloorToInt(sumOfHeights + solidGroundHeight);
 
             // ----- BASIC TERRAIN PASS -----
             byte voxelValue;
@@ -74,7 +77,7 @@ namespace Legacy
             }
             else if (yPos > terrainHeight)
             {
-                if (yPos < VoxelData.SeaLevel)
+                if (yPos < seaLevel)
                     return 19; // Water
 
                 return 0; // Air

@@ -23,6 +23,8 @@ namespace Legacy
         #region Input Data
 
         [ReadOnly] public int Seed;
+        [ReadOnly] public int SolidGroundHeight;
+        [ReadOnly] public int SeaLevel;
         [ReadOnly] public Vector2Int ChunkPosition;
         [ReadOnly] public NativeArray<BlockTypeJobData> BlockTypes;
         [ReadOnly] public NativeArray<LegacyBiomeAttributesJobData> Biomes;
@@ -59,7 +61,7 @@ namespace Legacy
             {
                 Vector3Int globalPos = new Vector3Int(x + ChunkPosition.x, y, z + ChunkPosition.y);
 
-                byte voxelID = LegacyWorldGen.GetVoxel(globalPos, Seed, Biomes, AllLodes);
+                byte voxelID = LegacyWorldGen.GetVoxel(globalPos, Seed, Biomes, AllLodes, SolidGroundHeight, SeaLevel);
                 BlockTypeJobData voxelProps = BlockTypes[voxelID];
 
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
@@ -76,7 +78,7 @@ namespace Legacy
                 }
 
                 // --- Major Flora Pass ---
-                if (y == GetTerrainHeight(globalPos, Biomes))
+                if (y == GetTerrainHeight(globalPos, Biomes, SolidGroundHeight))
                 {
                     LegacyBiomeAttributesJobData biome = GetStrongestBiome(globalPos, Biomes);
                     if (biome.PlaceMajorFlora)
@@ -101,7 +103,7 @@ namespace Legacy
 
         #region Helper Methods
 
-        private static int GetTerrainHeight(Vector3 pos, NativeArray<LegacyBiomeAttributesJobData> biomeArray)
+        private static int GetTerrainHeight(Vector3 pos, NativeArray<LegacyBiomeAttributesJobData> biomeArray, int solidGroundHeight)
         {
             float sumOfHeights = 0f;
             int count = 0;
@@ -117,7 +119,7 @@ namespace Legacy
                 }
             }
 
-            return Mathf.FloorToInt(sumOfHeights / count + VoxelData.SolidGroundHeight);
+            return Mathf.FloorToInt(sumOfHeights / count + solidGroundHeight);
         }
 
         private static LegacyBiomeAttributesJobData GetStrongestBiome(Vector3 pos, NativeArray<LegacyBiomeAttributesJobData> biomeArray)

@@ -20,6 +20,7 @@ namespace Jobs.Generators
     public class StandardChunkGenerator : IChunkGenerator
     {
         private int _seed;
+        private int _seaLevel;
         private NativeArray<StandardBiomeAttributesJobData> _biomesJobData;
         private NativeArray<StandardLodeJobData> _allLodesJobData;
         private NativeArray<StandardCaveLayerJobData> _allCaveLayersJobData;
@@ -37,6 +38,7 @@ namespace Jobs.Generators
         public void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData)
         {
             _seed = seed;
+            _seaLevel = worldType.SeaLevel;
             _blockTypesJobData = globalJobData.BlockTypesJobData;
 
             // --- Lookup Table Warmup (CRITICAL) ---
@@ -153,6 +155,7 @@ namespace Jobs.Generators
 
             var job = new StandardChunkGenerationJob
             {
+                SeaLevel = _seaLevel,
                 BaseSeed = _seed,
                 ChunkPosition = new int2(chunkVoxelPos.x, chunkVoxelPos.y),
                 BlockTypes = _blockTypesJobData,
@@ -206,7 +209,7 @@ namespace Jobs.Generators
             else if (y < terrainHeight && y > terrainHeight - 4)
                 voxelValue = biome.SubSurfaceBlockID;
             else if (y > terrainHeight)
-                return y < VoxelData.SeaLevel ? (byte)19 : (byte)0;
+                return y < _seaLevel ? (byte)19 : (byte)0;
             else
                 voxelValue = 1; // Stone
 
