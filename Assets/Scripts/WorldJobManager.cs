@@ -502,26 +502,18 @@ public class WorldJobManager : IDisposable
                         if (mod.Channel == LightChannel.Sun)
                         {
                             byte currentSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
-                            int hmIdx = localVoxelPos.x + VoxelData.ChunkWidth * localVoxelPos.z;
-                            ushort heightmapY = neighborChunk.heightMap[hmIdx];
 
-                            // Guard 1: A voxel above the heightmap has direct sky access and must
+                            // Guard: A voxel above the heightmap has direct sky access and must
                             // remain at sunlight 15. Cross-chunk shadow casting can incorrectly try
                             // to darken these voxels because it doesn't see this chunk's heightmap.
-                            if (currentSunlight == 15 && mod.LightLevel < 15 && localVoxelPos.y > heightmapY)
+                            if (currentSunlight == 15 && mod.LightLevel < 15)
                             {
-                                continue;
-                            }
-
-                            // Guard 2: Skip sunlight increases for voxels at or below the heightmap.
-                            // When chunk A has an air column at the border, its BFS propagates sunlight
-                            // horizontally into chunk B at every Y level — even where B has solid blocks
-                            // underground. This creates vertical "walls of light" leaking underground.
-                            // Chunk B's own BFS will correctly propagate any legitimate cave lighting
-                            // after the air-block border mods are processed.
-                            if (mod.LightLevel > currentSunlight && localVoxelPos.y <= heightmapY)
-                            {
-                                continue;
+                                int hmIdx = localVoxelPos.x + VoxelData.ChunkWidth * localVoxelPos.z;
+                                ushort heightmapY = neighborChunk.heightMap[hmIdx];
+                                if (localVoxelPos.y > heightmapY)
+                                {
+                                    continue;
+                                }
                             }
 
                             oldLightLevel = currentSunlight;

@@ -411,6 +411,7 @@ namespace Jobs
         /// <summary>
         /// Checks a single border voxel's light for one channel against its cross-chunk neighbor.
         /// Detects missing light (black spots) where the neighbor has light that should propagate here.
+        /// Sets the corrected value and enqueues for further BFS propagation.
         /// </summary>
         private void CheckEdgeVoxel(
             Vector3Int centerPos, uint centerPacked, uint neighborPacked, LightChannel channel,
@@ -434,6 +435,9 @@ namespace Jobs
             // Center voxel should have MORE light — catches black spots at borders.
             if (expectedFromNeighbor > centerLight)
             {
+                // Write the corrected value first, then enqueue for propagation.
+                // Without the SetLight, PropagateLight would read the stale value and do nothing.
+                SetLight(centerPos, expectedFromNeighbor, channel, ref cache);
                 placementQueue.Enqueue(centerPos);
             }
         }
