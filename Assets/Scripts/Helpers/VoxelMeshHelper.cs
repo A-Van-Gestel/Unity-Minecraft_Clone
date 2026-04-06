@@ -9,7 +9,6 @@ using UnityEngine;
 
 namespace Helpers
 {
-    [BurstCompile]
     public static class VoxelMeshHelper
     {
         // This array correctly maps the vertex order for each face to the UV coordinate order.
@@ -168,7 +167,6 @@ namespace Helpers
         /// Generates a custom mesh for a fluid voxel, creating a sloped surface based on its fluid level
         /// and the levels of its neighbors. This method uses pre-computed vertex height templates for high performance.
         /// </summary>
-        [BurstCompile]
         [SkipLocalsInit] // Optimization: Fluid generation uses many local floats/vectors. Skipping init saves cycles.
         public static void GenerateFluidMeshData(
             in Vector3Int pos,

@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using Unity.Mathematics;
 
 namespace Helpers
 {
@@ -6,6 +7,7 @@ namespace Helpers
     {
         // Constants from VoxelData, duplicated here to be self-contained for Burst
         public const int CHUNK_WIDTH = 16;
+        public const int CHUNK_HEIGHT = 128;
         public const int SECTION_SIZE = 16;
         public const int SECTION_VOLUME = SECTION_SIZE * SECTION_SIZE * SECTION_SIZE; // 4096 for 16 section width & 16 section size
 
@@ -35,6 +37,9 @@ namespace Helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int GetFlattenedIndexInChunk(int x, int y, int z)
         {
+            // Defensive clamp: prevents IndexOutOfRangeException if y reaches 128 (ChunkHeight).
+            y = math.clamp(y, 0, CHUNK_HEIGHT - 1);
+
             // 1. Determine which vertical section we are in.
             int sectionIdx = y / SECTION_SIZE;
 

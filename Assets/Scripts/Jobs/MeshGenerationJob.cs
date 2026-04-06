@@ -403,6 +403,11 @@ namespace Jobs
 
             if (!targetMap.IsCreated || targetMap.Length == 0) return null;
 
+            // Defensive validation: ensure remapped coordinates are within chunk bounds.
+            if (localPos.x < 0 || localPos.x >= VoxelData.ChunkWidth ||
+                localPos.z < 0 || localPos.z >= VoxelData.ChunkWidth)
+                return null;
+
             int mapIndex = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
             return new VoxelState(targetMap[mapIndex]);
         }

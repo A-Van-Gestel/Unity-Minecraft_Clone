@@ -56,6 +56,10 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<BlockTypeJobData> BlockTypes;
 
+        // When true, the job performs an edge consistency check on the 4 horizontal chunk borders
+        // before running the BFS. This detects and corrects stale light values at chunk boundaries.
+        public bool PerformEdgeCheck;
+
         #endregion
 
         // --- OUTPUT Data  ---
@@ -86,6 +90,15 @@ namespace Jobs
             // would return stale (pre-modification) values. This cache ensures that darkness removal
             // results are visible to the re-spreading phase within the same job execution.
             var neighborWriteCache = new NativeHashMap<long, uint>(64, Allocator.Temp);
+
+            // --- PASS -1: EDGE CONSISTENCY CHECK (Starlight-inspired) ---
+            // Validates light values on all 4 horizontal chunk borders against neighbor data.
+            // If a border voxel's light is inconsistent with what its neighbor could supply,
+            // it is queued for correction via the standard BFS passes.
+            if (PerformEdgeCheck)
+            {
+                CheckEdges(sunlightPlacementQueue, blocklightPlacementQueue, ref neighborWriteCache);
+            }
 
             // --- PASS 0: SEEDING ---
             // Seed the queues with initial changes from the main thread.
@@ -154,6 +167,18 @@ namespace Jobs
 
         #region Core Logic
 
+        /// <summary>
+        /// Returns true if the position is within the central chunk's local coordinate space (0-15 for X and Z).
+        /// BFS propagation must NOT continue into neighbor chunks — it creates light wrap-around artifacts
+        /// where light exits the center chunk, travels through the neighbor's (possibly empty) data,
+        /// and re-enters the center chunk underground. Neighbor lighting is handled by CrossChunkLightMods.
+        /// </summary>
+        private static bool IsInCenterChunk(Vector3Int pos)
+        {
+            return pos.x >= 0 && pos.x < VoxelData.ChunkWidth &&
+                   pos.z >= 0 && pos.z < VoxelData.ChunkWidth;
+        }
+
         private void PropagateDarkness(LightRemovalNode node, LightChannel channel, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, uint> cache)
         {
             for (int i = 0; i < 6; i++)
@@ -169,11 +194,14 @@ namespace Jobs
                     if (neighborLight < node.LightLevel)
                     {
                         SetLight(neighborPos, 0, channel, ref cache);
-                        rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborLight });
+                        // Only continue BFS within the center chunk. Neighbor mods are handled by CrossChunkLightMods.
+                        if (IsInCenterChunk(neighborPos))
+                            rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborLight });
                     }
                     else
                     {
-                        pQueue.Enqueue(neighborPos);
+                        if (IsInCenterChunk(neighborPos))
+                            pQueue.Enqueue(neighborPos);
                     }
                 }
             }
@@ -230,8 +258,9 @@ namespace Jobs
                     if (lightToPropagate > neighborLight)
                     {
                         SetLight(neighborPos, lightToPropagate, channel, ref cache);
-                        // Enqueue the transparent block to continue spreading the light.
-                        pQueue.Enqueue(neighborPos);
+                        // Only continue BFS within the center chunk. Neighbor mods are handled by CrossChunkLightMods.
+                        if (IsInCenterChunk(neighborPos))
+                            pQueue.Enqueue(neighborPos);
                     }
                 }
             }
@@ -321,6 +350,96 @@ namespace Jobs
 
         #endregion
 
+        #region Edge Checking
+
+        /// <summary>
+        /// Starlight-inspired edge consistency check. Iterates all voxels on the 4 horizontal
+        /// chunk borders and validates their light levels against what neighbors could supply.
+        /// Inconsistencies are queued for correction via the standard BFS passes.
+        /// </summary>
+        private void CheckEdges(
+            NativeQueue<Vector3Int> sunPlacement, NativeQueue<Vector3Int> blockPlacement,
+            ref NativeHashMap<long, uint> cache)
+        {
+            // Check all 4 horizontal borders:
+            // South border (z=0, neighbor at z=-1), North border (z=15, neighbor at z=+1)
+            // West border (x=0, neighbor at x=-1), East border (x=15, neighbor at x=+1)
+            for (int border = 0; border < 4; border++)
+            {
+                for (int y = 0; y < VoxelData.ChunkHeight; y++)
+                {
+                    for (int along = 0; along < VoxelData.ChunkWidth; along++)
+                    {
+                        Vector3Int pos;
+                        Vector3Int neighborPos;
+
+                        switch (border)
+                        {
+                            case 0: // South (z=0)
+                                pos = new Vector3Int(along, y, 0);
+                                neighborPos = new Vector3Int(along, y, -1);
+                                break;
+                            case 1: // North (z=15)
+                                pos = new Vector3Int(along, y, VoxelData.ChunkWidth - 1);
+                                neighborPos = new Vector3Int(along, y, VoxelData.ChunkWidth);
+                                break;
+                            case 2: // West (x=0)
+                                pos = new Vector3Int(0, y, along);
+                                neighborPos = new Vector3Int(-1, y, along);
+                                break;
+                            default: // East (x=15)
+                                pos = new Vector3Int(VoxelData.ChunkWidth - 1, y, along);
+                                neighborPos = new Vector3Int(VoxelData.ChunkWidth, y, along);
+                                break;
+                        }
+
+                        uint centerPacked = GetPackedData(pos, ref cache);
+                        if (centerPacked == uint.MaxValue) continue;
+
+                        uint neighborPacked = GetPackedData(neighborPos, ref cache);
+                        if (neighborPacked == uint.MaxValue) continue;
+
+                        CheckEdgeVoxel(pos, centerPacked, neighborPacked, LightChannel.Sun,
+                            sunPlacement, ref cache);
+                        CheckEdgeVoxel(pos, centerPacked, neighborPacked, LightChannel.Block,
+                            blockPlacement, ref cache);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks a single border voxel's light for one channel against its cross-chunk neighbor.
+        /// Detects missing light (black spots) where the neighbor has light that should propagate here.
+        /// </summary>
+        private void CheckEdgeVoxel(
+            Vector3Int centerPos, uint centerPacked, uint neighborPacked, LightChannel channel,
+            NativeQueue<Vector3Int> placementQueue, ref NativeHashMap<long, uint> cache)
+        {
+            byte centerLight = channel == LightChannel.Sun
+                ? BurstVoxelDataBitMapping.GetSunLight(centerPacked)
+                : BurstVoxelDataBitMapping.GetBlockLight(centerPacked);
+
+            byte neighborLight = channel == LightChannel.Sun
+                ? BurstVoxelDataBitMapping.GetSunLight(neighborPacked)
+                : BurstVoxelDataBitMapping.GetBlockLight(neighborPacked);
+
+            BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
+
+            // Opaque blocks cannot receive light through propagation.
+            if (centerProps.IsOpaque) return;
+
+            byte expectedFromNeighbor = (byte)Mathf.Max(0, neighborLight - 1 - centerProps.Opacity);
+
+            // Center voxel should have MORE light — catches black spots at borders.
+            if (expectedFromNeighbor > centerLight)
+            {
+                placementQueue.Enqueue(centerPos);
+            }
+        }
+
+        #endregion
+
         #region Helper Methods
 
         /// Get the packed data for the coordinates in the 3x3 grid.
@@ -390,6 +509,11 @@ namespace Jobs
 
             if (!targetMap.IsCreated || targetMap.Length == 0) return uint.MaxValue;
 
+            // Defensive validation: ensure remapped coordinates are within chunk bounds.
+            if (localPos.x < 0 || localPos.x >= VoxelData.ChunkWidth ||
+                localPos.z < 0 || localPos.z >= VoxelData.ChunkWidth)
+                return uint.MaxValue;
+
             int mapIndex = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
             uint data = targetMap[mapIndex];
 
@@ -405,6 +529,8 @@ namespace Jobs
         /// SetLight writes to the central map directly, but adds modifications for neighbors to the `crossChunkLightMods` list.
         private void SetLight(Vector3Int localPos, byte lightLevel, LightChannel channel, ref NativeHashMap<long, uint> cache)
         {
+            if (localPos.y < 0 || localPos.y >= VoxelData.ChunkHeight) return;
+
             if (localPos.x is >= 0 and < VoxelData.ChunkWidth && localPos.z is >= 0 and < VoxelData.ChunkWidth)
             {
                 // Voxel is in the central chunk, we can write to its map directly.

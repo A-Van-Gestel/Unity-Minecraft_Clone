@@ -60,7 +60,7 @@ public class WorldJobManager : IDisposable
         // (GeneratorRegistry) that eliminates the direct reference.
         _chunkGenerator = activeWorldType.TypeID switch
         {
-            WorldTypeID.Legacy   => new LegacyChunkGenerator(),
+            WorldTypeID.Legacy => new LegacyChunkGenerator(),
             WorldTypeID.Standard => new StandardChunkGenerator(),
             _ => throw new ArgumentException(
                 $"[WorldJobManager] Unsupported WorldTypeID: {activeWorldType.TypeID}. " +
@@ -278,10 +278,12 @@ public class WorldJobManager : IDisposable
             BlockTypes = _world.JobDataManager.BlockTypesJobData,
             CrossChunkLightMods = jobData.Mods,
             IsStable = jobData.IsStable,
+            PerformEdgeCheck = chunkData.NeedsEdgeCheck,
         };
 
         jobData.Handle = job.Schedule();
         chunkData.HasLightChangesToProcess = false;
+        if (chunkData.NeedsEdgeCheck) chunkData.NeedsEdgeCheck = false;
         lightingJobs.Add(chunkCoord, jobData);
     }
 
@@ -500,25 +502,29 @@ public class WorldJobManager : IDisposable
                         if (mod.Channel == LightChannel.Sun)
                         {
                             byte currentSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
+                            int hmIdx = localVoxelPos.x + VoxelData.ChunkWidth * localVoxelPos.z;
+                            ushort heightmapY = neighborChunk.heightMap[hmIdx];
 
-                            if (currentSunlight == 15 && mod.LightLevel < 15)
+                            // Guard 1: A voxel above the heightmap has direct sky access and must
+                            // remain at sunlight 15. Cross-chunk shadow casting can incorrectly try
+                            // to darken these voxels because it doesn't see this chunk's heightmap.
+                            if (currentSunlight == 15 && mod.LightLevel < 15 && localVoxelPos.y > heightmapY)
                             {
-                                int hmIdx = localVoxelPos.x + VoxelData.ChunkWidth * localVoxelPos.z;
-                                ushort heightmapY = neighborChunk.heightMap[hmIdx];
-                                if (localVoxelPos.y > heightmapY)
-                                {
-                                    if (_world.settings.enableDiagnosticLogs)
-                                    {
-                                        Debug.LogWarning($"[LIGHTING DEBUG] Skipped sunlight decrease at {mod.GlobalPosition} " +
-                                                         $"in chunk {neighborChunkVoxelPos}: current={currentSunlight}, incoming={mod.LightLevel}. " +
-                                                         $"Source job: {jobEntry.Key} (above heightmap={heightmapY})");
-                                    }
-
-                                    continue;
-                                }
+                                continue;
                             }
 
-                            oldLightLevel = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
+                            // Guard 2: Skip sunlight increases for voxels at or below the heightmap.
+                            // When chunk A has an air column at the border, its BFS propagates sunlight
+                            // horizontally into chunk B at every Y level — even where B has solid blocks
+                            // underground. This creates vertical "walls of light" leaking underground.
+                            // Chunk B's own BFS will correctly propagate any legitimate cave lighting
+                            // after the air-block border mods are processed.
+                            if (mod.LightLevel > currentSunlight && localVoxelPos.y <= heightmapY)
+                            {
+                                continue;
+                            }
+
+                            oldLightLevel = currentSunlight;
                             newPackedData = BurstVoxelDataBitMapping.SetSunLight(oldPackedData, mod.LightLevel);
                         }
                         else
@@ -535,8 +541,6 @@ public class WorldJobManager : IDisposable
                                 neighborChunk.AddToSunLightQueue(localVoxelPos, oldLightLevel);
                             else
                                 neighborChunk.AddToBlockLightQueue(localVoxelPos, oldLightLevel);
-
-                            _chunksToRebuildMesh.Add(ChunkCoord.FromVoxelOrigin(neighborChunk.position));
                         }
                     }
                 }
@@ -669,9 +673,23 @@ public class WorldJobManager : IDisposable
     /// </summary>
     public void Dispose()
     {
-        foreach (var job in generationJobs.Values) { job.Handle.Complete(); job.Dispose(); }
-        foreach (var (handle, meshData) in meshJobs.Values) { handle.Complete(); meshData.Dispose(); }
-        foreach (var job in lightingJobs.Values) { job.Handle.Complete(); job.Dispose(); }
+        foreach (var job in generationJobs.Values)
+        {
+            job.Handle.Complete();
+            job.Dispose();
+        }
+
+        foreach (var (handle, meshData) in meshJobs.Values)
+        {
+            handle.Complete();
+            meshData.Dispose();
+        }
+
+        foreach (var job in lightingJobs.Values)
+        {
+            job.Handle.Complete();
+            job.Dispose();
+        }
 
         generationJobs.Clear();
         meshJobs.Clear();

@@ -66,6 +66,13 @@ namespace Data
         [NonSerialized]
         public bool IsAwaitingMainThreadProcess = false;
 
+        /// <summary>
+        /// A transient flag indicating that this chunk needs an edge consistency check against its neighbors.
+        /// Set after initial lighting stabilizes; requires all neighbors to be lit before scheduling.
+        /// </summary>
+        [NonSerialized]
+        public bool NeedsEdgeCheck = false;
+
         [NonSerialized]
         private readonly Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
 
@@ -129,6 +136,7 @@ namespace Data
             NeedsInitialLighting = false;
             HasLightChangesToProcess = false;
             IsAwaitingMainThreadProcess = false;
+            NeedsEdgeCheck = false;
 
             // Clear Queues (retains capacity)
             _sunlightBfsQueue.Clear();

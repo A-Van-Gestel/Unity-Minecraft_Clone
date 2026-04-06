@@ -627,8 +627,9 @@ public class World : MonoBehaviour
                         // 2. Schedule the job immediately using Data overload
                         JobManager.ScheduleLightingUpdate(data);
 
-                        // 3. Clear flag so we don't do this again
+                        // 3. Clear flag so we don't do this again. Schedule edge check after stabilization.
                         data.NeedsInitialLighting = false;
+                        data.NeedsEdgeCheck = true;
                     }
                     else
                     {
@@ -637,6 +638,10 @@ public class World : MonoBehaviour
                 }
                 else
                 {
+                    // Chunk loaded from disk with stable lighting — schedule an edge check
+                    // to validate border consistency against current neighbor state.
+                    data.NeedsEdgeCheck = true;
+
                     // If the chunk is loaded and doesn't need lighting updates (it's stable),
                     // we must explicitly request the mesh rebuild here.
                     // CheckViewDistance skipped it because IsPopulated was false at that time.
@@ -720,7 +725,7 @@ public class World : MonoBehaviour
 
         // This logic is a synchronous version of what the Update() loop does asynchronously.
         while (HasPendingInitialLighting(chunksInLoadArea) || HasPendingLightChangesOnMainThread(chunksInLoadArea) ||
-               JobManager.lightingJobs.Count > 0)
+               HasPendingEdgeChecks(chunksInLoadArea) || JobManager.lightingJobs.Count > 0)
         {
             lightingLoopIterations++;
 
@@ -738,24 +743,30 @@ public class World : MonoBehaviour
                         chunkData.RecalculateSunLightLight();
 
                         // The request for an *initial* light pass has now been fulfilled.
+                        // Schedule edge check after stabilization.
                         chunkData.NeedsInitialLighting = false;
+                        chunkData.NeedsEdgeCheck = true;
                     }
                 }
             }
 
-            // --- Step 2b: Schedule Lighting Jobs ---
+            // --- Step 2b: Schedule Lighting Jobs (including edge checks) ---
             // Now that the initial light requests have been processed, the regular lighting scheduler can pick them up in the same coroutine iteration.
             foreach (ChunkData chunkData in chunksInLoadArea)
             {
-                if (chunkData.IsPopulated && chunkData.HasLightChangesToProcess)
+                ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.position);
+                if (!chunkData.IsPopulated || JobManager.lightingJobs.ContainsKey(chunkCoord)) continue;
+
+                if (chunkData.NeedsEdgeCheck && AreNeighborsDataReady(chunkCoord))
                 {
-                    ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.position);
-                    if (!JobManager.lightingJobs.ContainsKey(chunkCoord) && AreNeighborsDataReady(chunkCoord))
-                    {
-                        // OPTIMIZATION: Use TempJob allocator.
-                        // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
-                        JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
-                    }
+                    chunkData.HasLightChangesToProcess = true;
+                    JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                }
+                else if (chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
+                {
+                    // OPTIMIZATION: Use TempJob allocator.
+                    // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
+                    JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
                 }
             }
 
@@ -771,7 +782,7 @@ public class World : MonoBehaviour
             if (safetyBreak > maxIterations)
             {
                 Debug.LogError($"ForceCompleteDataJobsCoroutine exceeded max iterations ({maxIterations}) during Lighting Phase. Forcing exit.");
-                Debug.LogError($"Remaining jobs: Lighting({JobManager.lightingJobs.Count}). Pending chunks: InitialLight({chunksInLoadArea.Count(c => c.NeedsInitialLighting)}), LightChanges({chunksInLoadArea.Count(c => c.HasLightChangesToProcess)})");
+                Debug.LogError($"Remaining jobs: Lighting({JobManager.lightingJobs.Count}). Pending chunks: InitialLight({chunksInLoadArea.Count(c => c.NeedsInitialLighting)}), LightChanges({chunksInLoadArea.Count(c => c.HasLightChangesToProcess)}), EdgeChecks({chunksInLoadArea.Count(c => c.NeedsEdgeCheck)})");
                 yield break; // Exit the coroutine
             }
 
@@ -832,6 +843,14 @@ public class World : MonoBehaviour
     private static bool HasPendingLightChangesOnMainThread(List<ChunkData> chunkList)
     {
         return chunkList.Any(chunkData => chunkData != null && chunkData.HasLightChangesToProcess);
+    }
+
+    /// <summary>
+    /// Checks a specific list of chunks for any that need an edge consistency check.
+    /// </summary>
+    private static bool HasPendingEdgeChecks(List<ChunkData> chunkList)
+    {
+        return chunkList.Any(chunkData => chunkData != null && chunkData.NeedsEdgeCheck);
     }
 
     private void CompleteAndProcessLightingJobs()
@@ -969,7 +988,24 @@ public class World : MonoBehaviour
                             JobManager.ScheduleLightingUpdate(chunkData);
 
                             // The request has been fulfilled, so clear the flag.
+                            // Schedule an edge consistency check after initial lighting stabilizes.
                             chunkData.NeedsInitialLighting = false;
+                            chunkData.NeedsEdgeCheck = true;
+                            lightJobsScheduled++;
+                        }
+                    }
+                    // --- Edge consistency check ---
+                    // After initial lighting stabilizes, validate border light against neighbors.
+                    // Requires all neighbors to be lit so the edge comparison is meaningful.
+                    else if (chunkData.NeedsEdgeCheck)
+                    {
+                        if (AreNeighborsDataReady(chunkCoord))
+                        {
+                            // Schedule a lighting job with edge checking enabled.
+                            // The job's PerformEdgeCheck flag is set from chunkData.NeedsEdgeCheck
+                            // inside ScheduleLightingUpdate, which also clears the flag.
+                            chunkData.HasLightChangesToProcess = true;
+                            JobManager.ScheduleLightingUpdate(chunkData);
                             lightJobsScheduled++;
                         }
                     }
@@ -1279,7 +1315,7 @@ public class World : MonoBehaviour
             {
                 // Does the neighbor have pending light changes that haven't even been scheduled yet,
                 // OR is waiting for first light is NOT ready to provide lighting data for meshing.
-                if (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting)
+                if (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting || neighborData.NeedsEdgeCheck)
                 {
                     return
                         false; // Neighbor has pending light changes that haven't even been scheduled yet, we must wait.
@@ -1308,7 +1344,7 @@ public class World : MonoBehaviour
             Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
             if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData diagData) && diagData.IsPopulated)
             {
-                if (diagData.HasLightChangesToProcess || diagData.NeedsInitialLighting) return false;
+                if (diagData.HasLightChangesToProcess || diagData.NeedsInitialLighting || diagData.NeedsEdgeCheck) return false;
                 if (diagData.IsAwaitingMainThreadProcess) return false;
             }
         }
