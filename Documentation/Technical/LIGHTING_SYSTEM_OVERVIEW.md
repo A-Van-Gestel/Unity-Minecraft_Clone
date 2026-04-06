@@ -188,8 +188,8 @@ This section documents how our lighting engine compares to the Starlight referen
 #### Opacity-Based Light Attenuation
 **Starlight:** `targetLevel = propagatedLevel - max(1, opacity)`.
 **Our system:** `targetLevel = sourceLight - 1 - neighborOpacity`.
-**Note:** These are equivalent — our `-1` is Starlight's `max(1, ...)` minimum. Both ensure at least 1 level of attenuation per step.
-**Status:** Implemented correctly.
+**Note:** These differ for semi-transparent blocks. Starlight uses `max(1, opacity)` while we use `1 + opacity`. For air (opacity=0) both give `sourceLight - 1`. For water (opacity=2), Starlight gives `sourceLight - 2` while ours gives `sourceLight - 3`. This means our BFS attenuates semi-transparent blocks more aggressively than the column recalculation (which uses just `opacity`), causing a 1-level shadow line at chunk borders under water. Aligning with Starlight's `max(1, opacity)` formula would fix this, but requires careful testing with all semi-transparent block types.
+**Status:** Known discrepancy — see Section 5 for the proposed fix.
 
 #### Edge Checking on Chunk Load
 **Starlight:** Has a dedicated `checkChunkEdges()` method that runs on chunk load. It iterates every block on the 4 horizontal chunk borders and validates that each block's light level is consistent with its neighbors.
@@ -315,7 +315,17 @@ This eliminates the write loop and reduces memory bandwidth.
 
 **Proposed:** Use the existing `SectionJobData.IsEmpty` flags to skip entire 16-block vertical ranges in the BFS. If a section is empty and the section above is also empty, sunlight is implicitly 15 (virtual skylight) and no propagation is needed.
 
-### 5.5 Column Aggregation for Burst Updates
+### 5.5 Align BFS Attenuation with Starlight Formula
+**Priority: Medium** | **Complexity: Low** | **Known Bug**
+
+**Current:** `PropagateLight` uses `sourceLight - 1 - opacity` (i.e., `1 + opacity` attenuation per step).
+**Starlight:** Uses `sourceLight - max(1, opacity)`.
+
+For air (opacity=0) both give `-1`. For water (opacity=2): ours gives `-3`, Starlight gives `-2`. The column recalculation (`RecalculateSunlightForColumn`) attenuates by just `opacity` per block. This means the BFS and column recalculation produce different values for semi-transparent blocks, causing a **1-level shadow line at chunk borders under water**.
+
+**Fix:** Change the BFS formula to `Mathf.Max(0, sourceLight - Mathf.Max(1, neighborProps.Opacity))`. This requires updating the column recalculation to also use `max(1, opacity)` for consistency, and testing with all semi-transparent block types.
+
+### 5.6 Column Aggregation for Burst Updates
 **Priority: Low** | **Complexity: Medium**
 
 When multiple blocks change in the same vertical column (e.g., explosions, falling sand), deduplicate them into a single column recalculation. Use a `NativeArray<int>` (size 256) to track the lowest modified Y per column, and seed the BFS only from that Y level.

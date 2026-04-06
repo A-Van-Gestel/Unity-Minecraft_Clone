@@ -1315,7 +1315,7 @@ public class World : MonoBehaviour
             {
                 // Does the neighbor have pending light changes that haven't even been scheduled yet,
                 // OR is waiting for first light is NOT ready to provide lighting data for meshing.
-                if (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting || neighborData.NeedsEdgeCheck)
+                if (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting)
                 {
                     return
                         false; // Neighbor has pending light changes that haven't even been scheduled yet, we must wait.
@@ -1344,7 +1344,7 @@ public class World : MonoBehaviour
             Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
             if (worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData diagData) && diagData.IsPopulated)
             {
-                if (diagData.HasLightChangesToProcess || diagData.NeedsInitialLighting || diagData.NeedsEdgeCheck) return false;
+                if (diagData.HasLightChangesToProcess || diagData.NeedsInitialLighting) return false;
                 if (diagData.IsAwaitingMainThreadProcess) return false;
             }
         }
