@@ -627,9 +627,8 @@ public class World : MonoBehaviour
                         // 2. Schedule the job immediately using Data overload
                         JobManager.ScheduleLightingUpdate(data);
 
-                        // 3. Clear flag so we don't do this again. Schedule edge check after stabilization.
+                        // 3. Clear flag so we don't do this again.
                         data.NeedsInitialLighting = false;
-                        data.NeedsEdgeCheck = true;
                     }
                     else
                     {
@@ -743,9 +742,7 @@ public class World : MonoBehaviour
                         chunkData.RecalculateSunLightLight();
 
                         // The request for an *initial* light pass has now been fulfilled.
-                        // Schedule edge check after stabilization.
                         chunkData.NeedsInitialLighting = false;
-                        chunkData.NeedsEdgeCheck = true;
                     }
                 }
             }
@@ -757,12 +754,15 @@ public class World : MonoBehaviour
                 ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.position);
                 if (!chunkData.IsPopulated || JobManager.lightingJobs.ContainsKey(chunkCoord)) continue;
 
-                if (chunkData.NeedsEdgeCheck && AreNeighborsDataReady(chunkCoord))
+                bool scheduled = false;
+
+                if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
                 {
                     chunkData.HasLightChangesToProcess = true;
-                    JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                    scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
                 }
-                else if (chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
+
+                if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
                 {
                     // OPTIMIZATION: Use TempJob allocator.
                     // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
@@ -985,36 +985,41 @@ public class World : MonoBehaviour
                         {
                             // This is the first lighting pass, so we trigger the full recalculation.
                             chunkData.RecalculateSunLightLight();
-                            JobManager.ScheduleLightingUpdate(chunkData);
-
-                            // The request has been fulfilled, so clear the flag.
-                            // Schedule an edge consistency check after initial lighting stabilizes.
-                            chunkData.NeedsInitialLighting = false;
-                            chunkData.NeedsEdgeCheck = true;
-                            lightJobsScheduled++;
+                            if (JobManager.ScheduleLightingUpdate(chunkData))
+                            {
+                                // The request has been fulfilled, so clear the flag.
+                                chunkData.NeedsInitialLighting = false;
+                                lightJobsScheduled++;
+                            }
                         }
                     }
-                    // --- Edge consistency check ---
-                    // After initial lighting stabilizes, validate border light against neighbors.
-                    // Requires all neighbors to be lit so the edge comparison is meaningful.
-                    else if (chunkData.NeedsEdgeCheck)
+                    else
                     {
-                        if (AreNeighborsDataReady(chunkCoord))
+                        bool scheduled = false;
+
+                        // --- Edge consistency check ---
+                        // After initial lighting stabilizes, validate border light against neighbors.
+                        // Requires all neighbors to be lit so the edge comparison is meaningful.
+                        if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
                         {
                             // Schedule a lighting job with edge checking enabled.
                             // The job's PerformEdgeCheck flag is set from chunkData.NeedsEdgeCheck
                             // inside ScheduleLightingUpdate, which also clears the flag.
                             chunkData.HasLightChangesToProcess = true;
-                            JobManager.ScheduleLightingUpdate(chunkData);
-                            lightJobsScheduled++;
+                            scheduled = JobManager.ScheduleLightingUpdate(chunkData);
                         }
-                    }
-                    // --- Regular lighting updates ---
-                    // If no initial lighting is needed, check for regular updates.
-                    else if (chunkData.HasLightChangesToProcess)
-                    {
-                        JobManager.ScheduleLightingUpdate(chunkData);
-                        lightJobsScheduled++;
+
+                        // --- Regular lighting updates ---
+                        // If no edge check was scheduled (or it was skipped), check for regular updates.
+                        // We use `!scheduled` so that if an edge check WAS scheduled, the job covers it,
+                        // but if NeedsEdgeCheck was true and AreNeighborsReadyAndLit was false,
+                        // we STILL try to process regular lighting changes if neighbors generated.
+                        if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
+                        {
+                            scheduled = JobManager.ScheduleLightingUpdate(chunkData);
+                        }
+
+                        if (scheduled) lightJobsScheduled++;
                     }
                 }
             }

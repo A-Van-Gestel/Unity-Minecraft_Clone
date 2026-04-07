@@ -218,15 +218,16 @@ public class WorldJobManager : IDisposable
     /// </summary>
     /// <param name="chunkData">The central chunk data object.</param>
     /// <param name="allocator">The allocator to use for job data.</param>
-    public void ScheduleLightingUpdate(ChunkData chunkData, Allocator allocator = Allocator.Persistent)
+    /// <returns>True if the job was successfully scheduled, false if it exited early or was already scheduled.</returns>
+    public bool ScheduleLightingUpdate(ChunkData chunkData, Allocator allocator = Allocator.Persistent)
     {
         ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.position);
-        if (lightingJobs.ContainsKey(chunkCoord)) return;
+        if (lightingJobs.ContainsKey(chunkCoord)) return false;
 
         if (!_world.AreNeighborsDataReady(chunkCoord))
         {
             chunkData.HasLightChangesToProcess = true;
-            return;
+            return false;
         }
 
         LightingJobInputData inputData = new LightingJobInputData();
@@ -285,14 +286,18 @@ public class WorldJobManager : IDisposable
         chunkData.HasLightChangesToProcess = false;
         if (chunkData.NeedsEdgeCheck) chunkData.NeedsEdgeCheck = false;
         lightingJobs.Add(chunkCoord, jobData);
+        return true;
     }
 
     /// <summary>
     /// Helper overload for Chunk objects.
     /// </summary>
-    public void ScheduleLightingUpdate(Chunk chunk, Allocator allocator = Allocator.Persistent)
+    /// <param name="chunk">The chunk to schedule lighting for.</param>
+    /// <param name="allocator">The allocator to use for job data.</param>
+    /// <returns>True if the job was successfully scheduled, false if it exited early or was already scheduled.</returns>
+    public bool ScheduleLightingUpdate(Chunk chunk, Allocator allocator = Allocator.Persistent)
     {
-        ScheduleLightingUpdate(chunk.ChunkData, allocator);
+        return ScheduleLightingUpdate(chunk.ChunkData, allocator);
     }
 
     /// <summary>
