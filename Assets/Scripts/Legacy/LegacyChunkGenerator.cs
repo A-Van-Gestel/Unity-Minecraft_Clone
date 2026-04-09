@@ -31,15 +31,15 @@ namespace Legacy
         public void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData)
         {
             _seed = seed;
-            _seaLevel = worldType.SeaLevel;
-            _solidGroundHeight = worldType.SolidGroundHeight;
+            _seaLevel = worldType.seaLevel;
+            _solidGroundHeight = worldType.solidGroundHeight;
             _blockTypesJobData = globalJobData.BlockTypesJobData;
 
             // Cast BiomeBase[] → LegacyBiomeAttributes[]
-            _legacyBiomes = new LegacyBiomeAttributes[worldType.Biomes.Length];
-            for (int i = 0; i < worldType.Biomes.Length; i++)
+            _legacyBiomes = new LegacyBiomeAttributes[worldType.biomes.Length];
+            for (int i = 0; i < worldType.biomes.Length; i++)
             {
-                _legacyBiomes[i] = (LegacyBiomeAttributes)worldType.Biomes[i];
+                _legacyBiomes[i] = (LegacyBiomeAttributes)worldType.biomes[i];
             }
 
             // Flatten biomes + lodes into NativeArrays (same pattern as the old PrepareJobData)

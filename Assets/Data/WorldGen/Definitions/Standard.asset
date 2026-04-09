@@ -12,9 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 34c776fdd5293b04b8b815810cbf49e2, type: 3}
   m_Name: Standard
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.WorldTypeDefinition
-  TypeID: 1
-  DisplayName: Standard (WIP)
-  Biomes:
+  typeID: 1
+  displayName: Standard (WIP)
+  biomes:
   - {fileID: 11400000, guid: 4e2d8d59432ce5a4fbba25dc1f2e942c, type: 2}
-  SeaLevel: 54
-  SolidGroundHeight: 52
+  seaLevel: 54
+  solidGroundHeight: 52

@@ -27,7 +27,7 @@ MonoBehaviour:
   majorFloraPlacementThreshold: 0.8
   maxHeight: 8
   minHeight: 2
-  Lodes:
+  lodes:
   - nodeName: Dirt
     blockID: 3
     minHeight: 1

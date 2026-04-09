@@ -12,7 +12,7 @@ namespace Data.WorldTypes
     public class WorldTypeRegistry : ScriptableObject
     {
         [Tooltip("All registered world type definitions. Each must have a unique TypeID.")]
-        public WorldTypeDefinition[] Types;
+        public WorldTypeDefinition[] types;
 
         /// <summary>
         /// Looks up a WorldTypeDefinition by its ID. Throws if none is registered.
@@ -21,7 +21,7 @@ namespace Data.WorldTypes
         /// <returns>The matching WorldTypeDefinition.</returns>
         public WorldTypeDefinition GetWorldType(WorldTypeID id)
         {
-            WorldTypeDefinition wt = Types.FirstOrDefault(t => t.TypeID == id);
+            WorldTypeDefinition wt = types.FirstOrDefault(t => t.typeID == id);
             if (wt == null)
             {
                 throw new KeyNotFoundException(

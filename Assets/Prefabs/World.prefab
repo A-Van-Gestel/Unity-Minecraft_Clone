@@ -45,12 +45,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   settings:
-    version: 0.0.01
-    loadSaveDataOnStartup: 0
-    loadDistance: 7
+    keepChunksInMemory: 0
+    enableVolatileSaveData: 1
+    saveCompression: 2
     viewDistance: 5
+    maxInitialLoadRadius: 10
     maxLightJobsPerFrame: 8
     enableLighting: 1
+    maxMeshRebuildsPerFrame: 10
     clouds: 2
     mouseSensitivityX: 1.2
     mouseSensitivityY: 1.2
@@ -58,17 +60,15 @@ MonoBehaviour:
     enableMajorFloraPass: 1
     enableChunkLoadAnimations: 0
     showChunkBorders: 0
-  biomes:
-  - {fileID: 11400000, guid: 159c3e2bbfcf09d4bb338c3c44faa01e, type: 2}
+    enableDiagnosticLogs: 0
+    enableWaterDiagnosticLogs: 0
+  _worldTypeRegistry: {fileID: 0}
   globalLightLevel: 1
   day: {r: 0, g: 0.90980387, b: 1, a: 1}
   night: {r: 0.03137255, g: 0, b: 0.44705883, a: 1}
   player: {fileID: 0}
   spawnPosition: {x: 0, y: 0, z: 0}
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
-  material: {fileID: 2100000, guid: 310749baead051949ad82e332a06680f, type: 2}
-  transparentMaterial: {fileID: 2100000, guid: 451dc07c0cc41a649bf3ac4fe7a9e1b0, type: 2}
-  liquidMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
   blockDatabase: {fileID: 11400000, guid: 6aebc05383d66d242886f3518fb31bb0, type: 2}
   debugScreen: {fileID: 0}
   creativeInventoryWindow: {fileID: 0}
@@ -77,5 +77,8 @@ MonoBehaviour:
   worldData:
     worldName: Prototype
     seed: 0
+    creationDate: 0
   appSaveDataPath: 
   chunkBorderPrefab: {fileID: 2348571843614231521, guid: 0c5d03a94304a4b4bbf7153e8f2675e4, type: 3}
+  voxelVisualizer: {fileID: 0}
+  visualizationMode: 0

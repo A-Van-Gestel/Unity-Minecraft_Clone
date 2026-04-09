@@ -38,7 +38,7 @@ namespace Jobs.Generators
         public void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData)
         {
             _seed = seed;
-            _seaLevel = worldType.SeaLevel;
+            _seaLevel = worldType.seaLevel;
             _blockTypesJobData = globalJobData.BlockTypesJobData;
 
             // --- Lookup Table Warmup (CRITICAL) ---
@@ -48,10 +48,10 @@ namespace Jobs.Generators
             FastNoiseLite.InitializeLookupTables();
 
             // Cast BiomeBase[] → StandardBiomeAttributes[]
-            _standardBiomes = new StandardBiomeAttributes[worldType.Biomes.Length];
-            for (int i = 0; i < worldType.Biomes.Length; i++)
+            _standardBiomes = new StandardBiomeAttributes[worldType.biomes.Length];
+            for (int i = 0; i < worldType.biomes.Length; i++)
             {
-                _standardBiomes[i] = (StandardBiomeAttributes)worldType.Biomes[i];
+                _standardBiomes[i] = (StandardBiomeAttributes)worldType.biomes[i];
             }
 
             // --- Flatten biomes + lodes + caves into NativeArrays ---

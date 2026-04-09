@@ -362,7 +362,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 31c26ede345aa2b4eb24ad43bbd5048d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  player: {fileID: 151001798}
   highlight: {fileID: 166213405}
   slots:
   - {fileID: 1933202489}

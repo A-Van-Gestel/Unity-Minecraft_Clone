@@ -2,7 +2,6 @@ using System;
 using Data.WorldTypes;
 using UnityEngine;
 using UnityEngine.Scripting.APIUpdating;
-using UnityEngine.Serialization;
 
 namespace Legacy
 {
@@ -48,7 +47,6 @@ namespace Legacy
         public int maxHeight = 12;
         public int minHeight = 5;
 
-        [FormerlySerializedAs("Lodes")]
         [Header("Second Pass")]
         public LegacyLode[] lodes;
     }

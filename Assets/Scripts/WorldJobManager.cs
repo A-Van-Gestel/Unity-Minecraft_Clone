@@ -58,12 +58,12 @@ public class WorldJobManager : IDisposable
         // which requires referencing the Legacy namespace. If the Assembly Definition
         // boundary is adopted later, this switch is replaced by a registration pattern
         // (GeneratorRegistry) that eliminates the direct reference.
-        _chunkGenerator = activeWorldType.TypeID switch
+        _chunkGenerator = activeWorldType.typeID switch
         {
             WorldTypeID.Legacy => new LegacyChunkGenerator(),
             WorldTypeID.Standard => new StandardChunkGenerator(),
             _ => throw new ArgumentException(
-                $"[WorldJobManager] Unsupported WorldTypeID: {activeWorldType.TypeID}. " +
+                $"[WorldJobManager] Unsupported WorldTypeID: {activeWorldType.typeID}. " +
                 "Ensure all unimplemented types are remapped to a supported type before constructing WorldJobManager."),
         };
 

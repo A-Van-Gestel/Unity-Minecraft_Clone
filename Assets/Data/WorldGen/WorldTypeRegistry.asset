@@ -12,6 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5e5b7e90c302a0749a0da047b8765db9, type: 3}
   m_Name: WorldTypeRegistry
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.WorldTypeRegistry
-  Types:
+  types:
   - {fileID: 11400000, guid: 2190ca661f67c2d428d48a549f6f4272, type: 2}
   - {fileID: 11400000, guid: 702b85d39232d034492cbf9155313356, type: 2}

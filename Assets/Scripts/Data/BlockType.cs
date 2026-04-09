@@ -2,7 +2,6 @@ using System;
 using System.Runtime.CompilerServices;
 using MyBox;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace Data
 {
@@ -80,7 +79,6 @@ namespace Data
         [Tooltip("What tags does this block have? A block can have multiple tags.")]
         public BlockTags tags;
 
-        [FormerlySerializedAs("canBeReplacedByTags")]
         [Tooltip("What tags can this block replace? If NONE, it can only replace Air. If ALL tags are selected, it can replace anything (except Unbreakable).")]
         public BlockTags canReplaceTags;
 

@@ -48,7 +48,7 @@ public static class SaveSystem
             version = CURRENT_VERSION,
             worldName = worldName,
             seed = world.worldData.seed,
-            worldType = world.ActiveWorldType != null ? world.ActiveWorldType.TypeID : WorldTypeID.Legacy,
+            worldType = world.ActiveWorldType != null ? world.ActiveWorldType.typeID : WorldTypeID.Legacy,
             creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.Now.Ticks,
             lastPlayed = DateTime.Now.Ticks,
 

@@ -289,12 +289,12 @@ namespace UI
 
             List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>();
 
-            foreach (WorldTypeDefinition typeDef in worldTypeRegistry.Types)
+            foreach (WorldTypeDefinition typeDef in worldTypeRegistry.types)
             {
                 if (typeDef == null) continue;
 
-                options.Add(new TMP_Dropdown.OptionData(typeDef.DisplayName));
-                _dropdownMapping.Add(typeDef.TypeID);
+                options.Add(new TMP_Dropdown.OptionData(typeDef.displayName));
+                _dropdownMapping.Add(typeDef.typeID);
             }
 
             worldTypeDropdown.AddOptions(options);

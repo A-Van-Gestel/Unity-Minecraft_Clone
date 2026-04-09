@@ -25,19 +25,19 @@ namespace Data.WorldTypes
     public class WorldTypeDefinition : ScriptableObject
     {
         [Tooltip("The unique identifier for this world type. Must match the enum value exactly.")]
-        public WorldTypeID TypeID;
+        public WorldTypeID typeID;
 
         [Tooltip("The user-facing name shown in the world creation UI.")]
-        public string DisplayName;
+        public string displayName;
 
         [Tooltip("The specific biomes available to this world type.")]
-        public BiomeBase[] Biomes;
+        public BiomeBase[] biomes;
 
         [Header("Global Settings")]
         [Tooltip("The global sea level for this world type. Empty spaces below this level generate as water. Defaults to 45 (Minecraft is 62).")]
-        public int SeaLevel = 45;
+        public int seaLevel = 45;
 
         [Tooltip("Legacy field. Only used by LegacyWorldGen format. Standard generation uses Biome-specific BaseTerrainHeight.")]
-        public int SolidGroundHeight = 42;
+        public int solidGroundHeight = 42;
     }
 }

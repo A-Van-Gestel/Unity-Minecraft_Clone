@@ -32,7 +32,7 @@ public class World : MonoBehaviour
     [Header("World Configuration")]
     [SerializeField]
     [Tooltip("The registry that maps WorldTypeIDs to their definitions. Must be assigned in the Inspector.")]
-    private WorldTypeRegistry worldTypeRegistry;
+    private WorldTypeRegistry _worldTypeRegistry;
 
     /// <summary>
     /// The resolved world type definition for the current session.
@@ -387,8 +387,8 @@ public class World : MonoBehaviour
             typeToLoad = WorldTypeID.Standard;
         }
 
-        ActiveWorldType = worldTypeRegistry.GetWorldType(typeToLoad);
-        Debug.Log($"[World] Active World Type: {ActiveWorldType.DisplayName} (ID: {ActiveWorldType.TypeID})");
+        ActiveWorldType = _worldTypeRegistry.GetWorldType(typeToLoad);
+        Debug.Log($"[World] Active World Type: {ActiveWorldType.displayName} (ID: {ActiveWorldType.typeID})");
 
         // Initialize World Job Manager with the resolved world type strategy
         JobManager = new WorldJobManager(this, ActiveWorldType, JobDataManager);
