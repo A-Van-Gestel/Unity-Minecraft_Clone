@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -125,7 +125,7 @@ namespace Serialization
                     // Sanity check length (Max 16MB)
                     if (length is <= 1 or > 16 * 1024 * 1024)
                     {
-                        Debug.LogWarning($"RegionFile corrupt: Invalid length {length} at {localX},{localZ}");
+                        Debug.LogWarning($"RegionFile corrupt: Invalid length {length.ToString()} at {localX.ToString()},{localZ.ToString()}");
                         return (null, CompressionAlgorithm.GZip);
                     }
 
@@ -138,7 +138,7 @@ namespace Serialization
                     // Basic validation of supported types
                     if (!Enum.IsDefined(typeof(CompressionAlgorithm), algo))
                     {
-                        Debug.LogError($"RegionFile: Unsupported compression type {compressionByte} at {localX},{localZ}");
+                        Debug.LogError($"RegionFile: Unsupported compression type {compressionByte.ToString()} at {localX.ToString()},{localZ.ToString()}");
                         return (null, CompressionAlgorithm.GZip);
                     }
 
@@ -180,7 +180,7 @@ namespace Serialization
 
                     if (sectorsNeeded > 255)
                     {
-                        Debug.LogError($"Chunk {localX}, {localZ} is too big to save ({totalLength} bytes)");
+                        Debug.LogError($"Chunk {localX.ToString()}, {localZ.ToString()} is too big to save ({totalLength.ToString()} bytes)");
                         return;
                     }
 

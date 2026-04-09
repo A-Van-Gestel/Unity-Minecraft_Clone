@@ -255,7 +255,7 @@ namespace Serialization
             // Validate size
             if (section.voxels.Length != ChunkMath.SECTION_VOLUME)
             {
-                throw new InvalidDataException($"Section voxel array corrupted. Size: {section.voxels.Length}");
+                throw new InvalidDataException($"Section voxel array corrupted. Size: {section.voxels.Length.ToString()}");
             }
 
             // Fast unsafe write

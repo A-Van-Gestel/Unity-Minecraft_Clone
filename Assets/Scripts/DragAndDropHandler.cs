@@ -275,7 +275,7 @@ public class DragAndDropHandler : MonoBehaviour
         }
 
         // Inventory is full
-        Debug.Log($"Inventory is full, remaining stack: ID = {uiItemSlot.ItemSlot.Stack.ID}, amount = {uiItemSlot.ItemSlot.Stack.Amount}");
+        Debug.Log($"Inventory is full, remaining stack: ID = {uiItemSlot.ItemSlot.Stack.ID.ToString()}, amount = {uiItemSlot.ItemSlot.Stack.Amount.ToString()}");
         return false;
     }
 

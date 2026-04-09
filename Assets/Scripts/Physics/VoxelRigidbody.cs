@@ -302,14 +302,14 @@ namespace Physics
                 DrawBoundingBox(Color.yellow, 0f);
         }
 
+        // In development builds, we use LateUpdate to draw the debug lines continuously if toggled on
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
         private void LateUpdate()
         {
-            // In development builds, we use LateUpdate to draw the debug lines continuously if toggled on
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
             if (showBoundingBox)
                 DrawBoundingBox(Color.red, Time.deltaTime);
-#endif
         }
+#endif
 
         private void DrawBoundingBox(Color color, float duration)
         {

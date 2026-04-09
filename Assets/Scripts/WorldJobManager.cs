@@ -484,7 +484,7 @@ public class WorldJobManager : IDisposable
                             if (localX < 0 || localX >= VoxelData.ChunkWidth ||
                                 localZ < 0 || localZ >= VoxelData.ChunkWidth)
                             {
-                                Debug.LogError($"[ProcessLightingJobs] Invalid local column calculation: ({localX}, {localZ}) for global pos {mod.GlobalPosition}");
+                                Debug.LogError($"[ProcessLightingJobs] Invalid local column calculation: ({localX.ToString()}, {localZ.ToString()}) for global pos {mod.GlobalPosition.ToString()}");
                                 continue;
                             }
 
@@ -577,7 +577,7 @@ public class WorldJobManager : IDisposable
                 totalColumns += set.Count;
             }
 
-            Debug.Log($"[LIGHTING] Processed {_completedLightJobs.Count} jobs. Saved updates for {_droppedLightUpdates.Count} unloaded chunks ({totalColumns} columns)");
+            Debug.Log($"[LIGHTING] Processed {_completedLightJobs.Count.ToString()} jobs. Saved updates for {_droppedLightUpdates.Count.ToString()} unloaded chunks ({totalColumns.ToString()} columns)");
         }
 
         foreach (ChunkCoord chunkCoord in _chunksToRebuildMesh)

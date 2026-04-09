@@ -49,8 +49,8 @@ public static class SaveSystem
             worldName = worldName,
             seed = world.worldData.seed,
             worldType = world.ActiveWorldType != null ? world.ActiveWorldType.typeID : WorldTypeID.Legacy,
-            creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.Now.Ticks,
-            lastPlayed = DateTime.Now.Ticks,
+            creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.UtcNow.Ticks,
+            lastPlayed = DateTime.UtcNow.Ticks,
 
             worldState = new WorldStateData
             {

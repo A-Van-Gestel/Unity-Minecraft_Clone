@@ -4177,6 +4177,10 @@ PrefabInstance:
       value: 
       objectReference: {fileID: 11400000, guid: 3038e8b8e1ab9ae44802528aa73aa06a, type: 2}
     - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
+      propertyPath: _worldTypeRegistry
+      value: 
+      objectReference: {fileID: 11400000, guid: 3038e8b8e1ab9ae44802528aa73aa06a, type: 2}
+    - target: {fileID: 3602352557729800983, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
       propertyPath: 'biomes.Array.data[1]'
       value: 
       objectReference: {fileID: 11400000, guid: c63ff2437e30dfd4eacd9ffd953c5812, type: 2}

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
@@ -95,7 +95,7 @@ namespace Serialization
                 int length = ChunkSerializer.Serialize(data, buffer, algorithm);
                 if (length <= 0)
                 {
-                    Debug.LogWarning($"[SaveChunk] Chunk at voxelPos {data.position} serialization returned 0 bytes");
+                    Debug.LogWarning($"[SaveChunk] Chunk at voxelPos {data.position.ToString()} serialization returned 0 bytes");
                     return;
                 }
 
@@ -107,7 +107,7 @@ namespace Serialization
             }
             catch (Exception e)
             {
-                Debug.LogError($"[SaveChunk] Failed to save chunk at voxelPos {data.position}: {e.Message}");
+                Debug.LogError($"[SaveChunk] Failed to save chunk at voxelPos {data.position.ToString()}: {e.Message}");
             }
             finally
             {
@@ -159,7 +159,7 @@ namespace Serialization
             }
             catch (Exception e)
             {
-                Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {data.position}: {e.Message}");
+                Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {data.position.ToString()}: {e.Message}");
             }
             finally
             {

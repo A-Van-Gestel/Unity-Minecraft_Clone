@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using DebugVisualizations;
 using Helpers;
 using UnityEngine;
@@ -233,7 +233,7 @@ public class ChunkPoolManager
 
         // Update name
         ChunkCoord chunkCoord = ChunkCoord.FromWorldPosition(position);
-        border.name = $"Border {chunkCoord.X}, {chunkCoord.Z}";
+        border.name = $"Border {chunkCoord.X.ToString()}, {chunkCoord.Z.ToString()}";
 
         // Set active
         border.SetActive(true);

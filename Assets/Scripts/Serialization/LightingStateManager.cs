@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Data;
@@ -45,7 +45,7 @@ namespace Serialization
                 if (col.x < 0 || col.x >= VoxelData.ChunkWidth ||
                     col.y < 0 || col.y >= VoxelData.ChunkWidth)
                 {
-                    Debug.LogError($"[LightingStateManager] Invalid local column {col} for chunk {chunkCoord}. Must be 0-15!");
+                    Debug.LogError($"[LightingStateManager] Invalid local column {col.ToString()} for chunk {chunkCoord.ToString()}. Must be 0-15!");
                 }
             }
 

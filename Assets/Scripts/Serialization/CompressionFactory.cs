@@ -67,7 +67,7 @@ namespace Serialization
                     return new DeflateStream(outputStream, CompressionMode.Compress, leaveOpen);
 
                 default:
-                    throw new ArgumentException($"Unsupported compression algorithm: {algorithm}");
+                    throw new ArgumentException($"Unsupported compression algorithm: {algorithm.ToString()}");
             }
         }
 
@@ -94,7 +94,7 @@ namespace Serialization
                     throw new InvalidOperationException("Cannot decompress LZ4 chunk: Native library is missing.");
 
                 default:
-                    throw new ArgumentException($"Unsupported decompression algorithm: {algorithm}");
+                    throw new ArgumentException($"Unsupported decompression algorithm: {algorithm.ToString()}");
             }
         }
     }

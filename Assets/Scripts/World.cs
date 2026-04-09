@@ -1694,7 +1694,7 @@ public class World : MonoBehaviour
                     // Save to Persistence
                     LightingStateManager.AddPending(chunkCoord, localCols);
 
-                    Debug.Log($"[LIGHTING RESCUE] Saved {localCols.Count} orphaned sunlight columns for chunk {chunkCoord}");
+                    Debug.Log($"[LIGHTING RESCUE] Saved {localCols.Count.ToString()} orphaned sunlight columns for chunk {chunkCoord.ToString()}");
 
                     // Release temp set (AddPending makes its own copy)
                     HashSetPool<Vector2Int>.Release(localCols);
@@ -2428,7 +2428,7 @@ public class World : MonoBehaviour
         List<ChunkData> chunksToSave = new List<ChunkData>(worldData.ModifiedChunks);
         worldData.ModifiedChunks.Clear();
 
-        Debug.Log($"Saving {chunksToSave.Count} modified chunks (Sync: {synchronous})...");
+        Debug.Log($"Saving {chunksToSave.Count.ToString()} modified chunks (Sync: {synchronous.ToString()})...");
 
         foreach (ChunkData data in chunksToSave)
         {
@@ -2472,7 +2472,7 @@ public class World : MonoBehaviour
         }
 
         visualizationMode = (DebugVisualizationMode)currentModeIndex;
-        Debug.Log($"Voxel Visualization Mode set to: {visualizationMode}");
+        Debug.Log($"Voxel Visualization Mode set to: {visualizationMode.ToString()}");
     }
 
     #endregion
@@ -2540,8 +2540,8 @@ public class World : MonoBehaviour
                 active++;
         }
 
-        return $"{_chunksToBuildMesh.Count} total\n" +
-               $" └ Active: {active}, Inactive: {inactive}, Destroyed: {destroyed}, Null: {nullCount}";
+        return $"{_chunksToBuildMesh.Count.ToString()} total\n" +
+               $" └ Active: {active.ToString()}, Inactive: {inactive.ToString()}, Destroyed: {destroyed.ToString()}, Null: {nullCount.ToString()}";
     }
 
     #endregion

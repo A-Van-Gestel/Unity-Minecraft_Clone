@@ -358,8 +358,8 @@ public class DebugScreen : MonoBehaviour
         _topLeftBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
-        _topLeftBuilder.Append(" | Eye Level: ").AppendFormat("{0:F2}", playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f).AppendLine();
-        _topLeftBuilder.Append("Looking Angle H / V: ").AppendFormat("{0:F2} / {1:F2}", lookingDirection.x, lookingDirection.y)
+        _topLeftBuilder.Append(" | Eye Level: ").Append((playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f).ToString("F2")).AppendLine();
+        _topLeftBuilder.Append("Looking Angle H / V: ").Append(lookingDirection.x.ToString("F2")).Append(" / ").Append(lookingDirection.y.ToString("F2"))
             .Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
         _topLeftBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
         _topLeftBuilder.Append("Seed: ").Append(_world.worldData.seed).AppendLine();
@@ -371,9 +371,9 @@ public class DebugScreen : MonoBehaviour
             .Append(" | isFlying (").Append(_input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.isFlying)
             .Append(" | isNoclipping (").Append(_input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.isNoclipping)
             .Append(" | showHighlight (").Append(_input.GetBindingDisplayString(GameAction.ToggleBlockHighlight)).Append("): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
-        _topLeftBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", _player.MoveSpeed)
-            .Append(" | Flying: ").AppendFormat("{0:F1}", _player.VoxelRigidbody.flyingSpeed).AppendLine();
-        _topLeftBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", _player.Velocity.x, _player.Velocity.y, _player.Velocity.z).AppendLine();
+        _topLeftBuilder.Append("SPEED: Current: ").Append(_player.MoveSpeed.ToString("F1"))
+            .Append(" | Flying: ").Append(_player.VoxelRigidbody.flyingSpeed.ToString("F1")).AppendLine();
+        _topLeftBuilder.Append("Velocity XYZ: ").Append(_player.Velocity.x.ToString("F4")).Append(" / ").Append(_player.Velocity.y.ToString("F4")).Append(" / ").Append(_player.Velocity.z.ToString("F4")).AppendLine();
         _topLeftBuilder.AppendLine();
 
         // --- Chunk Info ---
@@ -551,7 +551,7 @@ public class DebugScreen : MonoBehaviour
     private static string FormatTicksAsMs(long ticks)
     {
         double milliseconds = ticks * s_tickToMs;
-        return $"{milliseconds:F2} ms";
+        return $"{milliseconds.ToString("F2")} ms";
     }
 
     /// <summary>
@@ -561,9 +561,9 @@ public class DebugScreen : MonoBehaviour
     {
         return bytes switch
         {
-            > 1024 * 1024 => $"{bytes / (1024f * 1024f):F2} MB",
-            > 1024 => $"{bytes / 1024f:F1} KB",
-            _ => $"{bytes} B",
+            > 1024 * 1024 => $"{(bytes / (1024f * 1024f)).ToString("F2")} MB",
+            > 1024 => $"{(bytes / 1024f).ToString("F1")} KB",
+            _ => $"{bytes.ToString()} B",
         };
     }
 

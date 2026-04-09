@@ -37,8 +37,15 @@ public class Chunk
         Coord = chunkCoord;
 
         // Create GameObject hierarchy
-        ChunkGameObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
+        ChunkGameObject = new GameObject($"Chunk {Coord.X.ToString()}, {Coord.Z.ToString()}");
         ChunkGameObject.transform.SetParent(World.Instance.transform);
+
+        // Pre-add the load animation component to avoid runtime AddComponent (which causes boxing/GC overhead)
+        if (World.Instance.settings.enableChunkLoadAnimations)
+        {
+            _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
+            _loadAnimation.enabled = false;
+        }
 
         // Initialize Section Renderers
         const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
@@ -66,18 +73,11 @@ public class Chunk
         ChunkPosition = Coord.ToWorldPosition();
 
         // Update GameObject identity
-        ChunkGameObject.name = $"Chunk {Coord.X}, {Coord.Z}";
+        ChunkGameObject.name = $"Chunk {Coord.X.ToString()}, {Coord.Z.ToString()}";
 
-        if (World.Instance.settings.enableChunkLoadAnimations)
+        if (World.Instance.settings.enableChunkLoadAnimations && _loadAnimation != null)
         {
-            if (_loadAnimation == null)
-            {
-                if (!ChunkGameObject.TryGetComponent(out _loadAnimation))
-                {
-                    _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
-                }
-            }
-
+            _loadAnimation.enabled = true;
             _loadAnimation.ResetToUnderground(ChunkPosition);
         }
         else
@@ -466,20 +466,9 @@ public class Chunk
     {
         if (_hasPlayedLoadAnimation) return;
 
-        if (World.Instance.settings.enableChunkLoadAnimations)
+        if (World.Instance.settings.enableChunkLoadAnimations && _loadAnimation != null)
         {
-            // Unity's overloaded == null accurately checks if the native object was destroyed.
-            if (_loadAnimation == null)
-            {
-                if (!ChunkGameObject.TryGetComponent(out _loadAnimation))
-                {
-                    _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
-                }
-
-                // If added mid-game, snap it underground
-                _loadAnimation.ResetToUnderground(ChunkPosition);
-            }
-
+            _loadAnimation.enabled = true;
             _loadAnimation.StartAnimation();
         }
         else

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Data;
 using Unity.Collections;
 using Unity.Jobs;
@@ -34,7 +34,7 @@ namespace DebugVisualizations
         /// <param name="parent">The parent transform to attach the GameObject to.</param>
         public VisualizerChunkData(ChunkCoord chunkCoord, Material mat, Transform parent)
         {
-            ChunkObject = new GameObject($"Visualizer_{chunkCoord.X}_{chunkCoord.Z}");
+            ChunkObject = new GameObject($"Visualizer_{chunkCoord.X.ToString()}_{chunkCoord.Z.ToString()}");
             ChunkObject.transform.SetParent(parent);
             ChunkObject.transform.position = chunkCoord.ToWorldPosition();
 
@@ -61,7 +61,7 @@ namespace DebugVisualizations
         {
             ChunkObject.transform.SetParent(parent);
             ChunkObject.transform.position = chunkCoord.ToWorldPosition();
-            ChunkObject.name = $"Visualizer_{chunkCoord.X}_{chunkCoord.Z}";
+            ChunkObject.name = $"Visualizer_{chunkCoord.X.ToString()}_{chunkCoord.Z.ToString()}";
             ChunkObject.SetActive(true);
 
             // Ensure material is correct (in case setting changed)
