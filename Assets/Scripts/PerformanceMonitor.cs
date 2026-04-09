@@ -35,6 +35,12 @@ public class PerformanceMonitor : MonoBehaviour
     /// </summary>
     public static PerformanceMonitor Instance { get; private set; }
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void DomainReset()
+    {
+        Instance = null;
+    }
+
     /// <summary>
     /// A chronological snapshot of all tracked performance metrics at a specific point in time.
     /// </summary>

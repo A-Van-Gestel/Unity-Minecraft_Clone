@@ -4,6 +4,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
+using UnityEngine;
 
 namespace Libraries
 {
@@ -1923,6 +1924,13 @@ namespace Libraries
             public static ref LookupPointers Data => ref Ref.Data;
 
             private static bool s_initialized;
+
+            [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+            private static void DomainReset()
+            {
+                s_initialized = false;
+                Ref.Data = default;
+            }
 
             /// <summary>
             /// Allocates unmanaged memory for the lookup tables and copies the managed source data into them.

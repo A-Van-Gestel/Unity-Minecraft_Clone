@@ -68,6 +68,16 @@ namespace DebugVisualizations
         private static float _cachedBorderThick;
         private static float _cachedSectionThick;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void DomainReset()
+        {
+            _cachedMesh = null;
+            _cachedGridInterval = 0;
+            _cachedCrossSectionSetting = false;
+            _cachedBorderThick = 0f;
+            _cachedSectionThick = 0f;
+        }
+
         #endregion
 
         private void Start()

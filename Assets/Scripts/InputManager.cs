@@ -18,6 +18,12 @@ public class InputManager : MonoBehaviour
     /// <summary>Singleton instance, set in <see cref="Awake"/>.</summary>
     public static InputManager Instance { get; private set; }
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void DomainReset()
+    {
+        Instance = null;
+    }
+
     [Header("Input Actions Asset")]
     [Tooltip("Drag the GameInputActions asset here.")]
     [SerializeField]

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.IO.Compression;
 using NativeCompressions;
@@ -13,6 +13,12 @@ namespace Serialization
     public static class CompressionFactory
     {
         private static bool? _lz4Available;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void DomainReset()
+        {
+            _lz4Available = null;
+        }
 
         /// <summary>
         /// Checks if the NativeCompressions DLL is loaded and functional.

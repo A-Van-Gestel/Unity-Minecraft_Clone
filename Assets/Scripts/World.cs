@@ -166,6 +166,12 @@ public class World : MonoBehaviour
 
     public static World Instance { get; private set; }
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void DomainReset()
+    {
+        Instance = null;
+    }
+
     private void Awake()
     {
         // If the instance value is not null and not *this*, we've somehow ended up with more than one World component.
@@ -2245,7 +2251,7 @@ public class World : MonoBehaviour
                                         uint abovePacked = chunk.ChunkData.GetVoxel(x, localY + 1, z);
                                         byte aboveSunlight = BurstVoxelDataBitMapping.GetSunLight(abovePacked);
                                         ushort aboveId = BurstVoxelDataBitMapping.GetId(abovePacked);
-                                        bool aboveIsOpaque = World.Instance.blockTypes[aboveId].IsOpaque;
+                                        bool aboveIsOpaque = Instance.blockTypes[aboveId].IsOpaque;
 
                                         // Flag anomaly: ≥2 level drop from non-opaque voxel above
                                         if (!aboveIsOpaque && aboveSunlight >= sunlight + 2)

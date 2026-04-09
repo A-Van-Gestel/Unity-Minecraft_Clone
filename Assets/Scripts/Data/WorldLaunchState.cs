@@ -1,4 +1,5 @@
 using Data.WorldTypes;
+using UnityEngine;
 
 namespace Data
 {
@@ -16,5 +17,14 @@ namespace Data
         /// New worlds default to the fast, Burst-compiled Standard path.
         /// </summary>
         public static WorldTypeID SelectedWorldType = WorldTypeID.Standard;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void DomainReset()
+        {
+            WorldName = "New World";
+            Seed = 0;
+            IsNewGame = true;
+            SelectedWorldType = WorldTypeID.Standard;
+        }
     }
 }

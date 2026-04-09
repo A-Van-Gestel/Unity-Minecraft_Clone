@@ -14,6 +14,12 @@ public static partial class BlockBehavior
     [ThreadStatic]
     private static List<VoxelMod> _tMods;
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void DomainReset()
+    {
+        _tMods = null;
+    }
+
     // A ThreadStatic reusable list to avoid allocating memory while ensuring thread-safety.
     // Lazy initialized because ThreadStatic inline initializers only run for the first thread.
     private static List<VoxelMod> Mods => _tMods ??= new List<VoxelMod>();

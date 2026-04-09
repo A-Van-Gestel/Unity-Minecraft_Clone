@@ -23,6 +23,13 @@ public static class VoxelData
 
     public static int Seed = 0;
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void DomainReset()
+    {
+        TickLength = 1f;
+        Seed = 0;
+    }
+
     public const int WorldSizeInVoxels = WorldSizeInChunks * ChunkWidth;
 
     public const int WorldCentre = WorldSizeInVoxels / 2;

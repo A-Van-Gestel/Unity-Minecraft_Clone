@@ -181,7 +181,7 @@ public static class SaveSystem
             // Skip backup worlds
             if (IsWorldBackup(worldName))
             {
-                Debug.LogWarning($"Backup world: {worldName}");
+                Debug.Log($"Backup world: {worldName}");
                 continue;
             }
 
