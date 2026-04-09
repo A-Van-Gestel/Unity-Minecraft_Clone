@@ -158,7 +158,6 @@ public class Player : MonoBehaviour
         if (_input.DebugCodePressed)
         {
             // Debug method here
-            _world.DebugLogFluidSurfaceMath();
         }
 
 

@@ -826,31 +826,61 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Checks a specific list of chunks for any that are waiting for their initial lighting pass.
+    /// Checks if any chunk in the list needs initial lighting AND can actually proceed (all 8 neighbors are populated).
+    /// Chunks on the outer ring whose diagonal neighbors are outside the load radius are excluded to prevent deadlock.
     /// </summary>
     /// <param name="chunkList">The list of chunks to check.</param>
-    /// <returns>True if any chunk in the list has the `NeedsInitialLighting` flag set; otherwise, false.</returns>
-    private static bool HasPendingInitialLighting(List<ChunkData> chunkList)
+    /// <returns>True if any actionable chunk still needs initial lighting.</returns>
+    private bool HasPendingInitialLighting(List<ChunkData> chunkList)
     {
-        return chunkList.Any(chunkData => chunkData != null && chunkData.NeedsInitialLighting);
+        foreach (ChunkData chunkData in chunkList)
+        {
+            if (chunkData != null && chunkData.NeedsInitialLighting &&
+                AreNeighborsDataReady(ChunkCoord.FromVoxelOrigin(chunkData.position)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
-    /// Checks a specific list of chunks for any that have pending lighting updates.
+    /// Checks if any chunk has pending light changes that can be scheduled now (all 8 neighbors are populated).
     /// </summary>
     /// <param name="chunkList">The list of chunks to check.</param>
-    /// <returns>True if any chunk in the list has the `HasLightChangesToProcess` flag set; otherwise, false.</returns>
-    private static bool HasPendingLightChangesOnMainThread(List<ChunkData> chunkList)
+    /// <returns>True if any actionable chunk still has light changes to process.</returns>
+    private bool HasPendingLightChangesOnMainThread(List<ChunkData> chunkList)
     {
-        return chunkList.Any(chunkData => chunkData != null && chunkData.HasLightChangesToProcess);
+        foreach (ChunkData chunkData in chunkList)
+        {
+            if (chunkData != null && chunkData.HasLightChangesToProcess &&
+                AreNeighborsDataReady(ChunkCoord.FromVoxelOrigin(chunkData.position)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
-    /// Checks a specific list of chunks for any that need an edge consistency check.
+    /// Checks if any chunk needs an edge check AND all its neighbors are fully lit.
     /// </summary>
-    private static bool HasPendingEdgeChecks(List<ChunkData> chunkList)
+    /// <param name="chunkList">The list of chunks to check.</param>
+    /// <returns>True if any actionable chunk still needs an edge consistency check.</returns>
+    private bool HasPendingEdgeChecks(List<ChunkData> chunkList)
     {
-        return chunkList.Any(chunkData => chunkData != null && chunkData.NeedsEdgeCheck);
+        foreach (ChunkData chunkData in chunkList)
+        {
+            if (chunkData != null && chunkData.NeedsEdgeCheck &&
+                AreNeighborsReadyAndLit(ChunkCoord.FromVoxelOrigin(chunkData.position)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void CompleteAndProcessLightingJobs()
@@ -1360,34 +1390,41 @@ public class World : MonoBehaviour
 
 
     /// <summary>
-    /// Verifies that all four cardinal neighbors of a chunk exist and have completely finished initial terrain generation.
+    /// Verifies that all 8 horizontal neighbors (cardinal + diagonal) of a chunk exist,
+    /// have completely finished terrain generation, and are populated with voxel data.
     /// Out-of-bounds chunks (beyond world limits) are treated as intrinsically "ready".
+    /// <para>
+    /// This prevents the lighting system from running against empty/air neighbor data,
+    /// which causes shadow artifacts at chunk borders underwater bodies.
+    /// </para>
     /// </summary>
     /// <param name="coord">The coordinate of the central chunk.</param>
     /// <returns>True if all valid neighbors are fully populated with voxel data.</returns>
     public bool AreNeighborsDataReady(ChunkCoord coord)
     {
-        // Check all 4 horizontal neighbors
-        foreach (int faceIndex in VoxelData.HorizontalFaceChecksIndices)
+        // Check all 8 horizontal neighbors to prevent light leaks into ungenerated chunks.
+        foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
         {
-            Vector3Int offset = VoxelData.FaceChecks[faceIndex];
             ChunkCoord neighborCoord = coord.Neighbor(offset.x, offset.z);
 
-            // Skip neighbors outside world bounds
-            if (!IsChunkInWorld(neighborCoord))
-            {
-                // Neighbor is outside the world - treat as "ready" (it will never exist)
-                continue;
-            }
+            // Neighbors outside the world will never exist — treat as ready.
+            if (!IsChunkInWorld(neighborCoord)) continue;
 
-            // 1. // Is a generation job for this neighbor still running?
+            // Still actively generating terrain data.
             if (JobManager.generationJobs.ContainsKey(neighborCoord))
             {
-                return false; // Neighbor data is not ready yet.
+                return false;
+            }
+
+            // Chunk hasn't been created yet, or exists but terrain isn't populated.
+            if (!worldData.Chunks.TryGetValue(neighborCoord.ToVoxelOrigin(), out ChunkData neighborData) ||
+                !neighborData.IsPopulated)
+            {
+                return false;
             }
         }
 
-        // All neighbors are present and generated.
+        // All neighbors exist and are populated.
         return true;
     }
 
@@ -2155,390 +2192,101 @@ public class World : MonoBehaviour
 
                 break;
 
+            // --- DIAGNOSTIC: Underwater chunk-border shadow wall ---
+            // Shows sunlight values for ALL voxels (including air & water) in a 2-block
+            // band around each chunk border. Highlights light-step anomalies.
+            case DebugVisualizationMode.SunlightChunkBorder:
+
+                const int borderWidth = 2; // How many blocks from each edge to visualize
+                const int chunkW = VoxelData.ChunkWidth; // 16
+
+                for (int s = 0; s < chunk.ChunkData.sections.Length; s++)
+                {
+                    ChunkSection section = chunk.ChunkData.sections[s];
+                    if (section == null) continue; // Skip null sections (all air, no data)
+
+                    int startY = s * ChunkMath.SECTION_SIZE;
+
+                    for (int x = 0; x < chunkW; x++)
+                    {
+                        for (int z = 0; z < chunkW; z++)
+                        {
+                            // Only draw voxels in the 2-block border band
+                            bool inBorderBand =
+                                x < borderWidth || x >= chunkW - borderWidth ||
+                                z < borderWidth || z >= chunkW - borderWidth;
+
+                            if (!inBorderBand) continue;
+
+                            for (int yOffset = 0; yOffset < ChunkMath.SECTION_SIZE; yOffset++)
+                            {
+                                int localY = startY + yOffset;
+                                int sectionIndex = x + yOffset * ChunkMath.SECTION_SIZE + z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+                                uint packedData = section.voxels[sectionIndex];
+
+                                VoxelState state = new VoxelState(packedData);
+                                Vector3Int localPos = new Vector3Int(x, localY, z);
+                                byte sunlight = state.Sunlight;
+                                bool isOpaque = state.Properties.IsOpaque;
+
+                                Color color;
+
+                                if (isOpaque)
+                                {
+                                    // Green for solid/opaque blocks — spatial reference
+                                    color = new Color(0f, 0.6f, 0f, 0.3f);
+                                }
+                                else
+                                {
+                                    // Check for light-step anomaly: compare with voxel directly above
+                                    bool isAnomaly = false;
+                                    if (localY + 1 < VoxelData.ChunkHeight)
+                                    {
+                                        uint abovePacked = chunk.ChunkData.GetVoxel(x, localY + 1, z);
+                                        byte aboveSunlight = BurstVoxelDataBitMapping.GetSunLight(abovePacked);
+                                        ushort aboveId = BurstVoxelDataBitMapping.GetId(abovePacked);
+                                        bool aboveIsOpaque = World.Instance.blockTypes[aboveId].IsOpaque;
+
+                                        // Flag anomaly: ≥2 level drop from non-opaque voxel above
+                                        if (!aboveIsOpaque && aboveSunlight >= sunlight + 2)
+                                        {
+                                            isAnomaly = true;
+                                        }
+                                    }
+
+                                    if (isAnomaly)
+                                    {
+                                        // Magenta — light step anomaly (≥2 level unexpected drop)
+                                        color = new Color(1f, 0f, 1f, 0.9f);
+                                    }
+                                    else if (sunlight == 0)
+                                    {
+                                        // Red — zero sunlight on a non-opaque voxel (unexpected darkness)
+                                        color = new Color(1f, 0f, 0f, 0.7f);
+                                    }
+                                    else
+                                    {
+                                        // Yellow gradient — normal sunlight (brighter = higher level)
+                                        float intensity = sunlight / 15f;
+                                        color = new Color(1f, 1f, 0f, intensity * 0.8f);
+                                    }
+                                }
+
+                                voxelsToDraw[localPos] = color;
+                            }
+                        }
+                    }
+                }
+
+                break;
+
             case DebugVisualizationMode.None:
             default:
                 break;
         }
     }
 
-    /// <summary>
-    /// A diagnostic tool for analyzing fluid meshing derivatives.
-    /// Raycasts to the target fluid voxel and prints its complete smoothing context
-    /// and per-face side culling simulation to the console.
-    /// </summary>
-    public void DebugLogFluidSurfaceMath()
-    {
-        VoxelRaycastResult result = player.PlayerInteraction.RaycastForVoxel(overrideInteractWithFluids: true);
-        if (!result.DidHit) return;
-
-        VoxelState? centerState = worldData.GetVoxelState(result.HitPosition);
-        if (!centerState.HasValue || centerState.Value.Properties.fluidType == FluidType.None) return;
-
-        ushort id = centerState.Value.id;
-        byte level = centerState.Value.FluidLevel;
-
-        // --- Horizontal neighbours ---
-        VoxelState? n = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 0, 1));
-        VoxelState? s = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 0, -1));
-        VoxelState? e = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, 0));
-        VoxelState? w = worldData.GetVoxelState(result.HitPosition + new Vector3Int(-1, 0, 0));
-        VoxelState? ne = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, 1));
-        VoxelState? nw = worldData.GetVoxelState(result.HitPosition + new Vector3Int(-1, 0, 1));
-        VoxelState? se = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, -1));
-        VoxelState? sw = worldData.GetVoxelState(result.HitPosition + new Vector3Int(-1, 0, -1));
-
-        // --- Vertical neighbours ---
-        VoxelState? above = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 1, 0));
-        VoxelState? above_N = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 1, 1));
-        VoxelState? above_S = worldData.GetVoxelState(result.HitPosition + new Vector3Int(0, 1, -1));
-        VoxelState? above_E = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 1, 0));
-        VoxelState? above_W = worldData.GetVoxelState(result.HitPosition + new Vector3Int(-1, 1, 0));
-
-        bool hasFluidAbove = above.HasValue && above.Value.id == id;
-
-        // --- Pre-compute corner smooth heights (reused for both surface and side-face reports) ---
-        float[] templates = FluidVertexTemplates.WaterVertexTemplates.ToArray();
-        float templateHeight = templates[level];
-
-        float neCorner = GetDebugSmoothHeight(level, n, e, ne, id);
-        float nwCorner = GetDebugSmoothHeight(level, n, w, nw, id);
-        float seCorner = GetDebugSmoothHeight(level, s, e, se, id);
-        float swCorner = GetDebugSmoothHeight(level, s, w, sw, id);
-
-        // --- Surface Report (original) ---
-        Debug.Log($"<color=cyan>--- FLUID SURFACE MATH REPORT ---</color>\n" +
-                  $"<b>Global Pos:</b> {result.HitPosition} | <b>Level:</b> {level} | " +
-                  $"<b>FluidAbove:</b> {hasFluidAbove} | <b>TemplateHeight:</b> {templateHeight:F4}\n\n" +
-                  $"[Corner Smooth Values]\n" +
-                  $"  <b>Top-Right (NE):</b> {neCorner}\n" +
-                  $"  <b>Top-Left  (NW):</b> {nwCorner}\n" +
-                  $"  <b>Bottom-Right (SE):</b> {seCorner}\n" +
-                  $"  <b>Bottom-Left  (SW):</b> {swCorner}");
-
-        // --- Side Face Diagnostic ---
-        // Each entry: (label, sideNeighbor, aboveNeighbor, cornerA_value, cornerA_name, cornerB_value, cornerB_name)
-        var faces = new (string label, VoxelState? neighbor, VoxelState? neighborAbove, float ca, string caName, float cb, string cbName)[]
-        {
-            ("North (+Z)", n, above_N, neCorner, "NE", nwCorner, "NW"),
-            ("South (-Z)", s, above_S, seCorner, "SE", swCorner, "SW"),
-            ("East  (+X)", e, above_E, neCorner, "NE", seCorner, "SE"),
-            ("West  (-X)", w, above_W, nwCorner, "NW", swCorner, "SW"),
-        };
-
-        StringBuilder sb = new StringBuilder();
-        sb.AppendLine("<color=yellow>--- FLUID SIDE FACE DIAGNOSTIC ---</color>");
-
-        foreach (var face in faces)
-        {
-            bool neighborIsSameFluid = face.neighbor.HasValue && face.neighbor.Value.id == id;
-            bool neighborHasFluidAbove = face.neighborAbove.HasValue && face.neighborAbove.Value.id == id;
-
-            byte neighborLevel = neighborIsSameFluid ? face.neighbor.Value.FluidLevel : (byte)0;
-            float neighborTemplate = neighborIsSameFluid ? templates[neighborLevel] : 0f;
-
-            // Simulate the culling logic from VoxelMeshHelper (replicates colleague's patch)
-            string cullResult;
-            if (neighborIsSameFluid)
-            {
-                bool isFullHeight = hasFluidAbove || templateHeight >= 1.0f;
-                if (!isFullHeight)
-                    cullResult = "<color=red>CULLED</color> — same fluid, isFullHeight=false (smooth cull)";
-                else if (neighborTemplate >= 1.0f)
-                    cullResult = "<color=red>CULLED</color> — same fluid, neighbor templateHeight >= 1.0";
-                else if (neighborHasFluidAbove)
-                    cullResult = "<color=red>CULLED</color> — same fluid, neighbor has fluid above";
-                else
-                    cullResult = "<color=green>DRAWN</color> — same fluid, gap fill required";
-            }
-            else if (!face.neighbor.HasValue)
-            {
-                cullResult = "<color=green>DRAWN</color> — no neighbor (air/void)";
-            }
-            else if (face.neighbor.Value.Properties.fluidType == FluidType.None
-                     && !face.neighbor.Value.Properties.IsTransparentForMesh)
-            {
-                cullResult = "<color=red>CULLED</color> — opaque solid neighbor";
-            }
-            else
-            {
-                cullResult = "<color=green>DRAWN</color> — transparent or non-fluid neighbor";
-            }
-
-            // The smoothed top-Y for this face's top edge (average of its two relevant corners)
-            float smoothedEdgeTopY = (face.ca + face.cb) * 0.5f;
-            bool hasGeometryGap = smoothedEdgeTopY < templateHeight - 0.001f;
-
-            sb.AppendLine($"  <b>[{face.label}]</b>");
-            sb.AppendLine($"    Neighbor: id={(face.neighbor.HasValue ? face.neighbor.Value.id.ToString() : "none")} | " +
-                          $"SameFluid: {neighborIsSameFluid} | " +
-                          $"NeighborLevel: {(neighborIsSameFluid ? neighborLevel.ToString() : "n/a")} | " +
-                          $"NeighborTemplate: {neighborTemplate:F4} | " +
-                          $"NeighborHasFluidAbove: {neighborHasFluidAbove}");
-            sb.AppendLine($"    TopY → SmoothedEdge: {smoothedEdgeTopY:F4} " +
-                          $"(corners {face.caName}:{face.ca:F4} + {face.cbName}:{face.cb:F4}) | " +
-                          $"Template: {templateHeight:F4} | " +
-                          $"GeometryGap: {(hasGeometryGap ? "<color=magenta>YES</color>" : "no")}");
-            sb.AppendLine($"    Cull Decision: {cullResult}");
-        }
-
-        // ── Per-Corner Flow Vector Report ─────────────────────────────────────────
-        // Mirrors CalculateSymmetricCornerFlow: IsSolidWall + accessibility guard + GetEffectiveFluidHeight.
-        sb.AppendLine("\n<color=lime>--- FLOW VECTORS (Per-Corner, Symmetric) ---</color>");
-        sb.AppendLine("  Uses IsSolidWall + accessibility guard (non-fluid blocks need ≥1 fluid grid-neighbor).");
-        sb.AppendLine("  Flow = normalized gradient × speed curve.\n");
-
-        ushort fluidId = id;
-        static bool IsFluid(VoxelState? vs, ushort fId) => vs.HasValue && vs.Value.id == fId;
-
-        // Debug equivalent of GetEffectiveFluidHeight.
-        static float DebugEffHeight(VoxelState? vs, ushort fId, float[] tmpl)
-        {
-            if (!vs.HasValue) return 0f;
-            bool isSolid = vs.Value.Properties.isSolid;
-            bool isTransparent = vs.Value.Properties.IsTransparentForMesh;
-            if (isSolid && !isTransparent) return 2.0f;
-            if (vs.Value.Properties.fluidType == FluidType.None && !isSolid) return -1.0f;
-            if (vs.Value.id == fId) return tmpl[vs.Value.FluidLevel];
-            return 0f;
-        }
-
-        static (Vector2 flow, string detail) DebugCornerFlow(
-            VoxelState? b00, VoxelState? b10, VoxelState? b01, VoxelState? b11,
-            ushort fId, float[] tmpl)
-        {
-            // Wall check
-            static bool W(VoxelState? v) => v.HasValue && v.Value.Properties.isSolid &&
-                                            v.Value.Properties.fluidType == FluidType.None;
-
-            bool w00 = W(b00);
-            bool w10 = W(b10);
-            bool w01 = W(b01);
-            bool w11 = W(b11);
-
-            // Fluid check
-            bool f00 = IsFluid(b00, fId);
-            bool f10 = IsFluid(b10, fId);
-            bool f01 = IsFluid(b01, fId);
-            bool f11 = IsFluid(b11, fId);
-
-            // Accessibility guard
-            if (!w00 && !f00 && !f10 && !f01) w00 = true;
-            if (!w10 && !f10 && !f00 && !f11) w10 = true;
-            if (!w01 && !f01 && !f00 && !f11) w01 = true;
-            if (!w11 && !f11 && !f10 && !f01) w11 = true;
-
-            float h00 = w00 ? 0f : DebugEffHeight(b00, fId, tmpl);
-            float h10 = w10 ? 0f : DebugEffHeight(b10, fId, tmpl);
-            float h01 = w01 ? 0f : DebugEffHeight(b01, fId, tmpl);
-            float h11 = w11 ? 0f : DebugEffHeight(b11, fId, tmpl);
-
-            float dx = 0f;
-            int dxc = 0;
-            if (!w01 && !w11)
-            {
-                dx += h11 - h01;
-                dxc++;
-            }
-
-            if (!w00 && !w10)
-            {
-                dx += h10 - h00;
-                dxc++;
-            }
-
-            if (dxc > 0) dx /= dxc;
-
-            float dz = 0f;
-            int dzc = 0;
-            if (!w10 && !w11)
-            {
-                dz += h11 - h10;
-                dzc++;
-            }
-
-            if (!w00 && !w01)
-            {
-                dz += h01 - h00;
-                dzc++;
-            }
-
-            if (dzc > 0) dz /= dzc;
-
-            string Blk(VoxelState? v, bool isW, bool isF, float h) =>
-                isF ? $"fluid(h={h:F3})" :
-                isW ? "wall(skip)" :
-                (v.HasValue ? $"id={v.Value.id}(h={h:F3})" : "void(skip)");
-
-            string detail = $"b00={Blk(b00, w00, f00, h00)} b10={Blk(b10, w10, f10, h10)} " +
-                            $"b01={Blk(b01, w01, f01, h01)} b11={Blk(b11, w11, f11, h11)}" +
-                            $"\n               dx={dx:F4}(pairs:{dxc}) dz={dz:F4}(pairs:{dzc})";
-
-            Vector2 flow = new Vector2(dx, dz);
-            float sqrMag = flow.sqrMagnitude;
-            if (sqrMag < 0.0001f) return (Vector2.zero, detail + " → zero");
-
-            float mag = Mathf.Sqrt(sqrMag);
-            Vector2 dir = flow / mag;
-            float speed = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0f, 0.25f, mag)) +
-                          Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(0.8f, 1.2f, mag)) * 0.5f;
-
-            return (dir * speed, detail + $" → dir={dir} speed={speed:F3}");
-        }
-
-        var (fBL, dBL) = DebugCornerFlow(sw, s, w, centerState, fluidId, templates);
-        var (fTL, dTL) = DebugCornerFlow(w, centerState, nw, n, fluidId, templates);
-        var (fBR, dBR) = DebugCornerFlow(s, se, centerState, e, fluidId, templates);
-        var (fTR, dTR) = DebugCornerFlow(centerState, e, n, ne, fluidId, templates);
-
-        sb.AppendLine($"  BL (x=0 z=0)  flow={fBL}\n               {dBL}");
-        sb.AppendLine($"  TL (x=0 z=1)  flow={fTL}\n               {dTL}");
-        sb.AppendLine($"  BR (x=1 z=0)  flow={fBR}\n               {dBR}");
-        sb.AppendLine($"  TR (x=1 z=1)  flow={fTR}\n               {dTR}");
-
-        // ── Shore Gradient / Push Report ─────────────────────────────────────────
-        // The shore gradient is computed per-pixel in the shader from an 8-neighbor wall mask.
-        // The push direction is still computed per-corner via the symmetric 4-block neighborhood.
-        sb.AppendLine("\n<color=lime>--- SHORE DATA ---</color>");
-        sb.AppendLine("  Wall mask: 8-neighbor flags (N/S/E/W + diagonals) packed into color.g.");
-        sb.AppendLine("  Push: per-corner normalized displacement direction (symmetric 4-block neighborhood).\n");
-
-        // ── Per-voxel wall mask (drives the per-pixel shore gradient in the shader) ──
-        static bool IsWall(VoxelState? s) =>
-            s.HasValue && s.Value.Properties.isSolid &&
-            s.Value.Properties.fluidType == FluidType.None;
-
-        bool wallN = IsWall(n);
-        bool wallS = IsWall(s);
-        bool wallE = IsWall(e);
-        bool wallW = IsWall(w);
-        bool diagNE = !wallN && !wallE && IsWall(ne);
-        bool diagNW = !wallN && !wallW && IsWall(nw);
-        bool diagSE = !wallS && !wallE && IsWall(se);
-        bool diagSW = !wallS && !wallW && IsWall(sw);
-
-        int mask = (wallN ? 1 : 0) | (wallS ? 2 : 0) | (wallE ? 4 : 0) | (wallW ? 8 : 0) |
-                   (diagNE ? 16 : 0) | (diagNW ? 32 : 0) | (diagSE ? 64 : 0) | (diagSW ? 128 : 0);
-
-        sb.AppendLine($"  Wall Mask: 0x{mask:X2} (N={wallN} S={wallS} E={wallE} W={wallW}" +
-                      $" NE={diagNE} NW={diagNW} SE={diagSE} SW={diagSW})");
-        sb.AppendLine($"  Packed color.g = {mask / 255f:F4}\n");
-
-        // ── Per-corner push directions (drive the shore push displacement effect) ──
-        // Local helper: replicates CalculateSymmetricCornerShorePush for the main thread.
-        static Vector2 DebugCornerShorePush(
-            VoxelState? b00, VoxelState? b10, VoxelState? b01, VoxelState? b11)
-        {
-            bool s00 = IsWall(b00); // SW
-            bool s10 = IsWall(b10); // SE
-            bool s01 = IsWall(b01); // NW
-            bool s11 = IsWall(b11); // NE
-
-            // Accessibility guard: promote enclosed non-fluid blocks to wall status.
-            if (!s00 && s10 && s01 && b00.HasValue && b00.Value.Properties.fluidType == FluidType.None) s00 = true;
-            if (!s10 && s00 && s11 && b10.HasValue && b10.Value.Properties.fluidType == FluidType.None) s10 = true;
-            if (!s01 && s00 && s11 && b01.HasValue && b01.Value.Properties.fluidType == FluidType.None) s01 = true;
-            if (!s11 && s10 && s01 && b11.HasValue && b11.Value.Properties.fluidType == FluidType.None) s11 = true;
-
-            float x_push = 0f;
-            float z_push = 0f;
-
-            if (s00 && s01) x_push -= 1f;
-            if (s10 && s11) x_push += 1f;
-            if (s00 && s10) z_push -= 1f;
-            if (s01 && s11) z_push += 1f;
-
-            if (x_push == 0f && z_push == 0f)
-            {
-                if (s00)
-                {
-                    x_push -= 1f;
-                    z_push -= 1f;
-                }
-                else if (s10)
-                {
-                    x_push += 1f;
-                    z_push -= 1f;
-                }
-                else if (s01)
-                {
-                    x_push -= 1f;
-                    z_push += 1f;
-                }
-                else if (s11)
-                {
-                    x_push += 1f;
-                    z_push += 1f;
-                }
-            }
-
-            float len = Mathf.Sqrt(x_push * x_push + z_push * z_push);
-            return len > 0.001f ? new Vector2(x_push / len, z_push / len) : Vector2.zero;
-        }
-
-        Vector2 p_bl = DebugCornerShorePush(sw, s, w, centerState);
-        Vector2 p_tl = DebugCornerShorePush(w, centerState, nw, n);
-        Vector2 p_br = DebugCornerShorePush(s, se, centerState, e);
-        Vector2 p_tr = DebugCornerShorePush(centerState, e, n, ne);
-
-        sb.AppendLine($"  BL (SW / x=0 z=0)  push={p_bl}");
-        sb.AppendLine($"  TL (NW / x=0 z=1)  push={p_tl}");
-        sb.AppendLine($"  BR (SE / x=1 z=0)  push={p_br}");
-        sb.AppendLine($"  TR (NE / x=1 z=1)  push={p_tr}");
-
-        // ── Seam check: NE corner of THIS voxel vs NW corner of the East neighbor ──
-        // These represent the SAME physical world vertex and must have identical push vectors.
-        VoxelState? eastVoxel = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, 0));
-        VoxelState? eastNorth = worldData.GetVoxelState(result.HitPosition + new Vector3Int(1, 0, 1));
-        Vector2 p_eastNW = DebugCornerShorePush(
-            centerState, // East's SW
-            eastVoxel, // East's SE
-            n, // East's NW
-            eastNorth // East's NE
-        );
-
-        bool pushMatch = Vector2.Distance(p_tr, p_eastNW) < 0.005f;
-        string seamResult = pushMatch
-            ? "<color=green>✓ MATCH — shared vertex push is identical.</color>"
-            : "<color=red>✗ MISMATCH — shared vertex push differs.</color>";
-
-        sb.AppendLine($"\n  [Seam Check: NE of center vs NW of East neighbor]");
-        sb.AppendLine($"    Center NE   → push={p_tr}");
-        sb.AppendLine($"    East   NW   → push={p_eastNW}");
-        sb.AppendLine($"    Result: {seamResult}");
-
-        Debug.Log(sb.ToString());
-    }
-
-    private float GetDebugSmoothHeight(byte centerLevel, VoxelState? n1, VoxelState? n2, VoxelState? nDiag, ushort fluidId)
-    {
-        float[] templates = FluidVertexTemplates.WaterVertexTemplates.ToArray(); // Assume Water for debug
-        float totalHeight = templates[centerLevel];
-        int count = 1;
-
-        bool n1IsFluid = n1.HasValue && n1.Value.id == fluidId;
-        bool n2IsFluid = n2.HasValue && n2.Value.id == fluidId;
-
-        if (n1IsFluid)
-        {
-            totalHeight += templates[n1.Value.FluidLevel];
-            count++;
-        }
-
-        if (n2IsFluid)
-        {
-            totalHeight += templates[n2.Value.FluidLevel];
-            count++;
-        }
-
-        bool nDiagIsFluid = nDiag.HasValue && nDiag.Value.id == fluidId;
-        if ((n1IsFluid || n2IsFluid) && nDiagIsFluid)
-        {
-            totalHeight += templates[nDiag.Value.FluidLevel];
-            count++;
-        }
-
-        return totalHeight / count;
-    }
+    // ── Diagnostic Tools ───────────────────────────────────────────────
 
     #endregion
 

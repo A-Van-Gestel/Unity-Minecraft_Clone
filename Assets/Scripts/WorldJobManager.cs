@@ -508,17 +508,18 @@ public class WorldJobManager : IDisposable
                         {
                             byte currentSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
 
-                            // Guard: A voxel above the heightmap has direct sky access and must
-                            // remain at sunlight 15. Cross-chunk shadow casting can incorrectly try
-                            // to darken these voxels because it doesn't see this chunk's heightmap.
-                            if (currentSunlight == 15 && mod.LightLevel < 15)
+                            // Guard: Cross-chunk BFS mods are computed against a STALE snapshot of
+                            // the neighbor's data (taken before the neighbor's own lighting pass).
+                            // This means a mod might try to set sunlight to a value LOWER than what
+                            // the neighbor's own column recalculation has already computed.
+                            //
+                            // Rule: Non-zero cross-chunk sunlight mods may only INCREASE light.
+                            // - Uplift mods (from PropagateLight): must be >= current to apply.
+                            // - Darkness removal mods (level=0, from PropagateDarkness): always apply
+                            //   so that block removal/placement propagates correctly across borders.
+                            if (mod.LightLevel > 0 && mod.LightLevel < currentSunlight)
                             {
-                                int hmIdx = localVoxelPos.x + VoxelData.ChunkWidth * localVoxelPos.z;
-                                ushort heightmapY = neighborChunk.heightMap[hmIdx];
-                                if (localVoxelPos.y > heightmapY)
-                                {
-                                    continue;
-                                }
+                                continue;
                             }
 
                             oldLightLevel = currentSunlight;

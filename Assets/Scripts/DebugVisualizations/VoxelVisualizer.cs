@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Data;
 using DebugVisualizations.Jobs;
 using Unity.Collections;
@@ -162,5 +162,12 @@ namespace DebugVisualizations
         Sunlight,
         Blocklight,
         FluidLevel,
+
+        /// <summary>
+        /// Diagnostic mode: shows sunlight values for ALL voxels (air, water, solids)
+        /// in a 2-block band around chunk borders. Highlights light-step anomalies
+        /// to diagnose the underwater shadow wall bug.
+        /// </summary>
+        SunlightChunkBorder,
     }
 }

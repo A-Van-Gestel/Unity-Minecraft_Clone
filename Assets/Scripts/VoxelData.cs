@@ -99,6 +99,23 @@ public static class VoxelData
         new Vector3Int(-1, 0, -1), // Back-Left   (SW)
     };
 
+    /// <summary>
+    /// All 8 horizontal neighbor offsets (4 cardinal + 4 diagonal).
+    /// Used by <see cref="World.AreNeighborsDataReady"/> to validate that the full
+    /// neighborhood is populated before scheduling lighting jobs.
+    /// </summary>
+    public static readonly Vector3Int[] AllNeighborOffsets =
+    {
+        new Vector3Int(0, 0, -1), // South  (Back)
+        new Vector3Int(0, 0, 1), // North  (Front)
+        new Vector3Int(-1, 0, 0), // West   (Left)
+        new Vector3Int(1, 0, 0), // East   (Right)
+        new Vector3Int(1, 0, 1), // NE     (Front-Right)
+        new Vector3Int(-1, 0, 1), // NW     (Front-Left)
+        new Vector3Int(1, 0, -1), // SE     (Back-Right)
+        new Vector3Int(-1, 0, -1), // SW     (Back-Left)
+    };
+
     // Should be accessed like this: VoxelTris[face * 4 + vert].
     public static readonly int[] VoxelTris =
     {

@@ -100,6 +100,23 @@ immediately visible to subsequent reads.
 
 ---
 
+### ~~08. Underwater cross-chunk shadow wall artifacts~~
+
+**Severity:** Bug  
+**Files:** `WorldJobManager.cs` — `ProcessLightingJobs`  
+**Fixed:** April 2026
+
+**Symptom:** Generating new chunks next to water bodies (or logging in dynamically) caused a 1-voxel wide vertical "wall of shadow" at the exact chunk boundary spanning beneath the water surface, despite correct lighting values everywhere else.
+
+**Root Cause:** A data race condition in chunk boundary lighting. When a chunk ran its lighting job, the `RecalculateSunlightForColumn` correctly evaluated direct downward light (e.g., `sunlight=15` through water).
+However, the neighboring chunk's lighting job (running asynchronously or later) evaluated the border block horizontally using BFS on a *stale snapshot* of the chunk (where the original sunlight value was `0`).
+This BFS evaluated a weakened light value (`15 - 1 distance - 2 water opacity = 12`) and generated a `CrossChunkLightMod`. This cross-chunk mod then overwrote the correct column value back on the main thread because the guard checking cross-chunk modifications was too narrow.  
+
+**Fix:** Broadened the safeguard in `ProcessLightingJobs` (`WorldJobManager.cs` line 518). Replaced the rigid `heightmap` check with a general principle:
+cross-chunk BFS modifications that evaluate a non-zero sunlight level *must never lower* the current target's sunlight level. This correctly delegates authoritative column values to the chunk that actually owns them.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~
@@ -311,8 +328,8 @@ The `UberLiquidShader` natively interprets this large V-axis vector, resulting i
 **Files:** `Chunk.cs` — `PlayChunkLoadAnimation`, `ChunkLoadAnimation.cs`
 **Fixed:** March 2026
 
-**Root Cause:** `GetComponent<ChunkLoadAnimation>()` was called on each pool activation. A primitive boolean flag was previously attempted, but it could become stale if the component were destroyed. Furthermore, applying animations from the pool caused a 1-frame visual flash, and
-subsequent chunk modifications re-triggered the upward animation natively since it hooked into mesh generation.
+**Root Cause:** `GetComponent<ChunkLoadAnimation>()` was called on each pool activation. A primitive boolean flag was previously attempted, but it could become stale if the component were destroyed.
+Furthermore, applying animations from the pool caused a 1-frame visual flash, and subsequent chunk modifications re-triggered the upward animation natively since it hooked into mesh generation.
 
 **Fix:**
 
