@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Linq;
 using JetBrains.Annotations;
 using Serialization;
 using UnityEngine;
@@ -256,8 +255,10 @@ public class DragAndDropHandler : MonoBehaviour
         int maxStackSize = _world.blockTypes[uiItemSlot.ItemSlot.Stack.ID].stackSize;
 
         // First fill slots in inventory with same item.
-        foreach (ItemSlot slot in _creativeInventory.Slots.Where(slot => !slot.IsCreative && slot.HasItem && slot.Stack.ID == uiItemSlot.ItemSlot.Stack.ID && slot.Stack.Amount < maxStackSize))
+        foreach (ItemSlot slot in _creativeInventory.Slots)
         {
+            if (slot.IsCreative || !slot.HasItem || slot.Stack.ID != uiItemSlot.ItemSlot.Stack.ID || slot.Stack.Amount >= maxStackSize) continue;
+
             ItemStack remainingStack = CombineStacks(slot, uiItemSlot.ItemSlot.Stack);
             uiItemSlot.ItemSlot.InsertStack(remainingStack);
             if (PlaceStackToAvailableInventorySlot(uiItemSlot))
@@ -265,8 +266,10 @@ public class DragAndDropHandler : MonoBehaviour
         }
 
         // After that, fill remaining empty slots
-        foreach (ItemSlot slot in _creativeInventory.Slots.Where(slot => !slot.IsCreative && !slot.HasItem))
+        foreach (ItemSlot slot in _creativeInventory.Slots)
         {
+            if (slot.IsCreative || slot.HasItem) continue;
+
             slot.InsertStack(uiItemSlot.ItemSlot.TakeAll());
             return true;
         }
