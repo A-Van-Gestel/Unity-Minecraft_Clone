@@ -46,9 +46,6 @@ namespace Editor.BlockEditor
 
         // --- Custom GUI Style ---
         private GUIStyle _listButtonStyle;
-        private static GUIStyle _checkerboardStyle;
-        private static GUIStyle _centeredIntFieldStyle;
-
         private bool _blockIdsStale = false;
 
         // --- Icon Generation ---
@@ -107,8 +104,10 @@ namespace Editor.BlockEditor
                 }
             }
 
+#pragma warning disable UDR0004
             //  Subscribe to the editor's update loop to enable real-time preview.
             EditorApplication.update += OnUpdate;
+#pragma warning restore UDR0004
         }
 
         // --- OnDisable for Cleanup ---

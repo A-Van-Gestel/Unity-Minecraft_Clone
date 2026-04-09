@@ -69,8 +69,10 @@ namespace Editor.WorldTools
             // Auto-discover all StandardBiomeAttributes assets in the project
             RefreshBiomeList();
 
+#pragma warning disable UDR0004
             // Poll for external asset changes (e.g. user modifies biome in Inspector and presses Ctrl+S)
             EditorApplication.update += PollForAssetChanges;
+#pragma warning restore UDR0004
         }
 
         /// <summary>
@@ -246,10 +248,7 @@ namespace Editor.WorldTools
                 ref _biomeListScrollPos,
                 ref _selectedBiomeIndex,
                 (biome, search) => string.IsNullOrEmpty(search) || biome.name.ToLower().Contains(search.ToLower()),
-                (rect, biome, _) =>
-                {
-                    GUI.Label(rect, $" {biome.name}", EditorStyles.toolbarButton);
-                },
+                (rect, biome, _) => { GUI.Label(rect, $" {biome.name}", EditorStyles.toolbarButton); },
                 index =>
                 {
                     _biome = _biomeAssets[index];
@@ -577,6 +576,7 @@ namespace Editor.WorldTools
                 float ca = noise.GetNoise(worldZ, worldX);
                 return (ab + bc + ac + ba + cb + ca) / 6f;
             }
+
             return 0f;
         }
 

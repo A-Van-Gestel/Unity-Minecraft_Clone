@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Data.Enums;
 using UnityEditor;
 using UnityEditor.Build;
@@ -21,11 +21,13 @@ namespace Editor.ProjectUtilities
         /// <summary>
         /// Retrieves the currently selected development stage from EditorPrefs.
         /// </summary>
+#pragma warning disable UDR0001 // False positive: No backing field to reset, strictly accesses EditorPrefs
         public static DevelopmentStage CurrentStage
         {
             get => (DevelopmentStage)EditorPrefs.GetInt(PREF_KEY_STAGE, (int)DevelopmentStage.Alpha);
             set => EditorPrefs.SetInt(PREF_KEY_STAGE, (int)value);
         }
+#pragma warning restore UDR0001
 
         /// <summary>
         /// Generates the formatted version string based on the current date and stage.

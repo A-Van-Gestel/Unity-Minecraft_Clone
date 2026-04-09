@@ -14,6 +14,13 @@ namespace Editor.Libraries
         private static Texture2D _checkerboardTexture;
         private static GUIStyle _centeredIntFieldStyle;
 
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void DomainReset()
+        {
+            _checkerboardTexture = null;
+            _centeredIntFieldStyle = null;
+        }
+
         #region Numeric Inputs
 
         /// <summary>
