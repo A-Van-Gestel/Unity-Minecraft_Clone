@@ -51,23 +51,21 @@ namespace Serialization.Migration
         /// </summary>
         public bool RequiresMigration(int savedVersion)
         {
-            if (savedVersion > SaveSystem.CURRENT_VERSION)
+            switch (savedVersion)
             {
-                throw new InvalidOperationException(
-                    $"World was saved with a newer version of the game's save-system (v{savedVersion}),\n" +
-                    $"but this build only supports versions up to v{SaveSystem.CURRENT_VERSION}.\n\n" +
-                    "Please update your game to play this world."
-                );
+                case > SaveSystem.CURRENT_VERSION:
+                    throw new InvalidOperationException(
+                        $"World was saved with a newer version of the game's save-system (v{savedVersion}),\n" +
+                        $"but this build only supports versions up to v{SaveSystem.CURRENT_VERSION}.\n\n" +
+                        "Please update your game to play this world."
+                    );
+                case < SaveSystem.CURRENT_VERSION:
+                    Debug.Log($"[MigrationManager] World requires migration from v{savedVersion} to v{SaveSystem.CURRENT_VERSION}");
+                    return true;
+                default:
+                    Debug.Log($"[MigrationManager] World is up to date (v{savedVersion})");
+                    return false;
             }
-
-            if (savedVersion < SaveSystem.CURRENT_VERSION)
-            {
-                Debug.Log($"[MigrationManager] World requires migration from v{savedVersion} to v{SaveSystem.CURRENT_VERSION}");
-                return true;
-            }
-
-            Debug.Log($"[MigrationManager] World is up to date (v{savedVersion})");
-            return false;
         }
 
         /// <summary>
@@ -100,7 +98,7 @@ namespace Serialization.Migration
             await Task.Run(() => CreateAtomicBackup(savePath, _currentBackupPath));
 
             // --- Step 2: Build Migration Path ---
-            var migrationPath = BuildMigrationPath(startVersion, SaveSystem.CURRENT_VERSION);
+            List<WorldMigrationStep> migrationPath = BuildMigrationPath(startVersion, SaveSystem.CURRENT_VERSION);
             Debug.Log($"[MigrationManager] Built migration path with {migrationPath.Count} step(s).");
 
             // --- Step 3: Migrate Global Metadata Files ---
@@ -404,7 +402,7 @@ namespace Serialization.Migration
 
         private List<WorldMigrationStep> BuildMigrationPath(int start, int target)
         {
-            var path = new List<WorldMigrationStep>();
+            List<WorldMigrationStep> path = new List<WorldMigrationStep>();
             int current = start;
 
             while (current < target)

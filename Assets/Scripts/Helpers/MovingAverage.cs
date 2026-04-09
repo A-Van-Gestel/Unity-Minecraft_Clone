@@ -1,3 +1,5 @@
+using JetBrains.Annotations;
+
 namespace Helpers
 {
     /// <summary>
@@ -50,6 +52,7 @@ namespace Helpers
         /// <summary>
         /// Resets the ring buffer, clearing all samples and the accumulator.
         /// </summary>
+        [UsedImplicitly]
         public void Reset()
         {
             _currentIndex = 0;

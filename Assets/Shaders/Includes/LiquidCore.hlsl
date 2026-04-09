@@ -201,7 +201,7 @@ void GetShoreData(float packedMask, float3 worldPos, float3 worldNormal,
 
     // Push direction: normalize the interpolated push vector for displacement.
     float pushLen = length(shorePush_in);
-    float2 push_dir = pushLen > 0.001 ? (shorePush_in / pushLen) : float2(0, 0);
+    float2 push_dir = pushLen > 0.001 ? shorePush_in / pushLen : float2(0, 0);
     shore_push = push_dir * shore_gradient;
 }
 
@@ -268,7 +268,7 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
 
     // Apply the routed 3D flow to the noise coordinates
     float3 p1 = i.worldPos * _NoiseScale + flow3D + float3(0, t_boil, 0);
-    float3 p2 = i.worldPos * _NoiseScale - (flow3D * 0.8) + float3(0, -t_boil * 0.8, 0);
+    float3 p2 = i.worldPos * _NoiseScale - flow3D * 0.8 + float3(0, -t_boil * 0.8, 0);
 
     float base_fbm = fbm(p1, 5);
     float base_noise = (base_fbm + 1.0) * 0.5;
@@ -291,7 +291,7 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     lavaCol = lerp(lavaCol, _CrustColor.rgb, saturate(crust_mask * _LavaShoreCrust));
 
     // 2. Bright Sparks where flow is strong (Turbulence)
-    float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + (flow3D * 2.0);
+    float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + flow3D * 2.0;
 
     float flow_mask = (fbm(flow_mask_p, 4) + 1.0) * 0.5;
     lavaCol += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * turbulence * _FlowHighlight;
@@ -350,7 +350,7 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
 
     // --- SHORE & STREAM EFFECTS ---
 
-    float3 stream_p = i.worldPos * _WaveScale * 2.0 + (flow3D * 3.0);
+    float3 stream_p = i.worldPos * _WaveScale * 2.0 + flow3D * 3.0;
     float stream_noise = (fbm(stream_p, 3) + 1.0) * 0.5;
 
     // 1. Stream Foam (Turbulence-based)

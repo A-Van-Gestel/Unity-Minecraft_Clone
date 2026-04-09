@@ -94,7 +94,7 @@ namespace Serialization.Migration.Steps
             // Keep new region files open across the outer loop so that multiple
             // old region files that map to the same new region are written in a
             // single open/close cycle (e.g. r.10.0 and r.11.0 both → r.0.0.bin).
-            var newRegions = new Dictionary<(int rx, int rz), RegionFile>();
+            Dictionary<(int rx, int rz), RegionFile> newRegions = new Dictionary<(int rx, int rz), RegionFile>();
             int totalChunksProcessed = 0;
 
             try

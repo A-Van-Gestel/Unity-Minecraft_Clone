@@ -70,13 +70,13 @@ namespace Legacy
         {
             Vector2Int chunkVoxelPos = coord.ToVoxelOrigin();
 
-            var modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
-            var outputMap = new NativeArray<uint>(
+            NativeQueue<VoxelMod> modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
+            NativeArray<uint> outputMap = new NativeArray<uint>(
                 VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent);
-            var outputHeightMap = new NativeArray<ushort>(
+            NativeArray<ushort> outputHeightMap = new NativeArray<ushort>(
                 VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent);
 
-            var job = new LegacyChunkGenerationJob
+            LegacyChunkGenerationJob job = new LegacyChunkGenerationJob
             {
                 Seed = _seed,
                 SeaLevel = _seaLevel,

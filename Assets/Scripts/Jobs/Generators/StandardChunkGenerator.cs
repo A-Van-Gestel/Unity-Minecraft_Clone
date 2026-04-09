@@ -59,8 +59,8 @@ namespace Jobs.Generators
             int totalCaveLayerCount = 0;
             foreach (StandardBiomeAttributes biome in _standardBiomes)
             {
-                totalLodeCount += (biome.lodes != null ? biome.lodes.Length : 0);
-                totalCaveLayerCount += (biome.caveLayers != null ? biome.caveLayers.Length : 0);
+                totalLodeCount += biome.lodes?.Length ?? 0;
+                totalCaveLayerCount += biome.caveLayers?.Length ?? 0;
             }
 
             _biomesJobData = new NativeArray<StandardBiomeAttributesJobData>(_standardBiomes.Length, Allocator.Persistent);
@@ -77,8 +77,8 @@ namespace Jobs.Generators
             for (int i = 0; i < _standardBiomes.Length; i++)
             {
                 StandardBiomeAttributes biome = _standardBiomes[i];
-                int lodeCount = biome.lodes != null ? biome.lodes.Length : 0;
-                int caveLayerCount = biome.caveLayers != null ? biome.caveLayers.Length : 0;
+                int lodeCount = biome.lodes?.Length ?? 0;
+                int caveLayerCount = biome.caveLayers?.Length ?? 0;
 
                 // Build lode data + noise
                 for (int j = 0; j < lodeCount; j++)
@@ -147,13 +147,13 @@ namespace Jobs.Generators
         {
             Vector2Int chunkVoxelPos = coord.ToVoxelOrigin();
 
-            var modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
-            var outputMap = new NativeArray<uint>(
+            NativeQueue<VoxelMod> modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
+            NativeArray<uint> outputMap = new NativeArray<uint>(
                 VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent);
-            var outputHeightMap = new NativeArray<ushort>(
+            NativeArray<ushort> outputHeightMap = new NativeArray<ushort>(
                 VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent);
 
-            var job = new StandardChunkGenerationJob
+            StandardChunkGenerationJob job = new StandardChunkGenerationJob
             {
                 SeaLevel = _seaLevel,
                 BaseSeed = _seed,
@@ -238,7 +238,7 @@ namespace Jobs.Generators
             // Use Unity.Mathematics.Random for trunk height (deterministic per position + seed)
             uint deterministicSeed = math.max(1u, math.hash(new int3(
                 rootMod.GlobalPosition.x, rootMod.GlobalPosition.z, _seed)));
-            var random = new Random(deterministicSeed);
+            Random random = new Random(deterministicSeed);
 
             return rootMod.ID switch
             {

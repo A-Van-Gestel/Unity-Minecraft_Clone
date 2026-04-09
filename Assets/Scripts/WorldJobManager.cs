@@ -64,7 +64,7 @@ public class WorldJobManager : IDisposable
             WorldTypeID.Standard => new StandardChunkGenerator(),
             _ => throw new ArgumentException(
                 $"[WorldJobManager] Unsupported WorldTypeID: {activeWorldType.TypeID}. " +
-                $"Ensure all unimplemented types are remapped to a supported type before constructing WorldJobManager.")
+                "Ensure all unimplemented types are remapped to a supported type before constructing WorldJobManager."),
         };
 
         _chunkGenerator.Initialize(VoxelData.Seed, activeWorldType, globalJobData);
@@ -142,7 +142,7 @@ public class WorldJobManager : IDisposable
 
         // 1. Prepare Section Data for CENTER chunk
         int sectionCount = chunk.ChunkData.sections.Length;
-        var sectionData = new NativeArray<SectionJobData>(sectionCount, Allocator.Persistent);
+        NativeArray<SectionJobData> sectionData = new NativeArray<SectionJobData>(sectionCount, Allocator.Persistent);
 
         for (int i = 0; i < sectionCount; i++)
         {
@@ -155,16 +155,16 @@ public class WorldJobManager : IDisposable
         }
 
         // 2. Allocate all input maps with Persistent
-        var map = _world.worldData.GetChunkMapForJob(chunkCoord.ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<uint> map = _world.worldData.GetChunkMapForJob(chunkCoord.ToVoxelOrigin(), Allocator.Persistent);
 
-        var back = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), Allocator.Persistent);
-        var front = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), Allocator.Persistent);
-        var left = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), Allocator.Persistent);
-        var right = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), Allocator.Persistent);
-        var frontRight = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), Allocator.Persistent);
-        var backRight = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), Allocator.Persistent);
-        var backLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), Allocator.Persistent);
-        var frontLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<uint> back = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<uint> front = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<uint> left = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<uint> right = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<uint> frontRight = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<uint> backRight = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<uint> backLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<uint> frontLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), Allocator.Persistent);
 
         MeshDataJobOutput meshOutput = new MeshDataJobOutput(Allocator.Persistent);
 
@@ -193,7 +193,7 @@ public class WorldJobManager : IDisposable
 
         JobHandle meshJobHandle = job.Schedule();
 
-        var disposalHandles = new NativeArray<JobHandle>(10, Allocator.Persistent);
+        NativeArray<JobHandle> disposalHandles = new NativeArray<JobHandle>(10, Allocator.Persistent);
         disposalHandles[0] = map.Dispose(meshJobHandle);
         disposalHandles[1] = sectionData.Dispose(meshJobHandle);
         disposalHandles[2] = back.Dispose(meshJobHandle);
@@ -307,7 +307,7 @@ public class WorldJobManager : IDisposable
     public void ProcessGenerationJobs()
     {
         _completedGenJobs.Clear();
-        foreach (var jobEntry in generationJobs)
+        foreach (KeyValuePair<ChunkCoord, GenerationJobData> jobEntry in generationJobs)
         {
             if (jobEntry.Value.Handle.IsCompleted)
             {
@@ -349,7 +349,7 @@ public class WorldJobManager : IDisposable
 
                     HashSetPool<Vector2Int>.Release(localLightCols);
 
-                    if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.position, out var existingQueue))
+                    if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.position, out HashSet<Vector2Int> existingQueue))
                     {
                         existingQueue.UnionWith(globalLightCols);
                         HashSetPool<Vector2Int>.Release(globalLightCols);
@@ -406,7 +406,7 @@ public class WorldJobManager : IDisposable
     public void ProcessMeshJobs()
     {
         _completedMeshJobs.Clear();
-        foreach (var jobEntry in meshJobs)
+        foreach (KeyValuePair<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> jobEntry in meshJobs)
         {
             if (jobEntry.Value.handle.IsCompleted)
             {
@@ -442,14 +442,14 @@ public class WorldJobManager : IDisposable
         _chunksToRebuildMesh.Clear();
         _completedLightJobs.Clear();
 
-        foreach (var set in _droppedLightUpdates.Values)
+        foreach (HashSet<Vector2Int> set in _droppedLightUpdates.Values)
         {
             HashSetPool<Vector2Int>.Release(set);
         }
 
         _droppedLightUpdates.Clear();
 
-        foreach (var jobEntry in lightingJobs)
+        foreach (KeyValuePair<ChunkCoord, LightingJobData> jobEntry in lightingJobs)
         {
             if (jobEntry.Value.Handle.IsCompleted)
             {
@@ -561,7 +561,7 @@ public class WorldJobManager : IDisposable
         }
 
         // Save vanishing neighbor updates (BATCH)
-        foreach (var kvp in _droppedLightUpdates)
+        foreach (KeyValuePair<ChunkCoord, HashSet<Vector2Int>> kvp in _droppedLightUpdates)
         {
             if (kvp.Value.Count > 0)
             {
@@ -572,7 +572,7 @@ public class WorldJobManager : IDisposable
         if (_droppedLightUpdates.Count > 0 && _world.settings.enableDiagnosticLogs)
         {
             int totalColumns = 0;
-            foreach (var set in _droppedLightUpdates.Values)
+            foreach (HashSet<Vector2Int> set in _droppedLightUpdates.Values)
             {
                 totalColumns += set.Count;
             }
@@ -671,19 +671,19 @@ public class WorldJobManager : IDisposable
     /// </summary>
     public void Dispose()
     {
-        foreach (var job in generationJobs.Values)
+        foreach (GenerationJobData job in generationJobs.Values)
         {
             job.Handle.Complete();
             job.Dispose();
         }
 
-        foreach (var (handle, meshData) in meshJobs.Values)
+        foreach ((JobHandle handle, MeshDataJobOutput meshData) in meshJobs.Values)
         {
             handle.Complete();
             meshData.Dispose();
         }
 
-        foreach (var job in lightingJobs.Values)
+        foreach (LightingJobData job in lightingJobs.Values)
         {
             job.Handle.Complete();
             job.Dispose();

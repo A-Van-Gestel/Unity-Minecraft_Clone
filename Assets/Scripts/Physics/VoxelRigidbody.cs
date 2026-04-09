@@ -349,13 +349,5 @@ namespace Physics
         }
 
         #endregion
-
-        /// <summary>
-        /// Provides access to directly modify vertical momentum (used for loading state).
-        /// </summary>
-        public void ApplyDirectVerticalMomentum(float momentum)
-        {
-            _verticalMomentum = momentum;
-        }
     }
 }

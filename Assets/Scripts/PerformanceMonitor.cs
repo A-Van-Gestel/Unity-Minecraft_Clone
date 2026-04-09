@@ -260,7 +260,7 @@ public class PerformanceMonitor : MonoBehaviour
 
     private IEnumerator FramePhaseCoroutine()
     {
-        var waitForEndOfFrame = new WaitForEndOfFrame();
+        WaitForEndOfFrame waitForEndOfFrame = new WaitForEndOfFrame();
 
         while (true)
         {

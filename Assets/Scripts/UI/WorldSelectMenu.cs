@@ -59,7 +59,7 @@ namespace UI
 
         private WorldSaveData _selectedWorld;
         private List<WorldListItem> _spawnedItems = new List<WorldListItem>();
-        private List<WorldTypeID> _dropdownMapping = new List<WorldTypeID>();
+        private readonly List<WorldTypeID> _dropdownMapping = new List<WorldTypeID>();
 
         private Settings _settings;
 
@@ -289,7 +289,7 @@ namespace UI
 
             List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>();
 
-            foreach (var typeDef in worldTypeRegistry.Types)
+            foreach (WorldTypeDefinition typeDef in worldTypeRegistry.Types)
             {
                 if (typeDef == null) continue;
 
@@ -309,6 +309,7 @@ namespace UI
             {
                 worldTypeDropdown.value = 0;
             }
+
             worldTypeDropdown.RefreshShownValue();
         }
 
@@ -437,29 +438,31 @@ namespace UI
                     : "None";
 
                 string migrationText = "";
-                if (saveVersion < SaveSystem.CURRENT_VERSION)
+                switch (saveVersion)
                 {
-                    try
-                    {
-                        MigrationManager migrationManager = new MigrationManager();
-                        List<WorldMigrationStep> steps = migrationManager.GetRequiredMigrations(saveVersion);
-                        if (steps.Count > 0)
+                    case < SaveSystem.CURRENT_VERSION:
+                        try
                         {
-                            migrationText = "\n\n<b><color=#FFA500>Pending Migrations:</color></b>";
-                            foreach (WorldMigrationStep step in steps)
+                            MigrationManager migrationManager = new MigrationManager();
+                            List<WorldMigrationStep> steps = migrationManager.GetRequiredMigrations(saveVersion);
+                            if (steps.Count > 0)
                             {
-                                migrationText += $"\n• <b>v{step.SourceWorldVersion} → v{step.TargetWorldVersion}:</b> {step.ChangeSummary}";
+                                migrationText = "\n\n<b><color=#FFA500>Pending Migrations:</color></b>";
+                                foreach (WorldMigrationStep step in steps)
+                                {
+                                    migrationText += $"\n• <b>v{step.SourceWorldVersion} → v{step.TargetWorldVersion}:</b> {step.ChangeSummary}";
+                                }
                             }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        migrationText = $"\n\n<b><color=#FF0000>Migration Error:</color></b>\n{ex.Message}";
-                    }
-                }
-                else if (saveVersion > SaveSystem.CURRENT_VERSION)
-                {
-                    migrationText = $"\n\n<b><color=#FF0000>Unsupported Future Version:</color></b>\nThis world was created in a newer version of the game (v{saveVersion}) and cannot be loaded.";
+                        catch (Exception ex)
+                        {
+                            migrationText = $"\n\n<b><color=#FF0000>Migration Error:</color></b>\n{ex.Message}";
+                        }
+
+                        break;
+                    case > SaveSystem.CURRENT_VERSION:
+                        migrationText = $"\n\n<b><color=#FF0000>Unsupported Future Version:</color></b>\nThis world was created in a newer version of the game (v{saveVersion}) and cannot be loaded.";
+                        break;
                 }
 
                 // 5. Update UI Text with Legend & Stats

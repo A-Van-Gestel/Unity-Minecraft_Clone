@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using JetBrains.Annotations;
+using UnityEngine;
 
 namespace Helpers
 {
@@ -39,6 +40,7 @@ namespace Helpers
         /// <summary>
         /// Generates the next <c>X</c> & <c>Z</c> coordinates and returns them as a new <c>Vector2</c>.
         /// </summary>
+        [UsedImplicitly]
         public Vector2 NextPoint()
         {
             Next();
@@ -48,6 +50,7 @@ namespace Helpers
         /// <summary>
         /// Resets the <c>X</c> & <c>Z</c> coordinates to 0, 0.
         /// </summary>
+        [UsedImplicitly]
         public void Reset()
         {
             X = 0;

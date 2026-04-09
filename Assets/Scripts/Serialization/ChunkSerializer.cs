@@ -226,7 +226,7 @@ namespace Serialization
         {
             int count = reader.ReadInt32();
             // Sanity check to prevent OOM on corrupt data
-            if (count < 0 || count > 100_000)
+            if (count is < 0 or > 100_000)
                 throw new InvalidDataException($"Invalid LightQueue count: {count}");
 
             for (int i = 0; i < count; i++)

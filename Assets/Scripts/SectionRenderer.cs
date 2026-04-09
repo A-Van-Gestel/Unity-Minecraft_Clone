@@ -74,8 +74,8 @@ public class SectionRenderer
         _mesh.SetIndexBufferParams(totalIndices, IndexFormat.UInt32);
 
         // Use a temporary NativeArray to store descriptors for atomic assignment.
-        var descriptors = new NativeArray<SubMeshDescriptor>(3, Allocator.Temp);
-        var materialBuffer = new Material[3];
+        NativeArray<SubMeshDescriptor> descriptors = new NativeArray<SubMeshDescriptor>(3, Allocator.Temp);
+        Material[] materialBuffer = new Material[3];
 
         int activeSubMeshCount = 0;
         int currentIndexOffset = 0;

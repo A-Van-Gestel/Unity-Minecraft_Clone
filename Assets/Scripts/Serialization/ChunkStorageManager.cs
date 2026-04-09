@@ -177,7 +177,7 @@ namespace Serialization
         public void Dispose()
         {
             Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
-            foreach (var lazyRegion in _regions.Values)
+            foreach (Lazy<RegionFile> lazyRegion in _regions.Values)
             {
                 // Only dispose if the file was actually opened
                 if (lazyRegion.IsValueCreated)

@@ -13,7 +13,6 @@ using Data.WorldTypes;
 using DebugVisualizations;
 using Helpers;
 using JetBrains.Annotations;
-using Jobs;
 using Jobs.BurstData;
 using Jobs.Data;
 using Libraries;
@@ -1289,36 +1288,6 @@ public class World : MonoBehaviour
         QueueNeighborRebuild(chunkCoord.Neighbor(-1, 0)); // West
     }
 
-    private bool AreNeighborsReady(ChunkCoord chunkCoord)
-    {
-        // Check all 4 horizontal neighbors
-        foreach (int faceIndex in VoxelData.HorizontalFaceChecksIndices)
-        {
-            Vector3Int offset = VoxelData.FaceChecks[faceIndex];
-            ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
-
-            if (IsChunkInWorld(neighborCoord))
-            {
-                // Is a generation job for this neighbor still running?
-                if (JobManager.generationJobs.ContainsKey(neighborCoord))
-                {
-                    return false; // Neighbor data is not ready yet.
-                }
-
-                // Does the placeholder ChunkData exist in the world dictionary?
-                Vector2Int chunkVoxelPos = neighborCoord.ToVoxelOrigin();
-                if (!worldData.Chunks.ContainsKey(chunkVoxelPos))
-                {
-                    // This case is unlikely with the new CheckViewDistance, but is a good safeguard.
-                    return false;
-                }
-            }
-        }
-
-        // If we get here, all neighbors are ready.
-        return true;
-    }
-
     /// <summary>
     /// Checks if all of a chunk's cardinal neighbors have finished generating their data and have a stable lighting state.
     /// A neighbor is considered "ready" if no generation or lighting job is running for it, and it has no pending
@@ -1432,41 +1401,6 @@ public class World : MonoBehaviour
 
         // All neighbors exist and are populated.
         return true;
-    }
-
-    /// <summary>
-    /// Safely writes an updated light value to a specific voxel's data without triggering the cascading
-    /// flood-fill updates normally caused by player modifications.
-    /// This is strictly used by background jobs to apply cross-chunk propagation results.
-    /// </summary>
-    /// <param name="globalPos">The absolute world position of the target voxel.</param>
-    /// <param name="lightValue">The newly calculated light intensity (0-15).</param>
-    /// <param name="channel">Which light channel to apply this to (Sunlight or Blocklight).</param>
-    public void SetLight(Vector3 globalPos, byte lightValue, LightChannel channel)
-    {
-        ChunkData chunkData = worldData.RequestChunk(worldData.GetChunkCoordFor(globalPos), false);
-        if (chunkData != null && chunkData.IsPopulated)
-        {
-            // Get data from the chunk
-            Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(globalPos);
-            uint oldPackedData = chunkData.GetVoxel(localPos.x, localPos.y, localPos.z);
-            uint newPackedData;
-
-            // Use the channel to call the correct setter
-            if (channel == LightChannel.Sun)
-            {
-                if (BurstVoxelDataBitMapping.GetSunLight(oldPackedData) == lightValue) return; // No change needed
-                newPackedData = BurstVoxelDataBitMapping.SetSunLight(oldPackedData, lightValue);
-            }
-            else // Blocklight
-            {
-                if (BurstVoxelDataBitMapping.GetBlockLight(oldPackedData) == lightValue) return; // No change needed
-                newPackedData = BurstVoxelDataBitMapping.SetBlockLight(oldPackedData, lightValue);
-            }
-
-            // Write data back
-            chunkData.SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData);
-        }
     }
 
 

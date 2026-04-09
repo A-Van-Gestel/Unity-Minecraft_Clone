@@ -582,13 +582,13 @@ namespace Helpers
             // This prevents walls from creating artificial slopes that pull flow backward!
             if (!w01 && !w11)
             {
-                dx += (h11 - h01);
+                dx += h11 - h01;
                 dx_count++;
             }
 
             if (!w00 && !w10)
             {
-                dx += (h10 - h00);
+                dx += h10 - h00;
                 dx_count++;
             }
 
@@ -599,13 +599,13 @@ namespace Helpers
             // Only calculate the Z derivative if the fluid actually exists across the boundary.
             if (!w10 && !w11)
             {
-                dz += (h11 - h10);
+                dz += h11 - h10;
                 dz_count++;
             }
 
             if (!w00 && !w01)
             {
-                dz += (h01 - h00);
+                dz += h01 - h00;
                 dz_count++;
             }
 

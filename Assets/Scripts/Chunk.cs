@@ -198,15 +198,6 @@ public class Chunk
         }
     }
 
-    /// <summary>
-    /// Updates chunk using the Unity Jobs System
-    /// </summary>
-    public void UpdateChunk()
-    {
-        // The responsibility of meshing is now on the World orchestrator
-        World.Instance.JobManager.ScheduleMeshing(this);
-    }
-
     #region Block Behavior Methods
 
     /// <summary>

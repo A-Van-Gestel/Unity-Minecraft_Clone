@@ -111,20 +111,20 @@ namespace Editor.Benchmarking
             {
                 float ratio = (float)i / section.voxels.Length;
 
-                if (ratio < 0.25f)
+                switch (ratio)
                 {
-                    // Solid block with some light: stone (ID=3) + sunlight 12
-                    section.voxels[i] = BurstVoxelDataBitMapping.PackVoxelData(3, 12, 0, 1, 0);
-                }
-                else if (ratio < 0.50f)
-                {
-                    // Air with light data (the problematic case): ID=0, sunlight=15
-                    section.voxels[i] = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0, 0, 0);
-                }
-                else
-                {
-                    // Pure air: all zeros
-                    section.voxels[i] = 0;
+                    case < 0.25f:
+                        // Solid block with some light: stone (ID=3) + sunlight 12
+                        section.voxels[i] = BurstVoxelDataBitMapping.PackVoxelData(3, 12, 0, 1, 0);
+                        break;
+                    case < 0.50f:
+                        // Air with light data (the problematic case): ID=0, sunlight=15
+                        section.voxels[i] = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0, 0, 0);
+                        break;
+                    default:
+                        // Pure air: all zeros
+                        section.voxels[i] = 0;
+                        break;
                 }
             }
         }

@@ -80,16 +80,16 @@ namespace Jobs
         public void Execute()
         {
             // Internal queues for the actual flood-fill algorithm. These are temporary for this job's execution.
-            var sunlightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
-            var sunlightPlacementQueue = new NativeQueue<Vector3Int>(Allocator.Temp);
-            var blocklightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
-            var blocklightPlacementQueue = new NativeQueue<Vector3Int>(Allocator.Temp);
+            NativeQueue<LightRemovalNode> sunlightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
+            NativeQueue<Vector3Int> sunlightPlacementQueue = new NativeQueue<Vector3Int>(Allocator.Temp);
+            NativeQueue<LightRemovalNode> blocklightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
+            NativeQueue<Vector3Int> blocklightPlacementQueue = new NativeQueue<Vector3Int>(Allocator.Temp);
 
             // Write-through cache for cross-chunk modifications.
             // SetLight can't modify [ReadOnly] neighbor arrays, so subsequent GetPackedData calls
             // would return stale (pre-modification) values. This cache ensures that darkness removal
             // results are visible to the re-spreading phase within the same job execution.
-            var neighborWriteCache = new NativeHashMap<long, uint>(64, Allocator.Temp);
+            NativeHashMap<long, uint> neighborWriteCache = new NativeHashMap<long, uint>(64, Allocator.Temp);
 
             // --- PASS -1: EDGE CONSISTENCY CHECK (Starlight-inspired) ---
             // Validates light values on all 4 horizontal chunk borders against neighbor data.
@@ -452,7 +452,7 @@ namespace Jobs
         /// - A position like (20, y, 20) is in the North-East neighbor.
         private uint GetPackedData(Vector3Int pos, ref NativeHashMap<long, uint> cache)
         {
-            if (pos.y < 0 || pos.y >= VoxelData.ChunkHeight) return uint.MaxValue;
+            if (pos.y is < 0 or >= VoxelData.ChunkHeight) return uint.MaxValue;
 
             NativeArray<uint> targetMap;
             Vector3Int localPos = pos;
@@ -533,7 +533,7 @@ namespace Jobs
         /// SetLight writes to the central map directly, but adds modifications for neighbors to the `crossChunkLightMods` list.
         private void SetLight(Vector3Int localPos, byte lightLevel, LightChannel channel, ref NativeHashMap<long, uint> cache)
         {
-            if (localPos.y < 0 || localPos.y >= VoxelData.ChunkHeight) return;
+            if (localPos.y is < 0 or >= VoxelData.ChunkHeight) return;
 
             if (localPos.x is >= 0 and < VoxelData.ChunkWidth && localPos.z is >= 0 and < VoxelData.ChunkWidth)
             {

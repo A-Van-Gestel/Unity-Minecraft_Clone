@@ -19,7 +19,7 @@ namespace Serialization.Migration.Steps
         public override string MigrateLevelDat(string oldJson)
         {
             // Parse the existing JSON, inject worldType: Legacy (0), bump version to 4.
-            var data = JsonUtility.FromJson<WorldSaveData>(oldJson);
+            WorldSaveData data = JsonUtility.FromJson<WorldSaveData>(oldJson);
             data.worldType = WorldTypeID.Legacy;
             data.version = TargetWorldVersion;
             return JsonUtility.ToJson(data, true);

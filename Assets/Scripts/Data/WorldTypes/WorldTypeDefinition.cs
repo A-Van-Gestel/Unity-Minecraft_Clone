@@ -15,7 +15,7 @@ namespace Data.WorldTypes
         Standard = 1,
 
         /// <summary>Reserved for future expansion.</summary>
-        Amplified = 2
+        Amplified = 2,
     }
 
     /// <summary>
@@ -38,6 +38,6 @@ namespace Data.WorldTypes
         public int SeaLevel = 45;
 
         [Tooltip("Legacy field. Only used by LegacyWorldGen format. Standard generation uses Biome-specific BaseTerrainHeight.")]
-        public int SolidGroundHeight = 42; 
+        public int SolidGroundHeight = 42;
     }
 }

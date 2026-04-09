@@ -19,7 +19,7 @@ namespace Editor.WorldTools
             Terrain,
             MajorFloraZone,
             CaveLayer,
-            Lode
+            Lode,
         }
 
         public enum ResolutionOptions
@@ -27,7 +27,7 @@ namespace Editor.WorldTools
             X128 = 128,
             X256 = 256,
             X512 = 512,
-            X1024 = 1024
+            X1024 = 1024,
         }
 
         // Biome selection state
@@ -86,7 +86,7 @@ namespace Editor.WorldTools
             foreach (string guid in guids)
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
-                var asset = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(path);
+                StandardBiomeAttributes asset = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(path);
                 if (asset != null) _biomeAssets.Add(asset);
             }
         }
@@ -108,7 +108,7 @@ namespace Editor.WorldTools
             if (string.IsNullOrEmpty(assetPath)) return;
 
             string fullPath = Path.GetFullPath(assetPath);
-            var writeTime = File.GetLastWriteTimeUtc(fullPath);
+            DateTime writeTime = File.GetLastWriteTimeUtc(fullPath);
 
             if (writeTime != _lastAssetWriteTime)
             {
@@ -132,7 +132,7 @@ namespace Editor.WorldTools
 
             _resolution = (ResolutionOptions)EditorGUILayout.EnumPopup("Preview Resolution", _resolution);
 
-            var prevTarget = _target;
+            NoiseTarget prevTarget = _target;
             _target = (NoiseTarget)EditorGUILayout.EnumPopup("Noise Target", _target);
             // Reset index when switching targets to prevent stale index references
             if (_target != prevTarget) _targetIndex = -1;
@@ -184,7 +184,7 @@ namespace Editor.WorldTools
             _offset = EditorGUILayout.Vector2IntField("XZ Offset", _offset);
 
             // Only show Y Slice for 3D noises
-            if (_target == NoiseTarget.CaveLayer || _target == NoiseTarget.Lode)
+            if (_target is NoiseTarget.CaveLayer or NoiseTarget.Lode)
             {
                 _sliceY = EditorGUILayout.IntSlider("World Y (Slice Height)", _sliceY, 0, 256);
             }
@@ -271,7 +271,7 @@ namespace Editor.WorldTools
                 }
 
                 string path = AssetDatabase.GenerateUniqueAssetPath($"{BIOME_SAVE_DIR}/New Biome.asset");
-                var newBiome = CreateInstance<StandardBiomeAttributes>();
+                StandardBiomeAttributes newBiome = CreateInstance<StandardBiomeAttributes>();
                 AssetDatabase.CreateAsset(newBiome, path);
                 AssetDatabase.SaveAssets();
 
@@ -291,7 +291,7 @@ namespace Editor.WorldTools
                 AssetDatabase.SaveAssets();
 
                 RefreshBiomeList();
-                var duplicated = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(newPath);
+                StandardBiomeAttributes duplicated = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(newPath);
                 _selectedBiomeIndex = _biomeAssets.IndexOf(duplicated);
                 _biome = duplicated;
                 _lastAssetWriteTime = default;
@@ -357,7 +357,7 @@ namespace Editor.WorldTools
             Color[] layerColors = null;
             CaveMode[] layerModes = null;
 
-            bool isComposite = _targetIndex == -1 && (_target == NoiseTarget.CaveLayer || _target == NoiseTarget.Lode);
+            bool isComposite = _targetIndex == -1 && _target is NoiseTarget.CaveLayer or NoiseTarget.Lode;
 
             if (_target == NoiseTarget.CaveLayer)
             {
@@ -372,7 +372,7 @@ namespace Editor.WorldTools
                     int queryIndex = isComposite ? i : _targetIndex;
                     if (queryIndex >= _biome.caveLayers.Length) continue;
 
-                    var layer = _biome.caveLayers[queryIndex];
+                    StandardCaveLayer layer = _biome.caveLayers[queryIndex];
                     layerNoises[i] = CreateNoiseFromConfig(layer.noiseConfig);
                     layerThresholds[i] = layer.threshold;
                     layerColors[i] = layer.previewColor;
@@ -392,7 +392,7 @@ namespace Editor.WorldTools
                     int queryIndex = isComposite ? i : _targetIndex;
                     if (queryIndex >= _biome.lodes.Length) continue;
 
-                    var layer = _biome.lodes[queryIndex];
+                    StandardLode layer = _biome.lodes[queryIndex];
                     layerNoises[i] = CreateNoiseFromConfig(layer.noiseConfig);
                     layerThresholds[i] = 0.5f; // Lode logic hardcoded internally
                     layerColors[i] = layer.previewColor;
@@ -412,8 +412,8 @@ namespace Editor.WorldTools
             {
                 for (int x = 0; x < texSize; x++)
                 {
-                    float worldX = (x * _zoom) + _offset.x;
-                    float worldZ = (z * _zoom) + _offset.y;
+                    float worldX = x * _zoom + _offset.x;
+                    float worldZ = z * _zoom + _offset.y;
 
                     Color pixelColor = Color.black;
 
@@ -494,7 +494,7 @@ namespace Editor.WorldTools
                                     int cellZ = (int)math.floor(worldZ / spacing);
 
                                     uint cellHash = math.hash(new int3(cellX, cellZ, _seed));
-                                    var cellRandom = new Random(math.max(1u, cellHash));
+                                    Random cellRandom = new Random(math.max(1u, cellHash));
 
                                     int edgePadding;
                                     if (_biome.majorFloraPlacementPadding < 0)

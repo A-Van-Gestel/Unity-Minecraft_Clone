@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using Serialization;
 using Serialization.Migration;
 using TMPro;
@@ -18,6 +19,7 @@ namespace UI
 
         [Header("Migration UI")]
         public GameObject migrationWarningObject;
+
         public TextMeshProUGUI migrationWarningText;
 
         [Tooltip("Assign the Image component of the child object that acts as the visual highlight.")]
@@ -46,39 +48,40 @@ namespace UI
 
             if (migrationWarningObject != null && migrationWarningText != null)
             {
-                if (data.version < SaveSystem.CURRENT_VERSION)
+                switch (data.version)
                 {
-                    try
-                    {
-                        MigrationManager migrationManager = new MigrationManager();
-                        var steps = migrationManager.GetRequiredMigrations(data.version);
-                        if (steps.Count > 0)
+                    case < SaveSystem.CURRENT_VERSION:
+                        try
                         {
-                            migrationWarningObject.SetActive(true);
+                            MigrationManager migrationManager = new MigrationManager();
+                            List<WorldMigrationStep> steps = migrationManager.GetRequiredMigrations(data.version);
+                            if (steps.Count > 0)
+                            {
+                                migrationWarningObject.SetActive(true);
 
-                            string migrationWord = steps.Count == 1 ? "migration" : "migrations";
-                            migrationWarningText.text = $"⏵Requires {steps.Count} {migrationWord} (v{data.version} → v{SaveSystem.CURRENT_VERSION})";
+                                string migrationWord = steps.Count == 1 ? "migration" : "migrations";
+                                migrationWarningText.text = $"⏵Requires {steps.Count} {migrationWord} (v{data.version} → v{SaveSystem.CURRENT_VERSION})";
+                            }
+                            else
+                            {
+                                migrationWarningObject.SetActive(false);
+                            }
                         }
-                        else
+                        catch
                         {
-                            migrationWarningObject.SetActive(false);
+                            // In case of unsupported version or missing steps
+                            migrationWarningObject.SetActive(true);
+                            migrationWarningText.text = $"⏵Cannot migrate (v{data.version} → v{SaveSystem.CURRENT_VERSION})";
                         }
-                    }
-                    catch
-                    {
-                        // In case of unsupported version or missing steps
+
+                        break;
+                    case > SaveSystem.CURRENT_VERSION:
                         migrationWarningObject.SetActive(true);
-                        migrationWarningText.text = $"⏵Cannot migrate (v{data.version} → v{SaveSystem.CURRENT_VERSION})";
-                    }
-                }
-                else if (data.version > SaveSystem.CURRENT_VERSION)
-                {
-                    migrationWarningObject.SetActive(true);
-                    migrationWarningText.text = $"⏵Unsupported future version (v{data.version})";
-                }
-                else
-                {
-                    migrationWarningObject.SetActive(false);
+                        migrationWarningText.text = $"⏵Unsupported future version (v{data.version})";
+                        break;
+                    default:
+                        migrationWarningObject.SetActive(false);
+                        break;
                 }
             }
 

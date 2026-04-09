@@ -5,7 +5,6 @@ using Random = UnityEngine.Random;
 
 public class Toolbar : MonoBehaviour
 {
-    public Player player;
     public RectTransform highlight;
     public UIItemSlot[] slots;
     public int slotIndex;

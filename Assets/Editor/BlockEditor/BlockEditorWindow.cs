@@ -79,15 +79,14 @@ namespace Editor.BlockEditor
 
             // ---  Find BlockDatabase asset ---
             string[] guids = AssetDatabase.FindAssets("t:BlockDatabase");
-            if (guids.Length == 0)
+            switch (guids.Length)
             {
-                Debug.LogError("Block Editor Error: Could not find a 'BlockDatabase.asset' in the project. Please create one or run the migration tool.", this);
-                return;
-            }
-
-            if (guids.Length > 1)
-            {
-                Debug.LogWarning("Block Editor Warning: Multiple 'BlockDatabase.asset' files found. Using the first one.", this);
+                case 0:
+                    Debug.LogError("Block Editor Error: Could not find a 'BlockDatabase.asset' in the project. Please create one or run the migration tool.", this);
+                    return;
+                case > 1:
+                    Debug.LogWarning("Block Editor Warning: Multiple 'BlockDatabase.asset' files found. Using the first one.", this);
+                    break;
             }
 
             string path = AssetDatabase.GUIDToAssetPath(guids[0]);

@@ -20,8 +20,8 @@ namespace Serialization.Migration.Steps
 
         public override byte[] MigrateChunk(byte[] uncompressedData)
         {
-            using var inStream = new MemoryStream(uncompressedData);
-            using var reader = new BinaryReader(inStream);
+            using MemoryStream inStream = new MemoryStream(uncompressedData);
+            using BinaryReader reader = new BinaryReader(inStream);
 
             // =================================================================
             // V2 READ DEFINITION
@@ -72,8 +72,8 @@ namespace Serialization.Migration.Steps
                 ushort nonAirCount = reader.ReadUInt16();
                 byte[] voxelData = reader.ReadBytes(16384);
 
-                using var secMs = new MemoryStream();
-                using var secWriter = new BinaryWriter(secMs);
+                using MemoryStream secMs = new MemoryStream();
+                using BinaryWriter secWriter = new BinaryWriter(secMs);
                 secWriter.Write(secVersion);
                 secWriter.Write(nonAirCount);
                 secWriter.Write(voxelData);
@@ -93,8 +93,8 @@ namespace Serialization.Migration.Steps
             // Key change: 'needsLight' is written as true regardless of its previous value.
             // =================================================================
 
-            using var outStream = new MemoryStream();
-            using var writer = new BinaryWriter(outStream);
+            using MemoryStream outStream = new MemoryStream();
+            using BinaryWriter writer = new BinaryWriter(outStream);
 
             if (!TargetChunkFormatVersion.HasValue)
                 throw new InvalidOperationException("TargetChunkFormatVersion must be defined for this step.");

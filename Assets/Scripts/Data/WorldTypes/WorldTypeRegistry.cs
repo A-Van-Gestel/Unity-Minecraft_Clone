@@ -21,12 +21,12 @@ namespace Data.WorldTypes
         /// <returns>The matching WorldTypeDefinition.</returns>
         public WorldTypeDefinition GetWorldType(WorldTypeID id)
         {
-            var wt = Types.FirstOrDefault(t => t.TypeID == id);
+            WorldTypeDefinition wt = Types.FirstOrDefault(t => t.TypeID == id);
             if (wt == null)
             {
                 throw new KeyNotFoundException(
                     $"[WorldTypeRegistry] CRITICAL: No WorldTypeDefinition found for ID '{id}'. " +
-                    $"Ensure it is assigned in the registry asset.");
+                    "Ensure it is assigned in the registry asset.");
             }
 
             return wt;

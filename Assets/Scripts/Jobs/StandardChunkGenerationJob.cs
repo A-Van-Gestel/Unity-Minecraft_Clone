@@ -23,42 +23,57 @@ namespace Jobs
     {
         #region Input Data
 
-        [ReadOnly] public int SeaLevel;
-        [ReadOnly] public int BaseSeed;
+        [ReadOnly]
+        public int SeaLevel;
+
+        [ReadOnly]
+        public int BaseSeed;
 
         /// <summary>
         /// Chunk position in voxel-space (world origin). Uses <c>int2</c> instead of <c>Vector2Int</c>
         /// to keep the math pipeline within <c>Unity.Mathematics</c> for Burst SIMD vectorization.
         /// </summary>
-        [ReadOnly] public int2 ChunkPosition;
+        [ReadOnly]
+        public int2 ChunkPosition;
 
-        [ReadOnly] public NativeArray<BlockTypeJobData> BlockTypes;
-        [ReadOnly] public NativeArray<StandardBiomeAttributesJobData> Biomes;
-        [ReadOnly] public NativeArray<StandardLodeJobData> AllLodes;
-        [ReadOnly] public NativeArray<StandardCaveLayerJobData> AllCaveLayers;
+        [ReadOnly]
+        public NativeArray<BlockTypeJobData> BlockTypes;
+
+        [ReadOnly]
+        public NativeArray<StandardBiomeAttributesJobData> Biomes;
+
+        [ReadOnly]
+        public NativeArray<StandardLodeJobData> AllLodes;
+
+        [ReadOnly]
+        public NativeArray<StandardCaveLayerJobData> AllCaveLayers;
 
         /// <summary>
         /// Pre-constructed FastNoiseLite instances for each biome's terrain noise.
         /// Indexed by biome index. Passed by value (72 bytes each).
         /// </summary>
-        [ReadOnly] public NativeArray<FastNoiseLite> BiomeTerrainNoises;
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> BiomeTerrainNoises;
 
         /// <summary>
         /// Pre-constructed FastNoiseLite instances for each lode's noise.
         /// Indexed matching AllLodes array.
         /// </summary>
-        [ReadOnly] public NativeArray<FastNoiseLite> LodeNoises;
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> LodeNoises;
 
         /// <summary>
         /// Pre-constructed FastNoiseLite instances for each biome's cave layers.
         /// Indexed alongside AllCaveLayers.
         /// </summary>
-        [ReadOnly] public NativeArray<FastNoiseLite> CaveNoises;
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> CaveNoises;
 
         /// <summary>
         /// Pre-constructed FastNoiseLite instances for each biome's flora zones.
         /// </summary>
-        [ReadOnly] public NativeArray<FastNoiseLite> FloraZoneNoises;
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> FloraZoneNoises;
 
         /// <summary>
         /// Global biome selection noise (Cellular/Voronoi).
@@ -252,24 +267,24 @@ namespace Jobs
 
                     // Tier 1: Are we inside a flora zone (e.g., a forest/grove)?
                     // FastNoiseLite.NormalizeToZeroOne config is recommended for flora zone noises to easily use 0..1 ranges.
-                    if (zoneNoiseVal > (1f - biome.MajorFloraZoneCoverage))
+                    if (zoneNoiseVal > 1f - biome.MajorFloraZoneCoverage)
                     {
                         // Tier 2: The Grid. Divide the world into Spacing x Spacing cells.
                         int spacing = math.max(1, biome.MajorFloraPlacementSpacing);
-                        
+
                         // Use float division to gracefully handle negative coordinates mathematically
                         int cellX = (int)math.floor((float)globalX / spacing);
                         int cellZ = (int)math.floor((float)globalZ / spacing);
 
                         // Seed a random generator specifically for this grid cell
                         uint cellHash = math.hash(new int3(cellX, cellZ, BaseSeed));
-                        var cellRandom = new Random(math.max(1u, cellHash));
+                        Random cellRandom = new Random(math.max(1u, cellHash));
 
                         // Calculate padding (minimum empty blocks from the grid cell edges)
                         int edgePadding = 0;
                         if (biome.MajorFloraPlacementPadding < 0)
                         {
-                            // Automatic mode: Prevent edge overlapping natively, 
+                            // Automatic mode: Prevent edge overlapping natively,
                             // but if the grid allows very dense placement (spacing < 5),
                             // we disable padding to allow natural clustering and avoid strict Orchard grids.
                             edgePadding = spacing >= 5 ? 1 : 0;
@@ -284,7 +299,7 @@ namespace Jobs
                         // Define valid internal placement area
                         int innerMinX = cellX * spacing + edgePadding;
                         int innerMaxX = cellX * spacing + spacing - edgePadding;
-                        
+
                         int innerMinZ = cellZ * spacing + edgePadding;
                         int innerMaxZ = cellZ * spacing + spacing - edgePadding;
 

@@ -33,15 +33,14 @@ namespace Editor.DataGeneration
         {
             // --- Find the BlockDatabase asset ---
             string[] guids = AssetDatabase.FindAssets("t:BlockDatabase");
-            if (guids.Length == 0)
+            switch (guids.Length)
             {
-                Debug.LogError("[BlockIdGenerator] Could not find a 'BlockDatabase' asset in the project.");
-                return false;
-            }
-
-            if (guids.Length > 1)
-            {
-                Debug.LogWarning("[BlockIdGenerator] Multiple 'BlockDatabase' assets found. Using the first one.");
+                case 0:
+                    Debug.LogError("[BlockIdGenerator] Could not find a 'BlockDatabase' asset in the project.");
+                    return false;
+                case > 1:
+                    Debug.LogWarning("[BlockIdGenerator] Multiple 'BlockDatabase' assets found. Using the first one.");
+                    break;
             }
 
             string assetPath = AssetDatabase.GUIDToAssetPath(guids[0]);

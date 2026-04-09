@@ -45,10 +45,10 @@ namespace Jobs.BurstData
             Dispose(); // Clean up any old data before initializing
 
             // Allocate persistent memory for our arrays, as they will exist for the lifetime of the app.
-            var voxelVerts = new NativeArray<Vector3>(VoxelData.VoxelVerts, Allocator.Persistent);
-            var voxelTris = new NativeArray<int>(VoxelData.VoxelTris, Allocator.Persistent);
-            var voxelUvs = new NativeArray<Vector2>(VoxelData.VoxelUvs, Allocator.Persistent);
-            var faceChecks = new NativeArray<Vector3Int>(VoxelData.FaceChecks, Allocator.Persistent);
+            NativeArray<Vector3> voxelVerts = new NativeArray<Vector3>(VoxelData.VoxelVerts, Allocator.Persistent);
+            NativeArray<int> voxelTris = new NativeArray<int>(VoxelData.VoxelTris, Allocator.Persistent);
+            NativeArray<Vector2> voxelUvs = new NativeArray<Vector2>(VoxelData.VoxelUvs, Allocator.Persistent);
+            NativeArray<Vector3Int> faceChecks = new NativeArray<Vector3Int>(VoxelData.FaceChecks, Allocator.Persistent);
 
             // Assign the created NativeArrays to our SharedStatic fields.
             VoxelVerts.Data = voxelVerts;

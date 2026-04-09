@@ -173,7 +173,7 @@ namespace Jobs
                     ProcessVoxel(max, y, z);
 
                     // Check Z-boundaries (only if not already covered by X-boundaries)
-                    if (z == 0 || z == max)
+                    if (z is 0 or max)
                     {
                         // We need to fill the row between 1 and max-1
                         for (int x = 1; x < max; x++)
@@ -334,7 +334,7 @@ namespace Jobs
         /// <returns>A VoxelState if the position is in a loaded neighbor chunk, otherwise null.</returns>
         private VoxelState? GetVoxelStateFromLocalPos(Vector3Int pos)
         {
-            if (pos.y < 0 || pos.y >= VoxelData.ChunkHeight) return null;
+            if (pos.y is < 0 or >= VoxelData.ChunkHeight) return null;
 
             // Fast path for internal voxels
             if (pos.x >= 0 && pos.x < VoxelData.ChunkWidth &&
