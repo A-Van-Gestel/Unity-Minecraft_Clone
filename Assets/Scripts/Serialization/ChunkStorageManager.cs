@@ -61,7 +61,9 @@ namespace Serialization
                 (byte[] data, CompressionAlgorithm algorithm) = region.LoadChunkData(lx, lz);
                 if (data == null)
                 {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
                     Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
+#endif
                     return null;
                 }
 
@@ -70,7 +72,9 @@ namespace Serialization
 
                 if (chunk == null)
                 {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
                     Debug.LogWarning($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} deserialization failed -> Will be (re-)generated");
+#endif
                     return null;
                 }
 
@@ -176,7 +180,9 @@ namespace Serialization
         /// </summary>
         public void Dispose()
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
+#endif
             foreach (Lazy<RegionFile> lazyRegion in _regions.Values)
             {
                 // Only dispose if the file was actually opened

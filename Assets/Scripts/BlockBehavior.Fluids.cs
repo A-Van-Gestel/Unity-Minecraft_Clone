@@ -127,14 +127,17 @@ public static partial class BlockBehavior
         bool canSpreadHorizontally = effectiveLevel == 0 ||
                                      (belowState.HasValue && belowState.Value.Properties.isSolid && !belowIsSameFluid);
 
-        LogWaterDebug($"[WaterDebug FLOW] Step 4 REACHED: pos={globalPos} id={currentId} level={currentLevel} " +
-                      $"canSpread={canSpreadHorizontally} effectiveLevel={effectiveLevel} " +
-                      $"belowSolid={belowState.HasValue && belowState.Value.Properties.isSolid} " +
-                      $"belowIsSameFluid={belowIsSameFluid}");
+        if (IsWaterDebugEnabled)
+        {
+            LogWaterDebug($"[WaterDebug FLOW] Step 4 REACHED: pos={globalPos} id={currentId} level={currentLevel} " +
+                          $"canSpread={canSpreadHorizontally} effectiveLevel={effectiveLevel} " +
+                          $"belowSolid={belowState.HasValue && belowState.Value.Properties.isSolid} " +
+                          $"belowIsSameFluid={belowIsSameFluid}");
+        }
 
         if (!canSpreadHorizontally)
         {
-            LogWaterDebug($"[WaterDebug FLOW] {globalPos} Cannot spread horizontally. Returning.");
+            if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} Cannot spread horizontally. Returning.");
             return;
         }
 
@@ -147,7 +150,7 @@ public static partial class BlockBehavior
         // E.g., Lava at 0.25 only flows 25% of the time, resulting in thick, blob-like staggering.
         if (Random.value > props.spreadChance)
         {
-            LogWaterDebug($"[WaterDebug FLOW] {globalPos} Random Viscosity Skip (Chance={props.spreadChance}).");
+            if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} Random Viscosity Skip (Chance={props.spreadChance}).");
             return;
         }
 
@@ -178,7 +181,7 @@ public static partial class BlockBehavior
                     neighborPos.x + chunkData.position.x, neighborPos.y,
                     neighborPos.z + chunkData.position.y);
 
-                LogWaterDebug($"[WaterDebug FLOW] {globalPos} SPREADING HORIZONTALLY to {globalNeighborPos} with level {newLevel}");
+                if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} SPREADING HORIZONTALLY to {globalNeighborPos} with level {newLevel}");
 
                 Mods.Add(new VoxelMod(globalNeighborPos, currentId)
                 {
@@ -199,7 +202,7 @@ public static partial class BlockBehavior
         byte currentLevel = voxel.FluidLevel;
         byte effectiveLevel = GetEffectiveLevel(currentLevel);
 
-        LogWaterDebug($"[WaterDebug ACTIVE] Eval pos={localPos} level={currentLevel}");
+        if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug ACTIVE] Eval pos={localPos} level={currentLevel}");
 
         // Reason 1: Can it flow down? (Gravity)
         VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
@@ -261,7 +264,7 @@ public static partial class BlockBehavior
         }
 
         // If no activation conditions are met, the block is stable and does not need to be ticked this cycle.
-        LogWaterDebug($"[WaterDebug ACTIVE] pos={localPos} Returning FALSE");
+        if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug ACTIVE] pos={localPos} Returning FALSE");
         return false;
     }
 
@@ -270,11 +273,14 @@ public static partial class BlockBehavior
     /// </summary>
     private static void LogWaterDebug(string message)
     {
-        if (World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs)
+        if (IsWaterDebugEnabled)
         {
             Debug.Log(message);
         }
     }
+
+    private static bool IsWaterDebugEnabled => World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs;
+
 
     /// <summary>
     /// Calculates the expected effective fluid level based on the environment.
@@ -445,7 +451,7 @@ public static partial class BlockBehavior
     /// </summary>
     private static byte GetOptimalFlowDirections(ChunkData chunkData, Vector3Int centerPos, ushort fluidId)
     {
-        int[] flowCost = new int[4];
+        Span<int> flowCost = stackalloc int[4];
         int minCost = 1000;
         byte validDirectionsMask = 0;
 
@@ -490,26 +496,41 @@ public static partial class BlockBehavior
         if (minCost > 4)
         {
             // No optimal path found, fallback to uniform spread.
-            LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} NO OPTIMAL DROPS. Falling back to mask={Convert.ToString(validDirectionsMask, 2).PadLeft(4, '0')}");
+            if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} NO OPTIMAL DROPS. Falling back to mask={Convert.ToString(validDirectionsMask, 2).PadLeft(4, '0')}");
             return validDirectionsMask;
         }
 
         byte optimalMask = 0;
-        string debugStr = "";
-        for (int i = 0; i < 4; i++)
+
+        if (IsWaterDebugEnabled)
         {
-            if (flowCost[i] == minCost)
+            string debugStr = "";
+            for (int i = 0; i < 4; i++)
             {
-                optimalMask |= (byte)(1 << i);
-                debugStr += $"{i}:{flowCost[i]} ";
+                if (flowCost[i] == minCost)
+                {
+                    optimalMask |= (byte)(1 << i);
+                    debugStr += $"{i}:{flowCost[i]} ";
+                }
+                else
+                {
+                    debugStr += $"({i}:{flowCost[i]}) ";
+                }
             }
-            else
+
+            LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} minCost={minCost} mask={Convert.ToString(optimalMask, 2).PadLeft(4, '0')} dirs={debugStr}");
+        }
+        else
+        {
+            for (int i = 0; i < 4; i++)
             {
-                debugStr += $"({i}:{flowCost[i]}) ";
+                if (flowCost[i] == minCost)
+                {
+                    optimalMask |= (byte)(1 << i);
+                }
             }
         }
 
-        LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} minCost={minCost} mask={Convert.ToString(optimalMask, 2).PadLeft(4, '0')} dirs={debugStr}");
         return optimalMask;
     }
 

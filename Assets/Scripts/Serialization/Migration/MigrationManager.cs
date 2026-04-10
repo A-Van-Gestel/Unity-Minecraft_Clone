@@ -89,7 +89,7 @@ namespace Serialization.Migration
                 : Path.Combine(Application.persistentDataPath, "Saves");
 
             // Add a timestamp to the backup to guarantee uniqueness and prevent overwrites
-            string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
             _currentBackupPath = Path.Combine(basePath, $"{worldName}_Backup_v{startVersion}_{timestamp}");
 
             // --- Step 1: Atomic Backup ---

@@ -40,7 +40,7 @@ namespace Data
         {
             this.worldName = worldName;
             this.seed = seed;
-            creationDate = DateTime.Now.Ticks;
+            creationDate = DateTime.UtcNow.Ticks;
         }
 
         /// <summary>
