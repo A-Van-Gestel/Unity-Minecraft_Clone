@@ -47,6 +47,8 @@ MonoBehaviour:
   terrainAmplitude: 55
   surfaceBlockID: 1
   subSurfaceBlockID: 1
+  terrainLayers: []
+  underwaterSurfaceBlockID: 4
   enableMajorFlora: 0
   majorFloraZoneNoiseConfig:
     seedOffset: 0
@@ -64,6 +66,10 @@ MonoBehaviour:
     cellularJitter: 0
     normalizeToZeroOne: 0
   majorFloraZoneCoverage: 0.4
+  majorFloraPlacementMinHeight: 0
+  majorFloraPlacementMaxHeight: 256
+  majorFloraMinPhysicalHeight: 5
+  majorFloraMaxPhysicalHeight: 12
   majorFloraPlacementSpacing: 5
   majorFloraPlacementPadding: -1
   majorFloraPlacementChance: 1
@@ -72,6 +78,7 @@ MonoBehaviour:
   - nodeName: Dirt
     previewColor: {r: 0.6784314, g: 0.3254902, b: 0.08627451, a: 1}
     blockID: 3
+    threshold: 0.5
     minHeight: 1
     maxHeight: 255
     noiseConfig:
@@ -92,6 +99,7 @@ MonoBehaviour:
   - nodeName: Sand
     previewColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
     blockID: 4
+    threshold: 0.6
     minHeight: 30
     maxHeight: 60
     noiseConfig:

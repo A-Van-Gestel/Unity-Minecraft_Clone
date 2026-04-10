@@ -3,6 +3,7 @@ using Data.WorldTypes;
 using Helpers;
 using Jobs.BurstData;
 using Jobs.Data;
+using Jobs.Helpers;
 using Libraries;
 using Unity.Burst;
 using Unity.Collections;
@@ -41,6 +42,9 @@ namespace Jobs
 
         [ReadOnly]
         public NativeArray<StandardBiomeAttributesJobData> Biomes;
+
+        [ReadOnly]
+        public NativeArray<StandardTerrainLayerJobData> AllTerrainLayers;
 
         [ReadOnly]
         public NativeArray<StandardLodeJobData> AllLodes;
@@ -114,17 +118,15 @@ namespace Jobs
             // --- BIOME SELECTION (Voronoi / Cellular) ---
             // Single evaluation per column — O(1) regardless of biome count.
             float biomeNoise = BiomeSelectionNoise.GetNoise(globalX, globalZ);
-            // Map noise output (-1..1) to biome index (0..N-1)
-            int biomeIndex = (int)math.floor((biomeNoise + 1f) * 0.5f * Biomes.Length);
+            // Noise is enforced to [0,1] normalization internally
+            int biomeIndex = (int)math.floor(biomeNoise * Biomes.Length);
             biomeIndex = math.clamp(biomeIndex, 0, Biomes.Length - 1);
 
             StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
 
-            // --- TERRAIN HEIGHT (2D noise) ---
-            FastNoiseLite terrainNoise = BiomeTerrainNoises[biomeIndex];
-            float heightNoise = terrainNoise.GetNoise(globalX, globalZ); // Returns -1..1
-            int terrainHeight = (int)math.floor(biome.BaseTerrainHeight + heightNoise * biome.TerrainAmplitude);
-            terrainHeight = math.clamp(terrainHeight, 1, VoxelData.ChunkHeight - 1);
+            // --- TERRAIN HEIGHT (2D noise blending) ---
+            int terrainHeight = BiomeBlender.CalculateBlendedTerrainHeight(
+                globalX, globalZ, ref BiomeSelectionNoise, ref Biomes, ref BiomeTerrainNoises);
 
             bool highestBlockFound = false;
 
@@ -141,11 +143,7 @@ namespace Jobs
                 // ----- BASIC TERRAIN PASS -----
                 else if (y == terrainHeight)
                 {
-                    voxelValue = biome.SurfaceBlockID;
-                }
-                else if (y < terrainHeight && y > terrainHeight - 4)
-                {
-                    voxelValue = biome.SubSurfaceBlockID;
+                    voxelValue = y < SeaLevel - 1 ? biome.UnderwaterSurfaceBlockID : biome.SurfaceBlockID;
                 }
                 else if (y > terrainHeight)
                 {
@@ -160,7 +158,22 @@ namespace Jobs
                 }
                 else
                 {
+                    // Default to stone
                     voxelValue = (byte)BlockIDs.Stone;
+
+                    // Execute progressive dynamic subsurface strata layers top-down
+                    int depthCounter = 0;
+                    for (int i = 0; i < biome.TerrainLayerCount; i++)
+                    {
+                        StandardTerrainLayerJobData layer = AllTerrainLayers[biome.TerrainLayerStartIndex + i];
+                        if (y < terrainHeight - depthCounter && y >= terrainHeight - depthCounter - layer.Depth)
+                        {
+                            voxelValue = layer.BlockID;
+                            break;
+                        }
+
+                        depthCounter += layer.Depth;
+                    }
                 }
 
                 // ----- SECOND PASS (Caves) -----
@@ -191,8 +204,19 @@ namespace Jobs
                         FastNoiseLite caveNoise = CaveNoises[caveIdx];
                         float noiseVal;
 
+                        // Apply depth fade: raise the effective threshold near depth bounds
+                        // (depthFade=0 at edge → threshold becomes unreachable, depthFade=1 inside → normal threshold)
+                        float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
+
                         if (caveLayer.Mode == CaveMode.Spaghetti)
                         {
+                            // Optimized Bounding Volume strategy: evaluate low-frequency 3D noise first.
+                            // Scaling coordinates mimics evaluating a generalized broader volume.
+                            float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
+
+                            // If the boundary check indicates highly dense solid rock, skip 6-way intersecting algorithm
+                            if (bound < effectiveThreshold - 0.2f) continue;
+
                             // Legacy-style 6-way axis-pair 2D noise averaging.
                             // Creates intersecting ridges that form interconnected tunnel networks.
                             // Normalization to [0,1] is handled by FastNoiseLite.NormalizeToZeroOne via config.
@@ -208,10 +232,6 @@ namespace Jobs
                         {
                             noiseVal = caveNoise.GetNoise(globalX, y, globalZ);
                         }
-
-                        // Apply depth fade: raise the effective threshold near depth bounds
-                        // (depthFade=0 at edge → threshold becomes unreachable, depthFade=1 inside → normal threshold)
-                        float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
 
                         if (noiseVal > effectiveThreshold)
                         {
@@ -232,8 +252,7 @@ namespace Jobs
                         {
                             FastNoiseLite lodeNoise = LodeNoises[lodeIdx];
                             float noiseVal = lodeNoise.GetNoise(globalX, y, globalZ);
-                            // FastNoiseLite returns -1..1; use threshold at 0.5 (equivalent to legacy > threshold)
-                            if (noiseVal > 0.5f)
+                            if (noiseVal > lode.Threshold)
                             {
                                 voxelValue = lode.BlockID;
                             }
@@ -258,9 +277,10 @@ namespace Jobs
                 }
 
                 // --- Flora placement ---
-                // We only place flora on non-Air, non-Fluid, solid surface blocks
-                if (y == terrainHeight && voxelValue != BlockIDs.Air &&
-                    voxelProps.FluidType == FluidType.None && biome.EnableMajorFlora)
+                // We only place flora on non-Air, non-Fluid, solid surface blocks above sea level
+                if (y == terrainHeight && y >= SeaLevel &&
+                    y >= biome.MajorFloraPlacementMinHeight && y <= biome.MajorFloraPlacementMaxHeight &&
+                    voxelValue != BlockIDs.Air && voxelProps.FluidType == FluidType.None && biome.EnableMajorFlora)
                 {
                     FastNoiseLite floraZoneNoise = FloraZoneNoises[biomeIndex];
                     float zoneNoiseVal = floraZoneNoise.GetNoise(globalX, globalZ);

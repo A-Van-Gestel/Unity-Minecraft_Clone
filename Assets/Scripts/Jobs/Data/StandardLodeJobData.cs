@@ -13,6 +13,7 @@ namespace Jobs.Data
         public readonly byte BlockID;
         public readonly int MinHeight;
         public readonly int MaxHeight;
+        public readonly float Threshold;
         public FastNoiseConfig NoiseConfig;
 
         /// <summary>
@@ -24,6 +25,7 @@ namespace Jobs.Data
             BlockID = (byte)lode.blockID;
             MinHeight = lode.minHeight;
             MaxHeight = lode.maxHeight;
+            Threshold = lode.threshold;
             NoiseConfig = lode.noiseConfig;
         }
     }

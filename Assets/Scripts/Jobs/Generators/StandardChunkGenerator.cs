@@ -22,6 +22,7 @@ namespace Jobs.Generators
         private int _seed;
         private int _seaLevel;
         private NativeArray<StandardBiomeAttributesJobData> _biomesJobData;
+        private NativeArray<StandardTerrainLayerJobData> _allTerrainLayersJobData;
         private NativeArray<StandardLodeJobData> _allLodesJobData;
         private NativeArray<StandardCaveLayerJobData> _allCaveLayersJobData;
         private NativeArray<BlockTypeJobData> _blockTypesJobData;
@@ -56,14 +57,17 @@ namespace Jobs.Generators
 
             // --- Flatten biomes + lodes + caves into NativeArrays ---
             int totalLodeCount = 0;
+            int totalTerrainLayerCount = 0;
             int totalCaveLayerCount = 0;
             foreach (StandardBiomeAttributes biome in _standardBiomes)
             {
                 totalLodeCount += biome.lodes?.Length ?? 0;
                 totalCaveLayerCount += biome.caveLayers?.Length ?? 0;
+                totalTerrainLayerCount += biome.terrainLayers?.Length ?? 0;
             }
 
             _biomesJobData = new NativeArray<StandardBiomeAttributesJobData>(_standardBiomes.Length, Allocator.Persistent);
+            _allTerrainLayersJobData = new NativeArray<StandardTerrainLayerJobData>(totalTerrainLayerCount, Allocator.Persistent);
             _allLodesJobData = new NativeArray<StandardLodeJobData>(totalLodeCount, Allocator.Persistent);
             _biomeTerrainNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _lodeNoises = new NativeArray<FastNoiseLite>(totalLodeCount, Allocator.Persistent);
@@ -74,11 +78,19 @@ namespace Jobs.Generators
 
             int currentLodeIndex = 0;
             int currentCaveLayerIndex = 0;
+            int currentTerrainLayerIndex = 0;
             for (int i = 0; i < _standardBiomes.Length; i++)
             {
                 StandardBiomeAttributes biome = _standardBiomes[i];
                 int lodeCount = biome.lodes?.Length ?? 0;
                 int caveLayerCount = biome.caveLayers?.Length ?? 0;
+                int terrainLayerCount = biome.terrainLayers?.Length ?? 0;
+
+                // Build terrain layer data
+                for (int j = 0; j < terrainLayerCount; j++)
+                {
+                    _allTerrainLayersJobData[currentTerrainLayerIndex + j] = new StandardTerrainLayerJobData(biome.terrainLayers[j]);
+                }
 
                 // Build lode data + noise
                 for (int j = 0; j < lodeCount; j++)
@@ -102,13 +114,19 @@ namespace Jobs.Generators
                     BaseTerrainHeight = biome.baseTerrainHeight,
                     TerrainAmplitude = biome.terrainAmplitude,
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
-                    SubSurfaceBlockID = (byte)biome.subSurfaceBlockID,
+                    UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
                     EnableMajorFlora = biome.enableMajorFlora,
                     MajorFloraZoneCoverage = biome.majorFloraZoneCoverage,
                     MajorFloraPlacementSpacing = biome.majorFloraPlacementSpacing,
                     MajorFloraPlacementPadding = biome.majorFloraPlacementPadding,
                     MajorFloraPlacementChance = biome.majorFloraPlacementChance,
+                    MajorFloraPlacementMinHeight = biome.majorFloraPlacementMinHeight,
+                    MajorFloraPlacementMaxHeight = biome.majorFloraPlacementMaxHeight,
+                    MajorFloraMinPhysicalHeight = biome.majorFloraMinPhysicalHeight,
+                    MajorFloraMaxPhysicalHeight = biome.majorFloraMaxPhysicalHeight,
                     MajorFloraIndex = biome.majorFloraIndex,
+                    TerrainLayerStartIndex = currentTerrainLayerIndex,
+                    TerrainLayerCount = terrainLayerCount,
                     LodeStartIndex = currentLodeIndex,
                     LodeCount = lodeCount,
                     CaveLayerStartIndex = currentCaveLayerIndex,
@@ -123,6 +141,7 @@ namespace Jobs.Generators
 
                 currentLodeIndex += lodeCount;
                 currentCaveLayerIndex += caveLayerCount;
+                currentTerrainLayerIndex += terrainLayerCount;
             }
 
             // --- Biome Selection Noise (Cellular / Voronoi) ---
@@ -139,6 +158,7 @@ namespace Jobs.Generators
                     cellularJitter = 1.0f,
                 };
 
+            selectionConfig.normalizeToZeroOne = true; // Enforce [0,1] normalization internally
             _biomeSelectionNoise = CreateNoiseFromConfig(selectionConfig);
         }
 
@@ -160,6 +180,7 @@ namespace Jobs.Generators
                 ChunkPosition = new int2(chunkVoxelPos.x, chunkVoxelPos.y),
                 BlockTypes = _blockTypesJobData,
                 Biomes = _biomesJobData,
+                AllTerrainLayers = _allTerrainLayersJobData,
                 AllLodes = _allLodesJobData,
                 AllCaveLayers = _allCaveLayersJobData,
                 BiomeTerrainNoises = _biomeTerrainNoises,
@@ -191,9 +212,9 @@ namespace Jobs.Generators
             // Bedrock
             if (y == 0) return 8;
 
-            // Biome selection
+            // Biome selection (now enforced to normalized [0,1] domain)
             float biomeNoise = _biomeSelectionNoise.GetNoise(globalPos.x, globalPos.z);
-            int biomeIndex = (int)math.floor((biomeNoise + 1f) * 0.5f * _biomesJobData.Length);
+            int biomeIndex = (int)math.floor(biomeNoise * _biomesJobData.Length);
             biomeIndex = math.clamp(biomeIndex, 0, _biomesJobData.Length - 1);
 
             StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
@@ -205,13 +226,78 @@ namespace Jobs.Generators
 
             byte voxelValue;
             if (y == terrainHeight)
-                voxelValue = biome.SurfaceBlockID;
-            else if (y < terrainHeight && y > terrainHeight - 4)
-                voxelValue = biome.SubSurfaceBlockID;
+            {
+                voxelValue = y < _seaLevel - 1 ? biome.UnderwaterSurfaceBlockID : biome.SurfaceBlockID;
+            }
             else if (y > terrainHeight)
+            {
                 return y < _seaLevel ? (byte)19 : (byte)0;
+            }
             else
-                voxelValue = 1; // Stone
+            {
+                // Assign Stone as default baseline
+                voxelValue = 1;
+
+                // Evaluate Terrain Layers (subsurface block swapping) map over stone
+                int depthCounter = 0;
+                for (int i = 0; i < biome.TerrainLayerCount; i++)
+                {
+                    StandardTerrainLayerJobData layer = _allTerrainLayersJobData[biome.TerrainLayerStartIndex + i];
+                    if (y < terrainHeight - depthCounter && y >= terrainHeight - depthCounter - layer.Depth)
+                    {
+                        voxelValue = layer.BlockID;
+                        break;
+                    }
+                    depthCounter += layer.Depth;
+                }
+            }
+
+            // Caves
+            if (voxelValue != 0 && voxelValue != 8 && voxelValue != 19 && _blockTypesJobData[voxelValue].FluidType == FluidType.None)
+            {
+                for (int i = 0; i < biome.CaveLayerCount; i++)
+                {
+                    int caveIdx = biome.CaveLayerStartIndex + i;
+                    StandardCaveLayerJobData caveLayer = _allCaveLayersJobData[caveIdx];
+
+                    if (y < caveLayer.MinHeight || y > caveLayer.MaxHeight) continue;
+
+                    float depthFade = 1f;
+                    if (caveLayer.DepthFadeMargin > 0)
+                    {
+                        int distFromMin = y - caveLayer.MinHeight;
+                        int distFromMax = caveLayer.MaxHeight - y;
+                        int distFromEdge = math.min(distFromMin, distFromMax);
+                        depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
+                    }
+
+                    FastNoiseLite caveNoise = _caveNoises[caveIdx];
+                    float noiseVal;
+
+                    if (caveLayer.Mode == CaveMode.Spaghetti)
+                    {
+                        // 25% frequency bounding check
+                        float bound = caveNoise.GetNoise(globalPos.x * 0.25f, y * 0.25f, globalPos.z * 0.25f);
+                        float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
+                        if (bound < effectiveThreshold - 0.2f) continue; // Skip to save performance
+
+                        noiseVal = (caveNoise.GetNoise(globalPos.x, y) + caveNoise.GetNoise(y, globalPos.z) +
+                                    caveNoise.GetNoise(globalPos.x, globalPos.z) + caveNoise.GetNoise(y, globalPos.x) +
+                                    caveNoise.GetNoise(globalPos.z, y) + caveNoise.GetNoise(globalPos.z, globalPos.x)) / 6f;
+                    }
+                    else
+                    {
+                        noiseVal = caveNoise.GetNoise(globalPos.x, y, globalPos.z);
+                    }
+
+                    float finalThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
+                    if (noiseVal > finalThreshold)
+                    {
+                        voxelValue = 0; // Air
+                        break;
+                    }
+                }
+            }
 
             // Lodes
             if (voxelValue == 1)
@@ -223,7 +309,7 @@ namespace Jobs.Generators
                     if (y > lode.MinHeight && y < lode.MaxHeight)
                     {
                         float noiseVal = _lodeNoises[lodeIdx].GetNoise(globalPos.x, y, globalPos.z);
-                        if (noiseVal > 0.5f)
+                        if (noiseVal > lode.Threshold)
                             voxelValue = lode.BlockID;
                     }
                 }
@@ -235,6 +321,12 @@ namespace Jobs.Generators
         /// <inheritdoc />
         public IEnumerable<VoxelMod> ExpandFlora(VoxelMod rootMod)
         {
+            // Evaluate biome at placement position to lookup exact Flora Size Traits
+            float biomeNoise = _biomeSelectionNoise.GetNoise(rootMod.GlobalPosition.x, rootMod.GlobalPosition.z);
+            int biomeIndex = (int)math.floor(biomeNoise * _biomesJobData.Length);
+            biomeIndex = math.clamp(biomeIndex, 0, _biomesJobData.Length - 1);
+            StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
+
             // Use Unity.Mathematics.Random for trunk height (deterministic per position + seed)
             uint deterministicSeed = math.max(1u, math.hash(new int3(
                 rootMod.GlobalPosition.x, rootMod.GlobalPosition.z, _seed)));
@@ -242,8 +334,8 @@ namespace Jobs.Generators
 
             return rootMod.ID switch
             {
-                0 => MakeTree(rootMod.GlobalPosition, random),
-                1 => MakeCacti(rootMod.GlobalPosition, random),
+                0 => MakeTree(rootMod.GlobalPosition, random, biome.MajorFloraMinPhysicalHeight, biome.MajorFloraMaxPhysicalHeight),
+                1 => MakeCacti(rootMod.GlobalPosition, random, biome.MajorFloraMinPhysicalHeight, biome.MajorFloraMaxPhysicalHeight),
                 _ => Enumerable.Empty<VoxelMod>(),
             };
         }
@@ -252,6 +344,7 @@ namespace Jobs.Generators
         public void Dispose()
         {
             if (_biomesJobData.IsCreated) _biomesJobData.Dispose();
+            if (_allTerrainLayersJobData.IsCreated) _allTerrainLayersJobData.Dispose();
             if (_allLodesJobData.IsCreated) _allLodesJobData.Dispose();
             if (_biomeTerrainNoises.IsCreated) _biomeTerrainNoises.Dispose();
             if (_lodeNoises.IsCreated) _lodeNoises.Dispose();
@@ -294,9 +387,9 @@ namespace Jobs.Generators
         /// Generates a tree structure using deterministic random for trunk height.
         /// Same visual output as the legacy tree but uses <c>Unity.Mathematics.Random</c>.
         /// </summary>
-        private static IEnumerable<VoxelMod> MakeTree(Vector3Int position, Random random)
+        private static IEnumerable<VoxelMod> MakeTree(Vector3Int position, Random random, int minHeight, int maxHeight)
         {
-            int height = random.NextInt(5, 13); // Trunk height range
+            int height = random.NextInt(minHeight, maxHeight + 1); // Trunk height range
 
             // LEAVES
             VoxelMod leafMod = new VoxelMod { ID = BlockIDs.OakLeaves };
@@ -344,9 +437,9 @@ namespace Jobs.Generators
         /// <summary>
         /// Generates a cactus structure using deterministic random for trunk height.
         /// </summary>
-        private static IEnumerable<VoxelMod> MakeCacti(Vector3Int position, Random random)
+        private static IEnumerable<VoxelMod> MakeCacti(Vector3Int position, Random random, int minHeight, int maxHeight)
         {
-            int height = random.NextInt(3, 7); // Cactus height range
+            int height = random.NextInt(minHeight, maxHeight + 1); // Cactus height range
 
             for (int i = 1; i <= height; i++)
                 yield return new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), BlockIDs.Cactus);

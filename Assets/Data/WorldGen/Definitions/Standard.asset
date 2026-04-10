@@ -16,5 +16,8 @@ MonoBehaviour:
   displayName: Standard (WIP)
   biomes:
   - {fileID: 11400000, guid: 4e2d8d59432ce5a4fbba25dc1f2e942c, type: 2}
+  - {fileID: 11400000, guid: 0973908ffb8640de911ca04893e2a319, type: 2}
+  - {fileID: 11400000, guid: 97ca01180be04a8f8433fd2d62859595, type: 2}
+  - {fileID: 11400000, guid: d73f7600d69642868aa79f1f75788e55, type: 2}
   seaLevel: 54
   solidGroundHeight: 52

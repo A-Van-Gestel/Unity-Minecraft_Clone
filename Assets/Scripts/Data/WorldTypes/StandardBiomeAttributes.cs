@@ -37,7 +37,17 @@ namespace Data.WorldTypes
 
         [ConstantsSelection(typeof(BlockIDs))]
         [Tooltip("Block ID for the sub-surface layers (e.g., Dirt).")]
+        [Obsolete("Replaced by terrainLayers")]
+        [HideInInspector]
         public ushort subSurfaceBlockID;
+
+        [Header("Terrain Layers")]
+        [Tooltip("The blocks evaluated progressively downwards from the surface block (e.g. 3 blocks of Dirt).")]
+        public StandardTerrainLayer[] terrainLayers;
+
+        [ConstantsSelection(typeof(BlockIDs))]
+        [Tooltip("Block ID to swap the Surface Block with if generating under the Sea Level (e.g. Sand instead of Grass).")]
+        public ushort underwaterSurfaceBlockID = 9; // Sand
 
         [Header("Major Flora")]
         [Tooltip("If true, flora like trees or cacti will be generated in this biome.")]
@@ -51,6 +61,16 @@ namespace Data.WorldTypes
                  "Larger = larger/more frequent zones, lower = smaller/rarer zones. 1.0 = entire biome is a zone.")]
         [Range(0f, 1f)]
         public float majorFloraZoneCoverage = 0.4f;
+
+        [Header("Flora Height Constraints")]
+        public int majorFloraPlacementMinHeight = 0;
+        public int majorFloraPlacementMaxHeight = 256;
+
+        [Tooltip("Minimum baseline trunk segments or column blocks to generate per tree/cactus.")]
+        public int majorFloraMinPhysicalHeight = 5;
+
+        [Tooltip("Maximum baseline trunk segments or column blocks to generate per tree/cactus.")]
+        public int majorFloraMaxPhysicalHeight = 12;
 
         [Header("Flora Placement (Spacing)")]
         [Tooltip("The minimum grid size for flora. Smaller = denser forest, Larger = sparser forest. Evaluated deterministically.")]
@@ -96,6 +116,10 @@ namespace Data.WorldTypes
         [Tooltip("ID of the block that will be generated.")]
         public ushort blockID;
 
+        [Range(0f, 1f)]
+        [Tooltip("The noise value must exceed this threshold to spawn the block. Larger numbers = rarer/smaller veins. Smaller numbers = massive veins.")]
+        public float threshold = 0.5f;
+
         [Tooltip("Blocks will not be generated below this height.")]
         public int minHeight;
 
@@ -116,6 +140,21 @@ namespace Data.WorldTypes
 
         /// <summary>Spaghetti (Axis-Pair Average) — Legacy-style 6-way 2D noise averaging. Produces interconnected tunnel networks.</summary>
         Spaghetti,
+    }
+
+    /// <summary>
+    /// Authoring class for a terrain layer block substitution (e.g. 4 blocks of Dirt below Grass).
+    /// </summary>
+    [Serializable]
+    public class StandardTerrainLayer
+    {
+        [ConstantsSelection(typeof(BlockIDs))]
+        [Tooltip("ID of the block that will be generated for this subsurface strata.")]
+        public ushort blockID;
+
+        [Tooltip("How many blocks deep this strata extends before checking the next one.")]
+        [Range(1, 20)]
+        public int depth = 3;
     }
 
     /// <summary>
