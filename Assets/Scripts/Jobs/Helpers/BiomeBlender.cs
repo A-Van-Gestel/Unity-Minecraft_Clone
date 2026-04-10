@@ -14,47 +14,68 @@ namespace Jobs.Helpers
     public static class BiomeBlender
     {
         /// <summary>
-        /// A 5-tap kernel layout evaluating the current block and four directional neighbors
-        /// at an 8-block offset. Averages the Heights to smooth harsh biome cliffs natively.
+        /// Evaluates the true mathematical heights of the top 3 closest biomes and performs
+        /// an Inverse-Distance-Weighted (IDW) interpolation between them based on Voronoi Edge distance.
         /// </summary>
         public static int CalculateBlendedTerrainHeight(
             int globalX,
             int globalZ,
+            float blendRadius,
             ref FastNoiseLite selectionNoise,
             ref NativeArray<StandardBiomeAttributesJobData> biomes,
             ref NativeArray<FastNoiseLite> terrainNoises)
         {
-            // 5-tap cross blend
-            // Center, Left, Right, Back, Forward (8 block radius)
-            // Weighting heavily favors the center block (50%), then 12.5% per edge to create a rolling hill transition.
-            NativeArray<int> dx = new NativeArray<int>(5, Allocator.Temp) { [0] = 0, [1] = -8, [2] = 8, [3] = 0, [4] = 0 };
-            NativeArray<int> dz = new NativeArray<int>(5, Allocator.Temp) { [0] = 0, [1] = 0, [2] = 0, [3] = -8, [4] = 8 };
-            NativeArray<float> weights = new NativeArray<float>(5, Allocator.Temp) { [0] = 0.5f, [1] = 0.125f, [2] = 0.125f, [3] = 0.125f, [4] = 0.125f };
+            // Retrieve top 3 overlapping cells natively
+            selectionNoise.GetCellularEdgeData(globalX, globalZ,
+                out int hash0, out float dist0,
+                out int hash1, out float dist1,
+                out int hash2, out float dist2);
 
-            float totalHeight = 0f;
+            // We use a linear falloff clamped by the global blend radius.
+            // dist0 is the closest cell (always).
+            // At the cell border, dist1 equals dist0 -> weight1 = 1.0
+            // In the dead center of a cell, (dist1 - dist0) is large -> weight1 = 0.0
+            float w0 = 1f;
+            float w1 = math.max(0f, 1f - (dist1 - dist0) / blendRadius);
+            float w2 = math.max(0f, 1f - (dist2 - dist0) / blendRadius);
 
-            for (int i = 0; i < 5; i++)
+            float totalWeight = w0 + w1 + w2;
+
+            int b0 = GetBiomeIndex(hash0, biomes.Length);
+            float finalHeight = EvaluateHeight(globalX, globalZ, b0, ref biomes, ref terrainNoises) * (w0 / totalWeight);
+
+            if (w1 > 0.001f)
             {
-                int sampleX = globalX + dx[i];
-                int sampleZ = globalZ + dz[i];
-
-                float bNoise = selectionNoise.GetNoise(sampleX, sampleZ);
-                // Noise is normalized [0,1], no need for +1 offsets
-                int bIndex = (int)math.floor(bNoise * biomes.Length);
-                bIndex = math.clamp(bIndex, 0, biomes.Length - 1);
-
-                StandardBiomeAttributesJobData biome = biomes[bIndex];
-                float hNoise = terrainNoises[bIndex].GetNoise(sampleX, sampleZ);
-
-                float evaluatedHeight = biome.BaseTerrainHeight + hNoise * biome.TerrainAmplitude;
-                totalHeight += evaluatedHeight * weights[i];
+                int b1 = GetBiomeIndex(hash1, biomes.Length);
+                finalHeight += EvaluateHeight(globalX, globalZ, b1, ref biomes, ref terrainNoises) * (w1 / totalWeight);
             }
 
-            dx.Dispose();
-            dz.Dispose();
-            weights.Dispose();
+            if (w2 > 0.001f)
+            {
+                int b2 = GetBiomeIndex(hash2, biomes.Length);
+                finalHeight += EvaluateHeight(globalX, globalZ, b2, ref biomes, ref terrainNoises) * (w2 / totalWeight);
+            }
 
-            return (int)math.floor(totalHeight);
+            return (int)math.floor(finalHeight);
+        }
+
+        private static int GetBiomeIndex(int hash, int biomesLength)
+        {
+            // FastNoiseLite natively maps cellular hash to a [-1, 1] interval.
+            float noiseValue = hash * (1.0f / 2147483648.0f);
+
+            // Replicate FastNoiseConfig.normalizeToZeroOne = true
+            noiseValue = (noiseValue + 1.0f) * 0.5f;
+
+            int idx = (int)math.floor(noiseValue * biomesLength);
+            return math.clamp(idx, 0, biomesLength - 1);
+        }
+
+        private static float EvaluateHeight(int x, int z, int biomeIdx, ref NativeArray<StandardBiomeAttributesJobData> biomes, ref NativeArray<FastNoiseLite> noises)
+        {
+            StandardBiomeAttributesJobData b = biomes[biomeIdx];
+            float noise = noises[biomeIdx].GetNoise(x, z);
+            return b.BaseTerrainHeight + noise * b.TerrainAmplitude;
         }
     }
 }

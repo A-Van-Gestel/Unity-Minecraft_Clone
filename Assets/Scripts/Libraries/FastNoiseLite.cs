@@ -1120,6 +1120,84 @@ namespace Libraries
             return value * 9.046026385208288f;
         }
 
+        public void GetCellularEdgeData(float x, float y, out int hash0, out float distance0, out int hash1, out float distance1, out int hash2, out float distance2)
+        {
+            TransformNoiseCoordinate(ref x, ref y);
+            SingleCellularEdgeData(mSeed, x, y, out hash0, out distance0, out hash1, out distance1, out hash2, out distance2);
+        }
+
+        private void SingleCellularEdgeData(int seed, float x, float y, out int hash0, out float distance0, out int hash1, out float distance1, out int hash2, out float distance2)
+        {
+            int xr = FastRound(x);
+            int yr = FastRound(y);
+            distance0 = float.MaxValue;
+            distance1 = float.MaxValue;
+            distance2 = float.MaxValue;
+            hash0 = 0;
+            hash1 = 0;
+            hash2 = 0;
+
+            float cellularJitter = 0.43701595f * mCellularJitterModifier;
+            int xPrimed = (xr - 1) * PrimeX;
+            int yPrimedBase = (yr - 1) * PrimeY;
+            unsafe
+            {
+                for (int xi = xr - 1; xi <= xr + 1; xi++)
+                {
+                    int yPrimed = yPrimedBase;
+                    for (int yi = yr - 1; yi <= yr + 1; yi++)
+                    {
+                        int hash = Hash(seed, xPrimed, yPrimed);
+                        int idx = hash & (255 << 1);
+
+                        float vecX = xi - x + Lookup.Data.RandVecs2D[idx] * cellularJitter;
+                        float vecY = yi - y + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
+
+                        float newDistance;
+                        if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+                            newDistance = vecX * vecX + vecY * vecY;
+                        else if (mCellularDistanceFunction == CellularDistanceFunction.Manhattan)
+                            newDistance = math.abs(vecX) + math.abs(vecY);
+                        else
+                            newDistance = math.abs(vecX) + math.abs(vecY) + (vecX * vecX + vecY * vecY);
+
+                        if (newDistance < distance0)
+                        {
+                            distance2 = distance1;
+                            hash2 = hash1;
+                            distance1 = distance0;
+                            hash1 = hash0;
+                            distance0 = newDistance;
+                            hash0 = hash;
+                        }
+                        else if (newDistance < distance1)
+                        {
+                            distance2 = distance1;
+                            hash2 = hash1;
+                            distance1 = newDistance;
+                            hash1 = hash;
+                        }
+                        else if (newDistance < distance2)
+                        {
+                            distance2 = newDistance;
+                            hash2 = hash;
+                        }
+
+                        yPrimed += PrimeY;
+                    }
+
+                    xPrimed += PrimeX;
+                }
+            }
+
+            if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean)
+            {
+                distance0 = math.sqrt(distance0);
+                distance1 = math.sqrt(distance1);
+                distance2 = math.sqrt(distance2);
+            }
+        }
+
         private float SingleCellular(int seed, float x, float y)
         {
             int xr = FastRound(x);

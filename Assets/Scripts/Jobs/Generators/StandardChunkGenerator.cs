@@ -4,6 +4,7 @@ using Data;
 using Data.JobData;
 using Data.WorldTypes;
 using Jobs.Data;
+using Jobs.Helpers;
 using Libraries;
 using Unity.Collections;
 using Unity.Jobs;
@@ -21,6 +22,7 @@ namespace Jobs.Generators
     {
         private int _seed;
         private int _seaLevel;
+        private float _biomeBlendRadius;
         private NativeArray<StandardBiomeAttributesJobData> _biomesJobData;
         private NativeArray<StandardTerrainLayerJobData> _allTerrainLayersJobData;
         private NativeArray<StandardLodeJobData> _allLodesJobData;
@@ -40,6 +42,7 @@ namespace Jobs.Generators
         {
             _seed = seed;
             _seaLevel = worldType.seaLevel;
+            _biomeBlendRadius = worldType.biomeBlendRadius;
             _blockTypesJobData = globalJobData.BlockTypesJobData;
 
             // --- Lookup Table Warmup (CRITICAL) ---
@@ -176,6 +179,7 @@ namespace Jobs.Generators
             StandardChunkGenerationJob job = new StandardChunkGenerationJob
             {
                 SeaLevel = _seaLevel,
+                BiomeBlendRadius = _biomeBlendRadius,
                 BaseSeed = _seed,
                 ChunkPosition = new int2(chunkVoxelPos.x, chunkVoxelPos.y),
                 BlockTypes = _blockTypesJobData,
@@ -220,9 +224,8 @@ namespace Jobs.Generators
             StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
 
             // Terrain height
-            float heightNoise = _biomeTerrainNoises[biomeIndex].GetNoise(globalPos.x, globalPos.z);
-            int terrainHeight = (int)math.floor(biome.BaseTerrainHeight + heightNoise * biome.TerrainAmplitude);
-            terrainHeight = math.clamp(terrainHeight, 1, VoxelData.ChunkHeight - 1);
+            int terrainHeight = BiomeBlender.CalculateBlendedTerrainHeight(
+                globalPos.x, globalPos.z, _biomeBlendRadius, ref _biomeSelectionNoise, ref _biomesJobData, ref _biomeTerrainNoises);
 
             byte voxelValue;
             if (y == terrainHeight)
@@ -248,6 +251,7 @@ namespace Jobs.Generators
                         voxelValue = layer.BlockID;
                         break;
                     }
+
                     depthCounter += layer.Depth;
                 }
             }

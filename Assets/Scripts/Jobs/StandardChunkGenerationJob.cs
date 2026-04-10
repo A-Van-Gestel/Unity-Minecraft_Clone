@@ -30,6 +30,9 @@ namespace Jobs
         [ReadOnly]
         public int BaseSeed;
 
+        [ReadOnly]
+        public float BiomeBlendRadius;
+
         /// <summary>
         /// Chunk position in voxel-space (world origin). Uses <c>int2</c> instead of <c>Vector2Int</c>
         /// to keep the math pipeline within <c>Unity.Mathematics</c> for Burst SIMD vectorization.
@@ -126,7 +129,7 @@ namespace Jobs
 
             // --- TERRAIN HEIGHT (2D noise blending) ---
             int terrainHeight = BiomeBlender.CalculateBlendedTerrainHeight(
-                globalX, globalZ, ref BiomeSelectionNoise, ref Biomes, ref BiomeTerrainNoises);
+                globalX, globalZ, BiomeBlendRadius, ref BiomeSelectionNoise, ref Biomes, ref BiomeTerrainNoises);
 
             bool highestBlockFound = false;
 
