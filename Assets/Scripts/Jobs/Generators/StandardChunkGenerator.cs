@@ -22,7 +22,6 @@ namespace Jobs.Generators
     {
         private int _seed;
         private int _seaLevel;
-        private float _biomeBlendRadius;
         private NativeArray<StandardBiomeAttributesJobData> _biomesJobData;
         private NativeArray<StandardTerrainLayerJobData> _allTerrainLayersJobData;
         private NativeArray<StandardLodeJobData> _allLodesJobData;
@@ -42,7 +41,6 @@ namespace Jobs.Generators
         {
             _seed = seed;
             _seaLevel = worldType.seaLevel;
-            _biomeBlendRadius = worldType.biomeBlendRadius;
             _blockTypesJobData = globalJobData.BlockTypesJobData;
 
             // --- Lookup Table Warmup (CRITICAL) ---
@@ -114,6 +112,7 @@ namespace Jobs.Generators
                 {
                     TerrainNoiseConfig = biome.terrainNoiseConfig,
                     BiomeWeightNoiseConfig = biome.biomeWeightNoiseConfig,
+                    BlendRadius = biome.blendRadius,
                     BaseTerrainHeight = biome.baseTerrainHeight,
                     TerrainAmplitude = biome.terrainAmplitude,
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
@@ -179,7 +178,6 @@ namespace Jobs.Generators
             StandardChunkGenerationJob job = new StandardChunkGenerationJob
             {
                 SeaLevel = _seaLevel,
-                BiomeBlendRadius = _biomeBlendRadius,
                 BaseSeed = _seed,
                 ChunkPosition = new int2(chunkVoxelPos.x, chunkVoxelPos.y),
                 BlockTypes = _blockTypesJobData,
@@ -225,7 +223,7 @@ namespace Jobs.Generators
 
             // Terrain height
             int terrainHeight = BiomeBlender.CalculateBlendedTerrainHeight(
-                globalPos.x, globalPos.z, _biomeBlendRadius, ref _biomeSelectionNoise, ref _biomesJobData, ref _biomeTerrainNoises);
+                globalPos.x, globalPos.z, ref _biomeSelectionNoise, ref _biomesJobData, ref _biomeTerrainNoises);
 
             byte voxelValue;
             if (y == terrainHeight)

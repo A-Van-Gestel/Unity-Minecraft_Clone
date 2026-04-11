@@ -43,6 +43,7 @@ MonoBehaviour:
     cellularReturnType: 0
     cellularJitter: 1
     normalizeToZeroOne: 0
+  blendRadius: 0.2
   baseTerrainHeight: 97
   terrainAmplitude: 55
   surfaceBlockID: 1

@@ -22,6 +22,10 @@ namespace Data.WorldTypes
         [Tooltip("Noise configuration for biome weight / Voronoi selection.")]
         public FastNoiseConfig biomeWeightNoiseConfig;
 
+        [Range(0.01f, 1.0f)]
+        [Tooltip("Defines how far this biome pushes its height influence onto neighboring biomes out from the Voronoi edge.")]
+        public float blendRadius = 0.2f;
+
         [Header("Terrain Shape")]
         [Tooltip("Base terrain height in blocks. Noise output is added to this value.")]
         public float baseTerrainHeight = 42f;
@@ -64,6 +68,7 @@ namespace Data.WorldTypes
 
         [Header("Flora Height Constraints")]
         public int majorFloraPlacementMinHeight = 0;
+
         public int majorFloraPlacementMaxHeight = 256;
 
         [Tooltip("Minimum baseline trunk segments or column blocks to generate per tree/cactus.")]

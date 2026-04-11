@@ -37,10 +37,6 @@ namespace Data.WorldTypes
         [Tooltip("The global sea level for this world type. Empty spaces below this level generate as water. Defaults to 45 (Minecraft is 62).")]
         public int seaLevel = 45;
 
-        [Range(0.01f, 1.0f)]
-        [Tooltip("The physical blend thickness between adjacent biomes. 0.01 equates to abrupt cliffs. 1.0 spans the entire Voronoi cell radius.")]
-        public float biomeBlendRadius = 0.2f;
-
         [Tooltip("Legacy field. Only used by LegacyWorldGen format. Standard generation uses Biome-specific BaseTerrainHeight.")]
         public int solidGroundHeight = 42;
     }

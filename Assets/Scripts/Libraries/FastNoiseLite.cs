@@ -1120,24 +1120,32 @@ namespace Libraries
             return value * 9.046026385208288f;
         }
 
-        public void GetCellularEdgeData(float x, float y, out int hash0, out float distance0, out int hash1, out float distance1, out int hash2, out float distance2, out int hash3, out float distance3)
+        public unsafe struct CellularEdgeData
         {
-            TransformNoiseCoordinate(ref x, ref y);
-            SingleCellularEdgeData(mSeed, x, y, out hash0, out distance0, out hash1, out distance1, out hash2, out distance2, out hash3, out distance3);
+            public fixed int Hashes[9];
+            public fixed float Distances[9];
         }
 
-        private void SingleCellularEdgeData(int seed, float x, float y, out int hash0, out float distance0, out int hash1, out float distance1, out int hash2, out float distance2, out int hash3, out float distance3)
+        public void GetCellularEdgeData(float x, float y, out CellularEdgeData edgeData)
+        {
+            TransformNoiseCoordinate(ref x, ref y);
+            SingleCellularEdgeData(mSeed, x, y, out edgeData);
+        }
+
+        private void SingleCellularEdgeData(int seed, float x, float y, out CellularEdgeData edgeData)
         {
             int xr = FastRound(x);
             int yr = FastRound(y);
-            distance0 = float.MaxValue;
-            distance1 = float.MaxValue;
-            distance2 = float.MaxValue;
-            distance3 = float.MaxValue;
-            hash0 = 0;
-            hash1 = 0;
-            hash2 = 0;
-            hash3 = 0;
+
+            edgeData = default;
+            unsafe
+            {
+                for (int i = 0; i < 9; i++)
+                {
+                    edgeData.Distances[i] = float.MaxValue;
+                    edgeData.Hashes[i] = 0;
+                }
+            }
 
             float cellularJitter = 0.43701595f * mCellularJitterModifier;
             int xPrimed = (xr - 1) * PrimeX;
@@ -1163,37 +1171,20 @@ namespace Libraries
                         else
                             newDistance = math.abs(vecX) + math.abs(vecY) + (vecX * vecX + vecY * vecY);
 
-                        if (newDistance < distance0)
+                        for (int i = 0; i < 9; i++)
                         {
-                            distance3 = distance2;
-                            hash3 = hash2;
-                            distance2 = distance1;
-                            hash2 = hash1;
-                            distance1 = distance0;
-                            hash1 = hash0;
-                            distance0 = newDistance;
-                            hash0 = hash;
-                        }
-                        else if (newDistance < distance1)
-                        {
-                            distance3 = distance2;
-                            hash3 = hash2;
-                            distance2 = distance1;
-                            hash2 = hash1;
-                            distance1 = newDistance;
-                            hash1 = hash;
-                        }
-                        else if (newDistance < distance2)
-                        {
-                            distance3 = distance2;
-                            hash3 = hash2;
-                            distance2 = newDistance;
-                            hash2 = hash;
-                        }
-                        else if (newDistance < distance3)
-                        {
-                            distance3 = newDistance;
-                            hash3 = hash;
+                            if (newDistance < edgeData.Distances[i])
+                            {
+                                for (int j = 8; j > i; j--)
+                                {
+                                    edgeData.Distances[j] = edgeData.Distances[j - 1];
+                                    edgeData.Hashes[j] = edgeData.Hashes[j - 1];
+                                }
+
+                                edgeData.Distances[i] = newDistance;
+                                edgeData.Hashes[i] = hash;
+                                break; // Break out of the loop once inserted
+                            }
                         }
 
                         yPrimed += PrimeY;
@@ -1205,10 +1196,13 @@ namespace Libraries
 
             if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
             {
-                distance0 = math.sqrt(distance0);
-                distance1 = math.sqrt(distance1);
-                distance2 = math.sqrt(distance2);
-                distance3 = math.sqrt(distance3);
+                unsafe
+                {
+                    for (int i = 0; i < 9; i++)
+                    {
+                        edgeData.Distances[i] = math.sqrt(edgeData.Distances[i]);
+                    }
+                }
             }
         }
 

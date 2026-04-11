@@ -13,6 +13,9 @@ namespace Jobs.Data
         /// <summary>Noise configuration for biome weight / selection.</summary>
         public FastNoiseConfig BiomeWeightNoiseConfig;
 
+        /// <summary>How far this biome's height influence extends beyond its Voronoi edge.</summary>
+        public float BlendRadius;
+
         /// <summary>Base height added to noise output.</summary>
         public float BaseTerrainHeight;
 
@@ -36,7 +39,7 @@ namespace Jobs.Data
 
         /// <summary>The minimum grid size for flora. Smaller = denser forest, Larger = sparser forest.</summary>
         public int MajorFloraPlacementSpacing;
-        
+
         /// <summary>Minimum empty blocks to maintain between the tree and the grid cell edges.</summary>
         public int MajorFloraPlacementPadding;
 

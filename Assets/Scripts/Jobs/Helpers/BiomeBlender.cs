@@ -16,74 +16,71 @@ namespace Jobs.Helpers
         /// <summary>
         /// Evaluates the true mathematical heights of the top 3 closest biomes and performs
         /// an Inverse-Distance-Weighted (IDW) interpolation between them based on Voronoi Edge distance.
-        /// </summary>
-        public static int CalculateBlendedTerrainHeight(
+        public static unsafe int CalculateBlendedTerrainHeight(
             int globalX,
             int globalZ,
-            float blendRadius,
             ref FastNoiseLite selectionNoise,
             ref NativeArray<StandardBiomeAttributesJobData> biomes,
             ref NativeArray<FastNoiseLite> terrainNoises)
         {
-            // Retrieve top 4 overlapping cells natively
-            // (Extracting 4 cells is crucial to prevent instant discontinuity flips at perfect 4-junction corners)
-            selectionNoise.GetCellularEdgeData(globalX, globalZ,
-                out int hash0, out float dist0,
-                out int hash1, out float dist1,
-                out int hash2, out float dist2,
-                out int hash3, out float dist3);
+            // Retrieve top 9 overlapping cells natively
+            // (Extracting all 9 cells guarantees no Voronoi borders can be popped abruptly by Top K thresholds bounding out active neighbors)
+            selectionNoise.GetCellularEdgeData(globalX, globalZ, out FastNoiseLite.CellularEdgeData edgeData);
 
-            // Add an organic low-frequency wiggle to the blend radius.
-            // This prevents Voronoi boundaries from looking overtly straight or artificial.
-            float wiggle = selectionNoise.GetNoise(globalX * 0.25f, globalZ * 0.25f) * 0.5f * blendRadius;
-            float activeRadius = math.max(0.001f, blendRadius + wiggle);
+            // Extract all 9 biome indices and radii
+            int* b = stackalloc int[9];
+            float* rad = stackalloc float[9];
+            for (int i = 0; i < 9; i++)
+            {
+                b[i] = GetBiomeIndex(edgeData.Hashes[i], biomes.Length);
+                rad[i] = biomes[b[i]].BlendRadius;
+            }
+
+            // Calculate a generic wide 1.0f envelope to linearly mix the radii themselves across the boundary crossings.
+            float trSum = 0f;
+            float localBlendRadiusSum = 0f;
+            float dist0 = edgeData.Distances[0];
+
+            for (int i = 0; i < 9; i++)
+            {
+                float tr = math.max(0f, 1f - (edgeData.Distances[i] - dist0));
+                trSum += tr;
+                localBlendRadiusSum += tr * rad[i];
+            }
+
+            float localBlendRadius = localBlendRadiusSum / trSum;
+
+            // Add an organic low-frequency wiggle to the dynamically mixed blend radius.
+            float wiggle = selectionNoise.GetNoise(globalX * 0.25f, globalZ * 0.25f) * 0.5f * localBlendRadius;
+            float activeRadius = math.max(0.001f, localBlendRadius + wiggle);
 
             // 1. Calculate Raw Linear Inverse-Distance Weights targeting the boundary edge
-            // At the cell border, dist1 equals dist0 -> raw1 = 1.0.
-            // Deep inside cell 0, raw1 = 0.0.
-            float raw0 = 1f;
-            float raw1 = math.max(0f, 1f - (dist1 - dist0) / activeRadius);
-            float raw2 = math.max(0f, 1f - (dist2 - dist0) / activeRadius);
-            float raw3 = math.max(0f, 1f - (dist3 - dist0) / activeRadius);
+            float* raw = stackalloc float[9];
+            float totalRaw = 0f;
+            for (int i = 0; i < 9; i++)
+            {
+                raw[i] = math.max(0f, 1f - (edgeData.Distances[i] - dist0) / activeRadius);
+                totalRaw += raw[i];
+            }
 
-            float totalRaw = raw0 + raw1 + raw2 + raw3;
-
-            // 2. Normalize weights over the 4-biome overlap
-            float norm0 = raw0 / totalRaw;
-            float norm1 = raw1 / totalRaw;
-            float norm2 = raw2 / totalRaw;
-            float norm3 = raw3 / totalRaw;
-
-            // 3. Smoothstep the normalized ratios.
-            // By normalizing FIRST, the steepest point of the S-curve aligns perfectly
-            // atop the Voronoi boundary (norm = 0.5), eliminating unnatural interpolation plateaus.
-            float w0 = math.smoothstep(0f, 1f, norm0);
-            float w1 = math.smoothstep(0f, 1f, norm1);
-            float w2 = math.smoothstep(0f, 1f, norm2);
-            float w3 = math.smoothstep(0f, 1f, norm3);
-
-            float totalSmooth = w0 + w1 + w2 + w3;
+            // 2. Normalize weights and 3. Smoothstep
+            float* w = stackalloc float[9];
+            float totalSmooth = 0f;
+            for (int i = 0; i < 9; i++)
+            {
+                float norm = raw[i] / totalRaw;
+                w[i] = math.smoothstep(0f, 1f, norm);
+                totalSmooth += w[i];
+            }
 
             // 4. Calculate final height
-            int b0 = GetBiomeIndex(hash0, biomes.Length);
-            float finalHeight = EvaluateHeight(globalX, globalZ, b0, ref biomes, ref terrainNoises) * (w0 / totalSmooth);
-
-            if (w1 > 0.001f)
+            float finalHeight = 0f;
+            for (int i = 0; i < 9; i++)
             {
-                int b1 = GetBiomeIndex(hash1, biomes.Length);
-                finalHeight += EvaluateHeight(globalX, globalZ, b1, ref biomes, ref terrainNoises) * (w1 / totalSmooth);
-            }
-
-            if (w2 > 0.001f)
-            {
-                int b2 = GetBiomeIndex(hash2, biomes.Length);
-                finalHeight += EvaluateHeight(globalX, globalZ, b2, ref biomes, ref terrainNoises) * (w2 / totalSmooth);
-            }
-
-            if (w3 > 0.001f)
-            {
-                int b3 = GetBiomeIndex(hash3, biomes.Length);
-                finalHeight += EvaluateHeight(globalX, globalZ, b3, ref biomes, ref terrainNoises) * (w3 / totalSmooth);
+                if (w[i] > 0.001f)
+                {
+                    finalHeight += EvaluateHeight(globalX, globalZ, b[i], ref biomes, ref terrainNoises) * (w[i] / totalSmooth);
+                }
             }
 
             return (int)math.floor(finalHeight);
