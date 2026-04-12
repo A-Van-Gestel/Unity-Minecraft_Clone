@@ -110,8 +110,6 @@ namespace Jobs.Generators
                 // Build biome job data
                 _biomesJobData[i] = new StandardBiomeAttributesJobData
                 {
-                    TerrainNoiseConfig = biome.terrainNoiseConfig,
-                    BiomeWeightNoiseConfig = biome.biomeWeightNoiseConfig,
                     BlendRadius = biome.blendRadius,
                     BlendWeight = biome.blendWeight,
                     BlendCurve = biome.blendCurve,

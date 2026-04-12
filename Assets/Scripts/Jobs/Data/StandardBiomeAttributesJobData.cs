@@ -9,12 +9,6 @@ namespace Jobs.Data
     /// </summary>
     public struct StandardBiomeAttributesJobData
     {
-        /// <summary>Noise configuration for terrain height evaluation.</summary>
-        public FastNoiseConfig TerrainNoiseConfig;
-
-        /// <summary>Noise configuration for biome weight / selection.</summary>
-        public FastNoiseConfig BiomeWeightNoiseConfig;
-
         /// <summary>Width of the transition zone at Voronoi boundaries. Larger = wider, more gradual blending.</summary>
         public float BlendRadius;
 
