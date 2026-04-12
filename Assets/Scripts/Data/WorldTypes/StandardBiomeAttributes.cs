@@ -22,9 +22,22 @@ namespace Data.WorldTypes
         [Tooltip("Noise configuration for biome weight / Voronoi selection.")]
         public FastNoiseConfig biomeWeightNoiseConfig;
 
+        [Header("Biome Blending")]
         [Range(0.01f, 1.0f)]
-        [Tooltip("Defines how far this biome pushes its height influence onto neighboring biomes out from the Voronoi edge.")]
+        [Tooltip("Controls the width of the transition zone at Voronoi boundaries. " +
+                 "Larger values produce wider, more gradual transitions. Smaller values produce tighter, more abrupt transitions.")]
         public float blendRadius = 0.2f;
+
+        [Range(0.01f, 1.0f)]
+        [Tooltip("Controls how strongly this biome's terrain height bleeds into neighboring biomes during blending. " +
+                 "1.0 = full influence (default). Lower values suppress this biome's height contribution at boundaries, " +
+                 "keeping neighboring terrain flatter. Useful for high-amplitude biomes like Mountains.")]
+        public float blendWeight = 1.0f;
+
+        [Tooltip("Controls the interpolation curve shape at Voronoi boundaries. " +
+                 "Linear = most gradual (good for Mountains). SmoothStep = standard S-curve (default). " +
+                 "SmootherStep = sharper S-curve with flatter plateaus.")]
+        public BlendCurve blendCurve = BlendCurve.SmoothStep;
 
         [Header("Terrain Shape")]
         [Tooltip("Base terrain height in blocks. Noise output is added to this value.")]
@@ -133,6 +146,21 @@ namespace Data.WorldTypes
 
         [Tooltip("FastNoiseLite noise configuration for this lode's generation pattern.")]
         public FastNoiseConfig noiseConfig;
+    }
+
+    /// <summary>
+    /// Controls the interpolation curve shape used when blending this biome's weight at Voronoi boundaries.
+    /// </summary>
+    public enum BlendCurve : byte
+    {
+        /// <summary>Uniform blend rate across the entire transition zone. Most gradual. Suited for high-amplitude biomes like Mountains.</summary>
+        Linear,
+
+        /// <summary>Hermite S-curve (3t² − 2t³). Concentrates transition at the boundary midpoint. Default for most biomes.</summary>
+        SmoothStep,
+
+        /// <summary>Quintic S-curve (6t⁵ − 15t⁴ + 10t³). Sharper than SmoothStep with flatter plateaus at extremes.</summary>
+        SmootherStep,
     }
 
     /// <summary>

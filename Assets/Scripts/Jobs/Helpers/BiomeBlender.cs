@@ -1,3 +1,4 @@
+using Data.WorldTypes;
 using Jobs.Data;
 using Libraries;
 using Unity.Burst;
@@ -27,13 +28,17 @@ namespace Jobs.Helpers
             // (Extracting all 9 cells guarantees no Voronoi borders can be popped abruptly by Top K thresholds bounding out active neighbors)
             selectionNoise.GetCellularEdgeData(globalX, globalZ, out FastNoiseLite.CellularEdgeData edgeData);
 
-            // Extract all 9 biome indices and radii
+            // Extract all 9 biome indices, radii, blend weights, and curves
             int* b = stackalloc int[9];
             float* rad = stackalloc float[9];
+            float* bw = stackalloc float[9];
+            BlendCurve* curves = stackalloc BlendCurve[9];
             for (int i = 0; i < 9; i++)
             {
                 b[i] = GetBiomeIndex(edgeData.Hashes[i], biomes.Length);
                 rad[i] = biomes[b[i]].BlendRadius;
+                bw[i] = biomes[b[i]].BlendWeight;
+                curves[i] = biomes[b[i]].BlendCurve;
             }
 
             // Calculate a generic wide 1.0f envelope to linearly mix the radii themselves across the boundary crossings.
@@ -54,22 +59,24 @@ namespace Jobs.Helpers
             float wiggle = selectionNoise.GetNoise(globalX * 0.25f, globalZ * 0.25f) * 0.5f * localBlendRadius;
             float activeRadius = math.max(0.001f, localBlendRadius + wiggle);
 
-            // 1. Calculate Raw Linear Inverse-Distance Weights targeting the boundary edge
+            // 1. Calculate Raw Linear Inverse-Distance Weights, scaled by per-biome BlendWeight.
+            // Multiplying BEFORE normalization ensures that low-weight biomes (e.g., Mountains 0.2)
+            // barely influence neighbors, while deep inside the biome they still normalize to 100%.
             float* raw = stackalloc float[9];
             float totalRaw = 0f;
             for (int i = 0; i < 9; i++)
             {
-                raw[i] = math.max(0f, 1f - (edgeData.Distances[i] - dist0) / activeRadius);
+                raw[i] = math.max(0f, 1f - (edgeData.Distances[i] - dist0) / activeRadius) * bw[i];
                 totalRaw += raw[i];
             }
 
-            // 2. Normalize weights and 3. Smoothstep
+            // 2. Normalize weights and 3. Apply per-biome interpolation curve
             float* w = stackalloc float[9];
             float totalSmooth = 0f;
             for (int i = 0; i < 9; i++)
             {
                 float norm = raw[i] / totalRaw;
-                w[i] = math.smoothstep(0f, 1f, norm);
+                w[i] = ApplyCurve(norm, curves[i]);
                 totalSmooth += w[i];
             }
 
@@ -103,6 +110,26 @@ namespace Jobs.Helpers
             StandardBiomeAttributesJobData b = biomes[biomeIdx];
             float noise = noises[biomeIdx].GetNoise(x, z);
             return b.BaseTerrainHeight + noise * b.TerrainAmplitude;
+        }
+
+        /// <summary>
+        /// Applies the selected interpolation curve to a normalized [0,1] weight value.
+        /// Each curve reshapes how the biome's influence ramps across the transition zone.
+        /// </summary>
+        private static float ApplyCurve(float t, BlendCurve curve)
+        {
+            switch (curve)
+            {
+                case BlendCurve.Linear:
+                    return t;
+                case BlendCurve.SmootherStep:
+                    // Quintic: 6t⁵ − 15t⁴ + 10t³
+                    return t * t * t * (t * (t * 6f - 15f) + 10f);
+                case BlendCurve.SmoothStep:
+                default:
+                    // Hermite: 3t² − 2t³ (equivalent to math.smoothstep(0, 1, t))
+                    return t * t * (3f - 2f * t);
+            }
         }
     }
 }

@@ -1,3 +1,5 @@
+using Data.WorldTypes;
+
 namespace Jobs.Data
 {
     /// <summary>
@@ -13,8 +15,17 @@ namespace Jobs.Data
         /// <summary>Noise configuration for biome weight / selection.</summary>
         public FastNoiseConfig BiomeWeightNoiseConfig;
 
-        /// <summary>How far this biome's height influence extends beyond its Voronoi edge.</summary>
+        /// <summary>Width of the transition zone at Voronoi boundaries. Larger = wider, more gradual blending.</summary>
         public float BlendRadius;
+
+        /// <summary>
+        /// Multiplier controlling how strongly this biome's height bleeds into neighbors during blending.
+        /// 1.0 = full influence (default). Lower values suppress outward height contribution.
+        /// </summary>
+        public float BlendWeight;
+
+        /// <summary>Interpolation curve shape applied to this biome's weight at Voronoi boundaries.</summary>
+        public BlendCurve BlendCurve;
 
         /// <summary>Base height added to noise output.</summary>
         public float BaseTerrainHeight;

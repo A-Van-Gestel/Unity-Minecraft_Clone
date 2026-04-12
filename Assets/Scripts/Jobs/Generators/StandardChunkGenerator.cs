@@ -113,6 +113,8 @@ namespace Jobs.Generators
                     TerrainNoiseConfig = biome.terrainNoiseConfig,
                     BiomeWeightNoiseConfig = biome.biomeWeightNoiseConfig,
                     BlendRadius = biome.blendRadius,
+                    BlendWeight = biome.blendWeight,
+                    BlendCurve = biome.blendCurve,
                     BaseTerrainHeight = biome.baseTerrainHeight,
                     TerrainAmplitude = biome.terrainAmplitude,
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
