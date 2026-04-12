@@ -7,7 +7,7 @@
       "dependencies": {
         "com.unity.ugui": "1.0.0"
       },
-      "hash": "998bf300cd676f79f1636324d39caf7641fabd3c"
+      "hash": "b3cbe94fbc353815106b8286b99fff93043bf78a"
     },
     "com.github-glitchenzo.nugetforunity": {
       "version": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
@@ -45,7 +45,7 @@
       }
     },
     "com.unity.dt.app-ui": {
-      "version": "2.1.8",
+      "version": "2.1.9",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -222,7 +222,7 @@
       }
     },
     "com.unity.test-framework.performance": {
-      "version": "3.2.0",
+      "version": "3.4.0",
       "depth": 1,
       "source": "registry",
       "dependencies": {
