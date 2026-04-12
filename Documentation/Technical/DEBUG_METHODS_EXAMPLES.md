@@ -783,3 +783,219 @@ private float GetDebugSmoothHeight(byte centerLevel, VoxelState? n1, VoxelState?
     return totalHeight / count;
 }
 ```
+
+## 6. Mesh Queue Deadlock Detector (`DiagnosticStuckChunkScan`)
+
+**Use Case:** Chunks remain in the `_chunksToBuildMesh` queue for extended periods (5+ seconds) without being scheduled for meshing. Produces a detailed per-chunk report showing exactly which flags and which neighbors are blocking `ScheduleMeshing`.
+**Usage:** Add to `World.cs`. Runs automatically every 5 seconds when `settings.enableDiagnosticLogs = true`. Call from `Update()` after the mesh scheduling loop.
+
+**Key insights this tool revealed:**
+
+- "Wave-front ping-pong" — lighting jobs at the loading edge continuously reschedule due to cross-chunk BFS mod ping-pong, blocking neighbor meshing indefinitely.
+- "World boundary instability" — chunks at world boundaries produce cross-chunk mods for non-existent chunks, keeping `IsStable = false` forever.
+- "Unload stranding" — chunks removed from memory while neighbors still have pending lighting work.
+
+**Required fields in `World.cs`:**
+
+```csharp
+// --- Diagnostic: Deadlock Detection ---
+private readonly Dictionary<ChunkCoord, float> _meshQueueEntryTime = new Dictionary<ChunkCoord, float>();
+private float _lastDiagnosticScanTime;
+private const float DIAGNOSTIC_SCAN_INTERVAL = 5f;
+private const float STUCK_CHUNK_THRESHOLD = 5f;
+```
+
+**Entry-time tracking (add to `RequestChunkMeshRebuild`):**
+
+```csharp
+// After adding to _chunksToBuildMeshSet:
+if (settings.enableDiagnosticLogs && !_meshQueueEntryTime.ContainsKey(chunk.Coord))
+{
+    _meshQueueEntryTime[chunk.Coord] = Time.time;
+}
+```
+
+**Cleanup (add at both mesh queue removal points in the scheduling loop):**
+
+```csharp
+_meshQueueEntryTime.Remove(chunk.Coord);  // When chunk is scheduled or invalidated
+```
+
+**Scan method:**
+
+```csharp
+/// <summary>
+/// Periodically scans the mesh queue for chunks that have been stuck for longer than
+/// <see cref="STUCK_CHUNK_THRESHOLD"/> seconds. Logs detailed state for each stuck chunk
+/// and its neighbors to identify the root cause of meshing deadlocks.
+/// <para>Only runs when <c>settings.enableDiagnosticLogs</c> is true.</para>
+/// </summary>
+private void DiagnosticStuckChunkScan()
+{
+    if (Time.time - _lastDiagnosticScanTime < DIAGNOSTIC_SCAN_INTERVAL) return;
+    _lastDiagnosticScanTime = Time.time;
+
+    // Clean up stale entries (chunks no longer in mesh queue)
+    List<ChunkCoord> staleKeys = ListPool<ChunkCoord>.Get();
+    foreach (ChunkCoord coord in _meshQueueEntryTime.Keys)
+    {
+        if (!_chunksToBuildMeshSet.Contains(coord))
+            staleKeys.Add(coord);
+    }
+    foreach (ChunkCoord key in staleKeys)
+        _meshQueueEntryTime.Remove(key);
+    ListPool<ChunkCoord>.Release(staleKeys);
+
+    // Scan for stuck chunks
+    int stuckCount = 0;
+    StringBuilder report = new StringBuilder();
+
+    foreach (Chunk chunk in _chunksToBuildMesh)
+    {
+        if (chunk == null || !chunk.isActive) continue;
+
+        if (!_meshQueueEntryTime.TryGetValue(chunk.Coord, out float entryTime)) continue;
+        float waitTime = Time.time - entryTime;
+        if (waitTime < STUCK_CHUNK_THRESHOLD) continue;
+
+        stuckCount++;
+        if (stuckCount > 10) continue; // Limit log output to 10 chunks
+
+        ChunkCoord coord = chunk.Coord;
+        ChunkData data = chunk.ChunkData;
+
+        report.AppendLine($"--- STUCK CHUNK: {coord} (waiting {waitTime:F1}s) ---");
+
+        // Center chunk flags
+        report.AppendLine($"  Center Flags: " +
+                          $"HasLightChanges={data.HasLightChangesToProcess}, " +
+                          $"NeedsInitialLighting={data.NeedsInitialLighting}, " +
+                          $"NeedsEdgeCheck={data.NeedsEdgeCheck}, " +
+                          $"IsAwaitingMainThread={data.IsAwaitingMainThreadProcess}");
+        report.AppendLine($"  Active Jobs: " +
+                          $"LightingJob={JobManager.lightingJobs.ContainsKey(coord)}, " +
+                          $"GenJob={JobManager.generationJobs.ContainsKey(coord)}, " +
+                          $"MeshJob={JobManager.meshJobs.ContainsKey(coord)}");
+
+        // Determine blocking reason
+        if (data.HasLightChangesToProcess)
+            report.AppendLine("  BLOCKED BY: Center HasLightChangesToProcess = true");
+        if (data.NeedsInitialLighting)
+            report.AppendLine("  BLOCKED BY: Center NeedsInitialLighting = true");
+
+        // Per-neighbor analysis
+        report.AppendLine("  Neighbor States:");
+        foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
+        {
+            ChunkCoord neighborCoord = coord.Neighbor(offset.x, offset.z);
+            if (!IsChunkInWorld(neighborCoord))
+            {
+                report.AppendLine($"    {neighborCoord} (offset {offset.x},{offset.z}): Out of world bounds (OK)");
+                continue;
+            }
+
+            Vector2Int neighborV2 = neighborCoord.ToVoxelOrigin();
+            if (!worldData.Chunks.TryGetValue(neighborV2, out ChunkData neighborData))
+            {
+                report.AppendLine($"    {neighborCoord} (offset {offset.x},{offset.z}): *** NOT IN MEMORY *** — AreNeighborsDataReady FAILS");
+                continue;
+            }
+
+            if (!neighborData.IsPopulated)
+            {
+                report.AppendLine($"    {neighborCoord} (offset {offset.x},{offset.z}): Not populated — AreNeighborsDataReady FAILS");
+                continue;
+            }
+
+            // Check AreNeighborsMeshReady conditions
+            bool genJob = JobManager.generationJobs.ContainsKey(neighborCoord);
+            bool needsInit = neighborData.NeedsInitialLighting;
+
+            bool isBlocking = genJob || needsInit;
+
+            if (isBlocking)
+            {
+                report.Append($"    {neighborCoord} (offset {offset.x},{offset.z}): BLOCKING — ");
+                if (genJob) report.Append("GenJob ");
+                if (needsInit) report.Append("NeedsInitLight ");
+                report.AppendLine();
+            }
+            else
+            {
+                report.AppendLine($"    {neighborCoord} (offset {offset.x},{offset.z}): OK");
+            }
+        }
+    }
+
+    if (stuckCount > 0)
+    {
+        report.Insert(0, $"[DEADLOCK DETECTOR] {stuckCount} chunks stuck in mesh queue (>{STUCK_CHUNK_THRESHOLD}s):\n");
+        if (stuckCount > 10)
+            report.AppendLine($"  ... and {(stuckCount - 10)} more stuck chunks (truncated).");
+        Debug.LogWarning(report.ToString());
+    }
+}
+```
+
+**Call site (in `Update()`, after the mesh scheduling loop and `ChunksToDraw` dequeue):**
+
+```csharp
+if (settings.enableDiagnosticLogs)
+{
+    DiagnosticStuckChunkScan();
+}
+```
+
+**Example output:**
+
+```text
+[DEADLOCK DETECTOR] 3 chunks stuck in mesh queue (>5s):
+--- STUCK CHUNK: ChunkCoord(52, 96) (waiting 31.4s) ---
+  Center Flags: HasLightChanges=False, NeedsInitialLighting=False, NeedsEdgeCheck=False, IsAwaitingMainThread=False
+  Active Jobs: LightingJob=True, GenJob=False, MeshJob=False
+  Neighbor States:
+    ChunkCoord(52, 95) (offset 0,-1): OK
+    ChunkCoord(52, 97) (offset 0,1): OK
+    ChunkCoord(51, 96) (offset -1,0): OK
+    ChunkCoord(53, 96) (offset 1,0): *** NOT IN MEMORY *** — AreNeighborsDataReady FAILS
+    ...
+```
+
+## 7. Unload Stranding Detector
+
+**Use Case:** Detecting when `UnloadChunks()` removes a chunk while a neighbor still has `HasLightChangesToProcess = true` or `NeedsInitialLighting = true`, potentially stranding that neighbor in a deadlock.
+**Usage:** Add to `UnloadChunks()` in `World.cs`, just before the chunk data is actually removed. Logs a warning for each stranding event.
+
+> **Note:** This bug was fixed by adding a neighbor-aware unload guard that defers unloads when neighbors have pending work. The diagnostic below is the logging-only version for future investigation.
+
+**Code (insert into `UnloadChunks()` after the `isJobRunning || isProcessingLight` safety check):**
+
+```csharp
+// --- Diagnostic: Detect Unload Stranding ---
+if (settings.enableDiagnosticLogs)
+{
+    foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
+    {
+        ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
+        Vector2Int neighborV2 = neighborCoord.ToVoxelOrigin();
+
+        if (worldData.Chunks.TryGetValue(neighborV2, out ChunkData neighborData) &&
+            neighborData.IsPopulated &&
+            (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting))
+        {
+            Debug.LogWarning(
+                $"[UNLOAD STRANDING] Unloading {chunkCoord} while neighbor {neighborCoord} has pending work! " +
+                $"Neighbor flags: HasLightChanges={neighborData.HasLightChangesToProcess}, " +
+                $"NeedsInitLight={neighborData.NeedsInitialLighting}, " +
+                $"NeedsEdgeCheck={neighborData.NeedsEdgeCheck}");
+        }
+    }
+}
+```
+
+**Example output:**
+
+```text
+[UNLOAD STRANDING] Unloading ChunkCoord(43, 57) while neighbor ChunkCoord(43, 58) has pending work! Neighbor flags: HasLightChanges=True, NeedsInitLight=True, NeedsEdgeCheck=False
+```
+

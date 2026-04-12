@@ -153,6 +153,7 @@ public class World : MonoBehaviour
     /// </summary>
     private bool _isWorldLoaded;
 
+
     /// <summary>
     /// Public accessor for world load state. True once <see cref="StartWorld"/> has fully completed.
     /// </summary>
@@ -1105,8 +1106,16 @@ public class World : MonoBehaviour
         // The chunksToDraw queue is populated by ApplyMeshData in Chunk.cs
         if (ChunksToDraw.Count > 0)
         {
-            ChunksToDraw.Dequeue().CreateMesh();
+            Chunk chunkToDraw = ChunksToDraw.Dequeue();
+
+            // Guard: The chunk's GameObject may have been destroyed by the pool
+            // while it was waiting in the draw queue (e.g., due to deferred unload timing).
+            if (chunkToDraw != null && chunkToDraw.ChunkGameObject != null)
+            {
+                chunkToDraw.CreateMesh();
+            }
         }
+
 
         // Run Pool Cleanup
         ChunkPool.Update();
@@ -1363,6 +1372,44 @@ public class World : MonoBehaviour
         return true;
     }
 
+    /// <summary>
+    /// Checks if all 8 horizontal neighbors have sufficient data for meshing.
+    /// Less strict than <see cref="AreNeighborsReadyAndLit"/> — allows neighbors that are
+    /// running lighting jobs or have pending light changes, as long as they have completed
+    /// their initial lighting pass and have valid voxel data.
+    /// <para>
+    /// This relaxed gate prevents "wave-front ping-pong" deadlocks where perpetually
+    /// rescheduling neighbor lighting jobs would otherwise block meshing indefinitely.
+    /// The meshing job reads a snapshot of the neighbor's current voxel data, which is
+    /// valid even if a lighting update is in-flight. Any stale border lighting is corrected
+    /// by the re-mesh triggered when the neighbor's lighting job completes.
+    /// </para>
+    /// </summary>
+    /// <param name="chunkCoord">The coordinate of the central chunk whose neighbors are to be checked.</param>
+    /// <returns>True if all neighbors have at minimum completed their initial lighting pass and are populated.</returns>
+    public bool AreNeighborsMeshReady(ChunkCoord chunkCoord)
+    {
+        foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
+        {
+            ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
+            if (!IsChunkInWorld(neighborCoord)) continue;
+
+            // Generation must be complete — no valid voxel data to snapshot otherwise.
+            if (JobManager.generationJobs.ContainsKey(neighborCoord)) return false;
+
+            Vector2Int neighborV2Pos = neighborCoord.ToVoxelOrigin();
+            if (!worldData.Chunks.TryGetValue(neighborV2Pos, out ChunkData neighborData) ||
+                !neighborData.IsPopulated)
+                return false;
+
+            // Initial lighting must have been completed at least once.
+            // Without initial lighting, the neighbor's light data is all zeros,
+            // which would produce incorrect face culling and ambient occlusion.
+            if (neighborData.NeedsInitialLighting) return false;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Verifies that all 8 horizontal neighbors (cardinal + diagonal) of a chunk exist,
@@ -1677,6 +1724,30 @@ public class World : MonoBehaviour
             {
                 // Skip unload - chunk is still being processed
                 continue;
+            }
+
+            // Safety: Don't unload if doing so would strand a neighbor that needs this chunk's data
+            // for lighting. A stranded neighbor with HasLightChangesToProcess or NeedsInitialLighting
+            // would be unable to schedule its lighting job (AreNeighborsDataReady would fail),
+            // unable to mesh (HasLightChangesToProcess blocks), and unable to unload (same flag blocks).
+            bool wouldStrandNeighbor = false;
+            foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
+            {
+                ChunkCoord neighborCoord = chunkCoord.Neighbor(offset.x, offset.z);
+                Vector2Int neighborV2 = neighborCoord.ToVoxelOrigin();
+
+                if (worldData.Chunks.TryGetValue(neighborV2, out ChunkData neighborData) &&
+                    neighborData.IsPopulated &&
+                    (neighborData.HasLightChangesToProcess || neighborData.NeedsInitialLighting))
+                {
+                    wouldStrandNeighbor = true;
+                    break;
+                }
+            }
+
+            if (wouldStrandNeighbor)
+            {
+                continue; // Defer unload — neighbor still needs us
             }
 
             // 1. Persist Orphaned Lighting Queue
@@ -2361,7 +2432,7 @@ public class World : MonoBehaviour
     /// </summary>
     /// <param name="chunkCoord">The chunk coordinate.</param>
     /// <returns>True if the chunk is in the world; otherwise, false.</returns>
-    private static bool IsChunkInWorld(ChunkCoord chunkCoord)
+    internal static bool IsChunkInWorld(ChunkCoord chunkCoord)
     {
         return chunkCoord.X is >= 0 and < VoxelData.WorldSizeInChunks &&
                chunkCoord.Z is >= 0 and < VoxelData.WorldSizeInChunks;

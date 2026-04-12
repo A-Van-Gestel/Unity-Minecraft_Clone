@@ -66,7 +66,7 @@ public class Settings
     /// This buffer is crucial for systems that need neighbor data, such as lighting, face culling, and preventing
     /// structures (e.g., trees) from suddenly appearing at the edge of the view.
     /// </summary>
-    public const int DATA_LOAD_BUFFER = 2;
+    public const int DATA_LOAD_BUFFER = 3;
 
     /// <summary>
     /// Gets the total radius of chunks around the player for which voxel data will be loaded and generated.

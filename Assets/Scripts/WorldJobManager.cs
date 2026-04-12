@@ -128,14 +128,19 @@ public class WorldJobManager : IDisposable
         if (meshJobs.ContainsKey(chunkCoord))
             return true;
 
+        // Gate 1: Center chunk must have completed at least one lighting pass and have
+        // no unscheduled light changes. We intentionally do NOT block on a running lighting
+        // job (lightingJobs.ContainsKey) — the meshing job reads an independent snapshot of
+        // the voxel data. If lighting is in-flight, the mesh uses valid data from the previous
+        // pass and gets rebuilt when the lighting job completes and triggers RequestChunkMeshRebuild.
+        // This prevents perpetual deadlocks from cross-chunk BFS ping-pong.
         if (chunk.ChunkData.HasLightChangesToProcess ||
-            chunk.ChunkData.NeedsInitialLighting ||
-            lightingJobs.ContainsKey(chunkCoord))
+            chunk.ChunkData.NeedsInitialLighting)
         {
             return false;
         }
 
-        if (!_world.AreNeighborsReadyAndLit(chunkCoord))
+        if (!_world.AreNeighborsMeshReady(chunkCoord))
         {
             return false;
         }
@@ -464,6 +469,7 @@ public class WorldJobManager : IDisposable
                 }
 
                 bool isChunkStable = jobData.IsStable[0];
+                bool hasRealCrossChunkMods = false;
 
                 if (chunkData != null && chunkData.IsPopulated)
                 {
@@ -472,11 +478,21 @@ public class WorldJobManager : IDisposable
                     foreach (LightModification mod in jobData.Mods)
                     {
                         Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
+                        ChunkCoord neighborChunkCoord = ChunkCoord.FromVoxelOrigin(neighborChunkVoxelPos);
+
+                        // Skip mods targeting chunks outside world boundaries entirely.
+                        // These can never be consumed (the target chunk will never exist),
+                        // and would cause perpetual IsStable=false rescheduling for boundary chunks.
+                        if (!World.IsChunkInWorld(neighborChunkCoord))
+                        {
+                            continue;
+                        }
+
                         ChunkData neighborChunk = _world.worldData.RequestChunk(neighborChunkVoxelPos, false);
 
                         if (neighborChunk == null || !neighborChunk.IsPopulated)
                         {
-                            ChunkCoord neighborChunkCoord = ChunkCoord.FromVoxelOrigin(neighborChunkVoxelPos);
+                            hasRealCrossChunkMods = true;
 
                             int localX = mod.GlobalPosition.x - neighborChunkVoxelPos.x;
                             int localZ = mod.GlobalPosition.z - neighborChunkVoxelPos.y;
@@ -497,6 +513,8 @@ public class WorldJobManager : IDisposable
                             cols.Add(new Vector2Int(localX, localZ));
                             continue;
                         }
+
+                        hasRealCrossChunkMods = true;
 
                         Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
@@ -541,6 +559,15 @@ public class WorldJobManager : IDisposable
                                 neighborChunk.AddToBlockLightQueue(localVoxelPos, oldLightLevel);
                         }
                     }
+                }
+
+                // Override stability: If the Burst job reported not-stable solely because
+                // of cross-chunk mods targeting out-of-world positions (which can never be
+                // consumed), treat the chunk as effectively stable. Without this, world-boundary
+                // chunks would reschedule lighting indefinitely.
+                if (!isChunkStable && !hasRealCrossChunkMods)
+                {
+                    isChunkStable = true;
                 }
 
                 if (isChunkStable)
