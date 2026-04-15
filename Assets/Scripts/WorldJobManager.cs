@@ -470,11 +470,9 @@ public class WorldJobManager : IDisposable
 
                 bool isChunkStable = jobData.IsStable[0];
                 bool hasRealCrossChunkMods = false;
-
                 if (chunkData != null && chunkData.IsPopulated)
                 {
                     ApplyLightingJobResult(chunkData, jobData.Map);
-
                     foreach (LightModification mod in jobData.Mods)
                     {
                         Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
@@ -574,6 +572,28 @@ public class WorldJobManager : IDisposable
                 {
                     _chunksToRebuildMesh.Add(jobEntry.Key);
                     _world.RequestNeighborMeshRebuilds(jobEntry.Key);
+
+                    // After a chunk's initial lighting stabilizes, schedule iterative
+                    // edge-check rounds (self + neighbors). During initial world generation,
+                    // chunks run their lighting with stale neighbor snapshots (neighbors are
+                    // populated but not yet lit). Each edge-check round reconciles border
+                    // lighting against the latest neighbor data.
+                    //
+                    // Multiple rounds are needed because two adjacent chunks that both
+                    // stabilize with stale data from each other need iterative convergence:
+                    // round 1 fixes the immediate frontier, round 2 reconciles any remaining
+                    // discrepancies after neighbors have run their own edge checks.
+                    if (chunkData != null && chunkData.RemainingEdgeCheckRounds > 0)
+                    {
+                        chunkData.RemainingEdgeCheckRounds--;
+
+                        // Self-edge-check: re-examine this chunk's own borders with the
+                        // latest neighbor snapshot data.
+                        chunkData.NeedsEdgeCheck = true;
+                        chunkData.HasLightChangesToProcess = true;
+
+                        TriggerNeighborEdgeChecks(jobEntry.Key);
+                    }
                 }
                 else
                 {
@@ -721,6 +741,41 @@ public class WorldJobManager : IDisposable
         lightingJobs.Clear();
 
         _chunkGenerator?.Dispose();
+    }
+
+    /// <summary>
+    /// Triggers edge consistency checks on the 4 cardinal neighbors of the specified chunk.
+    /// Called when a chunk's initial lighting stabilizes, so that neighbors can reconcile
+    /// their border lighting against the now-correct data.
+    /// </summary>
+    /// <param name="sourceCoord">The chunk that just stabilized.</param>
+    private void TriggerNeighborEdgeChecks(ChunkCoord sourceCoord)
+    {
+        for (int d = 0; d < 4; d++)
+        {
+            ChunkCoord neighborCoord = d switch
+            {
+                0 => sourceCoord.Neighbor(0, 1), // North
+                1 => sourceCoord.Neighbor(1, 0), // East
+                2 => sourceCoord.Neighbor(0, -1), // South
+                _ => sourceCoord.Neighbor(-1, 0), // West
+            };
+
+            if (!World.IsChunkInWorld(neighborCoord)) continue;
+
+            ChunkData neighborData = _world.worldData.RequestChunk(
+                neighborCoord.ToVoxelOrigin(), false);
+
+            // Only trigger on neighbors that are populated and have already finished
+            // their initial lighting. Neighbors still awaiting initial lighting will
+            // get their own edge check trigger when THEY stabilize.
+            if (neighborData != null && neighborData.IsPopulated
+                                     && !neighborData.NeedsInitialLighting)
+            {
+                neighborData.NeedsEdgeCheck = true;
+                neighborData.HasLightChangesToProcess = true;
+            }
+        }
     }
 
     #endregion

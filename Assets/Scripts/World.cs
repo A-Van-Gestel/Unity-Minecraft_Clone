@@ -1576,6 +1576,7 @@ public class World : MonoBehaviour
 
             // --- 3. If chunk is ready, Apply Modification ---
             Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.GlobalPosition);
+
             chunkData.ModifyVoxel(localPos, v);
 
             // --- 4. Neighbor Activation ---

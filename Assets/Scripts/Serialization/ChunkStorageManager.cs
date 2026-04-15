@@ -222,7 +222,7 @@ namespace Serialization
             for (int i = 0; i < source.sections.Length; i++)
             {
                 // Check specific section in source array
-                if (source.sections[i] != null && !source.sections[i].IsEmpty)
+                if (source.sections[i] != null)
                 {
                     ChunkSection snapSec = World.Instance.ChunkPool.GetChunkSection();
                     snapSec.nonAirCount = source.sections[i].nonAirCount;

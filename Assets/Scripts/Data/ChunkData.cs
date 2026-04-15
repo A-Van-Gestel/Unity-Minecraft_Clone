@@ -73,6 +73,16 @@ namespace Data
         [NonSerialized]
         public bool NeedsEdgeCheck = false;
 
+        /// <summary>
+        /// Tracks the number of post-generation edge check rounds remaining for this chunk.
+        /// When initial lighting stabilizes, this is decremented on each stabilization.
+        /// Each round triggers a self-edge-check and neighbor edge checks, allowing
+        /// iterative border convergence when both sides of a boundary start with stale snapshot data.
+        /// Not serialized — disk-loaded chunks use <see cref="NeedsEdgeCheck"/> directly.
+        /// </summary>
+        [NonSerialized]
+        public int RemainingEdgeCheckRounds = 2;
+
         [NonSerialized]
         private readonly Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
 
