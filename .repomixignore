@@ -1,0 +1,28 @@
+# Repomix tool files
+repomix-output.*
+repomix.config.json
+.repomixignore
+
+# Unity metadata (tracked by Unity, not useful for AI context)
+*.meta
+
+# Third-party packages
+Assets/TextMesh Pro/**/*
+
+# Reference implementations (external, not project code)
+_REFERENCES/**/*
+
+# Benchmark scripts (performance testing harness, not feature code)
+Assets/Scripts/Benchmarks/**/*
+
+# Archived documentation (historical records, not current architecture)
+Documentation/Archived/**/*
+
+# Fixed bugs archive (43 resolved entries — historical reference only)
+Documentation/Bugs/_FIXED_BUGS.md
+
+# Agent/IDE configuration (not relevant to packed codebase context)
+.agents/**/*
+.claude/**/*
+AGENTS.md
+CLAUDE.md

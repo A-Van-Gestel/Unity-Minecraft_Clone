@@ -88,5 +88,8 @@ crashlytics-build.properties
 # Auto generated backup files
 *.*~
 
+# Repomix
+/repomix-output.*
+
 # Added by code-review-graph
 .code-review-graph/
