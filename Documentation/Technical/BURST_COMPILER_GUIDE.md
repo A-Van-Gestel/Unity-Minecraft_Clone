@@ -1,4 +1,4 @@
-﻿# Burst Compiler Best Practices & Optimization Guide
+# Burst Compiler Best Practices & Optimization Guide
 
 This document outlines the rules and best practices for writing code compatible with the Unity Burst compiler (Unity 6 environment). Following these guidelines is essential for achieving maximum performance in our Job System.
 

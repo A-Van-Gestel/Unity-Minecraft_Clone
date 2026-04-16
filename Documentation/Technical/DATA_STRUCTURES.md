@@ -1,4 +1,4 @@
-﻿# Core Data Structures
+# Core Data Structures
 
 This document outlines the primary data structures used to represent the game world. The design prioritizes memory efficiency, cache-friendliness, and compatibility with Unity's C# Job System and Burst Compiler.
 

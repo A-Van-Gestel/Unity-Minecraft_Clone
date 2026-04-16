@@ -1,4 +1,4 @@
-﻿/*
+/*
 using Data;
 using UnityEditor;
 using UnityEngine;

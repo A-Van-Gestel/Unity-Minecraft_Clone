@@ -1,4 +1,4 @@
-﻿# Voxel Engine Project (Minecraft Clone)
+# Voxel Engine Project (Minecraft Clone)
 
 ![Unity Version](https://img.shields.io/badge/Unity-6000.4-black?logo=unity)
 

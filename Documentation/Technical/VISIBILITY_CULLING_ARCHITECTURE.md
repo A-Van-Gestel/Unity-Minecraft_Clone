@@ -1,4 +1,4 @@
-﻿# Advanced Visibility Culling (Graph Connectivity)
+# Advanced Visibility Culling (Graph Connectivity)
 
 - **Status:** Planned (Prerequisites Complete)
 - **Current Implementation:** Standard Frustum Culling + Empty Section Skipping

@@ -1,4 +1,4 @@
-﻿# General Optimization & Architecture Guide
+# General Optimization & Architecture Guide
 
 This document outlines optimization strategies, common pitfalls, and architectural best practices for the project. It focuses on high-level C# logic, data structures, and Unity lifecycle management (outside of the Burst/Job system).
 

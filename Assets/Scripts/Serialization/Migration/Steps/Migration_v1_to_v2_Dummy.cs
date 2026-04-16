@@ -1,4 +1,4 @@
-﻿using System.Threading;
+using System.Threading;
 
 namespace Serialization.Migration.Steps
 {

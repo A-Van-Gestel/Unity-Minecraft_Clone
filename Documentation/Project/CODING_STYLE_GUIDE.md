@@ -1,4 +1,4 @@
-﻿# C# Coding Style Guide
+# C# Coding Style Guide
 
 This document defines the coding style and conventions for this project. Following these guidelines is essential for maintaining code that is clean, readable, and easy to maintain.
 

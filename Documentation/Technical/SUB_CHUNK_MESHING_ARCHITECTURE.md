@@ -1,4 +1,4 @@
-﻿# Sub-Chunk (Section) Meshing Architecture
+# Sub-Chunk (Section) Meshing Architecture
 
 **Status:** Implemented (Active)
 **Target Engine:** Unity 6.2+

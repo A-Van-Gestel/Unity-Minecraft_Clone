@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using JetBrains.Annotations;
 using UnityEditor;
 using UnityEngine;

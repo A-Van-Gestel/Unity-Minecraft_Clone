@@ -1,4 +1,4 @@
-﻿# Project Structure Guide
+# Project Structure Guide
 
 This document provides an overview of the folder structure for the Voxel Engine project. A consistent structure is crucial for keeping the project organized, scalable, and easy to navigate.
 

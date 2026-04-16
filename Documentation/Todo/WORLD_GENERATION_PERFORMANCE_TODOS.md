@@ -1,4 +1,4 @@
-﻿# World Generation Performance TODOs
+# World Generation Performance TODOs
 
 This document outlines planned improvements to the world generation system. The primary goal is to make the entire pipeline, especially the `ChunkGenerationJob`, fully Burst-compatible for a 5-10x performance increase.
 

@@ -1,4 +1,4 @@
-﻿# Fluid Shoreline Rendering
+# Fluid Shoreline Rendering
 
 This document describes the algorithm and techniques used to render the foam shoreline effect where fluid surfaces meet solid walls. The system spans the C# mesher (`VoxelMeshHelper.cs`) and the HLSL shader (`UberLiquidShader.shader`).
 
