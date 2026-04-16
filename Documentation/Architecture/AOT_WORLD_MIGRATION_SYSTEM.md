@@ -2,8 +2,8 @@
 
 **Version:** 1.1  
 **Date:** 2026-02-24  
-**Status:** Implemented (TESTING)  
-**Target:** Unity 6.3 (Mono Backend)  
+**Status:** Implemented (Stable)  
+**Target:** Unity 6.4 (Mono Backend)  
 **Context:** Infinite Voxel Engine Serialization (Region-Based)
 
 ---

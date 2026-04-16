@@ -31,7 +31,7 @@ Apply each gate. A finding in any of these should block or downgrade the merge r
 - **Burst compliance scan:** Any diff under `Assets/Scripts/Jobs/` must be 100% Burst-compatible. Flag: managed reference fields, non-blittable types, `string` or `$""` interpolation (use `FixedString` / string literals), `Debug.Log($"...")` in jobs, non-`Unity.Mathematics` math (`Mathf`, `System.Math`), `try`/`catch` / exception types, LINQ, virtual calls, class fields.
 - **Pool usage:** Any `new List<T>()`, `new HashSet<T>()`, `new Dictionary<K,V>()` in a frequently-called method should route through a pool. One-shot initialization code is fine.
 - **Architectural constraints (hard rejections):** Any change that adds reference types per voxel, uses `BinaryFormatter` / JSON / XmlSerializer for terrain data, replaces sub-chunk meshing with monolithic columns, or bypasses the async BFS flood-fill for light propagation — reject and propose the data-oriented alternative. See `AGENTS.md` "Core Architecture Constraints".
-- **Serialization compatibility:** Changes to `ChunkData.cs`, `ChunkStorageManager.cs`, or anything under `Assets/Scripts/Serialization/` that alter the on-disk layout need AOT migration consideration. Reference `@Documentation/Design/AOT_WORLD_MIGRATION_SYSTEM.md` and flag if a migration step is missing.
+- **Serialization compatibility:** Changes to `ChunkData.cs`, `ChunkStorageManager.cs`, or anything under `Assets/Scripts/Serialization/` that alter the on-disk layout need AOT migration consideration. Reference `@Documentation/Architecture/AOT_WORLD_MIGRATION_SYSTEM.md` and flag if a migration step is missing.
 - **Known-bugs cross-check:** If the diff touches lighting, fluids, meshing, or chunk management, scan the relevant `@Documentation/Bugs/*.md` file to confirm the change does not reintroduce a known-fixed issue or collide with an open bug.
 - **Unity serialized-field safety:** Flag renames or deletions of `[SerializeField] private` fields or public fields referenced by prefabs/scenes/ScriptableObjects — silent data loss risk unless `[FormerlySerializedAs]` is used.
 - **Coding standards:** Magic numbers without named constants, `public` fields instead of `[SerializeField] private`, missing XML docstrings on new public API, incorrect constant casing (`public const` = PascalCase, `private const` = SCREAMING_CASE).
@@ -43,7 +43,7 @@ Group findings by severity:
 - **Blockers** — architectural constraint violations, Burst incompatibility in job code, missing AOT migration, silent data-loss risk.
 - **High** — hot-path GC, untested high-risk changes, known-bug collision.
 - **Medium** — missing pool usage, magic numbers, missing XML docstrings on new public members.
-- **Low** — style / naming deviations from `@Documentation/Project/CODING_STYLE_GUIDE.md`.
+- **Low** — style / naming deviations from `@Documentation/Guides/CODING_STYLE_GUIDE.md`.
 
 For each finding, include:
 

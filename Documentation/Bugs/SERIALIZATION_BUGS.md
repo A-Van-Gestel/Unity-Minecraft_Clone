@@ -13,7 +13,7 @@ This document outlines **open** bugs related to saving, loading, Region files, a
 
 The `_fileLock` works correctly to prevent save data corruption but adds massive overhead.
 
-**Status:** Needs careful architectural changes to split read and write concurrency. See `Documentation/Technical/REGION_FILE_CONCURRENCY.md` for a full breakdown of requirements before addressing this.
+**Status:** Needs careful architectural changes to split read and write concurrency. See `Documentation/Design/REGION_FILE_CONCURRENCY.md` for a full breakdown of requirements before addressing this.
 
 ---
 

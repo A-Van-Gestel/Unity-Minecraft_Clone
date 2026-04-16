@@ -19,7 +19,7 @@ regression does not happen.
 
 ### Step 1 — Read the pipeline document FIRST
 
-Before editing any pipeline code, read `@Documentation/Technical/CHUNK_LIFECYCLE_PIPELINE.md`. Specifically:
+Before editing any pipeline code, read `@Documentation/Architecture/CHUNK_LIFECYCLE_PIPELINE.md`. Specifically:
 
 - Section 2 — State flags, who sets them, who clears them.
 - Section 3 — Readiness gates (`AreNeighborsDataReady` vs `AreNeighborsReadyAndLit`) — the distinction is load-bearing.
@@ -46,7 +46,7 @@ Do not guess. Switch to the `voxel-debugging` skill and instrument first. The pi
 
 ### Step 5 — Update the pipeline document
 
-`@Documentation/Technical/CHUNK_LIFECYCLE_PIPELINE.md` is a living document and MUST stay in sync with the code. If your change alters any of the following, update the doc in the same commit:
+`@Documentation/Architecture/CHUNK_LIFECYCLE_PIPELINE.md` is a living document and MUST stay in sync with the code. If your change alters any of the following, update the doc in the same commit:
 
 - A state flag (added, removed, renamed, or re-purposed) — update Section 2 (State Flags Reference) and the flag lifecycle diagram.
 - A readiness gate (new condition, changed check order) — update Section 3 (Readiness Gates).

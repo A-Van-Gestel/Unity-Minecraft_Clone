@@ -19,7 +19,7 @@ This engine has a custom region-based binary save system with a formal migration
 
 ### Step 1 — Read the design document FIRST
 
-Read `@Documentation/Design/AOT_WORLD_MIGRATION_SYSTEM.md`. Key concepts before you write anything:
+Read `@Documentation/Architecture/AOT_WORLD_MIGRATION_SYSTEM.md`. Key concepts before you write anything:
 
 - **Master version:** `SaveSystem.CURRENT_VERSION` in `level.dat` is the single source of truth. Every format change bumps this.
 - **Historical DTOs:** Migration code MUST define its own frozen data structures inside the migration file. It must NOT reference live engine types like `ChunkData`, `ChunkSection`, or `VoxelState` — future rewrites of those types would silently break old migrations.
@@ -56,6 +56,6 @@ For every on-disk change, the following must all land in the same change:
 
 ## Cross-reference
 
-- Region file concurrency: `@Documentation/Technical/REGION_FILE_CONCURRENCY.md`
-- Overall storage architecture: `@Documentation/Design/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`
+- Region file concurrency: `@Documentation/Design/REGION_FILE_CONCURRENCY.md`
+- Overall storage architecture: `@Documentation/Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`
 - Known serialization bugs: `@Documentation/Bugs/SERIALIZATION_BUGS.md`

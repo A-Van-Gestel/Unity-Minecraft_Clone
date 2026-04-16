@@ -110,7 +110,7 @@ immediately visible to subsequent reads.
 
 **Root Cause:** A data race condition in chunk boundary lighting. When a chunk ran its lighting job, the `RecalculateSunlightForColumn` correctly evaluated direct downward light (e.g., `sunlight=15` through water).
 However, the neighboring chunk's lighting job (running asynchronously or later) evaluated the border block horizontally using BFS on a *stale snapshot* of the chunk (where the original sunlight value was `0`).
-This BFS evaluated a weakened light value (`15 - 1 distance - 2 water opacity = 12`) and generated a `CrossChunkLightMod`. This cross-chunk mod then overwrote the correct column value back on the main thread because the guard checking cross-chunk modifications was too narrow.  
+This BFS evaluated a weakened light value (`15 - 1 distance - 2 water opacity = 12`) and generated a `CrossChunkLightMod`. This cross-chunk mod then overwrote the correct column value back on the main thread because the guard checking cross-chunk modifications was too narrow.
 
 **Fix:** Broadened the safeguard in `ProcessLightingJobs` (`WorldJobManager.cs` line 518). Replaced the rigid `heightmap` check with a general principle:
 cross-chunk BFS modifications that evaluate a non-zero sunlight level *must never lower* the current target's sunlight level. This correctly delegates authoritative column values to the chunk that actually owns them.
@@ -257,6 +257,30 @@ The `UberLiquidShader` receives this vector (`localFlowVector`) and uses a dual-
 **Fix / Implementation:** In `VoxelMeshHelper.cs`, the mesh generation job now explicitly checks if the voxel has the falling flag (`fluidLevel >= 8`).
 If true, instead of calculating complex horizontal flow math, it bypasses the evaluation and forces a strict, high-velocity downward flow vector (`new Vector2(0f, 1.5f)`).
 The `UberLiquidShader` natively interprets this large V-axis vector, resulting in a fast-scrolling, distinct vertical waterfall effect that properly blends with horizontal pools at its base.
+
+---
+
+### ~~06. Missing Optimal Flow Direction Pathfinding~~
+
+**Severity:** Missing Feature  
+**Files:** `BlockBehavior.Fluids.cs`  
+**Fixed:** March 2026
+
+**Symptom:** Water spread outward in a uniform diamond shape, oblivious to nearby holes or drops.
+**Root Cause:** The simulation lacked Minecraft's recursive `calculateFlowCost` terrain scanner.
+**Fix:** Injected a dot-net 2.1 zero-allocation Breadth-First-Search iterative pathfinder using Unity's `NativeQueue` and bitmasks to determine the optimal downhill path.
+
+---
+
+### ~~09. Severed waterfalls cause infinite decay loops~~
+
+**Severity:** Bug  
+**Files:** `BlockBehavior.Fluids.cs`  
+**Fixed:** March 2026
+
+**Symptom:** Breaking a source block with a waterfall beneath it left floating, non-decaying waterfall columns that indefinitely supplied water to adjacent blocks.
+**Root Cause:** `CalculateExpectedFluidLevel` allowed orphaned waterfall blocks to act as level-0 support for each other, establishing a self-sustaining loop.
+**Fix:** Added an `isFedFromAbove` check. Now, if a falling fluid block is cut off from the stream above, it immediately decays to air or regular decaying fluid, ending the loop.
 
 ---
 
@@ -592,40 +616,3 @@ Furthermore, applying animations from the pool caused a 1-frame visual flash, an
 
 ---
 
-## Fluid Simulation
-
-### ~~05. 7x7 Horizontal Spreading Cube in Mid-Air~~
-
-**Severity:** Bug  
-**Files:** `BlockBehavior.Fluids.cs`  
-**Fixed:** March 2026
-
-**Symptom:** Pouring water off a cliff caused it to spread out horizontally into a 7x7 mid-air platform.
-**Root Cause:** Horizontal spread allowed fluid blocks to freely expand if the block below them was empty air, rather than matching Minecraft's gating logic which requires soft/fluid support to be solid.
-**Fix:** Added a conditional gate enforcing that non-source blocks can only spread if the block directly below them is solid, forcing waterfalls to drop straight down.
-
----
-
-### ~~06. Missing Optimal Flow Direction Pathfinding~~
-
-**Severity:** Missing Feature  
-**Files:** `BlockBehavior.Fluids.cs`  
-**Fixed:** March 2026
-
-**Symptom:** Water spread outward in a uniform diamond shape, oblivious to nearby holes or drops.
-**Root Cause:** The simulation lacked Minecraft's recursive `calculateFlowCost` terrain scanner.
-**Fix:** Injected a dot-net 2.1 zero-allocation Breadth-First-Search iterative pathfinder using Unity's `NativeQueue` and bitmasks to determine the optimal downhill path.
-
----
-
-### ~~07. Severed waterfalls cause infinite decay loops~~
-
-**Severity:** Bug  
-**Files:** `BlockBehavior.Fluids.cs`  
-**Fixed:** March 2026
-
-**Symptom:** Breaking a source block with a waterfall beneath it left floating, non-decaying waterfall columns that indefinitely supplied water to adjacent blocks.
-**Root Cause:** `CalculateExpectedFluidLevel` allowed orphaned waterfall blocks to act as level-0 support for each other, establishing a self-sustaining loop.
-**Fix:** Added an `isFedFromAbove` check. Now, if a falling fluid block is cut off from the stream above, it immediately decays to air or regular decaying fluid, ending the loop.
-
----

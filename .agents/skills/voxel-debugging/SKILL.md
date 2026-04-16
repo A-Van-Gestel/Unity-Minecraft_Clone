@@ -27,7 +27,7 @@ When debugging complex systems in this voxel engine, you must act as a Senior Sy
 3. **INSTRUMENT FIRST:** Generate a "Diagnostic Patch" instead of a fix.
     - Add targeted `Debug.Log` statements to trace data flow.
     - Suggest creating temporary `OnDrawGizmos` to visualize the data state.
-    - Check `@Documentation/Technical/DEBUG_METHODS_EXAMPLES.md` for existing debug tools (e.g. `DebugRaycastChunkState`) before writing new instrumentation.
+    - Check `@Documentation/Guides/DEBUG_METHODS_EXAMPLES.md` for existing debug tools (e.g. `DebugRaycastChunkState`) before writing new instrumentation.
 4. **BURST JOB LOGGING:** If the bug is inside a Burst Job (`Assets/Scripts/Jobs/`), you must use `Unity.Collections.LowLevel.Unsafe.UnsafeUtility` or `Debug.Log` strictly with **FixedStrings/String Literals only**. Do not use string interpolation (`$""`) in Jobs.
 5. **VERIFY ASSUMPTIONS:** State explicitly what you are trying to test (e.g., "We need to verify if the neighbor chunk is actually providing the correct data index before we change the meshing logic").
 6. **WAIT:** Wait for the user to run the game and provide the diagnostic logs before writing the actual bug fix.

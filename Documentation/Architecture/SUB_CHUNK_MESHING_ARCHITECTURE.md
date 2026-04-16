@@ -1,14 +1,14 @@
 # Sub-Chunk (Section) Meshing Architecture
 
 **Status:** Implemented (Active)
-**Target Engine:** Unity 6.2+
-**Context:** The engine successfully renders the world using 16x16x16 `ChunkSection` GameObjects instead of monolithic columns.
+**Target Engine:** Unity 6.4+
+**Context:** The engine renders the world using 16x16x16 `ChunkSection` GameObjects instead of monolithic columns.
 
 ## 1. Executive Summary
 
-To support increased world height (256+ blocks), eliminate main-thread lag during voxel modifications, and implement robust visibility culling, the rendering architecture will move from **Monolithic Column Meshes** to **Sub-Chunk (Section) Meshes**.
+To support increased world height (256+ blocks), eliminate main-thread lag during voxel modifications, and implement robust visibility culling, the rendering architecture uses **Sub-Chunk (Section) Meshes** instead of **Monolithic Column Meshes**.
 
-Instead of generating one massive mesh for a 16x16x128 column, we will generate independent meshes for each 16x16x16 `ChunkSection`. This aligns the rendering strategy with the underlying data structure and leverages Unity's native culling systems.
+Instead of generating one massive mesh for a 16x16x128 column, the engine generates independent meshes for each 16x16x16 `ChunkSection`. This aligns the rendering strategy with the underlying data structure and leverages Unity's native culling systems.
 
 ## 2. Problem Analysis
 
@@ -30,7 +30,7 @@ The `Chunk` class transforms from a Mesh provider into a **Manager**. It manages
 
 ### 3.2. Rendering Strategy
 
-We will use **Individual GameObjects per Section** with `MeshFilter` and `MeshRenderer`.
+The engine uses **Individual GameObjects per Section** with `MeshFilter` and `MeshRenderer`.
 
 **Why not `Graphics.DrawMesh`?**
 
@@ -102,7 +102,7 @@ To support future Cubic Chunks, the Meshing Job must become granular.
 
 ### 4.3. Modern Mesh API Optimization (Unity 2021+)
 
-To avoid Main Thread spikes when applying the mesh, we will use the Advanced Mesh API. This bypasses the conversion from `NativeList` -> `C# Array` -> `C++ Internal`.
+To avoid Main Thread spikes when applying the mesh, the engine uses the Advanced Mesh API. This bypasses the conversion from `NativeList` -> `C# Array` -> `C++ Internal`.
 
 ```csharp
 // OLD WAY (Slow, allocates memory)
@@ -136,8 +136,8 @@ mesh.SetSubMesh(0, new SubMeshDescriptor(0, indexCount));
 
 * **Risk:** Increasing GameObject count from ~400 (Chunks) to ~6,400 (Sections).
 * **Mitigation:**
-    1. **Empty Sections:** ~50% of sections (High air, Deep underground) have 0 vertices and will exist only as data, not GameObjects.
-    2. **GPU Instancing:** All sections share the same Material. Unity will batch them efficiently.
+    1. **Empty Sections:** ~50% of sections (High air, Deep underground) have 0 vertices and exist only as data, not GameObjects.
+    2. **GPU Instancing:** All sections share the same Material. Unity batches them efficiently.
     3. **Static Batching:** Not applicable for dynamic chunks, but Instancing is sufficient.
 
 ### 5.2. Memory
@@ -172,4 +172,4 @@ Once implemented, the `Chunk` (Column) class effectively becomes a legacy wrappe
 The Sub-Chunk architecture lays the foundation for **Graph-Based Visibility Culling** (stopping the rendering of caves when the player is on the surface).
 
 For the detailed design and implementation plan of this feature, please refer to:
-**[Documentation/Technical/VISIBILITY_CULLING_ARCHITECTURE.md](VISIBILITY_CULLING_ARCHITECTURE.md)**
+**[Documentation/Design/VISIBILITY_CULLING_ARCHITECTURE.md](../Design/VISIBILITY_CULLING_ARCHITECTURE.md)**

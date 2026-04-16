@@ -8,15 +8,15 @@ This is a Minecraft-like Voxel Engine built in **Unity 6.4** (Mono Scripting Bac
 If a user request violates these constraints, REJECT the request, explain why it fails at scale, and propose the Data-Oriented alternative.
 
 1. **Voxel Data**: Voxels are NOT objects. All data is bit-packed into a single `uint`. NEVER suggest adding classes/structs with reference types per voxel.
-    - *Reference:* Read `@Documentation/Technical/DATA_STRUCTURES.md`.
+    - *Reference:* Read `@Documentation/Architecture/DATA_STRUCTURES.md`.
 2. **Burst Jobs**: Code inside `Assets/Scripts/Jobs/` MUST be 100% Burst-compatible. NO managed reference types. ALWAYS use `Unity.Mathematics`.
-    - *Reference:* Read `@Documentation/Technical/BURST_COMPILER_GUIDE.md`.
+    - *Reference:* Read `@Documentation/Guides/BURST_COMPILER_GUIDE.md`.
 3. **Meshing**: We use Sub-Chunk (Section) Meshing (16x16x16), NOT monolithic columns.
-    - *Reference:* Read `@Documentation/Technical/SUB_CHUNK_MESHING_ARCHITECTURE.md`.
+    - *Reference:* Read `@Documentation/Architecture/SUB_CHUNK_MESHING_ARCHITECTURE.md`.
 4. **Lighting**: We use an async BFS flood-fill queue for Sunlight and Blocklight.
-    - *Reference:* Read `@Documentation/Technical/LIGHTING_SYSTEM_OVERVIEW.md`.
+    - *Reference:* Read `@Documentation/Architecture/LIGHTING_SYSTEM_OVERVIEW.md`.
 5. **Serialization**: We use a custom Region-based binary system with LZ4/GZip compression. NEVER suggest `BinaryFormatter`, `JSON`, or `XmlSerializer` for terrain data.
-    - *Reference:* Read `@Documentation/Design/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md` and `@Documentation/Design/AOT_WORLD_MIGRATION_SYSTEM.md`.
+    - *Reference:* Read `@Documentation/Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md` and `@Documentation/Architecture/AOT_WORLD_MIGRATION_SYSTEM.md`.
 
 ## Unity File Handling & Version Control
 
@@ -56,7 +56,7 @@ This is a high-performance engine. Efficiency is key.
 
 - **No LINQ or GC Allocations in hot paths:** Avoid `new`, `.Any()`, or `.ToArray()` inside `Update()` or core loops.
 - **Pooling:** Always use the project's existing custom pools (`DynamicPool<T>`, `ConcurrentDynamicPool<T>`) or Unity's standard pools (`ListPool<T>`, `HashSetPool<T>`).
-- *Reference:* Before making performance optimizations, read `@Documentation/Technical/GENERAL_OPTIMIZATION_GUIDE.md`.
+- *Reference:* Before making performance optimizations, read `@Documentation/Guides/GENERAL_OPTIMIZATION_GUIDE.md`.
 
 ## Diagnostic Debugging Workflow
 
@@ -67,8 +67,8 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 
 ## Code Style & Conventions
 
-- **Directory Structure:** Place new files in their exact architectural folder. See `@Documentation/Project/PROJECT_STRUCTURE.md`.
-- **Styling:** Adhere strictly to the rules in `@Documentation/Project/CODING_STYLE_GUIDE.md`.
+- **Directory Structure:** Place new files in their exact architectural folder. See `@Documentation/Guides/PROJECT_STRUCTURE.md`.
+- **Styling:** Adhere strictly to the rules in `@Documentation/Guides/CODING_STYLE_GUIDE.md`.
 - **No Magic Numbers:** Extract inline magic numbers into named constants.
     - `public const` fields must use `PascalCase` (e.g., `public const int ChunkWidth = 16;`).
     - `private const` fields must use `SCREAMING_CASE` (e.g., `private const uint SUNLIGHT_MASK = 0x00000F00;`).

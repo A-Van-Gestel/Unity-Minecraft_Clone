@@ -1,4 +1,7 @@
-# World Generation Performance TODOs
+# World Generation Performance TODOs  `[ARCHIVED]`
+
+> **Archived:** April 2026
+> **Reason:** The primary goal (Burst-compatible `ChunkGenerationJob` via FastNoiseLite) was achieved as part of the Modular World Generation refactor (see `Documentation/Design/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md`). Deferred structure generation was completed via `IChunkGenerator.ExpandFlora()`. Remaining items (SIMD micro-optimizations, heightmap early-exit) are speculative and low-priority — not worth maintaining as a live backlog. Kept here as a historical record of the investigation and findings.
 
 This document outlines planned improvements to the world generation system. The primary goal is to make the entire pipeline, especially the `ChunkGenerationJob`, fully Burst-compatible for a 5-10x performance increase.
 
