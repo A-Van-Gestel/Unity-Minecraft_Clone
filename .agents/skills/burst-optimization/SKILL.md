@@ -1,4 +1,4 @@
-﻿---
+---
 name: burst-optimization
 description: Use when optimizing code, writing new Burst jobs, refactoring performance bottlenecks, or when the user explicitly asks to make something faster.
 ---

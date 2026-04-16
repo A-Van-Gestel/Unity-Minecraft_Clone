@@ -6,6 +6,13 @@ root = true
 charset = utf-8
 insert_final_newline = true
 trim_trailing_whitespace = true
+max_line_length = 280
+
+# Normalize line endings for source and docs (explicitly scoped — Unity-serialized
+# files like .meta/.unity/.prefab/.asset are intentionally excluded so Unity's
+# serializer stays in charge of their line endings).
+[*.{cs,md,shader,compute,hlsl,cginc,json,asmdef,asmref}]
+end_of_line = lf
 
 # C# formatting
 [*.cs]
@@ -26,6 +33,7 @@ indent_size = 4
 # Protect Markdown hard line breaks (which rely on two trailing spaces)
 [*.md]
 trim_trailing_whitespace = false
+max_line_length = 560
 
 # Tell the IDE not to mess with Unity's auto-generated meta files
 [*.meta]
