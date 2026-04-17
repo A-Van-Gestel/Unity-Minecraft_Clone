@@ -72,7 +72,7 @@ public class Settings
     /// Gets the total radius of chunks around the player for which voxel data will be loaded and generated.
     /// This is a calculated property, dynamically derived from the viewDistance plus a safe buffer.
     /// </summary>
-    public int loadDistance => viewDistance + DATA_LOAD_BUFFER;
+    public int LoadDistance => viewDistance + DATA_LOAD_BUFFER;
 
     /// <summary>
     /// Caps the load distance for the initial startup to prevent long freezes.

@@ -185,7 +185,7 @@ public class Chunk
                 uint packedData = section.voxels[i];
                 ushort id = BurstVoxelDataBitMapping.GetId(packedData);
 
-                if (World.Instance.blockTypes[id].isActive)
+                if (World.Instance.BlockTypes[id].isActive)
                 {
                     // Convert section index back to 3D position
                     int x = i % ChunkMath.SECTION_SIZE;
@@ -269,7 +269,7 @@ public class Chunk
 
     #endregion
 
-    public bool isActive
+    public bool IsActive
     {
         get => _isActive;
         set

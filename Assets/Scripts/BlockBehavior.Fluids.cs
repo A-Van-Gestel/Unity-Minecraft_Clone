@@ -30,14 +30,14 @@ public static partial class BlockBehavior
     private static void HandleFluidFlow(ChunkData chunkData, Vector3Int localPos, VoxelState fluidState)
     {
         // 1. Setup shared state
-        ushort currentId = fluidState.id;
+        ushort currentId = fluidState.ID;
         byte currentLevel = fluidState.FluidLevel;
         BlockType props = fluidState.Properties;
 
-        Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
+        Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.Position.x, localPos.y, localPos.z + chunkData.Position.y);
 
         VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
-        bool belowIsSameFluid = belowState.HasValue && belowState.Value.id == currentId;
+        bool belowIsSameFluid = belowState.HasValue && belowState.Value.ID == currentId;
         bool canFlowDown = belowState.HasValue && !belowState.Value.Properties.isSolid && !belowIsSameFluid;
 
         // 2. Step 1: Calculate Expected Level (Decay / Drainage)
@@ -168,8 +168,8 @@ public static partial class BlockBehavior
             if (!neighborState.HasValue) continue;
 
             // Flow into air or same fluid with worse level
-            bool neighborIsAir = neighborState.Value.id == BlockIDs.Air;
-            bool neighborIsSameFluidAndWorse = neighborState.Value.id == currentId &&
+            bool neighborIsAir = neighborState.Value.ID == BlockIDs.Air;
+            bool neighborIsSameFluidAndWorse = neighborState.Value.ID == currentId &&
                                                !IsFalling(neighborState.Value.FluidLevel) && // Ensure we do not overwrite falling blocks (waterfalls) with horizontal flow.
                                                GetEffectiveLevel(neighborState.Value.FluidLevel) > newLevel;
 
@@ -178,8 +178,8 @@ public static partial class BlockBehavior
                 if (neighborState.Value.Properties.isSolid) continue;
 
                 Vector3Int globalNeighborPos = new Vector3Int(
-                    neighborPos.x + chunkData.position.x, neighborPos.y,
-                    neighborPos.z + chunkData.position.y);
+                    neighborPos.x + chunkData.Position.x, neighborPos.y,
+                    neighborPos.z + chunkData.Position.y);
 
                 if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} SPREADING HORIZONTALLY to {globalNeighborPos} with level {newLevel}");
 
@@ -206,7 +206,7 @@ public static partial class BlockBehavior
 
         // Reason 1: Can it flow down? (Gravity)
         VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
-        bool belowIsSameFluid = belowState.HasValue && belowState.Value.id == id;
+        bool belowIsSameFluid = belowState.HasValue && belowState.Value.ID == id;
         if (belowState.HasValue && !belowState.Value.Properties.isSolid && !belowIsSameFluid)
         {
             return true;
@@ -232,8 +232,8 @@ public static partial class BlockBehavior
 
                 if (!neighborState.HasValue) continue;
 
-                bool neighborIsAir = neighborState.Value.id == BlockIDs.Air;
-                bool neighborIsSameFluidAndWorse = neighborState.Value.id == id &&
+                bool neighborIsAir = neighborState.Value.ID == BlockIDs.Air;
+                bool neighborIsSameFluidAndWorse = neighborState.Value.ID == id &&
                                                    !IsFalling(neighborState.Value.FluidLevel) &&
                                                    GetEffectiveLevel(neighborState.Value.FluidLevel) > expectedNewLevel;
 
@@ -295,7 +295,7 @@ public static partial class BlockBehavior
 
         // 1. Check if fed from above
         VoxelState? aboveState = chunkData.GetState(localPos + Vector3Int.up);
-        if (aboveState.HasValue && aboveState.Value.id == fluidId)
+        if (aboveState.HasValue && aboveState.Value.ID == fluidId)
         {
             isFedFromAbove = true;
             expectedEffectiveLevel = GetEffectiveLevel(aboveState.Value.FluidLevel);
@@ -313,7 +313,7 @@ public static partial class BlockBehavior
                 Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
                 VoxelState? neighborState = chunkData.GetState(neighborPos);
 
-                if (neighborState.HasValue && neighborState.Value.id == fluidId)
+                if (neighborState.HasValue && neighborState.Value.ID == fluidId)
                 {
                     byte neighborEffective;
                     if (IsFalling(neighborState.Value.FluidLevel) && props.waterfallsMaxSpread)
@@ -322,7 +322,7 @@ public static partial class BlockBehavior
                         // CRITICAL FIX: To prevent infinite decay loops when a waterfall is broken,
                         // a falling block can ONLY act as a horizontal source if it itself is currently fed from above.
                         VoxelState? neighborAbove = chunkData.GetState(neighborPos + Vector3Int.up);
-                        bool isNeighborFed = neighborAbove.HasValue && neighborAbove.Value.id == fluidId;
+                        bool isNeighborFed = neighborAbove.HasValue && neighborAbove.Value.ID == fluidId;
 
                         // If it's a falling block but its source was severed, it provides no support.
                         neighborEffective = isNeighborFed ? (byte)0 : props.flowLevels;
@@ -358,7 +358,7 @@ public static partial class BlockBehavior
             {
                 VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
                 bool belowIsSolid = belowState.HasValue && belowState.Value.Properties.isSolid;
-                bool belowIsSource = belowState.HasValue && belowState.Value.id == fluidId && belowState.Value.FluidLevel == 0;
+                bool belowIsSource = belowState.HasValue && belowState.Value.ID == fluidId && belowState.Value.FluidLevel == 0;
 
                 if (belowIsSolid || belowIsSource)
                 {
@@ -414,14 +414,14 @@ public static partial class BlockBehavior
                 if (!neighborState.HasValue) continue;
 
                 // Stop if we hit a solid block or a source block of the same fluid
-                bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.id != fluidId;
-                bool isSourceFluid = neighborState.Value.id == fluidId && neighborState.Value.FluidLevel == 0;
+                bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.ID != fluidId;
+                bool isSourceFluid = neighborState.Value.ID == fluidId && neighborState.Value.FluidLevel == 0;
 
                 if (isSolid || isSourceFluid) continue;
 
                 // Check for a drop
                 VoxelState? belowNeighbor = chunkData.GetState(neighborPos + Vector3Int.down);
-                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.id != fluidId;
+                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.ID != fluidId;
 
                 if (belowNeighbor.HasValue && !belowIsSolid)
                 {
@@ -463,14 +463,14 @@ public static partial class BlockBehavior
 
             if (!neighborState.HasValue) continue;
 
-            bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.id != fluidId;
-            bool isSourceFluid = neighborState.Value.id == fluidId && neighborState.Value.FluidLevel == 0;
+            bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.ID != fluidId;
+            bool isSourceFluid = neighborState.Value.ID == fluidId && neighborState.Value.FluidLevel == 0;
 
             if (!isSolid && !isSourceFluid)
             {
                 validDirectionsMask |= (byte)(1 << i);
                 VoxelState? belowNeighbor = chunkData.GetState(neighborPos + Vector3Int.down);
-                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.id != fluidId;
+                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.ID != fluidId;
 
                 // If the block below is not a solid boundary, it's an immediate drop
                 if (belowNeighbor.HasValue && !belowIsSolid)

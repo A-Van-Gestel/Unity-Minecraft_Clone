@@ -25,9 +25,9 @@ public class WorldJobManager : IDisposable
 
     #region Job Tracking Dictionaries
 
-    public Dictionary<ChunkCoord, GenerationJobData> generationJobs { get; } = new Dictionary<ChunkCoord, GenerationJobData>();
-    public Dictionary<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> meshJobs { get; } = new Dictionary<ChunkCoord, (JobHandle, MeshDataJobOutput)>();
-    public Dictionary<ChunkCoord, LightingJobData> lightingJobs { get; } = new Dictionary<ChunkCoord, LightingJobData>();
+    public Dictionary<ChunkCoord, GenerationJobData> GenerationJobs { get; } = new Dictionary<ChunkCoord, GenerationJobData>();
+    public Dictionary<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> MeshJobs { get; } = new Dictionary<ChunkCoord, (JobHandle, MeshDataJobOutput)>();
+    public Dictionary<ChunkCoord, LightingJobData> LightingJobs { get; } = new Dictionary<ChunkCoord, LightingJobData>();
 
     #endregion
 
@@ -88,7 +88,7 @@ public class WorldJobManager : IDisposable
     /// <param name="chunkCoord">The coordinate of the chunk to generate.</param>
     public void ScheduleGeneration(ChunkCoord chunkCoord)
     {
-        if (generationJobs.ContainsKey(chunkCoord))
+        if (GenerationJobs.ContainsKey(chunkCoord))
             return;
 
         Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
@@ -97,7 +97,7 @@ public class WorldJobManager : IDisposable
             return;
 
         GenerationJobData jobData = _chunkGenerator.ScheduleGeneration(chunkCoord);
-        generationJobs.Add(chunkCoord, jobData);
+        GenerationJobs.Add(chunkCoord, jobData);
     }
 
     /// <summary>
@@ -125,7 +125,7 @@ public class WorldJobManager : IDisposable
     {
         ChunkCoord chunkCoord = chunk.Coord;
 
-        if (meshJobs.ContainsKey(chunkCoord))
+        if (MeshJobs.ContainsKey(chunkCoord))
             return true;
 
         // Gate 1: Center chunk must have completed at least one lighting pass and have
@@ -213,7 +213,7 @@ public class WorldJobManager : IDisposable
         JobHandle combinedDisposalHandle = JobHandle.CombineDependencies(disposalHandles);
         JobHandle finalHandle = disposalHandles.Dispose(combinedDisposalHandle);
 
-        meshJobs.Add(chunkCoord, (finalHandle, meshOutput));
+        MeshJobs.Add(chunkCoord, (finalHandle, meshOutput));
 
         return true;
     }
@@ -226,8 +226,8 @@ public class WorldJobManager : IDisposable
     /// <returns>True if the job was successfully scheduled, false if it exited early or was already scheduled.</returns>
     public bool ScheduleLightingUpdate(ChunkData chunkData, Allocator allocator = Allocator.Persistent)
     {
-        ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.position);
-        if (lightingJobs.ContainsKey(chunkCoord)) return false;
+        ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
+        if (LightingJobs.ContainsKey(chunkCoord)) return false;
 
         if (!_world.AreNeighborsDataReady(chunkCoord))
         {
@@ -250,7 +250,7 @@ public class WorldJobManager : IDisposable
         LightingJobData jobData = new LightingJobData
         {
             Input = inputData,
-            Map = _world.worldData.GetChunkMapForJob(chunkData.position, allocator),
+            Map = _world.worldData.GetChunkMapForJob(chunkData.Position, allocator),
             Mods = new NativeList<LightModification>(allocator),
             IsStable = new NativeArray<bool>(1, allocator),
             SunLightQueue = chunkData.GetSunlightQueueForJob(allocator),
@@ -258,21 +258,21 @@ public class WorldJobManager : IDisposable
             SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator),
         };
 
-        if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.position, out HashSet<Vector2Int> columns))
+        if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> columns))
         {
             foreach (Vector2Int col in columns)
             {
-                jobData.SunLightRecalcQueue.Enqueue(new Vector2Int(col.x - chunkData.position.x, col.y - chunkData.position.y));
+                jobData.SunLightRecalcQueue.Enqueue(new Vector2Int(col.x - chunkData.Position.x, col.y - chunkData.Position.y));
             }
 
-            _world.worldData.SunlightRecalculationQueue.Remove(chunkData.position);
+            _world.worldData.SunlightRecalculationQueue.Remove(chunkData.Position);
             HashSetPool<Vector2Int>.Release(columns);
         }
 
         NeighborhoodLightingJob job = new NeighborhoodLightingJob
         {
             Map = jobData.Map,
-            ChunkPosition = chunkData.position,
+            ChunkPosition = chunkData.Position,
             SunlightBfsQueue = jobData.SunLightQueue,
             BlocklightBfsQueue = jobData.BlockLightQueue,
             SunlightColumnRecalcQueue = jobData.SunLightRecalcQueue,
@@ -290,7 +290,7 @@ public class WorldJobManager : IDisposable
         jobData.Handle = job.Schedule();
         chunkData.HasLightChangesToProcess = false;
         if (chunkData.NeedsEdgeCheck) chunkData.NeedsEdgeCheck = false;
-        lightingJobs.Add(chunkCoord, jobData);
+        LightingJobs.Add(chunkCoord, jobData);
         return true;
     }
 
@@ -312,7 +312,7 @@ public class WorldJobManager : IDisposable
     public void ProcessGenerationJobs()
     {
         _completedGenJobs.Clear();
-        foreach (KeyValuePair<ChunkCoord, GenerationJobData> jobEntry in generationJobs)
+        foreach (KeyValuePair<ChunkCoord, GenerationJobData> jobEntry in GenerationJobs)
         {
             if (jobEntry.Value.Handle.IsCompleted)
             {
@@ -349,19 +349,19 @@ public class WorldJobManager : IDisposable
                     HashSet<Vector2Int> globalLightCols = HashSetPool<Vector2Int>.Get();
                     foreach (Vector2Int lCol in localLightCols)
                     {
-                        globalLightCols.Add(new Vector2Int(lCol.x + chunkData.position.x, lCol.y + chunkData.position.y));
+                        globalLightCols.Add(new Vector2Int(lCol.x + chunkData.Position.x, lCol.y + chunkData.Position.y));
                     }
 
                     HashSetPool<Vector2Int>.Release(localLightCols);
 
-                    if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.position, out HashSet<Vector2Int> existingQueue))
+                    if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> existingQueue))
                     {
                         existingQueue.UnionWith(globalLightCols);
                         HashSetPool<Vector2Int>.Release(globalLightCols);
                     }
                     else
                     {
-                        _world.worldData.SunlightRecalculationQueue[chunkData.position] = globalLightCols;
+                        _world.worldData.SunlightRecalculationQueue[chunkData.Position] = globalLightCols;
                     }
 
                     chunkData.HasLightChangesToProcess = true;
@@ -392,7 +392,7 @@ public class WorldJobManager : IDisposable
                 _completedGenJobs.Add(jobEntry.Key);
 
                 Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
-                if (chunk != null && chunk.isActive)
+                if (chunk != null && chunk.IsActive)
                 {
                     _world.RequestChunkMeshRebuild(chunk);
                 }
@@ -401,7 +401,7 @@ public class WorldJobManager : IDisposable
 
         foreach (ChunkCoord chunkCoord in _completedGenJobs)
         {
-            generationJobs.Remove(chunkCoord);
+            GenerationJobs.Remove(chunkCoord);
         }
     }
 
@@ -411,7 +411,7 @@ public class WorldJobManager : IDisposable
     public void ProcessMeshJobs()
     {
         _completedMeshJobs.Clear();
-        foreach (KeyValuePair<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> jobEntry in meshJobs)
+        foreach (KeyValuePair<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> jobEntry in MeshJobs)
         {
             if (jobEntry.Value.handle.IsCompleted)
             {
@@ -433,7 +433,7 @@ public class WorldJobManager : IDisposable
 
         foreach (ChunkCoord chunkCoord in _completedMeshJobs)
         {
-            meshJobs.Remove(chunkCoord);
+            MeshJobs.Remove(chunkCoord);
         }
     }
 
@@ -442,7 +442,7 @@ public class WorldJobManager : IDisposable
     /// </summary>
     public void ProcessLightingJobs()
     {
-        if (lightingJobs.Count == 0) return;
+        if (LightingJobs.Count == 0) return;
 
         _chunksToRebuildMesh.Clear();
         _completedLightJobs.Clear();
@@ -454,7 +454,7 @@ public class WorldJobManager : IDisposable
 
         _droppedLightUpdates.Clear();
 
-        foreach (KeyValuePair<ChunkCoord, LightingJobData> jobEntry in lightingJobs)
+        foreach (KeyValuePair<ChunkCoord, LightingJobData> jobEntry in LightingJobs)
         {
             if (jobEntry.Value.Handle.IsCompleted)
             {
@@ -638,7 +638,7 @@ public class WorldJobManager : IDisposable
 
         foreach (ChunkCoord chunkCoord in _completedLightJobs)
         {
-            lightingJobs.Remove(chunkCoord);
+            LightingJobs.Remove(chunkCoord);
         }
     }
 
@@ -703,7 +703,7 @@ public class WorldJobManager : IDisposable
                 }
                 else if (!isNewSection)
                 {
-                    section.RecalculateCounts(_world.blockTypes);
+                    section.RecalculateCounts(_world.BlockTypes);
                 }
             }
 
@@ -718,27 +718,27 @@ public class WorldJobManager : IDisposable
     /// </summary>
     public void Dispose()
     {
-        foreach (GenerationJobData job in generationJobs.Values)
+        foreach (GenerationJobData job in GenerationJobs.Values)
         {
             job.Handle.Complete();
             job.Dispose();
         }
 
-        foreach ((JobHandle handle, MeshDataJobOutput meshData) in meshJobs.Values)
+        foreach ((JobHandle handle, MeshDataJobOutput meshData) in MeshJobs.Values)
         {
             handle.Complete();
             meshData.Dispose();
         }
 
-        foreach (LightingJobData job in lightingJobs.Values)
+        foreach (LightingJobData job in LightingJobs.Values)
         {
             job.Handle.Complete();
             job.Dispose();
         }
 
-        generationJobs.Clear();
-        meshJobs.Clear();
-        lightingJobs.Clear();
+        GenerationJobs.Clear();
+        MeshJobs.Clear();
+        LightingJobs.Clear();
 
         _chunkGenerator?.Dispose();
     }

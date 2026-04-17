@@ -14,22 +14,22 @@ public class Player : MonoBehaviour
     private InputManager _input;
 
     [Tooltip("Makes the player not be affected by gravity.")]
-    public bool isFlying
+    public bool IsFlying
     {
         get => VoxelRigidbody.isFlying;
         set => VoxelRigidbody.isFlying = value;
     }
 
     [Tooltip("Allows the player to fly through blocks.")]
-    public bool isNoclipping
+    public bool IsNoclipping
     {
         get => VoxelRigidbody.isNoclipping;
         set => VoxelRigidbody.isNoclipping = value;
     }
 
-    public bool isGrounded => VoxelRigidbody.IsGrounded;
+    public bool IsGrounded => VoxelRigidbody.IsGrounded;
 
-    public bool isSprinting
+    public bool IsSprinting
     {
         get => VoxelRigidbody.isSprinting;
         set => VoxelRigidbody.isSprinting = value;
@@ -69,17 +69,17 @@ public class Player : MonoBehaviour
             playerBody.localPosition = playerBodyLocalPosition;
         }
 
-        _world.inUI = false;
+        _world.InUI = false;
     }
 
     private void Update()
     {
         if (_input.ToggleInventoryPressed)
         {
-            _world.inUI = !_world.inUI;
+            _world.InUI = !_world.InUI;
         }
 
-        if (!_world.inUI)
+        if (!_world.InUI)
         {
             GetPlayerInputs();
 
@@ -138,9 +138,9 @@ public class Player : MonoBehaviour
 
         // SPRINTING
         if (_input.SprintPressed)
-            isSprinting = true;
+            IsSprinting = true;
         if (_input.SprintReleased)
-            isSprinting = false;
+            IsSprinting = false;
 
         // --- DEBUG ACTIONS ---
         if (_input.ToggleDebugScreenPressed)
@@ -164,20 +164,20 @@ public class Player : MonoBehaviour
         // FLYING
         if (_input.ToggleFlyingPressed)
         {
-            isFlying = !isFlying;
-            if (!isFlying) isNoclipping = false; // Disable noclip when flight is disabled
+            IsFlying = !IsFlying;
+            if (!IsFlying) IsNoclipping = false; // Disable noclip when flight is disabled
         }
 
         // NOCLIP (GHOST MODE)
         if (_input.ToggleNoclipPressed)
         {
-            isNoclipping = !isNoclipping;
-            if (isNoclipping) isFlying = true; // Noclip requires flying
+            IsNoclipping = !IsNoclipping;
+            if (IsNoclipping) IsFlying = true; // Noclip requires flying
         }
 
-        if (!isFlying)
+        if (!IsFlying)
         {
-            if (isGrounded && _input.JumpHeld)
+            if (IsGrounded && _input.JumpHeld)
                 VoxelRigidbody.RequestJump();
         }
         else
@@ -217,8 +217,8 @@ public class Player : MonoBehaviour
             rotation = combinedRotation,
             capabilities = new PlayerCapabilityData
             {
-                isFlying = isFlying,
-                isNoclipping = isNoclipping,
+                isFlying = IsFlying,
+                isNoclipping = IsNoclipping,
             },
         };
 
@@ -250,8 +250,8 @@ public class Player : MonoBehaviour
         }
 
         // 3. Capabilities
-        isFlying = data.capabilities.isFlying;
-        isNoclipping = data.capabilities.isNoclipping;
+        IsFlying = data.capabilities.isFlying;
+        IsNoclipping = data.capabilities.isNoclipping;
     }
 
     #endregion

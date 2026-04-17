@@ -216,7 +216,7 @@ namespace Helpers
             float smooth_bl = math.max(kMinFluidSurfaceHeight, GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_W, n_SW, in templates, in blockTypes));
 
             // Check if we have fluid directly above us
-            bool hasFluidAbove = above.HasValue && blockTypes[above.State.id].FluidType == props.FluidType;
+            bool hasFluidAbove = above.HasValue && blockTypes[above.State.ID].FluidType == props.FluidType;
 
             // Force all corners to 1.0 when submerged so the block connects seamlessly to the one above.
             float height_tr = hasFluidAbove ? 1.0f : smooth_tr;
@@ -229,14 +229,14 @@ namespace Helpers
             // --- 4A. Top Face ---
             // Draw unless the same fluid is directly above, that would make the face interior to the fluid body.
             // Note: opaque blocks above (e.g. stone ceiling) must NOT suppress this face.
-            if (!above.HasValue || blockTypes[above.State.id].FluidType != props.FluidType)
+            if (!above.HasValue || blockTypes[above.State.ID].FluidType != props.FluidType)
             {
                 vertices.Add(pos + new Vector3(0, height_bl, 0)); // Back-Left
                 vertices.Add(pos + new Vector3(0, height_tl, 1)); // Front-Left
                 vertices.Add(pos + new Vector3(1, height_br, 0)); // Back-Right
                 vertices.Add(pos + new Vector3(1, height_tr, 1)); // Front-Right
 
-                float lightLevel = above.HasValue ? above.State.lightAsFloat : 1.0f;
+                float lightLevel = above.HasValue ? above.State.LightAsFloat : 1.0f;
 
                 // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
                 // v.color.r = liquidType
@@ -317,7 +317,7 @@ namespace Helpers
                     default: continue;
                 }
 
-                bool isNeighborSameFluid = sideNeighbor.HasValue && blockTypes[sideNeighbor.State.id].FluidType == props.FluidType;
+                bool isNeighborSameFluid = sideNeighbor.HasValue && blockTypes[sideNeighbor.State.ID].FluidType == props.FluidType;
 
                 // When true, the side face bottom is raised to the smooth surface level (waterfall curtain).
                 // When false, the face runs from y=0 up to the smooth heights (shallow edge gap-fill).
@@ -328,7 +328,7 @@ namespace Helpers
                     bool isFullHeight = hasFluidAbove || templates[fluidLevel] >= 1.0f;
                     bool neighborIsFullHeight = templates[sideNeighbor.State.FluidLevel] >= 1.0f;
                     bool neighborHasFluidAbove = sideNeighborAbove.HasValue &&
-                                                 blockTypes[sideNeighborAbove.State.id].FluidType == props.FluidType;
+                                                 blockTypes[sideNeighborAbove.State.ID].FluidType == props.FluidType;
                     bool neighborIsEffectivelyFullHeight = neighborIsFullHeight || neighborHasFluidAbove;
 
                     if (isFullHeight)
@@ -356,7 +356,7 @@ namespace Helpers
                 else
                 {
                     // Neighbor is not the same fluid — cull only against opaque solids.
-                    if (sideNeighbor.HasValue && !blockTypes[sideNeighbor.State.id].IsTransparentForMesh) continue;
+                    if (sideNeighbor.HasValue && !blockTypes[sideNeighbor.State.ID].IsTransparentForMesh) continue;
                 }
 
                 int v1 = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + 0];
@@ -388,7 +388,7 @@ namespace Helpers
                 vertices.Add(pos + p3);
                 vertices.Add(pos + p4);
 
-                float lightLevel = sideNeighbor.HasValue ? sideNeighbor.State.lightAsFloat : 1.0f;
+                float lightLevel = sideNeighbor.HasValue ? sideNeighbor.State.LightAsFloat : 1.0f;
 
                 // Side faces carry no shore data — g=0 (no walls), zw = 0
                 Color sideColor = new Color(liquidType, 0.0f, 1.0f, lightLevel);
@@ -444,14 +444,14 @@ namespace Helpers
 
             // --- 4C. Bottom Face ---
             // Only draw bottom face if below neighboring voxel is transparent or a different fluid.
-            if (!below.HasValue || blockTypes[below.State.id].IsTransparentForMesh && blockTypes[below.State.id].FluidType != props.FluidType)
+            if (!below.HasValue || blockTypes[below.State.ID].IsTransparentForMesh && blockTypes[below.State.ID].FluidType != props.FluidType)
             {
                 vertices.Add(pos + new Vector3(0, 0, 0)); // Back-Left   (0)
                 vertices.Add(pos + new Vector3(0, 0, 1)); // Front-Left  (1)
                 vertices.Add(pos + new Vector3(1, 0, 0)); // Back-Right  (2)
                 vertices.Add(pos + new Vector3(1, 0, 1)); // Front-Right (3)
 
-                float lightLevel = below.HasValue ? below.State.lightAsFloat : 1.0f;
+                float lightLevel = below.HasValue ? below.State.LightAsFloat : 1.0f;
                 // Bottom faces are internal. Hardcode shore mask (g) to 0.0f (no walls).
                 // Use 1.0f for the b-channel so bottom faces default to full brightness (unshadowed) in game
                 Color bottomColor = new Color(liquidType, 0.0f, 1.0f, lightLevel);
@@ -500,8 +500,8 @@ namespace Helpers
             int count = 1;
 
             // Track if adjacent neighbors are fluids to determine if the diagonal path is open ---
-            bool n1IsFluid = n1.HasValue && blockTypes[n1.State.id].FluidType == centerProps.FluidType;
-            bool n2IsFluid = n2.HasValue && blockTypes[n2.State.id].FluidType == centerProps.FluidType;
+            bool n1IsFluid = n1.HasValue && blockTypes[n1.State.ID].FluidType == centerProps.FluidType;
+            bool n2IsFluid = n2.HasValue && blockTypes[n2.State.ID].FluidType == centerProps.FluidType;
 
             if (n1IsFluid)
             {
@@ -517,7 +517,7 @@ namespace Helpers
 
             // Only consider the diagonal neighbor for smoothing if at least one of the
             // adjacent neighbors is also a fluid. This prevents height smoothing "through" solid corners.
-            bool nDiagIsFluid = nDiag.HasValue && blockTypes[nDiag.State.id].FluidType == centerProps.FluidType;
+            bool nDiagIsFluid = nDiag.HasValue && blockTypes[nDiag.State.ID].FluidType == centerProps.FluidType;
             if ((n1IsFluid || n2IsFluid) && nDiagIsFluid)
             {
                 totalHeight += templates[nDiag.State.FluidLevel];
@@ -642,7 +642,7 @@ namespace Helpers
         {
             if (!neighbor.HasValue) return 0f; // Neutral chunk edge
 
-            BlockTypeJobData nbProps = blockTypes[neighbor.State.id];
+            BlockTypeJobData nbProps = blockTypes[neighbor.State.ID];
 
             // Solid obstacle
             if (nbProps.IsSolid && !nbProps.IsTransparentForMesh) return 2.0f; // Represents a solid wall (higher than fluid 1.0)
@@ -695,10 +695,10 @@ namespace Helpers
             // grid-adjacent edges, promote it to wall status. This prevents diagonal air (e.g., SW)
             // behind two walls (S + W) from breaking wall-pair detection for shore push.
             // IMPORTANT: fluid blocks must NEVER be promoted — they are valid fluid surfaces.
-            if (!s00 && s10 && s01 && b00.HasValue && blockTypes[b00.State.id].FluidType == FluidType.None) s00 = true;
-            if (!s10 && s00 && s11 && b10.HasValue && blockTypes[b10.State.id].FluidType == FluidType.None) s10 = true;
-            if (!s01 && s00 && s11 && b01.HasValue && blockTypes[b01.State.id].FluidType == FluidType.None) s01 = true;
-            if (!s11 && s10 && s01 && b11.HasValue && blockTypes[b11.State.id].FluidType == FluidType.None) s11 = true;
+            if (!s00 && s10 && s01 && b00.HasValue && blockTypes[b00.State.ID].FluidType == FluidType.None) s00 = true;
+            if (!s10 && s00 && s11 && b10.HasValue && blockTypes[b10.State.ID].FluidType == FluidType.None) s10 = true;
+            if (!s01 && s00 && s11 && b01.HasValue && blockTypes[b01.State.ID].FluidType == FluidType.None) s01 = true;
+            if (!s11 && s10 && s01 && b11.HasValue && blockTypes[b11.State.ID].FluidType == FluidType.None) s11 = true;
 
             float x_push = 0f;
             float z_push = 0f;
@@ -750,7 +750,7 @@ namespace Helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsSolidWall(OptionalVoxelState state, in NativeArray<BlockTypeJobData> blockTypes)
         {
-            return state.HasValue && blockTypes[state.State.id].IsSolid && blockTypes[state.State.id].FluidType == FluidType.None;
+            return state.HasValue && blockTypes[state.State.ID].IsSolid && blockTypes[state.State.ID].FluidType == FluidType.None;
         }
 
         /// <summary>
@@ -761,7 +761,7 @@ namespace Helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsMatchingFluid(OptionalVoxelState state, FluidType fluidType, in NativeArray<BlockTypeJobData> blockTypes)
         {
-            return state.HasValue && blockTypes[state.State.id].FluidType == fluidType;
+            return state.HasValue && blockTypes[state.State.ID].FluidType == fluidType;
         }
 
         /// <summary>

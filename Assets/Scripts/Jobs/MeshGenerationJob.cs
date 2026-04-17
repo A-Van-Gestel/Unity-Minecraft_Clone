@@ -268,7 +268,7 @@ namespace Jobs
                     {
                         int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                         int textureID = GetTextureID(id, translatedP);
-                        float lightLevel = neighborVoxel?.lightAsFloat ?? 1.0f;
+                        float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, lightLevel, pos, rotation,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
@@ -291,7 +291,7 @@ namespace Jobs
                     {
                         int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                         int textureID = GetTextureID(id, translatedP);
-                        float lightLevel = neighborVoxel?.lightAsFloat ?? 1.0f;
+                        float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 
                         VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
@@ -312,7 +312,7 @@ namespace Jobs
             // If neighbor is null (chunk boundary/unloaded), draw the face to prevent holes.
             if (!neighborVoxel.HasValue) return true;
 
-            BlockTypeJobData neighborProps = BlockTypes[neighborVoxel.Value.id];
+            BlockTypeJobData neighborProps = BlockTypes[neighborVoxel.Value.ID];
 
             // Logic: Draw if the neighbor does NOT occlude this face.
             if (voxelProps.RenderNeighborFaces)

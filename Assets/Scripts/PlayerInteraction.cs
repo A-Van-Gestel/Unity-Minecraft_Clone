@@ -48,7 +48,7 @@ public class PlayerInteraction : MonoBehaviour
 
     private void Update()
     {
-        if (_world.inUI) return;
+        if (_world.InUI) return;
 
         PlaceCursorBlocks();
         HandleBlockModificationInput();

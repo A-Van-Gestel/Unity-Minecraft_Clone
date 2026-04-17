@@ -99,19 +99,19 @@ namespace Serialization
                 int length = ChunkSerializer.Serialize(data, buffer, algorithm);
                 if (length <= 0)
                 {
-                    Debug.LogWarning($"[SaveChunk] Chunk at voxelPos {data.position.ToString()} serialization returned 0 bytes");
+                    Debug.LogWarning($"[SaveChunk] Chunk at voxelPos {data.Position.ToString()} serialization returned 0 bytes");
                     return;
                 }
 
                 // Write to Region
-                (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(data.position);
+                (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(data.Position);
                 RegionFile region = GetRegion(regionCoord);
 
                 region.SaveChunkData(lx, lz, buffer, length, algorithm);
             }
             catch (Exception e)
             {
-                Debug.LogError($"[SaveChunk] Failed to save chunk at voxelPos {data.position.ToString()}: {e.Message}");
+                Debug.LogError($"[SaveChunk] Failed to save chunk at voxelPos {data.Position.ToString()}: {e.Message}");
             }
             finally
             {
@@ -151,7 +151,7 @@ namespace Serialization
                     if (length <= 0 || cancellationToken.IsCancellationRequested) return;
 
                     // Write
-                    (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(snapshot.position);
+                    (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(snapshot.Position);
                     RegionFile region = GetRegion(regionCoord);
 
                     region.SaveChunkData(lx, lz, buffer, length, algorithm);
@@ -163,7 +163,7 @@ namespace Serialization
             }
             catch (Exception e)
             {
-                Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {data.position.ToString()}: {e.Message}");
+                Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {data.Position.ToString()}: {e.Message}");
             }
             finally
             {
@@ -211,7 +211,7 @@ namespace Serialization
 
         private static ChunkData CreateSerializationSnapshot(ChunkData source)
         {
-            ChunkData snapshot = World.Instance.ChunkPool.GetChunkData(source.position);
+            ChunkData snapshot = World.Instance.ChunkPool.GetChunkData(source.Position);
             snapshot.NeedsInitialLighting = source.NeedsInitialLighting;
 
             // Copy Heightmap

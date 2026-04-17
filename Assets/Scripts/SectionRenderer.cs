@@ -81,9 +81,9 @@ public class SectionRenderer
         int currentIndexOffset = 0;
 
         // Add submeshes in order
-        AddSubMesh(opaqueTris, opaqueStart, opaqueCount, World.Instance.opaqueMaterial);
-        AddSubMesh(transparentTris, transparentStart, transparentCount, World.Instance.transparentMaterial);
-        AddSubMesh(fluidTris, fluidStart, fluidCount, World.Instance.liquidMaterial);
+        AddSubMesh(opaqueTris, opaqueStart, opaqueCount, World.Instance.OpaqueMaterial);
+        AddSubMesh(transparentTris, transparentStart, transparentCount, World.Instance.TransparentMaterial);
+        AddSubMesh(fluidTris, fluidStart, fluidCount, World.Instance.LiquidMaterial);
 
         // --- 3. Apply Submeshes Atomically ---
         // This overwrites all previous submesh data in one go, preventing overlap warnings.

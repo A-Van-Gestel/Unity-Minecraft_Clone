@@ -18,7 +18,7 @@ namespace Data
         /// <summary>
         /// Gets or sets the block ID.
         /// </summary>
-        public ushort id
+        public ushort ID
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => BurstVoxelDataBitMapping.GetId(_packedData);
@@ -29,7 +29,7 @@ namespace Data
         /// <summary>
         /// Gets or sets the orientation index of the voxel.
         /// </summary>
-        public byte orientation
+        public byte Orientation
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => BurstVoxelDataBitMapping.GetOrientation(_packedData);
@@ -41,7 +41,7 @@ namespace Data
         /// Returns the highest light level between sunlight and blocklight.
         /// </summary>
         /// <value>A byte from 0 to 15 representing the maximum light.</value>
-        public byte light
+        public byte Light
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => BurstVoxelDataBitMapping.GetLight(_packedData);
@@ -130,16 +130,16 @@ namespace Data
         /// <summary>
         /// Convenience accessor for the actual <see cref="BlockType"/> properties.
         /// </summary>
-        public BlockType Properties => World.Instance.blockTypes[id];
+        public BlockType Properties => World.Instance.BlockTypes[ID];
 
         /// <summary>
         /// Returns the highest light level between sunlight and blocklight as a float between 0 and 1.
         /// </summary>
         /// <value>A float from 0 to 1 representing the light intensity.</value>
-        public float lightAsFloat
+        public float LightAsFloat
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => light * VoxelData.UnitOfLight;
+            get => Light * VoxelData.UnitOfLight;
         }
 
         // --- Operator Overloads for comparison ---
@@ -175,7 +175,7 @@ namespace Data
 
         public override string ToString()
         {
-            return $"VoxelState: {{ Id = {id}, Light = {light}, Orientation = {orientation}, Properties = {Properties} }}";
+            return $"VoxelState: {{ Id = {ID}, Light = {Light}, Orientation = {Orientation}, Properties = {Properties} }}";
         }
 
         #endregion

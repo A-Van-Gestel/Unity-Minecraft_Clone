@@ -98,8 +98,8 @@ namespace Serialization
         {
             // --- Chunk Header ---
             writer.Write(CURRENT_CHUNK_VERSION);
-            writer.Write(data.position.x);
-            writer.Write(data.position.y); // Z coordinate (Vector2Int.y)
+            writer.Write(data.Position.x);
+            writer.Write(data.Position.y); // Z coordinate (Vector2Int.y)
 
             // --- State Flags ---
             writer.Write(data.NeedsInitialLighting);

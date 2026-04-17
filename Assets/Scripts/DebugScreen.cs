@@ -367,9 +367,9 @@ public class DebugScreen : MonoBehaviour
 
         // --- Player & Speed Info ---
         _topLeftBuilder.AppendLine("PLAYER:");
-        _topLeftBuilder.Append("isGrounded: ").Append(_player.isGrounded)
-            .Append(" | isFlying (").Append(_input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.isFlying)
-            .Append(" | isNoclipping (").Append(_input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.isNoclipping)
+        _topLeftBuilder.Append("isGrounded: ").Append(_player.IsGrounded)
+            .Append(" | isFlying (").Append(_input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.IsFlying)
+            .Append(" | isNoclipping (").Append(_input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.IsNoclipping)
             .Append(" | showHighlight (").Append(_input.GetBindingDisplayString(GameAction.ToggleBlockHighlight)).Append("): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
         _topLeftBuilder.Append("SPEED: Current: ").Append(_player.MoveSpeed.ToString("F1"))
             .Append(" | Flying: ").Append(_player.VoxelRigidbody.flyingSpeed.ToString("F1")).AppendLine();
@@ -513,7 +513,7 @@ public class DebugScreen : MonoBehaviour
             builder.Append("Name: ").AppendLine(props.blockName);
             builder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
             builder.Append("Is Active: ").AppendLine(BoolToYesNoString(isVoxelActive));
-            builder.Append("Light (Sun/Block/Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.light).AppendLine();
+            builder.Append("Light (Sun/Block/Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.Light).AppendLine();
 
             // --- Context-Specific Information ---
             if (props.fluidType != FluidType.None)
@@ -524,7 +524,7 @@ public class DebugScreen : MonoBehaviour
             else
             {
                 // For non-fluids (solids), show orientation.
-                builder.Append("Orientation: ").AppendLine(state.orientation.ToString());
+                builder.Append("Orientation: ").AppendLine(state.Orientation.ToString());
             }
 
             // --- General Properties & Tags ---

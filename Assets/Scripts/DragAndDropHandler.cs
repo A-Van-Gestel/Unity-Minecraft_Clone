@@ -37,14 +37,14 @@ public class DragAndDropHandler : MonoBehaviour
     private void Update()
     {
         // UI is closed and cursor slot is empty, do nothing.
-        if (!_world.inUI && !_cursorSlot.HasItem)
+        if (!_world.InUI && !_cursorSlot.HasItem)
             return;
 
         if (_creativeInventory == null)
             _creativeInventory = GameObject.Find("CreativeInventory").GetComponent<CreativeInventory>();
 
         // UI is closed and cursor slot still has item, place item back to original place.
-        if (!_world.inUI && _cursorSlot.HasItem)
+        if (!_world.InUI && _cursorSlot.HasItem)
         {
             PlaceStackToLastLocation(_cursorSlot);
             return;
@@ -110,7 +110,7 @@ public class DragAndDropHandler : MonoBehaviour
             }
 
             // Both slots contain the same item, combine item amount based on stack size
-            int maxStackSize = _world.blockTypes[_cursorSlot.ItemSlot.Stack.ID].stackSize;
+            int maxStackSize = _world.BlockTypes[_cursorSlot.ItemSlot.Stack.ID].stackSize;
             int oldCursorSlotStackAmount = _cursorSlot.ItemSlot.Stack.Amount;
             int oldClickedSlotStackAmount = clickedSlot.ItemSlot.Stack.Amount;
             int combinedStackAmount = oldClickedSlotStackAmount + oldCursorSlotStackAmount;
@@ -166,7 +166,7 @@ public class DragAndDropHandler : MonoBehaviour
                 return;
 
             // Both slots contain the same item, place one item into clicked slot based on stack size
-            int maxStackSize = _world.blockTypes[_cursorSlot.ItemSlot.Stack.ID].stackSize;
+            int maxStackSize = _world.BlockTypes[_cursorSlot.ItemSlot.Stack.ID].stackSize;
 
             // Clicked slot is full, do nothing.
             if (clickedSlot.ItemSlot.Stack.Amount + 1 > maxStackSize) return;
@@ -189,7 +189,7 @@ public class DragAndDropHandler : MonoBehaviour
     [CanBeNull]
     private ItemStack CombineStacks(ItemSlot slotA, ItemStack stack)
     {
-        int maxStackSize = _world.blockTypes[stack.ID].stackSize;
+        int maxStackSize = _world.BlockTypes[stack.ID].stackSize;
         int oldSlotAStackAmount = slotA.Stack.Amount;
         int combinedStackAmount = oldSlotAStackAmount + stack.Amount;
 
@@ -252,7 +252,7 @@ public class DragAndDropHandler : MonoBehaviour
         if (!uiItemSlot.HasItem)
             return true;
 
-        int maxStackSize = _world.blockTypes[uiItemSlot.ItemSlot.Stack.ID].stackSize;
+        int maxStackSize = _world.BlockTypes[uiItemSlot.ItemSlot.Stack.ID].stackSize;
 
         // First fill slots in inventory with same item.
         foreach (ItemSlot slot in _creativeInventory.Slots)

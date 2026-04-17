@@ -18,7 +18,7 @@ namespace Data
         private int _x;
         private int _y;
 
-        public Vector2Int position
+        public Vector2Int Position
         {
             get => new Vector2Int(_x, _y);
             set
@@ -104,7 +104,7 @@ namespace Data
         /// <param name="pos">The voxel-space world origin of the chunk.</param>
         public ChunkData(Vector2Int pos)
         {
-            position = pos;
+            Position = pos;
             InitializeSections();
         }
 
@@ -137,7 +137,7 @@ namespace Data
         /// <param name="pos">The new voxel-space world origin for the recycled chunk.</param>
         public void Reset(Vector2Int pos)
         {
-            position = pos;
+            Position = pos;
             IsPopulated = false;
             IsLoading = false;
             Chunk = null; // Unlink visual
@@ -255,7 +255,7 @@ namespace Data
                 else
                 {
                     // Recalculate counts so IsFullySolid works correctly for meshing
-                    sections[i].RecalculateCounts(World.Instance.blockTypes);
+                    sections[i].RecalculateCounts(World.Instance.BlockTypes);
                 }
             }
         }
@@ -266,7 +266,7 @@ namespace Data
         /// <param name="loadedData">The chunk data object loaded from disk.</param>
         public void PopulateFromSave(ChunkData loadedData)
         {
-            Debug.Log($"[PopulateFromSave] Starting for chunk {position}");
+            Debug.Log($"[PopulateFromSave] Starting for chunk {Position}");
 
             // Copy value types / arrays of value types
             // Note: heightMap is a fixed size array, so we copy contents, not the reference, just to be safe.
@@ -307,12 +307,12 @@ namespace Data
             if (World.Instance != null)
             {
                 foreach (ChunkSection section in sections)
-                    section?.RecalculateCounts(World.Instance.blockTypes);
+                    section?.RecalculateCounts(World.Instance.BlockTypes);
             }
 
             IsPopulated = true;
 
-            Debug.Log($"[PopulateFromSave] Completed for chunk {position}");
+            Debug.Log($"[PopulateFromSave] Completed for chunk {Position}");
         }
 
         #endregion
@@ -341,7 +341,7 @@ namespace Data
             // --- Create the new voxel data from the modification ---
             // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
             // The LightingJob will then fill it with propagated light from neighbors.
-            BlockType newProps = World.Instance.blockTypes[mod.ID];
+            BlockType newProps = World.Instance.BlockTypes[mod.ID];
 
             // IMPORTANT: If this is a fluid block, we must NOT pass the block placement orientation.
             // BurstVoxelDataBitMapping combines Orientation/FluidLevel into the same byte.
@@ -358,7 +358,7 @@ namespace Data
             ushort oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
             byte oldBlocklight = BurstVoxelDataBitMapping.GetBlockLight(oldPackedData);
             byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
-            BlockType oldProps = World.Instance.blockTypes[oldId];
+            BlockType oldProps = World.Instance.BlockTypes[oldId];
 
             // --- Update The Map (Sections) ---
             SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData, newProps, oldProps);
@@ -382,7 +382,7 @@ namespace Data
                     uint checkPacked = GetVoxel(localPos.x, y, localPos.z);
                     ushort checkId = BurstVoxelDataBitMapping.GetId(checkPacked);
                     // FIX: Was IsOpaque — changed to IsLightObstructing for consistency with Case 1 (line 346).
-                    if (World.Instance.blockTypes[checkId].IsLightObstructing)
+                    if (World.Instance.BlockTypes[checkId].IsLightObstructing)
                     {
                         newHeight = (ushort)y;
                         break; // Found the new highest block, stop scanning.
@@ -419,13 +419,13 @@ namespace Data
             // 3. If opacity changed, queue a full vertical sunlight recalculation.
             if (newProps.opacity != oldProps.opacity)
             {
-                World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(localPos.x + position.x, localPos.z + position.y));
+                World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(localPos.x + Position.x, localPos.z + Position.y));
             }
 
             // --- Notify World and Handle Active Voxels ---
 
             // Pass the immediateUpdate flag to the world so it can prioritize the mesh rebuild.
-            World.Instance.NotifyChunkModified(position, localPos, mod.ImmediateUpdate);
+            World.Instance.NotifyChunkModified(Position, localPos, mod.ImmediateUpdate);
 
             // If the chunk object exists, update its active voxel list immediately.
             // If not (e.g., during initial world gen), the active voxel scan in
@@ -611,7 +611,7 @@ namespace Data
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     // The global position of the column.
-                    worldData.QueueSunlightRecalculation(new Vector2Int(position.x + x, position.y + z));
+                    worldData.QueueSunlightRecalculation(new Vector2Int(Position.x + x, Position.y + z));
                 }
             }
         }
@@ -691,7 +691,7 @@ namespace Data
             }
 
             // If it's not in this chunk, ask the world.
-            Vector3 globalPos = new Vector3(localPos.x + position.x, localPos.y, localPos.z + position.y);
+            Vector3 globalPos = new Vector3(localPos.x + Position.x, localPos.y, localPos.z + Position.y);
             return World.Instance.worldData.GetVoxelState(globalPos);
         }
 
@@ -732,7 +732,7 @@ namespace Data
                 ushort id = BurstVoxelDataBitMapping.GetId(packedData);
                 // Debug.Log($"Y: {y:D2} | VoxelState: {World.Instance.blockTypes[id]}");
 
-                if (World.Instance.blockTypes[id].isSolid)
+                if (World.Instance.BlockTypes[id].isSolid)
                 {
                     return new Vector3Int(x, y, z);
                 }

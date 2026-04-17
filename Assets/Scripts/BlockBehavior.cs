@@ -76,7 +76,7 @@ public static partial class BlockBehavior
 
         // Get the voxel's properties & ID
         BlockType props = voxel.Properties;
-        ushort id = voxel.id;
+        ushort id = voxel.ID;
 
         // --- Grass Block ---
         if (id == BlockIDs.Grass)
@@ -137,7 +137,7 @@ public static partial class BlockBehavior
 
         // Get the voxel's properties & ID
         BlockType props = voxel.Properties;
-        ushort id = voxel.id;
+        ushort id = voxel.ID;
 
         // --- Grass Block ---
         if (id == BlockIDs.Grass)
@@ -146,7 +146,7 @@ public static partial class BlockBehavior
             VoxelState? topNeighbour = chunkData.GetState(localPos + VoxelData.FaceChecks[2]);
             if (topNeighbour.HasValue && topNeighbour.Value.Properties.isSolid)
             {
-                Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
+                Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.Position.x, localPos.y, localPos.z + chunkData.Position.y);
                 VoxelMod voxelMod = new VoxelMod(globalPos, BlockIDs.Dirt);
                 Mods.Add(voxelMod);
                 return Mods;
@@ -193,7 +193,7 @@ public static partial class BlockBehavior
                 if (Random.Range(0f, 1f) <= VoxelData.GrassSpreadChance)
                 {
                     // Modify the single, randomly chosen candidate.
-                    Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.position.y);
+                    Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.Position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.Position.y);
                     Mods.Add(new VoxelMod(chosenCandidateGlobalPos, BlockIDs.Grass));
                 }
             }

@@ -31,7 +31,7 @@ public class ChunkPoolManager
     private int _targetViewDistance;
     private const float POOL_BUFFER_PERCENTAGE = 1.25f; // Keep 25% extra as buffer
 
-    public int targetViewDistance => _targetViewDistance;
+    public int TargetViewDistance => _targetViewDistance;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChunkPoolManager"/> class.

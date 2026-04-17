@@ -12,12 +12,12 @@ public static partial class BlockBehavior
     {
         VoxelState? state = chunkData.GetState(pos);
         // It must be a dirt block (ID 3).
-        if (!state.HasValue || state.Value.id != BlockIDs.Dirt)
+        if (!state.HasValue || state.Value.ID != BlockIDs.Dirt)
             return false;
 
         // The block above it must be air (ID 0).
         VoxelState? stateAbove = chunkData.GetState(pos + VoxelData.FaceChecks[2]);
-        return stateAbove.HasValue && stateAbove.Value.id == BlockIDs.Air;
+        return stateAbove.HasValue && stateAbove.Value.ID == BlockIDs.Air;
     }
 
     /// <summary>
@@ -28,7 +28,7 @@ public static partial class BlockBehavior
     {
         VoxelState? state = chunkData.GetState(airPos);
         // The target adjacent block must be air.
-        if (!state.HasValue || state.Value.id != BlockIDs.Air)
+        if (!state.HasValue || state.Value.ID != BlockIDs.Air)
             return false;
 
         // The block below the air block must be a convertible dirt block.
