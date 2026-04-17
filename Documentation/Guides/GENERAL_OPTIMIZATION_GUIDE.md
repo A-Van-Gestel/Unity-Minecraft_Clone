@@ -201,7 +201,7 @@ If a value is expensive to calculate (e.g., `Mathf.PerlinNoise` or World Coordin
 3. **String Concatenation:**
     * **Bad:** `text.text = "Coords: " + x + ", " + y;` (Allocates new strings every frame).
     * **Good:** Use `StringBuilder` for complex strings.
-    * **Note:** C# String Interpolation (`$"{x}"`) in .NET Framework (Unity's Mono backend) typically allocates. Avoid in hot paths.
+    * **Note:** C# String Interpolation (`$"{x}"`) on .NET Framework API Compatibility typically allocates in both Mono (dev) and IL2CPP (production) backends. Avoid in hot paths.
 
 ### Advanced Pooling Architectures
 
@@ -245,7 +245,9 @@ Used for temporary, short-lived standard C# collections (`List<T>`, `HashSet<T>`
 
 ### Method Inlining (`[MethodImpl(MethodImplOptions.AggressiveInlining)]`)
 
-In the Mono backend (Unity's default scripting runtime), property accessors and small helper methods incur a CPU cost due to pushing/popping the stack. For "Hot Paths" (code that runs millions of times per frame), this overhead is significant.
+In the Mono backend (used for dev iteration), property accessors and small helper methods incur a CPU cost due to pushing/popping the stack. For "Hot Paths" (code that runs millions of times per frame), this overhead is significant.
+
+> **Dev-vs-production note:** IL2CPP's AOT compiler performs aggressive inlining and eliminates most of this overhead automatically, so the same hot path can appear slower in Mono (dev) builds than in IL2CPP (production). Use `[MethodImpl(AggressiveInlining)]` to close that gap for Mono iteration — it costs nothing in IL2CPP but makes Mono profiling representative of production behavior.
 
 **When to use it:**
 

@@ -3,7 +3,7 @@
 **Version:** 1.6
 **Date:** 2026-02-15  
 **Status:** Implemented (Stable)  
-**Target:** Unity 6.4 (Mono Backend)
+**Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 ## 1. Executive Summary
 

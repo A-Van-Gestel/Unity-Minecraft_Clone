@@ -3,7 +3,7 @@
 **Version:** 2.5  
 **Date:** 2026-04-03  
 **Status:** Approved for Implementation (Revised against current codebase)  
-**Target:** Unity 6.4 (Mono Backend)  
+**Target:** Unity 6.4 (Mono for dev; IL2CPP for production)  
 **Context:** Decoupling legacy `Mathf.PerlinNoise` generation from a new `[BurstCompile]` `FastNoiseLite` generation pipeline via a modular "World Type" architecture.
 
 ---

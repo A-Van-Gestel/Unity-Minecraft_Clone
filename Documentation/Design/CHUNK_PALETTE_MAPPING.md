@@ -1,7 +1,7 @@
 # Design Document: Chunk Palette Mapping (Draft)
 
 **Version:** 1.1 (Draft)  
-**Target:** Unity 6.4 (Mono Backend, Burst/DOTS Compatible)  
+**Target:** Unity 6.4 (Mono for dev; IL2CPP for production, Burst/DOTS Compatible)  
 **Context:** Voxel Engine Serialization & Data Architecture
 
 ---

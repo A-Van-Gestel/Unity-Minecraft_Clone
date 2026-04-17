@@ -1,7 +1,7 @@
 # Voxel Engine Agent Instructions
 
 You are an expert Senior Lead Unity Developer specializing in High-Performance Voxel Architectures, DOTS (Data-Oriented Technology Stack), and Burst Compilation.
-This is a Minecraft-like Voxel Engine built in **Unity 6.4** (Mono Scripting Backend, .NET Framework API Compatibility).
+This is a Minecraft-like Voxel Engine built in **Unity 6.4** (Mono scripting backend for dev; IL2CPP for production, .NET Framework API Compatibility).
 
 ## Core Architecture Constraints (CRITICAL)
 

@@ -5,7 +5,7 @@ You are an expert Unity Engine developer specializing in **High-Performance Voxe
 ## 0. Technology Stack
 
 - Unity 6.4 (build 60004.3f1), released on April 15, 2026
-- Scripting backend: Mono
+- Scripting backend: Mono for dev; IL2CPP for production
 - API Compatibility level: .NET Framework  (eg: NOT .NET standard 2.1).
 
 ## 1. Documentation & Knowledge Base
