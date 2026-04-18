@@ -181,6 +181,9 @@ namespace Data.WorldTypes
 
         /// <summary>Spaghetti (Axis-Pair Average) — Legacy-style 6-way 2D noise averaging. Produces interconnected tunnel networks.</summary>
         Spaghetti,
+
+        /// <summary>Worm Carver (Random Walk) — Legacy-style recursive turtle generator for highly organic cave networks.</summary>
+        WormCarver,
     }
 
     /// <summary>
@@ -216,9 +219,11 @@ namespace Data.WorldTypes
         public CaveMode mode = CaveMode.Blob;
 
         [Tooltip("FastNoiseLite noise configuration for defining the cave shapes.")]
+        [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
         public FastNoiseConfig noiseConfig;
 
         [Tooltip("If the evaluated noise exceeds this threshold, the block is carved into air.")]
+        [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
         public float threshold = 0.5f;
 
         [Header("Depth Bounds")]
@@ -231,5 +236,36 @@ namespace Data.WorldTypes
         [Tooltip("Number of blocks over which the carving fades in/out near MinHeight and MaxHeight bounds. 0 = hard cutoff.")]
         [Range(0, 32)]
         public int depthFadeMargin = 8;
+
+        [Header("Worm Carver Settings")]
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("Probability [0, 1] that this chunk will spawn a worm system.")]
+        [Range(0f, 1f)]
+        public float wormSpawnChance = 1.0f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("Maximum number of worms that can spawn in a single chunk if it succeeds the spawn chance.")]
+        [Range(1, 10)]
+        public int maxWormsPerChunk = 3;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("The base radius of the worm cave in blocks.")]
+        [Range(1f, 10f)]
+        public float wormBaseRadius = 3f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("How strongly the worm perturbs its pitch/yaw angles per step.")]
+        [Range(0.1f, 1f)]
+        public float wormWaviness = 0.5f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("Minimum number of steps the worm will march.")]
+        [Range(10, 200)]
+        public int wormMinLength = 50;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("Maximum number of steps the worm will march.")]
+        [Range(50, 500)]
+        public int wormMaxLength = 200;
     }
 }

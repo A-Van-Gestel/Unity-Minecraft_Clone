@@ -23,6 +23,13 @@ namespace Jobs.Data
         /// <summary>Number of blocks over which carving fades in/out near depth bounds. 0 = hard cutoff.</summary>
         public readonly int DepthFadeMargin;
 
+        public readonly float WormBaseRadius;
+        public readonly float WormWaviness;
+        public readonly int WormMinLength;
+        public readonly int WormMaxLength;
+        public readonly float WormSpawnChance;
+        public readonly int MaxWormsPerChunk;
+
         public StandardCaveLayerJobData(StandardCaveLayer layerConfig)
         {
             Mode = layerConfig.mode;
@@ -30,6 +37,13 @@ namespace Jobs.Data
             MinHeight = layerConfig.minHeight;
             MaxHeight = layerConfig.maxHeight;
             DepthFadeMargin = layerConfig.depthFadeMargin;
+
+            WormBaseRadius = layerConfig.wormBaseRadius;
+            WormWaviness = layerConfig.wormWaviness;
+            WormMinLength = layerConfig.wormMinLength;
+            WormMaxLength = layerConfig.wormMaxLength;
+            WormSpawnChance = layerConfig.wormSpawnChance;
+            MaxWormsPerChunk = layerConfig.maxWormsPerChunk;
         }
     }
 }

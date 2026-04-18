@@ -90,6 +90,13 @@ namespace Jobs
         /// </summary>
         public FastNoiseLite BiomeSelectionNoise;
 
+        /// <summary>
+        /// Pre-calculated bitmask of blocks that have been carved out by the Worm Carver scatter pass.
+        /// 1 bit per voxel. If bit is 1, the block should be air.
+        /// </summary>
+        [ReadOnly]
+        public NativeBitArray WormMask;
+
         #endregion
 
         #region Output Data
@@ -229,13 +236,24 @@ namespace Jobs
 
                         // --- Noise evaluation (branched by CaveMode) ---
                         FastNoiseLite caveNoise = CaveNoises[caveIdx];
-                        float noiseVal;
+                        float noiseVal = 0f;
 
                         // Apply depth fade: raise the effective threshold near depth bounds
                         // (depthFade=0 at edge → threshold becomes unreachable, depthFade=1 inside → normal threshold)
                         float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
 
-                        if (caveLayer.Mode == CaveMode.Spaghetti)
+                        if (caveLayer.Mode == CaveMode.WormCarver)
+                        {
+                            // Worm carvers are pre-calculated in a scatter pass (StandardWormCarverJob).
+                            // We just read the pre-calculated bitmask here.
+                            if (WormMask.IsSet(ChunkMath.GetFlattenedIndexInChunk(x, y, z)))
+                            {
+                                voxelValue = (byte)BlockIDs.Air;
+                                break;
+                            }
+                            continue; // Skip noise evaluation
+                        }
+                        else if (caveLayer.Mode == CaveMode.Spaghetti)
                         {
                             // Optimized Bounding Volume strategy: evaluate low-frequency 3D noise first.
                             // Scaling coordinates mimics evaluating a generalized broader volume.

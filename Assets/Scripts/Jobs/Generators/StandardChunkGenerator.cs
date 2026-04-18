@@ -181,6 +181,21 @@ namespace Jobs.Generators
             NativeArray<ushort> outputHeightMap = new NativeArray<ushort>(
                 VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent);
 
+            NativeBitArray wormMask = new NativeBitArray(
+                VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent);
+
+            StandardWormCarverJob wormJob = new StandardWormCarverJob
+            {
+                BaseSeed = _seed,
+                ChunkPosition = new int2(chunkVoxelPos.x, chunkVoxelPos.y),
+                Biomes = _biomesJobData,
+                AllCaveLayers = _allCaveLayersJobData,
+                BiomeSelectionNoise = _biomeSelectionNoise,
+                OutputWormMask = wormMask
+            };
+
+            JobHandle wormHandle = wormJob.Schedule(default);
+
             StandardChunkGenerationJob job = new StandardChunkGenerationJob
             {
                 SeaLevel = _seaLevel,
@@ -200,9 +215,15 @@ namespace Jobs.Generators
                 OutputMap = outputMap,
                 OutputHeightMap = outputHeightMap,
                 Modifications = modificationsQueue.AsParallelWriter(),
+                WormMask = wormMask
             };
 
-            JobHandle handle = job.ScheduleParallelByRef(VoxelData.ChunkWidth * VoxelData.ChunkWidth, 8, default);
+            JobHandle handle = job.ScheduleParallelByRef(VoxelData.ChunkWidth * VoxelData.ChunkWidth, 8, wormHandle);
+            
+            // Auto-dispose the worm mask when the terrain generation is complete.
+            // Using Allocator.Persistent and this JobHandle extension ensures it's cleaned up safely 
+            // without needing explicit tracking inside GenerationJobData.
+            wormMask.Dispose(handle);
 
             return new GenerationJobData
             {
