@@ -30,6 +30,15 @@ namespace Jobs.Data
         public readonly float WormSpawnChance;
         public readonly int MaxWormsPerChunk;
 
+        // Branching
+        public readonly float WormBranchChance;
+        public readonly int MaxBranchDepth;
+
+        // Seeking
+        public readonly int WormSeekInterval;
+        public readonly float WormSeekDistance;
+        public readonly float WormSeekChance;
+
         public StandardCaveLayerJobData(StandardCaveLayer layerConfig)
         {
             Mode = layerConfig.mode;
@@ -44,6 +53,13 @@ namespace Jobs.Data
             WormMaxLength = layerConfig.wormMaxLength;
             WormSpawnChance = layerConfig.wormSpawnChance;
             MaxWormsPerChunk = layerConfig.maxWormsPerChunk;
+
+            WormBranchChance = layerConfig.wormBranchChance;
+            MaxBranchDepth = layerConfig.maxBranchDepth;
+
+            WormSeekInterval = layerConfig.wormSeekInterval;
+            WormSeekDistance = layerConfig.wormSeekDistance;
+            WormSeekChance = layerConfig.wormSeekChance;
         }
     }
 }

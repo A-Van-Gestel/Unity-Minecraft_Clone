@@ -159,12 +159,17 @@ MonoBehaviour:
     minHeight: 5
     maxHeight: 120
     depthFadeMargin: 32
-    wormSpawnChance: 0.23
-    maxWormsPerChunk: 3
+    wormSpawnChance: 0.015
+    maxWormsPerChunk: 1
     wormBaseRadius: 3
     wormWaviness: 0.33
     wormMinLength: 50
     wormMaxLength: 200
+    wormBranchChance: 0.05
+    maxBranchDepth: 2
+    wormSeekInterval: 10
+    wormSeekDistance: 10
+    wormSeekChance: 0.5
   - layerName: Deep Chambers
     previewColor: {r: 1, g: 0.72156864, b: 0, a: 1}
     mode: 0
@@ -193,3 +198,8 @@ MonoBehaviour:
     wormWaviness: 0.5
     wormMinLength: 50
     wormMaxLength: 200
+    wormBranchChance: 0.05
+    maxBranchDepth: 2
+    wormSeekInterval: 10
+    wormSeekDistance: 10
+    wormSeekChance: 0.5

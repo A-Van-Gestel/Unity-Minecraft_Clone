@@ -191,6 +191,7 @@ namespace Jobs.Generators
                 Biomes = _biomesJobData,
                 AllCaveLayers = _allCaveLayersJobData,
                 BiomeSelectionNoise = _biomeSelectionNoise,
+                CaveNoises = _caveNoises,
                 OutputWormMask = wormMask
             };
 
@@ -219,9 +220,9 @@ namespace Jobs.Generators
             };
 
             JobHandle handle = job.ScheduleParallelByRef(VoxelData.ChunkWidth * VoxelData.ChunkWidth, 8, wormHandle);
-            
+
             // Auto-dispose the worm mask when the terrain generation is complete.
-            // Using Allocator.Persistent and this JobHandle extension ensures it's cleaned up safely 
+            // Using Allocator.Persistent and this JobHandle extension ensures it's cleaned up safely
             // without needing explicit tracking inside GenerationJobData.
             wormMask.Dispose(handle);
 

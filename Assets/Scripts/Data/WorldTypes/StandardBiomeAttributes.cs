@@ -267,5 +267,32 @@ namespace Data.WorldTypes
         [Tooltip("Maximum number of steps the worm will march.")]
         [Range(50, 500)]
         public int wormMaxLength = 200;
+
+        [Header("Worm Carver Branching")]
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("Probability [0, 1] per step that a worm will split and spawn a child worm.")]
+        [Range(0f, 0.2f)]
+        public float wormBranchChance = 0.05f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("How many generations of children are allowed (e.g., 0 = single worm, 1 = children allowed, 2 = grandchildren allowed).")]
+        [Range(0, 5)]
+        public int maxBranchDepth = 2;
+
+        [Header("Worm Carver Noise Seeking")]
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("How many steps the worm takes between seeking checks. 0 = disabled.")]
+        [Range(0, 50)]
+        public int wormSeekInterval = 10;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("How far ahead the worm looks for Blob/Spaghetti caves.")]
+        [Range(1f, 30f)]
+        public float wormSeekDistance = 10f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("Probability [0, 1] that the worm actually steers towards a detected cave.")]
+        [Range(0f, 1f)]
+        public float wormSeekChance = 0.5f;
     }
 }

@@ -32,8 +32,20 @@ namespace Jobs
         [ReadOnly]
         public FastNoiseLite BiomeSelectionNoise;
 
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> CaveNoises;
+
         [WriteOnly]
         public NativeBitArray OutputWormMask;
+
+        private struct WormState
+        {
+            public float3 Pos;
+            public float Yaw;
+            public float Pitch;
+            public int LengthRemaining;
+            public int BranchDepth;
+        }
 
         public void Execute()
         {
@@ -77,7 +89,7 @@ namespace Jobs
                     int globalCz = cz * VoxelData.ChunkWidth;
 
                     // Evaluate the center of this chunk to find its biome and determine worm parameters
-                    float biomeNoise = BiomeSelectionNoise.GetNoise(globalCx + VoxelData.ChunkWidth / 2, globalCz + VoxelData.ChunkWidth / 2);
+                    float biomeNoise = BiomeSelectionNoise.GetNoise(globalCx + VoxelData.ChunkWidth * 0.5f, globalCz + VoxelData.ChunkWidth * 0.5f);
                     int biomeIndex = (int)math.floor(biomeNoise * Biomes.Length);
                     biomeIndex = math.clamp(biomeIndex, 0, Biomes.Length - 1);
                     StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
@@ -94,23 +106,38 @@ namespace Jobs
                         // Spawn 1 to max worms per chunk
                         int numWorms = rand.NextInt(1, caveLayer.MaxWormsPerChunk + 1);
 
+                        NativeList<WormState> wormStack = new NativeList<WormState>(Allocator.Temp);
+
                         for (int w = 0; w < numWorms; w++)
                         {
-                            // Initialize worm parameters
-                            float3 pos = new float3(
-                                globalCx + rand.NextFloat(0, VoxelData.ChunkWidth),
-                                rand.NextFloat(caveLayer.MinHeight, caveLayer.MaxHeight),
-                                globalCz + rand.NextFloat(0, VoxelData.ChunkWidth)
-                            );
+                            wormStack.Add(new WormState
+                            {
+                                // Initialize worm parameters
+                                Pos = new float3(
+                                    globalCx + rand.NextFloat(0, VoxelData.ChunkWidth),
+                                    rand.NextFloat(caveLayer.MinHeight, caveLayer.MaxHeight),
+                                    globalCz + rand.NextFloat(0, VoxelData.ChunkWidth)
+                                ),
+                                Yaw = rand.NextFloat(0, math.PI * 2f),
+                                Pitch = rand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f),
+                                LengthRemaining = rand.NextInt(caveLayer.WormMinLength, caveLayer.WormMaxLength),
+                                BranchDepth = 0
+                            });
+                        }
 
-                            float yaw = rand.NextFloat(0, math.PI * 2f);
-                            float pitch = rand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f);
+                        while (wormStack.Length > 0)
+                        {
+                            int lastIdx = wormStack.Length - 1;
+                            WormState worm = wormStack[lastIdx];
+                            wormStack.RemoveAt(lastIdx);
 
-                            int length = rand.NextInt(caveLayer.WormMinLength, caveLayer.WormMaxLength);
                             float radius = caveLayer.WormBaseRadius;
+                            float3 pos = worm.Pos;
+                            float yaw = worm.Yaw;
+                            float pitch = worm.Pitch;
 
                             // Raymarch the worm
-                            for (int step = 0; step < length; step++)
+                            for (int step = 0; step < worm.LengthRemaining; step++)
                             {
                                 // Move position forward
                                 float3 forward = new float3(
@@ -127,8 +154,85 @@ namespace Jobs
                                 pitch += rand.NextFloat(-caveLayer.WormWaviness, caveLayer.WormWaviness);
                                 pitch = math.clamp(pitch, -math.PI * 0.4f, math.PI * 0.4f);
 
-                                // Check if this node intersects the target chunk
-                                // A sphere intersects a AABB if the squared distance from center to AABB is less than radius squared
+                                // Seeking Phase (Ping nearby noise fields)
+                                if (caveLayer.WormSeekInterval > 0 && step % caveLayer.WormSeekInterval == 0 && rand.NextFloat() < caveLayer.WormSeekChance)
+                                {
+                                    // Generate a random "look" direction
+                                    float lookYaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
+                                    float lookPitch = pitch + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
+
+                                    float3 seekForward = new float3(
+                                        math.cos(lookYaw) * math.cos(lookPitch),
+                                        math.sin(lookPitch),
+                                        math.sin(lookYaw) * math.cos(lookPitch)
+                                    );
+
+                                    float3 lookPos = pos + seekForward * caveLayer.WormSeekDistance;
+
+                                    bool foundCave = false;
+                                    for (int s = 0; s < biome.CaveLayerCount; s++)
+                                    {
+                                        int cIdx = biome.CaveLayerStartIndex + s;
+                                        StandardCaveLayerJobData seekLayer = AllCaveLayers[cIdx];
+
+                                        if (seekLayer.Mode == CaveMode.Blob || seekLayer.Mode == CaveMode.Spaghetti)
+                                        {
+                                            float noiseVal;
+                                            if (seekLayer.Mode == CaveMode.Spaghetti)
+                                            {
+                                                float ab = CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.y);
+                                                float bc = CaveNoises[cIdx].GetNoise(lookPos.y, lookPos.z);
+                                                float ac = CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.z);
+                                                float ba = CaveNoises[cIdx].GetNoise(lookPos.y, lookPos.x);
+                                                float cb = CaveNoises[cIdx].GetNoise(lookPos.z, lookPos.y);
+                                                float ca = CaveNoises[cIdx].GetNoise(lookPos.z, lookPos.x);
+                                                noiseVal = (ab + bc + ac + ba + cb + ca) / 6f;
+                                            }
+                                            else
+                                            {
+                                                noiseVal = CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.y, lookPos.z);
+                                            }
+
+                                            // Since threshold defines the cave boundary, anything > threshold is AIR.
+                                            // We detect if lookPos is very close to AIR.
+                                            if (noiseVal > seekLayer.Threshold - 0.1f)
+                                            {
+                                                foundCave = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    if (foundCave)
+                                    {
+                                        // Lock onto the detected cave
+                                        yaw = lookYaw;
+                                        pitch = lookPitch;
+
+                                        // Ensure we live long enough to reach it
+                                        int neededSteps = (int)math.ceil(caveLayer.WormSeekDistance / (radius * 0.5f));
+                                        int remainingSteps = worm.LengthRemaining - step;
+                                        if (remainingSteps < neededSteps)
+                                        {
+                                            worm.LengthRemaining += (neededSteps - remainingSteps);
+                                        }
+                                    }
+                                }
+
+                                // Branching Phase
+                                if (caveLayer.WormBranchChance > 0f && rand.NextFloat() < caveLayer.WormBranchChance && worm.BranchDepth < caveLayer.MaxBranchDepth)
+                                {
+                                    wormStack.Add(new WormState
+                                    {
+                                        Pos = pos,
+                                        Yaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f), // branch sideways
+                                        Pitch = pitch + rand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f),
+                                        LengthRemaining = rand.NextInt(caveLayer.WormMinLength / 2, caveLayer.WormMaxLength / 2),
+                                        BranchDepth = worm.BranchDepth + 1
+                                    });
+                                }
+
+                                // Carving Phase
                                 float3 closestPt = math.clamp(pos, chunkMin, chunkMax);
                                 float distSq = math.distancesq(pos, closestPt);
 
@@ -166,6 +270,8 @@ namespace Jobs
                                 }
                             }
                         }
+
+                        wormStack.Dispose();
                     }
                 }
             }
