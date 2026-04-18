@@ -60,6 +60,12 @@ namespace Jobs
         public NativeArray<FastNoiseLite> BiomeTerrainNoises;
 
         /// <summary>
+        /// Pre-constructed FastNoiseLite instances for each biome's strata depth noise.
+        /// </summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> StrataDepthNoises;
+
+        /// <summary>
         /// Pre-constructed FastNoiseLite instances for each lode's noise.
         /// Indexed matching AllLodes array.
         /// </summary>
@@ -124,6 +130,20 @@ namespace Jobs
 
             StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
 
+            // --- SURFACE BIOME DITHERING ---
+            // Calculate a secondary biome index for surface/strata block types to organically dither boundaries
+            // We use Simplex noise (snoise) with an irrational scale (0.23f) and distinct offsets 
+            // to avoid grid-aligned repeating artifacts commonly seen with Perlin (cnoise).
+            float ditherNoiseX = noise.snoise(new float2(globalX * 0.23f + 1337f, globalZ * 0.23f + BaseSeed));
+            float ditherNoiseZ = noise.snoise(new float2(globalX * 0.23f - 42f, globalZ * 0.23f - BaseSeed));
+            float ditherX = globalX + ditherNoiseX * biome.SurfaceBlockDitheringWidth * 30f;
+            float ditherZ = globalZ + ditherNoiseZ * biome.SurfaceBlockDitheringWidth * 30f;
+            
+            float ditheredBiomeNoise = BiomeSelectionNoise.GetNoise(ditherX, ditherZ);
+            int surfaceBiomeIndex = (int)math.floor(ditheredBiomeNoise * Biomes.Length);
+            surfaceBiomeIndex = math.clamp(surfaceBiomeIndex, 0, Biomes.Length - 1);
+            StandardBiomeAttributesJobData surfaceBiome = Biomes[surfaceBiomeIndex];
+
             // --- TERRAIN HEIGHT (2D noise blending) ---
             int terrainHeight = BiomeBlender.CalculateBlendedTerrainHeight(
                 globalX, globalZ, ref BiomeSelectionNoise, ref Biomes, ref BiomeTerrainNoises);
@@ -143,7 +163,7 @@ namespace Jobs
                 // ----- BASIC TERRAIN PASS -----
                 else if (y == terrainHeight)
                 {
-                    voxelValue = y < SeaLevel - 1 ? biome.UnderwaterSurfaceBlockID : biome.SurfaceBlockID;
+                    voxelValue = y < SeaLevel - 1 ? surfaceBiome.UnderwaterSurfaceBlockID : surfaceBiome.SurfaceBlockID;
                 }
                 else if (y > terrainHeight)
                 {
@@ -163,16 +183,23 @@ namespace Jobs
 
                     // Execute progressive dynamic subsurface strata layers top-down
                     int depthCounter = 0;
-                    for (int i = 0; i < biome.TerrainLayerCount; i++)
+                    
+                    // Evaluate strata jitter noise (returns ~[-1, 1]) and scale by 2.5 blocks
+                    float depthJitter = StrataDepthNoises[surfaceBiomeIndex].GetNoise(globalX, globalZ);
+                    int jitterBlocks = (int)math.round(depthJitter * 2.5f);
+
+                    for (int i = 0; i < surfaceBiome.TerrainLayerCount; i++)
                     {
-                        StandardTerrainLayerJobData layer = AllTerrainLayers[biome.TerrainLayerStartIndex + i];
-                        if (y < terrainHeight - depthCounter && y >= terrainHeight - depthCounter - layer.Depth)
+                        StandardTerrainLayerJobData layer = AllTerrainLayers[surfaceBiome.TerrainLayerStartIndex + i];
+                        int effectiveDepth = math.max(1, layer.Depth + jitterBlocks);
+
+                        if (y < terrainHeight - depthCounter && y >= terrainHeight - depthCounter - effectiveDepth)
                         {
                             voxelValue = layer.BlockID;
                             break;
                         }
 
-                        depthCounter += layer.Depth;
+                        depthCounter += effectiveDepth;
                     }
                 }
 

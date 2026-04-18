@@ -28,6 +28,7 @@ namespace Jobs.Generators
         private NativeArray<StandardCaveLayerJobData> _allCaveLayersJobData;
         private NativeArray<BlockTypeJobData> _blockTypesJobData;
         private NativeArray<FastNoiseLite> _biomeTerrainNoises;
+        private NativeArray<FastNoiseLite> _strataDepthNoises;
         private NativeArray<FastNoiseLite> _lodeNoises;
         private NativeArray<FastNoiseLite> _caveNoises;
         private NativeArray<FastNoiseLite> _floraZoneNoises;
@@ -71,6 +72,7 @@ namespace Jobs.Generators
             _allTerrainLayersJobData = new NativeArray<StandardTerrainLayerJobData>(totalTerrainLayerCount, Allocator.Persistent);
             _allLodesJobData = new NativeArray<StandardLodeJobData>(totalLodeCount, Allocator.Persistent);
             _biomeTerrainNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
+            _strataDepthNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _lodeNoises = new NativeArray<FastNoiseLite>(totalLodeCount, Allocator.Persistent);
 
             _allCaveLayersJobData = new NativeArray<StandardCaveLayerJobData>(totalCaveLayerCount, Allocator.Persistent);
@@ -113,6 +115,7 @@ namespace Jobs.Generators
                     BlendRadius = biome.blendRadius,
                     BlendWeight = biome.blendWeight,
                     BlendCurve = biome.blendCurve,
+                    SurfaceBlockDitheringWidth = biome.surfaceBlockDitheringWidth,
                     BaseTerrainHeight = biome.baseTerrainHeight,
                     TerrainAmplitude = biome.terrainAmplitude,
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
@@ -137,6 +140,9 @@ namespace Jobs.Generators
 
                 // Build per-biome terrain noise
                 _biomeTerrainNoises[i] = CreateNoiseFromConfig(biome.terrainNoiseConfig);
+
+                // Build per-biome strata depth noise
+                _strataDepthNoises[i] = CreateNoiseFromConfig(biome.strataDepthNoiseConfig);
 
                 // Build per-biome flora zone noise
                 _floraZoneNoises[i] = CreateNoiseFromConfig(biome.majorFloraZoneNoiseConfig);
@@ -186,6 +192,7 @@ namespace Jobs.Generators
                 AllLodes = _allLodesJobData,
                 AllCaveLayers = _allCaveLayersJobData,
                 BiomeTerrainNoises = _biomeTerrainNoises,
+                StrataDepthNoises = _strataDepthNoises,
                 LodeNoises = _lodeNoises,
                 CaveNoises = _caveNoises,
                 FloraZoneNoises = _floraZoneNoises,
@@ -349,6 +356,7 @@ namespace Jobs.Generators
             if (_allTerrainLayersJobData.IsCreated) _allTerrainLayersJobData.Dispose();
             if (_allLodesJobData.IsCreated) _allLodesJobData.Dispose();
             if (_biomeTerrainNoises.IsCreated) _biomeTerrainNoises.Dispose();
+            if (_strataDepthNoises.IsCreated) _strataDepthNoises.Dispose();
             if (_lodeNoises.IsCreated) _lodeNoises.Dispose();
             if (_allCaveLayersJobData.IsCreated) _allCaveLayersJobData.Dispose();
             if (_caveNoises.IsCreated) _caveNoises.Dispose();

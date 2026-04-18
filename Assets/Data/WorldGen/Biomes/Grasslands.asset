@@ -46,6 +46,7 @@ MonoBehaviour:
   blendRadius: 0.4
   blendWeight: 1
   blendCurve: 1
+  surfaceBlockDitheringWidth: 0.1
   baseTerrainHeight: 58
   terrainAmplitude: 12
   surfaceBlockID: 2
@@ -53,6 +54,21 @@ MonoBehaviour:
   terrainLayers:
   - blockID: 3
     depth: 3
+  strataDepthNoiseConfig:
+    seedOffset: 0
+    frequency: 0.05
+    noiseType: 0
+    rotationType3D: 0
+    fractalType: 0
+    octaves: 0
+    gain: 0
+    lacunarity: 0
+    weightedStrength: 0
+    pingPongStrength: 0
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 0
+    normalizeToZeroOne: 0
   underwaterSurfaceBlockID: 3
   enableMajorFlora: 1
   majorFloraZoneNoiseConfig:

@@ -1,5 +1,6 @@
 using System;
 using Jobs.Data;
+using Libraries;
 using MyBox;
 using UnityEngine;
 
@@ -39,6 +40,10 @@ namespace Data.WorldTypes
                  "SmootherStep = sharper S-curve with flatter plateaus.")]
         public BlendCurve blendCurve = BlendCurve.SmoothStep;
 
+        [Range(0f, 1.0f)]
+        [Tooltip("The cellular boundary distance threshold below which surface blocks are blended (dithered). 0 = hard cutoff, larger = wider transition.")]
+        public float surfaceBlockDitheringWidth = 0.10f;
+
         [Header("Terrain Shape")]
         [Tooltip("Base terrain height in blocks. Noise output is added to this value.")]
         public float baseTerrainHeight = 42f;
@@ -61,6 +66,9 @@ namespace Data.WorldTypes
         [Header("Terrain Layers")]
         [Tooltip("The blocks evaluated progressively downwards from the surface block (e.g. 3 blocks of Dirt).")]
         public StandardTerrainLayer[] terrainLayers;
+
+        [Tooltip("Noise configuration for strata depth jitter. Evaluated locally to organically vary the thickness of the subsurface terrain layers.")]
+        public FastNoiseConfig strataDepthNoiseConfig = new FastNoiseConfig { noiseType = FastNoiseLite.NoiseType.OpenSimplex2, frequency = 0.05f };
 
         [ConstantsSelection(typeof(BlockIDs))]
         [Tooltip("Block ID to swap the Surface Block with if generating under the Sea Level (e.g. Sand instead of Grass).")]

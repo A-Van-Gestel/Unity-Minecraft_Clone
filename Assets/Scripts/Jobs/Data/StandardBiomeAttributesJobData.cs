@@ -21,6 +21,9 @@ namespace Jobs.Data
         /// <summary>Interpolation curve shape applied to this biome's weight at Voronoi boundaries.</summary>
         public BlendCurve BlendCurve;
 
+        /// <summary>Width of the transition zone for surface blocks at Voronoi boundaries. Larger = wider, more gradual blending.</summary>
+        public float SurfaceBlockDitheringWidth;
+
         /// <summary>Base height added to noise output.</summary>
         public float BaseTerrainHeight;
 
