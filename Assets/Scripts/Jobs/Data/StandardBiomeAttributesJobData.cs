@@ -39,35 +39,20 @@ namespace Jobs.Data
         /// <summary>Block ID to substitute the surface layer with if generating below sea level (e.g. Sand).</summary>
         public byte UnderwaterSurfaceBlockID;
 
-        /// <summary>If true, flora like trees or cacti will be generated in this biome.</summary>
-        public bool EnableMajorFlora;
-
         /// <summary>Percentage of the biome covered by flora zones. Larger = larger zones, 1.0 = entire biome is a zone.</summary>
-        public float MajorFloraZoneCoverage;
+        public float FloraZoneCoverage;
 
-        /// <summary>The minimum grid size for flora. Smaller = denser forest, Larger = sparser forest.</summary>
-        public int MajorFloraPlacementSpacing;
+        /// <summary>Index into the shared NativeArray&lt;StructurePoolEntryJobData&gt; for this biome's major flora pool.</summary>
+        public int MajorFloraPoolStartIndex;
 
-        /// <summary>Minimum empty blocks to maintain between the tree and the grid cell edges.</summary>
-        public int MajorFloraPlacementPadding;
+        /// <summary>Number of major flora pool entries for this biome.</summary>
+        public int MajorFloraPoolCount;
 
-        /// <summary>Probability that a valid spacing slot will actually spawn a tree.</summary>
-        public float MajorFloraPlacementChance;
+        /// <summary>Index into the shared NativeArray&lt;StructurePoolEntryJobData&gt; for this biome's minor flora pool.</summary>
+        public int MinorFloraPoolStartIndex;
 
-        /// <summary>The absolute lowest Y level a tree root is allowed to spawn on.</summary>
-        public int MajorFloraPlacementMinHeight;
-
-        /// <summary>The absolute highest Y level a tree root is allowed to spawn on.</summary>
-        public int MajorFloraPlacementMaxHeight;
-
-        /// <summary>The physical minimum size/height of the tree/cactus being generated.</summary>
-        public int MajorFloraMinPhysicalHeight;
-
-        /// <summary>The physical maximum size/height of the tree/cactus being generated.</summary>
-        public int MajorFloraMaxPhysicalHeight;
-
-        /// <summary>Flora type index dispatched to ExpandFlora (0 = tree, 1 = cactus, etc.).</summary>
-        public byte MajorFloraIndex;
+        /// <summary>Number of minor flora pool entries for this biome.</summary>
+        public int MinorFloraPoolCount;
 
         /// <summary>Index into the shared NativeArray&lt;StandardTerrainLayerJobData&gt; owned by StandardChunkGenerator.</summary>
         public int TerrainLayerStartIndex;

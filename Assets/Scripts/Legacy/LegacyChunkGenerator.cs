@@ -108,8 +108,10 @@ namespace Legacy
         }
 
         /// <inheritdoc />
-        public IEnumerable<VoxelMod> ExpandFlora(VoxelMod rootMod)
+        public IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker)
         {
+            Vector3Int position = new Vector3Int(marker.Position.x, marker.Position.y, marker.Position.z);
+
             // Resolve the correct biome at the flora position using the legacy biome selection logic.
             float strongestWeight = 0f;
             int strongestBiomeIndex = 0;
@@ -117,7 +119,7 @@ namespace Legacy
             for (int i = 0; i < _biomesJobData.Length; i++)
             {
                 float weight = LegacyNoise.Get2DPerlin(
-                    new Vector2(rootMod.GlobalPosition.x, rootMod.GlobalPosition.z),
+                    new Vector2(position.x, position.z),
                     _biomesJobData[i].Offset,
                     _biomesJobData[i].Scale);
 
@@ -132,7 +134,8 @@ namespace Legacy
             int minHeight = _legacyBiomes[strongestBiomeIndex].minHeight;
             int maxHeight = _legacyBiomes[strongestBiomeIndex].maxHeight;
 
-            return LegacyStructure.GenerateMajorFlora(rootMod.ID, rootMod.GlobalPosition, minHeight, maxHeight);
+            // Legacy path: PoolEntryIndex maps directly to flora type (0 = tree, 1 = cactus)
+            return LegacyStructure.GenerateMajorFlora(marker.PoolEntryIndex, position, minHeight, maxHeight);
         }
 
         /// <inheritdoc />

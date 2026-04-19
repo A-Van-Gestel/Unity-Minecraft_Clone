@@ -121,7 +121,7 @@ namespace Jobs
                                 Yaw = rand.NextFloat(0, math.PI * 2f),
                                 Pitch = rand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f),
                                 LengthRemaining = rand.NextInt(caveLayer.WormMinLength, caveLayer.WormMaxLength),
-                                BranchDepth = 0
+                                BranchDepth = 0,
                             });
                         }
 
@@ -228,7 +228,7 @@ namespace Jobs
                                         Yaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f), // branch sideways
                                         Pitch = pitch + rand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f),
                                         LengthRemaining = rand.NextInt(caveLayer.WormMinLength / 2, caveLayer.WormMaxLength / 2),
-                                        BranchDepth = worm.BranchDepth + 1
+                                        BranchDepth = worm.BranchDepth + 1,
                                     });
                                 }
 

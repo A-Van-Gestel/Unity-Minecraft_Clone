@@ -1466,6 +1466,15 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Enqueues a single voxel modification to be processed without GC allocation.
+    /// </summary>
+    /// <param name="mod">The voxel modification to process.</param>
+    public void EnqueueVoxelModification(VoxelMod mod)
+    {
+        _modifications.Enqueue(mod);
+    }
+
+    /// <summary>
     /// Applies all queued voxel modifications.
     /// </summary>
     /// <remarks>

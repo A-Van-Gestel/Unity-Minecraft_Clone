@@ -8,7 +8,6 @@ using Libraries;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
-using Random = Unity.Mathematics.Random;
 
 namespace Editor.WorldTools
 {
@@ -17,7 +16,6 @@ namespace Editor.WorldTools
         public enum NoiseTarget
         {
             Terrain,
-            MajorFloraZone,
             CaveLayer,
             Lode,
         }
@@ -399,13 +397,7 @@ namespace Editor.WorldTools
                     layerModes[i] = CaveMode.Blob; // Lodes evaluate as 3D blobs
                 }
             }
-            else if (_target == NoiseTarget.MajorFloraZone)
-            {
-                layerNoises = new[] { CreateNoiseFromConfig(_biome.majorFloraZoneNoiseConfig) };
-                layerThresholds = new[] { 1f - _biome.majorFloraZoneCoverage };
-                layerColors = new[] { Color.red };
-                layerModes = new[] { CaveMode.Blob };
-            }
+
 
             // Loop Pixels
             for (int z = 0; z < texSize; z++)
@@ -453,8 +445,7 @@ namespace Editor.WorldTools
                         {
                             float noiseVal = EvaluateNoiseVal(layerNoises[i], worldX, worldZ, _target, layerModes[i]);
 
-                            // Visual normalized rendering if not in composite AND not showing threshold
-                            if (!isComposite && !_showThresholdOverlay && _target != NoiseTarget.MajorFloraZone)
+                            if (!isComposite && !_showThresholdOverlay)
                             {
                                 // Show raw grayscale of the noise (simulate Normalize behavior)
                                 bool isNorm = false;
@@ -485,50 +476,6 @@ namespace Editor.WorldTools
                                         1f
                                     );
                                 }
-
-                                // Overlay Flora Placement spots as yellow dots
-                                if (_target == NoiseTarget.MajorFloraZone)
-                                {
-                                    int spacing = math.max(1, _biome.majorFloraPlacementSpacing);
-                                    int cellX = (int)math.floor(worldX / spacing);
-                                    int cellZ = (int)math.floor(worldZ / spacing);
-
-                                    uint cellHash = math.hash(new int3(cellX, cellZ, _seed));
-                                    Random cellRandom = new Random(math.max(1u, cellHash));
-
-                                    int edgePadding;
-                                    if (_biome.majorFloraPlacementPadding < 0)
-                                    {
-                                        edgePadding = spacing >= 5 ? 1 : 0;
-                                    }
-                                    else
-                                    {
-                                        int maxPossiblePadding = (spacing - 1) / 2;
-                                        edgePadding = math.clamp(_biome.majorFloraPlacementPadding, 0, maxPossiblePadding);
-                                    }
-
-                                    int innerMinX = cellX * spacing + edgePadding;
-                                    int innerMaxX = cellX * spacing + spacing - edgePadding;
-
-                                    int innerMinZ = cellZ * spacing + edgePadding;
-                                    int innerMaxZ = cellZ * spacing + spacing - edgePadding;
-
-                                    int targetX = cellRandom.NextInt(innerMinX, innerMaxX);
-                                    int targetZ = cellRandom.NextInt(innerMinZ, innerMaxZ);
-
-                                    if (cellRandom.NextFloat() <= _biome.majorFloraPlacementChance)
-                                    {
-                                        float dist = math.distance(new float2(worldX, worldZ), new float2(targetX + 0.5f, targetZ + 0.5f));
-
-                                        // Scale the visual dot diameter based on zoom level so it remains visible at all scales
-                                        float radius = math.max(0.5f, _zoom * 0.8f);
-
-                                        if (dist <= radius)
-                                        {
-                                            pixelColor = Color.yellow;
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -558,11 +505,7 @@ namespace Editor.WorldTools
 
         private float EvaluateNoiseVal(FastNoiseLite noise, float worldX, float worldZ, NoiseTarget target, CaveMode caveMode)
         {
-            if (target == NoiseTarget.MajorFloraZone)
-            {
-                return noise.GetNoise(worldX, worldZ);
-            }
-            else if (target == NoiseTarget.Lode || (target == NoiseTarget.CaveLayer && caveMode == CaveMode.Blob))
+            if (target == NoiseTarget.Lode || (target == NoiseTarget.CaveLayer && caveMode == CaveMode.Blob))
             {
                 return noise.GetNoise(worldX, _sliceY, worldZ);
             }

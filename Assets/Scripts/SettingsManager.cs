@@ -141,6 +141,13 @@ public class Settings
     [Tooltip("Structure Pass: Tree generation")]
     public bool enableMajorFloraPass = true;
 
+    /// <summary>
+    /// The maximum number of structure-related VoxelMods that can be expanded in a single frame.
+    /// Prevents lag spikes when generating massive structures.
+    /// </summary>
+    [Tooltip("The maximum number of structure-related VoxelMods that can be expanded in a single frame. Prevents lag spikes when generating massive structures.")]
+    public int maxStructureModsPerFrame = 5000;
+
     // --- BONUS STUFF ---
     [Header("Bonus Stuff")]
     /// <summary>

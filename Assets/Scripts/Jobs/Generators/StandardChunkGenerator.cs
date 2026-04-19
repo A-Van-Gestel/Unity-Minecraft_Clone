@@ -1,7 +1,7 @@
 using System.Collections.Generic;
-using System.Linq;
 using Data;
 using Data.JobData;
+using Data.Structures;
 using Data.WorldTypes;
 using Jobs.Data;
 using Jobs.Helpers;
@@ -35,6 +35,15 @@ namespace Jobs.Generators
         private FastNoiseLite _biomeSelectionNoise;
         private StandardBiomeAttributes[] _standardBiomes;
 
+        /// <summary>Flattened Burst-safe pool entry data for all biomes (major + minor).</summary>
+        private NativeArray<StructurePoolEntryJobData> _allStructurePoolEntries;
+
+        /// <summary>
+        /// Managed lookup table mapping flat pool entry indices to their <see cref="CompositeStructureTemplate"/>.
+        /// Built during <see cref="Initialize"/> in the same order as <see cref="_allStructurePoolEntries"/>.
+        /// </summary>
+        private CompositeStructureTemplate[] _structureTemplateLookup;
+
         #region IChunkGenerator
 
         /// <inheritdoc />
@@ -57,15 +66,18 @@ namespace Jobs.Generators
                 _standardBiomes[i] = (StandardBiomeAttributes)worldType.biomes[i];
             }
 
-            // --- Flatten biomes + lodes + caves into NativeArrays ---
+            // --- Flatten biomes + lodes + caves + structure pools into NativeArrays ---
             int totalLodeCount = 0;
             int totalTerrainLayerCount = 0;
             int totalCaveLayerCount = 0;
+            int totalStructurePoolEntryCount = 0;
             foreach (StandardBiomeAttributes biome in _standardBiomes)
             {
                 totalLodeCount += biome.lodes?.Length ?? 0;
                 totalCaveLayerCount += biome.caveLayers?.Length ?? 0;
                 totalTerrainLayerCount += biome.terrainLayers?.Length ?? 0;
+                totalStructurePoolEntryCount += biome.majorFloraPool?.Length ?? 0;
+                totalStructurePoolEntryCount += biome.minorFloraPool?.Length ?? 0;
             }
 
             _biomesJobData = new NativeArray<StandardBiomeAttributesJobData>(_standardBiomes.Length, Allocator.Persistent);
@@ -78,10 +90,13 @@ namespace Jobs.Generators
             _allCaveLayersJobData = new NativeArray<StandardCaveLayerJobData>(totalCaveLayerCount, Allocator.Persistent);
             _caveNoises = new NativeArray<FastNoiseLite>(totalCaveLayerCount, Allocator.Persistent);
             _floraZoneNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
+            _allStructurePoolEntries = new NativeArray<StructurePoolEntryJobData>(totalStructurePoolEntryCount, Allocator.Persistent);
+            _structureTemplateLookup = new CompositeStructureTemplate[totalStructurePoolEntryCount];
 
             int currentLodeIndex = 0;
             int currentCaveLayerIndex = 0;
             int currentTerrainLayerIndex = 0;
+            int currentStructurePoolIndex = 0;
             for (int i = 0; i < _standardBiomes.Length; i++)
             {
                 StandardBiomeAttributes biome = _standardBiomes[i];
@@ -110,6 +125,10 @@ namespace Jobs.Generators
                 }
 
                 // Build biome job data
+                int majorPoolCount = biome.majorFloraPool?.Length ?? 0;
+                int minorPoolCount = biome.minorFloraPool?.Length ?? 0;
+                int majorPoolStart = currentStructurePoolIndex;
+
                 _biomesJobData[i] = new StandardBiomeAttributesJobData
                 {
                     BlendRadius = biome.blendRadius,
@@ -120,16 +139,11 @@ namespace Jobs.Generators
                     TerrainAmplitude = biome.terrainAmplitude,
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
                     UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
-                    EnableMajorFlora = biome.enableMajorFlora,
-                    MajorFloraZoneCoverage = biome.majorFloraZoneCoverage,
-                    MajorFloraPlacementSpacing = biome.majorFloraPlacementSpacing,
-                    MajorFloraPlacementPadding = biome.majorFloraPlacementPadding,
-                    MajorFloraPlacementChance = biome.majorFloraPlacementChance,
-                    MajorFloraPlacementMinHeight = biome.majorFloraPlacementMinHeight,
-                    MajorFloraPlacementMaxHeight = biome.majorFloraPlacementMaxHeight,
-                    MajorFloraMinPhysicalHeight = biome.majorFloraMinPhysicalHeight,
-                    MajorFloraMaxPhysicalHeight = biome.majorFloraMaxPhysicalHeight,
-                    MajorFloraIndex = biome.majorFloraIndex,
+                    FloraZoneCoverage = biome.floraZoneCoverage,
+                    MajorFloraPoolStartIndex = majorPoolStart,
+                    MajorFloraPoolCount = majorPoolCount,
+                    MinorFloraPoolStartIndex = majorPoolStart + majorPoolCount,
+                    MinorFloraPoolCount = minorPoolCount,
                     TerrainLayerStartIndex = currentTerrainLayerIndex,
                     TerrainLayerCount = terrainLayerCount,
                     LodeStartIndex = currentLodeIndex,
@@ -138,6 +152,40 @@ namespace Jobs.Generators
                     CaveLayerCount = caveLayerCount,
                 };
 
+                // Flatten major flora pool entries
+                for (int j = 0; j < majorPoolCount; j++)
+                {
+                    StructurePoolEntry entry = biome.majorFloraPool[j];
+                    _allStructurePoolEntries[currentStructurePoolIndex] = new StructurePoolEntryJobData
+                    {
+                        Spacing = entry.spacing,
+                        Padding = entry.padding,
+                        Chance = entry.chance,
+                        MinPlacementHeight = entry.minPlacementHeight,
+                        MaxPlacementHeight = entry.maxPlacementHeight,
+                        UseFloraZone = entry.useFloraZone,
+                    };
+                    _structureTemplateLookup[currentStructurePoolIndex] = entry.template;
+                    currentStructurePoolIndex++;
+                }
+
+                // Flatten minor flora pool entries
+                for (int j = 0; j < minorPoolCount; j++)
+                {
+                    StructurePoolEntry entry = biome.minorFloraPool[j];
+                    _allStructurePoolEntries[currentStructurePoolIndex] = new StructurePoolEntryJobData
+                    {
+                        Spacing = entry.spacing,
+                        Padding = entry.padding,
+                        Chance = entry.chance,
+                        MinPlacementHeight = entry.minPlacementHeight,
+                        MaxPlacementHeight = entry.maxPlacementHeight,
+                        UseFloraZone = entry.useFloraZone,
+                    };
+                    _structureTemplateLookup[currentStructurePoolIndex] = entry.template;
+                    currentStructurePoolIndex++;
+                }
+
                 // Build per-biome terrain noise
                 _biomeTerrainNoises[i] = CreateNoiseFromConfig(biome.terrainNoiseConfig);
 
@@ -145,7 +193,7 @@ namespace Jobs.Generators
                 _strataDepthNoises[i] = CreateNoiseFromConfig(biome.strataDepthNoiseConfig);
 
                 // Build per-biome flora zone noise
-                _floraZoneNoises[i] = CreateNoiseFromConfig(biome.majorFloraZoneNoiseConfig);
+                _floraZoneNoises[i] = CreateNoiseFromConfig(biome.floraZoneNoiseConfig);
 
                 currentLodeIndex += lodeCount;
                 currentCaveLayerIndex += caveLayerCount;
@@ -176,6 +224,7 @@ namespace Jobs.Generators
             Vector2Int chunkVoxelPos = coord.ToVoxelOrigin();
 
             NativeQueue<VoxelMod> modificationsQueue = new NativeQueue<VoxelMod>(Allocator.Persistent);
+            NativeQueue<StructureSpawnMarker> structureSpawnsQueue = new NativeQueue<StructureSpawnMarker>(Allocator.Persistent);
             NativeArray<uint> outputMap = new NativeArray<uint>(
                 VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent);
             NativeArray<ushort> outputHeightMap = new NativeArray<ushort>(
@@ -192,7 +241,7 @@ namespace Jobs.Generators
                 AllCaveLayers = _allCaveLayersJobData,
                 BiomeSelectionNoise = _biomeSelectionNoise,
                 CaveNoises = _caveNoises,
-                OutputWormMask = wormMask
+                OutputWormMask = wormMask,
             };
 
             JobHandle wormHandle = wormJob.Schedule(default);
@@ -213,10 +262,12 @@ namespace Jobs.Generators
                 CaveNoises = _caveNoises,
                 FloraZoneNoises = _floraZoneNoises,
                 BiomeSelectionNoise = _biomeSelectionNoise,
+                AllStructurePoolEntries = _allStructurePoolEntries,
                 OutputMap = outputMap,
                 OutputHeightMap = outputHeightMap,
                 Modifications = modificationsQueue.AsParallelWriter(),
-                WormMask = wormMask
+                StructureSpawns = structureSpawnsQueue.AsParallelWriter(),
+                WormMask = wormMask,
             };
 
             JobHandle handle = job.ScheduleParallelByRef(VoxelData.ChunkWidth * VoxelData.ChunkWidth, 8, wormHandle);
@@ -232,6 +283,7 @@ namespace Jobs.Generators
                 Map = outputMap,
                 HeightMap = outputHeightMap,
                 Mods = modificationsQueue,
+                StructureSpawns = structureSpawnsQueue,
             };
         }
 
@@ -350,25 +402,85 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
-        public IEnumerable<VoxelMod> ExpandFlora(VoxelMod rootMod)
+        public IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker)
         {
-            // Evaluate biome at placement position to lookup exact Flora Size Traits
-            float biomeNoise = _biomeSelectionNoise.GetNoise(rootMod.GlobalPosition.x, rootMod.GlobalPosition.z);
-            int biomeIndex = (int)math.floor(biomeNoise * _biomesJobData.Length);
-            biomeIndex = math.clamp(biomeIndex, 0, _biomesJobData.Length - 1);
-            StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
+            CompositeStructureTemplate template = _structureTemplateLookup[marker.PoolEntryIndex];
+            if (template == null)
+                yield break;
 
-            // Use Unity.Mathematics.Random for trunk height (deterministic per position + seed)
-            uint deterministicSeed = math.max(1u, math.hash(new int3(
-                rootMod.GlobalPosition.x, rootMod.GlobalPosition.z, _seed)));
+            Vector3Int rootPos = new Vector3Int(marker.Position.x, marker.Position.y, marker.Position.z);
+            Vector3Int cursor = rootPos + template.pivotOffset;
+
+            // Deterministic random seed per position for stacking counts
+            uint deterministicSeed = math.max(1u, math.hash(new int3(marker.Position.x, marker.Position.z, _seed)));
             Random random = new Random(deterministicSeed);
 
-            return rootMod.ID switch
+            foreach (StructureComponent component in template.components)
             {
-                0 => MakeTree(rootMod.GlobalPosition, random, biome.MajorFloraMinPhysicalHeight, biome.MajorFloraMaxPhysicalHeight),
-                1 => MakeCacti(rootMod.GlobalPosition, random, biome.MajorFloraMinPhysicalHeight, biome.MajorFloraMaxPhysicalHeight),
-                _ => Enumerable.Empty<VoxelMod>(),
-            };
+                // 1. Chance to spawn this component
+                if (component.placementChance < 1f)
+                {
+                    if (random.NextFloat() > component.placementChance)
+                        continue;
+                }
+
+                // 2. Select a variant
+                if (component.partVariants == null || component.partVariants.Length == 0)
+                    continue;
+
+                StructurePartTemplate selectedPart = component.partVariants.Length == 1
+                    ? component.partVariants[0]
+                    : component.partVariants[random.NextInt(0, component.partVariants.Length)];
+
+                if (selectedPart == null || selectedPart.blocks == null)
+                    continue;
+
+                // Adjust cursor if this component attaches to the end of the previous stacked part
+                if (component.attachToEndOfPreviousStack)
+                {
+                    cursor += component.baseOffset;
+                }
+                else
+                {
+                    // Reset cursor to the structure root for independent components
+                    cursor = rootPos + template.pivotOffset + component.baseOffset;
+                }
+
+                if (component.type == StructureComponentType.StaticPart)
+                {
+                    // Emit all blocks at the current cursor
+                    foreach (StructureBlock block in selectedPart.blocks)
+                    {
+                        yield return new VoxelMod
+                        {
+                            GlobalPosition = cursor + block.localPosition,
+                            ID = block.blockID,
+                            Rule = block.rule,
+                        };
+                    }
+                }
+                else if (component.type == StructureComponentType.StackedPart)
+                {
+                    int repeatCount = random.NextInt(component.minRepeat, component.maxRepeat + 1);
+                    for (int i = 0; i < repeatCount; i++)
+                    {
+                        // Emit all blocks shifted by the stack direction
+                        Vector3Int offset = component.stackDirection * i;
+                        foreach (StructureBlock block in selectedPart.blocks)
+                        {
+                            yield return new VoxelMod
+                            {
+                                GlobalPosition = cursor + offset + block.localPosition,
+                                ID = block.blockID,
+                                Rule = block.rule,
+                            };
+                        }
+                    }
+
+                    // Leave the cursor at the end of the stack so the next component can attach
+                    cursor += component.stackDirection * repeatCount;
+                }
+            }
         }
 
         /// <inheritdoc />
@@ -382,6 +494,8 @@ namespace Jobs.Generators
             if (_lodeNoises.IsCreated) _lodeNoises.Dispose();
             if (_allCaveLayersJobData.IsCreated) _allCaveLayersJobData.Dispose();
             if (_caveNoises.IsCreated) _caveNoises.Dispose();
+            if (_floraZoneNoises.IsCreated) _floraZoneNoises.Dispose();
+            if (_allStructurePoolEntries.IsCreated) _allStructurePoolEntries.Dispose();
         }
 
         #endregion
@@ -409,72 +523,6 @@ namespace Jobs.Generators
             noise.SetCellularJitter(config.cellularJitter);
             noise.SetNormalizeToZeroOne(config.normalizeToZeroOne);
             return noise;
-        }
-
-        #endregion
-
-        #region Flora Generation
-
-        /// <summary>
-        /// Generates a tree structure using deterministic random for trunk height.
-        /// Same visual output as the legacy tree but uses <c>Unity.Mathematics.Random</c>.
-        /// </summary>
-        private static IEnumerable<VoxelMod> MakeTree(Vector3Int position, Random random, int minHeight, int maxHeight)
-        {
-            int height = random.NextInt(minHeight, maxHeight + 1); // Trunk height range
-
-            // LEAVES
-            VoxelMod leafMod = new VoxelMod { ID = BlockIDs.OakLeaves };
-
-            for (int x = -2; x < 3; x++)
-            {
-                for (int z = -2; z < 3; z++)
-                {
-                    leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height - 2, position.z + z);
-                    yield return leafMod;
-                    leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height - 3, position.z + z);
-                    yield return leafMod;
-                }
-            }
-
-            for (int x = -1; x < 2; x++)
-            {
-                for (int z = -1; z < 2; z++)
-                {
-                    leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height - 1, position.z + z);
-                    yield return leafMod;
-                }
-            }
-
-            for (int x = -1; x < 2; x++)
-            {
-                if (x == 0)
-                    for (int z = -1; z < 2; z++)
-                    {
-                        leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height, position.z + z);
-                        yield return leafMod;
-                    }
-                else
-                {
-                    leafMod.GlobalPosition = new Vector3Int(position.x + x, position.y + height, position.z);
-                    yield return leafMod;
-                }
-            }
-
-            // TRUNK
-            for (int i = 1; i <= height; i++)
-                yield return new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), BlockIDs.OakLog);
-        }
-
-        /// <summary>
-        /// Generates a cactus structure using deterministic random for trunk height.
-        /// </summary>
-        private static IEnumerable<VoxelMod> MakeCacti(Vector3Int position, Random random, int minHeight, int maxHeight)
-        {
-            int height = random.NextInt(minHeight, maxHeight + 1); // Cactus height range
-
-            for (int i = 1; i <= height; i++)
-                yield return new VoxelMod(new Vector3Int(position.x, position.y + i, position.z), BlockIDs.Cactus);
         }
 
         #endregion

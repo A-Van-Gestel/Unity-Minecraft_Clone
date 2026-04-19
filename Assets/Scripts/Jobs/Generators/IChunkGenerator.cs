@@ -38,16 +38,15 @@ namespace Jobs.Generators
         byte GetVoxel(Vector3Int globalPos);
 
         /// <summary>
-        /// Expands a flora root point (queued by the generation job) into a full
+        /// Expands a structure spawn marker (queued by the generation job) into a full
         /// set of VoxelMods (trunk + leaves, cactus body, etc.).
         /// Called on the main thread during WorldJobManager.ProcessGenerationJobs().
-        /// Each generator owns its own noise/random strategy for trunk height determination,
-        /// ensuring legacy worlds use Mathf.PerlinNoise and standard worlds use Unity.Mathematics.Random.
+        /// Each generator owns its own structure templates and random strategy.
         /// </summary>
-        /// <param name="rootMod">The flora root VoxelMod as queued by the generation job.
-        /// The ID field encodes the flora type index (0 = tree, 1 = cactus, etc.).</param>
-        /// <returns>An enumerable of VoxelMods representing the full flora structure.</returns>
-        IEnumerable<VoxelMod> ExpandFlora(VoxelMod rootMod);
+        /// <param name="marker">The spawn marker as queued by the generation job.
+        /// Contains the global position and the pool entry index.</param>
+        /// <returns>An enumerable of VoxelMods representing the full structure.</returns>
+        IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker);
 
         /// <summary>
         /// Disposes of any internal NativeArrays allocated during Initialize.

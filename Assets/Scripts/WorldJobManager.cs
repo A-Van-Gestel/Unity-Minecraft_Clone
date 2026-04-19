@@ -11,6 +11,7 @@ using Jobs.Generators;
 using Legacy;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Pool;
 
@@ -312,26 +313,74 @@ public class WorldJobManager : IDisposable
     public void ProcessGenerationJobs()
     {
         _completedGenJobs.Clear();
+        int modsBudget = _world.settings.maxStructureModsPerFrame;
+
         foreach (KeyValuePair<ChunkCoord, GenerationJobData> jobEntry in GenerationJobs)
         {
             if (jobEntry.Value.Handle.IsCompleted)
             {
                 jobEntry.Value.Handle.Complete();
 
-                // --- STAGE 1: Populate with base terrain ---
                 ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), true);
-                chunkData.Populate(jobEntry.Value.Map, jobEntry.Value.HeightMap);
-                chunkData.Chunk?.OnDataPopulated();
+
+                // --- STAGE 1: Populate with base terrain (Once per chunk) ---
+                if (!chunkData.IsPopulated)
+                {
+                    chunkData.Populate(jobEntry.Value.Map, jobEntry.Value.HeightMap);
+                    chunkData.Chunk?.OnDataPopulated();
+                }
+
+                bool jobFullyProcessed = true;
 
                 // --- STAGE 2: Apply generated modifications (trees, etc.) ---
+
+                // 2A: Process old Legacy Mods queue (legacy generators still emit VoxelMod for roots)
                 while (jobEntry.Value.Mods.TryDequeue(out VoxelMod mod))
                 {
-                    // Delegate flora expansion to the active generator strategy.
-                    // Each generator resolves the correct biome at the mod's position and uses
-                    // its own noise/random strategy for trunk height determination.
-                    IEnumerable<VoxelMod> floraMods = _chunkGenerator.ExpandFlora(mod);
-                    _world.EnqueueVoxelModifications(floraMods);
+                    StructureSpawnMarker marker = new StructureSpawnMarker
+                    {
+                        Position = new int3(mod.GlobalPosition.x, mod.GlobalPosition.y, mod.GlobalPosition.z),
+                        PoolEntryIndex = mod.ID,
+                    };
+                    IEnumerable<VoxelMod> floraMods = _chunkGenerator.ExpandStructure(marker);
+
+                    foreach (VoxelMod fm in floraMods)
+                    {
+                        _world.EnqueueVoxelModification(fm);
+                        modsBudget--;
+                    }
+
+                    if (modsBudget <= 0)
+                    {
+                        jobFullyProcessed = false;
+                        break;
+                    }
                 }
+
+                if (!jobFullyProcessed) continue;
+
+                // 2B: Process Data-Driven StructureSpawns queue
+                if (jobEntry.Value.StructureSpawns.IsCreated)
+                {
+                    while (jobEntry.Value.StructureSpawns.TryDequeue(out StructureSpawnMarker marker))
+                    {
+                        IEnumerable<VoxelMod> structureMods = _chunkGenerator.ExpandStructure(marker);
+
+                        foreach (VoxelMod sm in structureMods)
+                        {
+                            _world.EnqueueVoxelModification(sm);
+                            modsBudget--;
+                        }
+
+                        if (modsBudget <= 0)
+                        {
+                            jobFullyProcessed = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (!jobFullyProcessed) continue;
 
                 // Check if any neighbors left pending mods for THIS chunk while it was unloaded.
                 if (_world.ModManager.TryGetModsForChunk(jobEntry.Key, out List<VoxelMod> pendingMods))
@@ -396,6 +445,10 @@ public class WorldJobManager : IDisposable
                 {
                     _world.RequestChunkMeshRebuild(chunk);
                 }
+
+                // If we ran out of budget during processing the rest of this chunk's fast STAGE 3 steps,
+                // break to respect frame time, letting the remaining completely finished jobs process next frame.
+                if (modsBudget <= 0) break;
             }
         }
 

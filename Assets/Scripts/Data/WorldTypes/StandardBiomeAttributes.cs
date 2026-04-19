@@ -74,47 +74,22 @@ namespace Data.WorldTypes
         [Tooltip("Block ID to swap the Surface Block with if generating under the Sea Level (e.g. Sand instead of Grass).")]
         public ushort underwaterSurfaceBlockID = 9; // Sand
 
-        [Header("Major Flora")]
-        [Tooltip("If true, flora like trees or cacti will be generated in this biome.")]
-        public bool enableMajorFlora = true;
-
+        [Header("Flora Zone")]
         [Tooltip("2D noise defining coherent regions (groves/forests) where flora can generate. " +
-                 "Only positions where this noise exceeds MajorFloraZoneThreshold are eligible for placement.")]
-        public FastNoiseConfig majorFloraZoneNoiseConfig;
+                 "Only pool entries with 'Use Flora Zone' enabled are affected by this noise.")]
+        public FastNoiseConfig floraZoneNoiseConfig;
 
         [Tooltip("Percentage of the biome covered by flora zones. " +
                  "Larger = larger/more frequent zones, lower = smaller/rarer zones. 1.0 = entire biome is a zone.")]
         [Range(0f, 1f)]
-        public float majorFloraZoneCoverage = 0.4f;
+        public float floraZoneCoverage = 0.4f;
 
-        [Header("Flora Height Constraints")]
-        public int majorFloraPlacementMinHeight = 0;
+        [Header("Structure Pools")]
+        [Tooltip("Major structures (trees, boulders, etc.) with independent placement grids.")]
+        public StructurePoolEntry[] majorFloraPool;
 
-        public int majorFloraPlacementMaxHeight = 256;
-
-        [Tooltip("Minimum baseline trunk segments or column blocks to generate per tree/cactus.")]
-        public int majorFloraMinPhysicalHeight = 5;
-
-        [Tooltip("Maximum baseline trunk segments or column blocks to generate per tree/cactus.")]
-        public int majorFloraMaxPhysicalHeight = 12;
-
-        [Header("Flora Placement (Spacing)")]
-        [Tooltip("The minimum grid size for flora. Smaller = denser forest, Larger = sparser forest. Evaluated deterministically.")]
-        [Range(1, 64)]
-        public int majorFloraPlacementSpacing = 5;
-
-        [Tooltip("Minimum empty blocks to maintain between the tree and the grid cell edges. " +
-                 "-1 = Automatic (Allows touching in dense small grids, prevents touching in larger grids >= 5). " +
-                 "0 = Full random placement allowing trees to naturally clump and touch. " +
-                 "Higher values force trees closer to the exact center of the grid cell.")]
-        public int majorFloraPlacementPadding = -1;
-
-        [Tooltip("Probability that a valid spacing slot will actually spawn a tree. 1.0 = every slot is filled, lower = sparser.")]
-        [Range(0f, 1f)]
-        public float majorFloraPlacementChance = 0.5f;
-
-        [Tooltip("Flora type index dispatched to ExpandFlora (0 = tree, 1 = cactus, etc.).")]
-        public byte majorFloraIndex;
+        [Tooltip("Minor structures (grass, flowers, etc.) with independent placement grids.")]
+        public StructurePoolEntry[] minorFloraPool;
 
         [Header("Lodes (Ore Veins)")]
         [Tooltip("Ore vein configurations for this biome.")]

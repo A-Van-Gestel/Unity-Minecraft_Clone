@@ -58,6 +58,7 @@ MonoBehaviour:
     mouseSensitivityY: 1.2
     enableSecondPass: 1
     enableMajorFloraPass: 1
+    maxStructureModsPerFrame: 5000
     enableChunkLoadAnimations: 0
     showChunkBorders: 0
     enableDiagnosticLogs: 0

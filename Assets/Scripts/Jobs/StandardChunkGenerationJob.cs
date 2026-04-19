@@ -9,7 +9,6 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
-using UnityEngine;
 using Random = Unity.Mathematics.Random;
 
 namespace Jobs
@@ -97,6 +96,13 @@ namespace Jobs
         [ReadOnly]
         public NativeBitArray WormMask;
 
+        /// <summary>
+        /// Flattened array of all structure pool entries across all biomes.
+        /// Each biome references a range via MajorFloraPoolStartIndex/Count and MinorFloraPoolStartIndex/Count.
+        /// </summary>
+        [ReadOnly]
+        public NativeArray<StructurePoolEntryJobData> AllStructurePoolEntries;
+
         #endregion
 
         #region Output Data
@@ -113,6 +119,12 @@ namespace Jobs
         /// <see cref="VoxelMod"/> with <c>Vector3Int</c> is fully blittable — safe in Burst.
         /// </summary>
         public NativeQueue<VoxelMod>.ParallelWriter Modifications;
+
+        /// <summary>
+        /// Structure spawn markers emitted by per-entry grid passes.
+        /// Consumed on the main thread for structure expansion.
+        /// </summary>
+        public NativeQueue<StructureSpawnMarker>.ParallelWriter StructureSpawns;
 
         #endregion
 
@@ -139,13 +151,13 @@ namespace Jobs
 
             // --- SURFACE BIOME DITHERING ---
             // Calculate a secondary biome index for surface/strata block types to organically dither boundaries
-            // We use Simplex noise (snoise) with an irrational scale (0.23f) and distinct offsets 
+            // We use Simplex noise (snoise) with an irrational scale (0.23f) and distinct offsets
             // to avoid grid-aligned repeating artifacts commonly seen with Perlin (cnoise).
             float ditherNoiseX = noise.snoise(new float2(globalX * 0.23f + 1337f, globalZ * 0.23f + BaseSeed));
             float ditherNoiseZ = noise.snoise(new float2(globalX * 0.23f - 42f, globalZ * 0.23f - BaseSeed));
             float ditherX = globalX + ditherNoiseX * biome.SurfaceBlockDitheringWidth * 30f;
             float ditherZ = globalZ + ditherNoiseZ * biome.SurfaceBlockDitheringWidth * 30f;
-            
+
             float ditheredBiomeNoise = BiomeSelectionNoise.GetNoise(ditherX, ditherZ);
             int surfaceBiomeIndex = (int)math.floor(ditheredBiomeNoise * Biomes.Length);
             surfaceBiomeIndex = math.clamp(surfaceBiomeIndex, 0, Biomes.Length - 1);
@@ -190,7 +202,7 @@ namespace Jobs
 
                     // Execute progressive dynamic subsurface strata layers top-down
                     int depthCounter = 0;
-                    
+
                     // Evaluate strata jitter noise (returns ~[-1, 1]) and scale by 2.5 blocks
                     float depthJitter = StrataDepthNoises[surfaceBiomeIndex].GetNoise(globalX, globalZ);
                     int jitterBlocks = (int)math.round(depthJitter * 2.5f);
@@ -236,7 +248,7 @@ namespace Jobs
 
                         // --- Noise evaluation (branched by CaveMode) ---
                         FastNoiseLite caveNoise = CaveNoises[caveIdx];
-                        float noiseVal = 0f;
+                        float noiseVal;
 
                         // Apply depth fade: raise the effective threshold near depth bounds
                         // (depthFade=0 at edge → threshold becomes unreachable, depthFade=1 inside → normal threshold)
@@ -251,6 +263,7 @@ namespace Jobs
                                 voxelValue = (byte)BlockIDs.Air;
                                 break;
                             }
+
                             continue; // Skip noise evaluation
                         }
                         else if (caveLayer.Mode == CaveMode.Spaghetti)
@@ -321,50 +334,60 @@ namespace Jobs
                     highestBlockFound = true;
                 }
 
-                // --- Flora placement ---
-                // We only place flora on non-Air, non-Fluid, solid surface blocks above sea level
+                // --- Structure placement (per-entry independent grids) ---
+                // We only place structures on non-Air, non-Fluid, solid surface blocks above sea level.
                 if (y == terrainHeight && y >= SeaLevel &&
-                    y >= biome.MajorFloraPlacementMinHeight && y <= biome.MajorFloraPlacementMaxHeight &&
-                    voxelValue != BlockIDs.Air && voxelProps.FluidType == FluidType.None && biome.EnableMajorFlora)
+                    voxelValue != BlockIDs.Air && voxelProps.FluidType == FluidType.None)
                 {
+                    // Pre-sample the flora zone noise once for all entries that use it.
                     FastNoiseLite floraZoneNoise = FloraZoneNoises[biomeIndex];
                     float zoneNoiseVal = floraZoneNoise.GetNoise(globalX, globalZ);
+                    bool isInFloraZone = zoneNoiseVal > 1f - biome.FloraZoneCoverage;
 
-                    // Tier 1: Are we inside a flora zone (e.g., a forest/grove)?
-                    // FastNoiseLite.NormalizeToZeroOne config is recommended for flora zone noises to easily use 0..1 ranges.
-                    if (zoneNoiseVal > 1f - biome.MajorFloraZoneCoverage)
+                    // Process major flora pool entries
+                    int totalPoolEntries = biome.MajorFloraPoolCount + biome.MinorFloraPoolCount;
+                    for (int poolPass = 0; poolPass < totalPoolEntries; poolPass++)
                     {
-                        // Tier 2: The Grid. Divide the world into Spacing x Spacing cells.
-                        int spacing = math.max(1, biome.MajorFloraPlacementSpacing);
+                        int entryIndex;
+                        if (poolPass < biome.MajorFloraPoolCount)
+                            entryIndex = biome.MajorFloraPoolStartIndex + poolPass;
+                        else
+                            entryIndex = biome.MinorFloraPoolStartIndex + (poolPass - biome.MajorFloraPoolCount);
 
-                        // Use float division to gracefully handle negative coordinates mathematically
+                        StructurePoolEntryJobData entry = AllStructurePoolEntries[entryIndex];
+
+                        // Height bounds check
+                        if (y < entry.MinPlacementHeight || y > entry.MaxPlacementHeight)
+                            continue;
+
+                        // Flora zone check (if this entry requires it)
+                        if (entry.UseFloraZone && !isInFloraZone)
+                            continue;
+
+                        // Grid-cell election with this entry's spacing
+                        int spacing = math.max(1, entry.Spacing);
                         int cellX = (int)math.floor((float)globalX / spacing);
                         int cellZ = (int)math.floor((float)globalZ / spacing);
 
-                        // Seed a random generator specifically for this grid cell
-                        uint cellHash = math.hash(new int3(cellX, cellZ, BaseSeed));
+                        // Seed includes the entry index for independence between entries
+                        uint cellHash = math.hash(new int4(cellX, cellZ, BaseSeed, entryIndex));
                         Random cellRandom = new Random(math.max(1u, cellHash));
 
-                        // Calculate padding (minimum empty blocks from the grid cell edges)
+                        // Calculate padding
                         int edgePadding;
-                        if (biome.MajorFloraPlacementPadding < 0)
+                        if (entry.Padding < 0)
                         {
-                            // Automatic mode: Prevent edge overlapping natively,
-                            // but if the grid allows very dense placement (spacing < 5),
-                            // we disable padding to allow natural clustering and avoid strict Orchard grids.
                             edgePadding = spacing >= 5 ? 1 : 0;
                         }
                         else
                         {
-                            // Developer Override
                             int maxPossiblePadding = (spacing - 1) / 2;
-                            edgePadding = math.clamp(biome.MajorFloraPlacementPadding, 0, maxPossiblePadding);
+                            edgePadding = math.clamp(entry.Padding, 0, maxPossiblePadding);
                         }
 
                         // Define valid internal placement area
                         int innerMinX = cellX * spacing + edgePadding;
                         int innerMaxX = cellX * spacing + spacing - edgePadding;
-
                         int innerMinZ = cellZ * spacing + edgePadding;
                         int innerMaxZ = cellZ * spacing + spacing - edgePadding;
 
@@ -372,16 +395,17 @@ namespace Jobs
                         int targetX = cellRandom.NextInt(innerMinX, innerMaxX);
                         int targetZ = cellRandom.NextInt(innerMinZ, innerMaxZ);
 
-                        // Is THIS column the elected structural point for this local grid cell?
+                        // Is THIS column the elected structural point for this entry's grid cell?
                         if (globalX == targetX && globalZ == targetZ)
                         {
-                            // Tier 3: Chance. Does the elected cell actually spawn a tree?
-                            if (cellRandom.NextFloat() <= biome.MajorFloraPlacementChance)
+                            // Chance roll
+                            if (cellRandom.NextFloat() <= entry.Chance)
                             {
-                                // Enqueue a flora root point for main-thread structure generation.
-                                Modifications.Enqueue(new VoxelMod(
-                                    new Vector3Int(globalX, y, globalZ),
-                                    biome.MajorFloraIndex));
+                                StructureSpawns.Enqueue(new StructureSpawnMarker
+                                {
+                                    Position = new int3(globalX, y, globalZ),
+                                    PoolEntryIndex = entryIndex,
+                                });
                             }
                         }
                     }
