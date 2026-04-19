@@ -194,7 +194,22 @@ namespace Editor.BlockEditor
 
                 EditorGUILayout.EndHorizontal();
 
-                _selectedBlock.meshData = (VoxelMeshData)EditorGUILayout.ObjectField(new GUIContent("Custom Mesh Data", "The custom mesh data for this block, if it's not a standard cube."), _selectedBlock.meshData, typeof(VoxelMeshData), false);
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Meshing", EditorStyles.boldLabel);
+
+                // --- Render Shape ---
+                EditorGUI.BeginChangeCheck();
+                _selectedBlock.renderShape = (RenderShape)EditorGUILayout.EnumPopup(new GUIContent("Render Shape", "The mesh generation strategy used for this block.\n\n• Cube — Standard 6-face cube.\n• CustomMesh — Uses a VoxelMeshData ScriptableObject.\n• CrossMesh — Two intersecting diagonal planes for flora."), _selectedBlock.renderShape);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    UpdatePreviewMesh();
+                }
+
+                // Only show the Custom Mesh Data field when using CustomMesh shape
+                if (_selectedBlock.renderShape == RenderShape.CustomMesh)
+                {
+                    _selectedBlock.meshData = (VoxelMeshData)EditorGUILayout.ObjectField(new GUIContent("Custom Mesh Data", "The custom mesh data for this block, if it's not a standard cube."), _selectedBlock.meshData, typeof(VoxelMeshData), false);
+                }
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Properties", EditorStyles.boldLabel);
@@ -344,45 +359,66 @@ namespace Editor.BlockEditor
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Face Textures (ID)", EditorStyles.boldLabel);
 
-                // --- Plus-Shaped Texture Selector Layout ---
-                // This layout uses nested vertical and horizontal groups to align the selectors
-                // in an "unfolded cube" pattern without hardcoding pixel sizes.
-
                 // Only draw the texture selectors if the block is not a fluid. As fluids are drawn using shaders.
                 if (_selectedBlock.fluidType == FluidType.None)
                 {
                     // Auto-refresh the 3D preview when any texture face ID changes.
                     EditorGUI.BeginChangeCheck();
 
-                    // Row 1: Top Face (centered)
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Top (+Y)", "Texture ID for the Positive Y face."), ref _selectedBlock.topFaceTexture);
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
+                    if (_selectedBlock.renderShape == RenderShape.CrossMesh)
+                    {
+                        // --- CrossMesh: Single Texture Selector ---
+                        // Cross meshes use a single texture for all four planes.
+                        // We sync all side face IDs to keep SideFaceTexture consistent.
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Texture", "Texture ID for the cross-mesh planes."), ref _selectedBlock.backFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
 
-                    // Row 2: Left, Front, and Right Faces
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Left (-X)", "Texture ID for the Negative X face."), ref _selectedBlock.leftFaceTexture);
-                    DrawTextureSelectorControl(new GUIContent("Front (+Z)", "Texture ID for the Positive Z face."), ref _selectedBlock.frontFaceTexture);
-                    DrawTextureSelectorControl(new GUIContent("Right (+X)", "Texture ID for the Positive X face."), ref _selectedBlock.rightFaceTexture);
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
+                        // Sync all face IDs so SideFaceTexture always returns this value.
+                        _selectedBlock.frontFaceTexture = _selectedBlock.backFaceTexture;
+                        _selectedBlock.leftFaceTexture = _selectedBlock.backFaceTexture;
+                        _selectedBlock.rightFaceTexture = _selectedBlock.backFaceTexture;
+                        _selectedBlock.topFaceTexture = _selectedBlock.backFaceTexture;
+                        _selectedBlock.bottomFaceTexture = _selectedBlock.backFaceTexture;
+                    }
+                    else
+                    {
+                        // --- Plus-Shaped Texture Selector Layout ---
+                        // This layout uses nested vertical and horizontal groups to align the selectors
+                        // in an "unfolded cube" pattern without hardcoding pixel sizes.
 
-                    // Row 3: Bottom Face (centered)
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Bottom (-Y)", "Texture ID for the Negative Y face."), ref _selectedBlock.bottomFaceTexture);
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
+                        // Row 1: Top Face (centered)
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Top (+Y)", "Texture ID for the Positive Y face."), ref _selectedBlock.topFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
 
-                    // Row 4: Back Face (centered)
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Back (-Z)", "Texture ID for the Negative Z face."), ref _selectedBlock.backFaceTexture);
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
+                        // Row 2: Left, Front, and Right Faces
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Left (-X)", "Texture ID for the Negative X face."), ref _selectedBlock.leftFaceTexture);
+                        DrawTextureSelectorControl(new GUIContent("Front (+Z)", "Texture ID for the Positive Z face."), ref _selectedBlock.frontFaceTexture);
+                        DrawTextureSelectorControl(new GUIContent("Right (+X)", "Texture ID for the Positive X face."), ref _selectedBlock.rightFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
+
+                        // Row 3: Bottom Face (centered)
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Bottom (-Y)", "Texture ID for the Negative Y face."), ref _selectedBlock.bottomFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
+
+                        // Row 4: Back Face (centered)
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Back (-Z)", "Texture ID for the Negative Z face."), ref _selectedBlock.backFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
+                    }
 
                     // If any texture ID changed, rebuild the preview mesh immediately.
                     if (EditorGUI.EndChangeCheck())
@@ -455,6 +491,7 @@ namespace Editor.BlockEditor
             {
                 blockName = $"{_selectedBlock.blockName} (Copy)",
                 icon = _selectedBlock.icon,
+                renderShape = _selectedBlock.renderShape,
                 meshData = _selectedBlock.meshData,
                 stackSize = _selectedBlock.stackSize,
                 isSolid = _selectedBlock.isSolid,
@@ -543,9 +580,9 @@ namespace Editor.BlockEditor
                 if (_blockDatabase.liquidMaterial != null) targetMaterial = _blockDatabase.liquidMaterial;
                 else EditorUtility.DisplayDialog("Error", "Liquid material not found.", "OK");
             }
-            else if (_selectedBlock.renderNeighborFaces)
+            else if (_selectedBlock.renderNeighborFaces || _selectedBlock.renderShape == RenderShape.CrossMesh)
             {
-                // Use the transparent material for see-through solid blocks
+                // Use the transparent material for see-through solid blocks and cross meshes
                 if (_blockDatabase.transparentMaterial != null) targetMaterial = _blockDatabase.transparentMaterial;
                 else EditorUtility.DisplayDialog("Error", "Transparent material not found.", "OK");
             }

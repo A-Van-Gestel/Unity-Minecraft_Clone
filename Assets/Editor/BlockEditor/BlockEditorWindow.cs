@@ -148,6 +148,7 @@ namespace Editor.BlockEditor
                     // copy all fields
                     blockName = blockType.blockName,
                     icon = blockType.icon,
+                    renderShape = blockType.renderShape,
                     meshData = blockType.meshData,
                     stackSize = blockType.stackSize,
                     isSolid = blockType.isSolid,

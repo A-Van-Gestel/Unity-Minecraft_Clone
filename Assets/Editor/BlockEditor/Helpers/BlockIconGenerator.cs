@@ -79,7 +79,12 @@ namespace Editor.BlockEditor.Helpers
             if (mesh == null || mesh.vertexCount == 0) return null;
 
             // --- Apply Isometric Shadowing ---
-            ApplyVertexColorShadows(mesh, blockType);
+            // Cross meshes (flora) use uniform lighting — the diagonal normals don't map
+            // to meaningful cube faces, so per-face darkening makes them look muddy.
+            if (blockType.renderShape != RenderShape.CrossMesh)
+            {
+                ApplyVertexColorShadows(mesh, blockType);
+            }
 
             // --- Select the correct material ---
             Material sourceMaterial = GetMaterialForBlock(blockType, blockDatabase);
@@ -187,6 +192,15 @@ namespace Editor.BlockEditor.Helpers
 
                 resultTexture.Apply();
                 RenderTexture.active = previousActive;
+
+                // --- Auto-center non-cube shapes (e.g., cross meshes) ---
+                // Cross mesh textures are often bottom-heavy (grass blades), causing the
+                // rendered content to appear misaligned within the fixed orthographic frame.
+                // We scan the visible pixel bounds and re-center the content vertically.
+                if (blockType.renderShape == RenderShape.CrossMesh)
+                {
+                    resultTexture = AutoCenterContent(resultTexture);
+                }
 
                 return resultTexture;
             }
@@ -418,7 +432,7 @@ namespace Editor.BlockEditor.Helpers
             if (blockType.fluidType != FluidType.None)
                 return blockDatabase.liquidMaterial;
 
-            if (blockType.renderNeighborFaces)
+            if (blockType.renderNeighborFaces || blockType.renderShape == RenderShape.CrossMesh)
                 return blockDatabase.transparentMaterial;
 
             return blockDatabase.opaqueMaterial;
@@ -440,6 +454,74 @@ namespace Editor.BlockEditor.Helpers
             // Also replace spaces for cleaner file names
             sanitized = sanitized.Replace(' ', '_');
             return sanitized;
+        }
+
+        /// <summary>
+        /// Scans the visible (non-transparent) pixel bounds of a rendered icon and
+        /// re-centers the content within the texture. This corrects alignment for
+        /// non-cubic shapes (e.g., cross meshes) whose visual content doesn't fill
+        /// the full orthographic frame evenly.
+        /// </summary>
+        private static Texture2D AutoCenterContent(Texture2D source)
+        {
+            int w = source.width;
+            int h = source.height;
+            Color[] pixels = source.GetPixels();
+
+            // Find the bounding box of non-transparent pixels
+            int minX = w, maxX = 0, minY = h, maxY = 0;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    if (pixels[y * w + x].a > 0.01f)
+                    {
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+            }
+
+            // If no visible content was found, return as-is
+            if (minX > maxX || minY > maxY) return source;
+
+            int contentW = maxX - minX + 1;
+            int contentH = maxY - minY + 1;
+
+            // Calculate the offset needed to center the content
+            int targetX = (w - contentW) / 2;
+            int targetY = (h - contentH) / 2;
+            int offsetX = targetX - minX;
+            int offsetY = targetY - minY;
+
+            // If the content is already centered (within 1px), skip the copy
+            if (Mathf.Abs(offsetX) <= 1 && Mathf.Abs(offsetY) <= 1) return source;
+
+            // Create a new blank texture and copy pixels with the centering offset
+            Texture2D centered = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            Color[] newPixels = new Color[w * h]; // Initialized to (0,0,0,0)
+
+            for (int y = minY; y <= maxY; y++)
+            {
+                for (int x = minX; x <= maxX; x++)
+                {
+                    int newX = x + offsetX;
+                    int newY = y + offsetY;
+                    if (newX >= 0 && newX < w && newY >= 0 && newY < h)
+                    {
+                        newPixels[newY * w + newX] = pixels[y * w + x];
+                    }
+                }
+            }
+
+            centered.SetPixels(newPixels);
+            centered.Apply();
+
+            // Clean up the original
+            Object.DestroyImmediate(source);
+            return centered;
         }
     }
 }

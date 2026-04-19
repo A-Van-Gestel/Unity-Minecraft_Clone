@@ -67,7 +67,14 @@ namespace Editor.BlockEditor.Helpers
                 templates.Dispose();
                 blockTypesJobData.Dispose();
             }
-            // Case 2: Custom Mesh
+            // Case 2: Cross Mesh (flora)
+            else if (blockType.renderShape == RenderShape.CrossMesh)
+            {
+                int textureID = blockType.backFaceTexture; // CrossMesh uses a single texture synced across all faces
+                VoxelMeshHelper.GenerateCrossMesh(textureID, 1.0f, Vector3Int.zero,
+                    ref vertexIndex, ref nativeVertices, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals);
+            }
+            // Case 3: Custom Mesh
             else if (blockType.meshData != null)
             {
                 // This logic does not use native lists, so it remains unchanged for now.
@@ -111,7 +118,7 @@ namespace Editor.BlockEditor.Helpers
                     }
                 }
             }
-            // Case 3: Standard Solid Block
+            // Case 4: Standard Solid Block
             else
             {
                 for (int p = 0; p < 6; p++)

@@ -250,8 +250,19 @@ namespace Jobs
                 return; // Fluid blocks are never also a custom mesh or standard cube.
             }
 
-            // --- CASE 2: CUSTOM MESH ---
-            if (voxelProps.CustomMeshIndex > -1)
+            // --- CASE 2: CROSS MESH ---
+            if (voxelProps.RenderShape == RenderShape.CrossMesh)
+            {
+                VoxelState? centerVoxel = GetVoxelStateFromLocalPos(pos);
+                float lightLevel = centerVoxel.HasValue ? centerVoxel.Value.LightAsFloat : 1.0f;
+                int textureID = voxelProps.SideFaceTexture;
+
+                VoxelMeshHelper.GenerateCrossMesh(textureID, lightLevel, pos, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals);
+                return;
+            }
+
+            // --- CASE 3: CUSTOM MESH ---
+            if (voxelProps.RenderShape == RenderShape.CustomMesh && voxelProps.CustomMeshIndex > -1)
             {
                 byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
                 float rotation = VoxelHelper.GetRotationAngle(orientation);
@@ -277,7 +288,7 @@ namespace Jobs
                     }
                 }
             }
-            // --- CASE 3: STANDARD CUBE ---
+            // --- CASE 4: STANDARD CUBE ---
             else
             {
                 byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);

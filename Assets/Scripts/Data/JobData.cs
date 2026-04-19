@@ -62,6 +62,7 @@ namespace Data
         [MarshalAs(UnmanagedType.U1)]
         public readonly bool RenderNeighborFaces;
 
+        public readonly RenderShape RenderShape;
         public readonly int CustomMeshIndex; // -1 if not a custom mesh
 
         // Fluid properties
@@ -98,6 +99,7 @@ namespace Data
             // Block properties
             IsSolid = blockType.isSolid;
             RenderNeighborFaces = blockType.renderNeighborFaces;
+            RenderShape = blockType.renderShape;
             CustomMeshIndex = customMeshIdx;
 
             // Fluid properties

@@ -40,6 +40,9 @@ This document tracks all third-party assets, libraries, algorithms, and resource
 * **paramecij's tree trunks and stumps texture pack 1** by [pare](https://opengameart.org/content/paramecijs-tree-trunks-and-stumps-texture-pack-1)
     * *License:* CC0 (Public Domain)
     * *Files used:* ....
+* **Grass 2** by [virtushda](https://opengameart.org/content/grass-2-0)
+    * *License:* CC0 (Public Domain)
+    * *Files used:* 255-grass_blades.png
 
 ### UI Elements
 

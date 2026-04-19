@@ -19,7 +19,12 @@ namespace Data
         [InitializationField]
         public Sprite icon;
 
+        [Header("Meshing")]
+        [Tooltip("The mesh generation strategy used for this block.")]
+        public RenderShape renderShape = RenderShape.Cube;
+
         [Tooltip("The custom mesh data for this block, if it's not a standard cube.")]
+        [ConditionalField(nameof(renderShape), false, RenderShape.CustomMesh)]
         [InitializationField]
         public VoxelMeshData meshData;
 

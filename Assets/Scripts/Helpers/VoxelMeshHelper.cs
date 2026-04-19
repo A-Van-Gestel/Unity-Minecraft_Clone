@@ -16,11 +16,11 @@ namespace Helpers
         private static readonly int[] s_faceUvOrder =
         {
             0, 1, 2, 3, // Back Face
-            2, 3, 0, 1, // Front Face
+            0, 1, 2, 3, // Front Face
             0, 1, 2, 3, // Top Face
             0, 1, 2, 3, // Bottom Face
-            1, 3, 0, 2, // Left Face
-            0, 2, 1, 3, // Right Face
+            0, 1, 2, 3, // Left Face
+            0, 1, 2, 3, // Right Face
         };
 
         /// <summary>
@@ -160,6 +160,78 @@ namespace Helpers
             }
 
             vertexIndex += faceData.VertCount;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void AddCrossQuad(
+            Vector3 bl, Vector3 tl, Vector3 br, Vector3 tr, Vector3 normal, int textureID, Color vertexColor, in Vector3Int position,
+            ref int vertexIndex, ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
+            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals)
+        {
+            vertices.Add(position + bl);
+            vertices.Add(position + tl);
+            vertices.Add(position + br);
+            vertices.Add(position + tr);
+
+            normals.Add(normal);
+            normals.Add(normal);
+            normals.Add(normal);
+            normals.Add(normal);
+
+            colors.Add(vertexColor);
+            colors.Add(vertexColor);
+            colors.Add(vertexColor);
+            colors.Add(vertexColor);
+
+            AddTexture(textureID, new Vector2(0, 0), ref uvs); // BL
+            AddTexture(textureID, new Vector2(0, 1), ref uvs); // TL
+            AddTexture(textureID, new Vector2(1, 0), ref uvs); // BR
+            AddTexture(textureID, new Vector2(1, 1), ref uvs); // TR
+
+            transparentTriangles.Add(vertexIndex);
+            transparentTriangles.Add(vertexIndex + 1);
+            transparentTriangles.Add(vertexIndex + 2);
+            transparentTriangles.Add(vertexIndex + 2);
+            transparentTriangles.Add(vertexIndex + 1);
+            transparentTriangles.Add(vertexIndex + 3);
+
+            vertexIndex += 4;
+        }
+
+        /// <summary>
+        /// Generates a cross mesh for minor flora (two intersecting diagonal planes).
+        /// Bypasses standard neighbor culling and uses diagonal normals.
+        /// </summary>
+        [BurstCompile]
+        [SkipLocalsInit]
+        public static void GenerateCrossMesh(
+            int textureID, float lightLevel, in Vector3Int position,
+            ref int vertexIndex,
+            ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
+            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals)
+        {
+            Color vertexColor = new Color(1f, 1f, 1f, lightLevel);
+
+            // Plane 1: (0,0,0) to (1,1,1)
+            Vector3 p1_bl = new Vector3(0, 0, 0);
+            Vector3 p1_tl = new Vector3(0, 1, 0);
+            Vector3 p1_br = new Vector3(1, 0, 1);
+            Vector3 p1_tr = new Vector3(1, 1, 1);
+            Vector3 normal1_front = new Vector3(-0.7071f, 0f, 0.7071f);
+            Vector3 normal1_back = new Vector3(0.7071f, 0f, -0.7071f);
+
+            // Plane 2: (1,0,0) to (0,1,1)
+            Vector3 p2_bl = new Vector3(1, 0, 0);
+            Vector3 p2_tl = new Vector3(1, 1, 0);
+            Vector3 p2_br = new Vector3(0, 0, 1);
+            Vector3 p2_tr = new Vector3(0, 1, 1);
+            Vector3 normal2_front = new Vector3(0.7071f, 0f, 0.7071f);
+            Vector3 normal2_back = new Vector3(-0.7071f, 0f, -0.7071f);
+
+            AddCrossQuad(p1_bl, p1_tl, p1_br, p1_tr, normal1_front, textureID, vertexColor, in position, ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals); // Plane 1 Front
+            AddCrossQuad(p1_br, p1_tr, p1_bl, p1_tl, normal1_back, textureID, vertexColor, in position, ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals); // Plane 1 Back
+            AddCrossQuad(p2_bl, p2_tl, p2_br, p2_tr, normal2_front, textureID, vertexColor, in position, ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals); // Plane 2 Front
+            AddCrossQuad(p2_br, p2_tr, p2_bl, p2_tl, normal2_back, textureID, vertexColor, in position, ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals); // Plane 2 Back
         }
 
 
