@@ -168,6 +168,18 @@ namespace Data
         }
 
         /// <summary>
+        /// Returns true if this block can act as a support base for blocks with
+        /// the <see cref="BlockTags.REQUIRES_SUPPORT"/> tag.
+        /// Currently equivalent to <see cref="isSolid"/>, but exists as a dedicated
+        /// property so the definition of "support" can diverge independently.
+        /// </summary>
+        public bool ProvidesSupport
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => isSolid;
+        }
+
+        /// <summary>
         /// Returns true if the block emits its own light.
         /// </summary>
         public bool IsLightSource

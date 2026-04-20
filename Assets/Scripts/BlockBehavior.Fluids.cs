@@ -167,16 +167,16 @@ public static partial class BlockBehavior
 
             if (!neighborState.HasValue) continue;
 
-            // Flow into air or same fluid with worse level
+            // Flow into air, same fluid with worse level, or replaceable non-solid blocks (e.g. grass)
             bool neighborIsAir = neighborState.Value.ID == BlockIDs.Air;
+            bool neighborIsReplaceable = !neighborState.Value.Properties.isSolid &&
+                                         (neighborState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0;
             bool neighborIsSameFluidAndWorse = neighborState.Value.ID == currentId &&
                                                !IsFalling(neighborState.Value.FluidLevel) && // Ensure we do not overwrite falling blocks (waterfalls) with horizontal flow.
                                                GetEffectiveLevel(neighborState.Value.FluidLevel) > newLevel;
 
-            if (neighborIsAir || neighborIsSameFluidAndWorse)
+            if (neighborIsAir || neighborIsReplaceable || neighborIsSameFluidAndWorse)
             {
-                if (neighborState.Value.Properties.isSolid) continue;
-
                 Vector3Int globalNeighborPos = new Vector3Int(
                     neighborPos.x + chunkData.Position.x, neighborPos.y,
                     neighborPos.z + chunkData.Position.y);
@@ -233,11 +233,13 @@ public static partial class BlockBehavior
                 if (!neighborState.HasValue) continue;
 
                 bool neighborIsAir = neighborState.Value.ID == BlockIDs.Air;
+                bool neighborIsReplaceable = !neighborState.Value.Properties.isSolid &&
+                                             (neighborState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0;
                 bool neighborIsSameFluidAndWorse = neighborState.Value.ID == id &&
                                                    !IsFalling(neighborState.Value.FluidLevel) &&
                                                    GetEffectiveLevel(neighborState.Value.FluidLevel) > expectedNewLevel;
 
-                if ((neighborIsAir || neighborIsSameFluidAndWorse) && !neighborState.Value.Properties.isSolid)
+                if ((neighborIsAir || neighborIsReplaceable || neighborIsSameFluidAndWorse) && !neighborState.Value.Properties.isSolid)
                 {
                     return true;
                 }

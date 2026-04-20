@@ -34,6 +34,8 @@ namespace Data
         MAN_MADE = 1 << 11, // 2048
         CLIMBABLE = 1 << 12, // 4096 (Ladders, Vines, etc.)
         REPLACEABLE = 1 << 13, // 8192 (Tall grass, etc. can be replaced by placing a block)
+        REQUIRES_SUPPORT = 1 << 14, // 16384 (Breaks when supporting block beneath becomes non-solid)
+        IGNORE_RAYCAST = 1 << 15, // 32768 (Raymarcher always passes through this block)
     }
 
     /// <summary>

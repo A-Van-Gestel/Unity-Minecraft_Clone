@@ -1567,8 +1567,10 @@ public class World : MonoBehaviour
                                     }
                                 }
                             }
-                            // Rule C: If the incoming block is set to NONE, it means it can only replace Air.
-                            else if (existingProps.tags != BlockTags.NONE)
+                            // Rule C: If the incoming block is set to NONE, it means it can only
+                            // replace Air or any block with the REPLACEABLE tag.
+                            else if (existingProps.tags != BlockTags.NONE &&
+                                     (existingProps.tags & BlockTags.REPLACEABLE) == 0)
                             {
                                 canPlace = false;
                             }
@@ -1586,7 +1588,31 @@ public class World : MonoBehaviour
             // --- 3. If chunk is ready, Apply Modification ---
             Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.GlobalPosition);
 
+            // Capture old state BEFORE modification for support check
+            VoxelState? oldState = worldData.GetVoxelState(v.GlobalPosition);
+            bool oldProvidedSupport = oldState.HasValue && blockDatabase.blockTypes[oldState.Value.ID].ProvidesSupport;
+
             chunkData.ModifyVoxel(localPos, v);
+
+            // --- 3b. Support Check ---
+            // If support was removed (solid→non-solid), break any block above that requires it.
+            if (oldProvidedSupport)
+            {
+                BlockType newModProps = blockDatabase.blockTypes[v.ID];
+                if (!newModProps.ProvidesSupport)
+                {
+                    Vector3Int abovePos = v.GlobalPosition + Vector3Int.up;
+                    VoxelState? aboveState = worldData.GetVoxelState(abovePos);
+                    if (aboveState.HasValue &&
+                        (blockDatabase.blockTypes[aboveState.Value.ID].tags & BlockTags.REQUIRES_SUPPORT) != 0)
+                    {
+                        _modifications.Enqueue(new VoxelMod(abovePos, blockId: BlockIDs.Air)
+                        {
+                            ImmediateUpdate = v.ImmediateUpdate,
+                        });
+                    }
+                }
+            }
 
             // --- 4. Neighbor Activation ---
             // After any modification, the World is now responsible for waking up all 6 neighbors.
@@ -2376,22 +2402,35 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Determines if a voxel at the given world position is solid.
+    /// Determines if a voxel at the given world position should stop a ray or count as a hit.
     /// </summary>
     /// <param name="worldPos">The world-space position.</param>
     /// <param name="includeFluids">If true, fluids will also count as a hit.</param>
-    /// <returns>True if the voxel is solid (or a fluid, if requested); otherwise, false.</returns>
-    public bool CheckForVoxel(Vector3 worldPos, bool includeFluids = false)
+    /// <param name="includeNonSolid">If true, non-solid interactable blocks (excluding Air and
+    /// blocks with <see cref="BlockTags.IGNORE_RAYCAST"/>) will also count as a hit.</param>
+    /// <returns>True if the voxel should be treated as a hit; otherwise, false.</returns>
+    public bool CheckForVoxel(Vector3 worldPos, bool includeFluids = false, bool includeNonSolid = false)
     {
         VoxelState? voxel = worldData.GetVoxelState(worldPos);
         if (!voxel.HasValue) return false;
 
-        // If we want to target fluids (e.g. for buckets) and this is a fluid, return true
-        if (includeFluids && blockDatabase.blockTypes[voxel.Value.ID].fluidType != FluidType.None)
+        BlockType props = blockDatabase.blockTypes[voxel.Value.ID];
+
+        // Skip Air (ID 0) — never a hit
+        if (voxel.Value.ID == BlockIDs.Air) return false;
+
+        // Fluid targeting (e.g. for buckets)
+        if (includeFluids && props.fluidType != FluidType.None)
             return true;
 
-        // Otherwise, only hit solid blocks
-        return blockDatabase.blockTypes[voxel.Value.ID].isSolid;
+        // Solid blocks are always a hit
+        if (props.isSolid) return true;
+
+        // Non-solid interactable targeting (e.g. grass plants)
+        if (includeNonSolid && (props.tags & BlockTags.IGNORE_RAYCAST) == 0)
+            return true;
+
+        return false;
     }
 
     /// <summary>

@@ -106,7 +106,7 @@ public class PlayerInteraction : MonoBehaviour
         {
             Vector3 pos = _playerCamera.position + _playerCamera.forward * step;
 
-            if (_world.CheckForVoxel(pos, checkFluids))
+            if (_world.CheckForVoxel(pos, checkFluids, includeNonSolid: true))
             {
                 VoxelRaycastResult result = new VoxelRaycastResult { DidHit = true };
                 result.HitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
@@ -149,6 +149,15 @@ public class PlayerInteraction : MonoBehaviour
 
         if (result.DidHit)
         {
+            // If the targeted block is replaceable (e.g. grass), the place position
+            // should be the block itself (replace it) rather than adjacent to it.
+            VoxelState? hitState = _world.GetVoxelState(result.HitPosition);
+            if (hitState.HasValue &&
+                (hitState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0)
+            {
+                result.PlacePosition = result.HitPosition;
+            }
+
             highlightBlock.position = result.HitPosition;
             placeBlock.position = result.PlacePosition;
 
