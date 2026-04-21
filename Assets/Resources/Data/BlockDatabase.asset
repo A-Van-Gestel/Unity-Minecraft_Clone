@@ -477,7 +477,7 @@ MonoBehaviour:
     rightFaceTexture: 18
   - blockName: Stone Half Slab
     icon: {fileID: 21300000, guid: 615f06e5618484b428678b605917c0ff, type: 3}
-    renderShape: 0
+    renderShape: 1
     meshData: {fileID: 11400000, guid: f1f1cbb961eacda4dbac46e90f49df51, type: 2}
     stackSize: 64
     isSolid: 1
