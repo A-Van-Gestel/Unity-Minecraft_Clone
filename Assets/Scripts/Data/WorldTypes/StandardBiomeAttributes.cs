@@ -1,4 +1,5 @@
 using System;
+using Attributes;
 using Jobs.Data;
 using Libraries;
 using MyBox;
@@ -53,11 +54,11 @@ namespace Data.WorldTypes
         public float terrainAmplitude = 20f;
 
         [Header("Surface Blocks")]
-        [ConstantsSelection(typeof(BlockIDs))]
+        [BlockID]
         [Tooltip("Block ID for the surface layer (e.g., Grass).")]
         public ushort surfaceBlockID;
 
-        [ConstantsSelection(typeof(BlockIDs))]
+        [BlockID]
         [Tooltip("Block ID for the sub-surface layers (e.g., Dirt).")]
         [Obsolete("Replaced by terrainLayers")]
         [HideInInspector]
@@ -70,7 +71,7 @@ namespace Data.WorldTypes
         [Tooltip("Noise configuration for strata depth jitter. Evaluated locally to organically vary the thickness of the subsurface terrain layers.")]
         public FastNoiseConfig strataDepthNoiseConfig = new FastNoiseConfig { noiseType = FastNoiseLite.NoiseType.OpenSimplex2, frequency = 0.05f };
 
-        [ConstantsSelection(typeof(BlockIDs))]
+        [BlockID]
         [Tooltip("Block ID to swap the Surface Block with if generating under the Sea Level (e.g. Sand instead of Grass).")]
         public ushort underwaterSurfaceBlockID = 9; // Sand
 
@@ -113,7 +114,7 @@ namespace Data.WorldTypes
         [Tooltip("Editor Preview Color for Composite visualizer tool.")]
         public Color previewColor = Color.yellow;
 
-        [ConstantsSelection(typeof(BlockIDs))]
+        [BlockID]
         [Tooltip("ID of the block that will be generated.")]
         public ushort blockID;
 
@@ -167,7 +168,7 @@ namespace Data.WorldTypes
     [Serializable]
     public class StandardTerrainLayer
     {
-        [ConstantsSelection(typeof(BlockIDs))]
+        [BlockID]
         [Tooltip("ID of the block that will be generated for this subsurface strata.")]
         public ushort blockID;
 

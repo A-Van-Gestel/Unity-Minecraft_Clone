@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Data.WorldTypes;
 using Editor.Libraries;
-using Jobs.Data;
+using Jobs.Generators;
 using Libraries;
 using Unity.Mathematics;
 using UnityEditor;
@@ -11,7 +11,7 @@ using UnityEngine;
 
 namespace Editor.WorldTools
 {
-    public class NoisePreviewWindow : EditorWindow
+    public partial class NoisePreviewWindow : EditorWindow
     {
         public enum NoiseTarget
         {
@@ -27,6 +27,10 @@ namespace Editor.WorldTools
             X512 = 512,
             X1024 = 1024,
         }
+
+        // --- Tab State ---
+        private int _selectedTabIndex;
+        private static readonly string[] s_tabLabels = { "Noise Preview", "World Blending" };
 
         // Biome selection state
         private const string BIOME_SAVE_DIR = "Assets/Data/WorldGen/Biomes";
@@ -66,6 +70,7 @@ namespace Editor.WorldTools
         {
             // Auto-discover all StandardBiomeAttributes assets in the project
             RefreshBiomeList();
+            OnEnableBlendingTab();
 
 #pragma warning disable UDR0004
             // Poll for external asset changes (e.g. user modifies biome in Inspector and presses Ctrl+S)
@@ -92,6 +97,7 @@ namespace Editor.WorldTools
         private void OnDisable()
         {
             EditorApplication.update -= PollForAssetChanges;
+            OnDisableBlendingTab();
         }
 
         /// <summary>
@@ -116,6 +122,24 @@ namespace Editor.WorldTools
         }
 
         private void OnGUI()
+        {
+            // --- Tab Toolbar ---
+            _selectedTabIndex = GUILayout.Toolbar(_selectedTabIndex, s_tabLabels, GUILayout.Height(25));
+
+            switch (_selectedTabIndex)
+            {
+                case 0:
+                    DrawNoisePreviewTab();
+                    break;
+                case 1:
+                    DrawWorldBlendingTab();
+                    break;
+            }
+        }
+
+        #region Tab 0: Noise Preview
+
+        private void DrawNoisePreviewTab()
         {
             EditorGUILayout.BeginHorizontal();
 
@@ -346,7 +370,7 @@ namespace Editor.WorldTools
 
             Color[] pixels = new Color[texSize * texSize];
 
-            FastNoiseLite terrainNoise = CreateNoiseFromConfig(_biome.terrainNoiseConfig);
+            FastNoiseLite terrainNoise = FastNoiseFactory.CreateNoiseFromConfig(_biome.terrainNoiseConfig, _seed);
             bool terrainNormalized = _biome.terrainNoiseConfig.normalizeToZeroOne;
 
             // Setup composite arrays
@@ -371,7 +395,7 @@ namespace Editor.WorldTools
                     if (queryIndex >= _biome.caveLayers.Length) continue;
 
                     StandardCaveLayer layer = _biome.caveLayers[queryIndex];
-                    layerNoises[i] = CreateNoiseFromConfig(layer.noiseConfig);
+                    layerNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(layer.noiseConfig, _seed);
                     layerThresholds[i] = layer.threshold;
                     layerColors[i] = layer.previewColor;
                     layerModes[i] = layer.mode;
@@ -391,7 +415,7 @@ namespace Editor.WorldTools
                     if (queryIndex >= _biome.lodes.Length) continue;
 
                     StandardLode layer = _biome.lodes[queryIndex];
-                    layerNoises[i] = CreateNoiseFromConfig(layer.noiseConfig);
+                    layerNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(layer.noiseConfig, _seed);
                     layerThresholds[i] = 0.5f; // Lode logic hardcoded internally
                     layerColors[i] = layer.previewColor;
                     layerModes[i] = CaveMode.Blob; // Lodes evaluate as 3D blobs
@@ -443,7 +467,7 @@ namespace Editor.WorldTools
                         bool isFirstHighlight = true;
                         for (int i = 0; i < layerNoises.Length; i++)
                         {
-                            float noiseVal = EvaluateNoiseVal(layerNoises[i], worldX, worldZ, _target, layerModes[i]);
+                            float noiseVal = NoisePreviewUtils.EvaluateNoiseVal(layerNoises[i], worldX, worldZ, _sliceY, _target, layerModes[i]);
 
                             if (!isComposite && !_showThresholdOverlay)
                             {
@@ -503,43 +527,6 @@ namespace Editor.WorldTools
             Repaint();
         }
 
-        private float EvaluateNoiseVal(FastNoiseLite noise, float worldX, float worldZ, NoiseTarget target, CaveMode caveMode)
-        {
-            if (target == NoiseTarget.Lode || (target == NoiseTarget.CaveLayer && caveMode == CaveMode.Blob))
-            {
-                return noise.GetNoise(worldX, _sliceY, worldZ);
-            }
-            else if (target == NoiseTarget.CaveLayer && caveMode == CaveMode.Spaghetti)
-            {
-                float ab = noise.GetNoise(worldX, _sliceY);
-                float bc = noise.GetNoise(_sliceY, worldZ);
-                float ac = noise.GetNoise(worldX, worldZ);
-                float ba = noise.GetNoise(_sliceY, worldX);
-                float cb = noise.GetNoise(worldZ, _sliceY);
-                float ca = noise.GetNoise(worldZ, worldX);
-                return (ab + bc + ac + ba + cb + ca) / 6f;
-            }
-
-            return 0f;
-        }
-
-        private FastNoiseLite CreateNoiseFromConfig(FastNoiseConfig config)
-        {
-            FastNoiseLite noise = FastNoiseLite.Create(_seed + config.seedOffset);
-            noise.SetFrequency(config.frequency);
-            noise.SetNoiseType(config.noiseType);
-            noise.SetRotationType3D(config.rotationType3D);
-            noise.SetFractalType(config.fractalType);
-            noise.SetFractalOctaves(config.octaves);
-            noise.SetFractalGain(config.gain);
-            noise.SetFractalLacunarity(config.lacunarity);
-            noise.SetFractalWeightedStrength(config.weightedStrength);
-            noise.SetFractalPingPongStrength(config.pingPongStrength);
-            noise.SetCellularDistanceFunction(config.cellularDistanceFunction);
-            noise.SetCellularReturnType(config.cellularReturnType);
-            noise.SetCellularJitter(config.cellularJitter);
-            noise.SetNormalizeToZeroOne(config.normalizeToZeroOne);
-            return noise;
-        }
+        #endregion
     }
 }

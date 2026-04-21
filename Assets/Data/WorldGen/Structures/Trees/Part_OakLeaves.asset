@@ -15,193 +15,257 @@ MonoBehaviour:
   blocks:
   - localPosition: {x: -2, y: 0, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -2, y: -1, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -2, y: 0, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -2, y: -1, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -2, y: 0, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -2, y: -1, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -2, y: 0, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -2, y: -1, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -2, y: 0, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -2, y: -1, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: 0, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: -1, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: 0, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: -1, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: 0, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: -1, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: 0, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: -1, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: 0, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: -1, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 0, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: -1, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 0, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: -1, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 0, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: -1, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 0, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: -1, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 0, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: -1, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: 0, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: -1, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: 0, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: -1, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: 0, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: -1, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: 0, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: -1, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: 0, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: -1, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: 0, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: -1, z: -2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: 0, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: -1, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: 0, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: -1, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: 0, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: -1, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: 0, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 2, y: -1, z: 2}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: 1, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: 1, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: 1, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 1, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 1, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 1, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: 1, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: 1, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: 1, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: -1, y: 2, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 2, z: -1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 2, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 0, y: 2, z: 1}
     blockID: 15
+    orientation: 0
     rule: 0
   - localPosition: {x: 1, y: 2, z: 0}
     blockID: 15
+    orientation: 0
     rule: 0

@@ -39,6 +39,12 @@ namespace Jobs.Generators
         private NativeArray<StructurePoolEntryJobData> _allStructurePoolEntries;
 
         /// <summary>
+        /// Pre-constructed FastNoiseLite instances for per-entry flora zone overrides.
+        /// Only entries with <c>useOverrideFloraZoneNoise</c> enabled get an index into this array.
+        /// </summary>
+        private NativeArray<FastNoiseLite> _entryFloraZoneNoises;
+
+        /// <summary>
         /// Managed lookup table mapping flat pool entry indices to their <see cref="CompositeStructureTemplate"/>.
         /// Built during <see cref="Initialize"/> in the same order as <see cref="_allStructurePoolEntries"/>.
         /// </summary>
@@ -71,6 +77,7 @@ namespace Jobs.Generators
             int totalTerrainLayerCount = 0;
             int totalCaveLayerCount = 0;
             int totalStructurePoolEntryCount = 0;
+            int totalEntryFloraZoneOverrides = 0;
             foreach (StandardBiomeAttributes biome in _standardBiomes)
             {
                 totalLodeCount += biome.lodes?.Length ?? 0;
@@ -78,6 +85,8 @@ namespace Jobs.Generators
                 totalTerrainLayerCount += biome.terrainLayers?.Length ?? 0;
                 totalStructurePoolEntryCount += biome.majorFloraPool?.Length ?? 0;
                 totalStructurePoolEntryCount += biome.minorFloraPool?.Length ?? 0;
+                totalEntryFloraZoneOverrides += CountFloraZoneOverrides(biome.majorFloraPool);
+                totalEntryFloraZoneOverrides += CountFloraZoneOverrides(biome.minorFloraPool);
             }
 
             _biomesJobData = new NativeArray<StandardBiomeAttributesJobData>(_standardBiomes.Length, Allocator.Persistent);
@@ -91,12 +100,14 @@ namespace Jobs.Generators
             _caveNoises = new NativeArray<FastNoiseLite>(totalCaveLayerCount, Allocator.Persistent);
             _floraZoneNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _allStructurePoolEntries = new NativeArray<StructurePoolEntryJobData>(totalStructurePoolEntryCount, Allocator.Persistent);
+            _entryFloraZoneNoises = new NativeArray<FastNoiseLite>(totalEntryFloraZoneOverrides, Allocator.Persistent);
             _structureTemplateLookup = new CompositeStructureTemplate[totalStructurePoolEntryCount];
 
             int currentLodeIndex = 0;
             int currentCaveLayerIndex = 0;
             int currentTerrainLayerIndex = 0;
             int currentStructurePoolIndex = 0;
+            int currentEntryFloraNoiseIndex = 0;
             for (int i = 0; i < _standardBiomes.Length; i++)
             {
                 StandardBiomeAttributes biome = _standardBiomes[i];
@@ -114,14 +125,14 @@ namespace Jobs.Generators
                 for (int j = 0; j < lodeCount; j++)
                 {
                     _allLodesJobData[currentLodeIndex + j] = new StandardLodeJobData(biome.lodes[j]);
-                    _lodeNoises[currentLodeIndex + j] = CreateNoiseFromConfig(biome.lodes[j].noiseConfig);
+                    _lodeNoises[currentLodeIndex + j] = FastNoiseFactory.CreateNoiseFromConfig(biome.lodes[j].noiseConfig, _seed);
                 }
 
                 // Build cave layer data + noise
                 for (int j = 0; j < caveLayerCount; j++)
                 {
                     _allCaveLayersJobData[currentCaveLayerIndex + j] = new StandardCaveLayerJobData(biome.caveLayers[j]);
-                    _caveNoises[currentCaveLayerIndex + j] = CreateNoiseFromConfig(biome.caveLayers[j].noiseConfig);
+                    _caveNoises[currentCaveLayerIndex + j] = FastNoiseFactory.CreateNoiseFromConfig(biome.caveLayers[j].noiseConfig, _seed);
                 }
 
                 // Build biome job data
@@ -156,15 +167,8 @@ namespace Jobs.Generators
                 for (int j = 0; j < majorPoolCount; j++)
                 {
                     StructurePoolEntry entry = biome.majorFloraPool[j];
-                    _allStructurePoolEntries[currentStructurePoolIndex] = new StructurePoolEntryJobData
-                    {
-                        Spacing = entry.spacing,
-                        Padding = entry.padding,
-                        Chance = entry.chance,
-                        MinPlacementHeight = entry.minPlacementHeight,
-                        MaxPlacementHeight = entry.maxPlacementHeight,
-                        UseFloraZone = entry.useFloraZone,
-                    };
+                    _allStructurePoolEntries[currentStructurePoolIndex] = BuildPoolEntryJobData(
+                        ref entry, ref currentEntryFloraNoiseIndex);
                     _structureTemplateLookup[currentStructurePoolIndex] = entry.template;
                     currentStructurePoolIndex++;
                 }
@@ -173,27 +177,20 @@ namespace Jobs.Generators
                 for (int j = 0; j < minorPoolCount; j++)
                 {
                     StructurePoolEntry entry = biome.minorFloraPool[j];
-                    _allStructurePoolEntries[currentStructurePoolIndex] = new StructurePoolEntryJobData
-                    {
-                        Spacing = entry.spacing,
-                        Padding = entry.padding,
-                        Chance = entry.chance,
-                        MinPlacementHeight = entry.minPlacementHeight,
-                        MaxPlacementHeight = entry.maxPlacementHeight,
-                        UseFloraZone = entry.useFloraZone,
-                    };
+                    _allStructurePoolEntries[currentStructurePoolIndex] = BuildPoolEntryJobData(
+                        ref entry, ref currentEntryFloraNoiseIndex);
                     _structureTemplateLookup[currentStructurePoolIndex] = entry.template;
                     currentStructurePoolIndex++;
                 }
 
                 // Build per-biome terrain noise
-                _biomeTerrainNoises[i] = CreateNoiseFromConfig(biome.terrainNoiseConfig);
+                _biomeTerrainNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.terrainNoiseConfig, _seed);
 
                 // Build per-biome strata depth noise
-                _strataDepthNoises[i] = CreateNoiseFromConfig(biome.strataDepthNoiseConfig);
+                _strataDepthNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.strataDepthNoiseConfig, _seed);
 
                 // Build per-biome flora zone noise
-                _floraZoneNoises[i] = CreateNoiseFromConfig(biome.floraZoneNoiseConfig);
+                _floraZoneNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.floraZoneNoiseConfig, _seed);
 
                 currentLodeIndex += lodeCount;
                 currentCaveLayerIndex += caveLayerCount;
@@ -215,7 +212,7 @@ namespace Jobs.Generators
                 };
 
             selectionConfig.normalizeToZeroOne = true; // Enforce [0,1] normalization internally
-            _biomeSelectionNoise = CreateNoiseFromConfig(selectionConfig);
+            _biomeSelectionNoise = FastNoiseFactory.CreateNoiseFromConfig(selectionConfig, _seed);
         }
 
         /// <inheritdoc />
@@ -263,6 +260,7 @@ namespace Jobs.Generators
                 FloraZoneNoises = _floraZoneNoises,
                 BiomeSelectionNoise = _biomeSelectionNoise,
                 AllStructurePoolEntries = _allStructurePoolEntries,
+                EntryFloraZoneNoises = _entryFloraZoneNoises,
                 OutputMap = outputMap,
                 OutputHeightMap = outputHeightMap,
                 Modifications = modificationsQueue.AsParallelWriter(),
@@ -411,9 +409,11 @@ namespace Jobs.Generators
             Vector3Int rootPos = new Vector3Int(marker.Position.x, marker.Position.y, marker.Position.z);
             Vector3Int cursor = rootPos + template.pivotOffset;
 
-            // Deterministic random seed per position for stacking counts
+            // Deterministic random seed per position for stacking counts and rotation
             uint deterministicSeed = math.max(1u, math.hash(new int3(marker.Position.x, marker.Position.z, _seed)));
             Random random = new Random(deterministicSeed);
+
+            int globalRotationSteps = template.allowRandomRotation ? random.NextInt(0, 4) : 0;
 
             foreach (StructureComponent component in template.components)
             {
@@ -435,15 +435,18 @@ namespace Jobs.Generators
                 if (selectedPart == null || selectedPart.blocks == null)
                     continue;
 
+                int componentRotationSteps = component.allowRandomRotation ? random.NextInt(0, 4) : 0;
+                int totalRotationSteps = (globalRotationSteps + componentRotationSteps) % 4;
+
                 // Adjust cursor if this component attaches to the end of the previous stacked part
                 if (component.attachToEndOfPreviousStack)
                 {
-                    cursor += component.baseOffset;
+                    cursor += RotatePosition(component.baseOffset, totalRotationSteps);
                 }
                 else
                 {
                     // Reset cursor to the structure root for independent components
-                    cursor = rootPos + template.pivotOffset + component.baseOffset;
+                    cursor = rootPos + template.pivotOffset + RotatePosition(component.baseOffset, totalRotationSteps);
                 }
 
                 if (component.type == StructureComponentType.StaticPart)
@@ -453,33 +456,48 @@ namespace Jobs.Generators
                     {
                         yield return new VoxelMod
                         {
-                            GlobalPosition = cursor + block.localPosition,
+                            GlobalPosition = cursor + RotatePosition(block.localPosition, totalRotationSteps),
                             ID = block.blockID,
                             Rule = block.rule,
+                            Orientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps)
                         };
                     }
                 }
                 else if (component.type == StructureComponentType.StackedPart)
                 {
                     int repeatCount = random.NextInt(component.minRepeat, component.maxRepeat + 1);
+                    Vector3Int rotatedStackDirection = RotatePosition(component.stackDirection, totalRotationSteps);
+
                     for (int i = 0; i < repeatCount; i++)
                     {
                         // Emit all blocks shifted by the stack direction
-                        Vector3Int offset = component.stackDirection * i;
+                        Vector3Int offset = rotatedStackDirection * i;
                         foreach (StructureBlock block in selectedPart.blocks)
                         {
                             yield return new VoxelMod
                             {
-                                GlobalPosition = cursor + offset + block.localPosition,
+                                GlobalPosition = cursor + offset + RotatePosition(block.localPosition, totalRotationSteps),
                                 ID = block.blockID,
                                 Rule = block.rule,
+                                Orientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps)
                             };
                         }
                     }
 
                     // Leave the cursor at the end of the stack so the next component can attach
-                    cursor += component.stackDirection * repeatCount;
+                    cursor += rotatedStackDirection * repeatCount;
                 }
+            }
+        }
+
+        private Vector3Int RotatePosition(Vector3Int pos, int rotationSteps)
+        {
+            switch (rotationSteps)
+            {
+                case 1: return new Vector3Int(pos.z, pos.y, -pos.x); // 90 CW
+                case 2: return new Vector3Int(-pos.x, pos.y, -pos.z); // 180
+                case 3: return new Vector3Int(-pos.z, pos.y, pos.x); // 270 CW
+                default: return pos; // 0
             }
         }
 
@@ -496,6 +514,7 @@ namespace Jobs.Generators
             if (_caveNoises.IsCreated) _caveNoises.Dispose();
             if (_floraZoneNoises.IsCreated) _floraZoneNoises.Dispose();
             if (_allStructurePoolEntries.IsCreated) _allStructurePoolEntries.Dispose();
+            if (_entryFloraZoneNoises.IsCreated) _entryFloraZoneNoises.Dispose();
         }
 
         #endregion
@@ -506,23 +525,51 @@ namespace Jobs.Generators
         /// Constructs a <see cref="FastNoiseLite"/> instance from a <see cref="FastNoiseConfig"/> struct.
         /// Must be called on the main thread.
         /// </summary>
-        private FastNoiseLite CreateNoiseFromConfig(FastNoiseConfig config)
+        /// <summary>
+        /// Builds a <see cref="StructurePoolEntryJobData"/> from an authoring <see cref="StructurePoolEntry"/>,
+        /// constructing per-entry flora zone override noises when configured.
+        /// </summary>
+        private StructurePoolEntryJobData BuildPoolEntryJobData(
+            ref StructurePoolEntry entry, ref int currentEntryFloraNoiseIndex)
         {
-            FastNoiseLite noise = FastNoiseLite.Create(_seed + config.seedOffset);
-            noise.SetFrequency(config.frequency);
-            noise.SetNoiseType(config.noiseType);
-            noise.SetRotationType3D(config.rotationType3D);
-            noise.SetFractalType(config.fractalType);
-            noise.SetFractalOctaves(config.octaves);
-            noise.SetFractalGain(config.gain);
-            noise.SetFractalLacunarity(config.lacunarity);
-            noise.SetFractalWeightedStrength(config.weightedStrength);
-            noise.SetFractalPingPongStrength(config.pingPongStrength);
-            noise.SetCellularDistanceFunction(config.cellularDistanceFunction);
-            noise.SetCellularReturnType(config.cellularReturnType);
-            noise.SetCellularJitter(config.cellularJitter);
-            noise.SetNormalizeToZeroOne(config.normalizeToZeroOne);
-            return noise;
+            int floraNoiseIndex = -1;
+            float floraZoneCoverage = 0f;
+
+            if (entry.useFloraZone && entry.useOverrideFloraZoneNoise)
+            {
+                floraNoiseIndex = currentEntryFloraNoiseIndex;
+                _entryFloraZoneNoises[currentEntryFloraNoiseIndex] = FastNoiseFactory.CreateNoiseFromConfig(entry.overrideFloraZoneNoise, _seed);
+                floraZoneCoverage = entry.overrideFloraZoneCoverage;
+                currentEntryFloraNoiseIndex++;
+            }
+
+            return new StructurePoolEntryJobData
+            {
+                Spacing = entry.spacing,
+                Padding = entry.padding,
+                Chance = entry.chance,
+                MinPlacementHeight = entry.minPlacementHeight,
+                MaxPlacementHeight = entry.maxPlacementHeight,
+                UseFloraZone = entry.useFloraZone,
+                FloraZoneNoiseIndex = floraNoiseIndex,
+                FloraZoneCoverage = floraZoneCoverage,
+            };
+        }
+
+        /// <summary>
+        /// Counts the number of entries in a pool array that have per-entry flora zone overrides.
+        /// </summary>
+        private static int CountFloraZoneOverrides(StructurePoolEntry[] pool)
+        {
+            if (pool == null) return 0;
+            int count = 0;
+            for (int i = 0; i < pool.Length; i++)
+            {
+                if (pool[i].useFloraZone && pool[i].useOverrideFloraZoneNoise)
+                    count++;
+            }
+
+            return count;
         }
 
         #endregion

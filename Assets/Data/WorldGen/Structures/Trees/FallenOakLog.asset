@@ -10,30 +10,19 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 808f93019affe6b4798f9afb00308ab3, type: 3}
-  m_Name: OakTree
+  m_Name: FallenOakLog
   m_EditorClassIdentifier: Assembly-CSharp::Data.Structures.CompositeStructureTemplate
   components:
-  - name: Trunk
+  - name: Fallen Trunk
     partVariants:
-    - {fileID: 11400000, guid: d66c64ed1caf2cb46b503932d80dac45, type: 2}
-    type: 1
-    placementChance: 1
-    baseOffset: {x: 0, y: 1, z: 0}
-    minRepeat: 4
-    maxRepeat: 8
-    stackDirection: {x: 0, y: 1, z: 0}
-    attachToEndOfPreviousStack: 0
-    allowRandomRotation: 0
-  - name: Canopy
-    partVariants:
-    - {fileID: 11400000, guid: 1023cfdbcc93e25488241015a69fede8, type: 2}
+    - {fileID: 11400000, guid: 9269e817a471ff74a82e19133a0bc4a9, type: 2}
     type: 0
     placementChance: 1
-    baseOffset: {x: 0, y: -2, z: 0}
+    baseOffset: {x: 0, y: 0, z: 0}
     minRepeat: 0
     maxRepeat: 0
     stackDirection: {x: 0, y: 0, z: 0}
-    attachToEndOfPreviousStack: 1
+    attachToEndOfPreviousStack: 0
     allowRandomRotation: 0
   pivotOffset: {x: 0, y: 0, z: 0}
   allowRandomRotation: 1

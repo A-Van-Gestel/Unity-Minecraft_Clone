@@ -69,10 +69,10 @@ MonoBehaviour:
     normalizeToZeroOne: 0
   underwaterSurfaceBlockID: 4
   floraZoneNoiseConfig:
-    seedOffset: 0
-    frequency: 0
+    seedOffset: -30
+    frequency: 0.09
     noiseType: 0
-    rotationType3D: 0
+    rotationType3D: 2
     fractalType: 0
     octaves: 0
     gain: 0
@@ -82,9 +82,33 @@ MonoBehaviour:
     cellularDistanceFunction: 0
     cellularReturnType: 0
     cellularJitter: 0
-    normalizeToZeroOne: 0
-  floraZoneCoverage: 0
-  majorFloraPool: []
+    normalizeToZeroOne: 1
+  floraZoneCoverage: 0.705
+  majorFloraPool:
+  - template: {fileID: 11400000, guid: 1e01d75efd26db949bf0775ef616bd1c, type: 2}
+    spacing: 10
+    padding: -1
+    chance: 0.072
+    minPlacementHeight: 0
+    maxPlacementHeight: 78
+    useFloraZone: 1
+    useOverrideFloraZoneNoise: 0
+    overrideFloraZoneNoise:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      normalizeToZeroOne: 0
+    overrideFloraZoneCoverage: 0
   minorFloraPool: []
   lodes:
   - nodeName: Dirt

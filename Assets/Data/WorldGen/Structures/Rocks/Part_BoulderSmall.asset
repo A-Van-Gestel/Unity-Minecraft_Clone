@@ -10,10 +10,30 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a9778fa45d531cf40be7c423b40e233d, type: 3}
-  m_Name: Part_Grass
+  m_Name: Part_BoulderSmall
   m_EditorClassIdentifier: Assembly-CSharp::Data.Structures.StructurePartTemplate
   blocks:
   - localPosition: {x: 0, y: 0, z: 0}
-    blockID: 22
+    blockID: 1
+    orientation: 0
+    rule: 0
+  - localPosition: {x: 1, y: 0, z: 0}
+    blockID: 1
+    orientation: 0
+    rule: 0
+  - localPosition: {x: 0, y: 0, z: 1}
+    blockID: 1
+    orientation: 0
+    rule: 0
+  - localPosition: {x: 1, y: 0, z: 1}
+    blockID: 17
+    orientation: 0
+    rule: 0
+  - localPosition: {x: 0, y: 1, z: 0}
+    blockID: 1
+    orientation: 0
+    rule: 0
+  - localPosition: {x: 1, y: 1, z: 0}
+    blockID: 10
     orientation: 0
     rule: 0

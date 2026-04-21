@@ -74,7 +74,7 @@ MonoBehaviour:
     seedOffset: 5566
     frequency: 0.05
     noiseType: 0
-    rotationType3D: 0
+    rotationType3D: 2
     fractalType: 0
     octaves: 1
     gain: 0.5
@@ -94,6 +94,23 @@ MonoBehaviour:
     minPlacementHeight: 0
     maxPlacementHeight: 256
     useFloraZone: 1
+    useOverrideFloraZoneNoise: 0
+    overrideFloraZoneNoise:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      normalizeToZeroOne: 0
+    overrideFloraZoneCoverage: 0
   minorFloraPool: []
   lodes:
   - nodeName: Dirt

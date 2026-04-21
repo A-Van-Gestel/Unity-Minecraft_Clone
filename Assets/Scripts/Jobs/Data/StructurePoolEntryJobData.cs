@@ -25,5 +25,17 @@ namespace Jobs.Data
 
         /// <summary>If true, this entry only spawns inside the biome's flora zone noise region.</summary>
         public bool UseFloraZone;
+
+        /// <summary>
+        /// Index into the per-entry override flora zone noise array.
+        /// -1 = use the biome's default flora zone noise instead.
+        /// </summary>
+        public int FloraZoneNoiseIndex;
+
+        /// <summary>
+        /// Per-entry override for the flora zone coverage threshold.
+        /// Only used when <see cref="FloraZoneNoiseIndex"/> >= 0.
+        /// </summary>
+        public float FloraZoneCoverage;
     }
 }

@@ -103,6 +103,14 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<StructurePoolEntryJobData> AllStructurePoolEntries;
 
+        /// <summary>
+        /// Pre-constructed FastNoiseLite instances for per-entry flora zone overrides.
+        /// Indexed by <see cref="StructurePoolEntryJobData.FloraZoneNoiseIndex"/>.
+        /// Entries without overrides use the biome's default <see cref="FloraZoneNoises"/> instead.
+        /// </summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> EntryFloraZoneNoises;
+
         #endregion
 
         #region Output Data
@@ -339,10 +347,10 @@ namespace Jobs
                 if (y == terrainHeight && y >= SeaLevel &&
                     voxelValue != BlockIDs.Air && voxelProps.FluidType == FluidType.None)
                 {
-                    // Pre-sample the flora zone noise once for all entries that use it.
-                    FastNoiseLite floraZoneNoise = FloraZoneNoises[biomeIndex];
-                    float zoneNoiseVal = floraZoneNoise.GetNoise(globalX, globalZ);
-                    bool isInFloraZone = zoneNoiseVal > 1f - biome.FloraZoneCoverage;
+                    // Pre-sample the biome's flora zone noise once for all entries that use it.
+                    FastNoiseLite biomeFloraZoneNoise = FloraZoneNoises[biomeIndex];
+                    float biomeZoneNoiseVal = biomeFloraZoneNoise.GetNoise(globalX, globalZ);
+                    bool isInBiomeFloraZone = biomeZoneNoiseVal > 1f - biome.FloraZoneCoverage;
 
                     // Process major flora pool entries
                     int totalPoolEntries = biome.MajorFloraPoolCount + biome.MinorFloraPoolCount;
@@ -361,8 +369,23 @@ namespace Jobs
                             continue;
 
                         // Flora zone check (if this entry requires it)
-                        if (entry.UseFloraZone && !isInFloraZone)
-                            continue;
+                        if (entry.UseFloraZone)
+                        {
+                            if (entry.FloraZoneNoiseIndex >= 0)
+                            {
+                                // Per-entry override noise
+                                float entryZoneNoiseVal = EntryFloraZoneNoises[entry.FloraZoneNoiseIndex]
+                                    .GetNoise(globalX, globalZ);
+                                if (entryZoneNoiseVal <= 1f - entry.FloraZoneCoverage)
+                                    continue;
+                            }
+                            else
+                            {
+                                // Biome-level default
+                                if (!isInBiomeFloraZone)
+                                    continue;
+                            }
+                        }
 
                         // Grid-cell election with this entry's spacing
                         int spacing = math.max(1, entry.Spacing);

@@ -56,6 +56,11 @@ namespace Data.Structures
         [Header("Attachment")]
         [Tooltip("If true, this component's baseOffset is relative to the cumulative end position of the previous StackedPart, rather than the structure root.")]
         public bool attachToEndOfPreviousStack;
+
+        [Header("Rotation")]
+        [Tooltip("If true, this specific component has an independent chance to randomly rotate (0, 90, 180, 270 degrees) around the Y-axis. " +
+                 "This is evaluated IN ADDITION to any global rotation applied by the CompositeStructureTemplate.")]
+        public bool allowRandomRotation;
     }
 
     /// <summary>
@@ -75,5 +80,8 @@ namespace Data.Structures
 
         [Tooltip("Global offset applied to all blocks (e.g., (0,1,0) to start above the surface block).")]
         public Vector3Int pivotOffset;
+
+        [Tooltip("If true, the entire composite structure will be randomly rotated by 0, 90, 180, or 270 degrees on the Y-axis when spawned.")]
+        public bool allowRandomRotation;
     }
 }

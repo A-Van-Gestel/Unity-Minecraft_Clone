@@ -1,5 +1,5 @@
 using System;
-using MyBox;
+using Attributes;
 using UnityEngine;
 
 namespace Data.Structures
@@ -16,8 +16,12 @@ namespace Data.Structures
         public Vector3Int localPosition;
 
         /// <summary>The block type to place. Use <see cref="BlockIDs"/> constants.</summary>
-        [ConstantsSelection(typeof(BlockIDs))]
+        [BlockID]
         public ushort blockID;
+
+        /// <summary>The base orientation of this block (0-5). Default is 1 (North/Front).</summary>
+        [Tooltip("The base orientation of this block. 0=South, 1=North (Default), 2=Top, 3=Bottom, 4=West, 5=East")]
+        public byte orientation;
 
         /// <summary>
         /// Controls how this block interacts with existing terrain.

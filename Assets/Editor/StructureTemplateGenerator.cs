@@ -27,6 +27,19 @@ namespace Editor
             {
                 GenerateCactus();
             }
+
+            EditorGUILayout.Space(10);
+            GUILayout.Label("Asymmetric Structures (Rotation Test)", EditorStyles.boldLabel);
+
+            if (GUILayout.Button("Generate Fallen Oak Log"))
+            {
+                GenerateFallenOakLog();
+            }
+
+            if (GUILayout.Button("Generate Boulder"))
+            {
+                GenerateBoulder();
+            }
         }
 
         private static void GenerateOakTree()
@@ -153,6 +166,92 @@ namespace Editor
 
             AssetDatabase.SaveAssets();
             Debug.Log("Generated Standard Cactus Template at Assets/Data/WorldGen/Structures/Flora/");
+        }
+
+        private static void GenerateFallenOakLog()
+        {
+            EnsureDirectory("Assets/Data/WorldGen/Structures/Trees");
+
+            // 1. Create Part — a horizontal trunk extending along +X with leaf decoration at the far end
+            StructurePartTemplate fallenTrunkPart = CreateOrGetAsset<StructurePartTemplate>("Assets/Data/WorldGen/Structures/Trees/Part_FallenTrunk.asset");
+            fallenTrunkPart.blocks = new[]
+            {
+                // Horizontal log trunk (4 blocks along +X)
+                new StructureBlock { localPosition = new Vector3Int(0, 0, 0), blockID = BlockIDs.OakLog },
+                new StructureBlock { localPosition = new Vector3Int(1, 0, 0), blockID = BlockIDs.OakLog },
+                new StructureBlock { localPosition = new Vector3Int(2, 0, 0), blockID = BlockIDs.OakLog },
+                new StructureBlock { localPosition = new Vector3Int(3, 0, 0), blockID = BlockIDs.OakLog },
+                // Leaf decoration on far end (asymmetric — only on +X side)
+                new StructureBlock { localPosition = new Vector3Int(3, 0, 1), blockID = BlockIDs.OakLeaves, rule = ReplacementRule.OnlyReplaceAir },
+                new StructureBlock { localPosition = new Vector3Int(3, 0, -1), blockID = BlockIDs.OakLeaves, rule = ReplacementRule.OnlyReplaceAir },
+                new StructureBlock { localPosition = new Vector3Int(3, 1, 0), blockID = BlockIDs.OakLeaves, rule = ReplacementRule.OnlyReplaceAir },
+            };
+            EditorUtility.SetDirty(fallenTrunkPart);
+
+            // 2. Create Composite Template
+            CompositeStructureTemplate fallenLogTemplate = CreateOrGetAsset<CompositeStructureTemplate>("Assets/Data/WorldGen/Structures/Trees/FallenOakLog.asset");
+            fallenLogTemplate.pivotOffset = Vector3Int.zero;
+            fallenLogTemplate.allowRandomRotation = true; // The whole point — rotation should be clearly visible
+            fallenLogTemplate.components = new[]
+            {
+                new StructureComponent
+                {
+                    name = "Fallen Trunk",
+                    partVariants = new[] { fallenTrunkPart },
+                    type = StructureComponentType.StaticPart,
+                    baseOffset = new Vector3Int(0, 1, 0),
+                    attachToEndOfPreviousStack = false,
+                    placementChance = 1f,
+                    allowRandomRotation = false, // Global rotation is enough
+                },
+            };
+            EditorUtility.SetDirty(fallenLogTemplate);
+
+            AssetDatabase.SaveAssets();
+            Debug.Log("Generated Fallen Oak Log Template at Assets/Data/WorldGen/Structures/Trees/");
+        }
+
+        private static void GenerateBoulder()
+        {
+            EnsureDirectory("Assets/Data/WorldGen/Structures/Rocks");
+
+            // 1. Create Part — an asymmetric L-shaped stone cluster
+            StructurePartTemplate boulderPart = CreateOrGetAsset<StructurePartTemplate>("Assets/Data/WorldGen/Structures/Rocks/Part_BoulderSmall.asset");
+            boulderPart.blocks = new[]
+            {
+                // Base layer (L-shape — 3 blocks)
+                new StructureBlock { localPosition = new Vector3Int(0, 0, 0), blockID = BlockIDs.Stone },
+                new StructureBlock { localPosition = new Vector3Int(1, 0, 0), blockID = BlockIDs.Stone },
+                new StructureBlock { localPosition = new Vector3Int(0, 0, 1), blockID = BlockIDs.Stone },
+                // Half slab in the L-shaped corner gap
+                new StructureBlock { localPosition = new Vector3Int(1, 0, 1), blockID = BlockIDs.StoneHalfSlab },
+                // Top layer (only one side — clearly asymmetric)
+                new StructureBlock { localPosition = new Vector3Int(0, 1, 0), blockID = BlockIDs.Stone },
+                new StructureBlock { localPosition = new Vector3Int(1, 1, 0), blockID = BlockIDs.GrassRocky },
+            };
+            EditorUtility.SetDirty(boulderPart);
+
+            // 2. Create Composite Template
+            CompositeStructureTemplate boulderTemplate = CreateOrGetAsset<CompositeStructureTemplate>("Assets/Data/WorldGen/Structures/Rocks/Boulder.asset");
+            boulderTemplate.pivotOffset = Vector3Int.zero;
+            boulderTemplate.allowRandomRotation = true;
+            boulderTemplate.components = new[]
+            {
+                new StructureComponent
+                {
+                    name = "Boulder Body",
+                    partVariants = new[] { boulderPart },
+                    type = StructureComponentType.StaticPart,
+                    baseOffset = new Vector3Int(0, 1, 0),
+                    attachToEndOfPreviousStack = false,
+                    placementChance = 1f,
+                    allowRandomRotation = false,
+                },
+            };
+            EditorUtility.SetDirty(boulderTemplate);
+
+            AssetDatabase.SaveAssets();
+            Debug.Log("Generated Boulder Template at Assets/Data/WorldGen/Structures/Rocks/");
         }
 
         private static T CreateOrGetAsset<T>(string path) where T : ScriptableObject

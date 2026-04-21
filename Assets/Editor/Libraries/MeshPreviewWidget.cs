@@ -25,7 +25,21 @@ namespace Editor.Libraries
 
         public bool ForceOpaque { get; set; } = false;
         public Color BackgroundColor { get; set; } = new Color(0, 0, 0, 0);
-        public Vector3 CameraPosition { get; set; } = new Vector3(0, 0, -3.5f);
+        private Vector3 _cameraPosition = new Vector3(0, 0, -3.5f);
+
+        public Vector3 CameraPosition
+        {
+            get => _cameraPosition;
+            set
+            {
+                _cameraPosition = value;
+                if (_previewRenderUtility != null)
+                {
+                    _previewRenderUtility.camera.transform.position = _cameraPosition;
+                }
+            }
+        }
+
         public float CameraFieldOfView { get; set; } = 30f;
         public float LightIntensity { get; set; } = 1.2f;
 
@@ -36,6 +50,7 @@ namespace Editor.Libraries
 
         private static readonly int s_mainTexId = Shader.PropertyToID("_MainTex");
         private static readonly int s_forceOpaqueId = Shader.PropertyToID("_ForceOpaque");
+        private static readonly int s_color = Shader.PropertyToID("_Color");
 
         public bool HasMesh => _previewMesh != null;
 
@@ -62,8 +77,8 @@ namespace Editor.Libraries
                 _previewRenderUtility = new PreviewRenderUtility();
 
                 // --- Enhanced Camera Setup ---
-                _previewRenderUtility.camera.nearClipPlane = 0.1f;
-                _previewRenderUtility.camera.farClipPlane = 10f;
+                _previewRenderUtility.camera.nearClipPlane = 0.01f;
+                _previewRenderUtility.camera.farClipPlane = 1000f;
 
                 // Make the camera background transparent to reveal the checkerboard.
                 _previewRenderUtility.camera.cameraType = CameraType.Preview;
@@ -174,6 +189,22 @@ namespace Editor.Libraries
         }
 
         /// <summary>
+        /// Updates the shared materials used for multi-mesh previews.
+        /// </summary>
+        public void SetMaterialTargets(Material blockMaterial, Material fluidMaterial)
+        {
+            if (_blockPreviewMaterial != null && blockMaterial != null && blockMaterial.HasTexture(s_mainTexId))
+            {
+                _blockPreviewMaterial.SetTexture(s_mainTexId, blockMaterial.GetTexture(s_mainTexId));
+            }
+
+            if (_fluidPreviewMaterial != null && fluidMaterial != null)
+            {
+                _fluidPreviewMaterial.CopyPropertiesFromMaterial(fluidMaterial);
+            }
+        }
+
+        /// <summary>
         /// Clears the current mesh from the preview.
         /// </summary>
         public void ClearPreview()
@@ -220,6 +251,75 @@ namespace Editor.Libraries
                 Texture previewTexture = _previewRenderUtility.EndPreview();
 
                 // Draw the rendered object on top of the checkerboard
+                GUI.DrawTexture(previewRect, previewTexture);
+            }
+        }
+
+        /// <summary>
+        /// Begins a custom multi-mesh drawing session.
+        /// </summary>
+        public void BeginDraw(Rect previewRect)
+        {
+            if (Event.current.type == EventType.Repaint)
+            {
+                EditorGUIHelper.DrawCheckerboardBackground(previewRect);
+            }
+
+            if (_previewRenderUtility != null)
+            {
+                PreviewRotation = EditorGUIHelper.HandleDragRotation(previewRect, PreviewRotation, DragSensitivity);
+                _previewRenderUtility.BeginPreview(previewRect, GUIStyle.none);
+            }
+        }
+
+        private MaterialPropertyBlock _previewPropertyBlock;
+
+        /// <summary>
+        /// Draws a single mesh within a multi-mesh drawing session.
+        /// </summary>
+        public void DrawMesh(Mesh mesh, Vector3 localPosition, bool isFluid, Color? overrideColor = null)
+        {
+            if (_previewRenderUtility == null || mesh == null) return;
+
+            Material mat = isFluid ? _fluidPreviewMaterial : _blockPreviewMaterial;
+            if (mat == null) return;
+
+            if (_previewPropertyBlock == null)
+            {
+                _previewPropertyBlock = new MaterialPropertyBlock();
+            }
+
+            // We must clear the block each time to avoid applying old properties, but we actually
+            // want to preserve any existing material properties and just override what we need.
+            _previewPropertyBlock.Clear();
+            _previewPropertyBlock.SetFloat(s_forceOpaqueId, ForceOpaque ? 1.0f : 0.0f);
+            _previewPropertyBlock.SetColor(s_color, overrideColor ?? Color.white);
+
+            // The rotation matrix pivots around (0,0,0) (the center of the structure view)
+            Matrix4x4 rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
+            // The position matrix moves the block to its local position
+            Matrix4x4 positionMatrix = Matrix4x4.Translate(localPosition);
+
+            // Apply rotation first, then translation
+            Matrix4x4 finalMatrix = rotationMatrix * positionMatrix;
+
+            _previewRenderUtility.DrawMesh(mesh, finalMatrix, mat, 0, _previewPropertyBlock);
+
+            if (mesh.subMeshCount > 1)
+            {
+                _previewRenderUtility.DrawMesh(mesh, finalMatrix, mat, 1, _previewPropertyBlock);
+            }
+        }
+
+        /// <summary>
+        /// Ends a custom multi-mesh drawing session and draws the result to the GUI.
+        /// </summary>
+        public void EndDraw(Rect previewRect)
+        {
+            if (_previewRenderUtility != null)
+            {
+                _previewRenderUtility.Render();
+                Texture previewTexture = _previewRenderUtility.EndPreview();
                 GUI.DrawTexture(previewRect, previewTexture);
             }
         }

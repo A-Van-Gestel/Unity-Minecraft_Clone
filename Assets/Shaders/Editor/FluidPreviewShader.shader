@@ -8,6 +8,7 @@ Shader "Hidden/Editor/FluidPreview"
     Properties
     {
         [KeywordEnum(Water, Lava)] _EditorPreviewType("Editor Preview Type", Float) = 0
+        _Color ("Tint Color", Color) = (1,1,1,1)
         [HideInInspector] _ForceOpaque("Force Opaque", Float) = 0.0
 
         // --- Global Shoreline Controls ---
@@ -80,6 +81,7 @@ Shader "Hidden/Editor/FluidPreview"
             #include "../Includes/VoxelLighting.hlsl"
 
             float _ForceOpaque;
+            half4 _Color;
 
             LiquidV2F vertFunction(LiquidAppdata v)
             {
@@ -124,6 +126,9 @@ Shader "Hidden/Editor/FluidPreview"
                     lava_col *= CalculateLinearVoxelShadow(shade);
 
                     lava_col *= i.shadowMultiplier;
+                    
+                    // Multiply by tint color (supports Structure Preview component coloring)
+                    lava_col *= _Color.rgb;
 
                     // Preview: solid background instead of SampleSceneColor
                     half3 background = half3(0.15, 0.08, 0.04); // Dark warm background for lava
@@ -151,6 +156,9 @@ Shader "Hidden/Editor/FluidPreview"
                     final_color *= CalculateLinearVoxelShadow(shade);
 
                     final_color *= i.shadowMultiplier;
+                    
+                    // Multiply by tint color (supports Structure Preview component coloring)
+                    final_color *= _Color.rgb;
 
                     // Preview: solid background instead of SampleSceneColor
                     // By conditionally forcing the alpha to 1.0, the generated icon can be rendered fully opaque for the UI

@@ -1,5 +1,7 @@
 using System;
 using Data.Structures;
+using Jobs.Data;
+using MyBox;
 using UnityEngine;
 
 namespace Data.WorldTypes
@@ -40,5 +42,18 @@ namespace Data.WorldTypes
         [Header("Zone Filtering")]
         [Tooltip("If true, this entry only spawns inside the biome's flora zone (controlled by the biome's Flora Zone Noise).")]
         public bool useFloraZone;
+
+        [ConditionalField(nameof(useFloraZone))]
+        [Tooltip("If true, uses a custom noise and coverage threshold instead of the biome's shared flora zone noise.")]
+        public bool useOverrideFloraZoneNoise;
+
+        [ConditionalField(nameof(useOverrideFloraZoneNoise))]
+        [Tooltip("Custom 2D noise defining this entry's independent zone regions.")]
+        public FastNoiseConfig overrideFloraZoneNoise;
+
+        [ConditionalField(nameof(useOverrideFloraZoneNoise))]
+        [Tooltip("Coverage percentage for this entry's override zone. Larger = larger zones, 1.0 = entire biome.")]
+        [Range(0f, 1f)]
+        public float overrideFloraZoneCoverage;
     }
 }

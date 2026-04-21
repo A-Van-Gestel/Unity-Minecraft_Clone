@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: GrassBlades
   m_EditorClassIdentifier: Assembly-CSharp::Data.Structures.CompositeStructureTemplate
   components:
-  - name: 
+  - name: Body
     partVariants:
     - {fileID: 11400000, guid: d858d607586d20f47ab19f21dbd7949d, type: 2}
     type: 0
@@ -23,4 +23,6 @@ MonoBehaviour:
     maxRepeat: 0
     stackDirection: {x: 0, y: 0, z: 0}
     attachToEndOfPreviousStack: 0
+    allowRandomRotation: 0
   pivotOffset: {x: 0, y: 0, z: 0}
+  allowRandomRotation: 0

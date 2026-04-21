@@ -74,7 +74,7 @@ MonoBehaviour:
     seedOffset: -99823
     frequency: 0.5
     noiseType: 0
-    rotationType3D: 0
+    rotationType3D: 2
     fractalType: 0
     octaves: 1
     gain: 0.5
@@ -94,6 +94,23 @@ MonoBehaviour:
     minPlacementHeight: 0
     maxPlacementHeight: 256
     useFloraZone: 1
+    useOverrideFloraZoneNoise: 0
+    overrideFloraZoneNoise:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      normalizeToZeroOne: 0
+    overrideFloraZoneCoverage: 0
   minorFloraPool:
   - template: {fileID: 11400000, guid: 26bb2246808379641acd51a810d6df9a, type: 2}
     spacing: 1
@@ -102,6 +119,23 @@ MonoBehaviour:
     minPlacementHeight: 0
     maxPlacementHeight: 256
     useFloraZone: 1
+    useOverrideFloraZoneNoise: 0
+    overrideFloraZoneNoise:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      normalizeToZeroOne: 0
+    overrideFloraZoneCoverage: 0
   lodes:
   - nodeName: Dirt
     previewColor: {r: 0.6784314, g: 0.3254902, b: 0.08627451, a: 1}
