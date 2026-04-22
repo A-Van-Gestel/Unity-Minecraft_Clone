@@ -75,7 +75,7 @@ namespace Editor.BlockEditor.Helpers
                     ref vertexIndex, ref nativeVertices, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals);
             }
             // Case 3: Custom Mesh
-            else if (blockType.meshData != null)
+            else if (blockType.renderShape == RenderShape.CustomMesh && blockType.meshData != null)
             {
                 // This logic does not use native lists, so it remains unchanged for now.
                 // It could be unified in a future pass.
