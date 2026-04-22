@@ -18,6 +18,12 @@ namespace Editor.BlockEditor.Helpers
         {
             if (blockType == null) return null;
 
+            // Ensure BurstVoxelData is initialized in the Editor context before generating native meshes
+            if (!BurstVoxelData.VoxelVerts.Data.IsCreated)
+            {
+                BurstVoxelData.Initialize();
+            }
+
             Mesh mesh = new Mesh();
             List<Vector3> vertices = new List<Vector3>();
             List<int> opaqueTriangles = new List<int>();

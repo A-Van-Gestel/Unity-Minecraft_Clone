@@ -38,8 +38,11 @@ namespace Jobs.BurstData
         {
         }
 
-        // This method is called automatically when the game loads.
+        // This method is called automatically when the game loads or when the editor reloads.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+#if UNITY_EDITOR
+        [InitializeOnLoadMethod]
+#endif
         public static void Initialize()
         {
             Dispose(); // Clean up any old data before initializing
