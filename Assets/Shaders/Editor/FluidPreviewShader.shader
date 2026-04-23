@@ -126,7 +126,7 @@ Shader "Hidden/Editor/FluidPreview"
                     lava_col *= CalculateLinearVoxelShadow(shade);
 
                     lava_col *= i.shadowMultiplier;
-                    
+
                     // Multiply by tint color (supports Structure Preview component coloring)
                     lava_col *= _Color.rgb;
 
@@ -156,7 +156,7 @@ Shader "Hidden/Editor/FluidPreview"
                     final_color *= CalculateLinearVoxelShadow(shade);
 
                     final_color *= i.shadowMultiplier;
-                    
+
                     // Multiply by tint color (supports Structure Preview component coloring)
                     final_color *= _Color.rgb;
 

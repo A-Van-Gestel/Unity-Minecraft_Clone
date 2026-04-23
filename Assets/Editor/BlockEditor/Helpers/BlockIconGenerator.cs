@@ -27,6 +27,7 @@ namespace Editor.BlockEditor.Helpers
     {
         private static readonly int s_mainTex = Shader.PropertyToID("_MainTex");
         private static readonly int s_forceOpaque = Shader.PropertyToID("_ForceOpaque");
+        private static readonly int s_color = Shader.PropertyToID("_Color");
 
         // --- Mesh Rotation Constants ---
         // Matches the exact initial rotation of the BlockEditorWindow 3D preview
@@ -113,6 +114,8 @@ namespace Editor.BlockEditor.Helpers
             {
                 // Fluid: copy all material properties (colors, scales, speeds)
                 renderMaterial.CopyPropertiesFromMaterial(sourceMaterial);
+                // Ensure _Color isn't wiped out to black by the missing property on the source material
+                renderMaterial.SetColor(s_color, Color.white);
             }
             else
             {

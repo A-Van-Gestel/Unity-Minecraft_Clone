@@ -175,6 +175,7 @@ namespace Editor.Libraries
                 if (_activePreviewMaterial != null)
                 {
                     _activePreviewMaterial.CopyPropertiesFromMaterial(targetMaterial);
+                    _activePreviewMaterial.SetColor(s_color, Color.white);
                 }
             }
             else
@@ -201,6 +202,7 @@ namespace Editor.Libraries
             if (_fluidPreviewMaterial != null && fluidMaterial != null)
             {
                 _fluidPreviewMaterial.CopyPropertiesFromMaterial(fluidMaterial);
+                _fluidPreviewMaterial.SetColor(s_color, Color.white);
             }
         }
 
