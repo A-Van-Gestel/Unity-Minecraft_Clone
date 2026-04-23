@@ -77,34 +77,26 @@ namespace Editor.BlockEditor
             _meshPreviewWidget = new MeshPreviewWidget();
             _meshPreviewWidget.Initialize();
 
-            // ---  Find BlockDatabase asset ---
-            string[] guids = AssetDatabase.FindAssets("t:BlockDatabase");
-            switch (guids.Length)
+            // Use EditorBlockDatabaseCache instead of manual AssetDatabase searches
+            _blockDatabase = EditorBlockDatabaseCache.Database;
+
+            if (_blockDatabase == null)
             {
-                case 0:
-                    Debug.LogError("Block Editor Error: Could not find a 'BlockDatabase.asset' in the project. Please create one or run the migration tool.", this);
-                    return;
-                case > 1:
-                    Debug.LogWarning("Block Editor Warning: Multiple 'BlockDatabase.asset' files found. Using the first one.", this);
-                    break;
+                Debug.LogError("Block Editor Error: Could not find a 'BlockDatabase.asset' in the project. Please create one or run the migration tool.", this);
+                return;
             }
 
-            string path = AssetDatabase.GUIDToAssetPath(guids[0]);
-            _blockDatabase = AssetDatabase.LoadAssetAtPath<BlockDatabase>(path);
+            LoadBlockData();
 
-            if (_blockDatabase != null)
+            // --- Load Materials ---
+            if (_blockDatabase.opaqueMaterial != null)
             {
-                LoadBlockData();
-
-                // --- Load Materials ---
-                if (_blockDatabase.opaqueMaterial != null)
-                {
-                    _atlasTexture = _blockDatabase.opaqueMaterial.mainTexture as Texture2D;
-                }
+                _atlasTexture = _blockDatabase.opaqueMaterial.mainTexture as Texture2D;
             }
 
 #pragma warning disable UDR0004
             //  Subscribe to the editor's update loop to enable real-time preview.
+            EditorApplication.update -= OnUpdate; // Ensure no double subscription
             EditorApplication.update += OnUpdate;
 #pragma warning restore UDR0004
         }
@@ -200,6 +192,10 @@ namespace Editor.BlockEditor
 
             // Auto-generate Block IDs
             bool generatedSuccessfully = BlockIdGenerator.TryGenerate();
+
+            // Refresh the fast Editor cache so other tools immediately see the changes
+            EditorBlockDatabaseCache.RefreshCache();
+
             if (generatedSuccessfully)
             {
                 _blockIdsStale = false;

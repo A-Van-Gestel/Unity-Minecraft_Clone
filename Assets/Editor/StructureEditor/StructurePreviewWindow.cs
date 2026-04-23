@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Data;
 using Data.Structures;
 using Editor.BlockEditor.Helpers;
+using Editor.DataGeneration;
 using Editor.Libraries;
 using UnityEditor;
 using UnityEngine;
@@ -80,7 +81,7 @@ namespace Editor.StructureEditor
 
         private void LoadDatabase()
         {
-            _blockDatabase = AssetDatabase.LoadAssetAtPath<BlockDatabase>("Assets/Resources/Data/BlockDatabase.asset");
+            _blockDatabase = EditorBlockDatabaseCache.Database;
             if (_blockDatabase != null)
             {
                 _allBlockTypes = new List<BlockType>(_blockDatabase.blockTypes);

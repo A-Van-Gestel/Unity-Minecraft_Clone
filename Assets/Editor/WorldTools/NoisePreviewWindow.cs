@@ -74,6 +74,7 @@ namespace Editor.WorldTools
 
 #pragma warning disable UDR0004
             // Poll for external asset changes (e.g. user modifies biome in Inspector and presses Ctrl+S)
+            EditorApplication.update -= PollForAssetChanges; // Ensure no double subscription
             EditorApplication.update += PollForAssetChanges;
 #pragma warning restore UDR0004
         }
