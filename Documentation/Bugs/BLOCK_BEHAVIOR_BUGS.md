@@ -23,3 +23,13 @@ Need to combine `Behave` and `Active` logic, or split active collections by bloc
 **Impact:** Performance bottleneck on main thread.
 
 ---
+
+## 03. Additional Light Sources
+
+**Severity:** Feature
+**Files:** Block Data
+
+Add more block light sources other than lava.
+eg: glowstone, torches, etc. Maybe also dedicated debug lights for each light level
+
+---
