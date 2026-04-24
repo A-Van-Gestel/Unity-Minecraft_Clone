@@ -48,7 +48,6 @@ namespace Editor.Libraries
         private Material _activePreviewMaterial;
         private Mesh _previewMesh;
 
-        private static readonly int s_mainTexId = Shader.PropertyToID("_MainTex");
         private static readonly int s_forceOpaqueId = Shader.PropertyToID("_ForceOpaque");
         private static readonly int s_color = Shader.PropertyToID("_Color");
 
@@ -95,26 +94,9 @@ namespace Editor.Libraries
                 light.transform.rotation = Quaternion.Euler(30, 30, 0);
 
                 // Initialize preview materials with dedicated editor shaders.
-                // These shaders share includes with the game shaders but substitute
-                // hardcoded lighting defaults and solid backgrounds for SampleSceneColor.
-                _blockPreviewMaterial = CreatePreviewMaterial("Hidden/Editor/BlockPreview");
-                _fluidPreviewMaterial = CreatePreviewMaterial("Hidden/Editor/FluidPreview");
+                EditorPreviewMaterialUtility.GetConfiguredMaterial(false, null, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
+                EditorPreviewMaterialUtility.GetConfiguredMaterial(true, null, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
             }
-        }
-
-        /// <summary>
-        /// Creates a preview material from a shader name with a fallback to URP/Unlit.
-        /// </summary>
-        private static Material CreatePreviewMaterial(string shaderName)
-        {
-            Shader shader = Shader.Find(shaderName);
-            if (shader == null)
-            {
-                Debug.LogError($"MeshPreviewWidget: Could not find '{shaderName}' shader. Using URP/Unlit fallback.");
-                shader = Shader.Find("Universal Render Pipeline/Unlit");
-            }
-
-            return new Material(shader);
         }
 
         /// <summary>
@@ -135,17 +117,7 @@ namespace Editor.Libraries
                 _previewMesh = null;
             }
 
-            if (_blockPreviewMaterial != null)
-            {
-                Object.DestroyImmediate(_blockPreviewMaterial);
-                _blockPreviewMaterial = null;
-            }
-
-            if (_fluidPreviewMaterial != null)
-            {
-                Object.DestroyImmediate(_fluidPreviewMaterial);
-                _fluidPreviewMaterial = null;
-            }
+            EditorPreviewMaterialUtility.DisposeCachedMaterials(ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
 
             _activePreviewMaterial = null;
         }
@@ -168,25 +140,8 @@ namespace Editor.Libraries
 
             if (targetMaterial == null) return;
 
-            if (isFluid)
-            {
-                // Fluid blocks: use dedicated fluid preview shader with all material properties
-                _activePreviewMaterial = _fluidPreviewMaterial;
-                if (_activePreviewMaterial != null)
-                {
-                    _activePreviewMaterial.CopyPropertiesFromMaterial(targetMaterial);
-                    _activePreviewMaterial.SetColor(s_color, Color.white);
-                }
-            }
-            else
-            {
-                // Standard/transparent blocks: use block preview shader with texture atlas only
-                _activePreviewMaterial = _blockPreviewMaterial;
-                if (_activePreviewMaterial != null && targetMaterial.HasTexture(s_mainTexId))
-                {
-                    _activePreviewMaterial.SetTexture(s_mainTexId, targetMaterial.GetTexture(s_mainTexId));
-                }
-            }
+            _activePreviewMaterial = EditorPreviewMaterialUtility.GetConfiguredMaterial(
+                isFluid, targetMaterial, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
         }
 
         /// <summary>
@@ -194,16 +149,8 @@ namespace Editor.Libraries
         /// </summary>
         public void SetMaterialTargets(Material blockMaterial, Material fluidMaterial)
         {
-            if (_blockPreviewMaterial != null && blockMaterial != null && blockMaterial.HasTexture(s_mainTexId))
-            {
-                _blockPreviewMaterial.SetTexture(s_mainTexId, blockMaterial.GetTexture(s_mainTexId));
-            }
-
-            if (_fluidPreviewMaterial != null && fluidMaterial != null)
-            {
-                _fluidPreviewMaterial.CopyPropertiesFromMaterial(fluidMaterial);
-                _fluidPreviewMaterial.SetColor(s_color, Color.white);
-            }
+            EditorPreviewMaterialUtility.GetConfiguredMaterial(false, blockMaterial, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
+            EditorPreviewMaterialUtility.GetConfiguredMaterial(true, fluidMaterial, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
         }
 
         /// <summary>
@@ -286,10 +233,7 @@ namespace Editor.Libraries
             Material mat = isFluid ? _fluidPreviewMaterial : _blockPreviewMaterial;
             if (mat == null) return;
 
-            if (_previewPropertyBlock == null)
-            {
-                _previewPropertyBlock = new MaterialPropertyBlock();
-            }
+            _previewPropertyBlock ??= new MaterialPropertyBlock();
 
             // We must clear the block each time to avoid applying old properties, but we actually
             // want to preserve any existing material properties and just override what we need.

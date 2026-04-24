@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using Data;
+using Editor.Libraries;
 using Helpers;
 using UnityEditor;
 using UnityEngine;
@@ -25,9 +26,7 @@ namespace Editor.BlockEditor.Helpers
     /// </remarks>
     public static class BlockIconGenerator
     {
-        private static readonly int s_mainTex = Shader.PropertyToID("_MainTex");
         private static readonly int s_forceOpaque = Shader.PropertyToID("_ForceOpaque");
-        private static readonly int s_color = Shader.PropertyToID("_Color");
 
         // --- Mesh Rotation Constants ---
         // Matches the exact initial rotation of the BlockEditorWindow 3D preview
@@ -73,6 +72,29 @@ namespace Editor.BlockEditor.Helpers
             BlockDatabase blockDatabase,
             int size = 128)
         {
+            Material blockMat = null;
+            Material fluidMat = null;
+            try
+            {
+                return RenderBlockIconBatched(blockType, allBlockTypes, blockDatabase, ref blockMat, ref fluidMat, size);
+            }
+            finally
+            {
+                EditorPreviewMaterialUtility.DisposeCachedMaterials(ref blockMat, ref fluidMat);
+            }
+        }
+
+        /// <summary>
+        /// Renders a single block as an icon, using provided cached materials for performance.
+        /// </summary>
+        public static Texture2D RenderBlockIconBatched(
+            BlockType blockType,
+            List<BlockType> allBlockTypes,
+            BlockDatabase blockDatabase,
+            ref Material cachedBlockMaterial,
+            ref Material cachedFluidMaterial,
+            int size = 128)
+        {
             if (blockType == null || blockDatabase == null) return null;
 
             // --- Generate the mesh (reuses the existing editor pipeline) ---
@@ -96,35 +118,11 @@ namespace Editor.BlockEditor.Helpers
                 return null;
             }
 
-            // Create a preview material using the dedicated editor preview shaders.
-            // These share include files with the game shaders but substitute hardcoded
-            // lighting defaults and solid backgrounds for SampleSceneColor.
             bool isFluid = blockType.fluidType != FluidType.None;
-            string shaderName = isFluid ? "Hidden/Editor/FluidPreview" : "Hidden/Editor/BlockPreview";
-            Shader previewShader = Shader.Find(shaderName);
-            if (previewShader == null)
-            {
-                Debug.LogError($"BlockIconGenerator: Could not find '{shaderName}' shader.");
-                Object.DestroyImmediate(mesh);
-                return null;
-            }
 
-            Material renderMaterial = new Material(previewShader);
-            if (isFluid)
-            {
-                // Fluid: copy all material properties (colors, scales, speeds)
-                renderMaterial.CopyPropertiesFromMaterial(sourceMaterial);
-                // Ensure _Color isn't wiped out to black by the missing property on the source material
-                renderMaterial.SetColor(s_color, Color.white);
-            }
-            else
-            {
-                // Standard/transparent: copy only the texture atlas
-                if (sourceMaterial.HasTexture(s_mainTex))
-                {
-                    renderMaterial.SetTexture(s_mainTex, sourceMaterial.GetTexture(s_mainTex));
-                }
-            }
+            // Use the shared utility to handle finding shaders, copying properties, and applying editor-only fixes
+            Material renderMaterial = EditorPreviewMaterialUtility.GetConfiguredMaterial(
+                isFluid, sourceMaterial, ref cachedBlockMaterial, ref cachedFluidMaterial);
 
             // Rendered UI icons must always be fully opaque, even for transparent blocks (water, glass)
             renderMaterial.SetFloat(s_forceOpaque, 1.0f);
@@ -288,7 +286,30 @@ namespace Editor.BlockEditor.Helpers
             BlockDatabase blockDatabase,
             int size = 128)
         {
-            Texture2D icon = RenderBlockIcon(blockType, allBlockTypes, blockDatabase, size);
+            Material blockMat = null;
+            Material fluidMat = null;
+            try
+            {
+                return GenerateAndSaveIconBatched(blockType, allBlockTypes, blockDatabase, ref blockMat, ref fluidMat, size);
+            }
+            finally
+            {
+                EditorPreviewMaterialUtility.DisposeCachedMaterials(ref blockMat, ref fluidMat);
+            }
+        }
+
+        /// <summary>
+        /// Generates an icon using cached materials for performance.
+        /// </summary>
+        public static Sprite GenerateAndSaveIconBatched(
+            BlockType blockType,
+            List<BlockType> allBlockTypes,
+            BlockDatabase blockDatabase,
+            ref Material cachedBlockMaterial,
+            ref Material cachedFluidMaterial,
+            int size = 128)
+        {
+            Texture2D icon = RenderBlockIconBatched(blockType, allBlockTypes, blockDatabase, ref cachedBlockMaterial, ref cachedFluidMaterial, size);
             if (icon == null)
             {
                 Debug.LogWarning($"BlockIconGenerator: Failed to render icon for '{blockType.blockName}'.");
@@ -323,6 +344,9 @@ namespace Editor.BlockEditor.Helpers
             int generated = 0;
             int total = blockTypes.Count;
 
+            Material cachedBlockMaterial = null;
+            Material cachedFluidMaterial = null;
+
             try
             {
                 for (int i = 0; i < total; i++)
@@ -348,7 +372,7 @@ namespace Editor.BlockEditor.Helpers
                         break;
                     }
 
-                    Sprite sprite = GenerateAndSaveIcon(block, blockTypes, blockDatabase, size);
+                    Sprite sprite = GenerateAndSaveIconBatched(block, blockTypes, blockDatabase, ref cachedBlockMaterial, ref cachedFluidMaterial, size);
                     if (sprite != null)
                     {
                         block.icon = sprite;
@@ -359,6 +383,7 @@ namespace Editor.BlockEditor.Helpers
             finally
             {
                 EditorUtility.ClearProgressBar();
+                EditorPreviewMaterialUtility.DisposeCachedMaterials(ref cachedBlockMaterial, ref cachedFluidMaterial);
             }
 
             Debug.Log($"BlockIconGenerator: Batch complete — generated {generated} icons.");
