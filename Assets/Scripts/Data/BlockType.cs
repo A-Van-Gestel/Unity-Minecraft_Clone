@@ -91,6 +91,24 @@ namespace Data
         [Tooltip("Indicates whether the block has any block behavior.")]
         public bool isActive;
 
+        [Header("Metadata")]
+        [Tooltip(
+            "How the 8-bit voxel metadata byte should be interpreted for this block.\n" +
+            "Determines orientation, fluid level, or other per-voxel state semantics.\n" +
+            "See MetadataSchema for the frozen bit layouts.")]
+        public MetadataSchema metadataSchema = MetadataSchema.None;
+
+        [Tooltip(
+            "How player placement should author this block's metadata.\n" +
+            "'None' means placement writes defaultMetadata unchanged.")]
+        public PlacementMetadataMode placementMetadataMode = PlacementMetadataMode.None;
+
+        [Tooltip(
+            "Default metadata value written when this block is placed without explicit metadata.\n" +
+            "Must fit within the chosen schema's valid range (see MetadataSchema).")]
+        [Range(0, 255)]
+        public byte defaultMetadata;
+
         [Header("Texture Values")]
         [Tooltip("Texture ID for the Negative Z face.")]
         public int backFaceTexture;
