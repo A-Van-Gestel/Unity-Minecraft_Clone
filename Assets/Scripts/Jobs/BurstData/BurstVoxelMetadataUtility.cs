@@ -1,0 +1,198 @@
+using System.Runtime.CompilerServices;
+using Data;
+using Unity.Burst;
+
+namespace Jobs.BurstData
+{
+    /// <summary>
+    /// Burst-compatible encode/decode primitives for the per-block metadata
+    /// schemas defined in <see cref="MetadataSchema"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>The frozen bit layouts below must never change once a schema value
+    /// has shipped. See <c>Documentation/Design/PER_BLOCK_METADATA_SCHEMAS.md §5.3</c>.</para>
+    /// <para>Encode/decode helpers apply strict bit masking against each schema's
+    /// frozen layout. Higher-level validation (e.g. "Axis3 only allows 0-2 even
+    /// though the mask permits 0-3") is handled separately by
+    /// <see cref="IsValidMeta"/> and <see cref="NormalizeMeta"/>.</para>
+    /// <para>Hot-path jobs should not call <see cref="IsValidMeta"/> per voxel — per §7.5
+    /// the decode LUT is the hot-path defense. Use <see cref="NormalizeMeta"/>
+    /// at LUT build time and at serialization boundaries.</para>
+    /// </remarks>
+    [BurstCompile]
+    public static class BurstVoxelMetadataUtility
+    {
+        // ===== Frozen bit layout constants (§5.3) =====
+
+        /// <summary><see cref="MetadataSchema.FluidLevel4"/> uses bits 0-3 of the metadata byte.</summary>
+        public const byte FLUID_LEVEL_MASK = 0x0F;
+
+        /// <summary><see cref="MetadataSchema.Axis3"/> uses bits 0-1 of the metadata byte.</summary>
+        public const byte AXIS3_MASK = 0x03;
+
+        /// <summary><see cref="MetadataSchema.Facing6"/> uses bits 0-2 of the metadata byte.</summary>
+        public const byte FACING6_MASK = 0x07;
+
+        /// <summary><see cref="MetadataSchema.Facing6Roll2"/> stores facing in bits 0-2.</summary>
+        public const byte FACING6_ROLL2_FACING_MASK = 0x07;
+
+        /// <summary><see cref="MetadataSchema.Facing6Roll2"/> stores roll in bits 3-4 (already shifted into place).</summary>
+        public const byte FACING6_ROLL2_ROLL_MASK_SHIFTED = 0x18;
+
+        /// <summary>Bit shift from a roll value (0-3) to its in-place position within <see cref="MetadataSchema.Facing6Roll2"/>.</summary>
+        public const int FACING6_ROLL2_ROLL_SHIFT = 3;
+
+        // ===== Valid semantic value ranges (tighter than the bit masks) =====
+
+        /// <summary><see cref="MetadataSchema.Axis3"/> only allows values 0-2 (Y, X, Z) even though the mask permits 0-3.</summary>
+        public const byte AXIS3_MAX_VALUE = 2;
+
+        /// <summary><see cref="MetadataSchema.Facing6"/> only allows values 0-5 even though the mask permits 0-7.</summary>
+        public const byte FACING6_MAX_VALUE = 5;
+
+        /// <summary>Roll in <see cref="MetadataSchema.Facing6Roll2"/> allows values 0-3.</summary>
+        public const byte FACING6_ROLL2_ROLL_MAX_VALUE = 3;
+
+        /// <summary><see cref="MetadataSchema.FluidLevel4"/> allows values 0-15.</summary>
+        public const byte FLUID_LEVEL_MAX_VALUE = 15;
+
+        // ===== Axis3 encoding (§8.1) =====
+
+        /// <summary>Axis value for an upright (Y-axis) orientation — the default for unrotated blocks.</summary>
+        public const byte AXIS_Y = 0;
+
+        /// <summary>Axis value for an east/west (X-axis) orientation.</summary>
+        public const byte AXIS_X = 1;
+
+        /// <summary>Axis value for a north/south (Z-axis) orientation.</summary>
+        public const byte AXIS_Z = 2;
+
+        // ===== Encode primitives =====
+
+        /// <summary>Encodes a fluid level (0-15) into the <see cref="MetadataSchema.FluidLevel4"/> layout.</summary>
+        /// <param name="level">The fluid level. Values outside 0-15 are masked to bits 0-3.</param>
+        /// <returns>A raw metadata byte with bits 0-3 set to the fluid level.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte EncodeFluidLevel(byte level)
+            => (byte)(level & FLUID_LEVEL_MASK);
+
+        /// <summary>Encodes an axis value (0=Y, 1=X, 2=Z) into the <see cref="MetadataSchema.Axis3"/> layout.</summary>
+        /// <param name="axis">The axis value. Values outside 0-3 are masked to bits 0-1.</param>
+        /// <returns>A raw metadata byte with bits 0-1 set to the axis.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte EncodeAxis3(byte axis)
+            => (byte)(axis & AXIS3_MASK);
+
+        /// <summary>Encodes a facing value (0-5) into the <see cref="MetadataSchema.Facing6"/> layout.</summary>
+        /// <param name="facing">The facing value. Values outside 0-7 are masked to bits 0-2.</param>
+        /// <returns>A raw metadata byte with bits 0-2 set to the facing.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte EncodeFacing6(byte facing)
+            => (byte)(facing & FACING6_MASK);
+
+        /// <summary>
+        /// Encodes a (facing, roll) pair into the <see cref="MetadataSchema.Facing6Roll2"/> layout.
+        /// </summary>
+        /// <param name="facing">The facing value (0-5). Higher values are masked to 3 bits to prevent clobbering the roll bits.</param>
+        /// <param name="roll">The roll value (0-3). Higher values are masked to 2 bits.</param>
+        /// <returns>A raw metadata byte: <c>(facing &amp; 0x07) | ((roll &amp; 0x03) &lt;&lt; 3)</c>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte EncodeFacing6Roll2(byte facing, byte roll)
+            => (byte)((facing & FACING6_ROLL2_FACING_MASK)
+                      | ((roll & 0x03) << FACING6_ROLL2_ROLL_SHIFT));
+
+        // ===== Decode primitives =====
+
+        /// <summary>Decodes the fluid level from bits 0-3 of a raw metadata byte.</summary>
+        /// <param name="meta">The raw metadata byte.</param>
+        /// <returns>The fluid level (0-15).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte DecodeFluidLevel(byte meta)
+            => (byte)(meta & FLUID_LEVEL_MASK);
+
+        /// <summary>Decodes the axis value from bits 0-1 of a raw metadata byte.</summary>
+        /// <param name="meta">The raw metadata byte.</param>
+        /// <returns>The axis value (0-3; only 0-2 are valid per §8.1).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte DecodeAxis3(byte meta)
+            => (byte)(meta & AXIS3_MASK);
+
+        /// <summary>Decodes the facing value from bits 0-2 of a raw metadata byte.</summary>
+        /// <param name="meta">The raw metadata byte.</param>
+        /// <returns>The facing value (0-7; only 0-5 are valid per §5.2).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte DecodeFacing6(byte meta)
+            => (byte)(meta & FACING6_MASK);
+
+        /// <summary>Decodes the facing component from a <see cref="MetadataSchema.Facing6Roll2"/> raw metadata byte.</summary>
+        /// <param name="meta">The raw metadata byte.</param>
+        /// <returns>The facing value (0-7; only 0-5 are valid).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte DecodeFacing6Roll2Facing(byte meta)
+            => (byte)(meta & FACING6_ROLL2_FACING_MASK);
+
+        /// <summary>Decodes the roll component from a <see cref="MetadataSchema.Facing6Roll2"/> raw metadata byte.</summary>
+        /// <param name="meta">The raw metadata byte.</param>
+        /// <returns>The roll value (0-3).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte DecodeFacing6Roll2Roll(byte meta)
+            => (byte)((meta & FACING6_ROLL2_ROLL_MASK_SHIFTED) >> FACING6_ROLL2_ROLL_SHIFT);
+
+        // ===== Validation =====
+
+        /// <summary>
+        /// Returns <see langword="true"/> if <paramref name="meta"/> is a valid raw metadata byte
+        /// for the given schema. Validates both the reserved bits and the semantic value range.
+        /// </summary>
+        /// <param name="schema">The schema to validate against.</param>
+        /// <param name="meta">The raw metadata byte.</param>
+        /// <returns><see langword="true"/> if the byte is legal for the schema; otherwise <see langword="false"/>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsValidMeta(MetadataSchema schema, byte meta)
+        {
+            switch (schema)
+            {
+                case MetadataSchema.None:
+                    // No bits may be set.
+                    return meta == 0;
+
+                case MetadataSchema.FluidLevel4:
+                    // Any value 0-15 is legal; reserved bits 4-7 must be zero.
+                    return (meta & ~FLUID_LEVEL_MASK) == 0;
+
+                case MetadataSchema.Axis3:
+                    // Axis 0-2 legal; reserved bits 2-7 must be zero (mask value 3 is invalid).
+                    return (meta & ~AXIS3_MASK) == 0 && meta <= AXIS3_MAX_VALUE;
+
+                case MetadataSchema.Facing6:
+                    // Facing 0-5 legal; reserved bits 3-7 must be zero.
+                    return (meta & ~FACING6_MASK) == 0 && meta <= FACING6_MAX_VALUE;
+
+                case MetadataSchema.Facing6Roll2:
+                {
+                    const byte USED_BITS = FACING6_ROLL2_FACING_MASK | FACING6_ROLL2_ROLL_MASK_SHIFTED;
+                    byte facing = DecodeFacing6Roll2Facing(meta);
+                    // Roll is already constrained to 0-3 by its 2-bit field; only facing needs a range check.
+                    return (meta & ~USED_BITS) == 0 && facing <= FACING6_MAX_VALUE;
+                }
+
+                default:
+                    // Unknown schemas are never valid — caller should treat this as corruption.
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns <paramref name="meta"/> if it is valid for the schema, otherwise returns
+        /// <paramref name="defaultMeta"/>. Use at LUT build time and at serialization
+        /// boundaries per §7.6; hot paths should use the prebuilt LUT instead.
+        /// </summary>
+        /// <param name="schema">The schema to validate against.</param>
+        /// <param name="meta">The raw metadata byte.</param>
+        /// <param name="defaultMeta">The fallback value if <paramref name="meta"/> is invalid.</param>
+        /// <returns>A valid metadata byte for the schema.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte NormalizeMeta(MetadataSchema schema, byte meta, byte defaultMeta)
+            => IsValidMeta(schema, meta) ? meta : defaultMeta;
+    }
+}
