@@ -3,6 +3,7 @@ using Data;
 using Data.JobData;
 using Data.Structures;
 using Data.WorldTypes;
+using Jobs.BurstData;
 using Jobs.Data;
 using Jobs.Helpers;
 using Libraries;
@@ -451,15 +452,17 @@ namespace Jobs.Generators
 
                 if (component.type == StructureComponentType.StaticPart)
                 {
-                    // Emit all blocks at the current cursor
+                    // Emit all blocks at the current cursor.
+                    // Structure blocks are solids, so meta is encoded via the legacy orientation rule.
                     foreach (StructureBlock block in selectedPart.blocks)
                     {
+                        byte rotatedOrientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps);
                         yield return new VoxelMod
                         {
                             GlobalPosition = cursor + RotatePosition(block.localPosition, totalRotationSteps),
                             ID = block.blockID,
                             Rule = block.rule,
-                            Orientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps)
+                            Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(rotatedOrientation, fluidLevel: 0, isFluid: false),
                         };
                     }
                 }
@@ -474,12 +477,13 @@ namespace Jobs.Generators
                         Vector3Int offset = rotatedStackDirection * i;
                         foreach (StructureBlock block in selectedPart.blocks)
                         {
+                            byte rotatedOrientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps);
                             yield return new VoxelMod
                             {
                                 GlobalPosition = cursor + offset + RotatePosition(block.localPosition, totalRotationSteps),
                                 ID = block.blockID,
                                 Rule = block.rule,
-                                Orientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps)
+                                Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(rotatedOrientation, fluidLevel: 0, isFluid: false),
                             };
                         }
                     }

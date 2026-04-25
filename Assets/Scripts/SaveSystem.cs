@@ -13,7 +13,10 @@ public static class SaveSystem
     // v2 → v3: Removed bug where 'IsEmpty' sections (all-air w/ light) were skipped.
     //          Migration triggers full initial lighting job for existing chunks to restore sky & cave light.
     // v3 → v4: Added WorldType metadata to level.dat. See Migration_v3_to_v4_WorldTypes.cs.
-    public const int CURRENT_VERSION = 4;
+    // v4 → v5: Collapsed VoxelMod's (Orientation, FluidLevel) byte pair into a single Meta byte
+    //          per PER_BLOCK_METADATA_SCHEMAS.md §7.4. Rewrites pending_mods.bin layout.
+    //          See Migration_v4_to_v5_VoxelModMeta.cs.
+    public const int CURRENT_VERSION = 5;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.

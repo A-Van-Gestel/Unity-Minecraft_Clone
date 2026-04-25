@@ -83,14 +83,14 @@ namespace Serialization
 
                 foreach (VoxelMod mod in kvp.Value)
                 {
-                    // Serialize VoxelMod
+                    // Serialize VoxelMod (v5+ format: single Meta byte per PER_BLOCK_METADATA_SCHEMAS.md §7.4).
                     writer.Write(mod.GlobalPosition.x);
                     writer.Write(mod.GlobalPosition.y);
                     writer.Write(mod.GlobalPosition.z);
                     writer.Write(mod.ID);
-                    writer.Write(mod.Orientation);
-                    writer.Write(mod.FluidLevel);
-                    // We don't save "ImmediateUpdate" flag as it's a runtime priority thing
+                    writer.Write(mod.Meta);
+                    // We don't save "ImmediateUpdate" flag as it's a runtime priority thing.
+                    // We don't save "Rule" since it's a placement-time directive.
                 }
             }
         }
@@ -120,14 +120,9 @@ namespace Serialization
                 {
                     Vector3Int pos = new Vector3Int(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32());
                     ushort id = reader.ReadUInt16();
-                    byte orient = reader.ReadByte();
-                    byte fluid = reader.ReadByte();
+                    byte meta = reader.ReadByte();
 
-                    mods.Add(new VoxelMod(pos, id)
-                    {
-                        Orientation = orient,
-                        FluidLevel = fluid,
-                    });
+                    mods.Add(new VoxelMod(pos, id) { Meta = meta });
                 }
 
                 _pendingMods[coord] = mods;

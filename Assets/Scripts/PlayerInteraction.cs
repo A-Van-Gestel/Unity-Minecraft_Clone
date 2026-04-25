@@ -1,4 +1,5 @@
 using Data;
+using Jobs.BurstData;
 using MyBox;
 using Physics;
 using UnityEngine;
@@ -78,9 +79,19 @@ public class PlayerInteraction : MonoBehaviour
                 if (!_blockPlaceable) return;
 
                 UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
-                _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), blockId: itemSlot.ItemSlot.Stack.ID)
+                ushort placedBlockId = itemSlot.ItemSlot.Stack.ID;
+                bool placedIsFluid = _world.BlockTypes[placedBlockId].fluidType != FluidType.None;
+
+                // For fluid blocks, the player's orientation is irrelevant — the meta byte holds
+                // the fluid level, which BlockBehavior.Fluids will fill from the source on its first tick.
+                // For solid blocks, the meta byte encodes the world-face orientation via the legacy rule.
+                byte meta = placedIsFluid
+                    ? (byte)0
+                    : BurstVoxelDataBitMapping.BuildMetaLegacy(_player.orientation, fluidLevel: 0, isFluid: false);
+
+                _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), placedBlockId)
                 {
-                    Orientation = _player.orientation,
+                    Meta = meta,
                     ImmediateUpdate = true,
                 });
                 itemSlot.ItemSlot.Take(1);

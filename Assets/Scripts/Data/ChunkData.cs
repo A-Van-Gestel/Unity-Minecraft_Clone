@@ -343,14 +343,10 @@ namespace Data
             // The LightingJob will then fill it with propagated light from neighbors.
             BlockType newProps = World.Instance.BlockTypes[mod.ID];
 
-            // IMPORTANT: If this is a fluid block, we must NOT pass the block placement orientation.
-            // BurstVoxelDataBitMapping combines Orientation/FluidLevel into the same byte under the
-            // legacy encoding rule, which BuildMetaLegacy preserves verbatim.
-            bool isFluid = newProps.fluidType != FluidType.None;
-            byte packOrientation = isFluid ? (byte)0 : mod.Orientation;
-            byte packedMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(packOrientation, mod.FluidLevel, isFluid);
-
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, 0, newProps.lightEmission, packedMeta);
+            // The mod is responsible for providing the correct meta byte for the block it places —
+            // schema-aware callers encode via BurstVoxelMetadataUtility, transitional callers via
+            // BurstVoxelDataBitMapping.BuildMetaLegacy (per PER_BLOCK_METADATA_SCHEMAS.md §7.4).
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, 0, newProps.lightEmission, mod.Meta);
 
             // Check if the full voxel state has actually changed.
             if (oldPackedData == newPackedData)
