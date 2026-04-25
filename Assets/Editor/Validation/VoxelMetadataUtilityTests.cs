@@ -91,6 +91,12 @@ namespace Editor.Validation
                 Test_VoxelState_GetFluidLevel_FluidLevel4_DecodesBits0to3();
                 Test_VoxelState_GetFluidLevel_OrientationSchemas_ReturnZero();
                 Test_VoxelState_SetFluidLevel_FluidLevel4_OverwritesMetaByte();
+
+                Test_BurstAxis3MeshUtility_YAxis_IsIdentity();
+                Test_BurstAxis3MeshUtility_XAxis_TopOfLogAtPositiveX();
+                Test_BurstAxis3MeshUtility_ZAxis_TopOfLogAtPositiveZ();
+                Test_BurstAxis3MeshUtility_EveryAxisHasExactlyTwoLogCapFaces();
+                Test_BurstAxis3MeshUtility_AllRemapValuesInRange();
             }
 
             // ===== Round-trip tests =====
@@ -480,6 +486,108 @@ namespace Editor.Validation
                 state.SetFluidLevel(7, MetadataSchema.FluidLevel4);
                 AssertEqual(BurstVoxelMetadataUtility.EncodeFluidLevel(7), state.Meta,
                     "SetFluidLevel(FluidLevel4) replaces the meta byte with the encoded level");
+            }
+
+            // ===== BurstAxis3MeshUtility face remap (Phase 2b) =====
+            //
+            // World face indices: 0=Back(-Z), 1=Front(+Z), 2=Top(+Y), 3=Bottom(-Y), 4=Left(-X), 5=Right(+X).
+            // Convention frozen in BurstAxis3MeshUtility: top of log faces in the direction of its named axis.
+
+            /// <summary>
+            /// For Y-axis (default upright), the face remap must be the identity — a Y-axis log
+            /// renders identically to a non-rotated cube.
+            /// </summary>
+            private void Test_BurstAxis3MeshUtility_YAxis_IsIdentity()
+            {
+                for (int worldFace = 0; worldFace < 6; worldFace++)
+                {
+                    byte effective = BurstAxis3MeshUtility.GetEffectiveFace(BurstVoxelMetadataUtility.AXIS_Y, worldFace);
+                    AssertEqual((byte)worldFace, effective,
+                        $"Y-axis remap is identity for worldFace={worldFace}");
+                }
+            }
+
+            /// <summary>
+            /// For X-axis logs, world face 5 (+X / Right) must show the block's top texture
+            /// (block face 2), and world face 4 (−X / Left) must show the block's bottom texture
+            /// (block face 3). The other 4 world faces must show side textures.
+            /// </summary>
+            private void Test_BurstAxis3MeshUtility_XAxis_TopOfLogAtPositiveX()
+            {
+                AssertEqual(2, BurstAxis3MeshUtility.GetEffectiveFace(BurstVoxelMetadataUtility.AXIS_X, 5),
+                    "X-axis: world face 5 (+X) shows block face 2 (top of log)");
+                AssertEqual(3, BurstAxis3MeshUtility.GetEffectiveFace(BurstVoxelMetadataUtility.AXIS_X, 4),
+                    "X-axis: world face 4 (−X) shows block face 3 (bottom of log)");
+
+                // Sides (faces 0-3) must NOT resolve to block faces 2 or 3 (the log caps).
+                for (int worldFace = 0; worldFace <= 3; worldFace++)
+                {
+                    byte effective = BurstAxis3MeshUtility.GetEffectiveFace(BurstVoxelMetadataUtility.AXIS_X, worldFace);
+                    AssertTrue(effective != 2 && effective != 3,
+                        $"X-axis: world face {worldFace} resolves to a side face (not 2 or 3)");
+                }
+            }
+
+            /// <summary>
+            /// For Z-axis logs, world face 1 (+Z / Front) must show the block's top texture
+            /// (block face 2), and world face 0 (−Z / Back) must show the block's bottom texture
+            /// (block face 3). The other 4 world faces must show side textures.
+            /// </summary>
+            private void Test_BurstAxis3MeshUtility_ZAxis_TopOfLogAtPositiveZ()
+            {
+                AssertEqual(2, BurstAxis3MeshUtility.GetEffectiveFace(BurstVoxelMetadataUtility.AXIS_Z, 1),
+                    "Z-axis: world face 1 (+Z) shows block face 2 (top of log)");
+                AssertEqual(3, BurstAxis3MeshUtility.GetEffectiveFace(BurstVoxelMetadataUtility.AXIS_Z, 0),
+                    "Z-axis: world face 0 (−Z) shows block face 3 (bottom of log)");
+
+                // Sides — world faces 2, 3, 4, 5 — must NOT resolve to block faces 2 or 3.
+                for (int worldFace = 2; worldFace <= 5; worldFace++)
+                {
+                    byte effective = BurstAxis3MeshUtility.GetEffectiveFace(BurstVoxelMetadataUtility.AXIS_Z, worldFace);
+                    AssertTrue(effective != 2 && effective != 3,
+                        $"Z-axis: world face {worldFace} resolves to a side face (not 2 or 3)");
+                }
+            }
+
+            /// <summary>
+            /// Structural invariant for log-shaped blocks: every axis must have exactly 2 world faces
+            /// resolving to "log cap" textures (block faces 2 and 3) and 4 resolving to "log side"
+            /// textures (block faces 0, 1, 4, 5). If this fails for an axis, the log will look broken.
+            /// </summary>
+            private void Test_BurstAxis3MeshUtility_EveryAxisHasExactlyTwoLogCapFaces()
+            {
+                for (byte axis = 0; axis <= BurstVoxelMetadataUtility.AXIS3_MAX_VALUE; axis++)
+                {
+                    int capCount = 0;
+                    int sideCount = 0;
+                    for (int worldFace = 0; worldFace < 6; worldFace++)
+                    {
+                        byte effective = BurstAxis3MeshUtility.GetEffectiveFace(axis, worldFace);
+                        if (effective == 2 || effective == 3) capCount++;
+                        else sideCount++;
+                    }
+
+                    AssertTrue(capCount == 2,
+                        $"axis={axis}: exactly 2 world faces should map to log caps (got {capCount})");
+                    AssertTrue(sideCount == 4,
+                        $"axis={axis}: exactly 4 world faces should map to log sides (got {sideCount})");
+                }
+            }
+
+            /// <summary>
+            /// Sanity check: every entry in the LUT is a valid block face index (0-5).
+            /// </summary>
+            private void Test_BurstAxis3MeshUtility_AllRemapValuesInRange()
+            {
+                for (byte axis = 0; axis <= BurstVoxelMetadataUtility.AXIS3_MAX_VALUE; axis++)
+                {
+                    for (int worldFace = 0; worldFace < 6; worldFace++)
+                    {
+                        byte effective = BurstAxis3MeshUtility.GetEffectiveFace(axis, worldFace);
+                        AssertTrue(effective <= 5,
+                            $"axis={axis}, worldFace={worldFace}: remap value {effective} is in range 0-5");
+                    }
+                }
             }
 
             // ===== Tiny assertion helpers =====

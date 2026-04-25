@@ -264,7 +264,7 @@ namespace Jobs
             if (voxelProps.RenderShape == RenderShape.CrossMesh)
             {
                 VoxelState? centerVoxel = GetVoxelStateFromLocalPos(pos);
-                float lightLevel = centerVoxel.HasValue ? centerVoxel.Value.LightAsFloat : 1.0f;
+                float lightLevel = centerVoxel?.LightAsFloat ?? 1.0f;
                 int textureID = voxelProps.SideFaceTexture;
 
                 VoxelMeshHelper.GenerateCrossMesh(textureID, lightLevel, pos, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals);
@@ -293,8 +293,9 @@ namespace Jobs
             // --- CASE 4: STANDARD CUBE ---
             switch (voxelProps.MetadataSchema)
             {
-                // Phase 2b will add dedicated arms here for schemas that need axis-aware face
-                // selection instead of legacy quaternion rotation.
+                case MetadataSchema.Axis3:
+                    GenerateStandardCubeMesh_Axis3(pos, packedData, id, voxelProps);
+                    break;
                 default:
                     GenerateStandardCubeMesh_Legacy(pos, packedData, id, voxelProps);
                     break;
@@ -365,6 +366,46 @@ namespace Jobs
                     float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 
                     VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                        voxelProps.RenderNeighborFaces);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.Axis3"/> blocks
+        /// (logs, pillars, fallen trunks). Performs no per-voxel rotation — the cube vertices are
+        /// emitted in their canonical positions and the per-face texture is selected via the
+        /// frozen face-remap LUT in <see cref="BurstAxis3MeshUtility"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>This is the Phase 2b primary cost-reduction path: replaces
+        /// <see cref="VoxelHelper.GetRotationAngle"/> + <see cref="UnityEngine.Quaternion.Euler"/>
+        /// per face with one O(1) byte-array lookup. The baseline (<c>Documentation/Performance/PHASE_02_BASELINE.md</c>)
+        /// measured the legacy rotation overhead at ~1.3 ns/face — this path should land well under that.</para>
+        /// <para>UV rotation per axis (so wood-grain side textures align with the log's long axis) is
+        /// not yet implemented. Without it, side-face bark grain stays "vertical" regardless of axis;
+        /// this is a visual defect to be addressed in a follow-up commit, not a correctness defect.</para>
+        /// </remarks>
+        private void GenerateStandardCubeMesh_Axis3(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte axis = BurstVoxelMetadataUtility.DecodeAxis3(meta);
+
+            for (int p = 0; p < 6; p++)
+            {
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                {
+                    // Texture comes from the axis-remapped block face. Vertex emission uses the
+                    // un-rotated world face index `p`, since cube vertices are axis-symmetric.
+                    int effectiveFace = BurstAxis3MeshUtility.GetEffectiveFace(axis, p);
+                    int textureID = GetTextureID(id, effectiveFace);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f,
                         ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
                         ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                         voxelProps.RenderNeighborFaces);
