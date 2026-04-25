@@ -128,12 +128,50 @@ namespace Editor.BlockEditor.Helpers
             // Case 4: Standard Solid Block
             else
             {
-                for (int p = 0; p < 6; p++)
+                // Mirrors `MeshGenerationJob.GenerateVoxelMeshData` case 4 — schema-aware dispatch
+                // so the Block Editor preview matches in-game rendering for Axis3 blocks.
+                // See `PER_BLOCK_METADATA_SCHEMAS.md §8.1` ("update runtime meshing and Block Editor
+                // preview meshing together").
+                switch (blockType.metadataSchema)
                 {
-                    int textureID = blockType.GetTextureID(p);
-                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f,
-                        ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
-                        blockType.renderNeighborFaces);
+                    case MetadataSchema.Axis3:
+                    {
+                        // Decode the preview axis from defaultMetadata. NormalizeMeta clamps invalid
+                        // values to 0 (Y-axis) so out-of-range authoring data renders an upright log
+                        // instead of crashing on an LUT out-of-bounds read.
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Axis3, blockType.defaultMetadata, defaultMeta: 0);
+                        byte axis = BurstVoxelMetadataUtility.DecodeAxis3(normalizedMeta);
+
+                        for (int p = 0; p < 6; p++)
+                        {
+                            // Texture comes from the axis-remapped block face; vertex emission uses
+                            // `rotation: 0f` since the cube vertices are axis-symmetric.
+                            int effectiveFace = BurstAxis3MeshUtility.GetEffectiveFace(axis, p);
+                            int textureID = blockType.GetTextureID(effectiveFace);
+                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
+
+                    default:
+                    {
+                        // Legacy / None-schema preview: identity face mapping, no rotation.
+                        for (int p = 0; p < 6; p++)
+                        {
+                            int textureID = blockType.GetTextureID(p);
+                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
                 }
             }
 
