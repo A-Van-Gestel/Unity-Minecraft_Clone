@@ -330,9 +330,13 @@ namespace Jobs
                 BlockTypeJobData voxelProps = BlockTypes[voxelValue];
 
                 // --- Pack voxel data ---
+                // Generation still uses the legacy meta encoding (orient=1 for solids, fluid level for fluids).
+                // Phase 2 callsite migration will replace this with schema-aware encoding via BurstVoxelMetadataUtility.
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                byte packedMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(
+                    orientation: 1, fluidLevel: voxelProps.FluidLevel, isFluid: false);
                 OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(
-                    voxelValue, 0, voxelProps.LightEmission, 1, voxelProps.FluidLevel);
+                    voxelValue, 0, voxelProps.LightEmission, packedMeta);
 
                 // --- Heightmap ---
                 if (!highestBlockFound && voxelProps.IsLightObstructing)

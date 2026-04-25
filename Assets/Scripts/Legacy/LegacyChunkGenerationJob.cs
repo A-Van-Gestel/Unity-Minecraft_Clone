@@ -65,7 +65,9 @@ namespace Legacy
                 BlockTypeJobData voxelProps = BlockTypes[voxelID];
 
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
-                OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.LightEmission, 1, voxelProps.FluidLevel);
+                byte packedMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(
+                    orientation: 1, fluidLevel: voxelProps.FluidLevel, isFluid: false);
+                OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.LightEmission, packedMeta);
 
                 if (!highestBlockFound)
                 {

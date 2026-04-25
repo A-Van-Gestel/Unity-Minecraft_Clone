@@ -333,7 +333,8 @@ namespace Benchmarks
             for (int i = 0; i < data.Center.Length; i++)
             {
                 byte idToPlace = GetVoxelIDForPattern(type, i);
-                uint packed = BurstVoxelDataBitMapping.PackVoxelData(idToPlace, 15, 0, 1, 0);
+                uint packed = BurstVoxelDataBitMapping.PackVoxelData(idToPlace, 15, 0,
+                    BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
                 data.FillAll(i, packed);
             }
 

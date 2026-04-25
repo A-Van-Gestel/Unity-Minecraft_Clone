@@ -344,11 +344,13 @@ namespace Data
             BlockType newProps = World.Instance.BlockTypes[mod.ID];
 
             // IMPORTANT: If this is a fluid block, we must NOT pass the block placement orientation.
-            // BurstVoxelDataBitMapping combines Orientation/FluidLevel into the same byte.
+            // BurstVoxelDataBitMapping combines Orientation/FluidLevel into the same byte under the
+            // legacy encoding rule, which BuildMetaLegacy preserves verbatim.
             bool isFluid = newProps.fluidType != FluidType.None;
             byte packOrientation = isFluid ? (byte)0 : mod.Orientation;
+            byte packedMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(packOrientation, mod.FluidLevel, isFluid);
 
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, 0, newProps.lightEmission, packOrientation, mod.FluidLevel, isFluid);
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, 0, newProps.lightEmission, packedMeta);
 
             // Check if the full voxel state has actually changed.
             if (oldPackedData == newPackedData)

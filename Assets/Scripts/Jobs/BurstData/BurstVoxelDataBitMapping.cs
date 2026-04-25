@@ -54,42 +54,58 @@ namespace Jobs.BurstData
         // --- Packing ---
 
         /// <summary>
-        /// Packs all component data into a single uint.
-        /// Orientation and FluidLevel share the same 8-bit Metadata space.
+        /// Packs voxel data into a single uint with the given raw metadata byte.
         /// </summary>
         /// <param name="id">The block ID (0-65535).</param>
         /// <param name="sunLight">The sunlight level (0-15).</param>
         /// <param name="blockLight">The blocklight level (0-15).</param>
-        /// <param name="orientation">The world orientation (face index).</param>
-        /// <param name="fluidLevel">The fluid level (0-15).</param>
-        /// <param name="isFluid">Whether the block is a fluid type. If true, fluidLevel is packed. If false, orientation is packed.</param>
+        /// <param name="meta">The raw 8-bit metadata byte. Schema-aware callers should encode this value
+        /// using <c>BurstVoxelMetadataUtility</c> (per <c>PER_BLOCK_METADATA_SCHEMAS.md §7.1</c>).
+        /// Transitional callers that still use legacy orientation/fluid-level inputs can compute the
+        /// byte via <see cref="BuildMetaLegacy"/>.</param>
         /// <returns>A packed uint containing all the voxel state data.</returns>
+        /// <remarks>
+        /// This signature replaced the legacy <c>PackVoxelData(id, sun, block, orientation, fluidLevel, isFluid)</c>
+        /// shape per <c>PER_BLOCK_METADATA_SCHEMAS.md §7.1</c>. The packer no longer assumes that solids mean
+        /// orientation and fluids mean fluid-level — the meaning of <paramref name="meta"/> is determined by
+        /// the block's <see cref="MetadataSchema"/>, not by this function.
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel, bool isFluid = false)
+        public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte meta)
         {
             uint packedData = 0;
             packedData |= (uint)(id << ID_SHIFT); // ID: 16 bits
             packedData |= (uint)((sunLight & 0xF) << SUNLIGHT_SHIFT); // Sunlight: 4 bits
             packedData |= (uint)((blockLight & 0xF) << BLOCKLIGHT_SHIFT); // Blocklight: 4 bits
+            packedData |= (uint)(meta << META_SHIFT); // Meta: 8 bits
+            return packedData;
+        }
 
-            // Metadata Logic:
-            // Since Fluid and Orientation share the same bits, we prioritize FluidLevel if it is a fluid block.
-            // A block defined as a Fluid in BlockTypes should use FluidLevel.
-            // A block defined as Solid should use Orientation.
-
-            byte meta;
+        /// <summary>
+        /// Computes a metadata byte using the legacy "fluid-level OR orientation-storage-index" rule.
+        /// </summary>
+        /// <param name="orientation">The world orientation (face index 0-5).</param>
+        /// <param name="fluidLevel">The fluid level (0-15).</param>
+        /// <param name="isFluid">If <see langword="true"/>, force the fluid-level encoding even when <paramref name="fluidLevel"/> is zero.</param>
+        /// <returns>A raw metadata byte: fluid level (bits 0-3) when <paramref name="isFluid"/> or <paramref name="fluidLevel"/> &gt; 0; otherwise the legacy orientation storage index (bits 0-2).</returns>
+        /// <remarks>
+        /// <para>Transitional helper per <c>PER_BLOCK_METADATA_SCHEMAS.md §7.1</c>. Use it only at call sites
+        /// that have not yet migrated to schema-aware meta encoding via
+        /// <c>BurstVoxelMetadataUtility</c>. After Phase 2 callsite migration this helper can be removed
+        /// alongside the other legacy compatibility shims.</para>
+        /// <para>This is the same encoding the old 6-argument <c>PackVoxelData</c> performed internally —
+        /// extracted into a named helper so each transitional callsite is explicit about using legacy
+        /// semantics rather than schema-aware semantics.</para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte BuildMetaLegacy(byte orientation, byte fluidLevel, bool isFluid)
+        {
             if (isFluid || fluidLevel > 0)
             {
-                meta = (byte)(fluidLevel & META_VAL_FLUID_MASK);
-            }
-            else
-            {
-                meta = GetOrientationIndex(orientation);
+                return (byte)(fluidLevel & META_VAL_FLUID_MASK);
             }
 
-            packedData |= (uint)(meta << META_SHIFT); // Meta: 8 bits
-
-            return packedData;
+            return GetOrientationIndex(orientation);
         }
 
         // --- Unpacking / Getters ---

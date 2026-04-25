@@ -277,22 +277,30 @@ namespace Data
                 blockId, // blockId
                 0, // SunLight = 0
                 0, // BlockLight = 0
-                1, // Orientation = 1 (Front)
-                0 // FluidLevel = 0
-            );
+                BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false)); // Default: Front orientation
         }
 
         /// <summary>
-        /// Creates a new voxel state from all its components.
+        /// Creates a new voxel state from all its components using the legacy
+        /// orientation/fluid-level encoding.
         /// </summary>
         /// <param name="blockId">The ID of the block.</param>
         /// <param name="sunLightLevel">The initial sunlight level (0-15).</param>
         /// <param name="blockLightLevel">The initial blocklight level (0-15).</param>
         /// <param name="orientation">The face orientation (default 1).</param>
         /// <param name="fluidLevel">The fluid level (default 0).</param>
+        /// <remarks>
+        /// Transitional constructor — encodes the meta byte using the legacy
+        /// <see cref="BurstVoxelDataBitMapping.BuildMetaLegacy"/> rule. Schema-aware callers should
+        /// prefer <see cref="VoxelState(uint)"/> with a pre-computed packed value, or
+        /// construct via <see cref="BurstVoxelDataBitMapping.PackVoxelData(ushort, byte, byte, byte)"/>
+        /// using a meta byte produced by <c>BurstVoxelMetadataUtility</c>.
+        /// </remarks>
         public VoxelState(byte blockId, byte sunLightLevel, byte blockLightLevel, byte orientation = 1, byte fluidLevel = 0)
         {
-            _packedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, sunLightLevel, blockLightLevel, orientation, fluidLevel);
+            _packedData = BurstVoxelDataBitMapping.PackVoxelData(
+                blockId, sunLightLevel, blockLightLevel,
+                BurstVoxelDataBitMapping.BuildMetaLegacy(orientation, fluidLevel, isFluid: false));
         }
 
         /// <summary>
