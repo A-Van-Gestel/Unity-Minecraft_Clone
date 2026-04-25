@@ -221,8 +221,18 @@ namespace Jobs
         }
 
         /// <summary>
-        /// The main router that decides how to mesh a block (Standard, Custom, or Fluid).
+        /// The main router that decides how to mesh a block (Standard, Custom, Cross, or Fluid).
         /// </summary>
+        /// <remarks>
+        /// <para>For the standard-cube and custom-mesh cases, the router additionally dispatches on
+        /// the block's <see cref="MetadataSchema"/> per <c>PER_BLOCK_METADATA_SCHEMAS.md §7.5</c>.
+        /// Today every schema routes to the legacy world-face/orientation-storage-index path; Phase 2b
+        /// adds dedicated arms (e.g. <see cref="MetadataSchema.Axis3"/>) that read the meta byte
+        /// directly and use precomputed face/UV variants instead of per-voxel quaternion rotation.</para>
+        /// <para>The Fluid (case 1) and CrossMesh (case 2) paths are not schema-dispatched — fluids
+        /// always interpret the meta byte as a fluid level via the existing <c>GenerateFluidMeshData</c>
+        /// path, and cross meshes do not use orientation at all.</para>
+        /// </remarks>
         private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps)
         {
             ushort id = BurstVoxelDataBitMapping.GetId(packedData);
@@ -264,51 +274,100 @@ namespace Jobs
             // --- CASE 3: CUSTOM MESH ---
             if (voxelProps.RenderShape == RenderShape.CustomMesh && voxelProps.CustomMeshIndex > -1)
             {
-                byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
-                float rotation = VoxelHelper.GetRotationAngle(orientation);
-                CustomMeshData meshData = CustomMeshes[voxelProps.CustomMeshIndex];
-
-                for (int p = 0; p < 6; p++)
+                switch (voxelProps.MetadataSchema)
                 {
-                    // Skip faces not defined in the custom mesh
-                    if (p >= meshData.FaceCount) continue;
+                    // Phase 2b will add dedicated arms here for schemas that need axis-aware face
+                    // selection instead of legacy quaternion rotation. E.g.:
+                    //
+                    //   case MetadataSchema.Axis3:
+                    //     GenerateCustomBlockMesh_Axis3(pos, packedData, id, voxelProps);
+                    //     break;
+                    default:
+                        GenerateCustomBlockMesh_Legacy(pos, packedData, id, voxelProps);
+                        break;
+                }
 
-                    VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+                return;
+            }
 
-                    if (ShouldDrawFace(voxelProps, neighborVoxel))
-                    {
-                        int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
-                        int textureID = GetTextureID(id, translatedP);
-                        float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+            // --- CASE 4: STANDARD CUBE ---
+            switch (voxelProps.MetadataSchema)
+            {
+                // Phase 2b will add dedicated arms here for schemas that need axis-aware face
+                // selection instead of legacy quaternion rotation.
+                default:
+                    GenerateStandardCubeMesh_Legacy(pos, packedData, id, voxelProps);
+                    break;
+            }
+        }
 
-                        VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, lightLevel, pos, rotation,
-                            voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
-                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
-                            ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
-                    }
+        /// <summary>
+        /// Legacy custom-mesh meshing path: decodes a world-face orientation from the packed voxel,
+        /// converts it to a Y-axis rotation angle via <see cref="VoxelHelper.GetRotationAngle"/>, and
+        /// emits each face of the custom mesh with that rotation applied.
+        /// </summary>
+        /// <remarks>
+        /// Called by <see cref="GenerateVoxelMeshData"/> for blocks whose <see cref="MetadataSchema"/>
+        /// has not yet been migrated to a schema-aware variant. Phase 2b adds dedicated variants for
+        /// <see cref="MetadataSchema.Axis3"/> and (later) <see cref="MetadataSchema.Facing6"/>.
+        /// </remarks>
+        private void GenerateCustomBlockMesh_Legacy(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
+            float rotation = VoxelHelper.GetRotationAngle(orientation);
+            CustomMeshData meshData = CustomMeshes[voxelProps.CustomMeshIndex];
+
+            for (int p = 0; p < 6; p++)
+            {
+                // Skip faces not defined in the custom mesh
+                if (p >= meshData.FaceCount) continue;
+
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                {
+                    int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
+                    int textureID = GetTextureID(id, translatedP);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+                    VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, lightLevel, pos, rotation,
+                        voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
+                        ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
                 }
             }
-            // --- CASE 4: STANDARD CUBE ---
-            else
+        }
+
+        /// <summary>
+        /// Legacy standard-cube meshing path: decodes a world-face orientation from the packed voxel,
+        /// converts it to a Y-axis rotation angle via <see cref="VoxelHelper.GetRotationAngle"/>, and
+        /// emits each visible face of the cube with that rotation applied.
+        /// </summary>
+        /// <remarks>
+        /// Called by <see cref="GenerateVoxelMeshData"/> for blocks whose <see cref="MetadataSchema"/>
+        /// has not yet been migrated to a schema-aware variant. Phase 2b will add a dedicated
+        /// <see cref="MetadataSchema.Axis3"/> variant that selects precomputed X/Y/Z face arrays
+        /// instead of running per-voxel quaternion rotation in this hot path.
+        /// </remarks>
+        private void GenerateStandardCubeMesh_Legacy(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
+            float rotation = VoxelHelper.GetRotationAngle(orientation);
+
+            for (int p = 0; p < 6; p++)
             {
-                byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
-                float rotation = VoxelHelper.GetRotationAngle(orientation);
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
 
-                for (int p = 0; p < 6; p++)
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
-                    VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+                    int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
+                    int textureID = GetTextureID(id, translatedP);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 
-                    if (ShouldDrawFace(voxelProps, neighborVoxel))
-                    {
-                        int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
-                        int textureID = GetTextureID(id, translatedP);
-                        float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
-
-                        VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
-                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                            ref Output.Uvs, ref Output.Colors, ref Output.Normals,
-                            voxelProps.RenderNeighborFaces);
-                    }
+                    VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                        voxelProps.RenderNeighborFaces);
                 }
             }
         }
