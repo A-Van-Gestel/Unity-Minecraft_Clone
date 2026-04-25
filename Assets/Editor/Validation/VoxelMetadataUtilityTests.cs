@@ -80,6 +80,17 @@ namespace Editor.Validation
 
                 Test_BurstVoxelDataBitMapping_OrientationRoundTrip();
                 Test_BurstVoxelDataBitMapping_FaceMappingIsNonIdentity();
+
+                Test_VoxelState_GetOrientation_None_MatchesLegacyProperty();
+                Test_VoxelState_GetOrientation_Facing6_DecodesBits0to2();
+                Test_VoxelState_GetOrientation_Facing6Roll2_DecodesFacingComponent();
+                Test_VoxelState_GetOrientation_Axis3_ReturnsZero();
+                Test_VoxelState_GetOrientation_FluidLevel4_ReturnsZero();
+                Test_VoxelState_SetOrientation_Facing6Roll2_PreservesRoll();
+                Test_VoxelState_GetFluidLevel_None_MatchesLegacyProperty();
+                Test_VoxelState_GetFluidLevel_FluidLevel4_DecodesBits0to3();
+                Test_VoxelState_GetFluidLevel_OrientationSchemas_ReturnZero();
+                Test_VoxelState_SetFluidLevel_FluidLevel4_OverwritesMetaByte();
             }
 
             // ===== Round-trip tests =====
@@ -329,6 +340,141 @@ namespace Editor.Validation
 
                 // Demonstrates the hazard: a migration that naively reads the raw stored index
                 // as if it were a world-orientation value would get the wrong answer for 0 and 1.
+            }
+
+            // ===== VoxelState schema-aware accessors (§7.2) =====
+
+            /// <summary>
+            /// Builds a <see cref="VoxelState"/> with a controlled metadata byte. The block id is
+            /// arbitrary because the schema is passed explicitly; only the underlying packed byte matters.
+            /// </summary>
+            private static VoxelState MakeVoxelStateWithMeta(byte meta)
+            {
+                var state = new VoxelState(0u);
+                state.Meta = meta;
+                return state;
+            }
+
+            /// <summary>
+            /// Under <see cref="MetadataSchema.None"/>, the schema-aware getter must agree with the legacy
+            /// <c>Orientation</c> property — that is what preserves behavior for every existing block.
+            /// </summary>
+            private void Test_VoxelState_GetOrientation_None_MatchesLegacyProperty()
+            {
+                for (byte worldFace = 0; worldFace <= 5; worldFace++)
+                {
+                    uint packed = BurstVoxelDataBitMapping.PackVoxelData(
+                        id: 1, sunLight: 0, blockLight: 0, orientation: worldFace, fluidLevel: 0, isFluid: false);
+                    var state = new VoxelState(packed);
+                    AssertEqual(state.Orientation, state.GetOrientation(MetadataSchema.None),
+                        $"GetOrientation(None) matches Orientation property for world face {worldFace}");
+                }
+            }
+
+            private void Test_VoxelState_GetOrientation_Facing6_DecodesBits0to2()
+            {
+                for (byte facing = 0; facing <= 5; facing++)
+                {
+                    var state = MakeVoxelStateWithMeta(BurstVoxelMetadataUtility.EncodeFacing6(facing));
+                    AssertEqual(facing, state.GetOrientation(MetadataSchema.Facing6),
+                        $"GetOrientation(Facing6) decodes facing={facing}");
+                }
+            }
+
+            private void Test_VoxelState_GetOrientation_Facing6Roll2_DecodesFacingComponent()
+            {
+                for (byte facing = 0; facing <= 5; facing++)
+                for (byte roll = 0; roll <= 3; roll++)
+                {
+                    byte meta = BurstVoxelMetadataUtility.EncodeFacing6Roll2(facing, roll);
+                    var state = MakeVoxelStateWithMeta(meta);
+                    AssertEqual(facing, state.GetOrientation(MetadataSchema.Facing6Roll2),
+                        $"GetOrientation(Facing6Roll2) returns facing component f={facing} r={roll}");
+                }
+            }
+
+            private void Test_VoxelState_GetOrientation_Axis3_ReturnsZero()
+            {
+                // Even with non-zero axis bits, GetOrientation on Axis3 must return 0 (orientation is meaningless here).
+                var state = MakeVoxelStateWithMeta(BurstVoxelMetadataUtility.EncodeAxis3(2));
+                AssertEqual(0, state.GetOrientation(MetadataSchema.Axis3),
+                    "GetOrientation(Axis3) returns 0 (orientation not meaningful for Axis3)");
+            }
+
+            private void Test_VoxelState_GetOrientation_FluidLevel4_ReturnsZero()
+            {
+                var state = MakeVoxelStateWithMeta(BurstVoxelMetadataUtility.EncodeFluidLevel(7));
+                AssertEqual(0, state.GetOrientation(MetadataSchema.FluidLevel4),
+                    "GetOrientation(FluidLevel4) returns 0 (orientation not meaningful for FluidLevel4)");
+            }
+
+            /// <summary>
+            /// Critical invariant: when SetOrientation is called on a Facing6Roll2 voxel, the
+            /// existing roll bits (3-4) must be preserved. Anything else corrupts asymmetric blocks.
+            /// </summary>
+            private void Test_VoxelState_SetOrientation_Facing6Roll2_PreservesRoll()
+            {
+                for (byte initialRoll = 0; initialRoll <= 3; initialRoll++)
+                for (byte newFacing = 0; newFacing <= 5; newFacing++)
+                {
+                    // Start with facing=2, the test roll value.
+                    var state = MakeVoxelStateWithMeta(
+                        BurstVoxelMetadataUtility.EncodeFacing6Roll2(facing: 2, roll: initialRoll));
+                    state.SetOrientation(newFacing, MetadataSchema.Facing6Roll2);
+
+                    AssertEqual(newFacing,
+                        BurstVoxelMetadataUtility.DecodeFacing6Roll2Facing(state.Meta),
+                        $"SetOrientation(Facing6Roll2) writes facing={newFacing} (initialRoll={initialRoll})");
+                    AssertEqual(initialRoll,
+                        BurstVoxelMetadataUtility.DecodeFacing6Roll2Roll(state.Meta),
+                        $"SetOrientation(Facing6Roll2) preserves roll={initialRoll} (newFacing={newFacing})");
+                }
+            }
+
+            private void Test_VoxelState_GetFluidLevel_None_MatchesLegacyProperty()
+            {
+                for (byte level = 0; level <= 15; level++)
+                {
+                    uint packed = BurstVoxelDataBitMapping.PackVoxelData(
+                        id: 1, sunLight: 0, blockLight: 0, orientation: 0, fluidLevel: level, isFluid: true);
+                    var state = new VoxelState(packed);
+                    AssertEqual(state.FluidLevel, state.GetFluidLevel(MetadataSchema.None),
+                        $"GetFluidLevel(None) matches FluidLevel property for level={level}");
+                }
+            }
+
+            private void Test_VoxelState_GetFluidLevel_FluidLevel4_DecodesBits0to3()
+            {
+                for (byte level = 0; level <= 15; level++)
+                {
+                    var state = MakeVoxelStateWithMeta(BurstVoxelMetadataUtility.EncodeFluidLevel(level));
+                    AssertEqual(level, state.GetFluidLevel(MetadataSchema.FluidLevel4),
+                        $"GetFluidLevel(FluidLevel4) decodes level={level}");
+                }
+            }
+
+            private void Test_VoxelState_GetFluidLevel_OrientationSchemas_ReturnZero()
+            {
+                // Pack a meta byte that would look like a high fluid level under FluidLevel4
+                // semantics, but assert it decodes to 0 under the orientation-shaped schemas.
+                var state = MakeVoxelStateWithMeta(0x0F);
+                AssertEqual(0, state.GetFluidLevel(MetadataSchema.Axis3),
+                    "GetFluidLevel(Axis3) returns 0");
+                AssertEqual(0, state.GetFluidLevel(MetadataSchema.Facing6),
+                    "GetFluidLevel(Facing6) returns 0");
+                AssertEqual(0, state.GetFluidLevel(MetadataSchema.Facing6Roll2),
+                    "GetFluidLevel(Facing6Roll2) returns 0");
+            }
+
+            private void Test_VoxelState_SetFluidLevel_FluidLevel4_OverwritesMetaByte()
+            {
+                // Start with a meta byte that has reserved bits set (which should be cleared by
+                // FluidLevel4 encoding), then set a fluid level and verify the byte equals the
+                // raw fluid encoding (no stray reserved bits).
+                var state = MakeVoxelStateWithMeta(0xF0);
+                state.SetFluidLevel(7, MetadataSchema.FluidLevel4);
+                AssertEqual(BurstVoxelMetadataUtility.EncodeFluidLevel(7), state.Meta,
+                    "SetFluidLevel(FluidLevel4) replaces the meta byte with the encoded level");
             }
 
             // ===== Tiny assertion helpers =====
