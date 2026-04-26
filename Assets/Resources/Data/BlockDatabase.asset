@@ -37,6 +37,9 @@ MonoBehaviour:
     tags: 0
     canReplaceTags: 4294967295
     isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -64,6 +67,9 @@ MonoBehaviour:
     tags: 257
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -91,6 +97,9 @@ MonoBehaviour:
     tags: 1041
     canReplaceTags: 8258
     isActive: 1
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 12
     frontFaceTexture: 12
     topFaceTexture: 1
@@ -118,6 +127,9 @@ MonoBehaviour:
     tags: 1041
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 2
     frontFaceTexture: 2
     topFaceTexture: 2
@@ -145,6 +157,9 @@ MonoBehaviour:
     tags: 25
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 3
     frontFaceTexture: 3
     topFaceTexture: 3
@@ -172,6 +187,9 @@ MonoBehaviour:
     tags: 17
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 4
     frontFaceTexture: 4
     topFaceTexture: 4
@@ -199,6 +217,9 @@ MonoBehaviour:
     tags: 1041
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 21
     frontFaceTexture: 21
     topFaceTexture: 5
@@ -226,6 +247,9 @@ MonoBehaviour:
     tags: 2305
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 6
     frontFaceTexture: 6
     topFaceTexture: 6
@@ -253,6 +277,9 @@ MonoBehaviour:
     tags: 261
     canReplaceTags: 4294967295
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 7
     frontFaceTexture: 7
     topFaceTexture: 7
@@ -280,6 +307,9 @@ MonoBehaviour:
     tags: 257
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 8
     frontFaceTexture: 8
     topFaceTexture: 8
@@ -307,6 +337,9 @@ MonoBehaviour:
     tags: 1041
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 25
     frontFaceTexture: 25
     topFaceTexture: 9
@@ -334,6 +367,9 @@ MonoBehaviour:
     tags: 2305
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 10
     frontFaceTexture: 10
     topFaceTexture: 10
@@ -361,6 +397,9 @@ MonoBehaviour:
     tags: 3105
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 11
     frontFaceTexture: 11
     topFaceTexture: 11
@@ -388,6 +427,9 @@ MonoBehaviour:
     tags: 2305
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 13
     frontFaceTexture: 13
     topFaceTexture: 13
@@ -415,6 +457,9 @@ MonoBehaviour:
     tags: 1057
     canReplaceTags: 8386
     isActive: 0
+    metadataSchema: 2
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 14
     frontFaceTexture: 14
     topFaceTexture: 15
@@ -442,6 +487,9 @@ MonoBehaviour:
     tags: 1217
     canReplaceTags: 0
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 16
     frontFaceTexture: 16
     topFaceTexture: 16
@@ -469,6 +517,9 @@ MonoBehaviour:
     tags: 8256
     canReplaceTags: 0
     isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 18
     frontFaceTexture: 18
     topFaceTexture: 17
@@ -496,6 +547,9 @@ MonoBehaviour:
     tags: 2305
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 4
+    placementMetadataMode: 2
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -523,6 +577,9 @@ MonoBehaviour:
     tags: 2048
     canReplaceTags: 16379
     isActive: 0
+    metadataSchema: 3
+    placementMetadataMode: 2
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 7
     topFaceTexture: 0
@@ -550,6 +607,9 @@ MonoBehaviour:
     tags: 2
     canReplaceTags: 8258
     isActive: 1
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -577,6 +637,9 @@ MonoBehaviour:
     tags: 2
     canReplaceTags: 8258
     isActive: 1
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -604,6 +667,9 @@ MonoBehaviour:
     tags: 769
     canReplaceTags: 256
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 32
     frontFaceTexture: 32
     topFaceTexture: 32
@@ -631,6 +697,9 @@ MonoBehaviour:
     tags: 24640
     canReplaceTags: 0
     isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 255
     frontFaceTexture: 255
     topFaceTexture: 255
