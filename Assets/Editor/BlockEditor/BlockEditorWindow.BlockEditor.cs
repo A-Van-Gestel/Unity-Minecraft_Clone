@@ -253,6 +253,41 @@ namespace Editor.BlockEditor
 
 
                 EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Metadata", EditorStyles.boldLabel);
+                _selectedBlock.metadataSchema = (MetadataSchema)EditorGUILayout.EnumPopup(
+                    new GUIContent("Metadata Schema",
+                        "How the 8-bit voxel metadata byte is interpreted for this block.\n\n" +
+                        "• None — meta is unused; defaultMetadata is written verbatim.\n" +
+                        "• FluidLevel4 — bits 0-3 store fluid level (0-15). For Water/Lava.\n" +
+                        "• Axis3 — bits 0-1 store the log/pillar axis (0=Y, 1=X, 2=Z).\n" +
+                        "• Facing6 — bits 0-2 store one of 6 face directions.\n" +
+                        "• Facing6Roll2 — bits 0-2 facing + bits 3-4 roll quadrant.\n" +
+                        "• HorizontalOnly — bits 0-1 store yaw (0=N, 1=S, 2=W, 3=E).\n\n" +
+                        "Frozen bit layouts — see PER_BLOCK_METADATA_SCHEMAS.md §5.3."),
+                    _selectedBlock.metadataSchema);
+
+                _selectedBlock.placementMetadataMode = (PlacementMetadataMode)EditorGUILayout.EnumPopup(
+                    new GUIContent("Placement Mode",
+                        "How player placement authors this block's metadata byte.\n\n" +
+                        "• None — placement writes 'Default Metadata' unchanged.\n" +
+                        "• PlayerYawCardinal — derives yaw from the player's body facing " +
+                        "(N/S/W/E). Use for blocks whose front face should snap to a horizontal " +
+                        "compass direction (e.g. furnaces, stairs, ordinary cubes routed via " +
+                        "HorizontalOnly).\n" +
+                        "• PlayerLookAxis — derives axis from the camera's look vector " +
+                        "(dominant of |x|, |y|, |z|; ties resolve Y > X > Z). Use for axial " +
+                        "blocks like logs/pillars where the placed face follows where you're " +
+                        "looking, including straight up/down."),
+                    _selectedBlock.placementMetadataMode);
+
+                _selectedBlock.defaultMetadata = (byte)EditorGUILayout.IntSlider(
+                    new GUIContent("Default Metadata",
+                        "Default metadata byte written when placement mode is 'None' or as a " +
+                        "fallback for invalid/missing values. Must fit within the chosen " +
+                        "schema's valid range (see Metadata Schema tooltip)."),
+                    _selectedBlock.defaultMetadata, 0, 255);
+
+                EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Lighting Properties", EditorStyles.boldLabel);
                 _selectedBlock.opacity = (byte)EditorGUILayout.IntSlider(new GUIContent("Opacity", "How many light levels will be blocked by this block."), _selectedBlock.opacity, 0, 15);
                 _selectedBlock.lightEmission = (byte)EditorGUILayout.IntSlider(new GUIContent("Light Emission", "How many light levels will be emitted by this block."), _selectedBlock.lightEmission, 0, 15);
@@ -508,6 +543,9 @@ namespace Editor.BlockEditor
                 tags = _selectedBlock.tags,
                 canReplaceTags = _selectedBlock.canReplaceTags,
                 isActive = _selectedBlock.isActive,
+                metadataSchema = _selectedBlock.metadataSchema,
+                placementMetadataMode = _selectedBlock.placementMetadataMode,
+                defaultMetadata = _selectedBlock.defaultMetadata,
                 backFaceTexture = _selectedBlock.backFaceTexture,
                 frontFaceTexture = _selectedBlock.frontFaceTexture,
                 topFaceTexture = _selectedBlock.topFaceTexture,
