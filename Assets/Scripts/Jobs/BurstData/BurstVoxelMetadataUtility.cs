@@ -42,6 +42,9 @@ namespace Jobs.BurstData
         /// <summary>Bit shift from a roll value (0-3) to its in-place position within <see cref="MetadataSchema.Facing6Roll2"/>.</summary>
         public const int FACING6_ROLL2_ROLL_SHIFT = 3;
 
+        /// <summary><see cref="MetadataSchema.HorizontalOnly"/> uses bits 0-1 of the metadata byte.</summary>
+        public const byte HORIZONTAL_ONLY_MASK = 0x03;
+
         // ===== Valid semantic value ranges (tighter than the bit masks) =====
 
         /// <summary><see cref="MetadataSchema.Axis3"/> only allows values 0-2 (Y, X, Z) even though the mask permits 0-3.</summary>
@@ -56,6 +59,9 @@ namespace Jobs.BurstData
         /// <summary><see cref="MetadataSchema.FluidLevel4"/> allows values 0-15.</summary>
         public const byte FLUID_LEVEL_MAX_VALUE = 15;
 
+        /// <summary><see cref="MetadataSchema.HorizontalOnly"/> allows all four 2-bit values (0-3).</summary>
+        public const byte HORIZONTAL_ONLY_MAX_VALUE = 3;
+
         // ===== Axis3 encoding (§8.1) =====
 
         /// <summary>Axis value for an upright (Y-axis) orientation — the default for unrotated blocks.</summary>
@@ -66,6 +72,20 @@ namespace Jobs.BurstData
 
         /// <summary>Axis value for a north/south (Z-axis) orientation.</summary>
         public const byte AXIS_Z = 2;
+
+        // ===== HorizontalOnly direction constants =====
+
+        /// <summary>Yaw value for a block facing North (+Z). Default for freshly placed cubes.</summary>
+        public const byte HORIZONTAL_NORTH = 0;
+
+        /// <summary>Yaw value for a block facing South (-Z).</summary>
+        public const byte HORIZONTAL_SOUTH = 1;
+
+        /// <summary>Yaw value for a block facing West (-X).</summary>
+        public const byte HORIZONTAL_WEST = 2;
+
+        /// <summary>Yaw value for a block facing East (+X).</summary>
+        public const byte HORIZONTAL_EAST = 3;
 
         // ===== Encode primitives =====
 
@@ -100,6 +120,13 @@ namespace Jobs.BurstData
         public static byte EncodeFacing6Roll2(byte facing, byte roll)
             => (byte)((facing & FACING6_ROLL2_FACING_MASK)
                       | ((roll & 0x03) << FACING6_ROLL2_ROLL_SHIFT));
+
+        /// <summary>Encodes a 4-way yaw value (0=N, 1=S, 2=W, 3=E) into the <see cref="MetadataSchema.HorizontalOnly"/> layout.</summary>
+        /// <param name="yaw">The yaw value. Values outside 0-3 are masked to bits 0-1.</param>
+        /// <returns>A raw metadata byte with bits 0-1 set to the yaw.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte EncodeHorizontalOnly(byte yaw)
+            => (byte)(yaw & HORIZONTAL_ONLY_MASK);
 
         // ===== Decode primitives =====
 
@@ -138,6 +165,13 @@ namespace Jobs.BurstData
         public static byte DecodeFacing6Roll2Roll(byte meta)
             => (byte)((meta & FACING6_ROLL2_ROLL_MASK_SHIFTED) >> FACING6_ROLL2_ROLL_SHIFT);
 
+        /// <summary>Decodes the 4-way yaw value from bits 0-1 of a raw metadata byte.</summary>
+        /// <param name="meta">The raw metadata byte.</param>
+        /// <returns>The yaw value (0=N, 1=S, 2=W, 3=E).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte DecodeHorizontalOnly(byte meta)
+            => (byte)(meta & HORIZONTAL_ONLY_MASK);
+
         // ===== Validation =====
 
         /// <summary>
@@ -175,6 +209,10 @@ namespace Jobs.BurstData
                     // Roll is already constrained to 0-3 by its 2-bit field; only facing needs a range check.
                     return (meta & ~USED_BITS) == 0 && facing <= FACING6_MAX_VALUE;
                 }
+
+                case MetadataSchema.HorizontalOnly:
+                    // All four 2-bit values (0-3) are legal; only the reserved bits 2-7 must be zero.
+                    return (meta & ~HORIZONTAL_ONLY_MASK) == 0;
 
                 default:
                     // Unknown schemas are never valid — caller should treat this as corruption.

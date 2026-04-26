@@ -296,6 +296,13 @@ namespace Jobs
                 case MetadataSchema.Axis3:
                     GenerateStandardCubeMesh_Axis3(pos, packedData, id, voxelProps);
                     break;
+                case MetadataSchema.HorizontalOnly:
+                    // HorizontalOnly's frozen bit layout is intentionally aligned with the legacy
+                    // 4-way yaw storage indices (see PER_BLOCK_METADATA_SCHEMAS.md §5.3), so the
+                    // legacy meshing path produces correct output for HorizontalOnly meta bytes
+                    // without any new code. The explicit case arm documents the intent.
+                    GenerateStandardCubeMesh_Legacy(pos, packedData, id, voxelProps);
+                    break;
                 default:
                     GenerateStandardCubeMesh_Legacy(pos, packedData, id, voxelProps);
                     break;

@@ -16,7 +16,13 @@ public static class SaveSystem
     // v4 → v5: Collapsed VoxelMod's (Orientation, FluidLevel) byte pair into a single Meta byte
     //          per PER_BLOCK_METADATA_SCHEMAS.md §7.4. Rewrites pending_mods.bin layout.
     //          See Migration_v4_to_v5_VoxelModMeta.cs.
-    public const int CURRENT_VERSION = 5;
+    // v5 → v6: Converted every voxel's metadata to schema-aware encoding per its target schema:
+    //          OakLog → Axis3, Water/Lava → FluidLevel4, ordinary cubes → HorizontalOnly,
+    //          Air/Facade/Cactus/GrassBlades → None. StoneHalfSlab and DirectionalBlock kept on
+    //          legacy semantics; their schema migration is deferred to a future version.
+    //          First chunk-format migration in the project; bumps chunk format version to 4.
+    //          Affects chunks AND pending mods. See Migration_v5_to_v6_LegacyToSchemaBased.cs.
+    public const int CURRENT_VERSION = 6;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.

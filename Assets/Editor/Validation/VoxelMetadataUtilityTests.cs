@@ -1,6 +1,7 @@
 using Data;
 using Helpers;
 using Jobs.BurstData;
+using Serialization.Migration.Steps;
 using UnityEditor;
 using UnityEngine;
 
@@ -97,6 +98,21 @@ namespace Editor.Validation
                 Test_BurstAxis3MeshUtility_ZAxis_TopOfLogAtPositiveZ();
                 Test_BurstAxis3MeshUtility_EveryAxisHasExactlyTwoLogCapFaces();
                 Test_BurstAxis3MeshUtility_AllRemapValuesInRange();
+
+                Test_HorizontalOnly_RoundTrip();
+                Test_HorizontalOnly_IsValidMeta();
+                Test_HorizontalOnly_NormalizeMeta();
+
+                Test_MigrationV5ToV6_LegacyStorageIndexMapping();
+                Test_MigrationV5ToV6_AllInputsProduceValidAxis();
+                Test_MigrationV5ToV6_IgnoresReservedBits();
+                Test_MigrationV5ToV6_EveryAxisIsReachable();
+
+                Test_MigrationV5ToV6_HorizontalOnlyIdentityFor4Horizontals();
+                Test_MigrationV5ToV6_HorizontalOnlyClampsTopBottom();
+                Test_MigrationV5ToV6_FluidLevel4MasksReservedBits();
+                Test_MigrationV5ToV6_PerBlockSchemaDispatch();
+                Test_MigrationV5ToV6_UnknownBlockIdLeavesMetaVerbatim();
             }
 
             // ===== Round-trip tests =====
@@ -587,6 +603,287 @@ namespace Editor.Validation
                         AssertTrue(effective <= 5,
                             $"axis={axis}, worldFace={worldFace}: remap value {effective} is in range 0-5");
                     }
+                }
+            }
+
+            // ===== MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3 (Phase 2d) =====
+            //
+            // Verifies the frozen storage-index → axis mapping defined in §9.5.A. Once shipped,
+            // any change to ConvertLegacyMetaToAxis3 corrupts every existing v5 world's OakLog
+            // voxels, so these tests act as a tripwire.
+
+            /// <summary>
+            /// Verifies the §9.5.A storage-index → axis mapping for all 8 possible v3 storage
+            /// indices (0-5 valid, 6-7 fall through to Y axis per §9.5.D fallback rule).
+            /// </summary>
+            private void Test_MigrationV5ToV6_LegacyStorageIndexMapping()
+            {
+                // Storage indices 0 (North) and 1 (South) → Z axis (axis 2).
+                AssertEqual(2, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(0),
+                    "storage 0 (North) → Z axis");
+                AssertEqual(2, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(1),
+                    "storage 1 (South) → Z axis");
+
+                // Storage indices 2 (West) and 3 (East) → X axis (axis 1).
+                AssertEqual(1, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(2),
+                    "storage 2 (West) → X axis");
+                AssertEqual(1, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(3),
+                    "storage 3 (East) → X axis");
+
+                // Storage indices 4 (Top) and 5 (Bottom) → Y axis (axis 0).
+                AssertEqual(0, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(4),
+                    "storage 4 (Top) → Y axis");
+                AssertEqual(0, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(5),
+                    "storage 5 (Bottom) → Y axis");
+
+                // Invalid storage indices 6 and 7 → Y axis (fallback, per §9.5.D).
+                AssertEqual(0, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(6),
+                    "storage 6 (invalid) → Y axis fallback");
+                AssertEqual(0, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(7),
+                    "storage 7 (invalid) → Y axis fallback");
+            }
+
+            /// <summary>
+            /// For every possible 8-bit input, the converter must produce a valid Axis3 meta byte
+            /// (0, 1, or 2 — the only legal values for the schema). Defends against accidental
+            /// reserved-bit leakage that would corrupt the new schema.
+            /// </summary>
+            private void Test_MigrationV5ToV6_AllInputsProduceValidAxis()
+            {
+                for (int i = 0; i <= 0xFF; i++)
+                {
+                    byte result = MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3((byte)i);
+                    AssertTrue(result <= BurstVoxelMetadataUtility.AXIS3_MAX_VALUE,
+                        $"ConvertLegacyMetaToAxis3(0x{i:X2}) = {result} is a valid axis (0-2)");
+                    AssertTrue(BurstVoxelMetadataUtility.IsValidMeta(MetadataSchema.Axis3, result),
+                        $"ConvertLegacyMetaToAxis3(0x{i:X2}) = {result} is a valid Axis3 meta byte");
+                }
+            }
+
+            /// <summary>
+            /// The converter must look at only the lower 3 bits (storage-index field). High bits
+            /// in the legacy meta byte (which were either reserved or unused) must not affect the
+            /// output axis.
+            /// </summary>
+            private void Test_MigrationV5ToV6_IgnoresReservedBits()
+            {
+                for (byte storageIndex = 0; storageIndex <= 7; storageIndex++)
+                {
+                    byte resultLow = MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(storageIndex);
+                    byte resultHigh = MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3((byte)(storageIndex | 0xF8));
+                    AssertEqual(resultLow, resultHigh,
+                        $"reserved-bit toggle does not affect output for storage={storageIndex}");
+                }
+            }
+
+            /// <summary>
+            /// Sanity invariant: each of the three Axis3 axes (Y, X, Z) must be reachable from at
+            /// least one legacy storage index. If any axis becomes unreachable due to a future LUT
+            /// edit, half the existing OakLog placements would silently collapse onto fewer axes.
+            /// </summary>
+            private void Test_MigrationV5ToV6_EveryAxisIsReachable()
+            {
+                bool reachedY = false;
+                bool reachedX = false;
+                bool reachedZ = false;
+
+                for (byte storageIndex = 0; storageIndex <= 7; storageIndex++)
+                {
+                    byte axis = MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3(storageIndex);
+                    if (axis == 0) reachedY = true;
+                    if (axis == 1) reachedX = true;
+                    if (axis == 2) reachedZ = true;
+                }
+
+                AssertTrue(reachedY, "Y axis is reachable from at least one legacy storage index");
+                AssertTrue(reachedX, "X axis is reachable from at least one legacy storage index");
+                AssertTrue(reachedZ, "Z axis is reachable from at least one legacy storage index");
+            }
+
+            // ===== HorizontalOnly schema (Phase 2d) =====
+
+            private void Test_HorizontalOnly_RoundTrip()
+            {
+                for (byte yaw = 0; yaw <= BurstVoxelMetadataUtility.HORIZONTAL_ONLY_MAX_VALUE; yaw++)
+                {
+                    byte meta = BurstVoxelMetadataUtility.EncodeHorizontalOnly(yaw);
+                    byte decoded = BurstVoxelMetadataUtility.DecodeHorizontalOnly(meta);
+                    AssertEqual(yaw, decoded, $"HorizontalOnly round-trip yaw={yaw}");
+                }
+            }
+
+            private void Test_HorizontalOnly_IsValidMeta()
+            {
+                // All four 2-bit values are legal.
+                for (byte yaw = 0; yaw <= 3; yaw++)
+                {
+                    AssertTrue(BurstVoxelMetadataUtility.IsValidMeta(MetadataSchema.HorizontalOnly, yaw),
+                        $"HorizontalOnly valid: yaw={yaw}");
+                }
+
+                // Reserved bits 2-7 must be zero.
+                AssertFalse(BurstVoxelMetadataUtility.IsValidMeta(MetadataSchema.HorizontalOnly, 0x04),
+                    "HorizontalOnly invalid: reserved bit 2 set");
+                AssertFalse(BurstVoxelMetadataUtility.IsValidMeta(MetadataSchema.HorizontalOnly, 0x80),
+                    "HorizontalOnly invalid: reserved bit 7 set");
+                AssertFalse(BurstVoxelMetadataUtility.IsValidMeta(MetadataSchema.HorizontalOnly, 0xFC),
+                    "HorizontalOnly invalid: all reserved bits set");
+            }
+
+            private void Test_HorizontalOnly_NormalizeMeta()
+            {
+                // Valid input passes through.
+                byte valid = BurstVoxelMetadataUtility.NormalizeMeta(
+                    MetadataSchema.HorizontalOnly, meta: 2, defaultMeta: 0);
+                AssertEqual(2, valid, "NormalizeMeta passes through valid HorizontalOnly=2");
+
+                // Invalid input falls back to default.
+                byte fallback = BurstVoxelMetadataUtility.NormalizeMeta(
+                    MetadataSchema.HorizontalOnly, meta: 0xC0, defaultMeta: 1);
+                AssertEqual(1, fallback,
+                    "NormalizeMeta falls back to default for HorizontalOnly with reserved bits set");
+            }
+
+            // ===== MigrationV5ToV6 — HorizontalOnly converter =====
+
+            /// <summary>
+            /// HorizontalOnly's bit layout is intentionally aligned with the legacy storage indices for
+            /// the four horizontal cases. The converter must be the identity for storage 0-3 — any drift
+            /// here means existing solid-block placements would silently rotate after migration.
+            /// </summary>
+            private void Test_MigrationV5ToV6_HorizontalOnlyIdentityFor4Horizontals()
+            {
+                AssertEqual(0, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly(0),
+                    "HorizontalOnly identity for storage 0 (North)");
+                AssertEqual(1, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly(1),
+                    "HorizontalOnly identity for storage 1 (South)");
+                AssertEqual(2, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly(2),
+                    "HorizontalOnly identity for storage 2 (West)");
+                AssertEqual(3, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly(3),
+                    "HorizontalOnly identity for storage 3 (East)");
+            }
+
+            /// <summary>
+            /// Storage indices 4 (Top) and 5 (Bottom) — never sensible for an ordinary cube — must
+            /// clamp to 0 (North) so the post-migration meta byte is a valid HorizontalOnly value.
+            /// Same for invalid 6/7. Reserved-bit toggles must not affect output.
+            /// </summary>
+            private void Test_MigrationV5ToV6_HorizontalOnlyClampsTopBottom()
+            {
+                AssertEqual(0, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly(4),
+                    "HorizontalOnly clamps storage 4 (Top) → 0 (North)");
+                AssertEqual(0, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly(5),
+                    "HorizontalOnly clamps storage 5 (Bottom) → 0 (North)");
+                AssertEqual(0, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly(6),
+                    "HorizontalOnly clamps invalid storage 6 → 0 (North)");
+                AssertEqual(0, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly(7),
+                    "HorizontalOnly clamps invalid storage 7 → 0 (North)");
+
+                // Reserved-bit isolation: only lower 3 bits should affect output.
+                for (byte storageIndex = 0; storageIndex <= 7; storageIndex++)
+                {
+                    byte resultLow = MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly(storageIndex);
+                    byte resultHigh = MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToHorizontalOnly((byte)(storageIndex | 0xF8));
+                    AssertEqual(resultLow, resultHigh,
+                        $"HorizontalOnly converter ignores reserved bits for storage={storageIndex}");
+                }
+            }
+
+            // ===== MigrationV5ToV6 — FluidLevel4 converter =====
+
+            private void Test_MigrationV5ToV6_FluidLevel4MasksReservedBits()
+            {
+                // Lower 4 bits should be preserved verbatim; upper 4 bits should be masked off.
+                for (byte level = 0; level <= 15; level++)
+                {
+                    AssertEqual(level, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToFluidLevel4(level),
+                        $"FluidLevel4 keeps level={level} verbatim");
+                    AssertEqual(level, MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyToFluidLevel4((byte)(level | 0xF0)),
+                        $"FluidLevel4 masks off reserved bits for level={level}");
+                }
+            }
+
+            // ===== MigrationV5ToV6 — Per-block schema dispatch =====
+
+            /// <summary>
+            /// Verifies that <see cref="MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta"/> dispatches
+            /// to the right schema for each block ID. This is the tripwire for accidental block-ID →
+            /// schema reassignments — a wrong assignment here corrupts every existing voxel of that block.
+            /// </summary>
+            private void Test_MigrationV5ToV6_PerBlockSchemaDispatch()
+            {
+                const byte LEGACY_TOP = 4; // storage index for Top
+                const byte LEGACY_NORTH = 0; // storage index for North
+                const byte LEGACY_FLUID_LEVEL = 7; // a non-zero fluid level
+
+                // None blocks → meta forced to 0 (irrespective of legacy meta).
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.Air, LEGACY_TOP),
+                    "Air → None: meta forced to 0");
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.Facade, LEGACY_TOP),
+                    "Facade → None: meta forced to 0");
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.Cactus, LEGACY_TOP),
+                    "Cactus → None: meta forced to 0");
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.GrassBlades, LEGACY_TOP),
+                    "GrassBlades → None: meta forced to 0");
+
+                // FluidLevel4 blocks → lower 4 bits kept, upper 4 cleared.
+                AssertEqual(LEGACY_FLUID_LEVEL,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.Water, LEGACY_FLUID_LEVEL | 0xF0),
+                    "Water → FluidLevel4: lower 4 bits kept, upper masked");
+                AssertEqual(LEGACY_FLUID_LEVEL,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.Lava, LEGACY_FLUID_LEVEL | 0xF0),
+                    "Lava → FluidLevel4: lower 4 bits kept, upper masked");
+
+                // Axis3 (OakLog) → storage index → axis.
+                AssertEqual(0, // Top → Y
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.OakLog, LEGACY_TOP),
+                    "OakLog → Axis3: storage 4 (Top) → Y axis");
+
+                // HorizontalOnly (sample of ordinary cubes) → identity for 4 horizontals.
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.Stone, LEGACY_NORTH),
+                    "Stone → HorizontalOnly: storage 0 (North) is identity");
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.Stone, LEGACY_TOP),
+                    "Stone → HorizontalOnly: storage 4 (Top) clamped to 0 (North)");
+                AssertEqual(2,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.Dirt, 2),
+                    "Dirt → HorizontalOnly: storage 2 (West) is identity");
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.OakLeaves, LEGACY_TOP),
+                    "OakLeaves → HorizontalOnly: storage 4 (Top) clamped");
+                AssertEqual(1,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.CoalOre, 1),
+                    "CoalOre → HorizontalOnly: storage 1 (South) is identity");
+
+                // Deferred blocks → meta byte left verbatim.
+                AssertEqual(LEGACY_TOP,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.StoneHalfSlab, LEGACY_TOP),
+                    "StoneHalfSlab deferred: meta byte left verbatim");
+                AssertEqual(LEGACY_TOP,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.DirectionalBlock, LEGACY_TOP),
+                    "DirectionalBlock deferred: meta byte left verbatim");
+            }
+
+            /// <summary>
+            /// Sanity check that an unknown block ID (e.g., from a fork or a future version) leaves
+            /// the meta byte verbatim instead of silently zeroing it. This protects against a
+            /// migration accident that would corrupt mod data the host project doesn't know about.
+            /// </summary>
+            private void Test_MigrationV5ToV6_UnknownBlockIdLeavesMetaVerbatim()
+            {
+                const ushort hypotheticalUnknownId = 9999;
+                for (byte legacyMeta = 0; legacyMeta <= 0xFF; legacyMeta++)
+                {
+                    byte result = MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(hypotheticalUnknownId, legacyMeta);
+                    AssertEqual(legacyMeta, result,
+                        $"Unknown block id {hypotheticalUnknownId} leaves legacy meta 0x{legacyMeta:X2} verbatim");
+
+                    if (legacyMeta == 0xFF) break; // avoid byte overflow
                 }
             }
 

@@ -149,6 +149,8 @@ namespace Data
                     return BurstVoxelMetadataUtility.DecodeFacing6(Meta);
                 case MetadataSchema.Facing6Roll2:
                     return BurstVoxelMetadataUtility.DecodeFacing6Roll2Facing(Meta);
+                case MetadataSchema.HorizontalOnly:
+                    return BurstVoxelMetadataUtility.DecodeHorizontalOnly(Meta);
                 case MetadataSchema.Axis3:
                 case MetadataSchema.FluidLevel4:
                     return 0;
@@ -189,6 +191,10 @@ namespace Data
                     _packedData = BurstVoxelDataBitMapping.SetMeta(_packedData, newMeta);
                     break;
                 }
+                case MetadataSchema.HorizontalOnly:
+                    _packedData = BurstVoxelDataBitMapping.SetMeta(
+                        _packedData, BurstVoxelMetadataUtility.EncodeHorizontalOnly(value));
+                    break;
                 case MetadataSchema.Axis3:
                 case MetadataSchema.FluidLevel4:
                     // Orientation is not meaningful for these schemas; no-op.
@@ -221,6 +227,7 @@ namespace Data
                 case MetadataSchema.Axis3:
                 case MetadataSchema.Facing6:
                 case MetadataSchema.Facing6Roll2:
+                case MetadataSchema.HorizontalOnly:
                     return 0;
                 default:
                     // None and any unknown schema fall back to the legacy fluid-level decode.
@@ -252,6 +259,7 @@ namespace Data
                 case MetadataSchema.Axis3:
                 case MetadataSchema.Facing6:
                 case MetadataSchema.Facing6Roll2:
+                case MetadataSchema.HorizontalOnly:
                     // Fluid level is not meaningful for these schemas; no-op.
                     break;
                 default:

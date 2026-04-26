@@ -158,9 +158,14 @@ namespace Editor.BlockEditor.Helpers
                         break;
                     }
 
+                    case MetadataSchema.HorizontalOnly:
+                    case MetadataSchema.None:
                     default:
                     {
-                        // Legacy / None-schema preview: identity face mapping, no rotation.
+                        // Legacy / None / HorizontalOnly preview: identity face mapping, no rotation.
+                        // The Block Editor canonical preview shows the block's "default" orientation;
+                        // HorizontalOnly's defaultMetadata=0 (North) is the same canonical view as
+                        // the None / legacy default, so a single code path covers both.
                         for (int p = 0; p < 6; p++)
                         {
                             int textureID = blockType.GetTextureID(p);

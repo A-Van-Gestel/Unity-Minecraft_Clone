@@ -41,6 +41,11 @@ namespace Helpers
         public static byte EncodeFacing6Roll2(byte facing, byte roll)
             => BurstVoxelMetadataUtility.EncodeFacing6Roll2(facing, roll);
 
+        /// <inheritdoc cref="BurstVoxelMetadataUtility.EncodeHorizontalOnly"/>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte EncodeHorizontalOnly(byte yaw)
+            => BurstVoxelMetadataUtility.EncodeHorizontalOnly(yaw);
+
         // ===== Decode =====
 
         /// <inheritdoc cref="BurstVoxelMetadataUtility.DecodeFluidLevel"/>
@@ -67,6 +72,11 @@ namespace Helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte DecodeFacing6Roll2Roll(byte meta)
             => BurstVoxelMetadataUtility.DecodeFacing6Roll2Roll(meta);
+
+        /// <inheritdoc cref="BurstVoxelMetadataUtility.DecodeHorizontalOnly"/>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte DecodeHorizontalOnly(byte meta)
+            => BurstVoxelMetadataUtility.DecodeHorizontalOnly(meta);
 
         // ===== Validation =====
 

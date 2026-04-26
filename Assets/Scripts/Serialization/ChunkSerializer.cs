@@ -15,7 +15,12 @@ namespace Serialization
     /// </summary>
     public static class ChunkSerializer
     {
-        private const byte CURRENT_CHUNK_VERSION = 3;
+        // v3 → v4: Voxel metadata bytes converted to schema-aware encoding per the target schema
+        //          chosen for each block ID (Axis3 for OakLog, HorizontalOnly for ordinary cubes,
+        //          FluidLevel4 for Water/Lava, None for Air/Facade/Cactus/GrassBlades; deferred
+        //          for StoneHalfSlab and DirectionalBlock). Chunk binary layout is unchanged —
+        //          only meta-byte semantics differ. See Migration_v5_to_v6_LegacyToSchemaBased.cs.
+        private const byte CURRENT_CHUNK_VERSION = 4;
 
         // FUTURE-PROOFING: Version header for individual sections.
         // Allows upgrading section format (e.g. adding Palettes) without breaking the chunk header.

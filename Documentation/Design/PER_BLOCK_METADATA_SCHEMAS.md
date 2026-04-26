@@ -153,27 +153,29 @@ That is a much better fit for a voxel engine with heterogeneous block behavior.
 
 The engine should begin with a small set of built-in schemas:
 
-| Schema         | Bits Used | Meaning                            | Recommended Use                            |
-|----------------|-----------|------------------------------------|--------------------------------------------|
-| `None`         | `0`       | Metadata unused, should remain `0` | Most ordinary cubes                        |
-| `FluidLevel4`  | `0-3`     | Fluid level `0-15`                 | Water, lava                                |
-| `Axis3`        | `0-1`     | `Y`, `X`, `Z` axis                 | Logs, pillars, fallen trunks               |
-| `Facing6`      | `0-2`     | 6 face directions                  | Directional blocks that care about up/down |
-| `Facing6Roll2` | `0-4`     | facing + 4-way roll                | Fully asymmetric mountable/custom meshes   |
+| Schema           | Bits Used | Meaning                          | Recommended Use                                                                   |
+|------------------|-----------|----------------------------------|-----------------------------------------------------------------------------------|
+| `None`           | `0`       | Metadata unused, must remain `0` | Truly orientation-less blocks (Air, decorative panels, plants that don't rotate)  |
+| `FluidLevel4`    | `0-3`     | Fluid level `0-15`               | Water, lava                                                                       |
+| `HorizontalOnly` | `0-1`     | 4-way yaw (`0=N, 1=S, 2=W, 3=E`) | Ordinary solid cubes that benefit from yaw variety to break up repeating textures |
+| `Axis3`          | `0-1`     | `Y`, `X`, `Z` axis               | Logs, pillars, fallen trunks                                                      |
+| `Facing6`        | `0-2`     | 6 face directions                | Directional blocks that care about up/down                                        |
+| `Facing6Roll2`   | `0-4`     | facing + 4-way roll              | Fully asymmetric mountable / custom meshes                                        |
 
-The most important immediate win is `Axis3`.
+The most important immediate wins are `Axis3` (logs) and `HorizontalOnly` (formalises the 4-way yaw rotation that ordinary cubes already use today). `HorizontalOnly`'s bit layout is intentionally aligned with the legacy v3-chunk orientation storage indices for the four horizontal cases (storage index `0=N, 1=S, 2=W, 3=E`), so a v5→v6 migration of an ordinary cube is a pure schema relabel — zero byte rewrites for the typical case. See §9.5.E for the migration mapping.
 
 ### 5.3. Frozen Bit Layouts
 
 The bit layout for every shipped schema must be frozen explicitly. Migration steps and future schema changes must not rely on inferred meanings.
 
-| Schema         | Frozen Bit Layout                                           |
-|----------------|-------------------------------------------------------------|
-| `None`         | all bits `0`                                                |
-| `FluidLevel4`  | bits `0-3` = fluid level, bits `4-7` reserved               |
-| `Axis3`        | bits `0-1` = axis, bits `2-7` reserved                      |
-| `Facing6`      | bits `0-2` = facing, bits `3-7` reserved                    |
-| `Facing6Roll2` | bits `0-2` = facing, bits `3-4` = roll, bits `5-7` reserved |
+| Schema           | Frozen Bit Layout                                                  |
+|------------------|--------------------------------------------------------------------|
+| `None`           | all bits `0`                                                       |
+| `FluidLevel4`    | bits `0-3` = fluid level, bits `4-7` reserved                      |
+| `HorizontalOnly` | bits `0-1` = 4-way yaw (`0=N, 1=S, 2=W, 3=E`), bits `2-7` reserved |
+| `Axis3`          | bits `0-1` = axis, bits `2-7` reserved                             |
+| `Facing6`        | bits `0-2` = facing, bits `3-7` reserved                           |
+| `Facing6Roll2`   | bits `0-2` = facing, bits `3-4` = roll, bits `5-7` reserved        |
 
 Frozen `Facing6Roll2` encoding:
 
@@ -644,6 +646,22 @@ Recommended examples:
 - invalid log orientation -> `Axis3.Y`
 - invalid `Facing6` value -> block's default facing
 - missing roll information when migrating to `Facing6Roll2` -> roll `0`
+
+#### 9.5.E. Legacy -> `HorizontalOnly`
+
+`HorizontalOnly`'s bit layout is intentionally aligned with the legacy v3-chunk orientation storage indices for the four horizontal cases, so the migration is the identity for those:
+
+| Legacy Storage Index | Legacy Meaning | New `HorizontalOnly` Value |
+|----------------------|----------------|----------------------------|
+| `0`                  | Front / North  | `0` (North)                |
+| `1`                  | Back / South   | `1` (South)                |
+| `2`                  | Left / West    | `2` (West)                 |
+| `3`                  | Right / East   | `3` (East)                 |
+| `4`                  | Top            | `0` (clamped to North)     |
+| `5`                  | Bottom         | `0` (clamped to North)     |
+| `6`, `7`             | invalid        | `0` (clamped to North)     |
+
+Top/Bottom (storage indices 4 and 5) are never sensible for an ordinary cube — the block has no "top" or "bottom" face that differs from the others — so they clamp to the North default. This is the §9.5.D fallback rule applied per-schema.
 
 ### 9.6. Schema-to-Schema Migration Rule
 

@@ -7,12 +7,15 @@ namespace Data
     /// <remarks>
     /// <para><b>Frozen bit layouts</b> (must never change once a value has shipped):</para>
     /// <list type="bullet">
-    ///   <item><description><see cref="None"/>         : all bits <c>0</c>.</description></item>
-    ///   <item><description><see cref="FluidLevel4"/>  : bits <c>0-3</c> = fluid level, bits <c>4-7</c> reserved.</description></item>
-    ///   <item><description><see cref="Axis3"/>        : bits <c>0-1</c> = axis (<c>0=Y, 1=X, 2=Z</c>), bits <c>2-7</c> reserved.</description></item>
-    ///   <item><description><see cref="Facing6"/>      : bits <c>0-2</c> = facing (<c>0-5</c>), bits <c>3-7</c> reserved.</description></item>
-    ///   <item><description><see cref="Facing6Roll2"/> : bits <c>0-2</c> = facing (<c>0-5</c>), bits <c>3-4</c> = roll (<c>0-3</c>), bits <c>5-7</c> reserved.
+    ///   <item><description><see cref="None"/>           : all bits <c>0</c>.</description></item>
+    ///   <item><description><see cref="FluidLevel4"/>    : bits <c>0-3</c> = fluid level, bits <c>4-7</c> reserved.</description></item>
+    ///   <item><description><see cref="Axis3"/>          : bits <c>0-1</c> = axis (<c>0=Y, 1=X, 2=Z</c>), bits <c>2-7</c> reserved.</description></item>
+    ///   <item><description><see cref="Facing6"/>        : bits <c>0-2</c> = facing (<c>0-5</c>), bits <c>3-7</c> reserved.</description></item>
+    ///   <item><description><see cref="Facing6Roll2"/>   : bits <c>0-2</c> = facing (<c>0-5</c>), bits <c>3-4</c> = roll (<c>0-3</c>), bits <c>5-7</c> reserved.
     ///     Raw encoding: <c>(facing &amp; 0x07) | ((roll &amp; 0x03) &lt;&lt; 3)</c>.</description></item>
+    ///   <item><description><see cref="HorizontalOnly"/> : bits <c>0-1</c> = 4-way yaw (<c>0=North, 1=South, 2=West, 3=East</c>), bits <c>2-7</c> reserved.
+    ///     The bit layout is intentionally chosen to match the v3-chunk legacy orientation storage indices for the four horizontal cases,
+    ///     so the v5→v6 migration is a pure schema relabel (no byte rewrite) for blocks that were already using horizontal yaw.</description></item>
     /// </list>
     /// <para><b>Reserved enum ranges</b> (for future compatibility with saved worlds):</para>
     /// <list type="bullet">
@@ -39,7 +42,16 @@ namespace Data
         /// <summary>Bits <c>0-2</c> hold a facing index (<c>0-5</c>), bits <c>3-4</c> hold a roll (<c>0-3</c>). Bits <c>5-7</c> reserved.</summary>
         Facing6Roll2 = 4,
 
-        // Reserved 5-31   for future core engine schemas.
+        /// <summary>
+        /// Bits <c>0-1</c> hold a 4-way horizontal yaw (<c>0=North, 1=South, 2=West, 3=East</c>); bits <c>2-7</c> reserved.
+        /// The canonical schema for ordinary solid cubes that rotate around the Y axis for visual variety
+        /// (breaking up repeating textures on stone walls, dirt floors, etc.). Bit values are aligned with the
+        /// pre-v6 legacy orientation storage indices for the same 4 cases, so the v5→v6 migration is a pure
+        /// schema relabel (zero byte rewrites) for the typical case.
+        /// </summary>
+        HorizontalOnly = 5,
+
+        // Reserved 6-31   for future core engine schemas.
         // Reserved 32-63  for experimental / editor-only schemas.
         // Reserved 64-255 for future use.
     }
