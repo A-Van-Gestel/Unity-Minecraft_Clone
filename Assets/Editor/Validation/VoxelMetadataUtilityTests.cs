@@ -2,6 +2,7 @@ using Data;
 using Helpers;
 using Jobs.BurstData;
 using Serialization.Migration.Steps;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
@@ -113,6 +114,10 @@ namespace Editor.Validation
                 Test_MigrationV5ToV6_FluidLevel4MasksReservedBits();
                 Test_MigrationV5ToV6_PerBlockSchemaDispatch();
                 Test_MigrationV5ToV6_UnknownBlockIdLeavesMetaVerbatim();
+
+                Test_DominantAxisFromLookVector_Cardinals();
+                Test_DominantAxisFromLookVector_TieBreaks();
+                Test_DominantAxisFromLookVector_NormalizedAndArbitraryVectors();
             }
 
             // ===== Round-trip tests =====
@@ -885,6 +890,92 @@ namespace Editor.Validation
 
                     if (legacyMeta == 0xFF) break; // avoid byte overflow
                 }
+            }
+
+            // ===== DominantAxisFromLookVector (Phase 2e) =====
+
+            /// <summary>
+            /// All six cardinal direction vectors must map to the matching axis. Sign is
+            /// irrelevant — the helper picks the axis with the greatest |component|.
+            /// </summary>
+            private void Test_DominantAxisFromLookVector_Cardinals()
+            {
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_X,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(1f, 0f, 0f)),
+                    "DominantAxis: +X cardinal → AXIS_X");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_X,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(-1f, 0f, 0f)),
+                    "DominantAxis: -X cardinal → AXIS_X");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(0f, 1f, 0f)),
+                    "DominantAxis: +Y cardinal → AXIS_Y");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(0f, -1f, 0f)),
+                    "DominantAxis: -Y cardinal → AXIS_Y");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(0f, 0f, 1f)),
+                    "DominantAxis: +Z cardinal → AXIS_Z");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(0f, 0f, -1f)),
+                    "DominantAxis: -Z cardinal → AXIS_Z");
+            }
+
+            /// <summary>
+            /// Tie-break order is Y &gt; X &gt; Z. This locks in the vertical-priority semantic that
+            /// makes log placement feel natural when looking at a 45° angle: any tie involving Y
+            /// resolves to Y, and X wins ties against Z.
+            /// </summary>
+            private void Test_DominantAxisFromLookVector_TieBreaks()
+            {
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(1f, 1f, 0f)),
+                    "DominantAxis tie X==Y → Y wins");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(0f, 1f, 1f)),
+                    "DominantAxis tie Y==Z → Y wins");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(1f, 1f, 1f)),
+                    "DominantAxis three-way tie → Y wins");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_X,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(1f, 0f, 1f)),
+                    "DominantAxis tie X==Z → X wins");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(0f, 0f, 0f)),
+                    "DominantAxis zero vector → Y (Y >= 0 holds)");
+            }
+
+            /// <summary>
+            /// Sample non-cardinal looks: a 45° downward stare should still resolve to the
+            /// dominant horizontal axis when |y| is below the horizontal component, and a
+            /// near-vertical stare should snap to Y even with a small horizontal jitter.
+            /// </summary>
+            private void Test_DominantAxisFromLookVector_NormalizedAndArbitraryVectors()
+            {
+                // 45° downward stare facing +X: |x|=cos45≈0.707, |y|=sin45≈0.707, tie → Y wins.
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(
+                        math.normalize(new float3(1f, -1f, 0f))),
+                    "DominantAxis 45° down toward +X → Y wins (tie)");
+
+                // Slightly more horizontal than vertical → X wins.
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_X,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(0.9f, -0.4f, 0.1f)),
+                    "DominantAxis mostly +X, slight downward → X");
+
+                // Near-straight-up with horizontal jitter → Y wins.
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(0.05f, 0.99f, 0.1f)),
+                    "DominantAxis near-up → Y");
+
+                // Mostly +Z with minimal jitter → Z wins.
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(0.2f, 0.1f, 0.95f)),
+                    "DominantAxis mostly +Z → Z");
+
+                // Mostly -Z with horizontal jitter → Z wins.
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(-0.3f, 0.2f, -0.9f)),
+                    "DominantAxis mostly -Z → Z");
             }
 
             // ===== Tiny assertion helpers =====

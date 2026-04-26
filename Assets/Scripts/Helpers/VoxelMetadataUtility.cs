@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Data;
 using Jobs.BurstData;
+using Unity.Mathematics;
 
 namespace Helpers
 {
@@ -89,5 +90,10 @@ namespace Helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte NormalizeMeta(MetadataSchema schema, byte meta, byte defaultMeta)
             => BurstVoxelMetadataUtility.NormalizeMeta(schema, meta, defaultMeta);
+
+        /// <inheritdoc cref="BurstVoxelMetadataUtility.DominantAxisFromLookVector"/>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte DominantAxisFromLookVector(float3 lookVector)
+            => BurstVoxelMetadataUtility.DominantAxisFromLookVector(lookVector);
     }
 }

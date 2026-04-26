@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Data;
 using Unity.Burst;
+using Unity.Mathematics;
 
 namespace Jobs.BurstData
 {
@@ -232,5 +233,36 @@ namespace Jobs.BurstData
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte NormalizeMeta(MetadataSchema schema, byte meta, byte defaultMeta)
             => IsValidMeta(schema, meta) ? meta : defaultMeta;
+
+        // ===== Placement helpers =====
+
+        /// <summary>
+        /// Projects a 3D look vector onto its dominant axis and returns the corresponding
+        /// <see cref="MetadataSchema.Axis3"/> value: <see cref="AXIS_Y"/>, <see cref="AXIS_X"/>,
+        /// or <see cref="AXIS_Z"/>.
+        /// </summary>
+        /// <param name="lookVector">The look direction (typically <c>Camera.main.transform.forward</c>).
+        /// Need not be normalised — only relative magnitudes matter.</param>
+        /// <returns>The axis whose absolute component is largest in <paramref name="lookVector"/>.</returns>
+        /// <remarks>
+        /// <para>Designed for <see cref="PlacementMetadataMode.PlayerLookAxis"/>: the player's camera
+        /// direction determines which axis a freshly placed Axis3 block (a log, pillar, etc.) aligns with.</para>
+        /// <para><b>Tie-break</b>: ties resolve in favour of <see cref="AXIS_Y"/> first, then <see cref="AXIS_X"/>.
+        /// In practice ties only occur when the player looks at exactly 45° between two axes — they are
+        /// resolved deterministically so the same look vector always produces the same placement.</para>
+        /// <para>Axis is direction-agnostic: looking at <c>(+1, 0, 0)</c> and <c>(-1, 0, 0)</c> both
+        /// produce <see cref="AXIS_X"/>. Logs are symmetric along their long axis.</para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte DominantAxisFromLookVector(float3 lookVector)
+        {
+            float ax = math.abs(lookVector.x);
+            float ay = math.abs(lookVector.y);
+            float az = math.abs(lookVector.z);
+
+            if (ay >= ax && ay >= az) return AXIS_Y;
+            if (ax >= az) return AXIS_X;
+            return AXIS_Z;
+        }
     }
 }

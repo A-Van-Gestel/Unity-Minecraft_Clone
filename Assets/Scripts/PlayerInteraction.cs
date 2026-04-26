@@ -80,14 +80,9 @@ public class PlayerInteraction : MonoBehaviour
 
                 UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
                 ushort placedBlockId = itemSlot.ItemSlot.Stack.ID;
-                bool placedIsFluid = _world.BlockTypes[placedBlockId].fluidType != FluidType.None;
+                BlockType placedBlockType = _world.BlockTypes[placedBlockId];
 
-                // For fluid blocks, the player's orientation is irrelevant — the meta byte holds
-                // the fluid level, which BlockBehavior.Fluids will fill from the source on its first tick.
-                // For solid blocks, the meta byte encodes the world-face orientation via the legacy rule.
-                byte meta = placedIsFluid
-                    ? (byte)0
-                    : BurstVoxelDataBitMapping.BuildMetaLegacy(_player.orientation, fluidLevel: 0, isFluid: false);
+                byte meta = ComputePlacementMeta(placedBlockType);
 
                 _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), placedBlockId)
                 {
@@ -99,6 +94,30 @@ public class PlayerInteraction : MonoBehaviour
         }
     }
 
+
+    /// <summary>
+    /// Computes the metadata byte for a freshly-placed block based on its
+    /// configured <see cref="PlacementMetadataMode"/>. Fluids always start at
+    /// meta=0 so <c>BlockBehavior.Fluids</c> can fill them from a source on
+    /// the first simulation tick.
+    /// </summary>
+    private byte ComputePlacementMeta(BlockType placedBlockType)
+    {
+        if (placedBlockType.fluidType != FluidType.None)
+        {
+            return 0;
+        }
+
+        return placedBlockType.placementMetadataMode switch
+        {
+            PlacementMetadataMode.PlayerYawCardinal =>
+                BurstVoxelDataBitMapping.BuildMetaLegacy(
+                    _player.orientation, fluidLevel: 0, isFluid: false),
+            PlacementMetadataMode.PlayerLookAxis =>
+                BurstVoxelMetadataUtility.DominantAxisFromLookVector(_playerCamera.forward),
+            _ => placedBlockType.defaultMetadata,
+        };
+    }
 
     /// <summary>
     /// Centralized method to cast a ray from the player's camera to find a voxel.
