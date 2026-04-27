@@ -95,5 +95,10 @@ namespace Helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte DominantAxisFromLookVector(float3 lookVector)
             => BurstVoxelMetadataUtility.DominantAxisFromLookVector(lookVector);
+
+        /// <inheritdoc cref="BurstVoxelMetadataUtility.RotateMetaY"/>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte RotateMetaY(MetadataSchema schema, byte meta, int steps)
+            => BurstVoxelMetadataUtility.RotateMetaY(schema, meta, steps);
     }
 }

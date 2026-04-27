@@ -264,5 +264,81 @@ namespace Jobs.BurstData
             if (ax >= az) return AXIS_X;
             return AXIS_Z;
         }
+
+        // ===== Structure-time rotation =====
+
+        /// <summary>
+        /// Rotates a schema-aware metadata byte 90° clockwise around the Y axis,
+        /// applied <paramref name="steps"/> times (mod 4). Used during structure
+        /// stamping when a part is rotated as a whole.
+        /// </summary>
+        /// <param name="schema">The block's metadata schema; determines rotation semantics.</param>
+        /// <param name="meta">The raw metadata byte.</param>
+        /// <param name="steps">Number of 90° CW rotations. Negative and large values are wrapped mod 4.</param>
+        /// <returns>The rotated metadata byte. Direction-agnostic schemas
+        /// (<see cref="MetadataSchema.None"/>, <see cref="MetadataSchema.FluidLevel4"/>)
+        /// return <paramref name="meta"/> unchanged.</returns>
+        /// <remarks>
+        /// <para><b>HorizontalOnly</b>: cycles N → E → S → W → N (one cycle per step).</para>
+        /// <para><b>Axis3</b>: swaps X ↔ Z on odd steps; Y is preserved.</para>
+        /// <para><b>Facing6 / Facing6Roll2</b>: rotates the facing component using the
+        /// existing <see cref="VoxelOrientation.RotateY"/> table; Top/Bottom are preserved
+        /// and the roll bits (Facing6Roll2 only) pass through untouched.</para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte RotateMetaY(MetadataSchema schema, byte meta, int steps)
+        {
+            int n = ((steps % 4) + 4) & 3;
+
+            switch (schema)
+            {
+                case MetadataSchema.None:
+                case MetadataSchema.FluidLevel4:
+                    return meta;
+
+                case MetadataSchema.Axis3:
+                {
+                    byte axis = (byte)(meta & AXIS3_MASK);
+                    // Y unchanged; X ↔ Z on odd steps; identity on even steps.
+                    if ((n & 1) == 1 && axis != AXIS_Y)
+                        axis = axis == AXIS_X ? AXIS_Z : AXIS_X;
+                    return axis;
+                }
+
+                case MetadataSchema.HorizontalOnly:
+                {
+                    byte yaw = (byte)(meta & HORIZONTAL_ONLY_MASK);
+                    for (int i = 0; i < n; i++)
+                        yaw = RotateHorizontalOnlyY90CW(yaw);
+                    return yaw;
+                }
+
+                case MetadataSchema.Facing6:
+                    return VoxelOrientation.RotateY((byte)(meta & FACING6_MASK), n);
+
+                case MetadataSchema.Facing6Roll2:
+                {
+                    byte face = VoxelOrientation.RotateY((byte)(meta & FACING6_ROLL2_FACING_MASK), n);
+                    byte rollBits = (byte)(meta & FACING6_ROLL2_ROLL_MASK_SHIFTED);
+                    return (byte)(face | rollBits);
+                }
+
+                default:
+                    return meta;
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static byte RotateHorizontalOnlyY90CW(byte yaw)
+        {
+            switch (yaw)
+            {
+                case HORIZONTAL_NORTH: return HORIZONTAL_EAST;
+                case HORIZONTAL_EAST: return HORIZONTAL_SOUTH;
+                case HORIZONTAL_SOUTH: return HORIZONTAL_WEST;
+                case HORIZONTAL_WEST: return HORIZONTAL_NORTH;
+                default: return yaw;
+            }
+        }
     }
 }

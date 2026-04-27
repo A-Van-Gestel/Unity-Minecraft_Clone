@@ -452,17 +452,18 @@ namespace Jobs.Generators
 
                 if (component.type == StructureComponentType.StaticPart)
                 {
-                    // Emit all blocks at the current cursor.
-                    // Structure blocks are solids, so meta is encoded via the legacy orientation rule.
+                    // Emit all blocks at the current cursor. Meta is rotated via the
+                    // schema-aware Y-rotation table for the placed block.
                     foreach (StructureBlock block in selectedPart.blocks)
                     {
-                        byte rotatedOrientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps);
+                        MetadataSchema schema = _blockTypesJobData[block.blockID].MetadataSchema;
+                        byte rotatedMeta = BurstVoxelMetadataUtility.RotateMetaY(schema, block.meta, totalRotationSteps);
                         yield return new VoxelMod
                         {
                             GlobalPosition = cursor + RotatePosition(block.localPosition, totalRotationSteps),
                             ID = block.blockID,
                             Rule = block.rule,
-                            Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(rotatedOrientation, fluidLevel: 0, isFluid: false),
+                            Meta = rotatedMeta,
                         };
                     }
                 }
@@ -477,13 +478,14 @@ namespace Jobs.Generators
                         Vector3Int offset = rotatedStackDirection * i;
                         foreach (StructureBlock block in selectedPart.blocks)
                         {
-                            byte rotatedOrientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps);
+                            MetadataSchema schema = _blockTypesJobData[block.blockID].MetadataSchema;
+                            byte rotatedMeta = BurstVoxelMetadataUtility.RotateMetaY(schema, block.meta, totalRotationSteps);
                             yield return new VoxelMod
                             {
                                 GlobalPosition = cursor + offset + RotatePosition(block.localPosition, totalRotationSteps),
                                 ID = block.blockID,
                                 Rule = block.rule,
-                                Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(rotatedOrientation, fluidLevel: 0, isFluid: false),
+                                Meta = rotatedMeta,
                             };
                         }
                     }

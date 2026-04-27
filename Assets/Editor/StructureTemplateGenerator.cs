@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using Data.Structures;
+using Jobs.BurstData;
 using UnityEditor;
 using UnityEngine;
 
@@ -176,11 +177,12 @@ namespace Editor
             StructurePartTemplate fallenTrunkPart = CreateOrGetAsset<StructurePartTemplate>("Assets/Data/WorldGen/Structures/Trees/Part_FallenTrunk.asset");
             fallenTrunkPart.blocks = new[]
             {
-                // Horizontal log trunk (4 blocks along +X)
-                new StructureBlock { localPosition = new Vector3Int(0, 0, 0), blockID = BlockIDs.OakLog },
-                new StructureBlock { localPosition = new Vector3Int(1, 0, 0), blockID = BlockIDs.OakLog },
-                new StructureBlock { localPosition = new Vector3Int(2, 0, 0), blockID = BlockIDs.OakLog },
-                new StructureBlock { localPosition = new Vector3Int(3, 0, 0), blockID = BlockIDs.OakLog },
+                // Horizontal log trunk (4 blocks along +X). meta=AXIS_X so the logs render
+                // along their long axis. Y-rotation of the whole part swaps X↔Z as needed.
+                new StructureBlock { localPosition = new Vector3Int(0, 0, 0), blockID = BlockIDs.OakLog, meta = BurstVoxelMetadataUtility.AXIS_X },
+                new StructureBlock { localPosition = new Vector3Int(1, 0, 0), blockID = BlockIDs.OakLog, meta = BurstVoxelMetadataUtility.AXIS_X },
+                new StructureBlock { localPosition = new Vector3Int(2, 0, 0), blockID = BlockIDs.OakLog, meta = BurstVoxelMetadataUtility.AXIS_X },
+                new StructureBlock { localPosition = new Vector3Int(3, 0, 0), blockID = BlockIDs.OakLog, meta = BurstVoxelMetadataUtility.AXIS_X },
                 // Leaf decoration on far end (asymmetric — only on +X side)
                 new StructureBlock { localPosition = new Vector3Int(3, 0, 1), blockID = BlockIDs.OakLeaves, rule = ReplacementRule.OnlyReplaceAir },
                 new StructureBlock { localPosition = new Vector3Int(3, 0, -1), blockID = BlockIDs.OakLeaves, rule = ReplacementRule.OnlyReplaceAir },

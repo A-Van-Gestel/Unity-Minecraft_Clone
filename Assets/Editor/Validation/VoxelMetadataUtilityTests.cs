@@ -118,6 +118,14 @@ namespace Editor.Validation
                 Test_DominantAxisFromLookVector_Cardinals();
                 Test_DominantAxisFromLookVector_TieBreaks();
                 Test_DominantAxisFromLookVector_NormalizedAndArbitraryVectors();
+
+                Test_RotateMetaY_NoneAndFluidLevel4_AreIdentity();
+                Test_RotateMetaY_Axis3_SwapsXZOnOddSteps();
+                Test_RotateMetaY_HorizontalOnly_CyclesNESW();
+                Test_RotateMetaY_Facing6_RotatesHorizontalsKeepsTopBottom();
+                Test_RotateMetaY_Facing6Roll2_PreservesRollBits();
+                Test_RotateMetaY_FullCycleIsIdentity();
+                Test_RotateMetaY_NegativeAndLargeStepsWrap();
             }
 
             // ===== Round-trip tests =====
@@ -976,6 +984,236 @@ namespace Editor.Validation
                 AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
                     BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(-0.3f, 0.2f, -0.9f)),
                     "DominantAxis mostly -Z → Z");
+            }
+
+            // ===== RotateMetaY (Phase 2 wrap-up — structure stamping) =====
+
+            private void Test_RotateMetaY_NoneAndFluidLevel4_AreIdentity()
+            {
+                for (int steps = 0; steps <= 4; steps++)
+                {
+                    AssertEqual(0,
+                        BurstVoxelMetadataUtility.RotateMetaY(MetadataSchema.None, 0, steps),
+                        $"None: rotate {steps} steps → identity");
+
+                    AssertEqual(7,
+                        BurstVoxelMetadataUtility.RotateMetaY(MetadataSchema.FluidLevel4, 7, steps),
+                        $"FluidLevel4: rotate level=7 by {steps} steps → unchanged");
+                    AssertEqual(15,
+                        BurstVoxelMetadataUtility.RotateMetaY(MetadataSchema.FluidLevel4, 15, steps),
+                        $"FluidLevel4: rotate level=15 by {steps} steps → unchanged");
+                }
+            }
+
+            /// <summary>
+            /// Axis3: Y is preserved under any rotation; X and Z swap on odd steps and are
+            /// preserved on even steps (180° doesn't change axis identity, only direction).
+            /// </summary>
+            private void Test_RotateMetaY_Axis3_SwapsXZOnOddSteps()
+            {
+                for (int steps = 0; steps <= 4; steps++)
+                {
+                    AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                        BurstVoxelMetadataUtility.RotateMetaY(
+                            MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_Y, steps),
+                        $"Axis3 Y preserved under {steps} steps");
+                }
+
+                // Step 0: identity.
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_X,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_X, 0),
+                    "Axis3 X under 0 steps");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_Z, 0),
+                    "Axis3 Z under 0 steps");
+
+                // Step 1: swap.
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_X, 1),
+                    "Axis3 X → Z under 1 step (90° CW)");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_X,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_Z, 1),
+                    "Axis3 Z → X under 1 step (90° CW)");
+
+                // Step 2: identity (180° preserves axis).
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_X,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_X, 2),
+                    "Axis3 X preserved under 2 steps (180°)");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_Z, 2),
+                    "Axis3 Z preserved under 2 steps (180°)");
+
+                // Step 3: swap.
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_X, 3),
+                    "Axis3 X → Z under 3 steps (270° CW)");
+            }
+
+            /// <summary>
+            /// HorizontalOnly: 90° CW cycles N → E → S → W → N.
+            /// </summary>
+            private void Test_RotateMetaY_HorizontalOnly_CyclesNESW()
+            {
+                // Single 90° CW step.
+                AssertEqual(BurstVoxelMetadataUtility.HORIZONTAL_EAST,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_NORTH, 1),
+                    "HorizontalOnly N → E");
+                AssertEqual(BurstVoxelMetadataUtility.HORIZONTAL_SOUTH,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_EAST, 1),
+                    "HorizontalOnly E → S");
+                AssertEqual(BurstVoxelMetadataUtility.HORIZONTAL_WEST,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_SOUTH, 1),
+                    "HorizontalOnly S → W");
+                AssertEqual(BurstVoxelMetadataUtility.HORIZONTAL_NORTH,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_WEST, 1),
+                    "HorizontalOnly W → N");
+
+                // 180° (2 steps).
+                AssertEqual(BurstVoxelMetadataUtility.HORIZONTAL_SOUTH,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_NORTH, 2),
+                    "HorizontalOnly N → S under 180°");
+                AssertEqual(BurstVoxelMetadataUtility.HORIZONTAL_EAST,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_WEST, 2),
+                    "HorizontalOnly W → E under 180°");
+
+                // 270° (3 steps) is opposite of 90°.
+                AssertEqual(BurstVoxelMetadataUtility.HORIZONTAL_WEST,
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_NORTH, 3),
+                    "HorizontalOnly N → W under 270°");
+            }
+
+            /// <summary>
+            /// Facing6: horizontals rotate per <see cref="VoxelOrientation.RotateY"/>; Top/Bottom
+            /// remain unchanged because they are aligned with the rotation axis.
+            /// </summary>
+            private void Test_RotateMetaY_Facing6_RotatesHorizontalsKeepsTopBottom()
+            {
+                AssertEqual(VoxelOrientation.West,
+                    BurstVoxelMetadataUtility.RotateMetaY(MetadataSchema.Facing6, VoxelOrientation.South, 1),
+                    "Facing6 South → West under 1 step");
+                AssertEqual(VoxelOrientation.East,
+                    BurstVoxelMetadataUtility.RotateMetaY(MetadataSchema.Facing6, VoxelOrientation.North, 1),
+                    "Facing6 North → East under 1 step");
+
+                for (int steps = 0; steps <= 4; steps++)
+                {
+                    AssertEqual(VoxelOrientation.Top,
+                        BurstVoxelMetadataUtility.RotateMetaY(MetadataSchema.Facing6, VoxelOrientation.Top, steps),
+                        $"Facing6 Top preserved under {steps} steps");
+                    AssertEqual(VoxelOrientation.Bottom,
+                        BurstVoxelMetadataUtility.RotateMetaY(MetadataSchema.Facing6, VoxelOrientation.Bottom, steps),
+                        $"Facing6 Bottom preserved under {steps} steps");
+                }
+            }
+
+            /// <summary>
+            /// Facing6Roll2: rotation must affect facing bits only and leave the roll bits untouched
+            /// regardless of rotation steps. This is the failure mode we'd get from a naive
+            /// VoxelOrientation.RotateY call on the full byte — make sure we don't regress.
+            /// </summary>
+            private void Test_RotateMetaY_Facing6Roll2_PreservesRollBits()
+            {
+                // Roll = 3 (max), Facing = North → after 1 step, Facing = East, Roll still 3.
+                byte input = BurstVoxelMetadataUtility.EncodeFacing6Roll2(VoxelOrientation.North, 3);
+                byte rotated = BurstVoxelMetadataUtility.RotateMetaY(MetadataSchema.Facing6Roll2, input, 1);
+
+                AssertEqual(VoxelOrientation.East,
+                    BurstVoxelMetadataUtility.DecodeFacing6Roll2Facing(rotated),
+                    "Facing6Roll2: facing rotates North → East");
+                AssertEqual(3,
+                    BurstVoxelMetadataUtility.DecodeFacing6Roll2Roll(rotated),
+                    "Facing6Roll2: roll bits preserved across rotation");
+
+                // Different roll, 3 steps.
+                byte input2 = BurstVoxelMetadataUtility.EncodeFacing6Roll2(VoxelOrientation.West, 1);
+                byte rotated2 = BurstVoxelMetadataUtility.RotateMetaY(MetadataSchema.Facing6Roll2, input2, 3);
+                AssertEqual(VoxelOrientation.South,
+                    BurstVoxelMetadataUtility.DecodeFacing6Roll2Facing(rotated2),
+                    "Facing6Roll2: West rotated 3 steps → South");
+                AssertEqual(1,
+                    BurstVoxelMetadataUtility.DecodeFacing6Roll2Roll(rotated2),
+                    "Facing6Roll2: roll=1 preserved through 3-step rotation");
+            }
+
+            /// <summary>
+            /// Four 90° steps must be the identity for every schema and every value. This is the
+            /// canonical sanity check that ensures the rotation tables form a proper cycle group.
+            /// </summary>
+            private void Test_RotateMetaY_FullCycleIsIdentity()
+            {
+                MetadataSchema[] schemas =
+                {
+                    MetadataSchema.None,
+                    MetadataSchema.FluidLevel4,
+                    MetadataSchema.Axis3,
+                    MetadataSchema.Facing6,
+                    MetadataSchema.Facing6Roll2,
+                    MetadataSchema.HorizontalOnly,
+                };
+
+                foreach (MetadataSchema schema in schemas)
+                {
+                    for (byte meta = 0; meta < 64; meta++)
+                    {
+                        byte rotated = BurstVoxelMetadataUtility.RotateMetaY(schema, meta, 4);
+                        // Compare against the schema's masked input — rotation discards reserved
+                        // bits the schema doesn't claim, so the round-trip identity is over the
+                        // schema's own bit footprint.
+                        byte expected = schema switch
+                        {
+                            MetadataSchema.None => meta, // None is full identity (no masking).
+                            MetadataSchema.FluidLevel4 => meta, // FluidLevel4 is identity.
+                            MetadataSchema.Axis3 => (byte)(meta & BurstVoxelMetadataUtility.AXIS3_MASK),
+                            MetadataSchema.Facing6 => (byte)(meta & BurstVoxelMetadataUtility.FACING6_MASK),
+                            MetadataSchema.Facing6Roll2 => (byte)(meta & (BurstVoxelMetadataUtility.FACING6_ROLL2_FACING_MASK | BurstVoxelMetadataUtility.FACING6_ROLL2_ROLL_MASK_SHIFTED)),
+                            MetadataSchema.HorizontalOnly => (byte)(meta & BurstVoxelMetadataUtility.HORIZONTAL_ONLY_MASK),
+                            _ => meta,
+                        };
+                        AssertEqual(expected, rotated,
+                            $"RotateMetaY full cycle (4 steps) is identity for schema={schema}, meta=0x{meta:X2}");
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Negative steps and steps &gt; 3 must wrap correctly: -1 ≡ 3, 5 ≡ 1, etc.
+            /// </summary>
+            private void Test_RotateMetaY_NegativeAndLargeStepsWrap()
+            {
+                AssertEqual(
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_NORTH, 3),
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_NORTH, -1),
+                    "HorizontalOnly: -1 step ≡ +3 steps");
+
+                AssertEqual(
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_X, 1),
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.Axis3, BurstVoxelMetadataUtility.AXIS_X, 5),
+                    "Axis3: 5 steps ≡ 1 step");
+
+                AssertEqual(
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_NORTH, 0),
+                    BurstVoxelMetadataUtility.RotateMetaY(
+                        MetadataSchema.HorizontalOnly, BurstVoxelMetadataUtility.HORIZONTAL_NORTH, -4),
+                    "HorizontalOnly: -4 steps ≡ identity");
             }
 
             // ===== Tiny assertion helpers =====
