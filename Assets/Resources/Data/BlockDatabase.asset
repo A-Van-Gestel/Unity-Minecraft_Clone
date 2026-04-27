@@ -458,7 +458,7 @@ MonoBehaviour:
     canReplaceTags: 8386
     isActive: 0
     metadataSchema: 2
-    placementMetadataMode: 1
+    placementMetadataMode: 2
     defaultMetadata: 0
     backFaceTexture: 14
     frontFaceTexture: 14
