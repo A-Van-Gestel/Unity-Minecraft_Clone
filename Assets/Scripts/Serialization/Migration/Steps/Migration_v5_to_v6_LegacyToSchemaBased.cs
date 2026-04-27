@@ -19,7 +19,7 @@ namespace Serialization.Migration.Steps
     ///   <listheader><term>Block</term><description>Target schema → meta-byte conversion</description></listheader>
     ///   <item><term>Air, Facade, Cactus, GrassBlades</term><description><b>None</b> — meta byte rewritten to <c>0</c>.</description></item>
     ///   <item><term>Water, Lava</term><description><b>FluidLevel4</b> — lower 4 bits kept, upper 4 cleared.</description></item>
-    ///   <item><term>OakLog</term><description><b>Axis3</b> — storage index → axis (N/S→Z, E/W→X, T/B/default→Y).</description></item>
+    ///   <item><term>OakLog</term><description><b>Axis3</b> — all legacy oak-log orientations normalize to <c>Y</c> because v5 oak logs were always authored/rendered as upright cubes; the old yaw byte never encoded a real axis.</description></item>
     ///   <item><term>Stone, Grass, Dirt, Sand, Snow, GrassSnowy, StoneWalkway, Bedrock, DesertCracked, GrassRocky, Tile, Wood, OakLeaves, CoalOre</term><description><b>HorizontalOnly</b> — storage indices 0-3 kept verbatim (the 4 horizontal cases align bit-for-bit with the new layout); storage indices 4-5 (Top/Bottom) clamped to 0 (North).</description></item>
     ///   <item><term>StoneHalfSlab, DirectionalBlock</term><description><b>None</b> for now — schema choice deferred to a future v6→v7 migration when Facing6/Facing6Roll2 meshing exists. Meta byte left verbatim.</description></item>
     ///   <item><term>Unknown block IDs</term><description>Treated as deferred — meta byte left verbatim. Future-proofs against forks/mods.</description></item>
@@ -254,6 +254,11 @@ namespace Serialization.Migration.Steps
         /// </remarks>
         public static byte ConvertLegacyMeta(ushort blockId, byte legacyMeta)
         {
+            if (blockId == V5_OAK_LOG)
+            {
+                return ConvertLegacyOakLogMetaToAxis3(legacyMeta);
+            }
+
             byte targetSchema = GetTargetSchema(blockId);
             return targetSchema switch
             {
@@ -338,6 +343,22 @@ namespace Serialization.Migration.Steps
                 5 => 0, // Bottom → Y
                 _ => 0, // invalid → Y (fallback per §9.5.D)
             };
+        }
+
+        /// <summary>
+        /// Frozen converter for v5 OakLog specifically.
+        /// </summary>
+        /// <remarks>
+        /// <para>Although OakLog migrates to <see cref="Data.MetadataSchema.Axis3"/>, historical v5 OakLog
+        /// voxels never stored a meaningful axis. Trees and the old placement path authored oak logs as
+        /// ordinary upright cubes using the legacy yaw byte, so every legacy orientation value rendered as
+        /// the same upright log.</para>
+        /// <para>To preserve the appearance of existing worlds, every v5 OakLog meta byte normalizes to
+        /// Axis3.Y during migration.</para>
+        /// </remarks>
+        public static byte ConvertLegacyOakLogMetaToAxis3(byte legacyMeta)
+        {
+            return 0;
         }
 
         /// <summary>

@@ -99,6 +99,8 @@ namespace Editor.Validation
                 Test_BurstAxis3MeshUtility_ZAxis_TopOfLogAtPositiveZ();
                 Test_BurstAxis3MeshUtility_EveryAxisHasExactlyTwoLogCapFaces();
                 Test_BurstAxis3MeshUtility_AllRemapValuesInRange();
+                Test_BurstAxis3MeshUtility_UvQuarterTurnsStayInRange();
+                Test_BurstAxis3MeshUtility_SidewaysLogsRotateBarkUvs();
 
                 Test_HorizontalOnly_RoundTrip();
                 Test_HorizontalOnly_IsValidMeta();
@@ -118,6 +120,7 @@ namespace Editor.Validation
                 Test_DominantAxisFromLookVector_Cardinals();
                 Test_DominantAxisFromLookVector_TieBreaks();
                 Test_DominantAxisFromLookVector_NormalizedAndArbitraryVectors();
+                Test_Axis3FromLegacyWorldOrientation_MapsHorizontalsToAxes();
 
                 Test_RotateMetaY_NoneAndFluidLevel4_AreIdentity();
                 Test_RotateMetaY_Axis3_SwapsXZOnOddSteps();
@@ -619,6 +622,38 @@ namespace Editor.Validation
                 }
             }
 
+            /// <summary>
+            /// Sanity check: every UV-rotation LUT entry must be a valid quarter-turn count (0-3).
+            /// </summary>
+            private void Test_BurstAxis3MeshUtility_UvQuarterTurnsStayInRange()
+            {
+                for (byte axis = 0; axis <= BurstVoxelMetadataUtility.AXIS3_MAX_VALUE; axis++)
+                {
+                    for (int worldFace = 0; worldFace < 6; worldFace++)
+                    {
+                        byte turns = BurstAxis3MeshUtility.GetUvQuarterTurnsCW(axis, worldFace);
+                        AssertTrue(turns <= 3,
+                            $"axis={axis}, worldFace={worldFace}: UV turns {turns} is in range 0-3");
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Regression coverage for the sideways-log bark-grain bug: the sideways faces that used
+            /// to keep pointing "up" must now receive a non-zero UV quarter-turn.
+            /// </summary>
+            private void Test_BurstAxis3MeshUtility_SidewaysLogsRotateBarkUvs()
+            {
+                AssertTrue(BurstAxis3MeshUtility.GetUvQuarterTurnsCW(BurstVoxelMetadataUtility.AXIS_X, 0) != 0,
+                    "X-axis log: world back face rotates bark UVs");
+                AssertTrue(BurstAxis3MeshUtility.GetUvQuarterTurnsCW(BurstVoxelMetadataUtility.AXIS_X, 1) != 0,
+                    "X-axis log: world front face rotates bark UVs");
+                AssertTrue(BurstAxis3MeshUtility.GetUvQuarterTurnsCW(BurstVoxelMetadataUtility.AXIS_Z, 4) != 0,
+                    "Z-axis log: world left face rotates bark UVs");
+                AssertTrue(BurstAxis3MeshUtility.GetUvQuarterTurnsCW(BurstVoxelMetadataUtility.AXIS_Z, 5) != 0,
+                    "Z-axis log: world right face rotates bark UVs");
+            }
+
             // ===== MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3 (Phase 2d) =====
             //
             // Verifies the frozen storage-index → axis mapping defined in §9.5.A. Once shipped,
@@ -851,10 +886,22 @@ namespace Editor.Validation
                     MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.Lava, LEGACY_FLUID_LEVEL | 0xF0),
                     "Lava → FluidLevel4: lower 4 bits kept, upper masked");
 
-                // Axis3 (OakLog) → storage index → axis.
-                AssertEqual(0, // Top → Y
+                // Axis3 (OakLog) → every historical legacy value normalizes to Y.
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.OakLog, LEGACY_NORTH),
+                    "OakLog → Axis3: storage 0 (North) normalizes to Y axis");
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.OakLog, 1),
+                    "OakLog → Axis3: storage 1 (South) normalizes to Y axis");
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.OakLog, 2),
+                    "OakLog → Axis3: storage 2 (West) normalizes to Y axis");
+                AssertEqual(0,
+                    MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.OakLog, 3),
+                    "OakLog → Axis3: storage 3 (East) normalizes to Y axis");
+                AssertEqual(0,
                     MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMeta(BlockIDs.OakLog, LEGACY_TOP),
-                    "OakLog → Axis3: storage 4 (Top) → Y axis");
+                    "OakLog → Axis3: storage 4 (Top) normalizes to Y axis");
 
                 // HorizontalOnly (sample of ordinary cubes) → identity for 4 horizontals.
                 AssertEqual(0,
@@ -984,6 +1031,29 @@ namespace Editor.Validation
                 AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
                     BurstVoxelMetadataUtility.DominantAxisFromLookVector(new float3(-0.3f, 0.2f, -0.9f)),
                     "DominantAxis mostly -Z → Z");
+            }
+
+            /// <summary>
+            /// Defensive placement fallback for stale authoring data: if an Axis3 block is still set
+            /// to use legacy cardinal yaw placement, North/South must map to Z and West/East to X.
+            /// </summary>
+            private void Test_Axis3FromLegacyWorldOrientation_MapsHorizontalsToAxes()
+            {
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.Axis3FromLegacyWorldOrientation(1),
+                    "Legacy North orientation maps to Axis3.Z");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Z,
+                    BurstVoxelMetadataUtility.Axis3FromLegacyWorldOrientation(0),
+                    "Legacy South orientation maps to Axis3.Z");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_X,
+                    BurstVoxelMetadataUtility.Axis3FromLegacyWorldOrientation(4),
+                    "Legacy West orientation maps to Axis3.X");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_X,
+                    BurstVoxelMetadataUtility.Axis3FromLegacyWorldOrientation(5),
+                    "Legacy East orientation maps to Axis3.X");
+                AssertEqual(BurstVoxelMetadataUtility.AXIS_Y,
+                    BurstVoxelMetadataUtility.Axis3FromLegacyWorldOrientation(2),
+                    "Legacy Top orientation falls back to Axis3.Y");
             }
 
             // ===== RotateMetaY (Phase 2 wrap-up — structure stamping) =====

@@ -23,10 +23,6 @@ namespace Jobs.BurstData
     /// legacy orientation values to Axis3 axis values (Phase 2d, save version v6) depends on it.
     /// Any change to these mappings requires a new save version + migration step per
     /// <c>PER_BLOCK_METADATA_SCHEMAS.md §9.6</c>.</para>
-    /// <para><b>Deferred to a follow-up commit</b>: per-axis UV rotation so wood-grain side textures
-    /// align with the log's long axis (e.g. an X-axis log's bark grain should run horizontally on
-    /// the top/bottom/front/back faces). Without it, the bark grain stays vertical on side faces;
-    /// this is a visual defect, not a correctness defect.</para>
     /// </remarks>
     [BurstCompile]
     public static class BurstAxis3MeshUtility
@@ -60,6 +56,23 @@ namespace Jobs.BurstData
         };
 
         /// <summary>
+        /// Frozen per-axis UV rotation LUT, flat-indexed by <c>axis * 6 + worldFace</c>.
+        /// Each entry stores clockwise quarter-turns (0-3) applied to the canonical face UVs so
+        /// bark grain follows the log's long axis on sideways logs.
+        /// </summary>
+        private static readonly byte[] s_uvQuarterTurnsCW =
+        {
+            // axis 0 (Y): identity.
+            0, 0, 0, 0, 0, 0,
+
+            // axis 1 (X): derived from rotating the canonical upright cube -90° around Z.
+            3, 1, 3, 1, 1, 3,
+
+            // axis 2 (Z): derived from rotating the canonical upright cube +90° around X.
+            2, 2, 0, 0, 1, 3,
+        };
+
+        /// <summary>
         /// Looks up the effective block face index for a given (axis, world face) pair.
         /// </summary>
         /// <param name="axis">The Axis3 value: 0 = Y, 1 = X, 2 = Z (per <see cref="BurstVoxelMetadataUtility"/>).</param>
@@ -73,6 +86,19 @@ namespace Jobs.BurstData
         public static byte GetEffectiveFace(byte axis, int worldFace)
         {
             return s_faceRemap[axis * 6 + worldFace];
+        }
+
+        /// <summary>
+        /// Returns clockwise quarter-turns (0-3) applied to the canonical face UVs for the given
+        /// Axis3 axis and world face.
+        /// </summary>
+        /// <param name="axis">The Axis3 value: 0 = Y, 1 = X, 2 = Z.</param>
+        /// <param name="worldFace">The world face index 0-5 the meshing job is currently emitting.</param>
+        /// <returns>Clockwise quarter-turn count in the range 0-3.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte GetUvQuarterTurnsCW(byte axis, int worldFace)
+        {
+            return s_uvQuarterTurnsCW[axis * 6 + worldFace];
         }
     }
 }

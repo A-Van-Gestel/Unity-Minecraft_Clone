@@ -110,11 +110,15 @@ public class PlayerInteraction : MonoBehaviour
 
         return placedBlockType.placementMetadataMode switch
         {
+            PlacementMetadataMode.PlayerYawCardinal when placedBlockType.metadataSchema == MetadataSchema.Axis3 =>
+                BurstVoxelMetadataUtility.Axis3FromLegacyWorldOrientation(_player.orientation),
             PlacementMetadataMode.PlayerYawCardinal =>
                 BurstVoxelDataBitMapping.BuildMetaLegacy(
                     _player.orientation, fluidLevel: 0, isFluid: false),
-            PlacementMetadataMode.PlayerLookAxis =>
+            PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Axis3 =>
                 BurstVoxelMetadataUtility.DominantAxisFromLookVector(_playerCamera.forward),
+            PlacementMetadataMode.PlayerLookAxis =>
+                placedBlockType.defaultMetadata,
             _ => placedBlockType.defaultMetadata,
         };
     }

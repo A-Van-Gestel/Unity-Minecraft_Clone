@@ -148,8 +148,9 @@ namespace Editor.BlockEditor.Helpers
                             // Texture comes from the axis-remapped block face; vertex emission uses
                             // `rotation: 0f` since the cube vertices are axis-symmetric.
                             int effectiveFace = BurstAxis3MeshUtility.GetEffectiveFace(axis, p);
+                            int uvQuarterTurnsCW = BurstAxis3MeshUtility.GetUvQuarterTurnsCW(axis, p);
                             int textureID = blockType.GetTextureID(effectiveFace);
-                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f,
+                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
                                 ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
                                 ref nativeUvs, ref nativeColors, ref nativeNormals,
                                 blockType.renderNeighborFaces);

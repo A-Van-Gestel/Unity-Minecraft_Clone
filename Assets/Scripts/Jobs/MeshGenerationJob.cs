@@ -398,7 +398,11 @@ namespace Jobs
         private void GenerateStandardCubeMesh_Axis3(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
         {
             byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
-            byte axis = BurstVoxelMetadataUtility.DecodeAxis3(meta);
+            byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Axis3, voxelProps.DefaultMetadata, BurstVoxelMetadataUtility.AXIS_Y);
+            byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Axis3, meta, normalizedDefaultMeta);
+            byte axis = BurstVoxelMetadataUtility.DecodeAxis3(normalizedMeta);
 
             for (int p = 0; p < 6; p++)
             {
@@ -409,10 +413,11 @@ namespace Jobs
                     // Texture comes from the axis-remapped block face. Vertex emission uses the
                     // un-rotated world face index `p`, since cube vertices are axis-symmetric.
                     int effectiveFace = BurstAxis3MeshUtility.GetEffectiveFace(axis, p);
+                    int uvQuarterTurnsCW = BurstAxis3MeshUtility.GetUvQuarterTurnsCW(axis, p);
                     int textureID = GetTextureID(id, effectiveFace);
                     float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 
-                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f,
+                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f, uvQuarterTurnsCW,
                         ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
                         ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                         voxelProps.RenderNeighborFaces);

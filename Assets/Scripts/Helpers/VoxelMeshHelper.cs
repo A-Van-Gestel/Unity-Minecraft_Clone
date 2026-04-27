@@ -60,6 +60,23 @@ namespace Helpers
             ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
             bool isTransparent)
         {
+            GenerateStandardCubeFace(faceIndex, textureID, lightLevel, in position, rotation, 0,
+                ref vertexIndex, ref vertices, ref triangles, ref transparentTriangles,
+                ref uvs, ref colors, ref normals, isTransparent);
+        }
+
+        /// <summary>
+        /// Generates a single face of a standard cube voxel with an optional UV quarter-turn.
+        /// </summary>
+        [BurstCompile]
+        [SkipLocalsInit] // Optimization: Skip zeroing local variables (Vector3s, Colors) as we overwrite them immediately.
+        public static void GenerateStandardCubeFace(
+            int faceIndex, int textureID, float lightLevel, in Vector3Int position, float rotation, int uvQuarterTurnsCW,
+            ref int vertexIndex,
+            ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
+            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            bool isTransparent)
+        {
             // A face is a quad, which consists of 4 vertices.
             for (int i = 0; i < 4; i++)
             {
@@ -77,7 +94,13 @@ namespace Helpers
 
                 // Use the FaceUvOrder array to get the correct UV for this vertex.
                 int uvIndex = s_faceUvOrder[faceIndex * 4 + i];
-                AddTexture(textureID, BurstVoxelData.VoxelUvs.Data[uvIndex], ref uvs);
+                Vector2 uv = BurstVoxelData.VoxelUvs.Data[uvIndex];
+                if ((uvQuarterTurnsCW & 3) != 0)
+                {
+                    uv = RotateUvQuarterTurnsCW(uv, uvQuarterTurnsCW);
+                }
+
+                AddTexture(textureID, uv, ref uvs);
             }
 
             // Add the triangle indices to the correct sub-mesh.
@@ -101,6 +124,22 @@ namespace Helpers
             }
 
             vertexIndex += 4;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector2 RotateUvQuarterTurnsCW(Vector2 uv, int quarterTurnsCW)
+        {
+            switch (quarterTurnsCW & 3)
+            {
+                case 1:
+                    return new Vector2(1f - uv.y, uv.x);
+                case 2:
+                    return new Vector2(1f - uv.x, 1f - uv.y);
+                case 3:
+                    return new Vector2(uv.y, 1f - uv.x);
+                default:
+                    return uv;
+            }
         }
 
         /// <summary>

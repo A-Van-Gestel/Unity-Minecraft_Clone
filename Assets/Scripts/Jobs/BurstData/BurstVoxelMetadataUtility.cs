@@ -265,6 +265,32 @@ namespace Jobs.BurstData
             return AXIS_Z;
         }
 
+        /// <summary>
+        /// Converts a legacy horizontal world-orientation value into the closest
+        /// <see cref="MetadataSchema.Axis3"/> axis.
+        /// </summary>
+        /// <param name="worldOrientation">
+        /// Legacy world-face orientation value: <c>1=North</c>, <c>0=South</c>,
+        /// <c>4=West</c>, <c>5=East</c>. Vertical or invalid values fall back to
+        /// <see cref="AXIS_Y"/>.
+        /// </param>
+        /// <returns>
+        /// <see cref="AXIS_Z"/> for North/South, <see cref="AXIS_X"/> for West/East,
+        /// otherwise <see cref="AXIS_Y"/>.
+        /// </returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte Axis3FromLegacyWorldOrientation(byte worldOrientation)
+        {
+            return worldOrientation switch
+            {
+                1 => AXIS_Z, // North
+                0 => AXIS_Z, // South
+                4 => AXIS_X, // West
+                5 => AXIS_X, // East
+                _ => AXIS_Y, // Top / Bottom / invalid
+            };
+        }
+
         // ===== Structure-time rotation =====
 
         /// <summary>
