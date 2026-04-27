@@ -11,10 +11,27 @@ namespace Editor.BlockEditor.Helpers
     public static class EditorMeshGenerator
     {
         /// <summary>
-        /// Generates a Mesh for a given BlockType. This is for editor previews only.
-        /// It now contains self-sufficient logic for all block types, including a simplified fluid preview.
+        /// Generates a Mesh for a given BlockType using its <see cref="BlockType.defaultMetadata"/>.
+        /// This is for editor previews (Block Editor icons) where no per-voxel meta is available.
         /// </summary>
         public static Mesh GenerateBlockMesh(BlockType blockType, List<BlockType> allBlockTypes, int fluidLevel = 0)
+            => GenerateBlockMeshInternal(blockType, allBlockTypes, blockType?.defaultMetadata ?? 0, fluidLevel);
+
+        /// <summary>
+        /// Generates a Mesh for a given BlockType with an explicit metadata byte.
+        /// Used by the Structure Preview tool where each block carries its own authored meta.
+        /// </summary>
+        /// <param name="blockType">The block type to generate a mesh for.</param>
+        /// <param name="allBlockTypes">All block types in the database (needed for fluid mock data).</param>
+        /// <param name="meta">The raw metadata byte controlling orientation/axis/facing.</param>
+        public static Mesh GenerateBlockMesh(BlockType blockType, List<BlockType> allBlockTypes, byte meta)
+            => GenerateBlockMeshInternal(blockType, allBlockTypes, meta, fluidLevel: 0);
+
+        /// <summary>
+        /// Shared implementation for block mesh generation. Dispatches on block type category
+        /// (Fluid, Cross, Custom, Standard) and then on <see cref="MetadataSchema"/> for orientation.
+        /// </summary>
+        private static Mesh GenerateBlockMeshInternal(BlockType blockType, List<BlockType> allBlockTypes, byte meta, int fluidLevel)
         {
             if (blockType == null) return null;
 
@@ -136,11 +153,11 @@ namespace Editor.BlockEditor.Helpers
                 {
                     case MetadataSchema.Axis3:
                     {
-                        // Decode the preview axis from defaultMetadata. NormalizeMeta clamps invalid
-                        // values to 0 (Y-axis) so out-of-range authoring data renders an upright log
+                        // Decode the preview axis from the supplied meta byte. NormalizeMeta clamps
+                        // invalid values to 0 (Y-axis) so out-of-range data renders an upright log
                         // instead of crashing on an LUT out-of-bounds read.
                         byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
-                            MetadataSchema.Axis3, blockType.defaultMetadata, defaultMeta: 0);
+                            MetadataSchema.Axis3, meta, defaultMeta: 0);
                         byte axis = BurstVoxelMetadataUtility.DecodeAxis3(normalizedMeta);
 
                         for (int p = 0; p < 6; p++)
@@ -149,6 +166,26 @@ namespace Editor.BlockEditor.Helpers
                             // `rotation: 0f` since the cube vertices are axis-symmetric.
                             int effectiveFace = BurstAxis3MeshUtility.GetEffectiveFace(axis, p);
                             int uvQuarterTurnsCW = BurstAxis3MeshUtility.GetUvQuarterTurnsCW(axis, p);
+                            int textureID = blockType.GetTextureID(effectiveFace);
+                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
+
+                    case MetadataSchema.Facing6:
+                    {
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Facing6, meta, defaultMeta: 0);
+                        byte facing = BurstVoxelMetadataUtility.DecodeFacing6(normalizedMeta);
+
+                        for (int p = 0; p < 6; p++)
+                        {
+                            int effectiveFace = BurstFacing6MeshUtility.GetEffectiveFace(facing, p);
+                            int uvQuarterTurnsCW = BurstFacing6MeshUtility.GetUvQuarterTurnsCW(facing, p);
                             int textureID = blockType.GetTextureID(effectiveFace);
                             VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
                                 ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,

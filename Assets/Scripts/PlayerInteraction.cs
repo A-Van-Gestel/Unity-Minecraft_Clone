@@ -117,6 +117,8 @@ public class PlayerInteraction : MonoBehaviour
                     _player.orientation, fluidLevel: 0, isFluid: false),
             PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Axis3 =>
                 BurstVoxelMetadataUtility.DominantAxisFromLookVector(_playerCamera.forward),
+            PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Facing6 =>
+                BurstVoxelMetadataUtility.Facing6FromLookVector(_playerCamera.forward),
             PlacementMetadataMode.PlayerLookAxis =>
                 placedBlockType.defaultMetadata,
             _ => placedBlockType.defaultMetadata,

@@ -5,6 +5,7 @@ using Data.Structures;
 using Editor.BlockEditor.Helpers;
 using Editor.DataGeneration;
 using Editor.Libraries;
+using Helpers;
 using UnityEditor;
 using UnityEngine;
 using Random = Unity.Mathematics.Random;
@@ -18,7 +19,7 @@ namespace Editor.StructureEditor
 
         private BlockDatabase _blockDatabase;
         private List<BlockType> _allBlockTypes;
-        private readonly Dictionary<ushort, Mesh> _meshCache = new Dictionary<ushort, Mesh>();
+        private readonly Dictionary<uint, Mesh> _meshCache = new Dictionary<uint, Mesh>();
         private Material _targetMaterial;
         private Material _fluidMaterial;
 
@@ -27,6 +28,7 @@ namespace Editor.StructureEditor
         {
             public Vector3Int Position;
             public ushort BlockID;
+            public byte Meta;
             public Color ComponentColor;
             public bool IsFluid;
         }
@@ -103,9 +105,13 @@ namespace Editor.StructureEditor
             _meshCache.Clear();
         }
 
-        private Mesh GetBlockMesh(ushort blockID)
+        private Mesh GetBlockMesh(ushort blockID, byte meta)
         {
-            if (_meshCache.TryGetValue(blockID, out Mesh existingMesh))
+            // Pack (blockID, meta) into a single uint key so different orientations
+            // of the same block produce distinct cached meshes.
+            uint cacheKey = ((uint)blockID << 8) | meta;
+
+            if (_meshCache.TryGetValue(cacheKey, out Mesh existingMesh))
             {
                 return existingMesh;
             }
@@ -115,8 +121,8 @@ namespace Editor.StructureEditor
                 BlockType blockType = _allBlockTypes[blockID];
                 if (blockType != null)
                 {
-                    Mesh newMesh = EditorMeshGenerator.GenerateBlockMesh(blockType, _allBlockTypes);
-                    _meshCache[blockID] = newMesh;
+                    Mesh newMesh = EditorMeshGenerator.GenerateBlockMesh(blockType, _allBlockTypes, meta);
+                    _meshCache[cacheKey] = newMesh;
                     return newMesh;
                 }
             }
@@ -153,7 +159,7 @@ namespace Editor.StructureEditor
 
             foreach (var block in _previewBlocks)
             {
-                Mesh mesh = GetBlockMesh(block.BlockID);
+                Mesh mesh = GetBlockMesh(block.BlockID, block.Meta);
                 if (mesh != null)
                 {
                     Color tint = _colorCodeComponents ? block.ComponentColor : Color.white;
@@ -251,10 +257,14 @@ namespace Editor.StructureEditor
                             Vector3Int worldPos = currentPivot + rotatedLocalPos;
 
                             BlockType type = block.blockID < _allBlockTypes.Count ? _allBlockTypes[block.blockID] : null;
+                            byte rotatedMeta = type != null
+                                ? VoxelMetadataUtility.RotateMetaY(type.metadataSchema, block.meta, totalRotation)
+                                : block.meta;
                             _previewBlocks.Add(new PreviewBlock
                             {
                                 Position = worldPos,
                                 BlockID = block.blockID,
+                                Meta = rotatedMeta,
                                 ComponentColor = compColor,
                                 IsFluid = type != null && type.fluidType != FluidType.None,
                             });
@@ -285,10 +295,14 @@ namespace Editor.StructureEditor
                                 Vector3Int worldPos = partOrigin + rotatedLocalPos;
 
                                 BlockType type = block.blockID < _allBlockTypes.Count ? _allBlockTypes[block.blockID] : null;
+                                byte rotatedMeta = type != null
+                                    ? VoxelMetadataUtility.RotateMetaY(type.metadataSchema, block.meta, totalRotation)
+                                    : block.meta;
                                 _previewBlocks.Add(new PreviewBlock
                                 {
                                     Position = worldPos,
                                     BlockID = block.blockID,
+                                    Meta = rotatedMeta,
                                     ComponentColor = compColor,
                                     IsFluid = type != null && type.fluidType != FluidType.None,
                                 });

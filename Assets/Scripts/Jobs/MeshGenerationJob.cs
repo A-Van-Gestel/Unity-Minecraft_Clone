@@ -296,6 +296,9 @@ namespace Jobs
                 case MetadataSchema.Axis3:
                     GenerateStandardCubeMesh_Axis3(pos, packedData, id, voxelProps);
                     break;
+                case MetadataSchema.Facing6:
+                    GenerateStandardCubeMesh_Facing6(pos, packedData, id, voxelProps);
+                    break;
                 case MetadataSchema.HorizontalOnly:
                     // HorizontalOnly's frozen bit layout is intentionally aligned with the legacy
                     // 4-way yaw storage indices (see PER_BLOCK_METADATA_SCHEMAS.md §5.3), so the
@@ -414,6 +417,36 @@ namespace Jobs
                     // un-rotated world face index `p`, since cube vertices are axis-symmetric.
                     int effectiveFace = BurstAxis3MeshUtility.GetEffectiveFace(axis, p);
                     int uvQuarterTurnsCW = BurstAxis3MeshUtility.GetUvQuarterTurnsCW(axis, p);
+                    int textureID = GetTextureID(id, effectiveFace);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f, uvQuarterTurnsCW,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                        voxelProps.RenderNeighborFaces);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.Facing6"/> blocks
+        /// (directional blocks, observers, dispensers). Uses precomputed face-remap LUTs in
+        /// <see cref="BurstFacing6MeshUtility"/> — no per-voxel quaternion rotation.
+        /// </summary>
+        private void GenerateStandardCubeMesh_Facing6(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte facing = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Facing6, meta, voxelProps.DefaultMetadata);
+
+            for (int p = 0; p < 6; p++)
+            {
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                {
+                    int effectiveFace = BurstFacing6MeshUtility.GetEffectiveFace(facing, p);
+                    int uvQuarterTurnsCW = BurstFacing6MeshUtility.GetUvQuarterTurnsCW(facing, p);
                     int textureID = GetTextureID(id, effectiveFace);
                     float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 

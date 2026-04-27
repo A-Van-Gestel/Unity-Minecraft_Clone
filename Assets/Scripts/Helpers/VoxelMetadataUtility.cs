@@ -96,6 +96,11 @@ namespace Helpers
         public static byte DominantAxisFromLookVector(float3 lookVector)
             => BurstVoxelMetadataUtility.DominantAxisFromLookVector(lookVector);
 
+        /// <inheritdoc cref="BurstVoxelMetadataUtility.Facing6FromLookVector"/>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte Facing6FromLookVector(float3 lookVector)
+            => BurstVoxelMetadataUtility.Facing6FromLookVector(lookVector);
+
         /// <inheritdoc cref="BurstVoxelMetadataUtility.RotateMetaY"/>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte RotateMetaY(MetadataSchema schema, byte meta, int steps)

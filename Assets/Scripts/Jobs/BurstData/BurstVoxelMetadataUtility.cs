@@ -242,12 +242,12 @@ namespace Jobs.BurstData
         /// or <see cref="AXIS_Z"/>.
         /// </summary>
         /// <param name="lookVector">The look direction (typically <c>Camera.main.transform.forward</c>).
-        /// Need not be normalised — only relative magnitudes matter.</param>
+        /// Need not be normalized — only relative magnitudes matter.</param>
         /// <returns>The axis whose absolute component is largest in <paramref name="lookVector"/>.</returns>
         /// <remarks>
         /// <para>Designed for <see cref="PlacementMetadataMode.PlayerLookAxis"/>: the player's camera
         /// direction determines which axis a freshly placed Axis3 block (a log, pillar, etc.) aligns with.</para>
-        /// <para><b>Tie-break</b>: ties resolve in favour of <see cref="AXIS_Y"/> first, then <see cref="AXIS_X"/>.
+        /// <para><b>Tie-break</b>: ties resolve in favor of <see cref="AXIS_Y"/> first, then <see cref="AXIS_X"/>.
         /// In practice ties only occur when the player looks at exactly 45° between two axes — they are
         /// resolved deterministically so the same look vector always produces the same placement.</para>
         /// <para>Axis is direction-agnostic: looking at <c>(+1, 0, 0)</c> and <c>(-1, 0, 0)</c> both
@@ -263,6 +263,34 @@ namespace Jobs.BurstData
             if (ay >= ax && ay >= az) return AXIS_Y;
             if (ax >= az) return AXIS_X;
             return AXIS_Z;
+        }
+
+        /// <summary>
+        /// Projects a 3D look vector onto the closest of 6 face directions and returns the
+        /// corresponding <see cref="MetadataSchema.Facing6"/> value.
+        /// </summary>
+        /// <param name="lookVector">The look direction (typically <c>Camera.main.transform.forward</c>).
+        /// Need not be normalized — only relative magnitudes and signs matter.</param>
+        /// <returns>A Facing6 value: 0=South, 1=North, 2=Top, 3=Bottom, 4=West, 5=East.</returns>
+        /// <remarks>
+        /// <para>Designed for <see cref="PlacementMetadataMode.PlayerLookAxis"/> combined with
+        /// <see cref="MetadataSchema.Facing6"/>: the player's camera direction determines which
+        /// face a freshly placed directional block points toward.</para>
+        /// <para><b>Tie-break</b>: ties resolve in favor of Y first, then X, matching
+        /// <see cref="DominantAxisFromLookVector"/>.</para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte Facing6FromLookVector(float3 lookVector)
+        {
+            float ax = math.abs(lookVector.x);
+            float ay = math.abs(lookVector.y);
+            float az = math.abs(lookVector.z);
+
+            if (ay >= ax && ay >= az)
+                return lookVector.y >= 0 ? VoxelOrientation.Top : VoxelOrientation.Bottom;
+            if (ax >= az)
+                return lookVector.x >= 0 ? VoxelOrientation.East : VoxelOrientation.West;
+            return lookVector.z >= 0 ? VoxelOrientation.North : VoxelOrientation.South;
         }
 
         /// <summary>
