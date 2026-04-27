@@ -196,6 +196,26 @@ namespace Editor.BlockEditor.Helpers
                         break;
                     }
 
+                    case MetadataSchema.Facing6Roll2:
+                    {
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Facing6Roll2, meta, defaultMeta: 0);
+                        BurstVoxelMetadataUtility.DecodeFacing6Roll2(normalizedMeta, out byte facing, out byte roll);
+
+                        for (int p = 0; p < 6; p++)
+                        {
+                            int effectiveFace = BurstFacing6Roll2MeshUtility.GetEffectiveFace(facing, roll, p);
+                            int uvQuarterTurnsCW = BurstFacing6Roll2MeshUtility.GetUvQuarterTurnsCW(facing, roll, p);
+                            int textureID = blockType.GetTextureID(effectiveFace);
+                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
+
                     case MetadataSchema.HorizontalOnly:
                     case MetadataSchema.None:
                     default:

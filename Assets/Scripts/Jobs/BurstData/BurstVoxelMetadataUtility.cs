@@ -166,6 +166,14 @@ namespace Jobs.BurstData
         public static byte DecodeFacing6Roll2Roll(byte meta)
             => (byte)((meta & FACING6_ROLL2_ROLL_MASK_SHIFTED) >> FACING6_ROLL2_ROLL_SHIFT);
 
+        /// <summary>Decodes both the facing and roll components from a <see cref="MetadataSchema.Facing6Roll2"/> raw metadata byte.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void DecodeFacing6Roll2(byte meta, out byte facing, out byte roll)
+        {
+            facing = (byte)(meta & FACING6_ROLL2_FACING_MASK);
+            roll = (byte)((meta & FACING6_ROLL2_ROLL_MASK_SHIFTED) >> FACING6_ROLL2_ROLL_SHIFT);
+        }
+
         /// <summary>Decodes the 4-way yaw value from bits 0-1 of a raw metadata byte.</summary>
         /// <param name="meta">The raw metadata byte.</param>
         /// <returns>The yaw value (0=N, 1=S, 2=W, 3=E).</returns>

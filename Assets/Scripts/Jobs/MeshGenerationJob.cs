@@ -299,6 +299,9 @@ namespace Jobs
                 case MetadataSchema.Facing6:
                     GenerateStandardCubeMesh_Facing6(pos, packedData, id, voxelProps);
                     break;
+                case MetadataSchema.Facing6Roll2:
+                    GenerateStandardCubeMesh_Facing6Roll2(pos, packedData, id, voxelProps);
+                    break;
                 case MetadataSchema.HorizontalOnly:
                     // HorizontalOnly's frozen bit layout is intentionally aligned with the legacy
                     // 4-way yaw storage indices (see PER_BLOCK_METADATA_SCHEMAS.md §5.3), so the
@@ -447,6 +450,36 @@ namespace Jobs
                 {
                     int effectiveFace = BurstFacing6MeshUtility.GetEffectiveFace(facing, p);
                     int uvQuarterTurnsCW = BurstFacing6MeshUtility.GetUvQuarterTurnsCW(facing, p);
+                    int textureID = GetTextureID(id, effectiveFace);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f, uvQuarterTurnsCW,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                        voxelProps.RenderNeighborFaces);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.Facing6Roll2"/> blocks.
+        /// Uses precomputed face-remap LUTs in <see cref="BurstFacing6Roll2MeshUtility"/>.
+        /// </summary>
+        private void GenerateStandardCubeMesh_Facing6Roll2(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Facing6Roll2, meta, voxelProps.DefaultMetadata);
+            BurstVoxelMetadataUtility.DecodeFacing6Roll2(normalizedMeta, out byte facing, out byte roll);
+
+            for (int p = 0; p < 6; p++)
+            {
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                {
+                    int effectiveFace = BurstFacing6Roll2MeshUtility.GetEffectiveFace(facing, roll, p);
+                    int uvQuarterTurnsCW = BurstFacing6Roll2MeshUtility.GetUvQuarterTurnsCW(facing, roll, p);
                     int textureID = GetTextureID(id, effectiveFace);
                     float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 

@@ -102,6 +102,9 @@ namespace Editor.Validation
                 Test_BurstAxis3MeshUtility_UvQuarterTurnsStayInRange();
                 Test_BurstAxis3MeshUtility_SidewaysLogsRotateBarkUvs();
 
+                Test_BurstFacing6Roll2MeshUtility_Roll0IsIdentityToFacing6();
+                Test_BurstFacing6Roll2MeshUtility_FrontFaceStaysFront();
+
                 Test_HorizontalOnly_RoundTrip();
                 Test_HorizontalOnly_IsValidMeta();
                 Test_HorizontalOnly_NormalizeMeta();
@@ -159,10 +162,17 @@ namespace Editor.Validation
                 for (byte roll = 0; roll <= BurstVoxelMetadataUtility.FACING6_ROLL2_ROLL_MAX_VALUE; roll++)
                 {
                     byte meta = BurstVoxelMetadataUtility.EncodeFacing6Roll2(facing, roll);
+
+                    // Test individual decoders
                     byte decodedFacing = BurstVoxelMetadataUtility.DecodeFacing6Roll2Facing(meta);
                     byte decodedRoll = BurstVoxelMetadataUtility.DecodeFacing6Roll2Roll(meta);
                     AssertEqual(facing, decodedFacing, $"Facing6Roll2 facing round-trip f={facing} r={roll}");
                     AssertEqual(roll, decodedRoll, $"Facing6Roll2 roll round-trip f={facing} r={roll}");
+
+                    // Test combined decoder
+                    BurstVoxelMetadataUtility.DecodeFacing6Roll2(meta, out byte combinedFacing, out byte combinedRoll);
+                    AssertEqual(facing, combinedFacing, $"Facing6Roll2 combined facing round-trip f={facing} r={roll}");
+                    AssertEqual(roll, combinedRoll, $"Facing6Roll2 combined roll round-trip f={facing} r={roll}");
                 }
             }
 
@@ -652,6 +662,40 @@ namespace Editor.Validation
                     "Z-axis log: world left face rotates bark UVs");
                 AssertTrue(BurstAxis3MeshUtility.GetUvQuarterTurnsCW(BurstVoxelMetadataUtility.AXIS_Z, 5) != 0,
                     "Z-axis log: world right face rotates bark UVs");
+            }
+
+            // ===== BurstFacing6Roll2MeshUtility face remap =====
+
+            private void Test_BurstFacing6Roll2MeshUtility_Roll0IsIdentityToFacing6()
+            {
+                for (byte facing = 0; facing <= BurstVoxelMetadataUtility.FACING6_MAX_VALUE; facing++)
+                for (int worldFace = 0; worldFace < 6; worldFace++)
+                {
+                    byte expectedFace = BurstFacing6MeshUtility.GetEffectiveFace(facing, worldFace);
+                    byte actualFace = BurstFacing6Roll2MeshUtility.GetEffectiveFace(facing, roll: 0, worldFace);
+                    AssertEqual(expectedFace, actualFace, $"Roll 0 face identity to Facing6 for f={facing} wf={worldFace}");
+
+                    byte expectedUv = BurstFacing6MeshUtility.GetUvQuarterTurnsCW(facing, worldFace);
+                    byte actualUv = BurstFacing6Roll2MeshUtility.GetUvQuarterTurnsCW(facing, roll: 0, worldFace);
+                    AssertEqual(expectedUv, actualUv, $"Roll 0 UV identity to Facing6 for f={facing} wf={worldFace}");
+                }
+            }
+
+            private void Test_BurstFacing6Roll2MeshUtility_FrontFaceStaysFront()
+            {
+                for (byte facing = 0; facing <= BurstVoxelMetadataUtility.FACING6_MAX_VALUE; facing++)
+                for (byte roll = 0; roll <= BurstVoxelMetadataUtility.FACING6_ROLL2_ROLL_MAX_VALUE; roll++)
+                {
+                    for (int wf = 0; wf < 6; wf++)
+                    {
+                        byte faceAfterFacing = BurstFacing6MeshUtility.GetEffectiveFace(facing, wf);
+                        byte faceAfterRoll = BurstFacing6Roll2MeshUtility.GetEffectiveFace(facing, roll, wf);
+                        if (faceAfterFacing == 1 || faceAfterFacing == 0) // Front or Back
+                        {
+                            AssertEqual(faceAfterFacing, faceAfterRoll, $"Roll doesn't move front/back face f={facing} r={roll} wf={wf}");
+                        }
+                    }
+                }
             }
 
             // ===== MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3 (Phase 2d) =====

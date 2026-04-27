@@ -119,6 +119,9 @@ public class PlayerInteraction : MonoBehaviour
                 BurstVoxelMetadataUtility.DominantAxisFromLookVector(_playerCamera.forward),
             PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Facing6 =>
                 BurstVoxelMetadataUtility.Facing6FromLookVector(_playerCamera.forward),
+            PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Facing6Roll2 =>
+                // TODO: Defaulting roll to 0. Future improvement: derive roll from secondary player look axis or wrench tool.
+                BurstVoxelMetadataUtility.EncodeFacing6Roll2(BurstVoxelMetadataUtility.Facing6FromLookVector(_playerCamera.forward), roll: 0),
             PlacementMetadataMode.PlayerLookAxis =>
                 placedBlockType.defaultMetadata,
             _ => placedBlockType.defaultMetadata,
