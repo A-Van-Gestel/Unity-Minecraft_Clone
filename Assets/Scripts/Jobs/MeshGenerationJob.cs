@@ -303,11 +303,7 @@ namespace Jobs
                     GenerateStandardCubeMesh_Facing6Roll2(pos, packedData, id, voxelProps);
                     break;
                 case MetadataSchema.HorizontalOnly:
-                    // HorizontalOnly's frozen bit layout is intentionally aligned with the legacy
-                    // 4-way yaw storage indices (see PER_BLOCK_METADATA_SCHEMAS.md §5.3), so the
-                    // legacy meshing path produces correct output for HorizontalOnly meta bytes
-                    // without any new code. The explicit case arm documents the intent.
-                    GenerateStandardCubeMesh_Legacy(pos, packedData, id, voxelProps);
+                    GenerateStandardCubeMesh_HorizontalOnly(pos, packedData, id, voxelProps);
                     break;
                 default:
                     GenerateStandardCubeMesh_Legacy(pos, packedData, id, voxelProps);
@@ -375,6 +371,52 @@ namespace Jobs
                 if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
                     int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
+                    int textureID = GetTextureID(id, translatedP);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+                    VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                        voxelProps.RenderNeighborFaces);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.HorizontalOnly"/> blocks.
+        /// Extracts the yaw from the metadata byte and applies the legacy rotation logic.
+        /// </summary>
+        private void GenerateStandardCubeMesh_HorizontalOnly(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.HorizontalOnly, voxelProps.DefaultMetadata, 0); // Default to North (0)
+            byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.HorizontalOnly, meta, normalizedDefaultMeta);
+
+            byte yaw = BurstVoxelMetadataUtility.DecodeHorizontalOnly(normalizedMeta);
+
+            // Map the HorizontalOnly yaw (0=North, 1=South, 2=West, 3=East)
+            // to the legacy orientation indices (1=North, 0=South, 4=West, 5=East)
+            // so we can reuse VoxelHelper.GetRotationAngle and GetTranslatedFaceIndex.
+            byte legacyOrientation = yaw switch
+            {
+                0 => VoxelOrientation.North, // North
+                1 => VoxelOrientation.South, // South
+                2 => VoxelOrientation.West, // West
+                3 => VoxelOrientation.East, // East
+                _ => VoxelOrientation.North
+            };
+
+            float rotation = VoxelHelper.GetRotationAngle(legacyOrientation);
+
+            for (int p = 0; p < 6; p++)
+            {
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                {
+                    int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, legacyOrientation);
                     int textureID = GetTextureID(id, translatedP);
                     float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 

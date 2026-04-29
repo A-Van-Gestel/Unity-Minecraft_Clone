@@ -74,7 +74,7 @@ namespace Data
         /// <summary>Use the dominant axis of the player's 3D look vector. The first non-yaw placement path in the engine; intended for <see cref="MetadataSchema.Axis3"/> blocks.</summary>
         PlayerLookAxis = 2,
 
-        // Reserved: 3 = SurfaceFacing (orient toward the surface the block was placed against).
-        // Not included in the initial implementation; add only when a block actually needs it.
+        /// <summary>Orient the block toward the surface it was placed against (e.g., torches attached to walls).</summary>
+        SurfaceFacing = 3,
     }
 }

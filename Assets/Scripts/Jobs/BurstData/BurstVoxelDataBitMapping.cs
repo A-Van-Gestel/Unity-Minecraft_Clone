@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Data;
 using Unity.Burst;
 using Unity.Mathematics;
 

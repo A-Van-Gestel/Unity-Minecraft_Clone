@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Data;
 using Unity.Burst;
 using Unity.Mathematics;
+using UnityEngine;
 
 namespace Jobs.BurstData
 {
@@ -274,6 +275,24 @@ namespace Jobs.BurstData
         }
 
         /// <summary>
+        /// Projects a 3D look vector onto the horizontal plane and returns the
+        /// corresponding <see cref="MetadataSchema.HorizontalOnly"/> value.
+        /// </summary>
+        /// <param name="lookVector">The look direction (typically <c>Camera.main.transform.forward</c>).
+        /// Need not be normalized — only relative magnitudes and signs matter.</param>
+        /// <returns>A HorizontalOnly yaw value: 0=North, 1=South, 2=West, 3=East.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte HorizontalOnlyFromLookVector(float3 lookVector)
+        {
+            float ax = math.abs(lookVector.x);
+            float az = math.abs(lookVector.z);
+
+            if (ax >= az)
+                return lookVector.x >= 0 ? (byte)3 /*East*/ : (byte)2 /*West*/;
+            return lookVector.z >= 0 ? (byte)1 /*South*/ : (byte)0 /*North*/;
+        }
+
+        /// <summary>
         /// Projects a 3D look vector onto the closest of 6 face directions and returns the
         /// corresponding <see cref="MetadataSchema.Facing6"/> value.
         /// </summary>
@@ -299,6 +318,41 @@ namespace Jobs.BurstData
             if (ax >= az)
                 return lookVector.x >= 0 ? VoxelOrientation.East : VoxelOrientation.West;
             return lookVector.z >= 0 ? VoxelOrientation.North : VoxelOrientation.South;
+        }
+
+        /// <summary>
+        /// Converts a placement surface hit normal into the corresponding <see cref="MetadataSchema.Facing6"/> orientation.
+        /// The block will face away from the surface (e.g. attaching to a wall's South face means the block faces South).
+        /// </summary>
+        /// <param name="hitNormal">The surface normal of the block being placed against.</param>
+        /// <returns>A Facing6 value: 0=South, 1=North, 2=Top, 3=Bottom, 4=West, 5=East.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte Facing6FromHitNormal(Vector3Int hitNormal)
+        {
+            if (hitNormal.z > 0) return VoxelOrientation.South;
+            if (hitNormal.z < 0) return VoxelOrientation.North;
+            if (hitNormal.y > 0) return VoxelOrientation.Bottom;
+            if (hitNormal.y < 0) return VoxelOrientation.Top;
+            if (hitNormal.x > 0) return VoxelOrientation.West;
+            if (hitNormal.x < 0) return VoxelOrientation.East;
+
+            return VoxelOrientation.North; // Fallback
+        }
+
+        /// <summary>
+        /// Converts a placement surface hit normal into the corresponding <see cref="MetadataSchema.HorizontalOnly"/> orientation.
+        /// </summary>
+        /// <param name="hitNormal">The surface normal of the block being placed against.</param>
+        /// <returns>A HorizontalOnly yaw value: 0=North, 1=South, 2=West, 3=East.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte HorizontalOnlyFromHitNormal(Vector3Int hitNormal)
+        {
+            if (hitNormal.z > 0) return 0; // North
+            if (hitNormal.z < 0) return 1; // South
+            if (hitNormal.x > 0) return 3; // East
+            if (hitNormal.x < 0) return 2; // West
+
+            return 0; // Fallback for Top/Bottom
         }
 
         /// <summary>

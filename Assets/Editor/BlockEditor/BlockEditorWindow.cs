@@ -44,6 +44,12 @@ namespace Editor.BlockEditor
         private int _previewFluidLevel = 0;
         private bool _forceOpaquePreview = false;
 
+        // --- Metadata Preview ---
+        private int _previewFacing = 0; // Default to South (0)
+        private int _previewRoll = 0; // Default to 0
+        private int _previewAxis = 0; // Default to Y-axis (0)
+        private int _previewYaw = 0; // Default to North (0)
+
         // --- Custom GUI Style ---
         private GUIStyle _listButtonStyle;
         private bool _blockIdsStale = false;

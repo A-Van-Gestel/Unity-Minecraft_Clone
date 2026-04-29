@@ -2,6 +2,7 @@ using Data;
 using Editor.BlockEditor.Helpers;
 using Editor.DataGeneration;
 using Editor.Libraries;
+using Jobs.BurstData;
 using UnityEditor;
 using UnityEngine;
 
@@ -130,6 +131,10 @@ namespace Editor.BlockEditor
                 {
                     _selectedBlock = _blockTypesCopy[index];
                     _previewFluidLevel = 0;
+                    _previewFacing = 0; // Default to South
+                    _previewRoll = 0;
+                    _previewAxis = 0;
+                    _previewYaw = 0;
                     UpdatePreviewMesh();
                 }
             );
@@ -286,6 +291,46 @@ namespace Editor.BlockEditor
                         "fallback for invalid/missing values. Must fit within the chosen " +
                         "schema's valid range (see Metadata Schema tooltip)."),
                     _selectedBlock.defaultMetadata, 0, 255);
+
+                // --- Metadata Editor Preview UI ---
+                if (_selectedBlock.metadataSchema != MetadataSchema.None && _selectedBlock.metadataSchema != MetadataSchema.FluidLevel4)
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Orientation Preview", EditorStyles.boldLabel);
+                    EditorGUI.BeginChangeCheck();
+
+                    switch (_selectedBlock.metadataSchema)
+                    {
+                        case MetadataSchema.Axis3:
+                            _previewAxis = EditorGUILayout.IntPopup("Preview Axis", _previewAxis,
+                                new[] { "Y-Axis (Up & Down)", "X-Axis (East & West)", "Z-Axis (North & South)" },
+                                new[] { 0, 1, 2 });
+                            break;
+                        case MetadataSchema.Facing6:
+                            _previewFacing = EditorGUILayout.IntPopup("Preview Facing", _previewFacing,
+                                new[] { "Top", "Bottom", "North", "South", "West", "East" },
+                                new[] { 2, 3, 1, 0, 4, 5 });
+                            break;
+                        case MetadataSchema.Facing6Roll2:
+                            _previewFacing = EditorGUILayout.IntPopup("Preview Facing", _previewFacing,
+                                new[] { "Top", "Bottom", "North", "South", "West", "East" },
+                                new[] { 2, 3, 1, 0, 4, 5 });
+                            _previewRoll = EditorGUILayout.IntPopup("Preview Roll", _previewRoll,
+                                new[] { "0°", "90° CW", "180°", "270° CW" },
+                                new[] { 0, 1, 2, 3 });
+                            break;
+                        case MetadataSchema.HorizontalOnly:
+                            _previewYaw = EditorGUILayout.IntPopup("Preview Yaw", _previewYaw,
+                                new[] { "North", "South", "West", "East" },
+                                new[] { 0, 1, 2, 3 });
+                            break;
+                    }
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        UpdatePreviewMesh();
+                    }
+                }
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Lighting Properties", EditorStyles.boldLabel);
@@ -507,6 +552,10 @@ namespace Editor.BlockEditor
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
+            _previewFacing = 0; // Default to South
+            _previewRoll = 0;
+            _previewAxis = 0;
+            _previewYaw = 0;
 
             // Automatically select the new block for immediate editing
             _selectedBlockIndex = _blockTypesCopy.Count - 1;
@@ -559,6 +608,10 @@ namespace Editor.BlockEditor
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
+            _previewFacing = 0; // Default to South
+            _previewRoll = 0;
+            _previewAxis = 0;
+            _previewYaw = 0;
 
             // Select the newly created duplicate
             _selectedBlockIndex = insertIndex;
@@ -609,7 +662,31 @@ namespace Editor.BlockEditor
 
         private void UpdatePreviewMesh()
         {
-            Mesh newMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, _previewFluidLevel);
+            byte previewMeta = _selectedBlock.defaultMetadata;
+            if (_selectedBlock.fluidType != FluidType.None)
+            {
+                // Fluid level preview handles mock metadata inside the mesh generator
+            }
+            else
+            {
+                switch (_selectedBlock.metadataSchema)
+                {
+                    case MetadataSchema.Axis3:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeAxis3((byte)_previewAxis);
+                        break;
+                    case MetadataSchema.Facing6:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeFacing6((byte)_previewFacing);
+                        break;
+                    case MetadataSchema.Facing6Roll2:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeFacing6Roll2((byte)_previewFacing, (byte)_previewRoll);
+                        break;
+                    case MetadataSchema.HorizontalOnly:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeHorizontalOnly((byte)_previewYaw);
+                        break;
+                }
+            }
+
+            Mesh newMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, previewMeta, _previewFluidLevel);
             Material targetMaterial = null;
 
             // Material switching logic

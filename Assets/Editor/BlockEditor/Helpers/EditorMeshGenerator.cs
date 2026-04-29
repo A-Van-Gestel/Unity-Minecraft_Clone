@@ -28,6 +28,13 @@ namespace Editor.BlockEditor.Helpers
             => GenerateBlockMeshInternal(blockType, allBlockTypes, meta, fluidLevel: 0);
 
         /// <summary>
+        /// Generates a Mesh for a given BlockType with both an explicit metadata byte and fluid level.
+        /// Used by the Block Editor to preview block metadata.
+        /// </summary>
+        public static Mesh GenerateBlockMesh(BlockType blockType, List<BlockType> allBlockTypes, byte meta, int fluidLevel)
+            => GenerateBlockMeshInternal(blockType, allBlockTypes, meta, fluidLevel);
+
+        /// <summary>
         /// Shared implementation for block mesh generation. Dispatches on block type category
         /// (Fluid, Cross, Custom, Standard) and then on <see cref="MetadataSchema"/> for orientation.
         /// </summary>
@@ -217,13 +224,42 @@ namespace Editor.BlockEditor.Helpers
                     }
 
                     case MetadataSchema.HorizontalOnly:
+                    {
+                        byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.HorizontalOnly, blockType.defaultMetadata, 0); // Default to North (0)
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.HorizontalOnly, meta, normalizedDefaultMeta);
+
+                        byte yaw = BurstVoxelMetadataUtility.DecodeHorizontalOnly(normalizedMeta);
+
+                        byte legacyOrientation = yaw switch
+                        {
+                            0 => 1, // North
+                            1 => 0, // South
+                            2 => 4, // West
+                            3 => 5, // East
+                            _ => 1,
+                        };
+
+                        float rotation = VoxelHelper.GetRotationAngle(legacyOrientation);
+
+                        for (int p = 0; p < 6; p++)
+                        {
+                            int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, legacyOrientation);
+                            int textureID = blockType.GetTextureID(translatedP);
+                            VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, 1.0f, Vector3Int.zero, rotation,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
+
                     case MetadataSchema.None:
                     default:
                     {
-                        // Legacy / None / HorizontalOnly preview: identity face mapping, no rotation.
-                        // The Block Editor canonical preview shows the block's "default" orientation;
-                        // HorizontalOnly's defaultMetadata=0 (North) is the same canonical view as
-                        // the None / legacy default, so a single code path covers both.
+                        // Legacy / None preview: identity face mapping, no rotation.
                         for (int p = 0; p < 6; p++)
                         {
                             int textureID = blockType.GetTextureID(p);

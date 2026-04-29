@@ -25,6 +25,8 @@ public class PlayerInteraction : MonoBehaviour
     /// </summary>
     private bool _blockPlaceable;
 
+    private VoxelRaycastResult _lastRaycastResult;
+
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
 
@@ -82,7 +84,7 @@ public class PlayerInteraction : MonoBehaviour
                 ushort placedBlockId = itemSlot.ItemSlot.Stack.ID;
                 BlockType placedBlockType = _world.BlockTypes[placedBlockId];
 
-                byte meta = ComputePlacementMeta(placedBlockType);
+                byte meta = ComputePlacementMeta(placedBlockType, _lastRaycastResult);
 
                 _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), placedBlockId)
                 {
@@ -101,7 +103,7 @@ public class PlayerInteraction : MonoBehaviour
     /// meta=0 so <c>BlockBehavior.Fluids</c> can fill them from a source on
     /// the first simulation tick.
     /// </summary>
-    private byte ComputePlacementMeta(BlockType placedBlockType)
+    private byte ComputePlacementMeta(BlockType placedBlockType, VoxelRaycastResult raycastResult)
     {
         if (placedBlockType.fluidType != FluidType.None)
         {
@@ -122,8 +124,14 @@ public class PlayerInteraction : MonoBehaviour
             PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Facing6Roll2 =>
                 // TODO: Defaulting roll to 0. Future improvement: derive roll from secondary player look axis or wrench tool.
                 BurstVoxelMetadataUtility.EncodeFacing6Roll2(BurstVoxelMetadataUtility.Facing6FromLookVector(_playerCamera.forward), roll: 0),
-            PlacementMetadataMode.PlayerLookAxis =>
-                placedBlockType.defaultMetadata,
+            PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.HorizontalOnly =>
+                BurstVoxelMetadataUtility.HorizontalOnlyFromLookVector(_playerCamera.forward),
+            PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.Facing6 =>
+                BurstVoxelMetadataUtility.Facing6FromHitNormal(raycastResult.HitNormal),
+            PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.Facing6Roll2 =>
+                BurstVoxelMetadataUtility.EncodeFacing6Roll2(BurstVoxelMetadataUtility.Facing6FromHitNormal(raycastResult.HitNormal), roll: 0),
+            PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.HorizontalOnly =>
+                BurstVoxelMetadataUtility.HorizontalOnlyFromHitNormal(raycastResult.HitNormal),
             _ => placedBlockType.defaultMetadata,
         };
     }
@@ -156,11 +164,13 @@ public class PlayerInteraction : MonoBehaviour
                 float zCheck = GetCoordinateOffset(pos.z);
 
                 if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
-                    result.PlacePosition = result.HitPosition + (xCheck < 0 ? Vector3Int.right : Vector3Int.left);
+                    result.HitNormal = xCheck < 0 ? Vector3Int.right : Vector3Int.left;
                 else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
-                    result.PlacePosition = result.HitPosition + (zCheck < 0 ? Vector3Int.forward : Vector3Int.back);
+                    result.HitNormal = zCheck < 0 ? Vector3Int.forward : Vector3Int.back;
                 else
-                    result.PlacePosition = result.HitPosition + (yCheck < 0 ? Vector3Int.up : Vector3Int.down);
+                    result.HitNormal = yCheck < 0 ? Vector3Int.up : Vector3Int.down;
+
+                result.PlacePosition = result.HitPosition + result.HitNormal;
 
                 return result;
             }
@@ -185,6 +195,7 @@ public class PlayerInteraction : MonoBehaviour
     private void PlaceCursorBlocks()
     {
         VoxelRaycastResult result = RaycastForVoxel();
+        _lastRaycastResult = result;
 
         if (result.DidHit)
         {
@@ -243,5 +254,6 @@ public struct VoxelRaycastResult
 {
     public bool DidHit;
     public Vector3Int HitPosition;
+    public Vector3Int HitNormal;
     public Vector3Int PlacePosition;
 }

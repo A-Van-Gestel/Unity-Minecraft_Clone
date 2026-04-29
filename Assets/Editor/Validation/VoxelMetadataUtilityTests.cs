@@ -104,6 +104,7 @@ namespace Editor.Validation
 
                 Test_BurstFacing6Roll2MeshUtility_Roll0IsIdentityToFacing6();
                 Test_BurstFacing6Roll2MeshUtility_FrontFaceStaysFront();
+                Test_BurstVoxelMetadataUtility_Facing6FromHitNormal();
 
                 Test_HorizontalOnly_RoundTrip();
                 Test_HorizontalOnly_IsValidMeta();
@@ -696,6 +697,16 @@ namespace Editor.Validation
                         }
                     }
                 }
+            }
+
+            private void Test_BurstVoxelMetadataUtility_Facing6FromHitNormal()
+            {
+                AssertEqual(VoxelOrientation.South, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.forward), "HitNormal +Z returns South");
+                AssertEqual(VoxelOrientation.North, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.back), "HitNormal -Z returns North");
+                AssertEqual(VoxelOrientation.Bottom, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.up), "HitNormal +Y returns Bottom");
+                AssertEqual(VoxelOrientation.Top, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.down), "HitNormal -Y returns Top");
+                AssertEqual(VoxelOrientation.West, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.right), "HitNormal +X returns West");
+                AssertEqual(VoxelOrientation.East, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.left), "HitNormal -X returns East");
             }
 
             // ===== MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3 (Phase 2d) =====

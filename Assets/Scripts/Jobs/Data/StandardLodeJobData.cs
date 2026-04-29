@@ -17,7 +17,7 @@ namespace Jobs.Data
         public FastNoiseConfig NoiseConfig;
 
         /// <summary>
-        /// Constructs a StandardLodeJobData from its authoring <see cref="Data.WorldTypes.StandardLode"/>.
+        /// Constructs a StandardLodeJobData from its authoring <see cref="StandardLode"/>.
         /// </summary>
         /// <param name="lode">The authoring lode data.</param>
         public StandardLodeJobData(StandardLode lode)

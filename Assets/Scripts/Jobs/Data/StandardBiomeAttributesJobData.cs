@@ -3,7 +3,7 @@ using Data.WorldTypes;
 namespace Jobs.Data
 {
     /// <summary>
-    /// Blittable, job-safe representation of <see cref="Data.WorldTypes.StandardBiomeAttributes"/>.
+    /// Blittable, job-safe representation of <see cref="StandardBiomeAttributes"/>.
     /// Constructed by <c>StandardChunkGenerator.Initialize()</c> from the ScriptableObject array.
     /// Lodes are flattened into a shared <c>NativeArray&lt;StandardLodeJobData&gt;</c>, referenced by index range.
     /// </summary>
