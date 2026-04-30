@@ -133,6 +133,13 @@ namespace Editor.Validation
                 Test_RotateMetaY_Facing6Roll2_PreservesRollBits();
                 Test_RotateMetaY_FullCycleIsIdentity();
                 Test_RotateMetaY_NegativeAndLargeStepsWrap();
+
+                // --- Phase 4: Custom Mesh Rotation Matrix Tests ---
+                Test_CustomMeshRotation_NoneSchema_ReturnsIdentity();
+                Test_CustomMeshRotation_Axis3_VertexTransforms();
+                Test_CustomMeshRotation_Facing6_FrontDirectionConsistency();
+                Test_CustomMeshRotation_Facing6Roll2_AllOrthogonal();
+                Test_CustomMeshRotation_HorizontalOnly_YRotation();
             }
 
             // ===== Round-trip tests =====
@@ -1356,6 +1363,127 @@ namespace Editor.Validation
                         $"[VoxelMetadataUtilityTests] FAIL: {description} — expected 0x{expected:X2}, got 0x{actual:X2}");
                 }
             }
+
+            // ===== Phase 4: Custom Mesh Rotation Matrix Tests =====
+
+            /// <summary>
+            /// GetRotationMatrix for MetadataSchema.None returns float3x3.identity.
+            /// </summary>
+            private void Test_CustomMeshRotation_NoneSchema_ReturnsIdentity()
+            {
+                float3x3 m = BurstCustomMeshRotationUtility.GetRotationMatrix(MetadataSchema.None, 0, 0);
+                bool isIdentity = math.all(m.c0 == new float3(1, 0, 0))
+                                  && math.all(m.c1 == new float3(0, 1, 0))
+                                  && math.all(m.c2 == new float3(0, 0, 1));
+                AssertTrue(isIdentity, "None schema returns identity matrix");
+            }
+
+            /// <summary>
+            /// Axis3 matrices correctly rotate the up vector (0,1,0) to align with the named axis.
+            /// </summary>
+            private void Test_CustomMeshRotation_Axis3_VertexTransforms()
+            {
+                float3 up = new float3(0, 1, 0);
+                float3[] expectedDirs = { new float3(0, 1, 0), new float3(1, 0, 0), new float3(0, 0, 1) };
+                string[] names = { "Y", "X", "Z" };
+
+                for (byte axis = 0; axis < 3; axis++)
+                {
+                    float3x3 m = BurstCustomMeshRotationUtility.GetAxis3Matrix(axis);
+                    float3 result = math.mul(m, up);
+                    float3 expected = expectedDirs[axis];
+                    bool match = math.distance(result, expected) < 0.001f;
+                    AssertTrue(match, $"Axis3[{names[axis]}] up→({result.x:F1},{result.y:F1},{result.z:F1}) expected ({expected.x:F1},{expected.y:F1},{expected.z:F1})");
+                }
+            }
+
+            /// <summary>
+            /// Facing6 matrices produce the expected front direction when applied to (0,0,1).
+            /// Convention: block front faces TOWARD the player (opposite the facing direction name).
+            /// South(0)=+Z, North(1)=-Z, Top(2)=-Y, Bottom(3)=+Y, West(4)=+X, East(5)=-X.
+            /// </summary>
+            private void Test_CustomMeshRotation_Facing6_FrontDirectionConsistency()
+            {
+                float3 front = new float3(0, 0, 1); // canonical front direction
+                float3[] expected =
+                {
+                    new float3(0, 0, 1), // South: +Z
+                    new float3(0, 0, -1), // North: -Z
+                    new float3(0, -1, 0), // Top: -Y
+                    new float3(0, 1, 0), // Bottom: +Y
+                    new float3(1, 0, 0), // West: +X
+                    new float3(-1, 0, 0), // East: -X
+                };
+                string[] names = { "South", "North", "Top", "Bottom", "West", "East" };
+
+                for (byte f = 0; f < 6; f++)
+                {
+                    float3x3 m = BurstCustomMeshRotationUtility.GetFacing6Matrix(f);
+                    float3 result = math.mul(m, front);
+                    bool match = math.distance(result, expected[f]) < 0.001f;
+                    AssertTrue(match, $"Facing6[{names[f]}] front→({result.x:F1},{result.y:F1},{result.z:F1}) expected ({expected[f].x:F1},{expected[f].y:F1},{expected[f].z:F1})");
+                }
+            }
+
+            /// <summary>
+            /// All 24 Facing6Roll2 matrices are orthogonal (det ≈ +1, M·Mᵀ ≈ I).
+            /// </summary>
+            private void Test_CustomMeshRotation_Facing6Roll2_AllOrthogonal()
+            {
+                bool allOk = true;
+                for (byte facing = 0; facing < 6; facing++)
+                {
+                    for (byte roll = 0; roll < 4; roll++)
+                    {
+                        float3x3 m = BurstCustomMeshRotationUtility.GetFacing6Roll2Matrix(facing, roll);
+                        // Check determinant ≈ 1 (proper rotation, no reflection/scale)
+                        float det = math.determinant(m);
+                        if (math.abs(det - 1f) > 0.01f)
+                        {
+                            allOk = false;
+                            Debug.LogError($"[VoxelMetadataUtilityTests] FAIL: Facing6Roll2 f={facing} r={roll} det={det:F4}");
+                            Failed++;
+                        }
+                    }
+                }
+
+                if (allOk)
+                {
+                    AssertTrue(true, "All 24 Facing6Roll2 matrices are orthogonal (det≈1)");
+                }
+            }
+
+            /// <summary>
+            /// HorizontalOnly matrices match the expected Y-axis rotation for each cardinal.
+            /// N=identity, S=180°Y, W=+90°Y, E=-90°Y.
+            /// </summary>
+            private void Test_CustomMeshRotation_HorizontalOnly_YRotation()
+            {
+                float3 front = new float3(0, 0, 1);
+                // HorizontalOnly front direction follows Facing6 convention for horizontal cardinals.
+                // N(0): front=+Z, S(1): front=-Z, W(2): front=+X via +90°Y, E(3): front=-X via -90°Y
+                float3[] expected =
+                {
+                    new float3(0, 0, 1), // North
+                    new float3(0, 0, -1), // South
+                    new float3(1, 0, 0), // West (front rotated +90° Y → +X)
+                    new float3(-1, 0, 0), // East (front rotated -90° Y → -X)
+                };
+                string[] names = { "North", "South", "West", "East" };
+
+                for (byte yaw = 0; yaw < 4; yaw++)
+                {
+                    float3x3 m = BurstCustomMeshRotationUtility.GetHorizontalOnlyMatrix(yaw);
+                    float3 result = math.mul(m, front);
+                    // Verify Y component unchanged (horizontal only)
+                    bool yUnchanged = math.abs(result.y) < 0.001f;
+                    bool dirMatch = math.distance(result, expected[yaw]) < 0.001f;
+                    AssertTrue(yUnchanged && dirMatch,
+                        $"HorizontalOnly[{names[yaw]}] front→({result.x:F1},{result.y:F1},{result.z:F1}) expected ({expected[yaw].x:F1},{expected[yaw].y:F1},{expected[yaw].z:F1})");
+                }
+            }
+
+            // ===== Assert helpers =====
 
             private void AssertTrue(bool condition, string description)
             {

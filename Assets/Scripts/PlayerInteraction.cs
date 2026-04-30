@@ -122,18 +122,43 @@ public class PlayerInteraction : MonoBehaviour
             PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Facing6 =>
                 BurstVoxelMetadataUtility.Facing6FromLookVector(_playerCamera.forward),
             PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Facing6Roll2 =>
-                // TODO: Defaulting roll to 0. Future improvement: derive roll from secondary player look axis or wrench tool.
-                BurstVoxelMetadataUtility.EncodeFacing6Roll2(BurstVoxelMetadataUtility.Facing6FromLookVector(_playerCamera.forward), roll: 0),
+                ComputeFacing6Roll2Meta(_playerCamera.forward),
             PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.HorizontalOnly =>
                 BurstVoxelMetadataUtility.HorizontalOnlyFromLookVector(_playerCamera.forward),
             PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.Facing6 =>
                 BurstVoxelMetadataUtility.Facing6FromHitNormal(raycastResult.HitNormal),
             PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.Facing6Roll2 =>
-                BurstVoxelMetadataUtility.EncodeFacing6Roll2(BurstVoxelMetadataUtility.Facing6FromHitNormal(raycastResult.HitNormal), roll: 0),
+                ComputeFacing6Roll2Meta(_playerCamera.forward, raycastResult.HitNormal),
             PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.HorizontalOnly =>
                 BurstVoxelMetadataUtility.HorizontalOnlyFromHitNormal(raycastResult.HitNormal),
             _ => placedBlockType.defaultMetadata,
         };
+    }
+
+    /// <summary>
+    /// Computes Facing6Roll2 metadata from the player's look direction (for
+    /// <see cref="PlacementMetadataMode.PlayerLookAxis"/>). Facing is derived from
+    /// the dominant look axis; roll aligns the block's +Y toward the player when
+    /// placed on a floor/ceiling.
+    /// </summary>
+    private static byte ComputeFacing6Roll2Meta(Vector3 lookForward)
+    {
+        byte facing = BurstVoxelMetadataUtility.Facing6FromLookVector(lookForward);
+        byte roll = BurstVoxelMetadataUtility.RollFromLookVector(facing, lookForward);
+        return BurstVoxelMetadataUtility.EncodeFacing6Roll2(facing, roll);
+    }
+
+    /// <summary>
+    /// Computes Facing6Roll2 metadata from the hit surface normal (for
+    /// <see cref="PlacementMetadataMode.SurfaceFacing"/>). Facing is derived from
+    /// the surface normal; roll aligns the block's +Y toward the player when
+    /// placed on a floor/ceiling.
+    /// </summary>
+    private static byte ComputeFacing6Roll2Meta(Vector3 lookForward, Vector3Int hitNormal)
+    {
+        byte facing = BurstVoxelMetadataUtility.Facing6FromHitNormal(hitNormal);
+        byte roll = BurstVoxelMetadataUtility.RollFromLookVector(facing, lookForward);
+        return BurstVoxelMetadataUtility.EncodeFacing6Roll2(facing, roll);
     }
 
     /// <summary>

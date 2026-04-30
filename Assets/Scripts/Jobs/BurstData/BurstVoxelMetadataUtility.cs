@@ -64,6 +64,16 @@ namespace Jobs.BurstData
         /// <summary><see cref="MetadataSchema.HorizontalOnly"/> allows all four 2-bit values (0-3).</summary>
         public const byte HORIZONTAL_ONLY_MAX_VALUE = 3;
 
+        // ===== Placement tuning constants =====
+
+        /// <summary>
+        /// Horizontal bias multiplier for <see cref="Facing6FromLookVector"/>. The vertical axis (Y)
+        /// must exceed the largest horizontal component by this factor to produce a Top/Bottom facing.
+        /// At 1.4×, the crossover occurs at ~55° from horizontal (≈35° from vertical), preventing
+        /// slight downward/upward camera angles from overriding intuitive horizontal placement.
+        /// </summary>
+        private const float FACING6_VERTICAL_BIAS = 1.4f;
+
         // ===== Axis3 encoding (§8.1) =====
 
         /// <summary>Axis value for an upright (Y-axis) orientation — the default for unrotated blocks.</summary>
@@ -303,8 +313,13 @@ namespace Jobs.BurstData
         /// <para>Designed for <see cref="PlacementMetadataMode.PlayerLookAxis"/> combined with
         /// <see cref="MetadataSchema.Facing6"/>: the player's camera direction determines which
         /// face a freshly placed directional block points toward.</para>
-        /// <para><b>Tie-break</b>: ties resolve in favor of Y first, then X, matching
-        /// <see cref="DominantAxisFromLookVector"/>.</para>
+        /// <para><b>Horizontal bias</b>: the vertical axis (Y) must exceed the largest horizontal
+        /// component by a factor of <see cref="FACING6_VERTICAL_BIAS"/> to be selected. This
+        /// prevents looking slightly downward at a neighboring block from producing a Top/Bottom
+        /// facing when a horizontal cardinal is more intuitive. At the default bias of 1.4×,
+        /// the crossover occurs at ~55° from horizontal (≈35° from vertical).</para>
+        /// <para><b>Tie-break</b>: among horizontal axes, ties resolve in favor of X first,
+        /// matching <see cref="DominantAxisFromLookVector"/>.</para>
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte Facing6FromLookVector(float3 lookVector)
@@ -313,11 +328,79 @@ namespace Jobs.BurstData
             float ay = math.abs(lookVector.y);
             float az = math.abs(lookVector.z);
 
-            if (ay >= ax && ay >= az)
+            // Horizontal bias: Y must dominate the largest horizontal component by
+            // a multiplier to be chosen. This prevents slight downward/upward angles
+            // from overriding an obvious horizontal placement intent.
+            float maxHorizontal = math.max(ax, az);
+            if (ay >= maxHorizontal * FACING6_VERTICAL_BIAS)
                 return lookVector.y >= 0 ? VoxelOrientation.Top : VoxelOrientation.Bottom;
             if (ax >= az)
                 return lookVector.x >= 0 ? VoxelOrientation.East : VoxelOrientation.West;
             return lookVector.z >= 0 ? VoxelOrientation.North : VoxelOrientation.South;
+        }
+
+        /// <summary>
+        /// Computes the roll component for <see cref="MetadataSchema.Facing6Roll2"/> placement
+        /// based on the player's horizontal look direction and the already-determined facing.
+        /// </summary>
+        /// <param name="facing">The facing value (0-5) already determined by
+        /// <see cref="Facing6FromLookVector"/> or <see cref="Facing6FromHitNormal"/>.</param>
+        /// <param name="lookVector">The player's camera forward vector.</param>
+        /// <returns>A roll value 0-3 that aligns the block's canonical +Y (top) face toward
+        /// the player when facing is Top (2) or Bottom (3). Returns 0 for horizontal facings
+        /// where the top already faces upward naturally.</returns>
+        /// <remarks>
+        /// <para>Derivation: for each facing, the Facing6Roll2 rotation matrix transforms the
+        /// block's +Y axis to a specific world direction per roll. This method picks the roll
+        /// whose resulting direction best matches the block-to-player horizontal direction
+        /// (i.e. <c>-lookVector</c> projected onto XZ).</para>
+        /// <para><b>Top facing roll map</b> (block's +Y ends up at):
+        /// Roll 0→+Z, Roll 1→+X, Roll 2→-Z, Roll 3→-X.</para>
+        /// <para><b>Bottom facing roll map</b> (block's +Y ends up at):
+        /// Roll 0→-Z, Roll 1→+X, Roll 2→+Z, Roll 3→-X.</para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte RollFromLookVector(byte facing, float3 lookVector)
+        {
+            // Horizontal facings: top is already upward, no roll needed.
+            if (facing != VoxelOrientation.Top && facing != VoxelOrientation.Bottom)
+                return 0;
+
+            // Determine which horizontal cardinal the block-to-player direction is.
+            // Block-to-player = -lookVector (horizontal projection).
+            // Encode as: 0 = +Z, 1 = -Z, 2 = +X, 3 = -X
+            float ax = math.abs(lookVector.x);
+            float az = math.abs(lookVector.z);
+
+            int btp;
+            if (az >= ax)
+                btp = lookVector.z < 0 ? 0 : 1; // look -Z → btp +Z(0); look +Z → btp -Z(1)
+            else
+                btp = lookVector.x < 0 ? 2 : 3; // look -X → btp +X(2); look +X → btp -X(3)
+
+            // Top facing: +Y ends up at Roll0→+Z, Roll1→+X, Roll2→-Z, Roll3→-X
+            // We want the roll whose direction matches btp.
+            // btp 0(+Z)→Roll 0, btp 1(-Z)→Roll 2, btp 2(+X)→Roll 1, btp 3(-X)→Roll 3
+            if (facing == VoxelOrientation.Top)
+            {
+                switch (btp)
+                {
+                    case 0: return 0; // +Z
+                    case 1: return 2; // -Z
+                    case 2: return 1; // +X
+                    default: return 3; // -X
+                }
+            }
+
+            // Bottom facing: +Y ends up at Roll0→-Z, Roll1→+X, Roll2→+Z, Roll3→-X
+            // btp 0(+Z)→Roll 2, btp 1(-Z)→Roll 0, btp 2(+X)→Roll 1, btp 3(-X)→Roll 3
+            switch (btp)
+            {
+                case 0: return 2; // +Z
+                case 1: return 0; // -Z
+                case 2: return 1; // +X
+                default: return 3; // -X
+            }
         }
 
         /// <summary>

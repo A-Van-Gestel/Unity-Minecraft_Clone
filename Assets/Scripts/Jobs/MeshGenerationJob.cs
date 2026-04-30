@@ -4,6 +4,7 @@ using Jobs.BurstData;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Jobs
@@ -276,12 +277,12 @@ namespace Jobs
             {
                 switch (voxelProps.MetadataSchema)
                 {
-                    // Phase 2b will add dedicated arms here for schemas that need axis-aware face
-                    // selection instead of legacy quaternion rotation. E.g.:
-                    //
-                    //   case MetadataSchema.Axis3:
-                    //     GenerateCustomBlockMesh_Axis3(pos, packedData, id, voxelProps);
-                    //     break;
+                    case MetadataSchema.Axis3:
+                    case MetadataSchema.Facing6:
+                    case MetadataSchema.Facing6Roll2:
+                    case MetadataSchema.HorizontalOnly:
+                        GenerateCustomBlockMesh_SchemaAware(pos, packedData, id, voxelProps);
+                        break;
                     default:
                         GenerateCustomBlockMesh_Legacy(pos, packedData, id, voxelProps);
                         break;
@@ -347,6 +348,46 @@ namespace Jobs
                 }
             }
         }
+
+        /// <summary>
+        /// Schema-aware custom-mesh meshing path: decodes the rotation matrix from the metadata
+        /// byte via <see cref="BurstCustomMeshRotationUtility.GetRotationMatrix"/> and applies
+        /// full 3D rotation to every custom mesh vertex and normal.
+        /// </summary>
+        /// <remarks>
+        /// Handles <see cref="MetadataSchema.Axis3"/>, <see cref="MetadataSchema.Facing6"/>,
+        /// <see cref="MetadataSchema.Facing6Roll2"/>, and <see cref="MetadataSchema.HorizontalOnly"/>.
+        /// Face culling uses axis-aligned neighbor checks (not rotated); this is a known Phase 4
+        /// limitation addressed in Phase 5.
+        /// </remarks>
+        private void GenerateCustomBlockMesh_SchemaAware(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            float3x3 matrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                voxelProps.MetadataSchema, meta, voxelProps.DefaultMetadata);
+
+            CustomMeshData meshData = CustomMeshes[voxelProps.CustomMeshIndex];
+
+            for (int p = 0; p < 6; p++)
+            {
+                // Skip faces not defined in the custom mesh
+                if (p >= meshData.FaceCount) continue;
+
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                {
+                    int textureID = GetTextureID(id, p);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+                    VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, lightLevel, pos, in matrix,
+                        voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
+                }
+            }
+        }
+
 
         /// <summary>
         /// Legacy standard-cube meshing path: decodes a world-face orientation from the packed voxel,

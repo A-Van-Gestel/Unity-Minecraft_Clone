@@ -201,6 +201,74 @@ namespace Helpers
             vertexIndex += faceData.VertCount;
         }
 
+        /// <summary>
+        /// Generates a single face of a custom mesh voxel with full 3D rotation via a
+        /// <see cref="float3x3"/> matrix. Used by schema-aware custom mesh meshing paths
+        /// (<see cref="MetadataSchema.Axis3"/>, <see cref="MetadataSchema.Facing6"/>,
+        /// <see cref="MetadataSchema.Facing6Roll2"/>, <see cref="MetadataSchema.HorizontalOnly"/>).
+        /// </summary>
+        /// <remarks>
+        /// Unlike the legacy <c>float rotation</c> overload (Y-axis only via <c>Quaternion.Euler</c>),
+        /// this overload applies a full 3D rotation to both vertices and normals using
+        /// <c>math.mul(matrix, direction)</c>. The matrix is obtained from
+        /// <see cref="BurstCustomMeshRotationUtility.GetRotationMatrix"/>.
+        /// </remarks>
+        [BurstCompile]
+        [SkipLocalsInit]
+        public static void GenerateCustomMeshFace(
+            int faceIndex, int textureID, float lightLevel, in Vector3Int position,
+            in float3x3 rotationMatrix,
+            int customMeshIndex,
+            [ReadOnly] in NativeArray<CustomMeshData> customMeshes,
+            [ReadOnly] in NativeArray<CustomFaceData> customFaces,
+            [ReadOnly] in NativeArray<CustomVertData> customVerts,
+            [ReadOnly] in NativeArray<int> customTris,
+            ref int vertexIndex,
+            ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
+            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            bool isTransparent)
+        {
+            CustomMeshData meshData = customMeshes[customMeshIndex];
+            CustomFaceData faceData = customFaces[meshData.FaceStartIndex + faceIndex];
+
+            int startVertCount = vertexIndex;
+            float3 center = new float3(0.5f, 0.5f, 0.5f);
+
+            // Rotate the face normal once (shared by all vertices on this face)
+            float3 rotatedNormal = math.normalize(math.mul(rotationMatrix, new float3(BurstVoxelData.FaceChecks.Data[faceIndex].x, BurstVoxelData.FaceChecks.Data[faceIndex].y, BurstVoxelData.FaceChecks.Data[faceIndex].z)));
+
+            for (int i = 0; i < faceData.VertCount; i++)
+            {
+                CustomVertData vertData = customVerts[faceData.VertStartIndex + i];
+
+                // Apply full 3D rotation around the block center
+                float3 rotated = math.mul(rotationMatrix, (float3)vertData.Position - center) + center;
+                vertices.Add(position + (Vector3)rotated);
+
+                normals.Add(rotatedNormal);
+                colors.Add(new Color(1f, 1f, 1f, lightLevel));
+                AddTexture(textureID, vertData.UV, ref uvs);
+            }
+
+            // Add triangles to the correct list based on transparency.
+            if (isTransparent)
+            {
+                for (int i = 0; i < faceData.TriCount; i++)
+                {
+                    transparentTriangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < faceData.TriCount; i++)
+                {
+                    triangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
+                }
+            }
+
+            vertexIndex += faceData.VertCount;
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddCrossQuad(
             Vector3 bl, Vector3 tl, Vector3 br, Vector3 tr, Vector3 normal, int textureID, Color vertexColor, in Vector3Int position,

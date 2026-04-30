@@ -4,6 +4,7 @@ using Data;
 using Helpers;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Editor.BlockEditor.Helpers
@@ -108,8 +109,11 @@ namespace Editor.BlockEditor.Helpers
             // Case 3: Custom Mesh
             else if (blockType.renderShape == RenderShape.CustomMesh && blockType.meshData != null)
             {
-                // This logic does not use native lists, so it remains unchanged for now.
-                // It could be unified in a future pass.
+                // Compute rotation matrix from the metadata byte (same logic as in-game)
+                float3x3 matrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                    blockType.metadataSchema, meta, blockType.defaultMetadata);
+                float3 center = new float3(0.5f, 0.5f, 0.5f);
+
                 for (int p = 0; p < blockType.meshData.faces.Length; p++)
                 {
                     if (p >= 6) continue; // Safety break for assets with >6 faces
@@ -127,16 +131,22 @@ namespace Editor.BlockEditor.Helpers
                     yUv = 1f - yUv - VoxelData.NormalizedBlockTextureSize;
                     Vector2 baseUv = new Vector2(xUv, yUv);
 
+                    // Rotate the face normal once (shared by all vertices on this face)
+                    float3 rotatedNormal = math.normalize(math.mul(matrix, new float3(VoxelData.FaceChecks[p].x, VoxelData.FaceChecks[p].y, VoxelData.FaceChecks[p].z)));
+
                     foreach (VertData vertData in face.vertData)
                     {
-                        vertices.Add(vertData.position);
+                        // Apply 3D rotation around block center
+                        float3 rotated = math.mul(matrix, (float3)vertData.position - center) + center;
+                        vertices.Add(rotated);
+
                         uvs.Add(new Vector4(
                             baseUv.x + vertData.uv.x * VoxelData.NormalizedBlockTextureSize,
                             baseUv.y + vertData.uv.y * VoxelData.NormalizedBlockTextureSize,
                             0f, 0f
                         ));
                         colors.Add(Color.white);
-                        normals.Add(VoxelData.FaceChecks[p]);
+                        normals.Add(rotatedNormal);
                     }
 
                     // Add triangles to the correct sub-mesh list
