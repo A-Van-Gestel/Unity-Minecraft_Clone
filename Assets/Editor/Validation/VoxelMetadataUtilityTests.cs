@@ -140,6 +140,10 @@ namespace Editor.Validation
                 Test_CustomMeshRotation_Facing6_FrontDirectionConsistency();
                 Test_CustomMeshRotation_Facing6Roll2_AllOrthogonal();
                 Test_CustomMeshRotation_HorizontalOnly_YRotation();
+
+                // --- Phase 5: Rotated Face Culling Tests ---
+                Test_RotatedCullDirection_AllFacing6_ProduceValidAxisAlignedVectors();
+                Test_RotatedCullDirection_Identity_Unchanged();
             }
 
             // ===== Round-trip tests =====
@@ -1481,6 +1485,80 @@ namespace Editor.Validation
                     AssertTrue(yUnchanged && dirMatch,
                         $"HorizontalOnly[{names[yaw]}] front→({result.x:F1},{result.y:F1},{result.z:F1}) expected ({expected[yaw].x:F1},{expected[yaw].y:F1},{expected[yaw].z:F1})");
                 }
+            }
+
+            // ===== Phase 5: Rotated Face Culling Tests =====
+
+            /// <summary>
+            /// For every Facing6 orientation and every face, rotating the cull-check direction
+            /// through the rotation matrix produces a valid axis-aligned unit vector (exactly
+            /// one component = ±1, others = 0).
+            /// </summary>
+            private void Test_RotatedCullDirection_AllFacing6_ProduceValidAxisAlignedVectors()
+            {
+                float3[] faceChecks =
+                {
+                    new float3(0, 0, -1), // 0 Back
+                    new float3(0, 0, 1), // 1 Front
+                    new float3(0, 1, 0), // 2 Top
+                    new float3(0, -1, 0), // 3 Bottom
+                    new float3(-1, 0, 0), // 4 Left
+                    new float3(1, 0, 0), // 5 Right
+                };
+
+                bool allOk = true;
+                for (byte facing = 0; facing < 6; facing++)
+                {
+                    float3x3 m = BurstCustomMeshRotationUtility.GetFacing6Matrix(facing);
+                    for (int p = 0; p < 6; p++)
+                    {
+                        float3 rotated = math.round(math.mul(m, faceChecks[p]));
+                        // Must be axis-aligned unit vector: exactly one component ±1
+                        float len = math.length(rotated);
+                        bool isUnit = math.abs(len - 1f) < 0.01f;
+                        bool isAxisAligned = (math.abs(rotated.x) + math.abs(rotated.y) + math.abs(rotated.z)) < 1.01f;
+                        if (!isUnit || !isAxisAligned)
+                        {
+                            allOk = false;
+                            Failed++;
+                            Debug.LogError($"[VoxelMetadataUtilityTests] FAIL: Facing6[{facing}] face[{p}] " +
+                                           $"rotated=({rotated.x:F1},{rotated.y:F1},{rotated.z:F1}) is not axis-aligned unit");
+                        }
+                    }
+                }
+
+                if (allOk)
+                    AssertTrue(true, "All Facing6×6 rotated cull directions are valid axis-aligned unit vectors");
+            }
+
+            /// <summary>
+            /// Identity rotation matrices (None, Axis3=Y, Facing6=South) leave face check
+            /// directions unchanged after rotation.
+            /// </summary>
+            private void Test_RotatedCullDirection_Identity_Unchanged()
+            {
+                float3[] faceChecks =
+                {
+                    new float3(0, 0, -1), new float3(0, 0, 1),
+                    new float3(0, 1, 0), new float3(0, -1, 0),
+                    new float3(-1, 0, 0), new float3(1, 0, 0),
+                };
+
+                float3x3 identity = BurstCustomMeshRotationUtility.GetRotationMatrix(MetadataSchema.None, 0, 0);
+                bool allOk = true;
+                for (int p = 0; p < 6; p++)
+                {
+                    float3 rotated = math.round(math.mul(identity, faceChecks[p]));
+                    if (math.distance(rotated, faceChecks[p]) > 0.01f)
+                    {
+                        allOk = false;
+                        Failed++;
+                        Debug.LogError($"[VoxelMetadataUtilityTests] FAIL: Identity rotation changed face[{p}]");
+                    }
+                }
+
+                if (allOk)
+                    AssertTrue(true, "Identity rotation leaves all 6 face check directions unchanged");
             }
 
             // ===== Assert helpers =====

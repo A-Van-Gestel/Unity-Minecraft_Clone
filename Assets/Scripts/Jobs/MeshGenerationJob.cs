@@ -357,8 +357,8 @@ namespace Jobs
         /// <remarks>
         /// Handles <see cref="MetadataSchema.Axis3"/>, <see cref="MetadataSchema.Facing6"/>,
         /// <see cref="MetadataSchema.Facing6Roll2"/>, and <see cref="MetadataSchema.HorizontalOnly"/>.
-        /// Face culling uses axis-aligned neighbor checks (not rotated); this is a known Phase 4
-        /// limitation addressed in Phase 5.
+        /// Face culling rotates the neighbor-check direction through the same rotation matrix
+        /// as the vertices, ensuring correct occlusion for all orientations.
         /// </remarks>
         private void GenerateCustomBlockMesh_SchemaAware(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
         {
@@ -373,7 +373,13 @@ namespace Jobs
                 // Skip faces not defined in the custom mesh
                 if (p >= meshData.FaceCount) continue;
 
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+                // Rotate the cull-check direction through the same matrix as the vertices.
+                // All rotation matrices are 90° multiples, so the result is always exactly ±1
+                // on one axis after rounding — no floating-point edge cases.
+                Vector3Int faceCheck = BurstVoxelData.FaceChecks.Data[p];
+                float3 rotatedCheck = math.round(math.mul(matrix, new float3(faceCheck.x, faceCheck.y, faceCheck.z)));
+                Vector3Int rotatedOffset = new Vector3Int((int)rotatedCheck.x, (int)rotatedCheck.y, (int)rotatedCheck.z);
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + rotatedOffset);
 
                 if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
