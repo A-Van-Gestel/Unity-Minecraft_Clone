@@ -93,3 +93,9 @@ crashlytics-build.properties
 
 # Added by code-review-graph
 .code-review-graph/
+
+# Python tooling (see Tools/Python/, python-scripting skill)
+/Tools/Python/.venv/
+/Tools/Python/output/
+__pycache__/
+*.pyc

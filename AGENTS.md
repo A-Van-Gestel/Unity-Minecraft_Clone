@@ -127,3 +127,7 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 The graph auto-updates on file changes via hooks — no manual rebuild needed.
 
 For task-specific workflows, see the `voxel-debugging`, `refactor-safely`, and `review-changes` skills under `.agents/skills/`.
+
+## System Environment & Capabilities
+
+- **Python Environment:** Python 3.14 is available on the host. Use it whenever Python is a better fit than C# (LUT generation, math prototyping, data transforms, save-file inspection, repo-wide automation, etc.). Place persistent scripts in `Tools/Python/` at the repo root — **never under `Assets/`**, which would drag them into Unity's asset pipeline. See the `python-scripting` skill for the full protocol (venv conventions, C# code-gen style, constraints).
