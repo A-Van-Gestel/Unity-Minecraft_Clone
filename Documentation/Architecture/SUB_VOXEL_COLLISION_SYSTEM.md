@@ -1,10 +1,10 @@
 # Sub-Voxel Collision System
 
-**Status:** Design (Not Started)  
+**Status:** Implemented (Automated Tests Pending) — core runtime collision, placement API separation, Block Editor authoring, editor preview, and in-game collision-bounds debug visualization are fully implemented and playtested. Automated regression tests remain outstanding.
 **Target Engine:** Unity 6.4+  
 **Dependencies:** Phase 4 Custom Mesh Rotation (`BurstCustomMeshRotationUtility`)  
-**Related:** `VoxelRigidbody.cs`, `World.CheckForCollision()`, `BlockType`, Block Editor  
-**Last Reviewed:** April 2026
+**Related:** `VoxelRigidbody.cs`, `World.CheckPhysicsCollision()`, `World.IsCellOccupiedForPlacement()`, `BlockType`, Block Editor
+**Last Reviewed:** May 2026
 
 ## Revision History
 
@@ -15,18 +15,20 @@
 | 2026-04-30 | Revision 2 (Codex): axis-specific contact queries, swept AABB tunneling guard, corrected step-up logic, schema-aware rotation path, placement API semantics, `IsEffectivelyFullBlock` validation, `BlockTypeJobData` consumer clarification, 90° permutation matrix terminology        |
 | 2026-04-30 | Revision 3 (Codex): direction-aware physics query, downward sweep for step-up, dynamic tunneling threshold from min collision thickness, coarse placement API disclaimer, replaceable tag gap noted, deferred `BlockTypeJobData` collision fields, corrected rotated component wording |
 | 2026-04-30 | Revision 4 (Codex): direction-specific multi-contact aggregation, step-up preserves horizontal velocity, substepping-only tunneling guard (removed union-scan from API), fixed stale pseudocode signatures                                                                             |
+| 2026-05-01 | Implementation status update: core runtime/editor system is implemented; document wording moved to present tense and remaining gaps called out explicitly.                                                                                                                             |
+| 2026-05-01 | Implementation Complete: runtime `DebugVisualizationMode.CollisionBounds` implementation finished and optimized. All features (except automated tests) are complete.                                                                                                                   |
 
 ## 1. Executive Summary
 
-The engine currently treats every block as a 1×1×1 collision cube. Custom mesh blocks (half-slabs, quarter-slabs) visually display sub-voxel geometry but collide as full cubes — the player cannot walk through the empty half of a slab, and standing on a half-slab places them at full-block height.
+The engine supports sub-voxel collision for rectangular custom-mesh blocks. Blocks can define per-block-type collision bounds, rotated by the block's metadata orientation, while preserving the performance characteristics of a voxel grid.
 
-This document designs a **sub-voxel collision system** that allows blocks to define per-block-type collision bounds, rotated by the block's metadata orientation, while maintaining the performance characteristics of a voxel grid.
+Custom mesh blocks such as half-slabs no longer need to collide as full 1×1×1 cubes. The player can stand on the authored collision surface and move through empty space outside that surface.
 
-> **Scope limitation**: Phase 6 targets **rectangular sub-blocks** only (half-slabs, quarter-slabs, pillars). Stairs, L-shapes, and wedges require multi-AABB compound shapes and are deferred to a future phase (see §7).
+> **Scope limitation**: Phase 6 implements **single-AABB rectangular sub-blocks** only (half-slabs, quarter-slabs, pillars). Stairs, L-shapes, and wedges require multi-AABB compound shapes and are deferred to a future phase (see §7).
 
-## 2. Problem Analysis
+## 2. Previous Problem Analysis
 
-### 2.1. Current Collision Pipeline
+### 2.1. Previous Collision Pipeline
 
 ```
 VoxelRigidbody.CalculateVelocity()
@@ -37,11 +39,11 @@ VoxelRigidbody.CalculateVelocity()
               └── GetVoxelState(pos) → bool (isSolid && !isFluid)
 ```
 
-Every collision check is a **binary whole-voxel test**: "is the voxel at `floor(pos)` solid?" There is no concept of *where within the voxel* the point falls.
+The previous collision path used **binary whole-voxel tests**: "is the voxel at `floor(pos)` solid?" It had no concept of *where within the voxel* the point fell.
 
 ### 2.2. Specific Failures
 
-| Scenario                                       | Expected Behavior           | Current Behavior                       |
+| Scenario                                       | Implemented Behavior        | Previous Behavior                      |
 |------------------------------------------------|-----------------------------|----------------------------------------|
 | Standing on a bottom half-slab                 | Player stands at Y + 0.5    | Player stands at Y + 1.0 (full block)  |
 | Walking through the empty top of a bottom slab | Player passes through       | Player blocked by invisible wall       |
@@ -49,15 +51,15 @@ Every collision check is a **binary whole-voxel test**: "is the voxel at `floor(
 | Walking from half-slab to full block           | Smooth step-up of 0.5       | Already at full height, no step needed |
 | Two adjacent differently-rotated slabs         | Fills the full block space  | Over-sized collision, can't enter gap  |
 
-### 2.3. Dual Semantics of `CheckForCollision`
+### 2.3. Resolved Dual Semantics
 
-`World.CheckForCollision(Vector3)` currently serves **two distinct purposes**:
+`World.CheckForCollision(Vector3)` previously served **two distinct purposes**:
 
 1. **Voxel occupancy** (`PlayerInteraction.cs:260`): "Is this voxel cell occupied?" — used for block placement validation. Should return `true` for any solid block at a grid position, regardless of sub-voxel shape. A half-slab still *occupies* the cell, even if the query point is in the empty half.
 
 2. **Physics collision** (`VoxelRigidbody.cs`): "Does the entity's body overlap solid geometry at this point?" — used for movement resolution. Must account for sub-voxel shape.
 
-> **Design rule**: These two concerns MUST remain separate APIs. A wall-slab returning `false` at the voxel origin for physics must still return `true` for occupancy, or block placement will allow overlapping blocks.
+The implementation separates these concerns. Placement preview uses `World.IsCellOccupiedForPlacement(Vector3)`, while entity movement uses `World.CheckPhysicsCollision(Bounds, axis, directionSign, out CollisionContact)`.
 
 ## 3. Design
 
@@ -85,48 +87,48 @@ public enum CollisionBoundsMode : byte
 public struct BlockCollisionBounds
 {
     /// <summary>How collision bounds are determined.</summary>
-    public CollisionBoundsMode Mode;
+    public CollisionBoundsMode mode;
     
     /// <summary>Minimum corner in local block space (0,0,0 = block origin).
     /// Only used when Mode is CustomAABB or MatchVisualMesh.</summary>
-    public Vector3 Min;
+    public Vector3 min;
     
     /// <summary>Maximum corner in local block space (1,1,1 = block far corner).
     /// Only used when Mode is CustomAABB or MatchVisualMesh.</summary>
-    public Vector3 Max;
+    public Vector3 max;
     
     /// <summary>True if collision bounds differ from the full block.
     /// Derived from Mode AND actual bounds values — not serialized independently.
     /// A CustomAABB with min=(0,0,0) max=(1,1,1) is treated as full-block.</summary>
-    public bool HasCustomBounds => Mode != CollisionBoundsMode.FullBlock
+    public bool HasCustomBounds => mode != CollisionBoundsMode.FullBlock
                                 && !IsEffectivelyFullBlock;
     
     /// <summary>True if Min/Max are equal to full-block bounds, regardless of Mode.
     /// Prevents false-positive sub-voxel checks for misconfigured custom AABBs.</summary>
     public bool IsEffectivelyFullBlock =>
-        Min == Vector3.zero && Max == Vector3.one;
+        min == Vector3.zero && max == Vector3.one;
     
     /// <summary>Full-block bounds (default for solid blocks).</summary>
     public static readonly BlockCollisionBounds FullBlock = new()
     {
-        Mode = CollisionBoundsMode.FullBlock,
-        Min = Vector3.zero,
-        Max = Vector3.one
+        mode = CollisionBoundsMode.FullBlock,
+        min = Vector3.zero,
+        max = Vector3.one
     };
     
     /// <summary>Bottom half-slab bounds.</summary>
     public static readonly BlockCollisionBounds BottomHalfSlab = new()
     {
-        Mode = CollisionBoundsMode.CustomAABB,
-        Min = Vector3.zero,
-        Max = new Vector3(1f, 0.5f, 1f)
+        mode = CollisionBoundsMode.CustomAABB,
+        min = Vector3.zero,
+        max = new Vector3(1f, 0.5f, 1f)
     };
 }
 ```
 
 **Key design decisions:**
 
-- **`HasCustomBounds` is derived, not serialized.** It is computed from both `Mode` AND actual `Min`/`Max` values — a `CustomAABB` whose bounds equal the full block `(0,0,0)→(1,1,1)` still takes the fast path. Editor validation ensures that `MatchVisualMesh` blocks have their `Min`/`Max` populated from the mesh bounding box at import time.
+- **`HasCustomBounds` is derived, not serialized.** It is computed from both `mode` AND actual `min`/`max` values — a `CustomAABB` whose bounds equal the full block `(0,0,0)→(1,1,1)` still takes the fast path. Editor validation prevents invalid saved bounds. `MatchVisualMesh` bounds are populated from the generated mesh through the Block Editor's editor-time derivation action.
 - **AABB, not mesh-based**: Collision shapes are always axis-aligned boxes *before rotation*. Mesh-based collision is too expensive for per-frame queries across potentially hundreds of voxels.
 - **Single AABB per block type**: Phase 6 explicitly targets rectangular sub-blocks only. Stairs and wedges are deferred (see §7).
 - **Presets**: Common shapes (FullBlock, BottomHalfSlab, TopHalfSlab, BottomQuarterSlab) are provided as static presets selectable in the Block Editor.
@@ -179,7 +181,7 @@ Since all rotation matrices are **90° signed permutation matrices** (not merely
 
 ### 3.3. Separated Collision APIs
 
-The existing `CheckForCollision` is split into **three** distinct APIs:
+Collision handling is separated into **three** distinct APIs:
 
 ```csharp
 // === API 1: Block Placement Occupancy (coarse check) ===
@@ -210,11 +212,11 @@ public bool IsCellOccupiedForPlacement(Vector3 pos)
     return props.isSolid && props.fluidType == FluidType.None;
 }
 
-// === API 2: Raycast Hit Detection (existing, unchanged) ===
+// === API 2: Raycast Hit Detection (unchanged) ===
 // World.CheckForVoxel(Vector3, includeFluids, includeNonSolid) — already has
 // the correct fluid/non-solid semantics. No changes needed.
 
-// === API 3: Physics Collision (new sub-voxel aware, axis + direction) ===
+// === API 3: Physics Collision (sub-voxel aware, axis + direction) ===
 
 /// <summary>
 /// Tests whether an entity AABB overlaps any solid collision geometry along a
@@ -263,12 +265,6 @@ public struct CollisionContact
     /// <summary>Whether a collision was detected on the queried axis.</summary>
     public bool Hit;
     
-    /// <summary>The world-space AABB of the colliding block's shape.</summary>
-    public Bounds BlockBounds;
-    
-    /// <summary>The axis that was queried (0=X, 1=Y, 2=Z).</summary>
-    public int Axis;
-    
     /// <summary>The signed correction to apply on the queried axis.
     /// Positive = entity should move in +axis direction to exit overlap.</summary>
     public float Correction;
@@ -281,7 +277,7 @@ public struct CollisionContact
 
 **Caller migration:**
 
-| Caller                                    | Current API                | New API                                  | Reason                                    |
+| Caller                                    | Previous API               | Implemented API                          | Reason                                    |
 |-------------------------------------------|----------------------------|------------------------------------------|-------------------------------------------|
 | `VoxelRigidbody.CheckDownSpeed`           | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, -1)`   | Y-down: resolve against block top face    |
 | `VoxelRigidbody.CheckUpSpeed`             | `CheckForCollision(point)` | `CheckPhysicsCollision(bounds, 1, +1)`   | Y-up: resolve against block bottom face   |
@@ -289,15 +285,15 @@ public struct CollisionContact
 | `PlayerInteraction.cs:260` (placement)    | `CheckForCollision(pos)`   | `IsCellOccupiedForPlacement(pos)`        | Coarse grid-occupancy (see API 1 remarks) |
 | `World.CheckForVoxel` (raycast)           | unchanged                  | unchanged                                | Already has fluid/non-solid parameters    |
 
-### 3.4. VoxelRigidbody Physics Solver Changes
+### 3.4. VoxelRigidbody Physics Solver
 
-The current solver uses **point probes** (4 corners at specific heights). This approach is fundamentally incompatible with sub-voxel shapes — a top slab occupying `0.5..1.0` can be entirely missed by probes at `collisionPadding` and `collisionPadding + 1.0`. This also risks regressing the previously fixed "sweep across full entity height" bug (see `_FIXED_BUGS.md #526`).
+The previous solver used **point probes** (4 corners at specific heights). That approach was fundamentally incompatible with sub-voxel shapes — a top slab occupying `0.5..1.0` could be entirely missed by probes at `collisionPadding` and `collisionPadding + 1.0`. It also risked regressing the previously fixed "sweep across full entity height" bug (see `_FIXED_BUGS.md #526`).
 
-**The solver must migrate from point probes to AABB-vs-AABB contact queries.**
+The implemented solver uses AABB-vs-AABB contact queries instead of point probes.
 
-#### 3.4.1. New Solver Architecture
+#### 3.4.1. Solver Architecture
 
-The base fallback resolution order is **preserved from the current solver**: Z → X → Y. Step-up is a **pre-pass** that probes whether horizontal movement would be blocked and, if so, attempts to clear the obstruction by lifting the entity before any horizontal corrections are committed. If the step-up fails, the solver falls through to the normal Z → X → Y sequence. The Y axis always resolves last to set `IsGrounded` correctly.
+The base fallback resolution order is **preserved**: Z → X → Y. Step-up is a **pre-pass** that probes whether horizontal movement is blocked and, if so, attempts to clear the obstruction by lifting the entity before any horizontal corrections are committed. If the step-up fails, the solver falls through to the normal Z → X → Y sequence. The Y axis resolves last to set `IsGrounded` correctly.
 
 ```
 VoxelRigidbody.CalculateVelocity()
@@ -333,10 +329,10 @@ This eliminates the probe-skipping failure mode entirely — if any part of the 
 #### 3.4.2. Vertical Resolution (Ground/Ceiling Snap)
 
 ```csharp
-// CURRENT (full-block assumption):
+// Previous full-block assumption:
 return Mathf.Floor(y) + 1f - pos.y;
 
-// NEW (axis + direction contact query):
+// Implemented axis + direction contact query:
 if (_world.CheckPhysicsCollision(predictedAABB, axis: 1, directionSign: -1, out CollisionContact contact))
 {
     // directionSign=-1 (falling) resolves against block top face
@@ -423,9 +419,9 @@ Key invariant: step-up probes the **original** desired position. If the step cle
 
 #### 3.4.4. Tunneling Prevention
 
-The current full-block system is immune to tunneling because every voxel is 1m thick and the entity moves < 1m per frame at normal speeds. Sub-voxel shapes (0.25m quarter-slabs) quarter the minimum collidable thickness, and the adjustable `flyingSpeed` in `VoxelRigidbody` can produce large displacements.
+The previous full-block system was mostly immune to tunneling because every voxel was 1m thick and the entity moved < 1m per frame at normal speeds. Sub-voxel shapes (0.25m quarter-slabs) quarter the minimum collidable thickness, and the adjustable `flyingSpeed` in `VoxelRigidbody` can produce large displacements.
 
-**Mitigation**: The solver **substeps** large displacements. `CheckPhysicsCollision` itself only tests the provided AABB as-is — it does not perform swept/union scans internally. Tunneling prevention is the caller’s responsibility:
+**Mitigation**: The solver **substeps** large displacements. `CheckPhysicsCollision` itself only tests the provided AABB as-is — it does not perform swept/union scans internally. Tunneling prevention is handled by `VoxelRigidbody`:
 
 ```csharp
 // Derive maxStep from the minimum supported collision thickness.
@@ -464,7 +460,7 @@ Collision bounds are stored in `BlockType` (managed, editor-serialized) as the *
 
 ### 4.1. Block Editor Integration
 
-Add a **Collision Bounds** section to the Block Editor with:
+The Block Editor provides a **Collision Bounds** section with:
 
 - **Mode selector**: `Full Block` (default) | `Custom AABB` | `Match Visual Mesh` (auto-derive from mesh bounds)
 - **Min/Max Vector3 fields** when `Custom AABB` is selected
@@ -474,67 +470,68 @@ Add a **Collision Bounds** section to the Block Editor with:
 
 ### 4.2. In-Game Debug Visualization
 
-Add a new `DebugVisualizationMode.CollisionBounds` option:
+`DebugVisualizationMode.CollisionBounds` renders runtime wireframe AABBs for solid blocks in visible chunks:
 
-- Renders wireframe AABBs for all visible blocks with custom collision bounds
-- Color-coded: green for standard full-block, yellow for custom bounds, red for blocks where visual mesh extends beyond collision (potential clip-through)
+- Green wireframes show standard full-block collision.
+- Yellow wireframes show custom collision bounds.
+- Red wireframes show custom bounds whose visual mesh vertices extend beyond the authored collision AABB, indicating a potential clip-through mismatch.
 
 ## 5. Implementation Phases
 
-### Phase 6a — Data Model & Editor (Estimated: ~1 session)
+### Phase 6a — Data Model & Editor
 
-- [ ] Add `CollisionBoundsMode` enum
-- [ ] Add `BlockCollisionBounds` struct with `Mode`, `Min`, `Max`, derived `HasCustomBounds`
-- [ ] Add `collisionBounds` field to `BlockType` with `FullBlock` default
-- [ ] ~~`BlockTypeJobData` collision fields deferred~~ — no Burst consumer in Phase 6
-- [ ] Add collision bounds editor UI to Block Editor with validation
-- [ ] Editor migration: existing `BlockDatabase.asset` entries initialize to `FullBlock`
-- [ ] Configure half-slab blocks with `BottomHalfSlab` bounds
+- [x] Add `CollisionBoundsMode` enum
+- [x] Add `BlockCollisionBounds` struct with `mode`, `min`, `max`, derived `HasCustomBounds`
+- [x] Add `collisionBounds` field to `BlockType` with `FullBlock` default
+- [x] ~~`BlockTypeJobData` collision fields deferred~~ — no Burst consumer in Phase 6
+- [x] Add collision bounds editor UI to Block Editor with validation
+- [x] Editor migration: existing `BlockDatabase.asset` entries initialize to `FullBlock`
+- [x] Configure half-slab blocks with sub-voxel bounds
 
-### Phase 6b — Separated APIs & AABB Queries (Estimated: ~1-2 sessions)
+### Phase 6b — Separated APIs & AABB Queries
 
-- [ ] Add `World.IsCellOccupiedForPlacement(Vector3)` — coarse grid-only check (document limitation vs `BlockTags.REPLACEABLE`)
-- [ ] Migrate `PlayerInteraction.cs` placement check to `IsCellOccupiedForPlacement`
-- [ ] Preserve existing `World.CheckForVoxel` (raycast) unchanged
-- [ ] Add `CollisionContact` struct with axis + direction fields
-- [ ] Implement `World.CheckPhysicsCollision(Bounds, axis, directionSign, out CollisionContact)` — direction-aware
-- [ ] Implement direction-specific multi-contact aggregation (largest absolute correction resolves all overlaps)
-- [ ] Implement `GetRotatedWorldBounds` using `BurstCustomMeshRotationUtility.GetRotationMatrix`
-- [ ] Full-block fast path (skip rotation for `FullBlock` mode and `IsEffectivelyFullBlock`)
+- [x] Add `World.IsCellOccupiedForPlacement(Vector3)` — coarse grid-only check (document limitation vs `BlockTags.REPLACEABLE`)
+- [x] Migrate `PlayerInteraction.cs` placement check to `IsCellOccupiedForPlacement`
+- [x] Preserve existing `World.CheckForVoxel` (raycast) unchanged
+- [x] Add `CollisionContact` struct with `Hit`, `Correction`, and `ContactFace`
+- [x] Implement `World.CheckPhysicsCollision(Bounds, axis, directionSign, out CollisionContact)` — direction-aware
+- [x] Implement direction-specific multi-contact aggregation (largest absolute correction resolves all overlaps)
+- [x] Implement `GetRotatedWorldBounds` using `BurstCustomMeshRotationUtility.GetRotationMatrix`
+- [x] Full-block fast path (skip rotation for `FullBlock` mode and `IsEffectivelyFullBlock`)
 - [ ] Unit tests: AABB overlap for unrotated and rotated bounds, occupancy vs physics separation
 
-### Phase 6c — VoxelRigidbody Solver Rewrite (Estimated: ~2-3 sessions)
+### Phase 6c — VoxelRigidbody Solver Rewrite
 
-- [ ] Replace point-probe pattern with AABB-vs-AABB contact queries
-- [ ] Preserve Z → X → Y resolution order
-- [ ] Implement per-axis resolution using `CheckPhysicsCollision(bounds, axis, directionSign)`
-- [ ] Replace `Mathf.Floor + 1` ground snap with `contact.ContactFace`
-- [ ] Add `stepHeight` parameter and step-up BEFORE horizontal commit (preserve velocity on success)
-- [ ] Add caller-side tunneling substep with `MIN_COLLISION_THICKNESS`-derived maxStep
-- [ ] Handle edge cases: slab-to-full transitions, adjacent rotated slabs, falling onto slabs
+- [x] Replace point-probe pattern with AABB-vs-AABB contact queries
+- [x] Preserve Z → X → Y resolution order
+- [x] Implement per-axis resolution using `CheckPhysicsCollision(bounds, axis, directionSign)`
+- [x] Replace `Mathf.Floor + 1` ground snap with `contact.ContactFace`
+- [x] Add `stepHeight` parameter and step-up BEFORE horizontal commit (preserve velocity on success)
+- [x] Add caller-side tunneling substep with `MIN_COLLISION_THICKNESS`-derived maxStep
+- [x] Handle edge cases through the implemented solver: slab-to-full transitions, adjacent rotated slabs, falling onto slabs
 - [ ] Regression test: verify existing full-block movement is unchanged
 - [ ] Regression test: verify "sweep across full entity height" bug (#526) does not reappear
 - [ ] Regression test: verify no tunneling through quarter-slabs at max flying speed
 - [ ] Regression test: multi-contact aggregation (entity on two half-slabs at different heights)
 - [ ] Regression test: horizontal velocity preserved after successful step-up
 - [ ] Regression test: step-up from half-slab to full block correctly finds support
-- [ ] Extensive playtesting of all movement scenarios
+- [x] Extensive playtesting of movement scenarios
 
-### Phase 6d — Editor & Debug Tooling (Estimated: ~1 session)
+### Phase 6d — Editor & Debug Tooling
 
-- [ ] Block Editor collision wireframe preview overlay
-- [ ] `DebugVisualizationMode.CollisionBounds` for in-game visualization
-- [ ] "Match Visual Mesh" auto-derive option
+- [x] Block Editor collision wireframe preview overlay
+- [x] `DebugVisualizationMode.CollisionBounds` for in-game visualization
+- [x] "Match Visual Mesh" editor-time derive option
 
 ## 6. Performance Considerations
 
-| Concern                               | Mitigation                                                                                                                                           |
-|---------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|
-| AABB overlap per candidate voxel cell | Full-block fast path (majority of blocks) skips rotation and uses integer grid check. Sub-voxel AABB test only for blocks with `HasCustomBounds`.    |
-| Grid scan range                       | Entity AABB typically spans 2-4 voxel cells per axis. Maximum ~64 cells for a 4×4×4 scan — trivial.                                                  |
-| Rotated AABB computation              | 8-corner rotation + min/max. For 90° multiples, result is exact integers/halves. Could pre-cache per block-type × orientation if profiling warrants. |
-| Solver call frequency                 | `FixedUpdate` at 50Hz, 1 entity. AABB tests are branchless arithmetic — negligible.                                                                  |
-| Tunneling substeps                    | At 50Hz with max flying speed ~20m/s, displacement ≈ 0.4m/frame. With `maxStep=0.125m`, worst case = 4 substeps. Negligible.                         |
+| Concern                               | Mitigation                                                                                                                                                                                                 |
+|---------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| AABB overlap per candidate voxel cell | Full-block fast path (majority of blocks) skips rotation and uses integer grid check. Sub-voxel AABB test only for blocks with `HasCustomBounds`.                                                          |
+| Grid scan range                       | Entity AABB typically spans 2-4 voxel cells per axis. Maximum ~64 cells for a 4×4×4 scan — trivial.                                                                                                        |
+| Rotated AABB computation              | Inline 8-corner rotation + min/max avoids managed allocations in the physics path. For 90° multiples, result is exact integers/halves. Could pre-cache per block-type × orientation if profiling warrants. |
+| Solver call frequency                 | `FixedUpdate` at 50Hz, 1 entity. AABB tests are branchless arithmetic — negligible.                                                                                                                        |
+| Tunneling substeps                    | At 50Hz with max flying speed ~20m/s, displacement ≈ 0.4m/frame. With `maxStep=0.125m`, worst case = 4 substeps. Negligible.                                                                               |
 
 ## 7. Limitations & Future Work
 
@@ -544,3 +541,4 @@ Add a new `DebugVisualizationMode.CollisionBounds` option:
     - **L-shapes**: 2+ AABBs.
 - **No per-voxel collision variation**: All instances of a block type share the same collision shape (modulo rotation). Blocks that change shape based on neighbors (e.g., fence posts connecting) would need runtime collision computation.
 - **No mesh-based collision**: We intentionally avoid using the visual mesh as collision geometry. The per-frame AABB-overlap pattern is incompatible with arbitrary triangle meshes at voxel density. For blocks needing precise collision, the AABB can be oversized with visual details protruding — an acceptable trade-off.
+- **Automated collision regression tests are pending**: core behavior has been playtested, but the AABB query and movement edge cases listed in §5 still need test coverage.
