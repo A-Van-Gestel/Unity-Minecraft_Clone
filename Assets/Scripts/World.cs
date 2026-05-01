@@ -17,9 +17,11 @@ using Jobs.BurstData;
 using Jobs.Data;
 using Libraries;
 using MyBox;
+using Physics;
 using Serialization;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
@@ -2438,6 +2440,8 @@ public class World : MonoBehaviour
     /// This is a coarse grid-level check used for placement previews.
     /// Does NOT evaluate <see cref="BlockTags.REPLACEABLE"/> or specific placement rules.
     /// </summary>
+    /// <param name="pos">The world-space position to check.</param>
+    /// <returns>True if the cell contains a solid block, false otherwise.</returns>
     public bool IsCellOccupiedForPlacement(Vector3 pos)
     {
         VoxelState? voxel = worldData.GetVoxelState(pos);
@@ -2454,9 +2458,9 @@ public class World : MonoBehaviour
     /// <param name="directionSign">+1 for positive movement, -1 for negative.</param>
     /// <param name="contact">If overlap detected, contains axis-specific resolution.</param>
     /// <returns>True if there is any overlap on the specified axis.</returns>
-    public bool CheckPhysicsCollision(Bounds entityBounds, int axis, int directionSign, out Physics.CollisionContact contact)
+    public bool CheckPhysicsCollision(Bounds entityBounds, int axis, int directionSign, out CollisionContact contact)
     {
-        contact = new Physics.CollisionContact { Hit = false };
+        contact = new CollisionContact { Hit = false };
         bool hitAnything = false;
         float maxCorrection = 0f;
 
@@ -2493,7 +2497,7 @@ public class World : MonoBehaviour
                     else
                     {
                         // Slow path: Get rotated bounds
-                        Unity.Mathematics.float3x3 rotMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                        float3x3 rotMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
                             blockType.metadataSchema, voxel.Value.Meta, blockType.defaultMetadata);
                         blockBounds = GetRotatedWorldBounds(voxelPos, blockType.collisionBounds, rotMatrix);
                     }
@@ -2575,40 +2579,30 @@ public class World : MonoBehaviour
     /// <summary>
     /// Helper to rotate local collision bounds into world space.
     /// </summary>
-    private static Bounds GetRotatedWorldBounds(Vector3Int blockOrigin, BlockCollisionBounds bounds, Unity.Mathematics.float3x3 rotationMatrix)
+    private static Bounds GetRotatedWorldBounds(Vector3Int blockOrigin, BlockCollisionBounds bounds, float3x3 rotationMatrix)
     {
         // 1. Shift [0,1] local bounds to center at (0,0,0) for rotation
         Vector3 localCenter = (bounds.min + bounds.max) * 0.5f - new Vector3(0.5f, 0.5f, 0.5f);
         Vector3 localExtents = (bounds.max - bounds.min) * 0.5f;
 
-        // 8 corners
-        Vector3[] corners = new Vector3[8];
-        corners[0] = localCenter + new Vector3(localExtents.x, localExtents.y, localExtents.z);
-        corners[1] = localCenter + new Vector3(localExtents.x, localExtents.y, -localExtents.z);
-        corners[2] = localCenter + new Vector3(localExtents.x, -localExtents.y, localExtents.z);
-        corners[3] = localCenter + new Vector3(localExtents.x, -localExtents.y, -localExtents.z);
-        corners[4] = localCenter + new Vector3(-localExtents.x, localExtents.y, localExtents.z);
-        corners[5] = localCenter + new Vector3(-localExtents.x, localExtents.y, -localExtents.z);
-        corners[6] = localCenter + new Vector3(-localExtents.x, -localExtents.y, localExtents.z);
-        corners[7] = localCenter + new Vector3(-localExtents.x, -localExtents.y, -localExtents.z);
+        float3 lc = new float3(localCenter.x, localCenter.y, localCenter.z);
+        float3 e = new float3(localExtents.x, localExtents.y, localExtents.z);
 
-        Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-        Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+        // 8 corners, computed and rotated inline to avoid GC allocations in FixedUpdate
+        float3 c0 = math.mul(rotationMatrix, lc + new float3(e.x, e.y, e.z));
+        float3 c1 = math.mul(rotationMatrix, lc + new float3(e.x, e.y, -e.z));
+        float3 c2 = math.mul(rotationMatrix, lc + new float3(e.x, -e.y, e.z));
+        float3 c3 = math.mul(rotationMatrix, lc + new float3(e.x, -e.y, -e.z));
+        float3 c4 = math.mul(rotationMatrix, lc + new float3(-e.x, e.y, e.z));
+        float3 c5 = math.mul(rotationMatrix, lc + new float3(-e.x, e.y, -e.z));
+        float3 c6 = math.mul(rotationMatrix, lc + new float3(-e.x, -e.y, e.z));
+        float3 c7 = math.mul(rotationMatrix, lc + new float3(-e.x, -e.y, -e.z));
 
-        for (int i = 0; i < 8; i++)
-        {
-            // Apply rotation using the burst-compatible math library
-            Unity.Mathematics.float3 rotatedCorner = Unity.Mathematics.math.mul(rotationMatrix, new Unity.Mathematics.float3(corners[i].x, corners[i].y, corners[i].z));
+        float3 minF = math.min(c0, math.min(c1, math.min(c2, math.min(c3, math.min(c4, math.min(c5, math.min(c6, c7)))))));
+        float3 maxF = math.max(c0, math.max(c1, math.max(c2, math.max(c3, math.max(c4, math.max(c5, math.max(c6, c7)))))));
 
-            // Because the rotation matrix only contains 90-degree increments, the result is exact.
-            // But we use min/max to rebuild the AABB around the rotated corners.
-            min.x = Mathf.Min(min.x, rotatedCorner.x);
-            min.y = Mathf.Min(min.y, rotatedCorner.y);
-            min.z = Mathf.Min(min.z, rotatedCorner.z);
-            max.x = Mathf.Max(max.x, rotatedCorner.x);
-            max.y = Mathf.Max(max.y, rotatedCorner.y);
-            max.z = Mathf.Max(max.z, rotatedCorner.z);
-        }
+        Vector3 min = new Vector3(minF.x, minF.y, minF.z);
+        Vector3 max = new Vector3(maxF.x, maxF.y, maxF.z);
 
         // Shift back to world space block origin + center
         Vector3 worldCenter = min + (max - min) * 0.5f + blockOrigin + new Vector3(0.5f, 0.5f, 0.5f);

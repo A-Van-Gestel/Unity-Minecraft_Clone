@@ -15,6 +15,7 @@ namespace Physics
         // A microscopic offset applied to snapped velocities to prevent floating point math from
         // evaluating to exactly equal with the block boundary on subsequent frames.
         private const float COLLISION_EPSILON = 0.001f;
+        private const float COLLISION_JITTER_TOLERANCE = 0.001f;
 
         [Tooltip("The padding added to the player bounds to avoid snagging flush walls.")]
         [Min(0.1f)]
@@ -30,6 +31,10 @@ namespace Physics
 
         [Tooltip("Render the physics bounding box in the Scene/Game view.")]
         public bool showBoundingBox = false;
+
+        [Tooltip("Standard Minecraft slab step height in meters.")]
+        [Min(0f)]
+        public float stepHeight = 0.5f;
 
         public float CollisionHalfWidthX => collisionWidthX * 0.5f;
         public float CollisionHalfDepthZ => collisionDepthZ * 0.5f;
@@ -239,7 +244,7 @@ namespace Physics
             horizontalFutureAABB.center += new Vector3(movement.x, 0, movement.z);
 
             // 1. Step-Up Pre-pass
-            float stepHeight = 0.5f; // Standard Minecraft slab step height
+            bool groundedByStep = false;
             bool zBlocked = false;
             bool xBlocked = false;
             int zSign = 0, xSign = 0;
@@ -283,6 +288,7 @@ namespace Physics
                         float newY = groundContact.ContactFace;
                         movement.y = newY - pos.y; // Instant vertical snap
                         movement.y += COLLISION_EPSILON; // Stop slightly short
+                        groundedByStep = true;
                     }
                     else
                     {
@@ -314,7 +320,7 @@ namespace Physics
                     if (zContact.Hit)
                     {
                         float epsilon = Mathf.Sign(zContact.Correction) * COLLISION_EPSILON;
-                        if (Mathf.Abs(zContact.Correction) < 0.001f) epsilon = 0; // Prevent jitter if already at edge
+                        if (Mathf.Abs(zContact.Correction) < COLLISION_JITTER_TOLERANCE) epsilon = 0; // Prevent jitter if already at edge
 
                         movement.z += zContact.Correction + epsilon;
                         if (Mathf.Abs(movement.z) < 0.0001f) movement.z = 0;
@@ -329,7 +335,7 @@ namespace Physics
                     if (xContact.Hit)
                     {
                         float epsilon = Mathf.Sign(xContact.Correction) * COLLISION_EPSILON;
-                        if (Mathf.Abs(xContact.Correction) < 0.001f) epsilon = 0;
+                        if (Mathf.Abs(xContact.Correction) < COLLISION_JITTER_TOLERANCE) epsilon = 0;
 
                         movement.x += xContact.Correction + epsilon;
                         if (Mathf.Abs(movement.x) < 0.0001f) movement.x = 0;
@@ -342,7 +348,7 @@ namespace Physics
             // Use the FULL AABB (not shrunk vertically) and apply ALL resolved movement
             Bounds verticalFutureAABB = currentAABB;
             verticalFutureAABB.center += movement;
-            IsGrounded = false;
+            IsGrounded = groundedByStep;
 
             if (movement.y != 0f)
             {
@@ -352,7 +358,7 @@ namespace Physics
                 if (yContact.Hit)
                 {
                     float epsilon = Mathf.Sign(yContact.Correction) * COLLISION_EPSILON;
-                    if (Mathf.Abs(yContact.Correction) < 0.001f) epsilon = 0;
+                    if (Mathf.Abs(yContact.Correction) < COLLISION_JITTER_TOLERANCE) epsilon = 0;
 
                     movement.y += yContact.Correction + epsilon;
                     if (Mathf.Abs(movement.y) < 0.0001f) movement.y = 0;

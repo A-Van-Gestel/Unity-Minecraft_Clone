@@ -675,7 +675,7 @@ MonoBehaviour:
     renderNeighborFaces: 1
     fluidType: 1
     fluidShaderID: 0
-    fluidMeshData: {fileID: 0}
+    fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
     fluidLevel: 0
     flowLevels: 8
     waterfallsMaxSpread: 1
@@ -709,7 +709,7 @@ MonoBehaviour:
     renderNeighborFaces: 1
     fluidType: 2
     fluidShaderID: 1
-    fluidMeshData: {fileID: 0}
+    fluidMeshData: {fileID: 11400000, guid: 4166a3e10e186364d8a9e5f90be4c0ee, type: 2}
     fluidLevel: 0
     flowLevels: 4
     waterfallsMaxSpread: 1

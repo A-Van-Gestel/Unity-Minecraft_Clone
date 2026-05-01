@@ -114,6 +114,11 @@ namespace Editor.Libraries
                 _previewRenderUtility = null;
             }
 
+            if (_wireCubeMesh != null)
+                Object.DestroyImmediate(_wireCubeMesh);
+            if (_wireMaterial != null)
+                Object.DestroyImmediate(_wireMaterial);
+
             if (_previewMesh != null)
             {
                 Object.DestroyImmediate(_previewMesh);
@@ -286,6 +291,10 @@ namespace Editor.Libraries
         /// <summary>
         /// Draws a wireframe cube within a custom drawing session.
         /// </summary>
+        /// <param name="center">The center position of the cube relative to the preview pivot.</param>
+        /// <param name="size">The size dimensions of the cube.</param>
+        /// <param name="color">The color of the wireframe lines.</param>
+        /// <param name="localPosition">The overall offset applied to the object in the preview.</param>
         public void DrawWireCube(Vector3 center, Vector3 size, Color color, Vector3 localPosition)
         {
             if (_previewRenderUtility == null) return;
