@@ -1,5 +1,3 @@
-using UnityEngine;
-
 namespace Physics
 {
     /// <summary>
@@ -9,12 +7,6 @@ namespace Physics
     {
         /// <summary>Whether a collision was detected on the queried axis.</summary>
         public bool Hit;
-
-        /// <summary>The world-space AABB of the colliding block's shape.</summary>
-        public Bounds BlockBounds;
-
-        /// <summary>The axis that was queried (0=X, 1=Y, 2=Z).</summary>
-        public int Axis;
 
         /// <summary>The signed correction to apply on the queried axis.
         /// Positive = entity should move in +axis direction to exit overlap.</summary>

@@ -2563,8 +2563,6 @@ public class World : MonoBehaviour
                         {
                             maxCorrection = correction;
                             contact.Hit = true;
-                            contact.BlockBounds = blockBounds;
-                            contact.Axis = axis;
                             contact.Correction = correction;
                             contact.ContactFace = face;
                         }
