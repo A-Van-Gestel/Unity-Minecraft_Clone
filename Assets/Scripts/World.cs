@@ -119,6 +119,7 @@ public class World : MonoBehaviour
 
     private DebugVisualizationMode _lastVisualizationMode;
     private readonly HashSet<ChunkCoord> _chunksToUpdateVisualization = new HashSet<ChunkCoord>();
+    private Vector3 _lastVisualizerPlayerPos;
 
     // --- Storage & Serialization ---
     public ChunkStorageManager StorageManager;
@@ -2079,12 +2080,33 @@ public class World : MonoBehaviour
             _lastVisualizationMode = visualizationMode;
         }
 
+        // --- 1.5 Dynamic Radius Update for Collision Bounds ---
+        if (visualizationMode == DebugVisualizationMode.CollisionBounds && _playerTransform != null)
+        {
+            if (Vector3.Distance(_playerTransform.position, _lastVisualizerPlayerPos) > 1f)
+            {
+                _lastVisualizerPlayerPos = _playerTransform.position;
+
+                // Add chunks within a small radius (1 chunk distance = 3x3 chunks) to be updated
+                for (int x = -1; x <= 1; x++)
+                {
+                    for (int z = -1; z <= 1; z++)
+                    {
+                        ChunkCoord coord = new ChunkCoord(PlayerChunkCoord.X + x, PlayerChunkCoord.Z + z);
+                        if (_activeChunks.Contains(coord))
+                        {
+                            AddChunksToUpdateVisualization(coord);
+                        }
+                    }
+                }
+            }
+        }
+
         // --- 2. Process any pending visualization updates ---
         if (visualizationMode != DebugVisualizationMode.None && _chunksToUpdateVisualization.Count > 0)
         {
             // Use Pools for tracking collections
             List<ChunkCoord> chunksReadyForVisualization = ListPool<ChunkCoord>.Get();
-            Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>> chunkDataCache = DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Get();
 
             try
             {
@@ -2102,31 +2124,13 @@ public class World : MonoBehaviour
                     }
                 }
 
-
-                // Pre-cache all required data in one go for chunks that are ready
-                foreach (ChunkCoord coord in chunksReadyForVisualization)
+                if (visualizationMode == DebugVisualizationMode.CollisionBounds)
                 {
-                    if (_chunkMap.TryGetValue(coord, out Chunk chunk))
-                    {
-                        // Explicit Ownership. The caller requests the pooled dictionary and passes it into the helper method to be populated.
-                        Dictionary<Vector3Int, Color> voxelsToDraw = DictionaryPool<Vector3Int, Color>.Get();
-                        GetVoxelDataForVisualization(chunk, voxelsToDraw);
-                        chunkDataCache[coord] = voxelsToDraw;
-                    }
+                    UpdateCollisionBoundsVisualizations(chunksReadyForVisualization);
                 }
-
-                // Iterate through the cached data to draw meshes
-                foreach ((ChunkCoord coord, Dictionary<Vector3Int, Color> value) in chunkDataCache)
+                else
                 {
-                    // Get neighbor data from the cache, or null if not available.
-                    chunkDataCache.TryGetValue(coord.Neighbor(0, 1), out Dictionary<Vector3Int, Color> northData);
-                    chunkDataCache.TryGetValue(coord.Neighbor(0, -1), out Dictionary<Vector3Int, Color> southData);
-                    chunkDataCache.TryGetValue(coord.Neighbor(1, 0), out Dictionary<Vector3Int, Color> eastData);
-                    chunkDataCache.TryGetValue(coord.Neighbor(-1, 0), out Dictionary<Vector3Int, Color> westData);
-
-                    // Call the visualizer method with all neighbor data.
-                    voxelVisualizer.UpdateChunkVisualization(coord, value, northData, southData, eastData,
-                        westData);
+                    UpdateVoxelStateVisualizations(chunksReadyForVisualization);
                 }
 
                 // Remove only the processed chunks from the update set.
@@ -2138,16 +2142,197 @@ public class World : MonoBehaviour
             }
             finally
             {
-                // ALWAYS release pools to prevent memory leaks, even on errors
-                foreach (Dictionary<Vector3Int, Color> dict in chunkDataCache.Values)
-                {
-                    if (dict != null) DictionaryPool<Vector3Int, Color>.Release(dict);
-                }
-
-                DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Release(chunkDataCache);
                 ListPool<ChunkCoord>.Release(chunksReadyForVisualization);
             }
         }
+    }
+
+    private void UpdateVoxelStateVisualizations(List<ChunkCoord> chunksReadyForVisualization)
+    {
+        Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>> chunkDataCache = DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Get();
+
+        try
+        {
+            // Pre-cache all required data in one go for chunks that are ready
+            foreach (ChunkCoord coord in chunksReadyForVisualization)
+            {
+                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                {
+                    // Explicit Ownership. The caller requests the pooled dictionary and passes it into the helper method to be populated.
+                    Dictionary<Vector3Int, Color> voxelsToDraw = DictionaryPool<Vector3Int, Color>.Get();
+                    GetVoxelDataForVisualization(chunk, voxelsToDraw);
+                    chunkDataCache[coord] = voxelsToDraw;
+                }
+            }
+
+            // Iterate through the cached data to draw meshes
+            foreach ((ChunkCoord coord, Dictionary<Vector3Int, Color> value) in chunkDataCache)
+            {
+                // Get neighbor data from the cache, or null if not available.
+                chunkDataCache.TryGetValue(coord.Neighbor(0, 1), out Dictionary<Vector3Int, Color> northData);
+                chunkDataCache.TryGetValue(coord.Neighbor(0, -1), out Dictionary<Vector3Int, Color> southData);
+                chunkDataCache.TryGetValue(coord.Neighbor(1, 0), out Dictionary<Vector3Int, Color> eastData);
+                chunkDataCache.TryGetValue(coord.Neighbor(-1, 0), out Dictionary<Vector3Int, Color> westData);
+
+                // Call the visualizer method with all neighbor data.
+                voxelVisualizer.UpdateChunkVisualization(coord, value, northData, southData, eastData, westData);
+            }
+        }
+        finally
+        {
+            // ALWAYS release pools to prevent memory leaks, even on errors
+            foreach (Dictionary<Vector3Int, Color> dict in chunkDataCache.Values)
+            {
+                if (dict != null) DictionaryPool<Vector3Int, Color>.Release(dict);
+            }
+
+            DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Release(chunkDataCache);
+        }
+    }
+
+    private void UpdateCollisionBoundsVisualizations(List<ChunkCoord> chunksReadyForVisualization)
+    {
+        Dictionary<ChunkCoord, List<CollisionBoundsVisualization>> chunkDataCache = DictionaryPool<ChunkCoord, List<CollisionBoundsVisualization>>.Get();
+
+        try
+        {
+            foreach (ChunkCoord coord in chunksReadyForVisualization)
+            {
+                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                {
+                    List<CollisionBoundsVisualization> boundsToDraw = ListPool<CollisionBoundsVisualization>.Get();
+                    GetCollisionBoundsDataForVisualization(chunk, boundsToDraw);
+                    chunkDataCache[coord] = boundsToDraw;
+                }
+            }
+
+            foreach ((ChunkCoord coord, List<CollisionBoundsVisualization> value) in chunkDataCache)
+            {
+                voxelVisualizer.UpdateCollisionBoundsVisualization(coord, value);
+            }
+        }
+        finally
+        {
+            foreach (List<CollisionBoundsVisualization> list in chunkDataCache.Values)
+            {
+                if (list != null) ListPool<CollisionBoundsVisualization>.Release(list);
+            }
+
+            DictionaryPool<ChunkCoord, List<CollisionBoundsVisualization>>.Release(chunkDataCache);
+        }
+    }
+
+    private void GetCollisionBoundsDataForVisualization(Chunk chunk, List<CollisionBoundsVisualization> boundsToDraw)
+    {
+        if (chunk == null || !chunk.ChunkData.IsPopulated) return;
+
+        for (int s = 0; s < chunk.ChunkData.sections.Length; s++)
+        {
+            ChunkSection section = chunk.ChunkData.sections[s];
+            if (section == null || section.IsEmpty) continue;
+
+            int startY = s * ChunkMath.SECTION_SIZE;
+
+            for (int i = 0; i < section.voxels.Length; i++)
+            {
+                uint packedData = section.voxels[i];
+                ushort id = BurstVoxelDataBitMapping.GetId(packedData);
+                if (id == BlockIDs.Air) continue;
+
+                BlockType blockType = BlockTypes[id];
+                if (!blockType.isSolid || blockType.fluidType != FluidType.None) continue;
+
+                int x = i % ChunkMath.SECTION_SIZE;
+                int yOffset = i / ChunkMath.SECTION_SIZE % ChunkMath.SECTION_SIZE;
+                int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
+                int globalY = startY + yOffset;
+
+                // --- CULL HIDDEN BLOCKS ---
+                bool isExposed = false;
+                for (int d = 0; d < 6; d++)
+                {
+                    Vector3Int neighborPos = new Vector3Int(x, globalY, z) + VoxelData.FaceChecks[d];
+                    VoxelState? neighbor = chunk.ChunkData.VoxelFromV3Int(neighborPos);
+
+                    if (!neighbor.HasValue)
+                    {
+                        isExposed = true;
+                        break;
+                    }
+
+                    BlockType neighborType = BlockTypes[neighbor.Value.ID];
+                    if (!neighborType.isSolid || neighborType.renderNeighborFaces || neighborType.fluidType != FluidType.None)
+                    {
+                        isExposed = true;
+                        break;
+                    }
+                }
+
+                if (!isExposed) continue;
+
+                Vector3 localBlockOrigin = new Vector3(x, globalY, z);
+
+                // --- RADIUS CULLING ---
+                if (_playerTransform != null)
+                {
+                    Vector3 worldBlockOrigin = chunk.Coord.ToWorldPosition() + localBlockOrigin;
+                    if (Vector3.Distance(worldBlockOrigin, _playerTransform.position) > 10f)
+                    {
+                        continue;
+                    }
+                }
+
+                Bounds localBounds;
+                Color color;
+
+                switch (blockType.collisionBounds.mode)
+                {
+                    case CollisionBoundsMode.FullBlock:
+                        color = new Color(0f, 1f, 0.25f, 0.35f); // Green
+                        break;
+                    case CollisionBoundsMode.MatchVisualMesh:
+                        color = new Color(1f, 0.5f, 0f, 0.35f); // Orange
+                        break;
+                    case CollisionBoundsMode.CustomAABB:
+                        color = new Color(0f, 0.5f, 1f, 0.35f); // Blue
+                        break;
+                    default:
+                        color = new Color(1f, 1f, 1f, 0.35f); // White
+                        break;
+                }
+
+                if (!blockType.collisionBounds.HasCustomBounds)
+                {
+                    localBounds = new Bounds(localBlockOrigin + new Vector3(0.5f, 0.5f, 0.5f), Vector3.one);
+                }
+                else
+                {
+                    float3x3 rotMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                        blockType.metadataSchema, BurstVoxelDataBitMapping.GetMeta(packedData), blockType.defaultMetadata);
+                    localBounds = GetRotatedLocalBounds(localBlockOrigin, blockType.collisionBounds, rotMatrix);
+                }
+
+                boundsToDraw.Add(new CollisionBoundsVisualization(localBounds, color));
+            }
+        }
+    }
+
+    private static Bounds GetRotatedLocalBounds(Vector3 blockOrigin, BlockCollisionBounds bounds, float3x3 rotationMatrix)
+    {
+        // Shift bounds to origin (-0.5 to 0.5)
+        Vector3 localCenter = (bounds.min + bounds.max) * 0.5f - new Vector3(0.5f, 0.5f, 0.5f);
+        Vector3 extents = (bounds.max - bounds.min) * 0.5f;
+
+        // Apply rotation to extents (AABB after rotation)
+        Vector3 newExtents = new Vector3(
+            Mathf.Abs(rotationMatrix.c0.x * extents.x) + Mathf.Abs(rotationMatrix.c1.x * extents.y) + Mathf.Abs(rotationMatrix.c2.x * extents.z),
+            Mathf.Abs(rotationMatrix.c0.y * extents.x) + Mathf.Abs(rotationMatrix.c1.y * extents.y) + Mathf.Abs(rotationMatrix.c2.y * extents.z),
+            Mathf.Abs(rotationMatrix.c0.z * extents.x) + Mathf.Abs(rotationMatrix.c1.z * extents.y) + Mathf.Abs(rotationMatrix.c2.z * extents.z)
+        );
+
+        Vector3 newCenter = math.mul(rotationMatrix, localCenter);
+
+        return new Bounds(blockOrigin + new Vector3(0.5f, 0.5f, 0.5f) + newCenter, newExtents * 2f);
     }
 
     /// <summary>

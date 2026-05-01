@@ -4,15 +4,50 @@ using DebugVisualizations.Jobs;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using UnityEngine.Pool;
 
 namespace DebugVisualizations
 {
+    /// <summary>
+    /// Describes one collision bounds wireframe to draw in a chunk-local debug mesh.
+    /// </summary>
+    public readonly struct CollisionBoundsVisualization
+    {
+        /// <summary>
+        /// The chunk-local bounds to draw.
+        /// </summary>
+        public readonly Bounds Bounds;
+
+        /// <summary>
+        /// The wireframe color.
+        /// </summary>
+        public readonly Color Color;
+
+        /// <summary>
+        /// Creates collision bounds visualization data.
+        /// </summary>
+        /// <param name="bounds">The chunk-local bounds to draw.</param>
+        /// <param name="color">The wireframe color.</param>
+        public CollisionBoundsVisualization(Bounds bounds, Color color)
+        {
+            Bounds = bounds;
+            Color = color;
+        }
+    }
+
     /// <summary>
     /// Manages the generation and rendering of debug visualization meshes for chunks in the world.
     /// This is primarily used to view active voxels or lighting spread states.
     /// </summary>
     public class VoxelVisualizer : MonoBehaviour
     {
+        private static readonly int[] s_wireCubeLineIndices =
+        {
+            0, 1, 1, 2, 2, 3, 3, 0,
+            4, 5, 5, 6, 6, 7, 7, 4,
+            0, 4, 1, 5, 2, 6, 3, 7,
+        };
+
         [Header("References")]
         [Tooltip("The material using the DebugVoxelShader.")]
         public Material visualizerMaterial;
@@ -124,6 +159,49 @@ namespace DebugVisualizations
         }
 
         /// <summary>
+        /// Updates the chunk's debug mesh with collision bounds wireframes.
+        /// </summary>
+        /// <param name="chunkCoord">The coordinate of the chunk to update.</param>
+        /// <param name="boundsToDraw">The chunk-local collision bounds to draw.</param>
+        public void UpdateCollisionBoundsVisualization(ChunkCoord chunkCoord, List<CollisionBoundsVisualization> boundsToDraw)
+        {
+            if (!_visualizerChunks.TryGetValue(chunkCoord, out VisualizerChunkData chunkData))
+            {
+                chunkData = World.Instance.ChunkPool.GetVisualizer(chunkCoord, visualizerMaterial, _visualizerParent);
+                _visualizerChunks[chunkCoord] = chunkData;
+            }
+
+            chunkData.JobHandle.Complete();
+            chunkData.DisposeJobData();
+
+            if (boundsToDraw == null || boundsToDraw.Count == 0)
+            {
+                chunkData.ClearMesh();
+                return;
+            }
+
+            List<Vector3> vertices = ListPool<Vector3>.Get();
+            List<int> indices = ListPool<int>.Get();
+            List<Color> colors = ListPool<Color>.Get();
+
+            try
+            {
+                foreach (CollisionBoundsVisualization collisionBound in boundsToDraw)
+                {
+                    AddCollisionWireCube(collisionBound, vertices, indices, colors);
+                }
+
+                chunkData.ApplyLineMesh(vertices, indices, colors);
+            }
+            finally
+            {
+                ListPool<Color>.Release(colors);
+                ListPool<int>.Release(indices);
+                ListPool<Vector3>.Release(vertices);
+            }
+        }
+
+        /// <summary>
         /// Clears a specific chunk's visualization mesh.
         /// </summary>
         /// <param name="chunkCoord">The chunk coordinate whose visualization should be cleared.</param>
@@ -150,6 +228,37 @@ namespace DebugVisualizations
 
             _visualizerChunks.Clear();
         }
+
+        private static void AddCollisionWireCube(
+            CollisionBoundsVisualization boundsVisualization,
+            List<Vector3> vertices,
+            List<int> indices,
+            List<Color> colors)
+        {
+            Bounds bounds = boundsVisualization.Bounds;
+            Vector3 min = bounds.min;
+            Vector3 max = bounds.max;
+            int vertexOffset = vertices.Count;
+
+            vertices.Add(new Vector3(min.x, min.y, min.z));
+            vertices.Add(new Vector3(max.x, min.y, min.z));
+            vertices.Add(new Vector3(max.x, min.y, max.z));
+            vertices.Add(new Vector3(min.x, min.y, max.z));
+            vertices.Add(new Vector3(min.x, max.y, min.z));
+            vertices.Add(new Vector3(max.x, max.y, min.z));
+            vertices.Add(new Vector3(max.x, max.y, max.z));
+            vertices.Add(new Vector3(min.x, max.y, max.z));
+
+            for (int i = 0; i < 8; i++)
+            {
+                colors.Add(boundsVisualization.Color);
+            }
+
+            foreach (int index in s_wireCubeLineIndices)
+            {
+                indices.Add(vertexOffset + index);
+            }
+        }
     }
 
     /// <summary>
@@ -169,5 +278,10 @@ namespace DebugVisualizations
         /// to diagnose the underwater shadow wall bug.
         /// </summary>
         SunlightChunkBorder,
+
+        /// <summary>
+        /// Shows runtime collision AABBs for solid blocks in visible chunks.
+        /// </summary>
+        CollisionBounds,
     }
 }
