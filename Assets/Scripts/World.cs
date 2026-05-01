@@ -2247,12 +2247,24 @@ public class World : MonoBehaviour
                 int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
                 int globalY = startY + yOffset;
 
+                Vector3 localBlockOrigin = new Vector3(x, globalY, z);
+                Vector3 worldBlockOrigin = chunk.Coord.ToWorldPosition() + localBlockOrigin;
+
+                // --- RADIUS CULLING ---
+                if (_playerTransform != null)
+                {
+                    if (Vector3.Distance(worldBlockOrigin, _playerTransform.position) > 10f)
+                    {
+                        continue;
+                    }
+                }
+
                 // --- CULL HIDDEN BLOCKS ---
                 bool isExposed = false;
                 for (int d = 0; d < 6; d++)
                 {
-                    Vector3Int neighborPos = new Vector3Int(x, globalY, z) + VoxelData.FaceChecks[d];
-                    VoxelState? neighbor = chunk.ChunkData.VoxelFromV3Int(neighborPos);
+                    Vector3 worldNeighborPos = worldBlockOrigin + VoxelData.FaceChecks[d];
+                    VoxelState? neighbor = worldData.GetVoxelState(worldNeighborPos);
 
                     if (!neighbor.HasValue)
                     {
@@ -2269,18 +2281,6 @@ public class World : MonoBehaviour
                 }
 
                 if (!isExposed) continue;
-
-                Vector3 localBlockOrigin = new Vector3(x, globalY, z);
-
-                // --- RADIUS CULLING ---
-                if (_playerTransform != null)
-                {
-                    Vector3 worldBlockOrigin = chunk.Coord.ToWorldPosition() + localBlockOrigin;
-                    if (Vector3.Distance(worldBlockOrigin, _playerTransform.position) > 10f)
-                    {
-                        continue;
-                    }
-                }
 
                 Bounds localBounds;
                 Color color;
