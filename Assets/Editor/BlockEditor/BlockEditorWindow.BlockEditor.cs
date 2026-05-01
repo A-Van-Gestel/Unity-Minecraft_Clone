@@ -220,6 +220,104 @@ namespace Editor.BlockEditor
                 EditorGUILayout.LabelField("Properties", EditorStyles.boldLabel);
                 _selectedBlock.stackSize = EditorGUILayout.IntSlider(new GUIContent("Stack Size", "The maximum amount of this block that can be stacked."), _selectedBlock.stackSize, 1, 64);
                 _selectedBlock.isSolid = EditorGUILayout.Toggle(new GUIContent("Is Solid", "Indicates whether the player collides with this block."), _selectedBlock.isSolid);
+
+                if (_selectedBlock.isSolid)
+                {
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.LabelField("Collision Bounds", EditorStyles.boldLabel);
+
+                    var bounds = _selectedBlock.collisionBounds;
+
+                    EditorGUI.BeginChangeCheck();
+                    bounds.mode = (CollisionBoundsMode)EditorGUILayout.EnumPopup(
+                        new GUIContent("Mode", "How the collision volume is defined.\n\n" +
+                                               "• Full Block — standard 1x1x1 cube (fast path).\n" +
+                                               "• Custom AABB — manually authored sub-voxel box.\n" +
+                                               "• Match Visual Mesh — auto-derived from the mesh bounding box."),
+                        bounds.mode);
+
+                    if (bounds.mode == CollisionBoundsMode.CustomAABB || bounds.mode == CollisionBoundsMode.MatchVisualMesh)
+                    {
+                        if (bounds.mode == CollisionBoundsMode.CustomAABB)
+                        {
+                            // Preset dropdown
+                            int currentPreset = 0;
+                            if (bounds.min == Vector3.zero && bounds.max == new Vector3(1f, 0.5f, 1f)) currentPreset = 1;
+                            else if (bounds.min == new Vector3(0f, 0.5f, 0f) && bounds.max == Vector3.one) currentPreset = 2;
+                            else if (bounds.min == Vector3.zero && bounds.max == new Vector3(1f, 0.25f, 1f)) currentPreset = 3;
+
+                            EditorGUI.BeginChangeCheck();
+                            int newPreset = EditorGUILayout.Popup(new GUIContent("Preset", "Quickly apply common sub-voxel collision shapes."), currentPreset, new[] { "Custom", "Bottom Half Slab", "Top Half Slab", "Quarter Slab" });
+                            if (EditorGUI.EndChangeCheck() && newPreset != 0)
+                            {
+                                if (newPreset == 1) bounds = BlockCollisionBounds.BottomHalfSlab;
+                                else if (newPreset == 2) bounds = BlockCollisionBounds.TopHalfSlab;
+                                else if (newPreset == 3) bounds = BlockCollisionBounds.BottomQuarterSlab;
+                            }
+
+                            bounds.min = EditorGUILayout.Vector3Field("Min", bounds.min);
+                            bounds.max = EditorGUILayout.Vector3Field("Max", bounds.max);
+                        }
+                        else if (bounds.mode == CollisionBoundsMode.MatchVisualMesh)
+                        {
+                            EditorGUILayout.HelpBox("Bounds will be auto-derived from the visual mesh. Preview and click 'Derive Now' to update.", MessageType.Info);
+
+                            GUI.enabled = false;
+                            EditorGUILayout.Vector3Field("Min", bounds.min);
+                            EditorGUILayout.Vector3Field("Max", bounds.max);
+                            GUI.enabled = true;
+
+                            if (GUILayout.Button("Derive Now"))
+                            {
+                                if (_meshPreviewWidget.HasMesh)
+                                {
+                                    // MeshPreviewWidget handles custom rotations, but the base mesh's bounds are what we need.
+                                    // The custom mesh data is compiled into a Unity Mesh which gives us its bounds centered around (0.5, 0.5, 0.5).
+                                    // We need to convert from Unity Mesh bounds back to block space [0,1].
+                                    // Mesh vertices are created centered on 0,0,0 usually? Wait, EditorMeshGenerator centers vertices around 0,0,0? No!
+                                    // Let's rely on standard block bounds logic. If EditorMeshGenerator generates vertices between -0.5 and 0.5, we add 0.5.
+                                    // If we just use the bounds and add 0.5, it should match the preview exactly!
+                                    // But wait, the preview mesh bounds can be retrieved using reflection or just accessing the _previewMesh, but we don't have public access.
+                                    // Let's just generate it here using the editor mesh generator, or store it in UpdatePreviewMesh.
+                                    // For now, let's call UpdatePreviewMesh() and then we need the bounds.
+                                    // Actually, it's safer to just generate the Mesh data directly here.
+                                    Mesh tempMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, _selectedBlock.defaultMetadata, 0);
+                                    if (tempMesh != null)
+                                    {
+                                        bounds.min = tempMesh.bounds.min + new Vector3(0.5f, 0.5f, 0.5f);
+                                        bounds.max = tempMesh.bounds.max + new Vector3(0.5f, 0.5f, 0.5f);
+                                        DestroyImmediate(tempMesh);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Validation
+                        if (bounds.min.x >= bounds.max.x || bounds.min.y >= bounds.max.y || bounds.min.z >= bounds.max.z)
+                        {
+                            EditorGUILayout.HelpBox("Validation Error: Min must be strictly less than Max.", MessageType.Error);
+                        }
+
+                        if (bounds.min.x < 0f || bounds.min.y < 0f || bounds.min.z < 0f ||
+                            bounds.max.x > 1f || bounds.max.y > 1f || bounds.max.z > 1f)
+                        {
+                            EditorGUILayout.HelpBox("Warning: Bounds are outside the standard [0,1] block space.", MessageType.Warning);
+                        }
+                    }
+                    else if (bounds.mode == CollisionBoundsMode.FullBlock)
+                    {
+                        // Ensure it resets to full block when switched back
+                        bounds = BlockCollisionBounds.FullBlock;
+                    }
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        _selectedBlock.collisionBounds = bounds;
+                    }
+
+                    EditorGUI.indentLevel--;
+                }
+
                 _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighbouring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
                 _selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), _selectedBlock.isActive);
 
@@ -579,6 +677,7 @@ namespace Editor.BlockEditor
                 meshData = _selectedBlock.meshData,
                 stackSize = _selectedBlock.stackSize,
                 isSolid = _selectedBlock.isSolid,
+                collisionBounds = _selectedBlock.collisionBounds,
                 renderNeighborFaces = _selectedBlock.renderNeighborFaces,
                 fluidType = _selectedBlock.fluidType,
                 fluidShaderID = _selectedBlock.fluidShaderID,
@@ -726,6 +825,18 @@ namespace Editor.BlockEditor
 
             // Sync the opacity setting before drawing
             _meshPreviewWidget.ForceOpaque = _forceOpaquePreview;
+
+            if (_selectedBlock != null && _selectedBlock.collisionBounds.HasCustomBounds)
+            {
+                _meshPreviewWidget.WireframeBounds = new Bounds(
+                    (_selectedBlock.collisionBounds.min + _selectedBlock.collisionBounds.max) * 0.5f,
+                    _selectedBlock.collisionBounds.max - _selectedBlock.collisionBounds.min
+                );
+            }
+            else
+            {
+                _meshPreviewWidget.WireframeBounds = null;
+            }
 
             // The widget internally handles the checkerboard background, interactive rotation, and mesh rendering.
             _meshPreviewWidget.Draw(previewRect);

@@ -22,6 +22,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 0
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 0
     fluidShaderID: 0
@@ -52,6 +56,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -82,6 +90,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -112,6 +124,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -142,6 +158,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -172,6 +192,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -202,6 +226,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -232,6 +260,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -262,6 +294,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -292,6 +328,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -322,6 +362,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -352,6 +396,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -382,6 +430,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -412,6 +464,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 0
     fluidShaderID: 0
@@ -442,6 +498,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -472,6 +532,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 0
     fluidShaderID: 0
@@ -502,6 +566,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -532,6 +600,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: f1f1cbb961eacda4dbac46e90f49df51, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 2
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 0.5, z: 1}
     renderNeighborFaces: 1
     fluidType: 0
     fluidShaderID: 0
@@ -562,6 +634,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -592,10 +668,14 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
     stackSize: 64
     isSolid: 0
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 1
     fluidShaderID: 0
-    fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
+    fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 8
     waterfallsMaxSpread: 1
@@ -622,10 +702,14 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
     stackSize: 64
     isSolid: 0
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 2
     fluidShaderID: 1
-    fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
+    fluidMeshData: {fileID: 0}
     fluidLevel: 0
     flowLevels: 4
     waterfallsMaxSpread: 1
@@ -652,6 +736,10 @@ MonoBehaviour:
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -682,6 +770,10 @@ MonoBehaviour:
     meshData: {fileID: 0}
     stackSize: 64
     isSolid: 0
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 0
     fluidShaderID: 0

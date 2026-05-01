@@ -35,6 +35,10 @@ namespace Data
         [Tooltip("Indicates whether the player collides with this block.")]
         public bool isSolid;
 
+        [Tooltip("Defines the sub-voxel shape of the collision volume if not a standard full block.")]
+        [ConditionalField(nameof(isSolid), false, true)]
+        public BlockCollisionBounds collisionBounds = BlockCollisionBounds.FullBlock;
+
         [Tooltip("Indicates whether the neighbouring faces should still be rendered when this block is placed.")]
         public bool renderNeighborFaces;
 

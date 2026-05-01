@@ -16,7 +16,7 @@ namespace Physics
         // evaluating to exactly equal with the block boundary on subsequent frames.
         private const float COLLISION_EPSILON = 0.001f;
 
-        [Tooltip("The total width of the physics collider (X axis).")]
+        [Tooltip("The padding added to the player bounds to avoid snagging flush walls.")]
         [Min(0.1f)]
         public float collisionWidthX = 0.8f;
 
@@ -172,127 +172,210 @@ namespace Physics
             // Apply vertical momentum (falling / jumping)
             Velocity += Vector3.up * (_verticalMomentum * Time.fixedDeltaTime);
 
-            // COLLISION (Continuous predict-check snapping)
+            // COLLISION (Sub-voxel AABB physics solver)
             if (!isNoclipping)
             {
-                float extX = CollisionHalfWidthX;
-                float extZ = CollisionHalfDepthZ;
+                const float MIN_COLLISION_THICKNESS = 0.25f; // Quarter-slab
+                float maxStep = MIN_COLLISION_THICKNESS * 0.5f; // 0.125m
 
-                // Resolve Z Axis
-                if (Velocity.z > 0 && CheckHorizontalCollision(0, extZ + Velocity.z))
-                    Velocity = new Vector3(Velocity.x, Velocity.y, Mathf.Floor(transform.position.z + extZ + Velocity.z) - (transform.position.z + extZ) - COLLISION_EPSILON);
-                else if (Velocity.z < 0 && CheckHorizontalCollision(0, -extZ + Velocity.z))
-                    Velocity = new Vector3(Velocity.x, Velocity.y, Mathf.Floor(transform.position.z - extZ + Velocity.z) + 1f - (transform.position.z - extZ) + COLLISION_EPSILON);
+                // Velocity here is actually the intended displacement for this frame
+                float displacementMag = Velocity.magnitude;
+                if (displacementMag > maxStep)
+                {
+                    int substeps = Mathf.CeilToInt(displacementMag / maxStep);
+                    Vector3 totalDisplacement = Vector3.zero;
+                    Vector3 remainingDisplacement = Velocity;
+                    Vector3 subMove = remainingDisplacement / substeps;
 
-                // Resolve X Axis
-                if (Velocity.x > 0 && CheckHorizontalCollision(extX + Velocity.x, 0))
-                    Velocity = new Vector3(Mathf.Floor(transform.position.x + extX + Velocity.x) - (transform.position.x + extX) - COLLISION_EPSILON, Velocity.y, Velocity.z);
-                else if (Velocity.x < 0 && CheckHorizontalCollision(-extX + Velocity.x, 0))
-                    Velocity = new Vector3(Mathf.Floor(transform.position.x - extX + Velocity.x) + 1f - (transform.position.x - extX) + COLLISION_EPSILON, Velocity.y, Velocity.z);
+                    for (int i = 0; i < substeps; i++)
+                    {
+                        // Use the corrected subMove from the previous step as a baseline,
+                        // but re-evaluate against current world position.
+                        Vector3 currentSubMove = subMove;
+                        ResolveMovement(ref currentSubMove);
+                        transform.position += currentSubMove; // Move temporarily to test next substeps accurately
+                        totalDisplacement += currentSubMove;
 
-                // Resolve Y Axis
-                if (Velocity.y < 0)
-                    Velocity = new Vector3(Velocity.x, CheckDownSpeed(Velocity.y), Velocity.z);
-                else if (Velocity.y > 0)
-                    Velocity = new Vector3(Velocity.x, CheckUpSpeed(Velocity.y), Velocity.z);
+                        // Carry over velocity blocks (if an axis stopped, it stays stopped)
+                        if (currentSubMove.x == 0) subMove.x = 0;
+                        if (currentSubMove.y == 0) subMove.y = 0;
+                        if (currentSubMove.z == 0) subMove.z = 0;
+                    }
+
+                    // Revert the temporary position changes because `VoxelRigidbody`
+                    // expects `transform.Translate(Velocity)` to be called externally later.
+                    transform.position -= totalDisplacement;
+                    Velocity = totalDisplacement;
+                }
                 else
-                    CheckDownSpeed(0); // Maintain IsGrounded explicitly when falling velocity is 0
+                {
+                    Vector3 tempVelocity = Velocity;
+                    ResolveMovement(ref tempVelocity);
+                    Velocity = tempVelocity;
+                }
             }
         }
 
-        #region Collision Checks
-
-        private float CheckDownSpeed(float downSpeed)
+        private void ResolveMovement(ref Vector3 movement)
         {
             Vector3 pos = transform.position;
-            float y = pos.y + downSpeed;
+            float extX = CollisionHalfWidthX - collisionPadding; // Keeping slight inset to avoid snagging flush walls
+            float extZ = CollisionHalfDepthZ - collisionPadding;
+            float h = collisionHeight;
 
-            // Skin width to ensure vertical checks don't clip into adjacent side walls
-            float wx = CollisionHalfWidthX - collisionPadding;
-            float wz = CollisionHalfDepthZ - collisionPadding;
+            // Build entity AABB
+            Bounds currentAABB = new Bounds();
+            currentAABB.SetMinMax(
+                new Vector3(pos.x - extX, pos.y, pos.z - extZ),
+                new Vector3(pos.x + extX, pos.y + h, pos.z + extZ)
+            );
 
-            // Check 4 corners of the bottom face
-            if (_world.CheckForCollision(new Vector3(pos.x - wx, y, pos.z - wz)) ||
-                _world.CheckForCollision(new Vector3(pos.x + wx, y, pos.z - wz)) ||
-                _world.CheckForCollision(new Vector3(pos.x + wx, y, pos.z + wz)) ||
-                _world.CheckForCollision(new Vector3(pos.x - wx, y, pos.z + wz)))
+            // Predict horizontal future AABB (NO Y movement, slightly shrunk on Y to avoid floor/ceiling snags)
+            Bounds horizontalFutureAABB = currentAABB;
+            horizontalFutureAABB.SetMinMax(
+                new Vector3(currentAABB.min.x, currentAABB.min.y + collisionPadding, currentAABB.min.z),
+                new Vector3(currentAABB.max.x, currentAABB.max.y - collisionPadding, currentAABB.max.z)
+            );
+            horizontalFutureAABB.center += new Vector3(movement.x, 0, movement.z);
+
+            // 1. Step-Up Pre-pass
+            float stepHeight = 0.5f; // Standard Minecraft slab step height
+            bool zBlocked = false;
+            bool xBlocked = false;
+            int zSign = 0, xSign = 0;
+
+            if (movement.z != 0f)
             {
-                IsGrounded = true;
-                // Snap exactly to the top surface of the voxel. Not using epsilon because gravity pushes exactly onto it.
-                return Mathf.Floor(y) + 1f - pos.y;
+                zSign = movement.z > 0 ? 1 : -1;
+                zBlocked = _world.CheckPhysicsCollision(horizontalFutureAABB, axis: 2, zSign, out _);
             }
 
+            if (movement.x != 0f)
+            {
+                xSign = movement.x > 0 ? 1 : -1;
+                xBlocked = _world.CheckPhysicsCollision(horizontalFutureAABB, axis: 0, xSign, out _);
+            }
+
+            bool horizontalBlocked = zBlocked || xBlocked;
+
+            // If blocked and grounded, attempt step-up with ORIGINAL movement
+            if (horizontalBlocked && IsGrounded && !isFlying)
+            {
+                Bounds liftedAABB = horizontalFutureAABB;
+                liftedAABB.center += Vector3.up * stepHeight;
+
+                bool clearsAtStep = true;
+                if (movement.x != 0f)
+                    clearsAtStep &= !_world.CheckPhysicsCollision(liftedAABB, axis: 0, xSign, out _);
+                if (movement.z != 0f)
+                    clearsAtStep &= !_world.CheckPhysicsCollision(liftedAABB, axis: 2, zSign, out _);
+
+                if (clearsAtStep)
+                {
+                    // Sweep DOWNWARD to find highest support surface
+                    Bounds sweepAABB = liftedAABB;
+                    sweepAABB.Expand(new Vector3(0, stepHeight, 0));
+                    sweepAABB.center -= new Vector3(0, stepHeight * 0.5f, 0);
+
+                    if (_world.CheckPhysicsCollision(sweepAABB, axis: 1, -1, out var groundContact))
+                    {
+                        // Found support
+                        float newY = groundContact.ContactFace;
+                        movement.y = newY - pos.y; // Instant vertical snap
+                        movement.y += COLLISION_EPSILON; // Stop slightly short
+                    }
+                    else
+                    {
+                        // No support found, step onto air
+                        movement.y = stepHeight;
+                    }
+
+                    // SUCCESS: horizontal velocity is preserved as-is (no correction applied).
+                    horizontalBlocked = false;
+                    horizontalFutureAABB.center += Vector3.up * movement.y;
+                }
+            }
+
+            // 2. Resolve Horizontal (if step-up failed or not attempted)
+            if (horizontalBlocked)
+            {
+                // Reset horizontal AABB to current to sweep axes independently.
+                // This prevents cross-axis interference (e.g. hitting an X wall generating a Z push).
+                Bounds sweepAABB = currentAABB;
+                sweepAABB.SetMinMax(
+                    new Vector3(currentAABB.min.x, currentAABB.min.y + collisionPadding, currentAABB.min.z),
+                    new Vector3(currentAABB.max.x, currentAABB.max.y - collisionPadding, currentAABB.max.z)
+                );
+
+                if (movement.z != 0f)
+                {
+                    sweepAABB.center += new Vector3(0, 0, movement.z);
+                    _world.CheckPhysicsCollision(sweepAABB, axis: 2, zSign, out var zContact);
+                    if (zContact.Hit)
+                    {
+                        float epsilon = Mathf.Sign(zContact.Correction) * COLLISION_EPSILON;
+                        if (Mathf.Abs(zContact.Correction) < 0.001f) epsilon = 0; // Prevent jitter if already at edge
+
+                        movement.z += zContact.Correction + epsilon;
+                        if (Mathf.Abs(movement.z) < 0.0001f) movement.z = 0;
+                        sweepAABB.center += new Vector3(0, 0, zContact.Correction + epsilon);
+                    }
+                }
+
+                if (movement.x != 0f)
+                {
+                    sweepAABB.center += new Vector3(movement.x, 0, 0);
+                    _world.CheckPhysicsCollision(sweepAABB, axis: 0, xSign, out var xContact);
+                    if (xContact.Hit)
+                    {
+                        float epsilon = Mathf.Sign(xContact.Correction) * COLLISION_EPSILON;
+                        if (Mathf.Abs(xContact.Correction) < 0.001f) epsilon = 0;
+
+                        movement.x += xContact.Correction + epsilon;
+                        if (Mathf.Abs(movement.x) < 0.0001f) movement.x = 0;
+                        sweepAABB.center += new Vector3(xContact.Correction + epsilon, 0, 0);
+                    }
+                }
+            }
+
+            // 3. Resolve Vertical (Y)
+            // Use the FULL AABB (not shrunk vertically) and apply ALL resolved movement
+            Bounds verticalFutureAABB = currentAABB;
+            verticalFutureAABB.center += movement;
             IsGrounded = false;
-            return downSpeed;
+
+            if (movement.y != 0f)
+            {
+                int ySign = movement.y > 0 ? 1 : -1;
+                _world.CheckPhysicsCollision(verticalFutureAABB, axis: 1, ySign, out var yContact);
+
+                if (yContact.Hit)
+                {
+                    float epsilon = Mathf.Sign(yContact.Correction) * COLLISION_EPSILON;
+                    if (Mathf.Abs(yContact.Correction) < 0.001f) epsilon = 0;
+
+                    movement.y += yContact.Correction + epsilon;
+                    if (Mathf.Abs(movement.y) < 0.0001f) movement.y = 0;
+
+                    if (ySign < 0)
+                    {
+                        IsGrounded = true;
+                    }
+                    else if (ySign > 0)
+                    {
+                        _verticalMomentum = 0; // Hit ceiling, kill upward momentum
+                    }
+                }
+            }
+            else
+            {
+                // Explicitly check ground when vertical movement is 0
+                _world.CheckPhysicsCollision(verticalFutureAABB, axis: 1, -1, out var groundContact);
+                if (groundContact.Hit && groundContact.Correction > -0.01f)
+                    IsGrounded = true;
+            }
         }
 
-        private float CheckUpSpeed(float upSpeed)
-        {
-            Vector3 pos = transform.position;
-            float y = pos.y + collisionHeight + upSpeed;
-
-            // Skin width to ensure vertical checks don't clip into adjacent side walls
-            float wx = CollisionHalfWidthX - collisionPadding;
-            float wz = CollisionHalfDepthZ - collisionPadding;
-
-            // Check 4 corners of the top face
-            if (_world.CheckForCollision(new Vector3(pos.x - wx, y, pos.z - wz)) ||
-                _world.CheckForCollision(new Vector3(pos.x + wx, y, pos.z - wz)) ||
-                _world.CheckForCollision(new Vector3(pos.x + wx, y, pos.z + wz)) ||
-                _world.CheckForCollision(new Vector3(pos.x - wx, y, pos.z + wz)))
-            {
-                _verticalMomentum = 0; // set to 0 so the entity falls when its head hits a block while jumping
-                return Mathf.Floor(y) - (pos.y + collisionHeight) - COLLISION_EPSILON;
-            }
-
-            return upSpeed;
-        }
-
-        /// <summary>
-        /// Sweeps an Axis-Aligned face dynamically up to the entity's height to check for collisions.
-        /// Incorporates a skin width padding algorithm to allow sliding parallel to blocks without snagging.
-        /// </summary>
-        private bool CheckHorizontalCollision(float dx, float dz)
-        {
-            Vector3 center = transform.position;
-            Vector3 offset = new Vector3(dx, 0, dz);
-
-            // Inset dimensions based on padding
-            float insetX = CollisionHalfWidthX - collisionPadding;
-            float insetZ = CollisionHalfDepthZ - collisionPadding;
-
-            // Perpendicular vector for the sweeping face
-            Vector3 perp;
-            if (Mathf.Abs(dz) > 0) // Moving along Z, sweep an X face
-                perp = new Vector3(insetX, 0, 0);
-            else // Moving along X, sweep a Z face
-                perp = new Vector3(0, 0, insetZ);
-
-            Vector3 corner1 = offset - perp;
-            Vector3 corner2 = offset + perp;
-
-            // Iterate bottom to top at 1 block intervals
-            // Use a y-offset skin width so horizontal checks don't catch the floor
-            float startY = collisionPadding;
-            const float step = 1.0f;
-            for (float y = startY; y < collisionHeight; y += step)
-            {
-                if (_world.CheckForCollision(center + corner1 + new Vector3(0, y, 0))) return true;
-                if (_world.CheckForCollision(center + corner2 + new Vector3(0, y, 0))) return true;
-            }
-
-            // Explicit top check (also inset horizontally/vertically)
-            float topY = collisionHeight - collisionPadding;
-            if (topY > startY)
-            {
-                if (_world.CheckForCollision(center + corner1 + new Vector3(0, topY, 0))) return true;
-                if (_world.CheckForCollision(center + corner2 + new Vector3(0, topY, 0))) return true;
-            }
-
-            return false;
-        }
-
-        #endregion
 
         #region Debug Visualizer
 
