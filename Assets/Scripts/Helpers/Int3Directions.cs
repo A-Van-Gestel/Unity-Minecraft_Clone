@@ -32,5 +32,10 @@ namespace Helpers
 
         /// <summary>Uniform one vector (1, 1, 1). Equivalent to <c>Vector3Int.one</c>.</summary>
         public static readonly int3 One = new int3(1, 1, 1);
+
+        // TODO: Add helper methods once there are real callsites to justify them:
+        //   Opposite(int3 d)   — returns -d; useful when iterating face pairs or reflecting normals.
+        //   IsCardinal(int3 d) — returns true if d is one of the 6 unit axis vectors; useful for
+        //                        validating hit normals or direction inputs at system boundaries.
     }
 }
