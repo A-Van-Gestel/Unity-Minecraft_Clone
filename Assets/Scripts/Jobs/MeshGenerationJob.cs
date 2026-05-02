@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Data;
 using Helpers;
 using Jobs.BurstData;
@@ -407,20 +408,7 @@ namespace Jobs
         private void GenerateStandardCubeMesh_None(Vector3Int pos, ushort id, BlockTypeJobData voxelProps)
         {
             for (int p = 0; p < 6; p++)
-            {
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
-
-                if (ShouldDrawFace(voxelProps, neighborVoxel))
-                {
-                    int textureID = GetTextureID(id, p);
-                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
-
-                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f,
-                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
-                        voxelProps.RenderNeighborFaces);
-                }
-            }
+                EmitStandardCubeFaceIfVisible(pos, id, voxelProps, worldFace: p, effectiveFace: p, uvQuarterTurnsCW: 0);
         }
 
         /// <summary>
@@ -501,6 +489,33 @@ namespace Jobs
         }
 
         /// <summary>
+        /// Checks visibility of a single cube face and, if visible, emits its vertices, UVs, and
+        /// color into the output mesh buffers.
+        /// </summary>
+        /// <param name="pos">Block position in chunk-local space.</param>
+        /// <param name="id">Block type ID used for texture lookup.</param>
+        /// <param name="voxelProps">Block properties (transparency, render-neighbor-faces flag, etc.).</param>
+        /// <param name="worldFace">Cardinal face index (0-5) used for neighbor sampling and vertex emission.</param>
+        /// <param name="effectiveFace">Remapped face index used for texture selection after schema rotation.</param>
+        /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void EmitStandardCubeFaceIfVisible(
+            Vector3Int pos, ushort id, BlockTypeJobData voxelProps,
+            int worldFace, int effectiveFace, int uvQuarterTurnsCW)
+        {
+            VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[worldFace]);
+            if (!ShouldDrawFace(voxelProps, neighborVoxel)) return;
+
+            int textureID = GetTextureID(id, effectiveFace);
+            float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+            VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, lightLevel, in pos, rotation: 0f, uvQuarterTurnsCW,
+                ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                voxelProps.RenderNeighborFaces);
+        }
+
+        /// <summary>
         /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.Axis3"/> blocks
         /// (logs, pillars, fallen trunks). Performs no per-voxel rotation — the cube vertices are
         /// emitted in their canonical positions and the per-face texture is selected via the
@@ -526,22 +541,11 @@ namespace Jobs
 
             for (int p = 0; p < 6; p++)
             {
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
-
-                if (ShouldDrawFace(voxelProps, neighborVoxel))
-                {
-                    // Texture comes from the axis-remapped block face. Vertex emission uses the
-                    // un-rotated world face index `p`, since cube vertices are axis-symmetric.
-                    int effectiveFace = BurstAxis3MeshUtility.GetEffectiveFace(axis, p);
-                    int uvQuarterTurnsCW = BurstAxis3MeshUtility.GetUvQuarterTurnsCW(axis, p);
-                    int textureID = GetTextureID(id, effectiveFace);
-                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
-
-                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f, uvQuarterTurnsCW,
-                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
-                        voxelProps.RenderNeighborFaces);
-                }
+                // Texture comes from the axis-remapped block face. Vertex emission uses the
+                // un-rotated world face index `p`, since cube vertices are axis-symmetric.
+                EmitStandardCubeFaceIfVisible(pos, id, voxelProps, worldFace: p,
+                    effectiveFace: BurstAxis3MeshUtility.GetEffectiveFace(axis, p),
+                    uvQuarterTurnsCW: BurstAxis3MeshUtility.GetUvQuarterTurnsCW(axis, p));
             }
         }
 
@@ -560,20 +564,9 @@ namespace Jobs
 
             for (int p = 0; p < 6; p++)
             {
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
-
-                if (ShouldDrawFace(voxelProps, neighborVoxel))
-                {
-                    int effectiveFace = BurstFacing6MeshUtility.GetEffectiveFace(facing, p);
-                    int uvQuarterTurnsCW = BurstFacing6MeshUtility.GetUvQuarterTurnsCW(facing, p);
-                    int textureID = GetTextureID(id, effectiveFace);
-                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
-
-                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f, uvQuarterTurnsCW,
-                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
-                        voxelProps.RenderNeighborFaces);
-                }
+                EmitStandardCubeFaceIfVisible(pos, id, voxelProps, worldFace: p,
+                    effectiveFace: BurstFacing6MeshUtility.GetEffectiveFace(facing, p),
+                    uvQuarterTurnsCW: BurstFacing6MeshUtility.GetUvQuarterTurnsCW(facing, p));
             }
         }
 
@@ -592,20 +585,9 @@ namespace Jobs
 
             for (int p = 0; p < 6; p++)
             {
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
-
-                if (ShouldDrawFace(voxelProps, neighborVoxel))
-                {
-                    int effectiveFace = BurstFacing6Roll2MeshUtility.GetEffectiveFace(facing, roll, p);
-                    int uvQuarterTurnsCW = BurstFacing6Roll2MeshUtility.GetUvQuarterTurnsCW(facing, roll, p);
-                    int textureID = GetTextureID(id, effectiveFace);
-                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
-
-                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f, uvQuarterTurnsCW,
-                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
-                        voxelProps.RenderNeighborFaces);
-                }
+                EmitStandardCubeFaceIfVisible(pos, id, voxelProps, worldFace: p,
+                    effectiveFace: BurstFacing6Roll2MeshUtility.GetEffectiveFace(facing, roll, p),
+                    uvQuarterTurnsCW: BurstFacing6Roll2MeshUtility.GetUvQuarterTurnsCW(facing, roll, p));
             }
         }
 
