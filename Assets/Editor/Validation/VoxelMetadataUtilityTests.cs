@@ -712,12 +712,12 @@ namespace Editor.Validation
 
             private void Test_BurstVoxelMetadataUtility_Facing6FromHitNormal()
             {
-                AssertEqual(VoxelOrientation.South, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(0, 0, 1)), "HitNormal +Z returns South");
-                AssertEqual(VoxelOrientation.North, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(0, 0, -1)), "HitNormal -Z returns North");
-                AssertEqual(VoxelOrientation.Bottom, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(0, 1, 0)), "HitNormal +Y returns Bottom");
-                AssertEqual(VoxelOrientation.Top, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(0, -1, 0)), "HitNormal -Y returns Top");
-                AssertEqual(VoxelOrientation.West, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(1, 0, 0)), "HitNormal +X returns West");
-                AssertEqual(VoxelOrientation.East, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(-1, 0, 0)), "HitNormal -X returns East");
+                AssertEqual(VoxelOrientation.South, BurstVoxelMetadataUtility.Facing6FromHitNormal(Int3Directions.Forward), "HitNormal +Z returns South");
+                AssertEqual(VoxelOrientation.North, BurstVoxelMetadataUtility.Facing6FromHitNormal(Int3Directions.Back), "HitNormal -Z returns North");
+                AssertEqual(VoxelOrientation.Bottom, BurstVoxelMetadataUtility.Facing6FromHitNormal(Int3Directions.Up), "HitNormal +Y returns Bottom");
+                AssertEqual(VoxelOrientation.Top, BurstVoxelMetadataUtility.Facing6FromHitNormal(Int3Directions.Down), "HitNormal -Y returns Top");
+                AssertEqual(VoxelOrientation.West, BurstVoxelMetadataUtility.Facing6FromHitNormal(Int3Directions.Right), "HitNormal +X returns West");
+                AssertEqual(VoxelOrientation.East, BurstVoxelMetadataUtility.Facing6FromHitNormal(Int3Directions.Left), "HitNormal -X returns East");
             }
 
             // ===== MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3 (Phase 2d) =====

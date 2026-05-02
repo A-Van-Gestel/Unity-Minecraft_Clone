@@ -1,4 +1,5 @@
 using Data;
+using Helpers;
 using Jobs.BurstData;
 using MyBox;
 using Physics;
@@ -190,11 +191,11 @@ public class PlayerInteraction : MonoBehaviour
                 float zCheck = GetCoordinateOffset(pos.z);
 
                 if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
-                    result.HitNormal = xCheck < 0 ? new int3(1, 0, 0) : new int3(-1, 0, 0);
+                    result.HitNormal = xCheck < 0 ? Int3Directions.Right : Int3Directions.Left;
                 else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
-                    result.HitNormal = zCheck < 0 ? new int3(0, 0, 1) : new int3(0, 0, -1);
+                    result.HitNormal = zCheck < 0 ? Int3Directions.Forward : Int3Directions.Back;
                 else
-                    result.HitNormal = yCheck < 0 ? new int3(0, 1, 0) : new int3(0, -1, 0);
+                    result.HitNormal = yCheck < 0 ? Int3Directions.Up : Int3Directions.Down;
 
                 result.PlacePosition = result.HitPosition + new Vector3Int(result.HitNormal.x, result.HitNormal.y, result.HitNormal.z);
 
