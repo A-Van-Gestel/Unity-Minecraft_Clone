@@ -528,8 +528,10 @@ namespace Jobs
         private void GenerateStandardCubeMesh_Facing6(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
         {
             byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Facing6, voxelProps.DefaultMetadata, 0); // 0 = South, always valid
             byte facing = BurstVoxelMetadataUtility.NormalizeMeta(
-                MetadataSchema.Facing6, meta, voxelProps.DefaultMetadata);
+                MetadataSchema.Facing6, meta, normalizedDefaultMeta);
 
             for (int p = 0; p < 6; p++)
             {
@@ -557,8 +559,10 @@ namespace Jobs
         private void GenerateStandardCubeMesh_Facing6Roll2(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
         {
             byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Facing6Roll2, voxelProps.DefaultMetadata, 0); // 0 = South+Roll0, always valid
             byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
-                MetadataSchema.Facing6Roll2, meta, voxelProps.DefaultMetadata);
+                MetadataSchema.Facing6Roll2, meta, normalizedDefaultMeta);
             BurstVoxelMetadataUtility.DecodeFacing6Roll2(normalizedMeta, out byte facing, out byte roll);
 
             for (int p = 0; p < 6; p++)
