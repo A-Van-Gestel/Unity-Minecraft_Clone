@@ -277,6 +277,7 @@ namespace Jobs
             {
                 switch (voxelProps.MetadataSchema)
                 {
+                    case MetadataSchema.None:
                     case MetadataSchema.Axis3:
                     case MetadataSchema.Facing6:
                     case MetadataSchema.Facing6Roll2:
@@ -294,6 +295,9 @@ namespace Jobs
             // --- CASE 4: STANDARD CUBE ---
             switch (voxelProps.MetadataSchema)
             {
+                case MetadataSchema.None:
+                    GenerateStandardCubeMesh_None(pos, id, voxelProps);
+                    break;
                 case MetadataSchema.Axis3:
                     GenerateStandardCubeMesh_Axis3(pos, packedData, id, voxelProps);
                     break;
@@ -396,9 +400,32 @@ namespace Jobs
 
 
         /// <summary>
-        /// Legacy standard-cube meshing path: decodes a world-face orientation from the packed voxel,
-        /// converts it to a Y-axis rotation angle via <see cref="VoxelHelper.GetRotationAngle"/>, and
-        /// emits each visible face of the cube with that rotation applied.
+        /// Standard-cube meshing path for <see cref="MetadataSchema.None"/> blocks (Air, Facade,
+        /// Cactus, etc.). No rotation is applied — each world face maps 1:1 to the matching block
+        /// face texture, with no UV rotation.
+        /// </summary>
+        private void GenerateStandardCubeMesh_None(Vector3Int pos, ushort id, BlockTypeJobData voxelProps)
+        {
+            for (int p = 0; p < 6; p++)
+            {
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                {
+                    int textureID = GetTextureID(id, p);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, lightLevel, in pos, rotation: 0f,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                        voxelProps.RenderNeighborFaces);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Legacy standard-cube meshing path: decodes a world-face orientation from the packed voxel
+        /// and delegates to <see cref="GenerateStandardCubeWithLegacyOrientation"/>.
         /// </summary>
         /// <remarks>
         /// Called by <see cref="GenerateVoxelMeshData"/> for blocks whose <see cref="MetadataSchema"/>
@@ -409,29 +436,13 @@ namespace Jobs
         private void GenerateStandardCubeMesh_Legacy(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
         {
             byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
-            float rotation = VoxelHelper.GetRotationAngle(orientation);
-
-            for (int p = 0; p < 6; p++)
-            {
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
-
-                if (ShouldDrawFace(voxelProps, neighborVoxel))
-                {
-                    int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
-                    int textureID = GetTextureID(id, translatedP);
-                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
-
-                    VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
-                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
-                        voxelProps.RenderNeighborFaces);
-                }
-            }
+            GenerateStandardCubeWithLegacyOrientation(pos, id, voxelProps, orientation);
         }
 
         /// <summary>
         /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.HorizontalOnly"/> blocks.
-        /// Extracts the yaw from the metadata byte and applies the legacy rotation logic.
+        /// Maps the 4-way yaw to a legacy orientation index and delegates to
+        /// <see cref="GenerateStandardCubeWithLegacyOrientation"/>.
         /// </summary>
         private void GenerateStandardCubeMesh_HorizontalOnly(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
         {
@@ -452,10 +463,24 @@ namespace Jobs
                 1 => VoxelOrientation.South, // South
                 2 => VoxelOrientation.West, // West
                 3 => VoxelOrientation.East, // East
-                _ => VoxelOrientation.North
+                _ => VoxelOrientation.North,
             };
 
-            float rotation = VoxelHelper.GetRotationAngle(legacyOrientation);
+            GenerateStandardCubeWithLegacyOrientation(pos, id, voxelProps, legacyOrientation);
+        }
+
+        /// <summary>
+        /// Shared inner loop for legacy-orientation standard-cube meshing. Converts a legacy
+        /// world-face orientation index to a Y-axis rotation angle and emits each visible face.
+        /// </summary>
+        /// <remarks>
+        /// Called by both <see cref="GenerateStandardCubeMesh_Legacy"/> (orientation decoded
+        /// directly from packed data) and <see cref="GenerateStandardCubeMesh_HorizontalOnly"/>
+        /// (yaw mapped to a legacy orientation index before calling here).
+        /// </remarks>
+        private void GenerateStandardCubeWithLegacyOrientation(Vector3Int pos, ushort id, BlockTypeJobData voxelProps, byte orientation)
+        {
+            float rotation = VoxelHelper.GetRotationAngle(orientation);
 
             for (int p = 0; p < 6; p++)
             {
@@ -463,7 +488,7 @@ namespace Jobs
 
                 if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
-                    int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, legacyOrientation);
+                    int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                     int textureID = GetTextureID(id, translatedP);
                     float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 
