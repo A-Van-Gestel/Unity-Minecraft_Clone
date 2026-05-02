@@ -21,6 +21,21 @@ namespace Serialization
         public int seed;
 
         /// <summary>
+        /// The chunk height in blocks.
+        /// </summary>
+        public int chunkHeight = 128;
+
+        /// <summary>
+        /// The chunk width and depth in blocks.
+        /// </summary>
+        public int chunkWidth = 16;
+
+        /// <summary>
+        /// The total width of the world in chunks.
+        /// </summary>
+        public int worldSizeInChunks = 100;
+
+        /// <summary>
         /// The world generation type. Defaults to Legacy (0) when the field is absent in old JSON files,
         /// ensuring backwards compatibility with saves created before the World Type system was introduced.
         /// </summary>

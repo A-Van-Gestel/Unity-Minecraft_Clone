@@ -22,7 +22,10 @@ public static class SaveSystem
     //          legacy semantics; their schema migration is deferred to a future version.
     //          First chunk-format migration in the project; bumps chunk format version to 4.
     //          Affects chunks AND pending mods. See Migration_v5_to_v6_LegacyToSchemaBased.cs.
-    public const int CURRENT_VERSION = 6;
+    // v6 → v7: Added global structural dimensions (chunkHeight, chunkWidth, worldSizeInChunks) 
+    //          to level.dat for future extensibility, and standardized the naming of the 
+    //          pending_lighting.bin file. See Migration_v6_to_v7_SaveFormatExtensibility.cs.
+    public const int CURRENT_VERSION = 7;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.

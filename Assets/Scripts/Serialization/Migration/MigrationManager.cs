@@ -27,6 +27,7 @@ namespace Serialization.Migration
             new MigrationV3ToV4WorldTypes(),
             new MigrationV4ToV5VoxelModMeta(),
             new MigrationV5ToV6LegacyToSchemaBased(),
+            new MigrationV6ToV7SaveFormatExtensibility(),
         };
 
         // Track the path of the backup we create so we can roll it back if needed.
@@ -103,7 +104,7 @@ namespace Serialization.Migration
             Debug.Log($"[MigrationManager] Built migration path with {migrationPath.Count} step(s).");
 
             // --- Step 3: Migrate Global Metadata Files ---
-            // level.dat, pending_mods.bin, lighting_pending.bin
+            // level.dat, pending_mods.bin, pending_lighting.bin
             progress?.Report(new MigrationProgress { CurrentTask = "Migrating World Metadata...", PercentComplete = 0.05f });
             await Task.Run(() => MigrateGlobalFiles(savePath, migrationPath));
 
@@ -315,7 +316,15 @@ namespace Serialization.Migration
 
         private static void MigrateGlobalFiles(string savePath, List<WorldMigrationStep> path)
         {
-            // --- level.dat ---
+            // --- 1. Pre-Processing File Renames ---
+            // Allow migration steps to rename/restructure files (e.g. lighting_pending.bin -> pending_lighting.bin)
+            // before we attempt to read their contents for byte-level migration.
+            foreach (WorldMigrationStep step in path)
+            {
+                step.PerformGlobalFileRename(savePath);
+            }
+
+            // --- 2. level.dat ---
             Debug.Log("[MigrationManager] Migrating level.dat...");
             string levelDatPath = Path.Combine(savePath, "level.dat");
             if (File.Exists(levelDatPath))
@@ -343,9 +352,10 @@ namespace Serialization.Migration
                 File.WriteAllBytes(modsPath, bytes);
             }
 
-            // --- lighting_pending.bin ---
-            Debug.Log("[MigrationManager] Migrating lighting_pending.bin...");
-            string lightPath = Path.Combine(savePath, "lighting_pending.bin");
+            // --- pending_lighting.bin  ---
+            Debug.Log("[MigrationManager] Migrating pending_lighting.bin...");
+            string lightPath = Path.Combine(savePath, "pending_lighting.bin");
+
             if (File.Exists(lightPath))
             {
                 byte[] bytes = File.ReadAllBytes(lightPath);

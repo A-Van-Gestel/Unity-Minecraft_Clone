@@ -42,6 +42,14 @@ namespace Serialization.Migration
         public virtual byte? TargetChunkFormatVersion => null;
 
         /// <summary>
+        /// Allows a migration step to rename or move global files (e.g. pending_mods.bin, level.dat)
+        /// before their bytes are read and passed through the migration pipeline.
+        /// </summary>
+        public virtual void PerformGlobalFileRename(string savePath)
+        {
+        }
+
+        /// <summary>
         /// Migrates the full JSON content of level.dat.
         /// After all steps run, the manager stamps the final version number — do not set it here.
         /// </summary>
@@ -53,7 +61,7 @@ namespace Serialization.Migration
         public virtual byte[] MigratePendingMods(byte[] rawOldData) => rawOldData;
 
         /// <summary>
-        /// Migrates the raw bytes of lighting_pending.bin.
+        /// Migrates the raw bytes of pending_lighting.bin.
         /// </summary>
         public virtual byte[] MigratePendingLighting(byte[] rawOldData) => rawOldData;
 

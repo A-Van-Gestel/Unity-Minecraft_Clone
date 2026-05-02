@@ -27,7 +27,7 @@ namespace Serialization
 
             string folder = Path.Combine(basePath, worldName);
             if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
-            _filePath = Path.Combine(folder, "lighting_pending.bin");
+            _filePath = Path.Combine(folder, "pending_lighting.bin");
         }
 
         /// <summary>
@@ -173,7 +173,7 @@ namespace Serialization
             }
             catch (EndOfStreamException)
             {
-                Debug.LogWarning("[LightingStateManager] lighting_pending.bin was truncated. Some pending lighting updates may be lost, but the pool remains safe.");
+                Debug.LogWarning("[LightingStateManager] pending_lighting.bin was truncated. Some pending lighting updates may be lost, but the pool remains safe.");
             }
             catch (Exception ex)
             {
