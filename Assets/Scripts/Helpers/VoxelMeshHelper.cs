@@ -235,7 +235,8 @@ namespace Helpers
             float3 center = new float3(0.5f, 0.5f, 0.5f);
 
             // Rotate the face normal once (shared by all vertices on this face)
-            float3 rotatedNormal = math.normalize(math.mul(rotationMatrix, new float3(BurstVoxelData.FaceChecks.Data[faceIndex].x, BurstVoxelData.FaceChecks.Data[faceIndex].y, BurstVoxelData.FaceChecks.Data[faceIndex].z)));
+            Vector3Int fc = BurstVoxelData.FaceChecks.Data[faceIndex];
+            float3 rotatedNormal = math.normalize(math.mul(rotationMatrix, new float3(fc.x, fc.y, fc.z)));
 
             for (int i = 0; i < faceData.VertCount; i++)
             {
