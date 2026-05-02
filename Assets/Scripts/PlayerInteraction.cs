@@ -2,6 +2,7 @@ using Data;
 using Jobs.BurstData;
 using MyBox;
 using Physics;
+using Unity.Mathematics;
 using UnityEngine;
 
 public class PlayerInteraction : MonoBehaviour
@@ -154,7 +155,7 @@ public class PlayerInteraction : MonoBehaviour
     /// the surface normal; roll aligns the block's +Y toward the player when
     /// placed on a floor/ceiling.
     /// </summary>
-    private static byte ComputeFacing6Roll2Meta(Vector3 lookForward, Vector3Int hitNormal)
+    private static byte ComputeFacing6Roll2Meta(Vector3 lookForward, int3 hitNormal)
     {
         byte facing = BurstVoxelMetadataUtility.Facing6FromHitNormal(hitNormal);
         byte roll = BurstVoxelMetadataUtility.RollFromLookVector(facing, lookForward);
@@ -189,13 +190,13 @@ public class PlayerInteraction : MonoBehaviour
                 float zCheck = GetCoordinateOffset(pos.z);
 
                 if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
-                    result.HitNormal = xCheck < 0 ? Vector3Int.right : Vector3Int.left;
+                    result.HitNormal = xCheck < 0 ? new int3(1, 0, 0) : new int3(-1, 0, 0);
                 else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
-                    result.HitNormal = zCheck < 0 ? Vector3Int.forward : Vector3Int.back;
+                    result.HitNormal = zCheck < 0 ? new int3(0, 0, 1) : new int3(0, 0, -1);
                 else
-                    result.HitNormal = yCheck < 0 ? Vector3Int.up : Vector3Int.down;
+                    result.HitNormal = yCheck < 0 ? new int3(0, 1, 0) : new int3(0, -1, 0);
 
-                result.PlacePosition = result.HitPosition + result.HitNormal;
+                result.PlacePosition = result.HitPosition + new Vector3Int(result.HitNormal.x, result.HitNormal.y, result.HitNormal.z);
 
                 return result;
             }
@@ -279,6 +280,6 @@ public struct VoxelRaycastResult
 {
     public bool DidHit;
     public Vector3Int HitPosition;
-    public Vector3Int HitNormal;
+    public int3 HitNormal;
     public Vector3Int PlacePosition;
 }

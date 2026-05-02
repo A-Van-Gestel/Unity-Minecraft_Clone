@@ -712,12 +712,12 @@ namespace Editor.Validation
 
             private void Test_BurstVoxelMetadataUtility_Facing6FromHitNormal()
             {
-                AssertEqual(VoxelOrientation.South, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.forward), "HitNormal +Z returns South");
-                AssertEqual(VoxelOrientation.North, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.back), "HitNormal -Z returns North");
-                AssertEqual(VoxelOrientation.Bottom, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.up), "HitNormal +Y returns Bottom");
-                AssertEqual(VoxelOrientation.Top, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.down), "HitNormal -Y returns Top");
-                AssertEqual(VoxelOrientation.West, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.right), "HitNormal +X returns West");
-                AssertEqual(VoxelOrientation.East, BurstVoxelMetadataUtility.Facing6FromHitNormal(Vector3Int.left), "HitNormal -X returns East");
+                AssertEqual(VoxelOrientation.South, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(0, 0, 1)), "HitNormal +Z returns South");
+                AssertEqual(VoxelOrientation.North, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(0, 0, -1)), "HitNormal -Z returns North");
+                AssertEqual(VoxelOrientation.Bottom, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(0, 1, 0)), "HitNormal +Y returns Bottom");
+                AssertEqual(VoxelOrientation.Top, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(0, -1, 0)), "HitNormal -Y returns Top");
+                AssertEqual(VoxelOrientation.West, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(1, 0, 0)), "HitNormal +X returns West");
+                AssertEqual(VoxelOrientation.East, BurstVoxelMetadataUtility.Facing6FromHitNormal(new int3(-1, 0, 0)), "HitNormal -X returns East");
             }
 
             // ===== MigrationV5ToV6LegacyToSchemaBased.ConvertLegacyMetaToAxis3 (Phase 2d) =====

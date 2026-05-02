@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 using Data;
 using Unity.Burst;
 using Unity.Mathematics;
-using UnityEngine;
 
 namespace Jobs.BurstData
 {
@@ -410,7 +409,7 @@ namespace Jobs.BurstData
         /// <param name="hitNormal">The surface normal of the block being placed against.</param>
         /// <returns>A Facing6 value: 0=South, 1=North, 2=Top, 3=Bottom, 4=West, 5=East.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static byte Facing6FromHitNormal(Vector3Int hitNormal)
+        public static byte Facing6FromHitNormal(int3 hitNormal)
         {
             if (hitNormal.z > 0) return VoxelOrientation.South;
             if (hitNormal.z < 0) return VoxelOrientation.North;
@@ -428,7 +427,7 @@ namespace Jobs.BurstData
         /// <param name="hitNormal">The surface normal of the block being placed against.</param>
         /// <returns>A HorizontalOnly yaw value: 0=North, 1=South, 2=West, 3=East.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static byte HorizontalOnlyFromHitNormal(Vector3Int hitNormal)
+        public static byte HorizontalOnlyFromHitNormal(int3 hitNormal)
         {
             if (hitNormal.z > 0) return 0; // North
             if (hitNormal.z < 0) return 1; // South
