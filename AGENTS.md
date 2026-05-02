@@ -84,6 +84,7 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 - **Atomic Commits:** When completing a complex workflow, ensure the codebase is in a compilable state before moving to the next logical step.
 - **Compile Command:** Run `dotnet build "Assembly-CSharp.csproj"` in your terminal/command execution tool.
 - **Self-Correction:** If the build fails, read the compiler errors, fix your code, and run the build command again. Do not ask the user to test broken code.
+- **Doc Sync:** When a change alters behavior described in a `Documentation/Architecture/`, `Design/`, or `Guides/` doc — or ships a feature drafted in a Design doc — use the `docs-sync` skill to update the matching doc in the same commit. Skip for refactors, bug fixes that preserve documented behavior, and test-only changes.
 
 <!-- code-review-graph MCP tools -->
 
