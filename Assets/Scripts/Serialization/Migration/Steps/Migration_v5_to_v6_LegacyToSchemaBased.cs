@@ -142,7 +142,10 @@ namespace Serialization.Migration.Steps
 
             // --- Sections ---
             int totalRewrites = 0;
-            for (int s = 0; s < V3_SECTIONS_PER_CHUNK; s++)
+            // Iterate up to 32 times because the sectionBitmask is a 32-bit integer.
+            // This properly handles chunks that were saved with a different ChunkHeight
+            // (e.g., height 256 = 16 sections), preventing stream misalignment.
+            for (int s = 0; s < 32; s++)
             {
                 if ((sectionBitmask & (1 << s)) == 0) continue;
 
@@ -403,6 +406,11 @@ namespace Serialization.Migration.Steps
         private static void CopyLightQueueVerbatim(BinaryReader reader, BinaryWriter writer)
         {
             int count = reader.ReadInt32();
+            
+            // Sanity check to prevent OOM or EndOfStreamException on corrupt/misaligned data
+            if (count < 0 || count > 100_000)
+                throw new InvalidDataException($"[MigrationV5ToV6] Invalid LightQueue count: {count}. Chunk stream is likely misaligned.");
+                
             writer.Write(count);
             for (int i = 0; i < count; i++)
             {

@@ -61,7 +61,10 @@ namespace Serialization.Migration.Steps
             //   ushort (2)    : section.nonAirCount
             //   byte[] (16384): voxel data (16*16*16 * sizeof(uint))
             // Total per section: 16387 bytes
-            const int maxSections = 8;
+            // Iterate up to 32 times because the sectionBitmask is a 32-bit integer.
+            // This properly handles chunks that were saved with a different ChunkHeight
+            // (e.g., height 256 = 16 sections), preventing stream misalignment.
+            const int maxSections = 32;
             byte[][] v2Sections = new byte[maxSections][];
 
             for (int i = 0; i < maxSections; i++)
