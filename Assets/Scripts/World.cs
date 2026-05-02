@@ -2083,7 +2083,8 @@ public class World : MonoBehaviour
         // --- 1.5 Dynamic Radius Update for Collision Bounds ---
         if (visualizationMode == DebugVisualizationMode.CollisionBounds && _playerTransform != null)
         {
-            if (Vector3.Distance(_playerTransform.position, _lastVisualizerPlayerPos) > 1f)
+            const float REGEN_MOVE_THRESHOLD = 1f;
+            if ((_playerTransform.position - _lastVisualizerPlayerPos).sqrMagnitude > REGEN_MOVE_THRESHOLD * REGEN_MOVE_THRESHOLD)
             {
                 _lastVisualizerPlayerPos = _playerTransform.position;
 
@@ -2251,9 +2252,10 @@ public class World : MonoBehaviour
                 Vector3 worldBlockOrigin = chunk.Coord.ToWorldPosition() + localBlockOrigin;
 
                 // --- RADIUS CULLING ---
+                const float COLLISION_BOUNDS_DRAW_RADIUS = 10f;
                 if (_playerTransform != null)
                 {
-                    if (Vector3.Distance(worldBlockOrigin, _playerTransform.position) > 10f)
+                    if ((worldBlockOrigin - _playerTransform.position).sqrMagnitude > COLLISION_BOUNDS_DRAW_RADIUS * COLLISION_BOUNDS_DRAW_RADIUS)
                     {
                         continue;
                     }
