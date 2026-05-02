@@ -22,7 +22,6 @@ namespace Serialization.Migration
         // Add new steps here in ascending version order.
         private readonly List<WorldMigrationStep> _steps = new List<WorldMigrationStep>
         {
-            // new MigrationV1ToV2Dummy()
             new MigrationV1ToV2RegionRepack(),
             new MigrationV2ToV3RestoreLighting(),
             new MigrationV3ToV4WorldTypes(),
