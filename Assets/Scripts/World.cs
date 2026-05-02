@@ -17,9 +17,11 @@ using Jobs.BurstData;
 using Jobs.Data;
 using Libraries;
 using MyBox;
+using Physics;
 using Serialization;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
@@ -117,6 +119,7 @@ public class World : MonoBehaviour
 
     private DebugVisualizationMode _lastVisualizationMode;
     private readonly HashSet<ChunkCoord> _chunksToUpdateVisualization = new HashSet<ChunkCoord>();
+    private Vector3 _lastVisualizerPlayerPos;
 
     // --- Storage & Serialization ---
     public ChunkStorageManager StorageManager;
@@ -2077,12 +2080,34 @@ public class World : MonoBehaviour
             _lastVisualizationMode = visualizationMode;
         }
 
+        // --- 1.5 Dynamic Radius Update for Collision Bounds ---
+        if (visualizationMode == DebugVisualizationMode.CollisionBounds && _playerTransform != null)
+        {
+            const float REGEN_MOVE_THRESHOLD = 1f;
+            if ((_playerTransform.position - _lastVisualizerPlayerPos).sqrMagnitude > REGEN_MOVE_THRESHOLD * REGEN_MOVE_THRESHOLD)
+            {
+                _lastVisualizerPlayerPos = _playerTransform.position;
+
+                // Add chunks within a small radius (1 chunk distance = 3x3 chunks) to be updated
+                for (int x = -1; x <= 1; x++)
+                {
+                    for (int z = -1; z <= 1; z++)
+                    {
+                        ChunkCoord coord = new ChunkCoord(PlayerChunkCoord.X + x, PlayerChunkCoord.Z + z);
+                        if (_activeChunks.Contains(coord))
+                        {
+                            AddChunksToUpdateVisualization(coord);
+                        }
+                    }
+                }
+            }
+        }
+
         // --- 2. Process any pending visualization updates ---
         if (visualizationMode != DebugVisualizationMode.None && _chunksToUpdateVisualization.Count > 0)
         {
             // Use Pools for tracking collections
             List<ChunkCoord> chunksReadyForVisualization = ListPool<ChunkCoord>.Get();
-            Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>> chunkDataCache = DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Get();
 
             try
             {
@@ -2100,31 +2125,13 @@ public class World : MonoBehaviour
                     }
                 }
 
-
-                // Pre-cache all required data in one go for chunks that are ready
-                foreach (ChunkCoord coord in chunksReadyForVisualization)
+                if (visualizationMode == DebugVisualizationMode.CollisionBounds)
                 {
-                    if (_chunkMap.TryGetValue(coord, out Chunk chunk))
-                    {
-                        // Explicit Ownership. The caller requests the pooled dictionary and passes it into the helper method to be populated.
-                        Dictionary<Vector3Int, Color> voxelsToDraw = DictionaryPool<Vector3Int, Color>.Get();
-                        GetVoxelDataForVisualization(chunk, voxelsToDraw);
-                        chunkDataCache[coord] = voxelsToDraw;
-                    }
+                    UpdateCollisionBoundsVisualizations(chunksReadyForVisualization);
                 }
-
-                // Iterate through the cached data to draw meshes
-                foreach ((ChunkCoord coord, Dictionary<Vector3Int, Color> value) in chunkDataCache)
+                else
                 {
-                    // Get neighbor data from the cache, or null if not available.
-                    chunkDataCache.TryGetValue(coord.Neighbor(0, 1), out Dictionary<Vector3Int, Color> northData);
-                    chunkDataCache.TryGetValue(coord.Neighbor(0, -1), out Dictionary<Vector3Int, Color> southData);
-                    chunkDataCache.TryGetValue(coord.Neighbor(1, 0), out Dictionary<Vector3Int, Color> eastData);
-                    chunkDataCache.TryGetValue(coord.Neighbor(-1, 0), out Dictionary<Vector3Int, Color> westData);
-
-                    // Call the visualizer method with all neighbor data.
-                    voxelVisualizer.UpdateChunkVisualization(coord, value, northData, southData, eastData,
-                        westData);
+                    UpdateVoxelStateVisualizations(chunksReadyForVisualization);
                 }
 
                 // Remove only the processed chunks from the update set.
@@ -2136,16 +2143,198 @@ public class World : MonoBehaviour
             }
             finally
             {
-                // ALWAYS release pools to prevent memory leaks, even on errors
-                foreach (Dictionary<Vector3Int, Color> dict in chunkDataCache.Values)
-                {
-                    if (dict != null) DictionaryPool<Vector3Int, Color>.Release(dict);
-                }
-
-                DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Release(chunkDataCache);
                 ListPool<ChunkCoord>.Release(chunksReadyForVisualization);
             }
         }
+    }
+
+    private void UpdateVoxelStateVisualizations(List<ChunkCoord> chunksReadyForVisualization)
+    {
+        Dictionary<ChunkCoord, Dictionary<Vector3Int, Color>> chunkDataCache = DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Get();
+
+        try
+        {
+            // Pre-cache all required data in one go for chunks that are ready
+            foreach (ChunkCoord coord in chunksReadyForVisualization)
+            {
+                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                {
+                    // Explicit Ownership. The caller requests the pooled dictionary and passes it into the helper method to be populated.
+                    Dictionary<Vector3Int, Color> voxelsToDraw = DictionaryPool<Vector3Int, Color>.Get();
+                    GetVoxelDataForVisualization(chunk, voxelsToDraw);
+                    chunkDataCache[coord] = voxelsToDraw;
+                }
+            }
+
+            // Iterate through the cached data to draw meshes
+            foreach ((ChunkCoord coord, Dictionary<Vector3Int, Color> value) in chunkDataCache)
+            {
+                // Get neighbor data from the cache, or null if not available.
+                chunkDataCache.TryGetValue(coord.Neighbor(0, 1), out Dictionary<Vector3Int, Color> northData);
+                chunkDataCache.TryGetValue(coord.Neighbor(0, -1), out Dictionary<Vector3Int, Color> southData);
+                chunkDataCache.TryGetValue(coord.Neighbor(1, 0), out Dictionary<Vector3Int, Color> eastData);
+                chunkDataCache.TryGetValue(coord.Neighbor(-1, 0), out Dictionary<Vector3Int, Color> westData);
+
+                // Call the visualizer method with all neighbor data.
+                voxelVisualizer.UpdateChunkVisualization(coord, value, northData, southData, eastData, westData);
+            }
+        }
+        finally
+        {
+            // ALWAYS release pools to prevent memory leaks, even on errors
+            foreach (Dictionary<Vector3Int, Color> dict in chunkDataCache.Values)
+            {
+                if (dict != null) DictionaryPool<Vector3Int, Color>.Release(dict);
+            }
+
+            DictionaryPool<ChunkCoord, Dictionary<Vector3Int, Color>>.Release(chunkDataCache);
+        }
+    }
+
+    private void UpdateCollisionBoundsVisualizations(List<ChunkCoord> chunksReadyForVisualization)
+    {
+        Dictionary<ChunkCoord, List<CollisionBoundsVisualization>> chunkDataCache = DictionaryPool<ChunkCoord, List<CollisionBoundsVisualization>>.Get();
+
+        try
+        {
+            foreach (ChunkCoord coord in chunksReadyForVisualization)
+            {
+                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                {
+                    List<CollisionBoundsVisualization> boundsToDraw = ListPool<CollisionBoundsVisualization>.Get();
+                    GetCollisionBoundsDataForVisualization(chunk, boundsToDraw);
+                    chunkDataCache[coord] = boundsToDraw;
+                }
+            }
+
+            foreach ((ChunkCoord coord, List<CollisionBoundsVisualization> value) in chunkDataCache)
+            {
+                voxelVisualizer.UpdateCollisionBoundsVisualization(coord, value);
+            }
+        }
+        finally
+        {
+            foreach (List<CollisionBoundsVisualization> list in chunkDataCache.Values)
+            {
+                if (list != null) ListPool<CollisionBoundsVisualization>.Release(list);
+            }
+
+            DictionaryPool<ChunkCoord, List<CollisionBoundsVisualization>>.Release(chunkDataCache);
+        }
+    }
+
+    private void GetCollisionBoundsDataForVisualization(Chunk chunk, List<CollisionBoundsVisualization> boundsToDraw)
+    {
+        if (chunk == null || !chunk.ChunkData.IsPopulated) return;
+
+        for (int s = 0; s < chunk.ChunkData.sections.Length; s++)
+        {
+            ChunkSection section = chunk.ChunkData.sections[s];
+            if (section == null || section.IsEmpty) continue;
+
+            int startY = s * ChunkMath.SECTION_SIZE;
+
+            for (int i = 0; i < section.voxels.Length; i++)
+            {
+                uint packedData = section.voxels[i];
+                ushort id = BurstVoxelDataBitMapping.GetId(packedData);
+                if (id == BlockIDs.Air) continue;
+
+                BlockType blockType = BlockTypes[id];
+                if (!blockType.isSolid || blockType.fluidType != FluidType.None) continue;
+
+                int x = i % ChunkMath.SECTION_SIZE;
+                int yOffset = i / ChunkMath.SECTION_SIZE % ChunkMath.SECTION_SIZE;
+                int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
+                int globalY = startY + yOffset;
+
+                Vector3 localBlockOrigin = new Vector3(x, globalY, z);
+                Vector3 worldBlockOrigin = chunk.Coord.ToWorldPosition() + localBlockOrigin;
+
+                // --- RADIUS CULLING ---
+                const float COLLISION_BOUNDS_DRAW_RADIUS = 10f;
+                if (_playerTransform != null)
+                {
+                    if ((worldBlockOrigin - _playerTransform.position).sqrMagnitude > COLLISION_BOUNDS_DRAW_RADIUS * COLLISION_BOUNDS_DRAW_RADIUS)
+                    {
+                        continue;
+                    }
+                }
+
+                // --- CULL HIDDEN BLOCKS ---
+                bool isExposed = false;
+                for (int d = 0; d < 6; d++)
+                {
+                    Vector3 worldNeighborPos = worldBlockOrigin + VoxelData.FaceChecks[d];
+                    VoxelState? neighbor = worldData.GetVoxelState(worldNeighborPos);
+
+                    if (!neighbor.HasValue)
+                    {
+                        isExposed = true;
+                        break;
+                    }
+
+                    BlockType neighborType = BlockTypes[neighbor.Value.ID];
+                    if (!neighborType.isSolid || neighborType.renderNeighborFaces || neighborType.fluidType != FluidType.None)
+                    {
+                        isExposed = true;
+                        break;
+                    }
+                }
+
+                if (!isExposed) continue;
+
+                Bounds localBounds;
+                Color color;
+
+                switch (blockType.collisionBounds.mode)
+                {
+                    case CollisionBoundsMode.FullBlock:
+                        color = new Color(0f, 1f, 0.25f, 0.35f); // Green
+                        break;
+                    case CollisionBoundsMode.MatchVisualMesh:
+                        color = new Color(1f, 0.5f, 0f, 0.35f); // Orange
+                        break;
+                    case CollisionBoundsMode.CustomAABB:
+                        color = new Color(0f, 0.5f, 1f, 0.35f); // Blue
+                        break;
+                    default:
+                        color = new Color(1f, 1f, 1f, 0.35f); // White
+                        break;
+                }
+
+                if (!blockType.collisionBounds.HasCustomBounds)
+                {
+                    localBounds = new Bounds(localBlockOrigin + new Vector3(0.5f, 0.5f, 0.5f), Vector3.one);
+                }
+                else
+                {
+                    float3x3 rotMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                        blockType.metadataSchema, BurstVoxelDataBitMapping.GetMeta(packedData), blockType.defaultMetadata);
+                    localBounds = GetRotatedLocalBounds(localBlockOrigin, blockType.collisionBounds, rotMatrix);
+                }
+
+                boundsToDraw.Add(new CollisionBoundsVisualization(localBounds, color));
+            }
+        }
+    }
+
+    private static Bounds GetRotatedLocalBounds(Vector3 blockOrigin, BlockCollisionBounds bounds, float3x3 rotationMatrix)
+    {
+        // Shift bounds to origin (-0.5 to 0.5)
+        Vector3 localCenter = (bounds.min + bounds.max) * 0.5f - new Vector3(0.5f, 0.5f, 0.5f);
+        Vector3 extents = (bounds.max - bounds.min) * 0.5f;
+
+        // Apply rotation to extents (AABB after rotation)
+        Vector3 newExtents = new Vector3(
+            Mathf.Abs(rotationMatrix.c0.x * extents.x) + Mathf.Abs(rotationMatrix.c1.x * extents.y) + Mathf.Abs(rotationMatrix.c2.x * extents.z),
+            Mathf.Abs(rotationMatrix.c0.y * extents.x) + Mathf.Abs(rotationMatrix.c1.y * extents.y) + Mathf.Abs(rotationMatrix.c2.y * extents.z),
+            Mathf.Abs(rotationMatrix.c0.z * extents.x) + Mathf.Abs(rotationMatrix.c1.z * extents.y) + Mathf.Abs(rotationMatrix.c2.z * extents.z)
+        );
+
+        Vector3 newCenter = math.mul(rotationMatrix, localCenter);
+
+        return new Bounds(blockOrigin + new Vector3(0.5f, 0.5f, 0.5f) + newCenter, newExtents * 2f);
     }
 
     /// <summary>
@@ -2434,14 +2623,175 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Determines if a voxel at the given world position should cause physical collision (solid and not a fluid).
+    /// Determines if a voxel cell is physically occupied by a solid block.
+    /// This is a coarse grid-level check used for placement previews.
+    /// Does NOT evaluate <see cref="BlockTags.REPLACEABLE"/> or specific placement rules.
     /// </summary>
-    /// <param name="pos">The world-space position.</param>
-    /// <returns>True if the voxel is solid and not water; otherwise, false.</returns>
-    public bool CheckForCollision(Vector3 pos)
+    /// <param name="pos">The world-space position to check.</param>
+    /// <returns>True if the cell contains a solid block, false otherwise.</returns>
+    public bool IsCellOccupiedForPlacement(Vector3 pos)
     {
         VoxelState? voxel = worldData.GetVoxelState(pos);
         return voxel.HasValue && voxel.Value.Properties.isSolid && voxel.Value.Properties.fluidType == FluidType.None;
+    }
+
+    /// <summary>
+    /// Tests whether an entity AABB overlaps any solid collision geometry along a
+    /// specific movement axis and direction. Aggregates across all overlapping blocks
+    /// and returns the correction that fully resolves ALL overlaps on this axis.
+    /// </summary>
+    /// <param name="entityBounds">The entity's predicted world-space AABB.</param>
+    /// <param name="axis">The movement axis to resolve (0=X, 1=Y, 2=Z).</param>
+    /// <param name="directionSign">+1 for positive movement, -1 for negative.</param>
+    /// <param name="contact">If overlap detected, contains axis-specific resolution.</param>
+    /// <returns>True if there is any overlap on the specified axis.</returns>
+    public bool CheckPhysicsCollision(Bounds entityBounds, int axis, int directionSign, out CollisionContact contact)
+    {
+        contact = new CollisionContact { Hit = false };
+        bool hitAnything = false;
+        float maxCorrection = 0f;
+
+        // 1. Grid scan range
+        Vector3Int minVoxel = new Vector3Int(
+            Mathf.FloorToInt(entityBounds.min.x),
+            Mathf.FloorToInt(entityBounds.min.y),
+            Mathf.FloorToInt(entityBounds.min.z));
+        Vector3Int maxVoxel = new Vector3Int(
+            Mathf.FloorToInt(entityBounds.max.x),
+            Mathf.FloorToInt(entityBounds.max.y),
+            Mathf.FloorToInt(entityBounds.max.z));
+
+        for (int x = minVoxel.x; x <= maxVoxel.x; x++)
+        {
+            for (int y = minVoxel.y; y <= maxVoxel.y; y++)
+            {
+                for (int z = minVoxel.z; z <= maxVoxel.z; z++)
+                {
+                    Vector3Int voxelPos = new Vector3Int(x, y, z);
+                    VoxelState? voxel = worldData.GetVoxelState(voxelPos);
+
+                    if (!voxel.HasValue || !voxel.Value.Properties.isSolid || voxel.Value.Properties.fluidType != FluidType.None)
+                        continue; // Empty, unloaded, or fluid
+
+                    BlockType blockType = voxel.Value.Properties;
+                    Bounds blockBounds;
+
+                    if (!blockType.collisionBounds.HasCustomBounds)
+                    {
+                        // Fast path: Full 1x1x1 cube
+                        blockBounds = new Bounds(voxelPos + new Vector3(0.5f, 0.5f, 0.5f), Vector3.one);
+                    }
+                    else
+                    {
+                        // Slow path: Get rotated bounds
+                        float3x3 rotMatrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                            blockType.metadataSchema, voxel.Value.Meta, blockType.defaultMetadata);
+                        blockBounds = GetRotatedWorldBounds(voxelPos, blockType.collisionBounds, rotMatrix);
+                    }
+
+                    // AABB overlap test
+                    bool overlaps = entityBounds.min.x < blockBounds.max.x
+                                    && entityBounds.max.x > blockBounds.min.x
+                                    && entityBounds.min.y < blockBounds.max.y
+                                    && entityBounds.max.y > blockBounds.min.y
+                                    && entityBounds.min.z < blockBounds.max.z
+                                    && entityBounds.max.z > blockBounds.min.z;
+
+                    if (overlaps)
+                    {
+                        hitAnything = true;
+
+                        // Calculate penetration correction for the requested axis
+                        float correction = 0f;
+                        float face = 0f;
+
+                        if (axis == 0) // X
+                        {
+                            if (directionSign < 0)
+                            {
+                                correction = blockBounds.max.x - entityBounds.min.x;
+                                face = blockBounds.max.x;
+                            }
+                            else
+                            {
+                                correction = blockBounds.min.x - entityBounds.max.x;
+                                face = blockBounds.min.x;
+                            }
+                        }
+                        else if (axis == 1) // Y
+                        {
+                            if (directionSign < 0)
+                            {
+                                correction = blockBounds.max.y - entityBounds.min.y;
+                                face = blockBounds.max.y;
+                            }
+                            else
+                            {
+                                correction = blockBounds.min.y - entityBounds.max.y;
+                                face = blockBounds.min.y;
+                            }
+                        }
+                        else if (axis == 2) // Z
+                        {
+                            if (directionSign < 0)
+                            {
+                                correction = blockBounds.max.z - entityBounds.min.z;
+                                face = blockBounds.max.z;
+                            }
+                            else
+                            {
+                                correction = blockBounds.min.z - entityBounds.max.z;
+                                face = blockBounds.min.z;
+                            }
+                        }
+
+                        // Aggregate by largest absolute correction
+                        if (Mathf.Abs(correction) > Mathf.Abs(maxCorrection))
+                        {
+                            maxCorrection = correction;
+                            contact.Hit = true;
+                            contact.Correction = correction;
+                            contact.ContactFace = face;
+                        }
+                    }
+                }
+            }
+        }
+
+        return hitAnything;
+    }
+
+    /// <summary>
+    /// Helper to rotate local collision bounds into world space.
+    /// </summary>
+    private static Bounds GetRotatedWorldBounds(Vector3Int blockOrigin, BlockCollisionBounds bounds, float3x3 rotationMatrix)
+    {
+        // 1. Shift [0,1] local bounds to center at (0,0,0) for rotation
+        Vector3 localCenter = (bounds.min + bounds.max) * 0.5f - new Vector3(0.5f, 0.5f, 0.5f);
+        Vector3 localExtents = (bounds.max - bounds.min) * 0.5f;
+
+        float3 lc = new float3(localCenter.x, localCenter.y, localCenter.z);
+        float3 e = new float3(localExtents.x, localExtents.y, localExtents.z);
+
+        // 8 corners, computed and rotated inline to avoid GC allocations in FixedUpdate
+        float3 c0 = math.mul(rotationMatrix, lc + new float3(e.x, e.y, e.z));
+        float3 c1 = math.mul(rotationMatrix, lc + new float3(e.x, e.y, -e.z));
+        float3 c2 = math.mul(rotationMatrix, lc + new float3(e.x, -e.y, e.z));
+        float3 c3 = math.mul(rotationMatrix, lc + new float3(e.x, -e.y, -e.z));
+        float3 c4 = math.mul(rotationMatrix, lc + new float3(-e.x, e.y, e.z));
+        float3 c5 = math.mul(rotationMatrix, lc + new float3(-e.x, e.y, -e.z));
+        float3 c6 = math.mul(rotationMatrix, lc + new float3(-e.x, -e.y, e.z));
+        float3 c7 = math.mul(rotationMatrix, lc + new float3(-e.x, -e.y, -e.z));
+
+        float3 minF = math.min(c0, math.min(c1, math.min(c2, math.min(c3, math.min(c4, math.min(c5, math.min(c6, c7)))))));
+        float3 maxF = math.max(c0, math.max(c1, math.max(c2, math.max(c3, math.max(c4, math.max(c5, math.max(c6, c7)))))));
+
+        Vector3 min = new Vector3(minF.x, minF.y, minF.z);
+        Vector3 max = new Vector3(maxF.x, maxF.y, maxF.z);
+
+        // Shift back to world space block origin + center
+        Vector3 worldCenter = min + (max - min) * 0.5f + blockOrigin + new Vector3(0.5f, 0.5f, 0.5f);
+        return new Bounds(worldCenter, max - min);
     }
 
     /// <summary>

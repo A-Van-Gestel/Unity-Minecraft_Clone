@@ -136,6 +136,22 @@ namespace DebugVisualizations
         }
 
         /// <summary>
+        /// Applies line topology vertices, indices, and colors to the mesh for non-Burst debug overlays.
+        /// </summary>
+        /// <param name="vertices">The line mesh vertices.</param>
+        /// <param name="indices">The line index buffer.</param>
+        /// <param name="colors">The vertex colors.</param>
+        public void ApplyLineMesh(List<Vector3> vertices, List<int> indices, List<Color> colors)
+        {
+            _mesh.Clear();
+            _mesh.SetVertices(vertices);
+            _mesh.SetIndices(indices, MeshTopology.Lines, 0);
+            _mesh.SetColors(colors);
+            _mesh.RecalculateBounds();
+            IsMeshApplied = true;
+        }
+
+        /// <summary>
         /// Clears the existing mesh data.
         /// </summary>
         public void ClearMesh()

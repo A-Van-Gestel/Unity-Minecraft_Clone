@@ -15,29 +15,29 @@ MonoBehaviour:
   blocks:
   - localPosition: {x: 0, y: 0, z: 0}
     blockID: 14
-    orientation: 0
+    meta: 1
     rule: 0
   - localPosition: {x: 1, y: 0, z: 0}
     blockID: 14
-    orientation: 0
+    meta: 1
     rule: 0
   - localPosition: {x: 2, y: 0, z: 0}
     blockID: 14
-    orientation: 0
+    meta: 1
     rule: 0
   - localPosition: {x: 3, y: 0, z: 0}
     blockID: 14
-    orientation: 0
+    meta: 1
     rule: 0
   - localPosition: {x: 3, y: 0, z: 1}
     blockID: 15
-    orientation: 0
+    meta: 0
     rule: 2
   - localPosition: {x: 3, y: 0, z: -1}
     blockID: 15
-    orientation: 0
+    meta: 0
     rule: 2
   - localPosition: {x: 3, y: 1, z: 0}
     blockID: 15
-    orientation: 0
+    meta: 0
     rule: 2

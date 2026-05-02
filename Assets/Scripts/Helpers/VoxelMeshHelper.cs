@@ -60,6 +60,23 @@ namespace Helpers
             ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
             bool isTransparent)
         {
+            GenerateStandardCubeFace(faceIndex, textureID, lightLevel, in position, rotation, 0,
+                ref vertexIndex, ref vertices, ref triangles, ref transparentTriangles,
+                ref uvs, ref colors, ref normals, isTransparent);
+        }
+
+        /// <summary>
+        /// Generates a single face of a standard cube voxel with an optional UV quarter-turn.
+        /// </summary>
+        [BurstCompile]
+        [SkipLocalsInit] // Optimization: Skip zeroing local variables (Vector3s, Colors) as we overwrite them immediately.
+        public static void GenerateStandardCubeFace(
+            int faceIndex, int textureID, float lightLevel, in Vector3Int position, float rotation, int uvQuarterTurnsCW,
+            ref int vertexIndex,
+            ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
+            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            bool isTransparent)
+        {
             // A face is a quad, which consists of 4 vertices.
             for (int i = 0; i < 4; i++)
             {
@@ -77,7 +94,13 @@ namespace Helpers
 
                 // Use the FaceUvOrder array to get the correct UV for this vertex.
                 int uvIndex = s_faceUvOrder[faceIndex * 4 + i];
-                AddTexture(textureID, BurstVoxelData.VoxelUvs.Data[uvIndex], ref uvs);
+                Vector2 uv = BurstVoxelData.VoxelUvs.Data[uvIndex];
+                if ((uvQuarterTurnsCW & 3) != 0)
+                {
+                    uv = RotateUvQuarterTurnsCW(uv, uvQuarterTurnsCW);
+                }
+
+                AddTexture(textureID, uv, ref uvs);
             }
 
             // Add the triangle indices to the correct sub-mesh.
@@ -101,6 +124,22 @@ namespace Helpers
             }
 
             vertexIndex += 4;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector2 RotateUvQuarterTurnsCW(Vector2 uv, int quarterTurnsCW)
+        {
+            switch (quarterTurnsCW & 3)
+            {
+                case 1:
+                    return new Vector2(1f - uv.y, uv.x);
+                case 2:
+                    return new Vector2(1f - uv.x, 1f - uv.y);
+                case 3:
+                    return new Vector2(uv.y, 1f - uv.x);
+                default:
+                    return uv;
+            }
         }
 
         /// <summary>
@@ -139,6 +178,75 @@ namespace Helpers
                 vertices.Add(position + direction + center);
 
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]); // Assuming one normal per face for custom meshes
+                colors.Add(new Color(1f, 1f, 1f, lightLevel));
+                AddTexture(textureID, vertData.UV, ref uvs);
+            }
+
+            // Add triangles to the correct list based on transparency.
+            if (isTransparent)
+            {
+                for (int i = 0; i < faceData.TriCount; i++)
+                {
+                    transparentTriangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < faceData.TriCount; i++)
+                {
+                    triangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
+                }
+            }
+
+            vertexIndex += faceData.VertCount;
+        }
+
+        /// <summary>
+        /// Generates a single face of a custom mesh voxel with full 3D rotation via a
+        /// <see cref="float3x3"/> matrix. Used by schema-aware custom mesh meshing paths
+        /// (<see cref="MetadataSchema.Axis3"/>, <see cref="MetadataSchema.Facing6"/>,
+        /// <see cref="MetadataSchema.Facing6Roll2"/>, <see cref="MetadataSchema.HorizontalOnly"/>).
+        /// </summary>
+        /// <remarks>
+        /// Unlike the legacy <c>float rotation</c> overload (Y-axis only via <c>Quaternion.Euler</c>),
+        /// this overload applies a full 3D rotation to both vertices and normals using
+        /// <c>math.mul(matrix, direction)</c>. The matrix is obtained from
+        /// <see cref="BurstCustomMeshRotationUtility.GetRotationMatrix"/>.
+        /// </remarks>
+        [BurstCompile]
+        [SkipLocalsInit]
+        public static void GenerateCustomMeshFace(
+            int faceIndex, int textureID, float lightLevel, in Vector3Int position,
+            in float3x3 rotationMatrix,
+            int customMeshIndex,
+            [ReadOnly] in NativeArray<CustomMeshData> customMeshes,
+            [ReadOnly] in NativeArray<CustomFaceData> customFaces,
+            [ReadOnly] in NativeArray<CustomVertData> customVerts,
+            [ReadOnly] in NativeArray<int> customTris,
+            ref int vertexIndex,
+            ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
+            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            bool isTransparent)
+        {
+            CustomMeshData meshData = customMeshes[customMeshIndex];
+            CustomFaceData faceData = customFaces[meshData.FaceStartIndex + faceIndex];
+
+            int startVertCount = vertexIndex;
+            float3 center = new float3(0.5f, 0.5f, 0.5f);
+
+            // Rotate the face normal once (shared by all vertices on this face)
+            Vector3Int fc = BurstVoxelData.FaceChecks.Data[faceIndex];
+            float3 rotatedNormal = math.normalize(math.mul(rotationMatrix, new float3(fc.x, fc.y, fc.z)));
+
+            for (int i = 0; i < faceData.VertCount; i++)
+            {
+                CustomVertData vertData = customVerts[faceData.VertStartIndex + i];
+
+                // Apply full 3D rotation around the block center
+                float3 rotated = math.mul(rotationMatrix, (float3)vertData.Position - center) + center;
+                vertices.Add(position + (Vector3)rotated);
+
+                normals.Add(rotatedNormal);
                 colors.Add(new Color(1f, 1f, 1f, lightLevel));
                 AddTexture(textureID, vertData.UV, ref uvs);
             }

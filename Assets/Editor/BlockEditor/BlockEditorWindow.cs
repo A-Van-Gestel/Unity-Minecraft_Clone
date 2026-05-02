@@ -44,6 +44,12 @@ namespace Editor.BlockEditor
         private int _previewFluidLevel = 0;
         private bool _forceOpaquePreview = false;
 
+        // --- Metadata Preview ---
+        private int _previewFacing = 0; // Default to South (0)
+        private int _previewRoll = 0; // Default to 0
+        private int _previewAxis = 0; // Default to Y-axis (0)
+        private int _previewYaw = 0; // Default to North (0)
+
         // --- Custom GUI Style ---
         private GUIStyle _listButtonStyle;
         private bool _blockIdsStale = false;
@@ -159,12 +165,16 @@ namespace Editor.BlockEditor
                     tags = blockType.tags,
                     canReplaceTags = blockType.canReplaceTags,
                     isActive = blockType.isActive,
+                    metadataSchema = blockType.metadataSchema,
+                    placementMetadataMode = blockType.placementMetadataMode,
+                    defaultMetadata = blockType.defaultMetadata,
                     backFaceTexture = blockType.backFaceTexture,
                     frontFaceTexture = blockType.frontFaceTexture,
                     topFaceTexture = blockType.topFaceTexture,
                     bottomFaceTexture = blockType.bottomFaceTexture,
                     leftFaceTexture = blockType.leftFaceTexture,
                     rightFaceTexture = blockType.rightFaceTexture,
+                    collisionBounds = blockType.collisionBounds,
                 });
             }
 
@@ -177,6 +187,30 @@ namespace Editor.BlockEditor
             {
                 EditorUtility.DisplayDialog("Error", "BlockDatabase asset not found or data not loaded.", "OK");
                 return;
+            }
+
+            // Pre-save validation for collision bounds
+            foreach (BlockType block in _blockTypesCopy)
+            {
+                // Only draw custom block bounds
+                if (block.collisionBounds.mode == CollisionBoundsMode.FullBlock) continue;
+
+                Vector3 min = block.collisionBounds.min;
+                Vector3 max = block.collisionBounds.max;
+
+                // Check inverted/zero bounds
+                if (min.x >= max.x || min.y >= max.y || min.z >= max.z)
+                {
+                    EditorUtility.DisplayDialog("Validation Error", $"Block '{block.blockName}' has invalid custom collision bounds. Min must be strictly less than Max.", "OK");
+                    return;
+                }
+
+                // Strict [0,1] domain requirement for voxel engine logic
+                if (min.x < 0f || min.y < 0f || min.z < 0f || max.x > 1f || max.y > 1f || max.z > 1f)
+                {
+                    EditorUtility.DisplayDialog("Validation Error", $"Block '{block.blockName}' has collision bounds outside the standard [0,1] block space. This is not allowed.", "OK");
+                    return;
+                }
             }
 
             // Prepare the BlockDatabase asset for modification.

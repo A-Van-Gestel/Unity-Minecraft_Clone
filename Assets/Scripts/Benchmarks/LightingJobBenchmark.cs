@@ -419,7 +419,8 @@ namespace Benchmarks
                             int index = x + VoxelData.ChunkWidth * (100 + VoxelData.ChunkHeight * z);
 
                             // Set to Stone (Solid, Opacity 15, Light 0)
-                            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0, 0, 1, 0);
+                            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0, 0,
+                                BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
 
                             // Trigger vertical darkness logic via Column Recalc
                             data.SourceSunRecalcQueue.Add(new Vector2Int(x, z));
@@ -464,8 +465,9 @@ namespace Benchmarks
 
         private static void FillDefaultTerrain(LightingBenchmarkData data, int height)
         {
-            uint solid = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0, 0, 1, 0); // Stone
-            uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 1, 0); // Air
+            byte legacySolidMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false);
+            uint solid = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0, 0, legacySolidMeta); // Stone
+            uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, legacySolidMeta); // Air
 
             for (int i = 0; i < data.Center.Length; i++)
             {
@@ -526,7 +528,8 @@ namespace Benchmarks
             int index = pos.x + VoxelData.ChunkWidth * (pos.y + VoxelData.ChunkHeight * pos.z);
 
             // Use Lava as the light-emitting block
-            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level, 1, 0);
+            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level,
+                BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
 
             // Add to queue
             data.SourceBlockLightQueue.Add(new LightQueueNode
@@ -544,7 +547,8 @@ namespace Benchmarks
         {
             // 1. Set Source in Map
             int srcIdx = srcPos.x + VoxelData.ChunkWidth * (srcPos.y + VoxelData.ChunkHeight * srcPos.z);
-            data.Center[srcIdx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level, 1, 0);
+            data.Center[srcIdx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level,
+                BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
 
             Queue<(Vector3Int p, int l)> queue = new Queue<(Vector3Int p, int l)>();
             queue.Enqueue((srcPos, level));
@@ -585,7 +589,8 @@ namespace Benchmarks
         {
             // 1. Set Block to Air (ID 0), Light 0.
             int idx = pos.x + VoxelData.ChunkWidth * (pos.y + VoxelData.ChunkHeight * pos.z);
-            data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 1, 0);
+            data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0,
+                BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
 
             // 2. Queue Removal
             data.SourceBlockLightQueue.Add(new LightQueueNode

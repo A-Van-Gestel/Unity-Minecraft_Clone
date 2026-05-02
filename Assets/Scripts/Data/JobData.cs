@@ -79,6 +79,11 @@ namespace Data
         [MarshalAs(UnmanagedType.U1)]
         public bool IsActive;
 
+        // Metadata schema
+        public readonly MetadataSchema MetadataSchema;
+        public readonly PlacementMetadataMode PlacementMetadataMode;
+        public readonly byte DefaultMetadata;
+
         // Texture ID's
         public readonly int BackFaceTexture;
         public readonly int FrontFaceTexture;
@@ -114,6 +119,11 @@ namespace Data
 
             // Block behavior
             IsActive = blockType.isActive;
+
+            // Metadata schema
+            MetadataSchema = blockType.metadataSchema;
+            PlacementMetadataMode = blockType.placementMetadataMode;
+            DefaultMetadata = blockType.defaultMetadata;
 
             // Texture ID's
             BackFaceTexture = blockType.backFaceTexture;

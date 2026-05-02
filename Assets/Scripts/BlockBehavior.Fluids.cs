@@ -1,5 +1,6 @@
 using System;
 using Data;
+using Jobs.BurstData;
 using Unity.Collections;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -85,8 +86,12 @@ public static partial class BlockBehavior
 
         if (expectedFluidLevel != currentLevel)
         {
-            // Update our level to match our support
-            Mods.Add(new VoxelMod(globalPos, currentId) { FluidLevel = expectedFluidLevel, ImmediateUpdate = true });
+            // Update our level to match our support. Meta encoded via the legacy fluid rule.
+            Mods.Add(new VoxelMod(globalPos, currentId)
+            {
+                Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, expectedFluidLevel, isFluid: true),
+                ImmediateUpdate = true,
+            });
             currentLevel = expectedFluidLevel; // Update by ref for the orchestrator
             return false; // Still process gravity/spread this tick, but with updated level (caught next tick mostly)
         }
@@ -107,7 +112,7 @@ public static partial class BlockBehavior
         Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
         Mods.Add(new VoxelMod(globalBelowPos, currentId)
         {
-            FluidLevel = MakeFalling(effectiveLevel),
+            Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, MakeFalling(effectiveLevel), isFluid: true),
         });
         return true; // Skip horizontal spreading this tick if we pushed downwards
     }
@@ -185,7 +190,7 @@ public static partial class BlockBehavior
 
                 Mods.Add(new VoxelMod(globalNeighborPos, currentId)
                 {
-                    FluidLevel = newLevel,
+                    Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, newLevel, isFluid: true),
                 });
             }
         }

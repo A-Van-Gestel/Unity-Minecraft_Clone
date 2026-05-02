@@ -26,6 +26,8 @@ namespace Serialization.Migration
             new MigrationV1ToV2RegionRepack(),
             new MigrationV2ToV3RestoreLighting(),
             new MigrationV3ToV4WorldTypes(),
+            new MigrationV4ToV5VoxelModMeta(),
+            new MigrationV5ToV6LegacyToSchemaBased(),
         };
 
         // Track the path of the backup we create so we can roll it back if needed.

@@ -3,6 +3,7 @@ using System.Text;
 using Data;
 using Helpers.UI;
 using JetBrains.Annotations;
+using Jobs.BurstData;
 using MyBox;
 using TMPro;
 using UnityEngine;
@@ -514,17 +515,47 @@ public class DebugScreen : MonoBehaviour
             builder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
             builder.Append("Is Active: ").AppendLine(BoolToYesNoString(isVoxelActive));
             builder.Append("Light (Sun/Block/Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.Light).AppendLine();
+            builder.Append("Meta: 0x").Append(state.Meta.ToString("X2")).AppendLine();
 
             // --- Context-Specific Information ---
-            if (props.fluidType != FluidType.None)
+            if (props.fluidType != FluidType.None || props.metadataSchema == MetadataSchema.FluidLevel4)
             {
                 // For fluids, show fluid-related properties.
-                builder.Append("Fluid Level: ").AppendLine(state.FluidLevel.ToString());
+                builder.Append("Fluid Level: ")
+                    .AppendLine(BurstVoxelMetadataUtility.DecodeFluidLevel(state.Meta).ToString());
             }
             else
             {
-                // For non-fluids (solids), show orientation.
-                builder.Append("Orientation: ").AppendLine(state.Orientation.ToString());
+                switch (props.metadataSchema)
+                {
+                    case MetadataSchema.Axis3:
+                    {
+                        byte defaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Axis3, props.defaultMetadata, BurstVoxelMetadataUtility.AXIS_Y);
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Axis3, state.Meta, defaultMeta);
+                        byte axis = BurstVoxelMetadataUtility.DecodeAxis3(normalizedMeta);
+
+                        builder.Append("Axis: ").Append(AxisToString(axis)).Append(" (").Append(axis).Append(')');
+                        if (normalizedMeta != state.Meta)
+                        {
+                            builder.Append(" [normalized]");
+                        }
+
+                        builder.AppendLine();
+                        break;
+                    }
+
+                    case MetadataSchema.HorizontalOnly:
+                        builder.Append("Yaw: ")
+                            .AppendLine(BurstVoxelMetadataUtility.DecodeHorizontalOnly(state.Meta).ToString());
+                        break;
+
+                    default:
+                        builder.Append("Orientation: ")
+                            .AppendLine(state.GetOrientation(props.metadataSchema).ToString());
+                        break;
+                }
             }
 
             // --- General Properties & Tags ---
@@ -608,6 +639,17 @@ public class DebugScreen : MonoBehaviour
     }
 
     private static string BoolToYesNoString(bool value) => value ? "Yes" : "No";
+
+    private static string AxisToString(byte axis)
+    {
+        return axis switch
+        {
+            0 => "Y",
+            1 => "X",
+            2 => "Z",
+            _ => "Invalid",
+        };
+    }
 
     #endregion
 }

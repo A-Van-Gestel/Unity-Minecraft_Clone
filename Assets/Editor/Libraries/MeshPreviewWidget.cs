@@ -43,6 +43,9 @@ namespace Editor.Libraries
         public float CameraFieldOfView { get; set; } = 30f;
         public float LightIntensity { get; set; } = 1.2f;
 
+        public Bounds? WireframeBounds { get; set; }
+        public Color WireframeColor { get; set; } = Color.green;
+
         private Material _blockPreviewMaterial;
         private Material _fluidPreviewMaterial;
         private Material _activePreviewMaterial;
@@ -110,6 +113,11 @@ namespace Editor.Libraries
                 _previewRenderUtility.Cleanup();
                 _previewRenderUtility = null;
             }
+
+            if (_wireCubeMesh != null)
+                Object.DestroyImmediate(_wireCubeMesh);
+            if (_wireMaterial != null)
+                Object.DestroyImmediate(_wireMaterial);
 
             if (_previewMesh != null)
             {
@@ -196,6 +204,13 @@ namespace Editor.Libraries
                     _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _activePreviewMaterial, 1);
                 }
 
+                if (WireframeBounds.HasValue)
+                {
+                    // Center the AABB around 0,0,0 (subtract 0.5)
+                    Vector3 center = WireframeBounds.Value.center - new Vector3(0.5f, 0.5f, 0.5f);
+                    DrawWireCube(center, WireframeBounds.Value.size, WireframeColor, Vector3.zero);
+                }
+
                 _previewRenderUtility.Render();
                 Texture previewTexture = _previewRenderUtility.EndPreview();
 
@@ -268,6 +283,53 @@ namespace Editor.Libraries
                 Texture previewTexture = _previewRenderUtility.EndPreview();
                 GUI.DrawTexture(previewRect, previewTexture);
             }
+        }
+
+        private Mesh _wireCubeMesh;
+        private Material _wireMaterial;
+
+        /// <summary>
+        /// Draws a wireframe cube within a custom drawing session.
+        /// </summary>
+        /// <param name="center">The center position of the cube relative to the preview pivot.</param>
+        /// <param name="size">The size dimensions of the cube.</param>
+        /// <param name="color">The color of the wireframe lines.</param>
+        /// <param name="localPosition">The overall offset applied to the object in the preview.</param>
+        public void DrawWireCube(Vector3 center, Vector3 size, Color color, Vector3 localPosition)
+        {
+            if (_previewRenderUtility == null) return;
+
+            if (_wireCubeMesh == null)
+            {
+                // Create a basic cube mesh and set topology to Lines
+                _wireCubeMesh = new Mesh();
+                _wireCubeMesh.vertices = new[]
+                {
+                    new Vector3(-0.5f, -0.5f, -0.5f), new Vector3(0.5f, -0.5f, -0.5f), new Vector3(0.5f, 0.5f, -0.5f), new Vector3(-0.5f, 0.5f, -0.5f),
+                    new Vector3(-0.5f, -0.5f, 0.5f), new Vector3(0.5f, -0.5f, 0.5f), new Vector3(0.5f, 0.5f, 0.5f), new Vector3(-0.5f, 0.5f, 0.5f),
+                };
+                _wireCubeMesh.SetIndices(new[]
+                {
+                    0, 1, 1, 2, 2, 3, 3, 0, // Front
+                    4, 5, 5, 6, 6, 7, 7, 4, // Back
+                    0, 4, 1, 5, 2, 6, 3, 7, // Connections
+                }, MeshTopology.Lines, 0);
+            }
+
+            if (_wireMaterial == null)
+            {
+                _wireMaterial = new Material(Shader.Find("Hidden/Internal-Colored"));
+            }
+
+            _previewPropertyBlock ??= new MaterialPropertyBlock();
+            _previewPropertyBlock.Clear();
+            _previewPropertyBlock.SetColor(s_color, color);
+
+            Matrix4x4 rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
+            Matrix4x4 positionMatrix = Matrix4x4.Translate(localPosition + center) * Matrix4x4.Scale(size);
+            Matrix4x4 finalMatrix = rotationMatrix * positionMatrix;
+
+            _previewRenderUtility.DrawMesh(_wireCubeMesh, finalMatrix, _wireMaterial, 0, _previewPropertyBlock);
         }
     }
 }

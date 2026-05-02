@@ -2,6 +2,7 @@ using Data;
 using Editor.BlockEditor.Helpers;
 using Editor.DataGeneration;
 using Editor.Libraries;
+using Jobs.BurstData;
 using UnityEditor;
 using UnityEngine;
 
@@ -130,6 +131,10 @@ namespace Editor.BlockEditor
                 {
                     _selectedBlock = _blockTypesCopy[index];
                     _previewFluidLevel = 0;
+                    _previewFacing = 0; // Default to South
+                    _previewRoll = 0;
+                    _previewAxis = 0;
+                    _previewYaw = 0;
                     UpdatePreviewMesh();
                 }
             );
@@ -215,6 +220,104 @@ namespace Editor.BlockEditor
                 EditorGUILayout.LabelField("Properties", EditorStyles.boldLabel);
                 _selectedBlock.stackSize = EditorGUILayout.IntSlider(new GUIContent("Stack Size", "The maximum amount of this block that can be stacked."), _selectedBlock.stackSize, 1, 64);
                 _selectedBlock.isSolid = EditorGUILayout.Toggle(new GUIContent("Is Solid", "Indicates whether the player collides with this block."), _selectedBlock.isSolid);
+
+                if (_selectedBlock.isSolid)
+                {
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.LabelField("Collision Bounds", EditorStyles.boldLabel);
+
+                    var bounds = _selectedBlock.collisionBounds;
+
+                    EditorGUI.BeginChangeCheck();
+                    bounds.mode = (CollisionBoundsMode)EditorGUILayout.EnumPopup(
+                        new GUIContent("Mode", "How the collision volume is defined.\n\n" +
+                                               "• Full Block — standard 1x1x1 cube (fast path).\n" +
+                                               "• Custom AABB — manually authored sub-voxel box.\n" +
+                                               "• Match Visual Mesh — auto-derived from the mesh bounding box."),
+                        bounds.mode);
+
+                    if (bounds.mode == CollisionBoundsMode.CustomAABB || bounds.mode == CollisionBoundsMode.MatchVisualMesh)
+                    {
+                        if (bounds.mode == CollisionBoundsMode.CustomAABB)
+                        {
+                            // Preset dropdown
+                            int currentPreset = 0;
+                            if (bounds.min == Vector3.zero && bounds.max == new Vector3(1f, 0.5f, 1f)) currentPreset = 1;
+                            else if (bounds.min == new Vector3(0f, 0.5f, 0f) && bounds.max == Vector3.one) currentPreset = 2;
+                            else if (bounds.min == Vector3.zero && bounds.max == new Vector3(1f, 0.25f, 1f)) currentPreset = 3;
+
+                            EditorGUI.BeginChangeCheck();
+                            int newPreset = EditorGUILayout.Popup(new GUIContent("Preset", "Quickly apply common sub-voxel collision shapes."), currentPreset, new[] { "Custom", "Bottom Half Slab", "Top Half Slab", "Quarter Slab" });
+                            if (EditorGUI.EndChangeCheck() && newPreset != 0)
+                            {
+                                if (newPreset == 1) bounds = BlockCollisionBounds.BottomHalfSlab;
+                                else if (newPreset == 2) bounds = BlockCollisionBounds.TopHalfSlab;
+                                else if (newPreset == 3) bounds = BlockCollisionBounds.BottomQuarterSlab;
+                            }
+
+                            bounds.min = EditorGUILayout.Vector3Field("Min", bounds.min);
+                            bounds.max = EditorGUILayout.Vector3Field("Max", bounds.max);
+                        }
+                        else if (bounds.mode == CollisionBoundsMode.MatchVisualMesh)
+                        {
+                            EditorGUILayout.HelpBox("Bounds will be auto-derived from the visual mesh. Preview and click 'Derive Now' to update.", MessageType.Info);
+
+                            GUI.enabled = false;
+                            EditorGUILayout.Vector3Field("Min", bounds.min);
+                            EditorGUILayout.Vector3Field("Max", bounds.max);
+                            GUI.enabled = true;
+
+                            if (GUILayout.Button("Derive Now"))
+                            {
+                                if (_meshPreviewWidget.HasMesh)
+                                {
+                                    // MeshPreviewWidget handles custom rotations, but the base mesh's bounds are what we need.
+                                    // The custom mesh data is compiled into a Unity Mesh which gives us its bounds centered around (0.5, 0.5, 0.5).
+                                    // We need to convert from Unity Mesh bounds back to block space [0,1].
+                                    // Mesh vertices are created centered on 0,0,0 usually? Wait, EditorMeshGenerator centers vertices around 0,0,0? No!
+                                    // Let's rely on standard block bounds logic. If EditorMeshGenerator generates vertices between -0.5 and 0.5, we add 0.5.
+                                    // If we just use the bounds and add 0.5, it should match the preview exactly!
+                                    // But wait, the preview mesh bounds can be retrieved using reflection or just accessing the _previewMesh, but we don't have public access.
+                                    // Let's just generate it here using the editor mesh generator, or store it in UpdatePreviewMesh.
+                                    // For now, let's call UpdatePreviewMesh() and then we need the bounds.
+                                    // Actually, it's safer to just generate the Mesh data directly here.
+                                    Mesh tempMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, _selectedBlock.defaultMetadata, 0);
+                                    if (tempMesh != null)
+                                    {
+                                        bounds.min = tempMesh.bounds.min + new Vector3(0.5f, 0.5f, 0.5f);
+                                        bounds.max = tempMesh.bounds.max + new Vector3(0.5f, 0.5f, 0.5f);
+                                        DestroyImmediate(tempMesh);
+                                    }
+                                }
+                            }
+                        }
+
+                        // Validation
+                        if (bounds.min.x >= bounds.max.x || bounds.min.y >= bounds.max.y || bounds.min.z >= bounds.max.z)
+                        {
+                            EditorGUILayout.HelpBox("Validation Error: Min must be strictly less than Max.", MessageType.Error);
+                        }
+
+                        if (bounds.min.x < 0f || bounds.min.y < 0f || bounds.min.z < 0f ||
+                            bounds.max.x > 1f || bounds.max.y > 1f || bounds.max.z > 1f)
+                        {
+                            EditorGUILayout.HelpBox("Warning: Bounds are outside the standard [0,1] block space.", MessageType.Warning);
+                        }
+                    }
+                    else if (bounds.mode == CollisionBoundsMode.FullBlock)
+                    {
+                        // Ensure it resets to full block when switched back
+                        bounds = BlockCollisionBounds.FullBlock;
+                    }
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        _selectedBlock.collisionBounds = bounds;
+                    }
+
+                    EditorGUI.indentLevel--;
+                }
+
                 _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighbouring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
                 _selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), _selectedBlock.isActive);
 
@@ -251,6 +354,81 @@ namespace Editor.BlockEditor
                     EditorGUI.indentLevel--;
                 }
 
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Metadata", EditorStyles.boldLabel);
+                _selectedBlock.metadataSchema = (MetadataSchema)EditorGUILayout.EnumPopup(
+                    new GUIContent("Metadata Schema",
+                        "How the 8-bit voxel metadata byte is interpreted for this block.\n\n" +
+                        "• None — meta is unused; defaultMetadata is written verbatim.\n" +
+                        "• FluidLevel4 — bits 0-3 store fluid level (0-15). For Water/Lava.\n" +
+                        "• Axis3 — bits 0-1 store the log/pillar axis (0=Y, 1=X, 2=Z).\n" +
+                        "• Facing6 — bits 0-2 store one of 6 face directions.\n" +
+                        "• Facing6Roll2 — bits 0-2 facing + bits 3-4 roll quadrant.\n" +
+                        "• HorizontalOnly — bits 0-1 store yaw (0=N, 1=S, 2=W, 3=E).\n\n" +
+                        "Frozen bit layouts — see PER_BLOCK_METADATA_SCHEMAS.md §5.3."),
+                    _selectedBlock.metadataSchema);
+
+                _selectedBlock.placementMetadataMode = (PlacementMetadataMode)EditorGUILayout.EnumPopup(
+                    new GUIContent("Placement Mode",
+                        "How player placement authors this block's metadata byte.\n\n" +
+                        "• None — placement writes 'Default Metadata' unchanged.\n" +
+                        "• PlayerYawCardinal — derives yaw from the player's body facing " +
+                        "(N/S/W/E). Use for blocks whose front face should snap to a horizontal " +
+                        "compass direction (e.g. furnaces, stairs, ordinary cubes routed via " +
+                        "HorizontalOnly).\n" +
+                        "• PlayerLookAxis — derives axis from the camera's look vector " +
+                        "(dominant of |x|, |y|, |z|; ties resolve Y > X > Z). Use for axial " +
+                        "blocks like logs/pillars where the placed face follows where you're " +
+                        "looking, including straight up/down."),
+                    _selectedBlock.placementMetadataMode);
+
+                _selectedBlock.defaultMetadata = (byte)EditorGUILayout.IntSlider(
+                    new GUIContent("Default Metadata",
+                        "Default metadata byte written when placement mode is 'None' or as a " +
+                        "fallback for invalid/missing values. Must fit within the chosen " +
+                        "schema's valid range (see Metadata Schema tooltip)."),
+                    _selectedBlock.defaultMetadata, 0, 255);
+
+                // --- Metadata Editor Preview UI ---
+                if (_selectedBlock.metadataSchema != MetadataSchema.None && _selectedBlock.metadataSchema != MetadataSchema.FluidLevel4)
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Orientation Preview", EditorStyles.boldLabel);
+                    EditorGUI.BeginChangeCheck();
+
+                    switch (_selectedBlock.metadataSchema)
+                    {
+                        case MetadataSchema.Axis3:
+                            _previewAxis = EditorGUILayout.IntPopup("Preview Axis", _previewAxis,
+                                new[] { "Y-Axis (Up & Down)", "X-Axis (East & West)", "Z-Axis (North & South)" },
+                                new[] { 0, 1, 2 });
+                            break;
+                        case MetadataSchema.Facing6:
+                            _previewFacing = EditorGUILayout.IntPopup("Preview Facing", _previewFacing,
+                                new[] { "Top", "Bottom", "North", "South", "West", "East" },
+                                new[] { 2, 3, 1, 0, 4, 5 });
+                            break;
+                        case MetadataSchema.Facing6Roll2:
+                            _previewFacing = EditorGUILayout.IntPopup("Preview Facing", _previewFacing,
+                                new[] { "Top", "Bottom", "North", "South", "West", "East" },
+                                new[] { 2, 3, 1, 0, 4, 5 });
+                            _previewRoll = EditorGUILayout.IntPopup("Preview Roll", _previewRoll,
+                                new[] { "0°", "90° CW", "180°", "270° CW" },
+                                new[] { 0, 1, 2, 3 });
+                            break;
+                        case MetadataSchema.HorizontalOnly:
+                            _previewYaw = EditorGUILayout.IntPopup("Preview Yaw", _previewYaw,
+                                new[] { "North", "South", "West", "East" },
+                                new[] { 0, 1, 2, 3 });
+                            break;
+                    }
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        UpdatePreviewMesh();
+                    }
+                }
 
                 EditorGUILayout.Space();
                 EditorGUILayout.LabelField("Lighting Properties", EditorStyles.boldLabel);
@@ -472,6 +650,10 @@ namespace Editor.BlockEditor
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
+            _previewFacing = 0; // Default to South
+            _previewRoll = 0;
+            _previewAxis = 0;
+            _previewYaw = 0;
 
             // Automatically select the new block for immediate editing
             _selectedBlockIndex = _blockTypesCopy.Count - 1;
@@ -495,6 +677,7 @@ namespace Editor.BlockEditor
                 meshData = _selectedBlock.meshData,
                 stackSize = _selectedBlock.stackSize,
                 isSolid = _selectedBlock.isSolid,
+                collisionBounds = _selectedBlock.collisionBounds,
                 renderNeighborFaces = _selectedBlock.renderNeighborFaces,
                 fluidType = _selectedBlock.fluidType,
                 fluidShaderID = _selectedBlock.fluidShaderID,
@@ -508,6 +691,9 @@ namespace Editor.BlockEditor
                 tags = _selectedBlock.tags,
                 canReplaceTags = _selectedBlock.canReplaceTags,
                 isActive = _selectedBlock.isActive,
+                metadataSchema = _selectedBlock.metadataSchema,
+                placementMetadataMode = _selectedBlock.placementMetadataMode,
+                defaultMetadata = _selectedBlock.defaultMetadata,
                 backFaceTexture = _selectedBlock.backFaceTexture,
                 frontFaceTexture = _selectedBlock.frontFaceTexture,
                 topFaceTexture = _selectedBlock.topFaceTexture,
@@ -521,6 +707,10 @@ namespace Editor.BlockEditor
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
+            _previewFacing = 0; // Default to South
+            _previewRoll = 0;
+            _previewAxis = 0;
+            _previewYaw = 0;
 
             // Select the newly created duplicate
             _selectedBlockIndex = insertIndex;
@@ -571,7 +761,31 @@ namespace Editor.BlockEditor
 
         private void UpdatePreviewMesh()
         {
-            Mesh newMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, _previewFluidLevel);
+            byte previewMeta = _selectedBlock.defaultMetadata;
+            if (_selectedBlock.fluidType != FluidType.None)
+            {
+                // Fluid level preview handles mock metadata inside the mesh generator
+            }
+            else
+            {
+                switch (_selectedBlock.metadataSchema)
+                {
+                    case MetadataSchema.Axis3:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeAxis3((byte)_previewAxis);
+                        break;
+                    case MetadataSchema.Facing6:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeFacing6((byte)_previewFacing);
+                        break;
+                    case MetadataSchema.Facing6Roll2:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeFacing6Roll2((byte)_previewFacing, (byte)_previewRoll);
+                        break;
+                    case MetadataSchema.HorizontalOnly:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeHorizontalOnly((byte)_previewYaw);
+                        break;
+                }
+            }
+
+            Mesh newMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, previewMeta, _previewFluidLevel);
             Material targetMaterial = null;
 
             // Material switching logic
@@ -611,6 +825,18 @@ namespace Editor.BlockEditor
 
             // Sync the opacity setting before drawing
             _meshPreviewWidget.ForceOpaque = _forceOpaquePreview;
+
+            if (_selectedBlock != null && _selectedBlock.collisionBounds.HasCustomBounds)
+            {
+                _meshPreviewWidget.WireframeBounds = new Bounds(
+                    (_selectedBlock.collisionBounds.min + _selectedBlock.collisionBounds.max) * 0.5f,
+                    _selectedBlock.collisionBounds.max - _selectedBlock.collisionBounds.min
+                );
+            }
+            else
+            {
+                _meshPreviewWidget.WireframeBounds = null;
+            }
 
             // The widget internally handles the checkerboard background, interactive rotation, and mesh rendering.
             _meshPreviewWidget.Draw(previewRect);

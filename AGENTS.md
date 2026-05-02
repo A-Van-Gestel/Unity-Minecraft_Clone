@@ -84,6 +84,7 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 - **Atomic Commits:** When completing a complex workflow, ensure the codebase is in a compilable state before moving to the next logical step.
 - **Compile Command:** Run `dotnet build "Assembly-CSharp.csproj"` in your terminal/command execution tool.
 - **Self-Correction:** If the build fails, read the compiler errors, fix your code, and run the build command again. Do not ask the user to test broken code.
+- **Doc Sync:** When a change alters behavior described in a `Documentation/Architecture/`, `Design/`, or `Guides/` doc — or ships a feature drafted in a Design doc — use the `docs-sync` skill to update the matching doc in the same commit. Skip for refactors, bug fixes that preserve documented behavior, and test-only changes.
 
 <!-- code-review-graph MCP tools -->
 
@@ -127,3 +128,7 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 The graph auto-updates on file changes via hooks — no manual rebuild needed.
 
 For task-specific workflows, see the `voxel-debugging`, `refactor-safely`, and `review-changes` skills under `.agents/skills/`.
+
+## System Environment & Capabilities
+
+- **Python Environment:** Python 3.14 is available on the host. Use it whenever Python is a better fit than C# (LUT generation, math prototyping, data transforms, save-file inspection, repo-wide automation, etc.). Place persistent scripts in `Tools/Python/` at the repo root — **never under `Assets/`**, which would drag them into Unity's asset pipeline. See the `python-scripting` skill for the full protocol (venv conventions, C# code-gen style, constraints).

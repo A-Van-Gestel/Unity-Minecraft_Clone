@@ -3,6 +3,7 @@ using Data;
 using Data.JobData;
 using Data.Structures;
 using Data.WorldTypes;
+using Jobs.BurstData;
 using Jobs.Data;
 using Jobs.Helpers;
 using Libraries;
@@ -451,15 +452,18 @@ namespace Jobs.Generators
 
                 if (component.type == StructureComponentType.StaticPart)
                 {
-                    // Emit all blocks at the current cursor
+                    // Emit all blocks at the current cursor. Meta is rotated via the
+                    // schema-aware Y-rotation table for the placed block.
                     foreach (StructureBlock block in selectedPart.blocks)
                     {
+                        MetadataSchema schema = _blockTypesJobData[block.blockID].MetadataSchema;
+                        byte rotatedMeta = BurstVoxelMetadataUtility.RotateMetaY(schema, block.meta, totalRotationSteps);
                         yield return new VoxelMod
                         {
                             GlobalPosition = cursor + RotatePosition(block.localPosition, totalRotationSteps),
                             ID = block.blockID,
                             Rule = block.rule,
-                            Orientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps)
+                            Meta = rotatedMeta,
                         };
                     }
                 }
@@ -474,12 +478,14 @@ namespace Jobs.Generators
                         Vector3Int offset = rotatedStackDirection * i;
                         foreach (StructureBlock block in selectedPart.blocks)
                         {
+                            MetadataSchema schema = _blockTypesJobData[block.blockID].MetadataSchema;
+                            byte rotatedMeta = BurstVoxelMetadataUtility.RotateMetaY(schema, block.meta, totalRotationSteps);
                             yield return new VoxelMod
                             {
                                 GlobalPosition = cursor + offset + RotatePosition(block.localPosition, totalRotationSteps),
                                 ID = block.blockID,
                                 Rule = block.rule,
-                                Orientation = VoxelOrientation.RotateY(block.orientation, totalRotationSteps)
+                                Meta = rotatedMeta,
                             };
                         }
                     }

@@ -1,3 +1,4 @@
+using Data.Structures;
 using Unity.Mathematics;
 
 namespace Jobs.Data
@@ -15,7 +16,7 @@ namespace Jobs.Data
         /// <summary>
         /// Flat index into the generator's flattened structure pool array.
         /// Used on the main thread to look up the corresponding
-        /// <see cref="Data.Structures.CompositeStructureTemplate"/>.
+        /// <see cref="CompositeStructureTemplate"/>.
         /// </summary>
         public int PoolEntryIndex;
     }

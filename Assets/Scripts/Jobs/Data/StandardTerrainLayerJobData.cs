@@ -3,7 +3,7 @@ using Data.WorldTypes;
 namespace Jobs.Data
 {
     /// <summary>
-    /// Blittable, job-safe representation of a <see cref="Data.WorldTypes.StandardTerrainLayer"/>.
+    /// Blittable, job-safe representation of a <see cref="StandardTerrainLayer"/>.
     /// Used to sequentially apply subsurface block strata (e.g. Dirt) below the surface block, dynamically.
     /// </summary>
     public struct StandardTerrainLayerJobData

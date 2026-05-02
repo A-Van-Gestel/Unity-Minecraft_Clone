@@ -22,7 +22,7 @@ Documentation/Archived/**/*
 Documentation/Bugs/_FIXED_BUGS.md
 
 # Agent/IDE configuration (not relevant to packed codebase context)
-.agents/**/*
+# .agents/**/*
 .claude/**/*
 AGENTS.md
 CLAUDE.md

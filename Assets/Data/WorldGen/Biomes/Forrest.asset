@@ -111,6 +111,30 @@ MonoBehaviour:
       cellularJitter: 0
       normalizeToZeroOne: 0
     overrideFloraZoneCoverage: 0
+  - template: {fileID: 11400000, guid: a14f0799904733d478c5e1a37d6be2b6, type: 2}
+    spacing: 6
+    padding: 0
+    chance: 0.18
+    minPlacementHeight: 0
+    maxPlacementHeight: 256
+    useFloraZone: 1
+    useOverrideFloraZoneNoise: 0
+    overrideFloraZoneNoise:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      normalizeToZeroOne: 0
+    overrideFloraZoneCoverage: 0
   minorFloraPool:
   - template: {fileID: 11400000, guid: 26bb2246808379641acd51a810d6df9a, type: 2}
     spacing: 1

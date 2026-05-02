@@ -1,9 +1,11 @@
+using Data.WorldTypes;
+
 namespace Jobs.Data
 {
     /// <summary>
     /// Blittable, Burst-safe representation of a structure pool entry's placement parameters.
     /// Constructed by <c>StandardChunkGenerator.Initialize()</c> from the authoring
-    /// <see cref="Data.Structures.StructurePoolEntry"/> structs on each biome.
+    /// <see cref="StructurePoolEntry"/> structs on each biome.
     /// Each entry runs its own independent placement grid pass in the generation job.
     /// </summary>
     public struct StructurePoolEntryJobData

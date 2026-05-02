@@ -256,6 +256,7 @@ MonoBehaviour:
   collisionDepthZ: 0.8
   collisionPadding: 0
   showBoundingBox: 0
+  stepHeight: 0.5
   jumpForce: 5.7
   walkSpeed: 3
   sprintSpeed: 6
@@ -742,11 +743,12 @@ MonoBehaviour:
   _benchMarkEnabled: 0
   _runFullComparison: 1
   _benchmarkRuns: 50
-  _chunksToMesh: 512
+  _chunksToMesh: 256
   _mode: 1
   _dataType: 1
   _useBlockingWait: 1
   _runOnStart: 0
+  _writeReportToFile: 1
   _triggerKey: 27
 --- !u!114 &370022900
 MonoBehaviour:

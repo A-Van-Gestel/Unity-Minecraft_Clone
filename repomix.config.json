@@ -34,7 +34,8 @@
         "Assets/**/*.json",
         "Assets/Shaders/**/*.shader",
         "Assets/Shaders/**/*.hlsl",
-        "Assets/Data/**/*.asset"
+        "Assets/Data/**/*.asset",
+		// ".agents/**/*",
     ],
     "ignore": {
         "useGitignore": true,

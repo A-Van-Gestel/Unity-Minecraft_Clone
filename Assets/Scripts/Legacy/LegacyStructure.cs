@@ -29,8 +29,9 @@ namespace Legacy
             if (height < minTrunkHeight)
                 height = minTrunkHeight;
 
-            // LEAVES
-            VoxelMod leafMod = new VoxelMod { ID = BlockIDs.OakLeaves };
+            // LEAVES — uses the constructor so Meta defaults to 0 (legacy Front/North storage index).
+            // GlobalPosition is overwritten on each yield below.
+            VoxelMod leafMod = new VoxelMod(default, BlockIDs.OakLeaves);
 
             for (int x = -2; x < 3; x++)
             {

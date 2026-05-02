@@ -1,9 +1,11 @@
+using System.Runtime.CompilerServices;
 using Data;
 using Helpers;
 using Jobs.BurstData;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Jobs
@@ -221,8 +223,18 @@ namespace Jobs
         }
 
         /// <summary>
-        /// The main router that decides how to mesh a block (Standard, Custom, or Fluid).
+        /// The main router that decides how to mesh a block (Standard, Custom, Cross, or Fluid).
         /// </summary>
+        /// <remarks>
+        /// <para>For the standard-cube and custom-mesh cases, the router additionally dispatches on
+        /// the block's <see cref="MetadataSchema"/> per <c>PER_BLOCK_METADATA_SCHEMAS.md §7.5</c>.
+        /// Today every schema routes to the legacy world-face/orientation-storage-index path; Phase 2b
+        /// adds dedicated arms (e.g. <see cref="MetadataSchema.Axis3"/>) that read the meta byte
+        /// directly and use precomputed face/UV variants instead of per-voxel quaternion rotation.</para>
+        /// <para>The Fluid (case 1) and CrossMesh (case 2) paths are not schema-dispatched — fluids
+        /// always interpret the meta byte as a fluid level via the existing <c>GenerateFluidMeshData</c>
+        /// path, and cross meshes do not use orientation at all.</para>
+        /// </remarks>
         private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps)
         {
             ushort id = BurstVoxelDataBitMapping.GetId(packedData);
@@ -254,7 +266,7 @@ namespace Jobs
             if (voxelProps.RenderShape == RenderShape.CrossMesh)
             {
                 VoxelState? centerVoxel = GetVoxelStateFromLocalPos(pos);
-                float lightLevel = centerVoxel.HasValue ? centerVoxel.Value.LightAsFloat : 1.0f;
+                float lightLevel = centerVoxel?.LightAsFloat ?? 1.0f;
                 int textureID = voxelProps.SideFaceTexture;
 
                 VoxelMeshHelper.GenerateCrossMesh(textureID, lightLevel, pos, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals);
@@ -264,52 +276,318 @@ namespace Jobs
             // --- CASE 3: CUSTOM MESH ---
             if (voxelProps.RenderShape == RenderShape.CustomMesh && voxelProps.CustomMeshIndex > -1)
             {
-                byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
-                float rotation = VoxelHelper.GetRotationAngle(orientation);
-                CustomMeshData meshData = CustomMeshes[voxelProps.CustomMeshIndex];
-
-                for (int p = 0; p < 6; p++)
+                switch (voxelProps.MetadataSchema)
                 {
-                    // Skip faces not defined in the custom mesh
-                    if (p >= meshData.FaceCount) continue;
+                    case MetadataSchema.None:
+                    case MetadataSchema.Axis3:
+                    case MetadataSchema.Facing6:
+                    case MetadataSchema.Facing6Roll2:
+                    case MetadataSchema.HorizontalOnly:
+                        GenerateCustomBlockMesh_SchemaAware(pos, packedData, id, voxelProps);
+                        break;
+                    default:
+                        GenerateCustomBlockMesh_Legacy(pos, packedData, id, voxelProps);
+                        break;
+                }
 
-                    VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+                return;
+            }
 
-                    if (ShouldDrawFace(voxelProps, neighborVoxel))
-                    {
-                        int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
-                        int textureID = GetTextureID(id, translatedP);
-                        float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+            // --- CASE 4: STANDARD CUBE ---
+            switch (voxelProps.MetadataSchema)
+            {
+                case MetadataSchema.None:
+                    GenerateStandardCubeMesh_None(pos, id, voxelProps);
+                    break;
+                case MetadataSchema.Axis3:
+                    GenerateStandardCubeMesh_Axis3(pos, packedData, id, voxelProps);
+                    break;
+                case MetadataSchema.Facing6:
+                    GenerateStandardCubeMesh_Facing6(pos, packedData, id, voxelProps);
+                    break;
+                case MetadataSchema.Facing6Roll2:
+                    GenerateStandardCubeMesh_Facing6Roll2(pos, packedData, id, voxelProps);
+                    break;
+                case MetadataSchema.HorizontalOnly:
+                    GenerateStandardCubeMesh_HorizontalOnly(pos, packedData, id, voxelProps);
+                    break;
+                default:
+                    GenerateStandardCubeMesh_Legacy(pos, packedData, id, voxelProps);
+                    break;
+            }
+        }
 
-                        VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, lightLevel, pos, rotation,
-                            voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
-                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
-                            ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
-                    }
+        /// <summary>
+        /// Legacy custom-mesh meshing path: decodes a world-face orientation from the packed voxel,
+        /// converts it to a Y-axis rotation angle via <see cref="VoxelHelper.GetRotationAngle"/>, and
+        /// emits each face of the custom mesh with that rotation applied.
+        /// </summary>
+        /// <remarks>
+        /// Called by <see cref="GenerateVoxelMeshData"/> for blocks whose <see cref="MetadataSchema"/>
+        /// has not yet been migrated to a schema-aware variant. Phase 2b adds dedicated variants for
+        /// <see cref="MetadataSchema.Axis3"/> and (later) <see cref="MetadataSchema.Facing6"/>.
+        /// </remarks>
+        private void GenerateCustomBlockMesh_Legacy(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
+            float rotation = VoxelHelper.GetRotationAngle(orientation);
+            CustomMeshData meshData = CustomMeshes[voxelProps.CustomMeshIndex];
+
+            for (int p = 0; p < 6; p++)
+            {
+                // Skip faces not defined in the custom mesh
+                if (p >= meshData.FaceCount) continue;
+
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                {
+                    int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
+                    int textureID = GetTextureID(id, translatedP);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+                    VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, lightLevel, pos, rotation,
+                        voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
+                        ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
                 }
             }
-            // --- CASE 4: STANDARD CUBE ---
-            else
+        }
+
+        /// <summary>
+        /// Schema-aware custom-mesh meshing path: decodes the rotation matrix from the metadata
+        /// byte via <see cref="BurstCustomMeshRotationUtility.GetRotationMatrix"/> and applies
+        /// full 3D rotation to every custom mesh vertex and normal.
+        /// </summary>
+        /// <remarks>
+        /// Handles <see cref="MetadataSchema.Axis3"/>, <see cref="MetadataSchema.Facing6"/>,
+        /// <see cref="MetadataSchema.Facing6Roll2"/>, and <see cref="MetadataSchema.HorizontalOnly"/>.
+        /// Face culling rotates the neighbor-check direction through the same rotation matrix
+        /// as the vertices, ensuring correct occlusion for all orientations.
+        /// </remarks>
+        private void GenerateCustomBlockMesh_SchemaAware(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            float3x3 matrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                voxelProps.MetadataSchema, meta, voxelProps.DefaultMetadata);
+
+            CustomMeshData meshData = CustomMeshes[voxelProps.CustomMeshIndex];
+
+            for (int p = 0; p < 6; p++)
             {
-                byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
-                float rotation = VoxelHelper.GetRotationAngle(orientation);
+                // Skip faces not defined in the custom mesh
+                if (p >= meshData.FaceCount) continue;
 
-                for (int p = 0; p < 6; p++)
+                // Rotate the cull-check direction through the same matrix as the vertices.
+                // All rotation matrices are 90° multiples, so the result is always exactly ±1
+                // on one axis after rounding — no floating-point edge cases.
+                Vector3Int faceCheck = BurstVoxelData.FaceChecks.Data[p];
+                float3 rotatedCheck = math.round(math.mul(matrix, new float3(faceCheck.x, faceCheck.y, faceCheck.z)));
+                Vector3Int rotatedOffset = new Vector3Int((int)rotatedCheck.x, (int)rotatedCheck.y, (int)rotatedCheck.z);
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + rotatedOffset);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
-                    VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+                    int textureID = GetTextureID(id, p);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 
-                    if (ShouldDrawFace(voxelProps, neighborVoxel))
-                    {
-                        int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
-                        int textureID = GetTextureID(id, translatedP);
-                        float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
-
-                        VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
-                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                            ref Output.Uvs, ref Output.Colors, ref Output.Normals,
-                            voxelProps.RenderNeighborFaces);
-                    }
+                    VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, lightLevel, pos, in matrix,
+                        voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
                 }
+            }
+        }
+
+
+        /// <summary>
+        /// Standard-cube meshing path for <see cref="MetadataSchema.None"/> blocks (Air, Facade,
+        /// Cactus, etc.). No rotation is applied — each world face maps 1:1 to the matching block
+        /// face texture, with no UV rotation.
+        /// </summary>
+        private void GenerateStandardCubeMesh_None(Vector3Int pos, ushort id, BlockTypeJobData voxelProps)
+        {
+            for (int p = 0; p < 6; p++)
+                EmitStandardCubeFaceIfVisible(pos, id, voxelProps, worldFace: p, effectiveFace: p, uvQuarterTurnsCW: 0);
+        }
+
+        /// <summary>
+        /// Legacy standard-cube meshing path: decodes a world-face orientation from the packed voxel
+        /// and delegates to <see cref="GenerateStandardCubeWithLegacyOrientation"/>.
+        /// </summary>
+        /// <remarks>
+        /// Called by <see cref="GenerateVoxelMeshData"/> for blocks whose <see cref="MetadataSchema"/>
+        /// has not yet been migrated to a schema-aware variant. Phase 2b will add a dedicated
+        /// <see cref="MetadataSchema.Axis3"/> variant that selects precomputed X/Y/Z face arrays
+        /// instead of running per-voxel quaternion rotation in this hot path.
+        /// </remarks>
+        private void GenerateStandardCubeMesh_Legacy(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte orientation = BurstVoxelDataBitMapping.GetOrientation(packedData);
+            GenerateStandardCubeWithLegacyOrientation(pos, id, voxelProps, orientation);
+        }
+
+        /// <summary>
+        /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.HorizontalOnly"/> blocks.
+        /// Maps the 4-way yaw to a legacy orientation index and delegates to
+        /// <see cref="GenerateStandardCubeWithLegacyOrientation"/>.
+        /// </summary>
+        private void GenerateStandardCubeMesh_HorizontalOnly(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.HorizontalOnly, voxelProps.DefaultMetadata, 0); // Default to North (0)
+            byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.HorizontalOnly, meta, normalizedDefaultMeta);
+
+            byte yaw = BurstVoxelMetadataUtility.DecodeHorizontalOnly(normalizedMeta);
+
+            // Map the HorizontalOnly yaw (0=North, 1=South, 2=West, 3=East)
+            // to the legacy orientation indices (1=North, 0=South, 4=West, 5=East)
+            // so we can reuse VoxelHelper.GetRotationAngle and GetTranslatedFaceIndex.
+            byte legacyOrientation = yaw switch
+            {
+                0 => VoxelOrientation.North, // North
+                1 => VoxelOrientation.South, // South
+                2 => VoxelOrientation.West, // West
+                3 => VoxelOrientation.East, // East
+                _ => VoxelOrientation.North,
+            };
+
+            GenerateStandardCubeWithLegacyOrientation(pos, id, voxelProps, legacyOrientation);
+        }
+
+        /// <summary>
+        /// Shared inner loop for legacy-orientation standard-cube meshing. Converts a legacy
+        /// world-face orientation index to a Y-axis rotation angle and emits each visible face.
+        /// </summary>
+        /// <remarks>
+        /// Called by both <see cref="GenerateStandardCubeMesh_Legacy"/> (orientation decoded
+        /// directly from packed data) and <see cref="GenerateStandardCubeMesh_HorizontalOnly"/>
+        /// (yaw mapped to a legacy orientation index before calling here).
+        /// </remarks>
+        private void GenerateStandardCubeWithLegacyOrientation(Vector3Int pos, ushort id, BlockTypeJobData voxelProps, byte orientation)
+        {
+            float rotation = VoxelHelper.GetRotationAngle(orientation);
+
+            for (int p = 0; p < 6; p++)
+            {
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+
+                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                {
+                    int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
+                    int textureID = GetTextureID(id, translatedP);
+                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+                    VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                        voxelProps.RenderNeighborFaces);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks visibility of a single cube face and, if visible, emits its vertices, UVs, and
+        /// color into the output mesh buffers.
+        /// </summary>
+        /// <param name="pos">Block position in chunk-local space.</param>
+        /// <param name="id">Block type ID used for texture lookup.</param>
+        /// <param name="voxelProps">Block properties (transparency, render-neighbor-faces flag, etc.).</param>
+        /// <param name="worldFace">Cardinal face index (0-5) used for neighbor sampling and vertex emission.</param>
+        /// <param name="effectiveFace">Remapped face index used for texture selection after schema rotation.</param>
+        /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void EmitStandardCubeFaceIfVisible(
+            Vector3Int pos, ushort id, BlockTypeJobData voxelProps,
+            int worldFace, int effectiveFace, int uvQuarterTurnsCW)
+        {
+            VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[worldFace]);
+            if (!ShouldDrawFace(voxelProps, neighborVoxel)) return;
+
+            int textureID = GetTextureID(id, effectiveFace);
+            float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+
+            VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, lightLevel, in pos, rotation: 0f, uvQuarterTurnsCW,
+                ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                voxelProps.RenderNeighborFaces);
+        }
+
+        /// <summary>
+        /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.Axis3"/> blocks
+        /// (logs, pillars, fallen trunks). Performs no per-voxel rotation — the cube vertices are
+        /// emitted in their canonical positions and the per-face texture is selected via the
+        /// frozen face-remap LUT in <see cref="BurstAxis3MeshUtility"/>.
+        /// </summary>
+        /// <remarks>
+        /// <para>This is the Phase 2b primary cost-reduction path: replaces
+        /// <see cref="VoxelHelper.GetRotationAngle"/> + <see cref="UnityEngine.Quaternion.Euler"/>
+        /// per face with one O(1) byte-array lookup. The baseline (<c>Documentation/Performance/PHASE_02_BASELINE.md</c>)
+        /// measured the legacy rotation overhead at ~1.3 ns/face — this path should land well under that.</para>
+        /// <para>UV rotation per axis (so wood-grain side textures align with the log's long axis) is
+        /// not yet implemented. Without it, side-face bark grain stays "vertical" regardless of axis;
+        /// this is a visual defect to be addressed in a follow-up commit, not a correctness defect.</para>
+        /// </remarks>
+        private void GenerateStandardCubeMesh_Axis3(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Axis3, voxelProps.DefaultMetadata, BurstVoxelMetadataUtility.AXIS_Y);
+            byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Axis3, meta, normalizedDefaultMeta);
+            byte axis = BurstVoxelMetadataUtility.DecodeAxis3(normalizedMeta);
+
+            for (int p = 0; p < 6; p++)
+            {
+                // Texture comes from the axis-remapped block face. Vertex emission uses the
+                // un-rotated world face index `p`, since cube vertices are axis-symmetric.
+                EmitStandardCubeFaceIfVisible(pos, id, voxelProps, worldFace: p,
+                    effectiveFace: BurstAxis3MeshUtility.GetEffectiveFace(axis, p),
+                    uvQuarterTurnsCW: BurstAxis3MeshUtility.GetUvQuarterTurnsCW(axis, p));
+            }
+        }
+
+        /// <summary>
+        /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.Facing6"/> blocks
+        /// (directional blocks, observers, dispensers). Uses precomputed face-remap LUTs in
+        /// <see cref="BurstFacing6MeshUtility"/> — no per-voxel quaternion rotation.
+        /// </summary>
+        private void GenerateStandardCubeMesh_Facing6(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Facing6, voxelProps.DefaultMetadata, 0); // 0 = South, always valid
+            byte facing = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Facing6, meta, normalizedDefaultMeta);
+
+            for (int p = 0; p < 6; p++)
+            {
+                EmitStandardCubeFaceIfVisible(pos, id, voxelProps, worldFace: p,
+                    effectiveFace: BurstFacing6MeshUtility.GetEffectiveFace(facing, p),
+                    uvQuarterTurnsCW: BurstFacing6MeshUtility.GetUvQuarterTurnsCW(facing, p));
+            }
+        }
+
+        /// <summary>
+        /// Schema-aware standard-cube meshing path for <see cref="MetadataSchema.Facing6Roll2"/> blocks.
+        /// Uses precomputed face-remap LUTs in <see cref="BurstFacing6Roll2MeshUtility"/>.
+        /// </summary>
+        private void GenerateStandardCubeMesh_Facing6Roll2(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
+        {
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packedData);
+            byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Facing6Roll2, voxelProps.DefaultMetadata, 0); // 0 = South+Roll0, always valid
+            byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                MetadataSchema.Facing6Roll2, meta, normalizedDefaultMeta);
+            BurstVoxelMetadataUtility.DecodeFacing6Roll2(normalizedMeta, out byte facing, out byte roll);
+
+            for (int p = 0; p < 6; p++)
+            {
+                EmitStandardCubeFaceIfVisible(pos, id, voxelProps, worldFace: p,
+                    effectiveFace: BurstFacing6Roll2MeshUtility.GetEffectiveFace(facing, roll, p),
+                    uvQuarterTurnsCW: BurstFacing6Roll2MeshUtility.GetUvQuarterTurnsCW(facing, roll, p));
             }
         }
 

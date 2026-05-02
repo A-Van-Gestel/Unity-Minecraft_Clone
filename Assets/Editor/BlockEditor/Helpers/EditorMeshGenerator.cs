@@ -4,6 +4,7 @@ using Data;
 using Helpers;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Editor.BlockEditor.Helpers
@@ -11,10 +12,34 @@ namespace Editor.BlockEditor.Helpers
     public static class EditorMeshGenerator
     {
         /// <summary>
-        /// Generates a Mesh for a given BlockType. This is for editor previews only.
-        /// It now contains self-sufficient logic for all block types, including a simplified fluid preview.
+        /// Generates a Mesh for a given BlockType using its <see cref="BlockType.defaultMetadata"/>.
+        /// This is for editor previews (Block Editor icons) where no per-voxel meta is available.
         /// </summary>
         public static Mesh GenerateBlockMesh(BlockType blockType, List<BlockType> allBlockTypes, int fluidLevel = 0)
+            => GenerateBlockMeshInternal(blockType, allBlockTypes, blockType?.defaultMetadata ?? 0, fluidLevel);
+
+        /// <summary>
+        /// Generates a Mesh for a given BlockType with an explicit metadata byte.
+        /// Used by the Structure Preview tool where each block carries its own authored meta.
+        /// </summary>
+        /// <param name="blockType">The block type to generate a mesh for.</param>
+        /// <param name="allBlockTypes">All block types in the database (needed for fluid mock data).</param>
+        /// <param name="meta">The raw metadata byte controlling orientation/axis/facing.</param>
+        public static Mesh GenerateBlockMesh(BlockType blockType, List<BlockType> allBlockTypes, byte meta)
+            => GenerateBlockMeshInternal(blockType, allBlockTypes, meta, fluidLevel: 0);
+
+        /// <summary>
+        /// Generates a Mesh for a given BlockType with both an explicit metadata byte and fluid level.
+        /// Used by the Block Editor to preview block metadata.
+        /// </summary>
+        public static Mesh GenerateBlockMesh(BlockType blockType, List<BlockType> allBlockTypes, byte meta, int fluidLevel)
+            => GenerateBlockMeshInternal(blockType, allBlockTypes, meta, fluidLevel);
+
+        /// <summary>
+        /// Shared implementation for block mesh generation. Dispatches on block type category
+        /// (Fluid, Cross, Custom, Standard) and then on <see cref="MetadataSchema"/> for orientation.
+        /// </summary>
+        private static Mesh GenerateBlockMeshInternal(BlockType blockType, List<BlockType> allBlockTypes, byte meta, int fluidLevel)
         {
             if (blockType == null) return null;
 
@@ -52,7 +77,8 @@ namespace Editor.BlockEditor.Helpers
                 // Create mock data needed by the helper that isn't available in the editor.
                 BlockTypeJobData mockProps = new BlockTypeJobData(blockType);
                 // Use fluid level 0 (full block) and full sunlight (15) for the preview.
-                uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0, 1, (byte)fluidLevel);
+                uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0,
+                    BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: (byte)fluidLevel, isFluid: false));
 
                 // For a simple, flat preview, an empty (default) array is sufficient.
                 NativeArray<OptionalVoxelState> mockNeighbors = new NativeArray<OptionalVoxelState>(14, Allocator.Temp);
@@ -83,8 +109,11 @@ namespace Editor.BlockEditor.Helpers
             // Case 3: Custom Mesh
             else if (blockType.renderShape == RenderShape.CustomMesh && blockType.meshData != null)
             {
-                // This logic does not use native lists, so it remains unchanged for now.
-                // It could be unified in a future pass.
+                // Compute rotation matrix from the metadata byte (same logic as in-game)
+                float3x3 matrix = BurstCustomMeshRotationUtility.GetRotationMatrix(
+                    blockType.metadataSchema, meta, blockType.defaultMetadata);
+                float3 center = new float3(0.5f, 0.5f, 0.5f);
+
                 for (int p = 0; p < blockType.meshData.faces.Length; p++)
                 {
                     if (p >= 6) continue; // Safety break for assets with >6 faces
@@ -102,16 +131,22 @@ namespace Editor.BlockEditor.Helpers
                     yUv = 1f - yUv - VoxelData.NormalizedBlockTextureSize;
                     Vector2 baseUv = new Vector2(xUv, yUv);
 
+                    // Rotate the face normal once (shared by all vertices on this face)
+                    float3 rotatedNormal = math.normalize(math.mul(matrix, new float3(VoxelData.FaceChecks[p].x, VoxelData.FaceChecks[p].y, VoxelData.FaceChecks[p].z)));
+
                     foreach (VertData vertData in face.vertData)
                     {
-                        vertices.Add(vertData.position);
+                        // Apply 3D rotation around block center
+                        float3 rotated = math.mul(matrix, (float3)vertData.position - center) + center;
+                        vertices.Add(rotated);
+
                         uvs.Add(new Vector4(
                             baseUv.x + vertData.uv.x * VoxelData.NormalizedBlockTextureSize,
                             baseUv.y + vertData.uv.y * VoxelData.NormalizedBlockTextureSize,
                             0f, 0f
                         ));
                         colors.Add(Color.white);
-                        normals.Add(VoxelData.FaceChecks[p]);
+                        normals.Add(rotatedNormal);
                     }
 
                     // Add triangles to the correct sub-mesh list
@@ -127,12 +162,125 @@ namespace Editor.BlockEditor.Helpers
             // Case 4: Standard Solid Block
             else
             {
-                for (int p = 0; p < 6; p++)
+                // Mirrors `MeshGenerationJob.GenerateVoxelMeshData` case 4 — schema-aware dispatch
+                // so the Block Editor preview matches in-game rendering for Axis3 blocks.
+                // See `PER_BLOCK_METADATA_SCHEMAS.md §8.1` ("update runtime meshing and Block Editor
+                // preview meshing together").
+                switch (blockType.metadataSchema)
                 {
-                    int textureID = blockType.GetTextureID(p);
-                    VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f,
-                        ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
-                        blockType.renderNeighborFaces);
+                    case MetadataSchema.Axis3:
+                    {
+                        // Decode the preview axis from the supplied meta byte. NormalizeMeta clamps
+                        // invalid values to 0 (Y-axis) so out-of-range data renders an upright log
+                        // instead of crashing on an LUT out-of-bounds read.
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Axis3, meta, defaultMeta: 0);
+                        byte axis = BurstVoxelMetadataUtility.DecodeAxis3(normalizedMeta);
+
+                        for (int p = 0; p < 6; p++)
+                        {
+                            // Texture comes from the axis-remapped block face; vertex emission uses
+                            // `rotation: 0f` since the cube vertices are axis-symmetric.
+                            int effectiveFace = BurstAxis3MeshUtility.GetEffectiveFace(axis, p);
+                            int uvQuarterTurnsCW = BurstAxis3MeshUtility.GetUvQuarterTurnsCW(axis, p);
+                            int textureID = blockType.GetTextureID(effectiveFace);
+                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
+
+                    case MetadataSchema.Facing6:
+                    {
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Facing6, meta, defaultMeta: 0);
+                        byte facing = BurstVoxelMetadataUtility.DecodeFacing6(normalizedMeta);
+
+                        for (int p = 0; p < 6; p++)
+                        {
+                            int effectiveFace = BurstFacing6MeshUtility.GetEffectiveFace(facing, p);
+                            int uvQuarterTurnsCW = BurstFacing6MeshUtility.GetUvQuarterTurnsCW(facing, p);
+                            int textureID = blockType.GetTextureID(effectiveFace);
+                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
+
+                    case MetadataSchema.Facing6Roll2:
+                    {
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Facing6Roll2, meta, defaultMeta: 0);
+                        BurstVoxelMetadataUtility.DecodeFacing6Roll2(normalizedMeta, out byte facing, out byte roll);
+
+                        for (int p = 0; p < 6; p++)
+                        {
+                            int effectiveFace = BurstFacing6Roll2MeshUtility.GetEffectiveFace(facing, roll, p);
+                            int uvQuarterTurnsCW = BurstFacing6Roll2MeshUtility.GetUvQuarterTurnsCW(facing, roll, p);
+                            int textureID = blockType.GetTextureID(effectiveFace);
+                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
+
+                    case MetadataSchema.HorizontalOnly:
+                    {
+                        byte normalizedDefaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.HorizontalOnly, blockType.defaultMetadata, 0); // Default to North (0)
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.HorizontalOnly, meta, normalizedDefaultMeta);
+
+                        byte yaw = BurstVoxelMetadataUtility.DecodeHorizontalOnly(normalizedMeta);
+
+                        byte legacyOrientation = yaw switch
+                        {
+                            0 => 1, // North
+                            1 => 0, // South
+                            2 => 4, // West
+                            3 => 5, // East
+                            _ => 1,
+                        };
+
+                        float rotation = VoxelHelper.GetRotationAngle(legacyOrientation);
+
+                        for (int p = 0; p < 6; p++)
+                        {
+                            int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, legacyOrientation);
+                            int textureID = blockType.GetTextureID(translatedP);
+                            VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, 1.0f, Vector3Int.zero, rotation,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
+
+                    case MetadataSchema.None:
+                    default:
+                    {
+                        // Legacy / None preview: identity face mapping, no rotation.
+                        for (int p = 0; p < 6; p++)
+                        {
+                            int textureID = blockType.GetTextureID(p);
+                            VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f,
+                                ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
+                                ref nativeUvs, ref nativeColors, ref nativeNormals,
+                                blockType.renderNeighborFaces);
+                        }
+
+                        break;
+                    }
                 }
             }
 
