@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Serialization.Migration.Exceptions;
 using Serialization.Migration.Steps;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 namespace Serialization.Migration
 {
@@ -204,12 +205,15 @@ namespace Serialization.Migration
                     });
 
                     // Process on a background thread; await ensures sequential writes.
-                    (int chunksInRegion, int corruptedInRegion) = await Task.Run(() =>
-                        MigrateSingleRegion(oldFile, tempFile, targetCompression, migrationPath)
+                    (int chunksInRegion, int corruptedInRegion, bool skipped) = await Task.Run(async () =>
+                        await MigrateSingleRegion(oldFile, tempFile, targetCompression, migrationPath)
                     );
 
-                    processedChunksTotal += chunksInRegion;
-                    corruptedChunksTotal += corruptedInRegion;
+                    if (!skipped)
+                    {
+                        processedChunksTotal += chunksInRegion;
+                        corruptedChunksTotal += corruptedInRegion;
+                    }
                 }
 
                 // ── Phase 2: Corruption prompt ──
@@ -312,27 +316,44 @@ namespace Serialization.Migration
         /// Migrates all chunks in a single region file from the old format to the new format.
         /// Corrupted chunks are skipped (not written to the new region) and counted.
         /// </summary>
-        /// <returns>A tuple of (chunksProcessed, corruptedChunks).</returns>
-        private static (int chunksProcessed, int corruptedChunks) MigrateSingleRegion(
+        /// <returns>A tuple of (chunksProcessed, corruptedChunks, skipped).</returns>
+        private static async Task<(int chunksProcessed, int corruptedChunks, bool skipped)> MigrateSingleRegion(
             string oldFile,
             string tempFile,
             CompressionAlgorithm targetCompression,
             List<WorldMigrationStep> path)
         {
             using RegionFile oldRegion = new RegionFile(oldFile);
+
             // Writing into a fresh RegionFile defragments it: chunks are written
             // sequentially with no dead sectors, reducing final file size at no extra cost.
             using RegionFile newRegion = new RegionFile(tempFile);
             int chunksProcessed = 0;
             int corruptedChunks = 0;
+            int throttleCounter = 0;
             string regionName = Path.GetFileName(oldFile);
+
+#if UNITY_EDITOR
+            bool simulateCorruption = SettingsManager.LoadSettings().Dev.simulateMigrationCorruption;
+#endif
 
             foreach (Vector2Int localCoord in oldRegion.GetAllChunkCoords())
             {
+                if (++throttleCounter % 50 == 0)
+                {
+                    await Task.Yield();
+                }
+
                 try
                 {
                     (byte[] compressedData, CompressionAlgorithm oldCompression) = oldRegion.LoadChunkData(localCoord.x, localCoord.y);
                     if (compressedData == null) continue;
+
+#if UNITY_EDITOR
+                    // Fault Injection for Development Testing
+                    if (simulateCorruption && Random.value < 0.01f)
+                        throw new Exception("Simulated migration corruption for testing.");
+#endif
 
                     // Decompress using the algorithm stored in the region file's chunk header.
                     byte[] currentData = Decompress(compressedData, oldCompression);
@@ -381,7 +402,8 @@ namespace Serialization.Migration
                 }
             }
 
-            return (chunksProcessed, corruptedChunks);
+
+            return (chunksProcessed, corruptedChunks, false);
         }
 
         // -------------------------------------------------------------------------

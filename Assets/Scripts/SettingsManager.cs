@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using MyBox;
 using Serialization;
@@ -8,8 +9,21 @@ using UnityEditor;
 #endif
 
 [Serializable]
+public class DevSettings
+{
+    /// <summary>
+    /// If true, the migration system will randomly fail ~1% of chunks
+    /// to test fault tolerance and the corruption prompt UI.
+    /// </summary>
+    public bool simulateMigrationCorruption = false;
+}
+
+[Serializable]
 public class Settings
 {
+    [NonSerialized]
+    public DevSettings Dev = new DevSettings();
+
     // --- SAVE SYSTEM ---
     [Header("Save System")]
 #if UNITY_EDITOR
@@ -184,6 +198,14 @@ public static class SettingsManager
 {
     private static readonly string s_settingsFilePath = Application.dataPath + "/settings.json";
 
+    private static readonly HashSet<string> s_loadedDevSections = new HashSet<string>();
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStatics()
+    {
+        s_loadedDevSections.Clear();
+    }
+
     /// <summary>
     /// Loads settings from disk. Returns default settings if the file does not exist.
     /// In the Editor, it guarantees the file is created on first load so developers have it.
@@ -210,7 +232,11 @@ public static class SettingsManager
             {
                 string jsonImport = File.ReadAllText(s_settingsFilePath);
                 Settings loadedSettings = JsonUtility.FromJson<Settings>(jsonImport);
-                if (loadedSettings != null) return loadedSettings;
+                if (loadedSettings != null)
+                {
+                    loadedSettings.Dev = TryLoadDevSection<DevSettings>(jsonImport, "dev") ?? new DevSettings();
+                    return loadedSettings;
+                }
             }
             catch (Exception e)
             {
@@ -234,6 +260,7 @@ public static class SettingsManager
         try
         {
             string jsonExport = JsonUtility.ToJson(settings, true);
+            jsonExport = TryWriteDevSection(jsonExport, "dev", settings.Dev);
             File.WriteAllText(s_settingsFilePath, jsonExport);
 
             // Per User Requirement: Force AssetDatabase refresh after settings generation in Editor
@@ -245,5 +272,45 @@ public static class SettingsManager
         {
             Debug.LogError($"[SettingsManager] Failed to save settings: {e.Message}");
         }
+    }
+
+    [Serializable]
+    private class DevSettingsLoader
+    {
+        public DevSettings dev;
+    }
+
+    private static T TryLoadDevSection<T>(string json, string key) where T : class, new()
+    {
+        if (json.Contains($"\"{key}\""))
+        {
+            s_loadedDevSections.Add(key);
+            if (key == "dev")
+            {
+                var loader = JsonUtility.FromJson<DevSettingsLoader>(json);
+                return loader.dev as T;
+            }
+        }
+
+        return new T();
+    }
+
+    private static string TryWriteDevSection<T>(string json, string key, T data)
+    {
+        if (s_loadedDevSections.Contains(key))
+        {
+            string sectionJson = JsonUtility.ToJson(data, true);
+            int insertPos = json.LastIndexOf('}');
+            if (insertPos != -1)
+            {
+                string prefix = json.Substring(0, insertPos).TrimEnd();
+                if (!prefix.EndsWith(",") && !prefix.EndsWith("{")) prefix += ",";
+
+                string injected = $"\n    \"{key}\": {sectionJson}\n";
+                return prefix + injected + "}";
+            }
+        }
+
+        return json;
     }
 }
