@@ -3,6 +3,8 @@
     "com.domybest.mybox": "https://github.com/Deadcows/MyBox.git",
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
     "com.unity.2d.sprite": "1.0.0",
+    "com.unity.ai.assistant": "2.6.0-pre.1",
+    "com.unity.ai.inference": "2.6.1",
     "com.unity.burst": "1.8.29",
     "com.unity.collections": "6.4.0",
     "com.unity.dt.app-ui": "2.1.9",
