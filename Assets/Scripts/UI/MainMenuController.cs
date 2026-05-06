@@ -8,7 +8,7 @@ using UnityEngine.UI;
 
 namespace UI
 {
-    public class TitleMenu : MonoBehaviour
+    public class MainMenuController : MonoBehaviour
     {
         #region Variables
 
@@ -32,6 +32,9 @@ namespace UI
         #region Settings Menu UI Elements
 
         [Header("Settings Menu UI Elements")]
+        // UI Scale
+        public TMP_Dropdown uiScaleDropdown;
+
         // View Distance
         public Slider viewDistanceSlider;
 
@@ -58,6 +61,10 @@ namespace UI
         public void Awake()
         {
             _settings = SettingsManager.LoadSettings();
+            if (uiScaleDropdown != null)
+            {
+                uiScaleDropdown.onValueChanged.AddListener(OnUIScaleChanged);
+            }
             // --- VERSION STRING LOGIC ---
 #if UNITY_EDITOR
             // In the Editor, we fetch the live date and the chosen enum from EditorPrefs.
@@ -85,8 +92,17 @@ namespace UI
         }
 
 
+        public void OnUIScaleChanged(int value)
+        {
+            UIScaleController scaler = FindAnyObjectByType<UIScaleController>();
+            if (scaler != null) scaler.ApplyScale(value);
+        }
+
         public void EnterSettings()
         {
+            // UI Scale
+            if (uiScaleDropdown != null) uiScaleDropdown.SetValueWithoutNotify(_settings.uiScale);
+
             // View Distance
             viewDistanceSlider.value = _settings.viewDistance;
             UpdateViewDistanceSlider();
@@ -104,6 +120,8 @@ namespace UI
 
         public void LeaveSettings()
         {
+            if (uiScaleDropdown != null) _settings.uiScale = uiScaleDropdown.value;
+
             _settings.viewDistance = (int)viewDistanceSlider.value;
             _settings.mouseSensitivityX = mouseSensitivitySlider.value;
             _settings.mouseSensitivityY = mouseSensitivitySlider.value;

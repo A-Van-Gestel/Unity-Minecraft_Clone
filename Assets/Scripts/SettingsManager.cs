@@ -123,6 +123,11 @@ public class Settings
     [Tooltip("The style of clouds to render.")]
     public CloudStyle clouds = CloudStyle.Fancy;
 
+    // --- UI ---
+    [Header("UI")]
+    [Tooltip("UI Scale (0 = Small, 1 = Standard, 2 = Large)")]
+    public int uiScale = 1;
+
     // --- CONTROLS ---
     [Header("Controls")]
     /// <summary>
