@@ -1,10 +1,8 @@
 using System;
-using System.IO;
 using Data.Enums;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace UI
 {
@@ -29,42 +27,11 @@ namespace UI
 
         #endregion
 
-        #region Settings Menu UI Elements
-
-        [Header("Settings Menu UI Elements")]
-        // UI Scale
-        public TMP_Dropdown uiScaleDropdown;
-
-        // View Distance
-        public Slider viewDistanceSlider;
-
-        public TextMeshProUGUI viewDistanceText;
-
-        // Mouse Sensitivity
-        public Slider mouseSensitivitySlider;
-        public TextMeshProUGUI mouseSensitivityText;
-
-        // Cloud Style
-        public TMP_Dropdown cloudStyleDropdown;
-
-        // Toggles
-        public Toggle chunkAnimationToggle;
-
-        #endregion
-
-        private Settings _settings;
-        private readonly string _settingFilePath = Application.dataPath + "/settings.json";
-
         #endregion
 
 
         public void Awake()
         {
-            _settings = SettingsManager.LoadSettings();
-            if (uiScaleDropdown != null)
-            {
-                uiScaleDropdown.onValueChanged.AddListener(OnUIScaleChanged);
-            }
             // --- VERSION STRING LOGIC ---
 #if UNITY_EDITOR
             // In the Editor, we fetch the live date and the chosen enum from EditorPrefs.
@@ -77,6 +44,16 @@ namespace UI
             // In a built game, the PreBuild hook has already baked the final string into Application.version
             versionField.text = $"v{Application.version}";
 #endif
+
+            // Wire up the SettingsMenuController's OnSettingsClosed callback
+            if (settingsMenuObject != null)
+            {
+                var settingsController = settingsMenuObject.GetComponent<SettingsMenuController>();
+                if (settingsController != null)
+                {
+                    settingsController.onSettingsClosed.AddListener(OnSettingsClosed);
+                }
+            }
         }
 
         public void StartGame()
@@ -91,48 +68,20 @@ namespace UI
             mainMenuObject.SetActive(true);
         }
 
-
-        public void OnUIScaleChanged(int value)
-        {
-            UIScaleController scaler = FindAnyObjectByType<UIScaleController>();
-            if (scaler != null) scaler.ApplyScale(value);
-        }
-
         public void EnterSettings()
         {
-            // UI Scale
-            if (uiScaleDropdown != null) uiScaleDropdown.SetValueWithoutNotify(_settings.uiScale);
-
-            // View Distance
-            viewDistanceSlider.value = _settings.viewDistance;
-            UpdateViewDistanceSlider();
-            // Mouse Sensitivity
-            mouseSensitivitySlider.value = _settings.mouseSensitivityX;
-            UpdateMouseSensitivitySlider();
-            // Cloud Style
-            cloudStyleDropdown.value = (int)_settings.clouds;
-            // Toggles
-            chunkAnimationToggle.isOn = _settings.enableChunkLoadAnimations;
-
             mainMenuObject.SetActive(false);
             settingsMenuObject.SetActive(true);
         }
 
-        public void LeaveSettings()
+        /// <summary>
+        /// Called by the SettingsMenuController's OnSettingsClosed event.
+        /// Transitions back to the main menu.
+        /// </summary>
+        private void OnSettingsClosed()
         {
-            if (uiScaleDropdown != null) _settings.uiScale = uiScaleDropdown.value;
-
-            _settings.viewDistance = (int)viewDistanceSlider.value;
-            _settings.mouseSensitivityX = mouseSensitivitySlider.value;
-            _settings.mouseSensitivityY = mouseSensitivitySlider.value;
-            _settings.clouds = (CloudStyle)cloudStyleDropdown.value;
-            _settings.enableChunkLoadAnimations = chunkAnimationToggle.isOn;
-
-            string jsonExport = JsonUtility.ToJson(_settings, true);
-            File.WriteAllText(_settingFilePath, jsonExport);
-
-            mainMenuObject.SetActive(true);
             settingsMenuObject.SetActive(false);
+            mainMenuObject.SetActive(true);
         }
 
         public void QuitGame()
@@ -145,19 +94,5 @@ namespace UI
          Application.Quit();
 #endif
         }
-
-        #region UI UpdateSliderValues
-
-        public void UpdateViewDistanceSlider()
-        {
-            viewDistanceText.text = $"View Distance: {viewDistanceSlider.value}";
-        }
-
-        public void UpdateMouseSensitivitySlider()
-        {
-            mouseSensitivityText.text = $"Mouse Sensitivity: {mouseSensitivitySlider.value:f1}";
-        }
-
-        #endregion
     }
 }
