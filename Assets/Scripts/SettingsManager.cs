@@ -198,6 +198,7 @@ public class Settings
 
 /// <summary>
 /// Static utility wrapper responsible for strictly controlled IO / creation of the game's Settings object.
+/// Uses a singleton cache so only one Settings instance exists per application lifecycle.
 /// </summary>
 public static class SettingsManager
 {
@@ -205,32 +206,32 @@ public static class SettingsManager
 
     private static readonly HashSet<string> s_loadedDevSections = new HashSet<string>();
 
+    /// <summary>
+    /// Cached singleton Settings instance. Populated on first LoadSettings() call,
+    /// invalidated only on domain reload via ResetStatics().
+    /// </summary>
+    private static Settings s_cachedSettings;
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
     {
         s_loadedDevSections.Clear();
+        s_cachedSettings = null;
     }
 
     /// <summary>
-    /// Loads settings from disk. Returns default settings if the file does not exist.
-    /// In the Editor, it guarantees the file is created on first load so developers have it.
+    /// Returns the singleton Settings instance. Loads from disk on the first call,
+    /// creates and persists defaults if the settings file does not exist.
+    /// Subsequent calls return the cached instance without disk IO.
     /// </summary>
-    /// <returns>The deserialized Settings object, or a fresh default object.</returns>
+    /// <returns>The singleton Settings object.</returns>
     public static Settings LoadSettings()
     {
-        // 1. Create file and return fresh if missing (or force write in Editor to assure asset database existence)
-        if (!File.Exists(s_settingsFilePath) || Application.isEditor)
-        {
-            Debug.Log("[SettingsManager] No settings file found, creating new one.");
-            Settings freshSettings = new Settings();
-            SaveSettings(freshSettings);
-#if UNITY_EDITOR
-            AssetDatabase.Refresh(); // Refresh Unity's asset database.
-# endif
-            return freshSettings;
-        }
+        // Return cached instance if available
+        if (s_cachedSettings != null)
+            return s_cachedSettings;
 
-        // 2. Load and deserialize
+        // Try loading from disk
         if (File.Exists(s_settingsFilePath))
         {
             try
@@ -240,7 +241,8 @@ public static class SettingsManager
                 if (loadedSettings != null)
                 {
                     loadedSettings.Dev = TryLoadDevSection<DevSettings>(jsonImport, "dev") ?? new DevSettings();
-                    return loadedSettings;
+                    s_cachedSettings = loadedSettings;
+                    return s_cachedSettings;
                 }
             }
             catch (Exception e)
@@ -249,18 +251,28 @@ public static class SettingsManager
             }
         }
 
-        // Fallback
-        return new Settings();
+        // File missing or failed to parse — create defaults and persist
+        Debug.Log("[SettingsManager] No settings file found, creating new one.");
+        s_cachedSettings = new Settings();
+        SaveSettings(s_cachedSettings);
+#if UNITY_EDITOR
+        AssetDatabase.Refresh();
+#endif
+        return s_cachedSettings;
     }
 
     /// <summary>
     /// Serializes and writes the provided Settings object to disk.
+    /// Also updates the singleton cache so subsequent LoadSettings() calls
+    /// return this instance without disk IO.
     /// </summary>
     /// <param name="settings">The settings configuration object to save to disk.</param>
     public static void SaveSettings(Settings settings)
     {
         if (settings == null)
             return;
+
+        s_cachedSettings = settings;
 
         try
         {
