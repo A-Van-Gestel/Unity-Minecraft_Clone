@@ -54,6 +54,7 @@ MonoBehaviour:
     enableLighting: 1
     maxMeshRebuildsPerFrame: 10
     clouds: 2
+    uiScale: 1
     mouseSensitivityX: 1.2
     mouseSensitivityY: 1.2
     enableSecondPass: 1

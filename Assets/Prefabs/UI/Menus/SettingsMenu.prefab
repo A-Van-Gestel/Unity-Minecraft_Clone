@@ -527,7 +527,7 @@ MonoBehaviour:
   _viewDistanceSlider: {fileID: 5610856000270213171}
   _viewDistanceText: {fileID: 6701904735897225911}
   _cloudStyleDropdown: {fileID: 5683920717112897736}
-  OnSettingsClosed:
+  onSettingsClosed:
     m_PersistentCalls:
       m_Calls: []
   _scrollRect: {fileID: 7167927072446741215}
