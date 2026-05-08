@@ -1417,6 +1417,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: SettingsMenu
       objectReference: {fileID: 0}
+    - target: {fileID: 2094270275590983793, guid: f25fae20a74ca404391c94bf64dfbd18, type: 3}
+      propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.size
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 2901800787528890957, guid: f25fae20a74ca404391c94bf64dfbd18, type: 3}
       propertyPath: m_Pivot.x
       value: 0.5

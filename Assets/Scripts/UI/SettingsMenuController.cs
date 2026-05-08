@@ -15,27 +15,58 @@ namespace UI
         #region Tab System
 
         [Header("Tab System")]
-        [SerializeField] private Button[] _tabButtons;
-        [SerializeField] private GameObject[] _tabContents;
+        [SerializeField]
+        private Button[] _tabButtons;
+
+        [SerializeField]
+        private GameObject[] _tabContents;
 
         #endregion
 
         #region General Tab UI Elements
 
         [Header("General Tab")]
-        [SerializeField] private TMP_Dropdown _uiScaleDropdown;
-        [SerializeField] private Slider _mouseSensitivitySlider;
-        [SerializeField] private TextMeshProUGUI _mouseSensitivityText;
-        [SerializeField] private Toggle _chunkAnimationToggle;
+        [SerializeField]
+        private TMP_Dropdown _uiScaleDropdown;
+
+        [SerializeField]
+        private Slider _mouseSensitivitySlider;
+
+        [SerializeField]
+        private TextMeshProUGUI _mouseSensitivityText;
+
+        [SerializeField]
+        private Toggle _chunkAnimationToggle;
 
         #endregion
 
         #region Graphics Tab UI Elements
 
         [Header("Graphics Tab")]
-        [SerializeField] private Slider _viewDistanceSlider;
-        [SerializeField] private TextMeshProUGUI _viewDistanceText;
-        [SerializeField] private TMP_Dropdown _cloudStyleDropdown;
+        [SerializeField]
+        private Slider _viewDistanceSlider;
+
+        [SerializeField]
+        private TextMeshProUGUI _viewDistanceText;
+
+        [SerializeField]
+        private TMP_Dropdown _cloudStyleDropdown;
+
+        #endregion
+
+        #region Dev Tab UI Elements
+
+        [Header("Dev Tab (Editor & Development Builds Only)")]
+        [Tooltip("The Dev tab button. Kept separate from the main tab arrays so it is always appended last at runtime.")]
+        [SerializeField]
+        private Button _devTabButton;
+
+        [Tooltip("The Dev tab content panel. Kept separate from the main tab arrays so it is always appended last at runtime.")]
+        [SerializeField]
+        private GameObject _devTabContent;
+
+        [SerializeField]
+        private Toggle _simulateMigrationCorruptionToggle;
 
         #endregion
 
@@ -48,9 +79,18 @@ namespace UI
         #endregion
 
         [Header("Scroll")]
-        [SerializeField] private ScrollRect _scrollRect;
+        [SerializeField]
+        private ScrollRect _scrollRect;
 
         private Settings _settings;
+
+        /// <summary>
+        /// Runtime-combined tab arrays that include the Dev tab (when visible).
+        /// Built once per OnEnable from the serialized arrays + Dev fields.
+        /// </summary>
+        private Button[] _runtimeTabButtons;
+
+        private GameObject[] _runtimeTabContents;
 
         #region Unity Lifecycle
 
@@ -63,6 +103,7 @@ namespace UI
         private void OnEnable()
         {
             _settings = SettingsManager.LoadSettings();
+            ConfigureDevTabVisibility();
             RegisterListeners();
             InitializeUI();
             SwitchTab(0);
@@ -84,19 +125,19 @@ namespace UI
         /// <param name="tabIndex">Zero-based tab index.</param>
         public void SwitchTab(int tabIndex)
         {
-            if (_tabContents == null || _tabButtons == null) return;
+            if (_runtimeTabContents == null || _runtimeTabButtons == null) return;
 
-            for (int i = 0; i < _tabContents.Length; i++)
+            for (int i = 0; i < _runtimeTabContents.Length; i++)
             {
-                if (_tabContents[i] != null) _tabContents[i].SetActive(i == tabIndex);
-                if (i < _tabButtons.Length && _tabButtons[i] != null)
-                    _tabButtons[i].interactable = (i != tabIndex);
+                if (_runtimeTabContents[i] != null) _runtimeTabContents[i].SetActive(i == tabIndex);
+                if (i < _runtimeTabButtons.Length && _runtimeTabButtons[i] != null)
+                    _runtimeTabButtons[i].interactable = (i != tabIndex);
             }
 
             // Swap the ScrollRect content to the newly active tab
-            if (_scrollRect != null && tabIndex < _tabContents.Length && _tabContents[tabIndex] != null)
+            if (_scrollRect != null && tabIndex < _runtimeTabContents.Length && _runtimeTabContents[tabIndex] != null)
             {
-                _scrollRect.content = _tabContents[tabIndex].GetComponent<RectTransform>();
+                _scrollRect.content = _runtimeTabContents[tabIndex].GetComponent<RectTransform>();
                 _scrollRect.verticalNormalizedPosition = 1f; // Scroll to top
             }
         }
@@ -127,7 +168,7 @@ namespace UI
         public void UpdateMouseSensitivityLabel()
         {
             if (_mouseSensitivityText != null && _mouseSensitivitySlider != null)
-                _mouseSensitivityText.text = $"Mouse Sensitivity: {_mouseSensitivitySlider.value:f1}";
+                _mouseSensitivityText.text = $"Mouse Sensitivity: {_mouseSensitivitySlider.value:f2}";
         }
 
         #endregion
@@ -157,6 +198,12 @@ namespace UI
                 _mouseSensitivitySlider.onValueChanged.RemoveListener(OnMouseSensitivitySliderChanged);
                 _mouseSensitivitySlider.onValueChanged.AddListener(OnMouseSensitivitySliderChanged);
             }
+
+            if (_devTabButton != null)
+            {
+                _devTabButton.onClick.RemoveListener(OnDevTabClicked);
+                _devTabButton.onClick.AddListener(OnDevTabClicked);
+            }
         }
 
         /// <summary>
@@ -172,6 +219,9 @@ namespace UI
 
             if (_mouseSensitivitySlider != null)
                 _mouseSensitivitySlider.onValueChanged.RemoveListener(OnMouseSensitivitySliderChanged);
+
+            if (_devTabButton != null)
+                _devTabButton.onClick.RemoveListener(OnDevTabClicked);
         }
 
         /// <summary>
@@ -204,6 +254,10 @@ namespace UI
             // Toggles
             if (_chunkAnimationToggle != null)
                 _chunkAnimationToggle.SetIsOnWithoutNotify(_settings.enableChunkLoadAnimations);
+
+            // Dev Settings
+            if (_simulateMigrationCorruptionToggle != null)
+                _simulateMigrationCorruptionToggle.SetIsOnWithoutNotify(_settings.Dev.simulateMigrationCorruption);
         }
 
         /// <summary>
@@ -218,8 +272,13 @@ namespace UI
                 _settings.mouseSensitivityX = _mouseSensitivitySlider.value;
                 _settings.mouseSensitivityY = _mouseSensitivitySlider.value;
             }
+
             if (_cloudStyleDropdown != null) _settings.clouds = (CloudStyle)_cloudStyleDropdown.value;
             if (_chunkAnimationToggle != null) _settings.enableChunkLoadAnimations = _chunkAnimationToggle.isOn;
+
+            // Dev Settings
+            if (_simulateMigrationCorruptionToggle != null)
+                _settings.Dev.simulateMigrationCorruption = _simulateMigrationCorruptionToggle.isOn;
 
             SettingsManager.SaveSettings(_settings);
         }
@@ -250,6 +309,54 @@ namespace UI
         {
             UIScaleController scaler = FindAnyObjectByType<UIScaleController>();
             if (scaler != null) scaler.ApplyScale(value);
+        }
+
+        /// <summary>
+        /// Callback for the Dev tab button click event.
+        /// Switches to the dynamically assigned Dev tab index.
+        /// </summary>
+        private void OnDevTabClicked()
+        {
+            if (_tabButtons != null)
+            {
+                SwitchTab(_tabButtons.Length);
+            }
+        }
+
+        /// <summary>
+        /// Builds the runtime tab arrays from the serialized normal tabs,
+        /// then conditionally appends the Dev tab as the last entry.
+        /// In Release builds, the Dev tab button and content are hidden entirely.
+        /// </summary>
+        private void ConfigureDevTabVisibility()
+        {
+            bool showDevTab = Debug.isDebugBuild && _devTabButton != null && _devTabContent != null;
+
+            if (showDevTab)
+            {
+                // Append Dev tab at the end of the runtime arrays
+                _runtimeTabButtons = new Button[_tabButtons.Length + 1];
+                _tabButtons.CopyTo(_runtimeTabButtons, 0);
+                _runtimeTabButtons[_tabButtons.Length] = _devTabButton;
+
+                _runtimeTabContents = new GameObject[_tabContents.Length + 1];
+                _tabContents.CopyTo(_runtimeTabContents, 0);
+                _runtimeTabContents[_tabContents.Length] = _devTabContent;
+
+                // Ensure the Dev tab button is visually the last in the TabBar layout
+                _devTabButton.transform.SetAsLastSibling();
+                _devTabButton.gameObject.SetActive(true);
+            }
+            else
+            {
+                // No Dev tab — runtime arrays are just the serialized arrays
+                _runtimeTabButtons = _tabButtons;
+                _runtimeTabContents = _tabContents;
+
+                // Ensure Dev tab UI is hidden in release builds
+                if (_devTabButton != null) _devTabButton.gameObject.SetActive(false);
+                if (_devTabContent != null) _devTabContent.SetActive(false);
+            }
         }
 
         #endregion

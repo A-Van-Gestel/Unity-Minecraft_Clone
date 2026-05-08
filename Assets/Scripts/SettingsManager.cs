@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using MyBox;
 using Serialization;
@@ -202,9 +201,9 @@ public class Settings
 /// </summary>
 public static class SettingsManager
 {
-    private static readonly string s_settingsFilePath = Application.dataPath + "/settings.json";
+    private const string KEY_DEV = "dev";
 
-    private static readonly HashSet<string> s_loadedDevSections = new HashSet<string>();
+    private static readonly string s_settingsFilePath = Application.dataPath + "/settings.json";
 
     /// <summary>
     /// Cached singleton Settings instance. Populated on first LoadSettings() call,
@@ -215,7 +214,6 @@ public static class SettingsManager
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
     {
-        s_loadedDevSections.Clear();
         s_cachedSettings = null;
     }
 
@@ -240,7 +238,10 @@ public static class SettingsManager
                 Settings loadedSettings = JsonUtility.FromJson<Settings>(jsonImport);
                 if (loadedSettings != null)
                 {
-                    loadedSettings.Dev = TryLoadDevSection<DevSettings>(jsonImport, "dev") ?? new DevSettings();
+                    loadedSettings.Dev = Debug.isDebugBuild
+                        ? ReadHiddenSection<DevSettingsLoader, DevSettings>(jsonImport, KEY_DEV, w => w.dev)
+                        : new DevSettings();
+
                     s_cachedSettings = loadedSettings;
                     return s_cachedSettings;
                 }
@@ -277,7 +278,13 @@ public static class SettingsManager
         try
         {
             string jsonExport = JsonUtility.ToJson(settings, true);
-            jsonExport = TryWriteDevSection(jsonExport, "dev", settings.Dev);
+
+            // Inject Dev settings only in Editor or Development builds
+            if (Debug.isDebugBuild)
+            {
+                jsonExport = InjectHiddenSection(jsonExport, KEY_DEV, settings.Dev);
+            }
+
             File.WriteAllText(s_settingsFilePath, jsonExport);
 
             // Per User Requirement: Force AssetDatabase refresh after settings generation in Editor
@@ -297,35 +304,63 @@ public static class SettingsManager
         public DevSettings dev;
     }
 
-    private static T TryLoadDevSection<T>(string json, string key) where T : class, new()
+    /// <summary>
+    /// Extracts a hidden/non-serialized object from a JSON string.
+    /// Because Unity's JsonUtility requires strongly-typed fields matching the exact JSON key,
+    /// this method uses a provided wrapper class and an extraction delegate to retrieve the data.
+    /// </summary>
+    /// <typeparam name="TWrapper">A serializable class containing a field named exactly like the JSON key.</typeparam>
+    /// <typeparam name="TData">The target data type to extract.</typeparam>
+    /// <param name="json">The full JSON string to parse.</param>
+    /// <param name="key">The literal JSON key to check for existence before parsing.</param>
+    /// <param name="extractor">A delegate that retrieves the TData from the parsed TWrapper.</param>
+    /// <returns>The deserialized TData instance, or a fresh instance if the key was missing.</returns>
+    private static TData ReadHiddenSection<TWrapper, TData>(string json, string key, Func<TWrapper, TData> extractor)
+        where TData : class, new()
     {
         if (json.Contains($"\"{key}\""))
         {
-            s_loadedDevSections.Add(key);
-            if (key == "dev")
+            try
             {
-                var loader = JsonUtility.FromJson<DevSettingsLoader>(json);
-                return loader.dev as T;
+                var wrapper = JsonUtility.FromJson<TWrapper>(json);
+                if (wrapper != null)
+                {
+                    return extractor(wrapper) ?? new TData();
+                }
+            }
+            catch (Exception)
+            {
+                // Fall back to default on parse error
             }
         }
 
-        return new T();
+        return new TData();
     }
 
-    private static string TryWriteDevSection<T>(string json, string key, T data)
+    /// <summary>
+    /// Generically injects a hidden/non-serialized object into the root of a JSON string.
+    /// Handles proper indentation alignment so the injected block correctly aligns with the parent JSON structure.
+    /// </summary>
+    /// <typeparam name="T">The data type to serialize and inject.</typeparam>
+    /// <param name="json">The base JSON string to inject into.</param>
+    /// <param name="key">The JSON key under which the data should be nested.</param>
+    /// <param name="data">The object to serialize and inject.</param>
+    /// <returns>The modified JSON string containing the newly injected section.</returns>
+    private static string InjectHiddenSection<T>(string json, string key, T data)
     {
-        if (s_loadedDevSections.Contains(key))
-        {
-            string sectionJson = JsonUtility.ToJson(data, true);
-            int insertPos = json.LastIndexOf('}');
-            if (insertPos != -1)
-            {
-                string prefix = json.Substring(0, insertPos).TrimEnd();
-                if (!prefix.EndsWith(",") && !prefix.EndsWith("{")) prefix += ",";
+        string sectionJson = JsonUtility.ToJson(data, true);
 
-                string injected = $"\n    \"{key}\": {sectionJson}\n";
-                return prefix + injected + "}";
-            }
+        // Indent the injected JSON by 4 spaces so it aligns correctly with the parent block
+        sectionJson = sectionJson.Replace("\n", "\n    ");
+
+        int insertPos = json.LastIndexOf('}');
+        if (insertPos != -1)
+        {
+            string prefix = json.Substring(0, insertPos).TrimEnd();
+            if (!prefix.EndsWith(",") && !prefix.EndsWith("{")) prefix += ",";
+
+            string injected = $"\n    \"{key}\": {sectionJson}\n";
+            return prefix + injected + "}";
         }
 
         return json;
