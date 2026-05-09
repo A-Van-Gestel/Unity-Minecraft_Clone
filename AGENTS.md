@@ -27,8 +27,9 @@ If a user request violates these constraints, REJECT the request, explain why it
 
 - **Always use `BlockIDs` constants, never raw IDs.** Reference blocks via `BlockIDs.Stone`, `BlockIDs.Grass`, `BlockIDs.Air`, etc. — never hardcode raw `ushort` literals or guess IDs. The class is auto-generated at `Assets/Scripts/Data/BlockIDs.cs` from `BlockDatabase.asset`.
   These constants are Burst-safe and compile to integer literals.
-- **Adding a new block:** Use the in-editor `BlockEditor` tool (writes to `BlockDatabase.asset`), then regenerate `BlockIDs.cs` via the `Minecraft Clone > Generate Block IDs` menu. Do NOT hand-author `BlockIDs.cs` — its header warns against manual edits.
+- **Adding a new block:** Use the in-editor `BlockEditor` tool (writes to `BlockDatabase.asset`), then regenerate `BlockIDs.cs` via `Unity_ManageMenuItem` → `Minecraft Clone/Generate Block IDs`. Do NOT hand-author `BlockIDs.cs` — its header warns against manual edits.
 - If a block you need is missing from `BlockIDs`, ask the user to add it via the editor tool rather than inventing an ID.
+- **Programmatic code generation:** Any `Minecraft Clone/*` menu item (Generate Block IDs, Generate Fluid Mesh Data, Generate Game Actions, etc.) can be triggered via the `Unity_ManageMenuItem` MCP tool instead of asking the user to click through menus.
 
 ## Unity API Lookup (unity-api MCP)
 
@@ -128,6 +129,44 @@ Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
 The graph auto-updates on file changes via hooks — no manual rebuild needed.
 
 For task-specific workflows, see the `voxel-debugging`, `refactor-safely`, and `review-changes` skills under `.agents/skills/`.
+
+## MCP Tools: unity-mcp (Live Unity Editor)
+
+The Unity Editor exposes live tools via the `unity-mcp` MCP server. These provide capabilities that file reads cannot — inspecting runtime state, reading `[SerializeField]` values from scene objects, querying the profiler, and executing arbitrary C# in the editor context.
+
+### Tool Reference
+
+| Tool                           | Use when                                                                                            |
+|--------------------------------|-----------------------------------------------------------------------------------------------------|
+| `Unity_RunCommand`             | Execute arbitrary C# in the editor — inspect runtime state, run validation, query ScriptableObjects |
+| `Unity_ReadConsole`            | Read console logs with filtering by type/text/timestamp — essential for debugging                   |
+| `Unity_ManageScene`            | Get active scene, scene hierarchy (depth-limited), build settings                                   |
+| `Unity_ManageGameObject`       | Find GameObjects, read components + `[SerializeField]` values, inspect transforms                   |
+| `Unity_ManageMenuItem`         | Execute editor menu items programmatically (e.g. `Minecraft Clone/Generate Block IDs`)              |
+| `Unity_ManageAsset`            | Search assets, get GUIDs, read asset metadata                                                       |
+| `Unity_ManageEditor`           | Play/Pause/Stop, get editor state, manage tags/layers, get selection                                |
+| `Unity_Camera_Capture`         | Capture rendered output from a camera — visual verification of scenes/UI                            |
+| `Unity_ValidateScript`         | Unity-aware script validation — catches GC allocations in hot paths                                 |
+| `Unity_PackageManager_GetData` | Check installed package versions (Burst, Collections, etc.)                                         |
+| `Unity_FindInFile`             | Regex search with SHA256 verification — confirms file hasn't changed since Unity loaded it          |
+| **Profiler tools (10)**        | Query GC allocations, frame timing, bottom-up analysis — only work with profiling data              |
+
+### When to use unity-mcp vs file reads
+
+- **Reading `[SerializeField]` values from scene objects:** Use `Unity_ManageGameObject` — binary `.unity` files are not human-readable.
+- **Checking if the project compiles in Unity:** Use `Unity_ManageEditor` → `GetState` to check for compilation errors after `dotnet build`.
+- **Running code generation:** Use `Unity_ManageMenuItem` instead of asking the user to click menus.
+- **Debugging runtime state:** Use `Unity_RunCommand` to execute C# queries in the editor context.
+- **Visual verification:** Use `Unity_Camera_Capture` to see what a camera actually renders.
+- **Profiling performance:** Use the Profiler tools after the user runs the game with profiling enabled.
+
+### Rules
+
+- `Unity_RunCommand` is powerful but runs in the editor process — do not execute long-running or blocking code that could freeze the editor.
+- Profiler tools return no data unless a profiling session is active (play mode with profiler recording). Check with `Unity_ManageEditor` → `GetState` first.
+- `Unity_ManageEditor` Play/Pause/Stop controls affect the editor's play state — always confirm with the user before entering play mode.
+
+For full parameter schemas, example calls, recipes, and profiler tool details, see the `unity-mcp` skill under `.agents/skills/`.
 
 ## System Environment & Capabilities
 

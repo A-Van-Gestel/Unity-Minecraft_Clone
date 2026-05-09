@@ -26,11 +26,20 @@ Every asset that Unity tracks has a `{asset}.meta` sibling containing a GUID. Sc
 - **Deleting a `.cs` file MUST delete its `.meta` file** in the same commit. An orphan `.meta` without its asset produces a duplicate-GUID warning on the next Editor import.
 - **Adding a `.cs` file:** let Unity generate the `.meta` on import. Commit both in the same commit so teammates do not get a GUID-mismatch when they pull.
 
+### Verifying assets via unity-mcp
+
+The Unity MCP provides live editor tools that complement file-level operations:
+
+- `Unity_ManageAsset` → `GetInfo` — get an asset's GUID, type, and metadata without manually parsing `.meta` files. Use `Search` to find assets by name/type when you don't know the exact path.
+- `Unity_ManageGameObject` → `find` / `get_components` — inspect live scene objects to verify component references are wired correctly after a move or rename. Use `include_non_public_serialized: true` to see `[SerializeField]` values.
+- `Unity_ManageEditor` → `GetTags` / `GetLayers` — verify tags and layers exist before referencing them in code. Use `AddTag` / `AddLayer` to create them programmatically instead of asking the user.
+- `Unity_ReadConsole` — after a file operation, check for "missing script", "missing reference", or "duplicate GUID" warnings that indicate a break the compiler won't catch.
+
 ### Deleting serialized assets
 
 Before deleting a prefab, ScriptableObject, or scene:
 
-1. Search for references by GUID, not by filename. Open the `.meta` file, copy the `guid:` value, then `Grep` the project for that 32-character string.
+1. Search for references by GUID, not by filename. Use `Unity_ManageAsset` → `GetInfo` to get the GUID, or open the `.meta` file and copy the `guid:` value. Then `Grep` the project for that 32-character string.
 2. Check `.unity` scenes and `.prefab` files for hits — those are the call sites Unity will break.
 3. If references exist, either update them to a replacement asset or confirm with the user that breakage is intended.
 

@@ -40,9 +40,16 @@ After your edit, use the code-review-graph MCP:
 - `get_impact_radius` on the modified file — confirm you didn't unintentionally destabilize an adjacent pipeline stage.
 - `detect_changes` — risk score should not flag the readiness gates unless you intentionally changed them.
 
-### Step 4 — If behavior is wrong
+### Step 4 — Inspect live pipeline state (unity-mcp)
 
-Do not guess. Switch to the `voxel-debugging` skill and instrument first. The pipeline's symptoms (stuck chunks, missing mesh, black lighting at borders) almost never point at their actual cause — instrument to confirm the stage that stalled before editing.
+Before instrumenting, use the Unity MCP to observe the pipeline's current state:
+
+- `Unity_ManageEditor` → `GetState` — check if the editor is in play mode and whether compilation errors are blocking the pipeline.
+- `Unity_ReadConsole` — filter for `Error` and `Warning` types to find pipeline-related exceptions (e.g. "chunk stuck", "meshing timeout", NullReference in job scheduling).
+- `Unity_RunCommand` — execute C# to query pipeline state directly (e.g. count loaded chunks, check flag values on specific chunks, inspect the generation/meshing queues).
+- `Unity_ManageGameObject` → `find` — locate chunk GameObjects in the hierarchy and inspect their component state to see which pipeline stage they're stuck in.
+
+If these observations are insufficient to identify the stalled stage, switch to the `voxel-debugging` skill's instrumentation step. The pipeline's symptoms (stuck chunks, missing mesh, black lighting at borders) almost never point at their actual cause — instrument to confirm the stage that stalled before editing.
 
 ### Step 5 — Update the pipeline document
 

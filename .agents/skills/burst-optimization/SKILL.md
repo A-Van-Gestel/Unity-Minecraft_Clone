@@ -39,7 +39,28 @@ If you identify an optimization that requires changing:
 2. **Explain the trade-offs** (Performance gained vs. Code Complexity added).
 3. **STOP and Wait** for user confirmation before writing the actual code.
 
-### 3. Native Memory Management
+### 3. Script Validation (unity-mcp)
+
+Before and after optimization work, use the Unity MCP validation tools:
+
+- `Unity_ValidateScript` (level: `standard`) — run on modified scripts to catch GC allocation patterns the compiler misses (e.g. string concatenation in Update, boxing in hot paths). Use this as a pre-optimization scan to find candidates.
+- `Unity_PackageManager_GetData` — verify installed Burst/Collections/Mathematics package versions before suggesting API usage that may require a specific version.
+
+### 4. Data-Driven Profiling (unity-mcp — requires profiling data)
+
+When the user has profiling data available (play mode with profiler recording), use the Profiler MCP tools for evidence-based optimization instead of guessing:
+
+- `Unity_Profiler_GetOverallGcAllocations` — find which samples allocate the most GC across all recorded frames.
+- `Unity_Profiler_GetFrameTopTimeSamples` — identify the slowest calls in a specific frame.
+- `Unity_Profiler_GetFrameRangeTopTimeSummary` — aggregate timing across a frame range to find sustained bottlenecks (not just spike frames).
+- `Unity_Profiler_GetFrameSelfTimeSamples` — self-time analysis excludes child calls, revealing the actual hotspot vs. the call tree parent.
+- `Unity_Profiler_GetBottomUpSampleTime` — bottom-up view shows which leaf functions consume the most time.
+- `Unity_Profiler_GetRelatedSamples` — cross-thread correlation to find if a main-thread stall is caused by a job thread.
+- `Unity_Profiler_GetFrameGcAllocations` / `GetSampleGcAllocations` — drill into GC sources for a specific frame or sample.
+
+**Rule:** Always check `Unity_ManageEditor` → `GetState` first to confirm profiling data is available. These tools return empty results without an active profiling session.
+
+### 5. Native Memory Management
 
 Whenever you create or modify a `NativeArray`, `NativeList`, or `NativeQueue`:
 

@@ -35,6 +35,7 @@ Apply each gate. A finding in any of these should block or downgrade the merge r
 - **Known-bugs cross-check:** If the diff touches lighting, fluids, meshing, or chunk management, scan the relevant `@Documentation/Bugs/*.md` file to confirm the change does not reintroduce a known-fixed issue or collide with an open bug.
 - **Unity serialized-field safety:** Flag renames or deletions of `[SerializeField] private` fields or public fields referenced by prefabs/scenes/ScriptableObjects — silent data loss risk unless `[FormerlySerializedAs]` is used.
 - **Coding standards:** Magic numbers without named constants, `public` fields instead of `[SerializeField] private`, missing XML docstrings on new public API, incorrect constant casing (`public const` = PascalCase, `private const` = SCREAMING_CASE).
+- **Unity-aware validation (unity-mcp):** Run `Unity_ValidateScript` (level: `standard`) on each modified `.cs` file. This catches Unity-specific issues the compiler and graph miss: GC allocations in Update/LateUpdate, string concatenation in hot paths, boxing patterns. Report findings as **Medium** severity.
 
 ### 3. Output format
 

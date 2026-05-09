@@ -43,3 +43,7 @@ Generic rename/move tools miss these. Check each before `apply_refactor_tool`:
 - Run `dotnet build "Assembly-CSharp.csproj"`. If the build fails, fix the errors before reporting the refactor done.
 - If `.cs` files moved, confirm `.meta` files moved with them — `git status` should show renames, not delete + add.
 - If public serialized fields were renamed, confirm either `[FormerlySerializedAs]` was added or the user has accepted the data-break.
+- **Unity MCP verification (unity-mcp):** After the refactor compiles:
+    - `Unity_ManageAsset` → `GetInfo` on moved/renamed assets to confirm the GUID is preserved (same GUID = references survived).
+    - `Unity_ManageGameObject` → `get_components` on affected prefab instances in the scene to verify component references didn't break (look for `null` where a reference should exist).
+    - `Unity_ReadConsole` — check for "missing script" or "missing reference" warnings that indicate a GUID break the compiler can't catch.
