@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c3269e3766a9f964a94dfdbdfacfe53a, type: 3}
+  m_Name: SettingsUIPrefabLibrary
+  m_EditorClassIdentifier: Assembly-CSharp::UI.ScriptableObjects.SettingsUIPrefabLibrary
+  headerTextPrefab: {fileID: 2727689385047579958, guid: 2e4b584347604c34caf59dd1ef2d0668, type: 3}
+  tabButtonPrefab: {fileID: 1817907604769527979, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
+  tabContentPrefab: {fileID: 1989072610176159727, guid: e0fe5f509b78d064e81740f75cfe80e4, type: 3}
+  togglePrefab:
+    prefab: {fileID: 8214111885246209119, guid: 28847e46f3447c149b0bbd3a34996a2b, type: 3}
+    preferredHeight: 50
+    flexibleWidth: 1
+  sliderPrefab:
+    prefab: {fileID: 7729309643082146298, guid: 4392031e14577884286144a20c8282dc, type: 3}
+    preferredHeight: 50
+    flexibleWidth: 1
+  dropdownPrefab:
+    prefab: {fileID: 433331736802902799, guid: 8cf6f67d3554e3d48b7d688c3478d973, type: 3}
+    preferredHeight: 50
+    flexibleWidth: 1
+  inputFieldPrefab:
+    prefab: {fileID: 324500594941557550, guid: 695da9ed50d482e4e99c89b07e8ed067, type: 3}
+    preferredHeight: 50
+    flexibleWidth: 1

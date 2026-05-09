@@ -2,6 +2,8 @@ using System;
 using System.IO;
 using MyBox;
 using Serialization;
+using UI.Attributes;
+using UI.Enums;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -11,9 +13,19 @@ using UnityEditor;
 public class DevSettings
 {
     /// <summary>
+    /// If true, chunks are never unloaded and saving/loading is disabled.
+    /// Useful for verifying generation without disk I/O side effects.
+    /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Keep Chunks In Memory", DebugOnly = true, Order = 0)]
+    [Tooltip("If true: Chunks are never unloaded and saving/loading is disabled. Use this to verify generation without disk I/O side effects.\nIf false: Standard behavior (Chunk Unloading + Disk Persistence).")]
+    public bool keepChunksInMemory = false;
+
+    /// <summary>
     /// If true, the migration system will randomly fail ~1% of chunks
     /// to test fault tolerance and the corruption prompt UI.
     /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Simulate Migration Corruption", DebugOnly = true, Order = 1)]
+    [Tooltip("Randomly fail ~1% of chunks during migration to test fault tolerance.")]
     public bool simulateMigrationCorruption = false;
 }
 
@@ -25,15 +37,6 @@ public class Settings
 
     // --- SAVE SYSTEM ---
     [Header("Save System")]
-#if UNITY_EDITOR
-    /// <summary>
-    /// If true, chunks are never unloaded and saving/loading is disabled.
-    /// Useful for verifying generation without disk I/O side effects.
-    /// </summary>
-    [Tooltip("If true: Chunks are never unloaded and saving/loading is disabled. Use this to verify generation without disk I/O side effects.\nIf false: Standard behavior (Chunk Unloading + Disk Persistence).")]
-    public bool keepChunksInMemory = false;
-#endif
-
     /// <summary>
     /// If true, saves are stored in a temporary folder in the Editor to keep production saves clean.
     /// </summary>
@@ -44,33 +47,25 @@ public class Settings
     /// The compression algorithm used for saving chunks.
     /// LZ4 is recommended for a balance of speed and size.
     /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Save Compression", Order = 0)]
     [Tooltip("The compression algorithm used for saving chunks. 'None' is faster but uses more disk space.")]
     public CompressionAlgorithm saveCompression = CompressionAlgorithm.LZ4;
 
     /// <summary>
     /// Returns true if the game should behave normally (Save/Load/Unload).
-    /// Returns false if the game is in Editor Debug Mode (Keep everything in RAM, no Disk I/O).
-    /// Always returns true in Builds.
+    /// Returns false if the game is in Debug Mode with Keep Chunks In Memory enabled.
+    /// Always returns true in Release builds.
     /// </summary>
-    public bool EnablePersistence
-    {
-        get
-        {
-#if UNITY_EDITOR
-            return !keepChunksInMemory;
-#else
-            return true;
-#endif
-        }
-    }
+    public bool EnablePersistence => !Debug.isDebugBuild || !Dev.keepChunksInMemory;
 
 
     // --- PERFORMANCE ---
     [Header("Performance")]
-    // --- CHUNK LOADING ---
     /// <summary>
     /// The radius of chunks (in chunks) around the player that will be visible and rendered.
     /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 0)]
+    [Range(1, 32)]
     [Tooltip("The radius of chunks around the player that will be visible and rendered.")]
     public int viewDistance = 5;
 
@@ -91,6 +86,8 @@ public class Settings
     /// Caps the load distance for the initial startup to prevent long freezes.
     /// The world will continue to load to the full loadDistance asynchronously after startup.
     /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Max Initial Load Radius", Format = "f0", Order = 1)]
+    [Range(2, 32)]
     [Tooltip("Caps the load distance for the initial startup to prevent long freezes. Set to a high value to disable.")]
     public int maxInitialLoadRadius = 10;
 
@@ -98,20 +95,24 @@ public class Settings
     /// <summary>
     /// The maximum number of lighting jobs that can be scheduled in a single frame.
     /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Max Light Jobs Per Frame", Format = "f0", Order = 2)]
+    [Range(1, 128)]
     [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame.")]
     public int maxLightJobsPerFrame = 32;
 
     /// <summary>
     /// If true, the lighting system is enabled.
     /// </summary>
+    [SettingField(SettingsTab.World, Label = "Lighting", Order = 0)]
     [InitializationField]
     [Tooltip("Enable the lighting system.")]
     public bool enableLighting = true;
 
-    // --- MESHING ---
     /// <summary>
     /// The maximum number of chunks that can be meshed (rebuilt) in a single frame.
     /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Max Mesh Rebuilds Per Frame", Order = 10)]
+    [Range(1, 50)]
     [Tooltip("The maximum number of chunks that can be meshed (rebuilt) in a single frame.")]
     public int maxMeshRebuildsPerFrame = 10;
 
@@ -119,35 +120,30 @@ public class Settings
     /// <summary>
     /// The visual style of clouds in the sky.
     /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 1)]
     [Tooltip("The style of clouds to render.")]
     public CloudStyle clouds = CloudStyle.Fancy;
 
     // --- UI ---
-    [Header("UI")]
-    [Tooltip("UI Scale (0 = Small, 1 = Standard, 2 = Large)")]
-    public int uiScale = 1;
+    [SettingField(SettingsTab.General, Label = "UI Scale", Order = 0)]
+    [Tooltip("The scale of the game's user interface.")]
+    public UIScale uiScale = UIScale.Standard;
 
     // --- CONTROLS ---
-    [Header("Controls")]
     /// <summary>
-    /// Horizontal mouse sensitivity (X-axis).
+    /// Look sensitivity applied to both horizontal and vertical camera rotation.
     /// </summary>
+    [SettingField(SettingsTab.Controls, Label = "Look Sensitivity", Format = "f2", Order = 0)]
     [Range(0.1f, 10f)]
-    [Tooltip("Horizontal mouse sensitivity.")]
-    public float mouseSensitivityX = 1.2f;
-
-    /// <summary>
-    /// Vertical mouse sensitivity (Y-axis).
-    /// </summary>
-    [Range(0.1f, 10f)]
-    [Tooltip("Vertical mouse sensitivity.")]
-    public float mouseSensitivityY = 1.2f;
+    [Tooltip("Look sensitivity for camera movement.")]
+    public float lookSensitivity = 1.2f;
 
     // --- WORLD GENERATION ---
     [Header("World Generation")]
     /// <summary>
     /// If true, enables the second pass of world generation (e.g., ore lodes).
     /// </summary>
+    [SettingField(SettingsTab.World, Label = "Ore Generation (Second Pass)", Order = 1)]
     [InitializationField]
     [Tooltip("Second Pass: Lode generation")]
     public bool enableSecondPass = true;
@@ -155,6 +151,7 @@ public class Settings
     /// <summary>
     /// If true, enables the structure pass of world generation (e.g., trees and large flora).
     /// </summary>
+    [SettingField(SettingsTab.World, Label = "Tree Generation (Structure Pass)", Order = 2)]
     [InitializationField]
     [Tooltip("Structure Pass: Tree generation")]
     public bool enableMajorFloraPass = true;
@@ -163,14 +160,16 @@ public class Settings
     /// The maximum number of structure-related VoxelMods that can be expanded in a single frame.
     /// Prevents lag spikes when generating massive structures.
     /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Max Structure Mods Per Frame", Format = "f0", Order = 3)]
+    [Range(100, 50000)]
     [Tooltip("The maximum number of structure-related VoxelMods that can be expanded in a single frame. Prevents lag spikes when generating massive structures.")]
     public int maxStructureModsPerFrame = 5000;
 
     // --- BONUS STUFF ---
-    [Header("Bonus Stuff")]
     /// <summary>
     /// If true, chunks play a subtle upward slide animation when their meshes are generated.
     /// </summary>
+    [SettingField(SettingsTab.General, Label = "Chunk Load Animations", Order = 10)]
     [Tooltip("If true, chunks play a subtle upward slide animation when their meshes are generated.")]
     public bool enableChunkLoadAnimations = false;
 
@@ -185,12 +184,14 @@ public class Settings
     /// <summary>
     /// If true, enables generic diagnostic console logs for debugging core engine loops.
     /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Diagnostic Logs", DebugOnly = true, Order = 10)]
     [Tooltip("Enable detailed diagnostic logs for debugging fluid, lighting, and chunk issues. Warning: may impact performance.")]
     public bool enableDiagnosticLogs = false;
 
     /// <summary>
     /// If true, enables granular diagnostic console logs specifically for fluid simulation.
     /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Water Diagnostic Logs", DebugOnly = true, Order = 11)]
     [Tooltip("Enable detailed diagnostic logs specifically for water/fluid simulation. Warning: may impact performance.")]
     public bool enableWaterDiagnosticLogs = false;
 }

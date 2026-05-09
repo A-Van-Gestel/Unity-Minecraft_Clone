@@ -45,7 +45,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   settings:
-    keepChunksInMemory: 0
     enableVolatileSaveData: 1
     saveCompression: 2
     viewDistance: 5
@@ -55,8 +54,7 @@ MonoBehaviour:
     maxMeshRebuildsPerFrame: 10
     clouds: 2
     uiScale: 1
-    mouseSensitivityX: 1.2
-    mouseSensitivityY: 1.2
+    lookSensitivity: 1.2
     enableSecondPass: 1
     enableMajorFloraPass: 1
     maxStructureModsPerFrame: 5000

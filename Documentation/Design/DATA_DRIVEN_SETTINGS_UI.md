@@ -159,7 +159,7 @@ public bool enableChunkLoadAnimations = false;
 // Full — all options specified
 [SettingField(SettingsTab.Controls, Label = "Mouse Sensitivity", Format = "f2", Order = 0)]
 [Range(0.1f, 10f)]
-public float mouseSensitivity = 1.2f;
+public float lookSensitivity = 1.2f;
 
 // Debug-only field (hidden in release builds)
 [SettingField(SettingsTab.Dev, Label = "Simulate Migration Corruption", DebugOnly = true)]
@@ -208,7 +208,7 @@ SettingsMenu
 │       │   │   ├── InterfaceHeading (TMP)
 │       │   │   ├── UIScaleDropdown (Dropdown)
 │       │   │   ├── InputHeading (TMP)
-│       │   │   ├── MouseSensitivitySlider (Slider)
+│       │   │   ├── lookSensitivitySlider (Slider)
 │       │   │   ├── BonusHeading (TMP)
 │       │   │   └── ChunkAnimationToggle (Toggle)
 │       │   ├── GraphicsTabContent
@@ -409,6 +409,7 @@ public class SettingsUIPrefabLibrary : ScriptableObject
         public GameObject prefab;
         public float preferredHeight = 50f;
         public float flexibleWidth = 1f;
+        public float flexibleHeight = 0f;
     }
 }
 ```
@@ -433,7 +434,7 @@ The following refactors are prerequisites for the generator:
 
 ### 8.1 Collapse Mouse Sensitivity
 
-Replace the two separate X/Y fields with a single `mouseSensitivity` field:
+Replace the two separate X/Y fields with a single `lookSensitivity` field:
 
 ```csharp
 // Before (current)
@@ -443,12 +444,12 @@ public float mouseSensitivityY = 1.2f;
 // After
 [SettingField(SettingsTab.Controls, Label = "Mouse Sensitivity", Format = "f2", Order = 0)]
 [Range(0.1f, 10f)]
-public float mouseSensitivity = 1.2f;
+public float lookSensitivity = 1.2f;
 ```
 
 If separate X/Y control is needed in the future, it can be reintroduced as two separate settings with individual UI sliders.
 
-> **Note:** This rename means existing `settings.json` files with `mouseSensitivityX`/`mouseSensitivityY` keys will have those keys silently ignored by `JsonUtility.FromJson`, and `mouseSensitivity` will receive its default value (`1.2f`). This is acceptable since only dev builds currently exist with this setting.
+> **Note:** This rename means existing `settings.json` files with `mouseSensitivityX`/`mouseSensitivityY` keys will have those keys silently ignored by `JsonUtility.FromJson`, and `lookSensitivity` will receive its default value (`1.2f`). This is acceptable since only dev builds currently exist with this setting.
 >
 > **TODO:** In the future, a settings migration system (analogous to the AOT World Migration system) may be needed if production builds ship and field renames become breaking changes.
 
@@ -521,7 +522,7 @@ public class Settings
     // --- Controls ---
     [SettingField(SettingsTab.Controls, Label = "Mouse Sensitivity", Format = "f2", Order = 0)]
     [Range(0.1f, 10f)]
-    public float mouseSensitivity = 1.2f;
+    public float lookSensitivity = 1.2f;
 
     // --- Graphics ---
     [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 0)]
@@ -594,15 +595,15 @@ These operations are fully supported by IL2CPP in Unity 6. No `MakeGenericMethod
 
 ### Phase 1: Foundation
 
-- [ ] Create `SettingsTab` enum
-- [ ] Create `SettingFieldAttribute` class
-- [ ] Create `SettingsUIPrefabLibrary` ScriptableObject and populate it in Inspector
-- [ ] Refactor `mouseSensitivityX`/`Y` → `mouseSensitivity`
-- [ ] Refactor `uiScale` from `int` to `UIScale` enum
-- [ ] Move `keepChunksInMemory` from `#if UNITY_EDITOR` to `DevSettings`
-- [ ] Update `Settings.EnablePersistence` to use `Debug.isDebugBuild` runtime check
-- [ ] Add `[Range(1, 32)]` to `viewDistance`
-- [ ] Annotate all UI-visible fields with `[SettingField(...)]`
+- [X] Create `SettingsTab` enum
+- [X] Create `SettingFieldAttribute` class
+- [X] Create `SettingsUIPrefabLibrary` ScriptableObject and populate it in Inspector
+- [X] Refactor `mouseSensitivityX`/`Y` → `lookSensitivity`
+- [X] Refactor `uiScale` from `int` to `UIScale` enum
+- [X] Move `keepChunksInMemory` from `#if UNITY_EDITOR` to `DevSettings`
+- [X] Update `Settings.EnablePersistence` to use `Debug.isDebugBuild` runtime check
+- [X] Add `[Range(1, 32)]` to `viewDistance`
+- [X] Annotate all UI-visible fields with `[SettingField(...)]`
 
 ### Phase 2: Generator
 

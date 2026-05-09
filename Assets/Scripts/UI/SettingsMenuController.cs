@@ -1,4 +1,5 @@
 using TMPro;
+using UI.Enums;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -30,10 +31,10 @@ namespace UI
         private TMP_Dropdown _uiScaleDropdown;
 
         [SerializeField]
-        private Slider _mouseSensitivitySlider;
+        private Slider _lookSensitivitySlider;
 
         [SerializeField]
-        private TextMeshProUGUI _mouseSensitivityText;
+        private TextMeshProUGUI _lookSensitivityText;
 
         [SerializeField]
         private Toggle _chunkAnimationToggle;
@@ -162,13 +163,13 @@ namespace UI
         }
 
         /// <summary>
-        /// Updates the mouse sensitivity label text to match the slider value.
+        /// Updates the look sensitivity label text to match the slider value.
         /// Called at runtime by the slider's onValueChanged event.
         /// </summary>
-        public void UpdateMouseSensitivityLabel()
+        public void UpdateLookSensitivityLabel()
         {
-            if (_mouseSensitivityText != null && _mouseSensitivitySlider != null)
-                _mouseSensitivityText.text = $"Mouse Sensitivity: {_mouseSensitivitySlider.value:f2}";
+            if (_lookSensitivityText != null && _lookSensitivitySlider != null)
+                _lookSensitivityText.text = $"Look Sensitivity: {_lookSensitivitySlider.value:f2}";
         }
 
         #endregion
@@ -193,10 +194,10 @@ namespace UI
                 _viewDistanceSlider.onValueChanged.AddListener(OnViewDistanceSliderChanged);
             }
 
-            if (_mouseSensitivitySlider != null)
+            if (_lookSensitivitySlider != null)
             {
-                _mouseSensitivitySlider.onValueChanged.RemoveListener(OnMouseSensitivitySliderChanged);
-                _mouseSensitivitySlider.onValueChanged.AddListener(OnMouseSensitivitySliderChanged);
+                _lookSensitivitySlider.onValueChanged.RemoveListener(OnLookSensitivitySliderChanged);
+                _lookSensitivitySlider.onValueChanged.AddListener(OnLookSensitivitySliderChanged);
             }
 
             if (_devTabButton != null)
@@ -217,8 +218,8 @@ namespace UI
             if (_viewDistanceSlider != null)
                 _viewDistanceSlider.onValueChanged.RemoveListener(OnViewDistanceSliderChanged);
 
-            if (_mouseSensitivitySlider != null)
-                _mouseSensitivitySlider.onValueChanged.RemoveListener(OnMouseSensitivitySliderChanged);
+            if (_lookSensitivitySlider != null)
+                _lookSensitivitySlider.onValueChanged.RemoveListener(OnLookSensitivitySliderChanged);
 
             if (_devTabButton != null)
                 _devTabButton.onClick.RemoveListener(OnDevTabClicked);
@@ -231,7 +232,7 @@ namespace UI
         {
             // UI Scale
             if (_uiScaleDropdown != null)
-                _uiScaleDropdown.SetValueWithoutNotify(_settings.uiScale);
+                _uiScaleDropdown.SetValueWithoutNotify((int)_settings.uiScale);
 
             // View Distance
             if (_viewDistanceSlider != null)
@@ -240,11 +241,11 @@ namespace UI
                 UpdateViewDistanceLabel();
             }
 
-            // Mouse Sensitivity
-            if (_mouseSensitivitySlider != null)
+            // Look Sensitivity
+            if (_lookSensitivitySlider != null)
             {
-                _mouseSensitivitySlider.SetValueWithoutNotify(_settings.mouseSensitivityX);
-                UpdateMouseSensitivityLabel();
+                _lookSensitivitySlider.SetValueWithoutNotify(_settings.lookSensitivity);
+                UpdateLookSensitivityLabel();
             }
 
             // Cloud Style
@@ -265,12 +266,11 @@ namespace UI
         /// </summary>
         private void SaveSettings()
         {
-            if (_uiScaleDropdown != null) _settings.uiScale = _uiScaleDropdown.value;
+            if (_uiScaleDropdown != null) _settings.uiScale = (UIScale)_uiScaleDropdown.value;
             if (_viewDistanceSlider != null) _settings.viewDistance = (int)_viewDistanceSlider.value;
-            if (_mouseSensitivitySlider != null)
+            if (_lookSensitivitySlider != null)
             {
-                _settings.mouseSensitivityX = _mouseSensitivitySlider.value;
-                _settings.mouseSensitivityY = _mouseSensitivitySlider.value;
+                _settings.lookSensitivity = _lookSensitivitySlider.value;
             }
 
             if (_cloudStyleDropdown != null) _settings.clouds = (CloudStyle)_cloudStyleDropdown.value;
@@ -293,12 +293,12 @@ namespace UI
         }
 
         /// <summary>
-        /// Callback for the mouse sensitivity slider's onValueChanged event.
+        /// Callback for the look sensitivity slider's onValueChanged event.
         /// </summary>
         /// <param name="value">The new slider value.</param>
-        private void OnMouseSensitivitySliderChanged(float value)
+        private void OnLookSensitivitySliderChanged(float value)
         {
-            UpdateMouseSensitivityLabel();
+            UpdateLookSensitivityLabel();
         }
 
         /// <summary>
@@ -308,7 +308,7 @@ namespace UI
         private void OnUIScaleChanged(int value)
         {
             UIScaleController scaler = FindAnyObjectByType<UIScaleController>();
-            if (scaler != null) scaler.ApplyScale(value);
+            if (scaler != null) scaler.ApplyScale((UIScale)value);
         }
 
         /// <summary>

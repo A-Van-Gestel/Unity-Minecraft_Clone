@@ -1,3 +1,4 @@
+using UI.Enums;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -11,7 +12,6 @@ namespace UI
     {
         private CanvasScaler _canvasScaler;
 
-        // Settings indices: 0 = Small, 1 = Standard, 2 = Large
         private const float SMALL_SCALE_MULT = 1.25f;
         private const float STANDARD_SCALE_MULT = 1.0f;
         private const float LARGE_SCALE_MULT = 0.75f;
@@ -30,17 +30,21 @@ namespace UI
             ApplyScale(settings.uiScale);
         }
 
-        public void ApplyScale(int scaleIndex)
+        /// <summary>
+        /// Applies the given <see cref="UIScale"/> preset to the canvas scaler's reference resolution.
+        /// </summary>
+        /// <param name="scale">The UI scale preset to apply.</param>
+        public void ApplyScale(UIScale scale)
         {
             if (_canvasScaler == null) return;
 
-            float multiplier = STANDARD_SCALE_MULT;
-            switch (scaleIndex)
+            float multiplier = scale switch
             {
-                case 0: multiplier = SMALL_SCALE_MULT; break;
-                case 1: multiplier = STANDARD_SCALE_MULT; break;
-                case 2: multiplier = LARGE_SCALE_MULT; break;
-            }
+                UIScale.Small => SMALL_SCALE_MULT,
+                UIScale.Standard => STANDARD_SCALE_MULT,
+                UIScale.Large => LARGE_SCALE_MULT,
+                _ => STANDARD_SCALE_MULT,
+            };
 
             _canvasScaler.referenceResolution = _baseResolution * multiplier;
         }
