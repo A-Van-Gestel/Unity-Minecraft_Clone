@@ -212,10 +212,27 @@ public static class SettingsManager
     /// </summary>
     private static Settings s_cachedSettings;
 
+    /// <summary>
+    /// Invoked by the UI generator when a setting value changes.
+    /// Broadcasts the field name so subscribers can filter efficiently.
+    /// </summary>
+    public static event Action<string> OnSettingChanged;
+
+    /// <summary>
+    /// Fires the <see cref="OnSettingChanged"/> event with the given field name.
+    /// Called by the SettingsUIGenerator when a UI control value changes.
+    /// </summary>
+    /// <param name="fieldName">The name of the settings field that was modified.</param>
+    public static void NotifySettingChanged(string fieldName)
+    {
+        OnSettingChanged?.Invoke(fieldName);
+    }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
     {
         s_cachedSettings = null;
+        OnSettingChanged = null;
     }
 
     /// <summary>

@@ -607,14 +607,14 @@ These operations are fully supported by IL2CPP in Unity 6. No `MakeGenericMethod
 
 ### Phase 2: Generator
 
-- [ ] Implement `SettingsUIGenerator.cs` with `Generate()` and `RebindValues(bool isInGame)`
-- [ ] Implement `TAB_ORDER` array with startup completeness assertion
-- [ ] Implement reflection pipeline: field discovery → filtering → sorting → instantiation → binding
-- [ ] Hardcode `Settings.Dev` iteration for DevSettings fields
-- [ ] Implement `camelCase` → `"Title Case"` label conversion utility
-- [ ] Implement `[InspectorName]` reading for enum dropdown population
-- [ ] Wire `onValueChanged` → `FieldInfo.SetValue()` + `NotifySettingChanged()`
-- [ ] Handle `[InitializationField]` interactability based on `IsInGame` flag
+- [X] Implement `SettingsUIGenerator.cs` with `Generate()` and `RebindValues(bool isInGame)`
+- [X] Implement `TAB_ORDER` array with startup completeness assertion
+- [X] Implement reflection pipeline: field discovery → filtering → sorting → instantiation → binding
+- [X] Hardcode `Settings.Dev` iteration for DevSettings fields
+- [X] Implement `camelCase` → `"Title Case"` label conversion utility
+- [X] Implement `[InspectorName]` reading for enum dropdown population
+- [X] Wire `onValueChanged` → `FieldInfo.SetValue()` + `NotifySettingChanged()`
+- [X] Handle `[InitializationField]` interactability based on `IsInGame` flag
 
 ### Phase 3: Integration
 
