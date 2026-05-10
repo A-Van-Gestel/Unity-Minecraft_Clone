@@ -8,6 +8,7 @@ using TMPro;
 using UI.Attributes;
 using UI.Enums;
 using UI.ScriptableObjects;
+using UI.Tooltip;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -389,6 +390,15 @@ namespace UI
             }
 
             if (binding == null) return;
+
+            // Apply tooltip if present
+            TooltipAttribute tooltipAttr = entry.Field.GetCustomAttribute<TooltipAttribute>();
+            if (tooltipAttr != null && !string.IsNullOrEmpty(tooltipAttr.tooltip))
+            {
+                // Attach TooltipTrigger to the root of the instantiated control prefab
+                TooltipTrigger trigger = binding.ControlRoot.AddComponent<TooltipTrigger>();
+                trigger.text = tooltipAttr.tooltip;
+            }
 
             binding.IsInitializationField = isInitField;
             _controlBindings.Add(binding);
