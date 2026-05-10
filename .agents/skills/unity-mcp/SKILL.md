@@ -94,3 +94,8 @@ This skill is used correctly when:
 - You confirmed with the user before Play/Pause/Stop actions
 - You verified profiler data exists before calling profiler tools
 </success_criteria>
+
+<metadata>
+- **Last modified:** 2026-05-10
+- **Unity MCP package:** `com.unity.ai.assistant` v2.6.0-pre.1
+</metadata>
