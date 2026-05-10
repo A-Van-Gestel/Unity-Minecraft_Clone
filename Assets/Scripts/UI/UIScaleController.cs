@@ -6,6 +6,8 @@ namespace UI
 {
     /// <summary>
     /// Dynamically adjusts the CanvasScaler's reference resolution based on user preferences.
+    /// Subscribes to <see cref="SettingsManager.OnSettingChanged"/> to react immediately
+    /// when the UI scale setting is modified.
     /// </summary>
     [RequireComponent(typeof(CanvasScaler))]
     public class UIScaleController : MonoBehaviour
@@ -21,13 +23,30 @@ namespace UI
         private void Awake()
         {
             _canvasScaler = GetComponent<CanvasScaler>();
-            LoadSettings();
+            ApplyScale(SettingsManager.LoadSettings().uiScale);
         }
 
-        private void LoadSettings()
+        private void OnEnable()
         {
-            var settings = SettingsManager.LoadSettings();
-            ApplyScale(settings.uiScale);
+            SettingsManager.OnSettingChanged += HandleSettingChanged;
+        }
+
+        private void OnDisable()
+        {
+            SettingsManager.OnSettingChanged -= HandleSettingChanged;
+        }
+
+        /// <summary>
+        /// Handles setting change notifications. Applies the new UI scale when the
+        /// <see cref="Settings.uiScale"/> field is modified.
+        /// </summary>
+        /// <param name="fieldName">The name of the settings field that changed.</param>
+        private void HandleSettingChanged(string fieldName)
+        {
+            if (fieldName == nameof(Settings.uiScale))
+            {
+                ApplyScale(SettingsManager.LoadSettings().uiScale);
+            }
         }
 
         /// <summary>

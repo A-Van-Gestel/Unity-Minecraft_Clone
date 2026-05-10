@@ -103,6 +103,7 @@ public class Settings
     /// <summary>
     /// If true, the lighting system is enabled.
     /// </summary>
+    [Header("Lighting")]
     [SettingField(SettingsTab.World, Label = "Lighting", Order = 0)]
     [InitializationField]
     [Tooltip("Enable the lighting system.")]
@@ -125,6 +126,7 @@ public class Settings
     public CloudStyle clouds = CloudStyle.Fancy;
 
     // --- UI ---
+    [Header("Interface")]
     [SettingField(SettingsTab.General, Label = "UI Scale", Order = 0)]
     [Tooltip("The scale of the game's user interface.")]
     public UIScale uiScale = UIScale.Standard;
@@ -133,6 +135,7 @@ public class Settings
     /// <summary>
     /// Look sensitivity applied to both horizontal and vertical camera rotation.
     /// </summary>
+    [Header("Controls")]
     [SettingField(SettingsTab.Controls, Label = "Look Sensitivity", Format = "f2", Order = 0)]
     [Range(0.1f, 10f)]
     [Tooltip("Look sensitivity for camera movement.")]
@@ -169,6 +172,7 @@ public class Settings
     /// <summary>
     /// If true, chunks play a subtle upward slide animation when their meshes are generated.
     /// </summary>
+    [Header("Bonus")]
     [SettingField(SettingsTab.General, Label = "Chunk Load Animations", Order = 10)]
     [Tooltip("If true, chunks play a subtle upward slide animation when their meshes are generated.")]
     public bool enableChunkLoadAnimations = false;

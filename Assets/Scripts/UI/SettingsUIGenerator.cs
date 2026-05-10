@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
 using System.Text;
 using MyBox;
@@ -107,6 +108,15 @@ namespace UI
 
             /// <summary>The Selectable component (Toggle, Slider, Dropdown, InputField) for interactability control.</summary>
             public Selectable Selectable;
+
+            /// <summary>The display label (e.g., "View Distance"). Stored for rebinding "Label: Value" text.</summary>
+            public string Label;
+
+            /// <summary>The format string for numeric value display (e.g., "f0", "f2"). Null for non-slider controls.</summary>
+            public string Format;
+
+            /// <summary>Direct reference to the label TMP component for efficient rebinding.</summary>
+            public TextMeshProUGUI LabelText;
         }
 
         /// <summary>
@@ -130,6 +140,28 @@ namespace UI
         public void Generate()
         {
             if (_isGenerated) return;
+
+            // Validate required references
+            if (_library == null)
+            {
+                Debug.LogError("[SettingsUIGenerator] _library (SettingsUIPrefabLibrary) is not assigned! " +
+                               "Assign it in the Inspector.");
+                return;
+            }
+
+            if (_tabButtonContainer == null)
+            {
+                Debug.LogError("[SettingsUIGenerator] _tabButtonContainer is not assigned! " +
+                               "Assign it in the Inspector.");
+                return;
+            }
+
+            if (_tabContentParent == null)
+            {
+                Debug.LogError("[SettingsUIGenerator] _tabContentParent is not assigned! " +
+                               "Assign it in the Inspector.");
+                return;
+            }
 
             ValidateTabOrder();
 
@@ -273,8 +305,11 @@ namespace UI
         private TabEntry CreateTab(SettingsTab tab)
         {
             // Instantiate tab button
-            GameObject buttonObj = Instantiate(_library.tabButtonPrefab, _tabButtonContainer);
+            GameObject buttonObj = Instantiate(_library.tabButtonPrefab.prefab, _tabButtonContainer);
             buttonObj.name = $"{tab}Tab";
+
+            // Apply layout configuration (preferredHeight = 50, flexibleWidth = 1)
+            ApplyLayout(buttonObj, _library.tabButtonPrefab);
 
             // Set button label text
             TextMeshProUGUI buttonLabel = buttonObj.GetComponentInChildren<TextMeshProUGUI>();
@@ -401,6 +436,7 @@ namespace UI
 
         /// <summary>
         /// Creates a Slider control for an int or float field with [Range].
+        /// Label displays as "Label: Value" (e.g., "View Distance: 5").
         /// </summary>
         private ControlBinding CreateSlider(FieldEntry entry, Transform parent, string label,
             RangeAttribute range, bool wholeNumbers)
@@ -415,11 +451,10 @@ namespace UI
             Slider slider = obj.GetComponentInChildren<Slider>();
             TextMeshProUGUI[] texts = obj.GetComponentsInChildren<TextMeshProUGUI>();
 
-            // Convention: first TMP is the label, second TMP is the value display
+            // Use the first TMP as the combined "Label: Value" display
             TextMeshProUGUI labelText = texts.Length > 0 ? texts[0] : null;
-            TextMeshProUGUI valueText = texts.Length > 1 ? texts[1] : null;
 
-            if (labelText != null) labelText.text = label;
+            string format = entry.Attribute.Format ?? (wholeNumbers ? "f0" : "f2");
 
             if (slider != null)
             {
@@ -428,13 +463,13 @@ namespace UI
                 slider.wholeNumbers = wholeNumbers;
 
                 float currentValue = wholeNumbers
-                    ? (int)entry.Field.GetValue(entry.Owner)
+                    ? Convert.ToInt32(entry.Field.GetValue(entry.Owner))
                     : (float)entry.Field.GetValue(entry.Owner);
                 slider.SetValueWithoutNotify(currentValue);
 
-                string format = entry.Attribute.Format ?? (wholeNumbers ? "f0" : "f2");
-                if (valueText != null)
-                    valueText.text = currentValue.ToString(format);
+                // Set combined label: "View Distance: 5"
+                if (labelText != null)
+                    labelText.text = FormatLabelValue(label, currentValue.ToString(format, CultureInfo.InvariantCulture));
 
                 // Capture for closure
                 FieldInfo field = entry.Field;
@@ -446,11 +481,15 @@ namespace UI
                     else
                         field.SetValue(owner, val);
 
-                    if (valueText != null)
-                        valueText.text = val.ToString(format);
+                    if (labelText != null)
+                        labelText.text = FormatLabelValue(label, val.ToString(format, CultureInfo.InvariantCulture));
 
                     SettingsManager.NotifySettingChanged(field.Name);
                 });
+            }
+            else if (labelText != null)
+            {
+                labelText.text = label;
             }
 
             return new ControlBinding
@@ -459,11 +498,16 @@ namespace UI
                 Owner = entry.Owner,
                 ControlRoot = obj,
                 Selectable = slider,
+                Label = label,
+                Format = format,
+                LabelText = labelText,
             };
         }
 
         /// <summary>
         /// Creates a Dropdown control for an enum field.
+        /// The dropdown's caption text displays as "Label: SelectedOption" (e.g., "Clouds: Fancy").
+        /// If the prefab has a dedicated external label TMP (not the caption), that is used instead.
         /// </summary>
         private ControlBinding CreateDropdown(FieldEntry entry, Transform parent, string label)
         {
@@ -475,22 +519,30 @@ namespace UI
             ApplyLayout(obj, config);
 
             TMP_Dropdown dropdown = obj.GetComponentInChildren<TMP_Dropdown>();
-            TextMeshProUGUI text = null;
 
-            // Find a label text that is NOT inside the dropdown template
-            TextMeshProUGUI[] texts = obj.GetComponentsInChildren<TextMeshProUGUI>();
+            // Determine label target: look for an external label TMP outside the dropdown.
+            // If none exists, use the dropdown's own captionText for the "Label: Value" display.
+            TextMeshProUGUI labelTarget = null;
+
             if (dropdown != null)
             {
+                // Look for a TMP that is NOT inside the dropdown's Template and is NOT the captionText
+                Transform template = dropdown.template;
+                TextMeshProUGUI[] texts = obj.GetComponentsInChildren<TextMeshProUGUI>();
                 foreach (TextMeshProUGUI t in texts)
                 {
-                    // Skip the dropdown's own caption and item labels
-                    if (t.transform.IsChildOf(dropdown.transform)) continue;
-                    text = t;
+                    if (t == dropdown.captionText) continue;
+                    if (template != null && t.transform.IsChildOf(template)) continue;
+                    labelTarget = t;
                     break;
                 }
-            }
 
-            if (text != null) text.text = label;
+                // No external label found — use captionText for the prefixed display
+                if (labelTarget == null && dropdown.captionText != null)
+                {
+                    labelTarget = dropdown.captionText as TextMeshProUGUI;
+                }
+            }
 
             if (dropdown != null)
             {
@@ -510,17 +562,32 @@ namespace UI
 
                 dropdown.AddOptions(options);
 
-                int currentValue = (int)entry.Field.GetValue(entry.Owner);
+                int currentValue = Convert.ToInt32(entry.Field.GetValue(entry.Owner));
                 dropdown.SetValueWithoutNotify(currentValue);
+
+                // Override caption after SetValueWithoutNotify (which calls RefreshShownValue)
+                if (labelTarget != null && currentValue >= 0 && currentValue < dropdown.options.Count)
+                    labelTarget.text = FormatLabelValue(label, dropdown.options[currentValue].text);
 
                 // Capture for closure
                 FieldInfo field = entry.Field;
                 object owner = entry.Owner;
+                TextMeshProUGUI captureLabelTarget = labelTarget;
                 dropdown.onValueChanged.AddListener(val =>
                 {
                     field.SetValue(owner, Enum.ToObject(field.FieldType, val));
+
+                    // onValueChanged fires after RefreshShownValue resets caption,
+                    // so we override it here with our prefixed format
+                    if (captureLabelTarget != null)
+                        captureLabelTarget.text = FormatLabelValue(label, dropdown.options[val].text);
+
                     SettingsManager.NotifySettingChanged(field.Name);
                 });
+            }
+            else if (labelTarget != null)
+            {
+                labelTarget.text = label;
             }
 
             return new ControlBinding
@@ -529,6 +596,8 @@ namespace UI
                 Owner = entry.Owner,
                 ControlRoot = obj,
                 Selectable = dropdown,
+                Label = label,
+                LabelText = labelTarget,
             };
         }
 
@@ -607,6 +676,7 @@ namespace UI
 
         /// <summary>
         /// Sets a generated control's displayed value without triggering its onValueChanged callback.
+        /// Also updates the combined "Label: Value" text for sliders and dropdowns.
         /// </summary>
         private void SetControlValue(ControlBinding binding, object value)
         {
@@ -619,20 +689,26 @@ namespace UI
                 float floatVal = value is int intVal ? intVal : (float)value;
                 slider.SetValueWithoutNotify(floatVal);
 
-                // Update value label
-                TextMeshProUGUI[] texts = binding.ControlRoot.GetComponentsInChildren<TextMeshProUGUI>();
-                if (texts.Length > 1)
+                // Update combined "Label: Value" text
+                if (binding.LabelText != null && binding.Label != null)
                 {
-                    SettingFieldAttribute attr = binding.Field.GetCustomAttribute<SettingFieldAttribute>();
-
-                    bool wholeNumbers = binding.Field.FieldType == typeof(int);
-                    string format = attr?.Format ?? (wholeNumbers ? "f0" : "f2");
-                    texts[1].text = floatVal.ToString(format);
+                    string format = binding.Format ?? "f2";
+                    binding.LabelText.text = FormatLabelValue(
+                        binding.Label, floatVal.ToString(format, CultureInfo.InvariantCulture));
                 }
             }
             else if (binding.Selectable is TMP_Dropdown dropdown)
             {
-                dropdown.SetValueWithoutNotify((int)value);
+                int intValue = Convert.ToInt32(value);
+                dropdown.SetValueWithoutNotify(intValue);
+
+                // Update combined "Label: SelectedOption" text
+                if (binding.LabelText != null && binding.Label != null
+                                              && intValue >= 0 && intValue < dropdown.options.Count)
+                {
+                    binding.LabelText.text = FormatLabelValue(
+                        binding.Label, dropdown.options[intValue].text);
+                }
             }
             else if (binding.ControlRoot != null)
             {
@@ -657,6 +733,17 @@ namespace UI
             layout.preferredHeight = config.preferredHeight;
             layout.flexibleWidth = config.flexibleWidth;
             layout.flexibleHeight = config.flexibleHeight;
+        }
+
+        /// <summary>
+        /// Formats a combined "Label: Value" string for slider and dropdown labels.
+        /// </summary>
+        /// <param name="label">The display label (e.g., "View Distance").</param>
+        /// <param name="value">The formatted value string (e.g., "5" or "Fancy").</param>
+        /// <returns>A combined string in the format "Label: Value".</returns>
+        private static string FormatLabelValue(string label, string value)
+        {
+            return $"{label}: {value}";
         }
 
         /// <summary>

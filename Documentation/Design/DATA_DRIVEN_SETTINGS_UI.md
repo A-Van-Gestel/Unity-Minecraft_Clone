@@ -618,12 +618,12 @@ These operations are fully supported by IL2CPP in Unity 6. No `MakeGenericMethod
 
 ### Phase 3: Integration
 
-- [ ] Add `OnSettingChanged` event and `NotifySettingChanged()` to `SettingsManager`
-- [ ] Add `bool IsInGame` property to `SettingsMenuController`
+- [X] Add `OnSettingChanged` event and `NotifySettingChanged()` to `SettingsManager`
+- [X] Add `bool IsInGame` property to `SettingsMenuController`
 - [ ] Update Main Menu and Pause Menu to set `IsInGame` before enabling settings
-- [ ] Refactor `SettingsMenuController` to shell role (remove all per-field `[SerializeField]` references)
-- [ ] Preserve ScrollRect content swap and scroll-to-top on tab switch
-- [ ] Migrate `UIScaleController` to use `OnSettingChanged` subscriber pattern
+- [X] Refactor `SettingsMenuController` to shell role (remove all per-field `[SerializeField]` references)
+- [X] Preserve ScrollRect content swap and scroll-to-top on tab switch
+- [X] Migrate `UIScaleController` to use `OnSettingChanged` subscriber pattern
 - [ ] Test immediate-apply behavior for all setting types
 
 ### Phase 4: Validation
