@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UI.Tooltip;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -25,7 +26,7 @@ public class CreativeInventory : MonoBehaviour
         canvasGridLayoutGroup.cellSize = prefabSize;
 
         // Calculate how many rows the different block types will fill.
-        int itemCount = _world.BlockTypes.Length - 1; // Exclude Air (blockTypes[0]) 
+        int itemCount = _world.BlockTypes.Length - 1; // Exclude Air (blockTypes[0])
         int creativeSlotRows = Mathf.CeilToInt((float)itemCount / itemColumnCount);
 
         // Fill in the slots.
@@ -41,6 +42,9 @@ public class CreativeInventory : MonoBehaviour
                 ItemSlot slot = new ItemSlot(newSlot.GetComponent<UIItemSlot>(), stack);
                 slot.IsCreative = true;
                 Slots.Add(slot);
+
+                TooltipTrigger trigger = newSlot.AddComponent<TooltipTrigger>();
+                trigger.text = _world.BlockTypes[i].blockName;
             }
             // Create one row spacer between creative blocks and empty slots by disabling created slot.
             else if (currentRow <= creativeSlotRows + 1)
@@ -53,6 +57,8 @@ public class CreativeInventory : MonoBehaviour
             {
                 ItemSlot slot = new ItemSlot(newSlot.GetComponent<UIItemSlot>());
                 Slots.Add(slot);
+
+                newSlot.AddComponent<TooltipTrigger>();
             }
         }
     }

@@ -1,4 +1,5 @@
 using TMPro;
+using UI.Tooltip;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -11,6 +12,7 @@ public class UIItemSlot : MonoBehaviour
     public TextMeshProUGUI slotAmount;
 
     private World _world;
+    private TooltipTrigger _tooltipTrigger;
 
     private void Awake()
     {
@@ -42,6 +44,7 @@ public class UIItemSlot : MonoBehaviour
             slotAmount.text = ItemSlot.Stack.Amount.ToString();
             slotIcon.enabled = true;
             slotAmount.enabled = true;
+            UpdateTooltip(_world.BlockTypes[ItemSlot.Stack.ID].blockName);
         }
         else
         {
@@ -55,6 +58,16 @@ public class UIItemSlot : MonoBehaviour
         slotAmount.text = "";
         slotIcon.enabled = false;
         slotAmount.enabled = false;
+        UpdateTooltip(null);
+    }
+
+    private void UpdateTooltip(string text)
+    {
+        if (_tooltipTrigger == null)
+            _tooltipTrigger = GetComponent<TooltipTrigger>();
+
+        if (_tooltipTrigger != null)
+            _tooltipTrigger.text = text;
     }
 
     private void OnDestroy()
