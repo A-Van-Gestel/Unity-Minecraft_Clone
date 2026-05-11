@@ -12,6 +12,9 @@ namespace UI.Tooltip
         [Tooltip("The text to display in the tooltip.")]
         public string text;
 
+        [Tooltip("Per-trigger position override. When set, overrides the TooltipManager's default hover mode.")]
+        public TooltipHoverPosition? HoverPositionOverride;
+
         private Coroutine _delayCoroutine;
 
         public void OnPointerEnter(PointerEventData eventData)
@@ -60,7 +63,7 @@ namespace UI.Tooltip
             // Use realtime so tooltips work even when Time.timeScale is 0 (e.g. paused menu)
             yield return new WaitForSecondsRealtime(delay);
 
-            TooltipManager.Show(text);
+            TooltipManager.Show(text, (RectTransform)transform, HoverPositionOverride);
         }
     }
 }

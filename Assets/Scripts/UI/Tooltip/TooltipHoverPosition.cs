@@ -9,5 +9,11 @@ namespace UI.Tooltip
         /// The tooltip will dynamically follow the mouse cursor.
         /// </summary>
         FollowMouse,
+
+        /// <summary>
+        /// The tooltip's top-left corner aligns with the trigger element's top-right corner.
+        /// Falls back to the left side if there is not enough screen space on the right.
+        /// </summary>
+        TopLeft,
     }
 }

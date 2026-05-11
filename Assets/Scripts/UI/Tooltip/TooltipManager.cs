@@ -21,23 +21,29 @@ namespace UI.Tooltip
 
         [Header("References")]
         [Tooltip("The canvas where the tooltip should be parented.")]
-        [SerializeField] private Canvas _parentCanvas;
+        [SerializeField]
+        private Canvas _parentCanvas;
 
         [Tooltip("The tooltip UI prefab.")]
-        [SerializeField] private GameObject _tooltipPrefab;
+        [SerializeField]
+        private GameObject _tooltipPrefab;
 
         [Header("Configuration")]
         [Tooltip("The delay in seconds before a hovered tooltip is displayed.")]
-        [SerializeField] private float _hoverDelay = 0.4f;
+        [SerializeField]
+        private float _hoverDelay = 0.4f;
 
         [Tooltip("How the tooltip is positioned.")]
-        [SerializeField] private TooltipHoverPosition _hoverMode = TooltipHoverPosition.FollowMouse;
+        [SerializeField]
+        private TooltipHoverPosition _hoverMode = TooltipHoverPosition.FollowMouse;
 
         public float HoverDelay => _hoverDelay;
 
         private GameObject _activeTooltip;
         private TextMeshProUGUI _tooltipText;
         private RectTransform _tooltipRect;
+        private RectTransform _activeTriggerRect;
+        private TooltipHoverPosition _activeHoverMode;
 
         private void Awake()
         {
@@ -46,6 +52,7 @@ namespace UI.Tooltip
                 Destroy(gameObject);
                 return;
             }
+
             Instance = this;
         }
 
@@ -53,19 +60,23 @@ namespace UI.Tooltip
         {
             if (_activeTooltip == null || !_activeTooltip.activeSelf) return;
 
-            if (_hoverMode == TooltipHoverPosition.FollowMouse)
+            if (_activeHoverMode == TooltipHoverPosition.FollowMouse)
             {
-                UpdateTooltipPosition();
+                UpdateFollowMousePosition();
             }
         }
 
         /// <summary>
         /// Displays the tooltip with the given text.
+        /// Optionally accepts the trigger's RectTransform and a per-trigger hover position override.
         /// </summary>
-        public static void Show(string content)
+        /// <param name="content">The tooltip text to display.</param>
+        /// <param name="triggerRect">The RectTransform of the element that triggered this tooltip.</param>
+        /// <param name="positionOverride">Per-trigger position override; uses the manager's default when null.</param>
+        public static void Show(string content, RectTransform triggerRect = null, TooltipHoverPosition? positionOverride = null)
         {
             if (Instance == null) return;
-            Instance.ShowInternal(content);
+            Instance.ShowInternal(content, triggerRect, positionOverride);
         }
 
         /// <summary>
@@ -77,7 +88,7 @@ namespace UI.Tooltip
             Instance.HideInternal();
         }
 
-        private void ShowInternal(string content)
+        private void ShowInternal(string content, RectTransform triggerRect, TooltipHoverPosition? positionOverride)
         {
             if (_parentCanvas == null || _tooltipPrefab == null)
             {
@@ -95,15 +106,23 @@ namespace UI.Tooltip
                 _tooltipRect.pivot = new Vector2(0, 1);
             }
 
+            _activeTriggerRect = triggerRect;
+            _activeHoverMode = positionOverride ?? _hoverMode;
+
             if (_tooltipText != null)
                 _tooltipText.text = content;
 
             // Force layout rebuild so sizing is correct for boundary checks
             LayoutRebuilder.ForceRebuildLayoutImmediate(_tooltipRect);
 
-            if (_hoverMode == TooltipHoverPosition.FollowMouse)
+            switch (_activeHoverMode)
             {
-                UpdateTooltipPosition();
+                case TooltipHoverPosition.FollowMouse:
+                    UpdateFollowMousePosition();
+                    break;
+                case TooltipHoverPosition.TopLeft:
+                    UpdateAnchoredPosition();
+                    break;
             }
 
             _activeTooltip.SetActive(true);
@@ -116,9 +135,11 @@ namespace UI.Tooltip
         {
             if (_activeTooltip != null)
                 _activeTooltip.SetActive(false);
+
+            _activeTriggerRect = null;
         }
 
-        private void UpdateTooltipPosition()
+        private void UpdateFollowMousePosition()
         {
             if (_tooltipRect == null || _parentCanvas == null) return;
 
@@ -162,6 +183,49 @@ namespace UI.Tooltip
             finalPos.y = Mathf.Clamp(finalPos.y, tooltipHeight, Screen.height);
 
             // Setting position directly works perfectly for Overlay canvases
+            _tooltipRect.position = finalPos;
+        }
+
+        /// <summary>
+        /// Positions the tooltip anchored to the trigger element.
+        /// TopLeft: tooltip's top-left corner aligns with the trigger's top-right corner.
+        /// Falls back to the opposite side when there is not enough screen space.
+        /// </summary>
+        private void UpdateAnchoredPosition()
+        {
+            if (_tooltipRect == null || _parentCanvas == null || _activeTriggerRect == null) return;
+
+            float scaleFactor = _parentCanvas.scaleFactor;
+            float tooltipWidth = _tooltipRect.rect.width * scaleFactor;
+            float tooltipHeight = _tooltipRect.rect.height * scaleFactor;
+
+            // Get the trigger's screen-space corners (bottom-left, top-left, top-right, bottom-right)
+            Vector3[] triggerCorners = new Vector3[4];
+            _activeTriggerRect.GetWorldCorners(triggerCorners);
+
+            float triggerRight = triggerCorners[2].x;
+            float triggerLeft = triggerCorners[0].x;
+            float triggerTop = triggerCorners[1].y;
+
+            Vector2 finalPos;
+
+            // X: prefer placing to the right of the trigger; fall back to the left
+            if (triggerRight + tooltipWidth <= Screen.width)
+            {
+                finalPos.x = triggerRight;
+            }
+            else
+            {
+                finalPos.x = triggerLeft - tooltipWidth;
+            }
+
+            // Y: align top edges; the pivot is top-left so finalPos.y is the top edge
+            finalPos.y = triggerTop;
+
+            // Hard clamp to screen bounds
+            finalPos.x = Mathf.Clamp(finalPos.x, 0f, Screen.width - tooltipWidth);
+            finalPos.y = Mathf.Clamp(finalPos.y, tooltipHeight, Screen.height);
+
             _tooltipRect.position = finalPos;
         }
     }
