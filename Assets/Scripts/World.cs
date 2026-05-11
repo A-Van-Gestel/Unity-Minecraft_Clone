@@ -162,6 +162,12 @@ public class World : MonoBehaviour
     /// </summary>
     public bool IsWorldLoaded => _isWorldLoaded;
 
+    /// <summary>
+    /// Runtime toggle for chunk border visualization. Toggled by the player input action;
+    /// not persisted to settings because it is transient debug state.
+    /// </summary>
+    public bool ShowChunkBorders { get; set; }
+
     // --- Cancellation Token for Async Saves ---
     private CancellationTokenSource _shutdownTokenSource;
 
@@ -406,7 +412,7 @@ public class World : MonoBehaviour
         GameObject borderParentGo = new GameObject("Chunk Borders");
         borderParentGo.transform.SetParent(transform);
         _chunkBorderParent = borderParentGo.transform;
-        _lastChunkBordersState = settings.showChunkBorders;
+        _lastChunkBordersState = ShowChunkBorders;
 
         // --- STEP 1: DETERMINE INITIAL PLAYER POSITION ---
         // If we loaded a save, the player position is already set by LoadWorldGameState.
@@ -967,18 +973,18 @@ public class World : MonoBehaviour
             CheckViewDistance();
         }
 
-        // Toggle chunk border visibility if the setting has changed.
-        if (_lastChunkBordersState != settings.showChunkBorders)
+        // Toggle chunk border visibility if the runtime state has changed.
+        if (_lastChunkBordersState != ShowChunkBorders)
         {
             foreach (GameObject borderObject in _chunkBorders.Values)
             {
                 if (borderObject != null)
                 {
-                    borderObject.SetActive(settings.showChunkBorders);
+                    borderObject.SetActive(ShowChunkBorders);
                 }
             }
 
-            _lastChunkBordersState = settings.showChunkBorders;
+            _lastChunkBordersState = ShowChunkBorders;
         }
 
         // Debug: Voxel Visualization Management
@@ -2038,7 +2044,7 @@ public class World : MonoBehaviour
         GameObject borderObject = ChunkPool.GetBorder(chunkBorderPrefab, pos, _chunkBorderParent);
 
         // Ensure state matches setting (Pool might return active object, but setting might be off)
-        borderObject.SetActive(settings.showChunkBorders);
+        borderObject.SetActive(ShowChunkBorders);
         _chunkBorders.Add(chunkCoord, borderObject);
     }
 

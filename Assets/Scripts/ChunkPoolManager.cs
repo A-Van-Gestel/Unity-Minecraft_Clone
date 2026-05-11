@@ -119,7 +119,7 @@ public class ChunkPoolManager
         _sectionPool.UpdatePruning(maxPoolSize * 8);
 
         // Fully cleanup ChunkBorder pool if disabled to free memory allocation
-        int chunkBorderPoolSize = World.Instance.settings.showChunkBorders ? maxPoolSize : 0;
+        int chunkBorderPoolSize = World.Instance.ShowChunkBorders ? maxPoolSize : 0;
         _borderPool.UpdatePruning(chunkBorderPoolSize);
 
         // Fully cleanup visualizer pool if disabled to free memory allocation

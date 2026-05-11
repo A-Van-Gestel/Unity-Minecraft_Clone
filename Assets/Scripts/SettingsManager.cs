@@ -290,14 +290,6 @@ public class Settings
     /// </summary>
     public int LoadDistance => viewDistance + DATA_LOAD_BUFFER;
 
-    [Header("Debug")]
-    /// <summary>
-    /// If true, chunk borders will be visualized in the scene.
-    /// </summary>
-    [Tooltip("Draws debug wireframe outlines around 16x16 chunk boundaries.\n\n" +
-             TooltipTags.Note + "Only visible in the Scene view or when Gizmos are enabled.")]
-    public bool showChunkBorders = false;
-
     #endregion
 }
 

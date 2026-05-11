@@ -150,7 +150,7 @@ public class Player : MonoBehaviour
             _world.SaveWorldData();
 
         if (_input.ToggleChunkBordersPressed)
-            _world.settings.showChunkBorders = !_world.settings.showChunkBorders;
+            _world.ShowChunkBorders = !_world.ShowChunkBorders;
 
         if (_input.CycleVisModePressed)
             _world.CycleVisualizationMode();
