@@ -21,6 +21,9 @@ public static class TooltipTags
 
     public const string DefaultColorStart = "<color=#B3B3B3><i>Default: ";
     public const string DefaultColorEnd = "</i></color>";
+
+    public const string BulletOptionStart = "  • <color=#A3D1FF>"; // Light Blue
+    public const string BulletOptionEnd = ":</color> ";
 }
 
 [Serializable]
@@ -33,8 +36,8 @@ public class DevSettings
     [Header("Chunk Loading")]
     [SettingField(SettingsTab.Dev, Label = "Keep Chunks In Memory", DebugOnly = true, Order = 0)]
     [Tooltip("Determines if chunks are unloaded and persisted to disk.\n\n" +
-             "  • <color=#A3D1FF>If true:</color> Chunks remain in memory indefinitely. Saving/loading is disabled.\n" +
-             "  • <color=#A3D1FF>If false:</color> Standard behavior with unloading and disk persistence.\n\n" +
+             TooltipTags.BulletOptionStart + "If true" + TooltipTags.BulletOptionEnd + "Chunks remain in memory indefinitely. Saving/loading is disabled.\n" +
+             TooltipTags.BulletOptionStart + "If false" + TooltipTags.BulletOptionEnd + "Standard behavior with unloading and disk persistence.\n\n" +
              TooltipTags.Warning + "High memory usage. Useful for verifying world generation.")]
     public bool keepChunksInMemory = false;
 
@@ -119,9 +122,9 @@ public class Settings
     /// </summary>
     [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 1)]
     [Tooltip("The visual style of the cloud mesh system.\n\n" +
-             "  • <color=#A3D1FF>Off:</color> Disables cloud rendering.\n" +
-             "  • <color=#A3D1FF>Fast:</color> 2D flat clouds.\n" +
-             "  • <color=#A3D1FF>Fancy:</color> Full 3D clouds.")]
+             TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "Disables cloud rendering.\n" +
+             TooltipTags.BulletOptionStart + "Fast" + TooltipTags.BulletOptionEnd + "2D flat clouds.\n" +
+             TooltipTags.BulletOptionStart + "Fancy" + TooltipTags.BulletOptionEnd + "Full 3D clouds.")]
     public CloudStyle clouds = CloudStyle.Fancy;
 
     #endregion
@@ -178,9 +181,9 @@ public class Settings
     [Header("Save System")]
     [SettingField(SettingsTab.Performance, Label = "Save Compression", Order = 0)]
     [Tooltip("Sets the compression algorithm used for saving chunk data to disk.\n\n" +
-             "  • <color=#A3D1FF>LZ4:</color> Recommended balance of speed and size.\n" +
-             "  • <color=#A3D1FF>GZip:</color> Maximum compression, slower save/load times.\n" +
-             "  • <color=#A3D1FF>None:</color> Fastest saving, largest file size.")]
+             TooltipTags.BulletOptionStart + "LZ4" + TooltipTags.BulletOptionEnd + "Recommended balance of speed and size.\n" +
+             TooltipTags.BulletOptionStart + "GZip" + TooltipTags.BulletOptionEnd + "Maximum compression, slower save/load times.\n" +
+             TooltipTags.BulletOptionStart + "None" + TooltipTags.BulletOptionEnd + "Fastest saving, largest file size.")]
     public CompressionAlgorithm saveCompression = CompressionAlgorithm.LZ4;
 
     /// <summary>
