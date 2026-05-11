@@ -15,6 +15,10 @@ namespace UI.Tooltip
         [Tooltip("Per-trigger position override. When set, overrides the TooltipManager's default hover mode.")]
         public TooltipHoverPosition? HoverPositionOverride;
 
+        [Tooltip("Maximum width of the tooltip as a percentage of the screen width (0.1 to 1.0).")]
+        [Range(0.1f, 1f)]
+        public float maxWidthPercentage = 0.8f;
+
         private Coroutine _delayCoroutine;
 
         public void OnPointerEnter(PointerEventData eventData)
@@ -63,7 +67,7 @@ namespace UI.Tooltip
             // Use realtime so tooltips work even when Time.timeScale is 0 (e.g. paused menu)
             yield return new WaitForSecondsRealtime(delay);
 
-            TooltipManager.Show(text, (RectTransform)transform, HoverPositionOverride);
+            TooltipManager.Show(text, (RectTransform)transform, HoverPositionOverride, maxWidthPercentage);
         }
     }
 }

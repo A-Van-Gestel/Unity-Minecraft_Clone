@@ -73,10 +73,11 @@ namespace UI.Tooltip
         /// <param name="content">The tooltip text to display.</param>
         /// <param name="triggerRect">The RectTransform of the element that triggered this tooltip.</param>
         /// <param name="positionOverride">Per-trigger position override; uses the manager's default when null.</param>
-        public static void Show(string content, RectTransform triggerRect = null, TooltipHoverPosition? positionOverride = null)
+        /// <param name="maxWidthPercentage">Maximum width of the tooltip as a fraction of screen width.</param>
+        public static void Show(string content, RectTransform triggerRect = null, TooltipHoverPosition? positionOverride = null, float maxWidthPercentage = 0.8f)
         {
             if (Instance == null) return;
-            Instance.ShowInternal(content, triggerRect, positionOverride);
+            Instance.ShowInternal(content, triggerRect, positionOverride, maxWidthPercentage);
         }
 
         /// <summary>
@@ -88,7 +89,7 @@ namespace UI.Tooltip
             Instance.HideInternal();
         }
 
-        private void ShowInternal(string content, RectTransform triggerRect, TooltipHoverPosition? positionOverride)
+        private void ShowInternal(string content, RectTransform triggerRect, TooltipHoverPosition? positionOverride, float maxWidthPercentage)
         {
             if (_parentCanvas == null || _tooltipPrefab == null)
             {
@@ -104,13 +105,44 @@ namespace UI.Tooltip
 
                 // Ensure Pivot is top-left so the offset logic works predictably
                 _tooltipRect.pivot = new Vector2(0, 1);
+
+                // Prevent the tooltip from blocking raycasts. If it gets too large and covers
+                // the mouse, it would cause an infinite OnPointerExit/OnPointerEnter flicker loop.
+                CanvasGroup cg = _activeTooltip.GetComponent<CanvasGroup>();
+                if (cg == null) cg = _activeTooltip.AddComponent<CanvasGroup>();
+                cg.blocksRaycasts = false;
+                cg.interactable = false;
             }
 
             _activeTriggerRect = triggerRect;
             _activeHoverMode = positionOverride ?? _hoverMode;
 
             if (_tooltipText != null)
+            {
+                // Enforce max width for word wrapping using LayoutElement
+                LayoutElement layoutElement = _activeTooltip.GetComponent<LayoutElement>();
+                if (layoutElement == null)
+                    layoutElement = _activeTooltip.AddComponent<LayoutElement>();
+
+                // First, allow it to grow freely to calculate true width
+                layoutElement.preferredWidth = -1;
+                _tooltipText.textWrappingMode = TextWrappingModes.NoWrap;
                 _tooltipText.text = content;
+                _tooltipText.ForceMeshUpdate();
+
+                // If it's too wide, cap it to a percentage of the screen width
+                float maxWidth = Screen.width * Mathf.Clamp01(maxWidthPercentage);
+                if (_tooltipText.preferredWidth > maxWidth)
+                {
+                    layoutElement.preferredWidth = maxWidth;
+                    _tooltipText.textWrappingMode = TextWrappingModes.Normal;
+                    // Re-update mesh so the height adjusts for the new wrapped lines
+                    _tooltipText.ForceMeshUpdate();
+                }
+            }
+
+            // IMPORTANT: The GameObject must be active for LayoutRebuilder to actually do anything!
+            _activeTooltip.SetActive(true);
 
             // Force layout rebuild so sizing is correct for boundary checks
             LayoutRebuilder.ForceRebuildLayoutImmediate(_tooltipRect);
@@ -124,8 +156,6 @@ namespace UI.Tooltip
                     UpdateAnchoredPosition();
                     break;
             }
-
-            _activeTooltip.SetActive(true);
 
             // Set as last sibling so it renders on top of everything
             _activeTooltip.transform.SetAsLastSibling();
@@ -209,15 +239,10 @@ namespace UI.Tooltip
 
             Vector2 finalPos;
 
-            // X: prefer placing to the right of the trigger; fall back to the left
-            if (triggerRight + tooltipWidth <= Screen.width)
-            {
-                finalPos.x = triggerRight;
-            }
-            else
-            {
-                finalPos.x = triggerLeft - tooltipWidth;
-            }
+            // X: Try placing to the right of the trigger.
+            // If it overflows the screen, the Clamp below will automatically push it back
+            // so it sits flush against the right edge of the screen.
+            finalPos.x = triggerRight;
 
             // Y: align top edges; the pivot is top-left so finalPos.y is the top edge
             finalPos.y = triggerTop;
