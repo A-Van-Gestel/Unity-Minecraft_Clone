@@ -44,7 +44,7 @@ public class CreativeInventory : MonoBehaviour
                 Slots.Add(slot);
 
                 TooltipTrigger trigger = newSlot.AddComponent<TooltipTrigger>();
-                trigger.text = _world.BlockTypes[i].blockName;
+                trigger.text = BlockTooltipBuilder.Build(_world.BlockTypes[i], (byte)i);
                 trigger.HoverPositionOverride = TooltipHoverPosition.TopLeft;
             }
             // Create one row spacer between creative blocks and empty slots by disabling created slot.

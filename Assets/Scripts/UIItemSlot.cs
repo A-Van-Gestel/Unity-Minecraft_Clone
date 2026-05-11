@@ -44,7 +44,7 @@ public class UIItemSlot : MonoBehaviour
             slotAmount.text = ItemSlot.Stack.Amount.ToString();
             slotIcon.enabled = true;
             slotAmount.enabled = true;
-            UpdateTooltip(_world.BlockTypes[ItemSlot.Stack.ID].blockName);
+            UpdateTooltip(BlockTooltipBuilder.Build(_world.BlockTypes[ItemSlot.Stack.ID], ItemSlot.Stack.ID));
         }
         else
         {

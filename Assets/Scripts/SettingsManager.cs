@@ -72,6 +72,19 @@ public class Settings
     public UIScale uiScale = UIScale.Standard;
 
     /// <summary>
+    /// Controls how much information is displayed in inventory item tooltips.
+    /// </summary>
+    [SettingField(SettingsTab.General, Label = "Item Tooltip Detail", Order = 1)]
+    [Tooltip("Controls how much information is displayed in inventory item tooltips.\n\n" +
+             TooltipTags.BulletOptionStart + "Name Only" + TooltipTags.BulletOptionEnd +
+             "Shows only the block name (default).\n" +
+             TooltipTags.BulletOptionStart + "Standard" + TooltipTags.BulletOptionEnd +
+             "Adds block properties, tags, and lighting info.\n" +
+             TooltipTags.BulletOptionStart + "Technical" + TooltipTags.BulletOptionEnd +
+             "Shows all internal engine data including texture IDs and fluid properties.")]
+    public TooltipDetail itemTooltipDetail = TooltipDetail.NameOnly;
+
+    /// <summary>
     /// If true, chunks play a subtle upward slide animation when their meshes are generated.
     /// </summary>
     [Header("Bonus")]
