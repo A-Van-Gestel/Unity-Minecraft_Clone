@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using Data;
 using Serialization;
+using UI.Enums;
 using UI.Tooltip;
 using UnityEngine;
 using Random = UnityEngine.Random;
@@ -66,6 +68,15 @@ public class Toolbar : MonoBehaviour
     private void SetItemSlot()
     {
         highlight.position = slots[slotIndex].slotIcon.transform.position;
+
+        // Return early if no item is in the slot
+        if (!slots[slotIndex].ItemSlot.HasItem) return;
+
+        // Show block name tooltip
+        byte blockId = slots[slotIndex].ItemSlot.Stack.ID;
+        BlockType type = World.Instance.BlockTypes[blockId];
+        string blockNameTooltipText = BlockTooltipBuilder.Build(type, blockId, TooltipDetail.NameOnly);
+        TooltipManager.Show(blockNameTooltipText, highlight, TooltipHoverPosition.BottomCenter, 1f, 2f); // Auto-hide after 2 seconds
     }
 
     // --- SAVE / LOAD LOGIC ---

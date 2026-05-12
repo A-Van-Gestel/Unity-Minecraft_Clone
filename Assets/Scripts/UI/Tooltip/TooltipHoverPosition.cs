@@ -15,5 +15,11 @@ namespace UI.Tooltip
         /// Falls back to the left side if there is not enough screen space on the right.
         /// </summary>
         TopLeft,
+
+        /// <summary>
+        /// The tooltip is horizontally centered and placed directly above the trigger element.
+        /// Useful for hotbar/toolbar item names.
+        /// </summary>
+        BottomCenter,
     }
 }

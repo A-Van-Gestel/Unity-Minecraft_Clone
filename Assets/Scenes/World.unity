@@ -1177,7 +1177,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::UI.Tooltip.TooltipManager
   _parentCanvas: {fileID: 1080100305}
   _tooltipPrefab: {fileID: 7123995696884771889, guid: a2bb3b45563c6df47af5894e9dbc1581, type: 3}
-  _hoverDelay: 0.4
+  hoverDelay: 0.4
   _hoverMode: 0
 --- !u!1 &667527221
 GameObject:

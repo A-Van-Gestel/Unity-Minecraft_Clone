@@ -1,3 +1,4 @@
+using System.Collections;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -28,20 +29,18 @@ namespace UI.Tooltip
         [SerializeField]
         private GameObject _tooltipPrefab;
 
-        [Header("Configuration")]
-        [Tooltip("The delay in seconds before a hovered tooltip is displayed.")]
-        [SerializeField]
-        private float _hoverDelay = 0.4f;
+        [Header("Settings")]
+        [Tooltip("Default hover delay in seconds before the tooltip appears.")]
+        public float hoverDelay = 0.4f;
 
         [Tooltip("How the tooltip is positioned.")]
         [SerializeField]
         private TooltipHoverPosition _hoverMode = TooltipHoverPosition.FollowMouse;
 
-        public float HoverDelay => _hoverDelay;
-
         private GameObject _activeTooltip;
-        private TextMeshProUGUI _tooltipText;
         private RectTransform _tooltipRect;
+        private TextMeshProUGUI _tooltipText;
+        private Coroutine _autoHideCoroutine;
         private RectTransform _activeTriggerRect;
         private TooltipHoverPosition _activeHoverMode;
 
@@ -74,10 +73,11 @@ namespace UI.Tooltip
         /// <param name="triggerRect">The RectTransform of the element that triggered this tooltip.</param>
         /// <param name="positionOverride">Per-trigger position override; uses the manager's default when null.</param>
         /// <param name="maxWidthPercentage">Maximum width of the tooltip as a fraction of screen width.</param>
-        public static void Show(string content, RectTransform triggerRect = null, TooltipHoverPosition? positionOverride = null, float maxWidthPercentage = 0.8f)
+        /// <param name="autoHideDelay">Optional delay in seconds before automatically hiding the tooltip. 0 means it stays until hidden manually.</param>
+        public static void Show(string content, RectTransform triggerRect = null, TooltipHoverPosition? positionOverride = null, float maxWidthPercentage = 0.8f, float autoHideDelay = 0f)
         {
             if (Instance == null) return;
-            Instance.ShowInternal(content, triggerRect, positionOverride, maxWidthPercentage);
+            Instance.ShowInternal(content, triggerRect, positionOverride, maxWidthPercentage, autoHideDelay);
         }
 
         /// <summary>
@@ -89,12 +89,18 @@ namespace UI.Tooltip
             Instance.HideInternal();
         }
 
-        private void ShowInternal(string content, RectTransform triggerRect, TooltipHoverPosition? positionOverride, float maxWidthPercentage)
+        private void ShowInternal(string content, RectTransform triggerRect, TooltipHoverPosition? positionOverride, float maxWidthPercentage, float autoHideDelay)
         {
             if (_parentCanvas == null || _tooltipPrefab == null)
             {
                 Debug.LogWarning("[TooltipManager] Missing Canvas or Prefab references.");
                 return;
+            }
+
+            if (_autoHideCoroutine != null)
+            {
+                StopCoroutine(_autoHideCoroutine);
+                _autoHideCoroutine = null;
             }
 
             if (_activeTooltip == null)
@@ -155,14 +161,33 @@ namespace UI.Tooltip
                 case TooltipHoverPosition.TopLeft:
                     UpdateAnchoredPosition();
                     break;
+                case TooltipHoverPosition.BottomCenter:
+                    UpdateBottomCenterPosition();
+                    break;
             }
 
             // Set as last sibling so it renders on top of everything
             _activeTooltip.transform.SetAsLastSibling();
+
+            if (autoHideDelay > 0f)
+            {
+                _autoHideCoroutine = StartCoroutine(AutoHideRoutine(autoHideDelay));
+            }
+        }
+
+        private IEnumerator AutoHideRoutine(float delay)
+        {
+            yield return new WaitForSecondsRealtime(delay);
+            HideInternal();
         }
 
         private void HideInternal()
         {
+            if (_autoHideCoroutine != null)
+            {
+                StopCoroutine(_autoHideCoroutine);
+                _autoHideCoroutine = null;
+            }
             if (_activeTooltip != null)
                 _activeTooltip.SetActive(false);
 
@@ -246,6 +271,40 @@ namespace UI.Tooltip
 
             // Y: align top edges; the pivot is top-left so finalPos.y is the top edge
             finalPos.y = triggerTop;
+
+            // Hard clamp to screen bounds
+            finalPos.x = Mathf.Clamp(finalPos.x, 0f, Screen.width - tooltipWidth);
+            finalPos.y = Mathf.Clamp(finalPos.y, tooltipHeight, Screen.height);
+
+            _tooltipRect.position = finalPos;
+        }
+
+        /// <summary>
+        /// Positions the tooltip horizontally centered directly above the trigger element.
+        /// </summary>
+        private void UpdateBottomCenterPosition()
+        {
+            if (_tooltipRect == null || _parentCanvas == null || _activeTriggerRect == null) return;
+
+            float scaleFactor = _parentCanvas.scaleFactor;
+            float tooltipWidth = _tooltipRect.rect.width * scaleFactor;
+            float tooltipHeight = _tooltipRect.rect.height * scaleFactor;
+
+            // Get the trigger's screen-space corners
+            Vector3[] triggerCorners = new Vector3[4];
+            _activeTriggerRect.GetWorldCorners(triggerCorners);
+
+            float triggerTop = triggerCorners[1].y;
+            float triggerCenterX = (triggerCorners[0].x + triggerCorners[2].x) / 2f;
+
+            Vector2 finalPos;
+
+            // X: Center horizontally over the trigger
+            finalPos.x = triggerCenterX - (tooltipWidth / 2f);
+
+            // Y: Place above the trigger. Since pivot is Top-Left (0, 1),
+            // adding tooltipHeight sets the bottom edge of the tooltip above the trigger top.
+            finalPos.y = triggerTop + tooltipHeight + 10f;
 
             // Hard clamp to screen bounds
             finalPos.x = Mathf.Clamp(finalPos.x, 0f, Screen.width - tooltipWidth);

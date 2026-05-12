@@ -62,7 +62,7 @@ namespace UI.Tooltip
 
         private IEnumerator ShowDelayCoroutine()
         {
-            float delay = TooltipManager.Instance != null ? TooltipManager.Instance.HoverDelay : 0.4f;
+            float delay = TooltipManager.Instance != null ? TooltipManager.Instance.hoverDelay : 0.4f;
 
             // Use realtime so tooltips work even when Time.timeScale is 0 (e.g. paused menu)
             yield return new WaitForSecondsRealtime(delay);

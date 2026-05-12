@@ -45,23 +45,23 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   settings:
-    enableVolatileSaveData: 1
-    saveCompression: 2
-    viewDistance: 5
-    maxInitialLoadRadius: 10
-    maxLightJobsPerFrame: 8
-    enableLighting: 1
-    maxMeshRebuildsPerFrame: 10
-    clouds: 2
     uiScale: 1
+    itemTooltipDetail: 0
+    enableChunkLoadAnimations: 0
     lookSensitivity: 1.2
+    viewDistance: 5
+    clouds: 2
+    enableLighting: 1
     enableSecondPass: 1
     enableMajorFloraPass: 1
+    saveCompression: 2
+    maxInitialLoadRadius: 10
+    maxMeshRebuildsPerFrame: 10
+    maxLightJobsPerFrame: 8
     maxStructureModsPerFrame: 5000
-    enableChunkLoadAnimations: 0
-    showChunkBorders: 0
     enableDiagnosticLogs: 0
     enableWaterDiagnosticLogs: 0
+    enableVolatileSaveData: 1
   _worldTypeRegistry: {fileID: 0}
   globalLightLevel: 1
   day: {r: 0, g: 0.90980387, b: 1, a: 1}
