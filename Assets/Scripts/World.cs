@@ -2832,7 +2832,7 @@ public class World : MonoBehaviour
     /// Gets whether the game is currently in a UI menu.
     /// Redirects to the centralized WorldUIManager.
     /// </summary>
-    public bool InUI => WorldUIManager.Instance != null && WorldUIManager.Instance.InUI;
+    public static bool InUI => WorldUIManager.Instance != null && WorldUIManager.Instance.InUI;
 
     /// <summary>
     /// Checks if the specified chunk coordinate is within the permitted world boundaries.

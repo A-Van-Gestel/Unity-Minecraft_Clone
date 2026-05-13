@@ -71,7 +71,7 @@ public class Player : MonoBehaviour
 
     private void Update()
     {
-        if (!_world.InUI)
+        if (!World.InUI)
         {
             GetPlayerInputs();
 
