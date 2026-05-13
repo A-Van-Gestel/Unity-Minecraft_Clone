@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using Serialization;
+using UI;
 using UI.Enums;
 using UI.Tooltip;
 using UnityEngine;
@@ -34,6 +35,9 @@ public class Toolbar : MonoBehaviour
 
     private void Update()
     {
+        // Disable toolbar when in Pause Menu
+        if (WorldUIManager.Instance != null && WorldUIManager.Instance.IsPauseMenuOpen) return;
+
         // SCROLL WHEEL
         float scroll = _input.ScrollValue;
 
