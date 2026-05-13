@@ -782,6 +782,10 @@ PrefabInstance:
       propertyPath: m_ConstrainProportionsScale
       value: 1
       objectReference: {fileID: 0}
+    - target: {fileID: 4947750069076680972, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
+      propertyPath: m_RaycastTarget
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 5881940885246964651, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_Name
       value: ResumeText (TMP)
@@ -813,7 +817,7 @@ PrefabInstance:
     - target: {fileID: 7041653364962214675, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Target
       value: 
-      objectReference: {fileID: 1080100309}
+      objectReference: {fileID: 1040082909}
     - target: {fileID: 7041653364962214675, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_CallState
       value: 2
@@ -2682,6 +2686,7 @@ GameObject:
   m_Component:
   - component: {fileID: 928827593}
   - component: {fileID: 928827594}
+  - component: {fileID: 928827595}
   m_Layer: 5
   m_Name: PauseMenu
   m_TagString: Untagged
@@ -2718,6 +2723,36 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 928827592}
   m_CullTransparentMesh: 1
+--- !u!114 &928827595
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 928827592}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_Material: {fileID: 2100000, guid: 0e2aca7582943cc4d9a22634cc4662f6, type: 2}
+  m_Color: {r: 0, g: 0, b: 0, a: 0.72156864}
+  m_RaycastTarget: 0
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Sprite: {fileID: 0}
+  m_Type: 1
+  m_PreserveAspect: 0
+  m_FillCenter: 1
+  m_FillMethod: 4
+  m_FillAmount: 1
+  m_FillClockwise: 1
+  m_FillOrigin: 0
+  m_UseSpriteMesh: 0
+  m_PixelsPerUnitMultiplier: 1
 --- !u!1 &963194225
 GameObject:
   m_ObjectHideFlags: 0
@@ -2963,6 +2998,10 @@ PrefabInstance:
       propertyPath: m_ConstrainProportionsScale
       value: 1
       objectReference: {fileID: 0}
+    - target: {fileID: 4947750069076680972, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
+      propertyPath: m_RaycastTarget
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 5881940885246964651, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_Name
       value: SaveAndQuitToMainMenuText (TMP)
@@ -2990,7 +3029,7 @@ PrefabInstance:
     - target: {fileID: 7041653364962214675, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Target
       value: 
-      objectReference: {fileID: 1080100309}
+      objectReference: {fileID: 1040082909}
     - target: {fileID: 7041653364962214675, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_CallState
       value: 2
@@ -3026,6 +3065,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1040082908}
+  - component: {fileID: 1040082909}
   m_Layer: 5
   m_Name: PauseMenuContainer
   m_TagString: Untagged
@@ -3054,6 +3094,20 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 0, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &1040082909
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1040082907}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ec1716d141aecab4384983d7269cc395, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UI.PauseMenuController
+  pauseMenuPanel: {fileID: 928827592}
+  settingsMenuObject: {fileID: 1113966849}
 --- !u!1 &1073421875
 GameObject:
   m_ObjectHideFlags: 0
@@ -3194,6 +3248,10 @@ PrefabInstance:
       propertyPath: m_ConstrainProportionsScale
       value: 1
       objectReference: {fileID: 0}
+    - target: {fileID: 4947750069076680972, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
+      propertyPath: m_RaycastTarget
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 5881940885246964651, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_Name
       value: SettingsText (TMP)
@@ -3225,7 +3283,7 @@ PrefabInstance:
     - target: {fileID: 7041653364962214675, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Target
       value: 
-      objectReference: {fileID: 1080100309}
+      objectReference: {fileID: 1040082909}
     - target: {fileID: 7041653364962214675, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_CallState
       value: 2
@@ -3631,7 +3689,10 @@ PrefabInstance:
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 1279955668379731324, guid: f25fae20a74ca404391c94bf64dfbd18, type: 3}
+      insertIndex: 2
+      addedObject: {fileID: 1113966859}
   m_SourcePrefab: {fileID: 100100000, guid: f25fae20a74ca404391c94bf64dfbd18, type: 3}
 --- !u!224 &1113966848 stripped
 RectTransform:
@@ -3643,6 +3704,36 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 1279955668379731324, guid: f25fae20a74ca404391c94bf64dfbd18, type: 3}
   m_PrefabInstance: {fileID: 1113966847}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &1113966859
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1113966849}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_Material: {fileID: 2100000, guid: 0e2aca7582943cc4d9a22634cc4662f6, type: 2}
+  m_Color: {r: 0, g: 0, b: 0, a: 0.72156864}
+  m_RaycastTarget: 0
+  m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
+  m_Maskable: 1
+  m_OnCullStateChanged:
+    m_PersistentCalls:
+      m_Calls: []
+  m_Sprite: {fileID: 0}
+  m_Type: 1
+  m_PreserveAspect: 0
+  m_FillCenter: 1
+  m_FillMethod: 4
+  m_FillAmount: 1
+  m_FillClockwise: 1
+  m_FillOrigin: 0
+  m_UseSpriteMesh: 0
+  m_PixelsPerUnitMultiplier: 1
 --- !u!1 &1166654192
 GameObject:
   m_ObjectHideFlags: 0
@@ -4355,6 +4446,10 @@ PrefabInstance:
       propertyPath: m_ConstrainProportionsScale
       value: 1
       objectReference: {fileID: 0}
+    - target: {fileID: 4947750069076680972, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
+      propertyPath: m_RaycastTarget
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 5881940885246964651, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_Name
       value: SaveAndQuitToDesktopText (TMP)
@@ -4382,7 +4477,7 @@ PrefabInstance:
     - target: {fileID: 7041653364962214675, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Target
       value: 
-      objectReference: {fileID: 1080100309}
+      objectReference: {fileID: 1040082909}
     - target: {fileID: 7041653364962214675, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_CallState
       value: 2
@@ -4417,6 +4512,10 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 1766210276}
     m_Modifications:
+    - target: {fileID: 637303918058902009, guid: 87fc70fbcd08fc84f98e71569f12280c, type: 3}
+      propertyPath: m_Sprite
+      value: 
+      objectReference: {fileID: 0}
     - target: {fileID: 2653701730941643839, guid: 87fc70fbcd08fc84f98e71569f12280c, type: 3}
       propertyPath: m_Pivot.x
       value: 0.5
@@ -5292,7 +5391,7 @@ PrefabInstance:
     - target: {fileID: 715589282694584058, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
       propertyPath: pauseMenuController
       value: 
-      objectReference: {fileID: 1080100309}
+      objectReference: {fileID: 1040082909}
     - target: {fileID: 715589282694584058, guid: f1790e1259cd2b141b2b9e38ede1259e, type: 3}
       propertyPath: creativeInventoryWindow
       value: 

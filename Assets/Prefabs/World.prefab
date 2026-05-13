@@ -43,8 +43,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b1422a5c69e44f94b89a0a3086494c2f, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   settings:
     uiScale: 1
     itemTooltipDetail: 0
@@ -77,7 +77,7 @@ MonoBehaviour:
     worldName: Prototype
     seed: 0
     creationDate: 0
-  appSaveDataPath:
+  appSaveDataPath: 
   chunkBorderPrefab: {fileID: 2348571843614231521, guid: 0c5d03a94304a4b4bbf7153e8f2675e4, type: 3}
   voxelVisualizer: {fileID: 0}
   visualizationMode: 0
@@ -91,7 +91,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 574141ffbde709a4686017b494fc0a4c, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.WorldUIManager
   creativeInventoryWindow: {fileID: 0}
   cursorSlot: {fileID: 0}
