@@ -17,6 +17,11 @@ namespace UI
 
         private void Awake()
         {
+            // Check for null references
+            if (pauseMenuPanel == null) Debug.LogError("PauseMenuPanel is not assigned.");
+            if (settingsMenuObject == null) Debug.LogError("SettingsMenuObject is not assigned.");
+
+            // Initialize settings controller
             if (settingsMenuObject != null)
             {
                 _settingsController = settingsMenuObject.GetComponent<SettingsMenuController>();

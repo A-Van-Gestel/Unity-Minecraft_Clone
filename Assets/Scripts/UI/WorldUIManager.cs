@@ -80,6 +80,11 @@ namespace UI
             {
                 Instance = this;
                 UpdateUIState();
+
+                // Check for null references
+                if (creativeInventoryWindow == null) Debug.LogError("CreativeInventoryWindow is not assigned.");
+                if (cursorSlot == null) Debug.LogError("CursorSlot is not assigned.");
+                if (pauseMenuController == null) Debug.LogError("PauseMenuController is not assigned.");
             }
             else
             {
