@@ -125,7 +125,14 @@ namespace UI
                 if (settingsController != null)
                     settingsController.OnDoneClicked();
             }
-            // 2. If Pause Menu is open, close it
+            // 2. If help menu is open, return to Pause Menu
+            else if (pauseMenuController != null && pauseMenuController.helpMenuObject != null && pauseMenuController.helpMenuObject.activeSelf)
+            {
+                HelpMenuController helpController = pauseMenuController.helpMenuObject.GetComponent<HelpMenuController>();
+                if (helpController != null)
+                    helpController.OnDoneClicked();
+            }
+            // 3. If Pause Menu is open, close it
             else if (IsPauseMenuOpen)
             {
                 IsPauseMenuOpen = false;

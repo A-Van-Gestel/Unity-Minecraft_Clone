@@ -423,6 +423,7 @@ namespace UI
                 // Attach TooltipTrigger to the root of the instantiated control prefab
                 TooltipTrigger trigger = binding.ControlRoot.AddComponent<TooltipTrigger>();
                 trigger.text = tooltipAttr.tooltip;
+                trigger.hoverPositionOverride = TooltipHoverPosition.FollowMouse;
             }
 
             binding.IsInitializationField = isInitField;

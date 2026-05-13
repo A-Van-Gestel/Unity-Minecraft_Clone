@@ -6,6 +6,11 @@ namespace UI.Tooltip
     public enum TooltipHoverPosition
     {
         /// <summary>
+        /// The tooltip will use the default position set by the TooltipManager.
+        /// </summary>
+        None,
+
+        /// <summary>
         /// The tooltip will dynamically follow the mouse cursor.
         /// </summary>
         FollowMouse,

@@ -25,7 +25,7 @@ public class Toolbar : MonoBehaviour
             // Attach tooltip trigger before linking the ItemSlot so the
             // first UpdateSlot() call finds it and sets the text immediately.
             TooltipTrigger trigger = s.gameObject.AddComponent<TooltipTrigger>();
-            trigger.HoverPositionOverride = TooltipHoverPosition.TopLeft;
+            trigger.hoverPositionOverride = TooltipHoverPosition.TopLeft;
 
             ItemStack stack = new ItemStack(index, Random.Range(2, 65));
             ItemSlot slot = new ItemSlot(s, stack);

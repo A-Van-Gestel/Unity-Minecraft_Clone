@@ -783,7 +783,7 @@ MonoBehaviour:
   _parentCanvas: {fileID: 1724541918}
   _tooltipPrefab: {fileID: 7123995696884771889, guid: a2bb3b45563c6df47af5894e9dbc1581, type: 3}
   hoverDelay: 0.4
-  _hoverMode: 0
+  _hoverMode: 3
 --- !u!1 &948903509 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 7997337584920481295, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}

@@ -74,7 +74,7 @@ namespace UI.Tooltip
         /// <param name="positionOverride">Per-trigger position override; uses the manager's default when null.</param>
         /// <param name="maxWidthPercentage">Maximum width of the tooltip as a fraction of screen width.</param>
         /// <param name="autoHideDelay">Optional delay in seconds before automatically hiding the tooltip. 0 means it stays until hidden manually.</param>
-        public static void Show(string content, RectTransform triggerRect = null, TooltipHoverPosition? positionOverride = null, float maxWidthPercentage = 0.8f, float autoHideDelay = 0f)
+        public static void Show(string content, RectTransform triggerRect = null, TooltipHoverPosition positionOverride = TooltipHoverPosition.None, float maxWidthPercentage = 0.8f, float autoHideDelay = 0f)
         {
             if (Instance == null) return;
             Instance.ShowInternal(content, triggerRect, positionOverride, maxWidthPercentage, autoHideDelay);
@@ -89,7 +89,7 @@ namespace UI.Tooltip
             Instance.HideInternal();
         }
 
-        private void ShowInternal(string content, RectTransform triggerRect, TooltipHoverPosition? positionOverride, float maxWidthPercentage, float autoHideDelay)
+        private void ShowInternal(string content, RectTransform triggerRect, TooltipHoverPosition positionOverride, float maxWidthPercentage, float autoHideDelay)
         {
             if (_parentCanvas == null || _tooltipPrefab == null)
             {
@@ -121,7 +121,9 @@ namespace UI.Tooltip
             }
 
             _activeTriggerRect = triggerRect;
-            _activeHoverMode = positionOverride ?? _hoverMode;
+            _activeHoverMode = positionOverride != TooltipHoverPosition.None
+                ? positionOverride
+                : _hoverMode;
 
             if (_tooltipText != null)
             {
@@ -188,6 +190,7 @@ namespace UI.Tooltip
                 StopCoroutine(_autoHideCoroutine);
                 _autoHideCoroutine = null;
             }
+
             if (_activeTooltip != null)
                 _activeTooltip.SetActive(false);
 

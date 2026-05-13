@@ -12,14 +12,17 @@ namespace UI
         public GameObject pauseMenuPanel;
 
         public GameObject settingsMenuObject;
+        public GameObject helpMenuObject;
 
         private SettingsMenuController _settingsController;
+        private HelpMenuController _helpController;
 
         private void Awake()
         {
             // Check for null references
             if (pauseMenuPanel == null) Debug.LogError("PauseMenuPanel is not assigned.");
             if (settingsMenuObject == null) Debug.LogError("SettingsMenuObject is not assigned.");
+            if (helpMenuObject == null) Debug.LogError("HelpMenuObject is not assigned.");
 
             // Initialize settings controller
             if (settingsMenuObject != null)
@@ -28,6 +31,16 @@ namespace UI
                 if (_settingsController != null)
                 {
                     _settingsController.onSettingsClosed.AddListener(OnSettingsClosed);
+                }
+            }
+
+            // Initialize help controller
+            if (helpMenuObject != null)
+            {
+                _helpController = helpMenuObject.GetComponent<HelpMenuController>();
+                if (_helpController != null)
+                {
+                    _helpController.onHelpClosed.AddListener(OnHelpClosed);
                 }
             }
         }
@@ -53,6 +66,9 @@ namespace UI
 
             if (settingsMenuObject != null)
                 settingsMenuObject.SetActive(false);
+
+            if (helpMenuObject != null)
+                helpMenuObject.SetActive(false);
         }
 
         #endregion
@@ -84,6 +100,30 @@ namespace UI
 
                 settingsMenuObject.SetActive(true);
             }
+        }
+
+        /// <summary>
+        /// Transitions from the pause panel to the help menu.
+        /// </summary>
+        public void EnterHelp()
+        {
+            if (pauseMenuPanel != null)
+                pauseMenuPanel.SetActive(false);
+
+            if (helpMenuObject != null)
+                helpMenuObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// Triggered when the Help menu is closed. Re-opens the pause panel.
+        /// </summary>
+        private void OnHelpClosed()
+        {
+            if (helpMenuObject != null)
+                helpMenuObject.SetActive(false);
+
+            if (pauseMenuPanel != null)
+                pauseMenuPanel.SetActive(true);
         }
 
         /// <summary>

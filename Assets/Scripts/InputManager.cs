@@ -243,7 +243,7 @@ public class InputManager : MonoBehaviour
     public string GetBindingDisplayString(GameAction action)
     {
         InputAction inputAction = _inputActions.FindAction(action.ToString(), false);
-        return inputAction != null ? inputAction.GetBindingDisplayString() : "?";
+        return inputAction != null ? inputAction.GetBindingDisplayString(options: InputBinding.DisplayStringOptions.DontUseShortDisplayNames) : "?";
     }
 
     // ==============================================
