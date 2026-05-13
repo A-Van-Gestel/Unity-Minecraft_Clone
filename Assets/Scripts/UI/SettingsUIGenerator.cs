@@ -61,6 +61,13 @@ namespace UI
 
         #endregion
 
+        #region Constants
+
+        private const float LOCKED_CONTROL_ALPHA = 0.5f;
+        private const string LOCKED_LABEL_SUFFIX = " (Main Menu only)";
+
+        #endregion
+
         #region Runtime State
 
         private bool _isGenerated;
@@ -221,10 +228,28 @@ namespace UI
                 object value = binding.Field.GetValue(binding.Owner);
                 SetControlValue(binding, value);
 
+                bool locked = binding.IsInitializationField && isInGame;
+
                 // Lock [InitializationField] controls during gameplay
                 if (binding.Selectable != null)
                 {
-                    binding.Selectable.interactable = !(binding.IsInitializationField && isInGame);
+                    binding.Selectable.interactable = !locked;
+                }
+
+                // Dim locked controls via CanvasGroup alpha
+                if (binding.IsInitializationField)
+                {
+                    CanvasGroup group = binding.ControlRoot.GetComponent<CanvasGroup>();
+                    if (group == null) group = binding.ControlRoot.AddComponent<CanvasGroup>();
+                    group.alpha = locked ? LOCKED_CONTROL_ALPHA : 1f;
+                }
+
+                // Append/remove suffix on the label to explain why the control is locked
+                if (binding.IsInitializationField && binding.LabelText != null && binding.Label != null)
+                {
+                    binding.LabelText.text = locked
+                        ? binding.Label + LOCKED_LABEL_SUFFIX
+                        : binding.Label;
                 }
             }
         }
@@ -441,6 +466,8 @@ namespace UI
                 Owner = entry.Owner,
                 ControlRoot = obj,
                 Selectable = toggle,
+                Label = label,
+                LabelText = text,
             };
         }
 
