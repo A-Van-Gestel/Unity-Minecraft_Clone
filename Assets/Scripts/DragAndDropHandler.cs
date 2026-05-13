@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using JetBrains.Annotations;
 using Serialization;
+using UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -36,15 +37,17 @@ public class DragAndDropHandler : MonoBehaviour
 
     private void Update()
     {
-        // UI is closed and cursor slot is empty, do nothing.
-        if (!_world.InUI && !_cursorSlot.HasItem)
+        bool inventoryOpen = WorldUIManager.Instance != null && WorldUIManager.Instance.IsCreativeInventoryOpen;
+
+        // Inventory is closed and cursor slot is empty, do nothing.
+        if (!inventoryOpen && !_cursorSlot.HasItem)
             return;
 
         if (_creativeInventory == null)
             _creativeInventory = GameObject.Find("CreativeInventory").GetComponent<CreativeInventory>();
 
-        // UI is closed and cursor slot still has item, place item back to original place.
-        if (!_world.InUI && _cursorSlot.HasItem)
+        // Inventory is closed and cursor slot still has item, place item back to original place.
+        if (!inventoryOpen && _cursorSlot.HasItem)
         {
             PlaceStackToLastLocation(_cursorSlot);
             return;

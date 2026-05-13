@@ -19,6 +19,7 @@ using Libraries;
 using MyBox;
 using Physics;
 using Serialization;
+using UI;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -89,10 +90,6 @@ public class World : MonoBehaviour
     // UI
     [Header("UI")]
     public GameObject debugScreen;
-
-    public GameObject creativeInventoryWindow;
-    public GameObject cursorSlot;
-    private bool _inUI;
 
     // Clouds
     [Header("Clouds")]
@@ -185,7 +182,7 @@ public class World : MonoBehaviour
     {
         // If the instance value is not null and not *this*, we've somehow ended up with more than one World component.
         // Since another one has already been assigned, delete this one.
-        if (Instance is not null && Instance != this)
+        if (Instance != null && Instance != this)
         {
             Destroy(gameObject);
         }
@@ -254,6 +251,8 @@ public class World : MonoBehaviour
     // Cleanup for NativeArrays
     private void OnDestroy()
     {
+        if (Instance == this) Instance = null;
+
         // 1. Complete any running jobs and dispose the generator strategy.
         //    WorldJobManager.Dispose() handles all job completion and NativeArray disposal.
         JobManager?.Dispose();
@@ -1134,6 +1133,7 @@ public class World : MonoBehaviour
         if (settings.viewDistance != ChunkPool.TargetViewDistance)
         {
             ChunkPool.SetTargetViewDistance(settings.viewDistance);
+            CheckViewDistance();
         }
     }
 
@@ -1870,6 +1870,21 @@ public class World : MonoBehaviour
 
         // 5. Return temp pools back to pool list
         ListPool<ChunkCoord>.Release(chunksToRemove); // Free the ListPool
+    }
+
+    /// <summary>
+    /// Called after settings are reloaded (e.g. from the pause-menu settings screen).
+    /// - Forces a view-distance re-evaluation so chunks are added/removed to match the new render distance.
+    /// - Reinitializes the clouds.
+    /// </summary>
+    public void OnSettingsChanged()
+    {
+        // Reset player chunk tracking for view distance check
+        _playerLastChunkCoord = new ChunkCoord(int.MinValue, int.MinValue);
+        CheckViewDistance();
+
+        // Reinitialize clouds
+        clouds.Reinitialize();
     }
 
     /// <summary>
@@ -2811,26 +2826,13 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Gets or sets whether the game is currently in a UI menu.
-    /// Manages cursor locking and UI window visibility.
+    /// Gets or sets whether the game is currently in a pause menu state.
     /// </summary>
-    public bool InUI
-    {
-        // ReSharper disable once ArrangeAccessorOwnerBody
-        get { return _inUI; }
-        set
-        {
-            _inUI = value;
-            Cursor.lockState = _inUI
-                ? CursorLockMode.None // Makes cursor visible
-                : CursorLockMode.Locked; // Makes cursor invisible and not able to go of screen
-
-            // Toggle UI based on inUI state
-            Cursor.visible = _inUI;
-            creativeInventoryWindow.SetActive(_inUI);
-            cursorSlot.SetActive(_inUI);
-        }
-    }
+    /// <summary>
+    /// Gets whether the game is currently in a UI menu.
+    /// Redirects to the centralized WorldUIManager.
+    /// </summary>
+    public bool InUI => WorldUIManager.Instance != null && WorldUIManager.Instance.InUI;
 
     /// <summary>
     /// Checks if the specified chunk coordinate is within the permitted world boundaries.

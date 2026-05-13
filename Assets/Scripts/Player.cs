@@ -1,6 +1,5 @@
 using Physics;
 using Serialization;
-using UnityEditor;
 using UnityEngine;
 
 [RequireComponent(typeof(PlayerInteraction))]
@@ -68,17 +67,10 @@ public class Player : MonoBehaviour
             playerBodyLocalPosition = new Vector3(playerBodyLocalPosition.x, VoxelRigidbody.collisionHeight / 2f, playerBodyLocalPosition.z);
             playerBody.localPosition = playerBodyLocalPosition;
         }
-
-        _world.InUI = false;
     }
 
     private void Update()
     {
-        if (_input.ToggleInventoryPressed)
-        {
-            _world.InUI = !_world.InUI;
-        }
-
         if (!_world.InUI)
         {
             GetPlayerInputs();
@@ -118,16 +110,6 @@ public class Player : MonoBehaviour
 
     private void GetPlayerInputs()
     {
-        // CLOSE GAME ON ESC BUTTON PRESS
-        if (_input.EscapePressed)
-        {
-#if UNITY_EDITOR
-            EditorApplication.isPlaying = false;
-#else
-            Application.Quit();
-#endif
-        }
-
         // MOVEMENT & CAMERA
         Vector2 move = _input.MoveInput;
         _horizontal = move.x;

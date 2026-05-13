@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 927538490966982780}
   - component: {fileID: 3602352557729800983}
+  - component: {fileID: 715589282694584058}
   m_Layer: 0
   m_Name: World
   m_TagString: Untagged
@@ -42,8 +43,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b1422a5c69e44f94b89a0a3086494c2f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   settings:
     uiScale: 1
     itemTooltipDetail: 0
@@ -57,12 +58,12 @@ MonoBehaviour:
     saveCompression: 2
     maxInitialLoadRadius: 10
     maxMeshRebuildsPerFrame: 10
-    maxLightJobsPerFrame: 8
+    maxLightJobsPerFrame: 32
     maxStructureModsPerFrame: 5000
     enableDiagnosticLogs: 0
     enableWaterDiagnosticLogs: 0
     enableVolatileSaveData: 1
-  _worldTypeRegistry: {fileID: 0}
+  _worldTypeRegistry: {fileID: 11400000, guid: 3038e8b8e1ab9ae44802528aa73aa06a, type: 2}
   globalLightLevel: 1
   day: {r: 0, g: 0.90980387, b: 1, a: 1}
   night: {r: 0.03137255, g: 0, b: 0.44705883, a: 1}
@@ -71,14 +72,27 @@ MonoBehaviour:
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
   blockDatabase: {fileID: 11400000, guid: 6aebc05383d66d242886f3518fb31bb0, type: 2}
   debugScreen: {fileID: 0}
-  creativeInventoryWindow: {fileID: 0}
-  cursorSlot: {fileID: 0}
   clouds: {fileID: 0}
   worldData:
     worldName: Prototype
     seed: 0
     creationDate: 0
-  appSaveDataPath: 
+  appSaveDataPath:
   chunkBorderPrefab: {fileID: 2348571843614231521, guid: 0c5d03a94304a4b4bbf7153e8f2675e4, type: 3}
   voxelVisualizer: {fileID: 0}
   visualizationMode: 0
+--- !u!114 &715589282694584058
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2574360936984693049}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 574141ffbde709a4686017b494fc0a4c, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::UI.WorldUIManager
+  creativeInventoryWindow: {fileID: 0}
+  cursorSlot: {fileID: 0}
+  pauseMenuController: {fileID: 0}

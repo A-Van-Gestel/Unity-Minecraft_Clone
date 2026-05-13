@@ -32,6 +32,9 @@ namespace UI
 
         public void Awake()
         {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
             // --- VERSION STRING LOGIC ---
 #if UNITY_EDITOR
             // In the Editor, we fetch the live date and the chosen enum from EditorPrefs.

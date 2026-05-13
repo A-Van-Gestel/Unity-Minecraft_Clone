@@ -57,6 +57,22 @@ public class Clouds : MonoBehaviour
         UpdateClouds();
     }
 
+    /// <summary>
+    /// Destroys all existing cloud tiles and re-creates them with the current cloud style setting.
+    /// Called when the cloud style is changed at runtime (e.g. from the pause menu settings).
+    /// </summary>
+    public void Reinitialize()
+    {
+        foreach (GameObject cloud in _clouds.Values)
+        {
+            if (cloud != null) Destroy(cloud);
+        }
+
+        _clouds.Clear();
+        _isInitialized = false;
+        Initialize();
+    }
+
     private void LoadCloudData()
     {
         // Ensure the texture is readable. If not, disable clouds to prevent errors.
