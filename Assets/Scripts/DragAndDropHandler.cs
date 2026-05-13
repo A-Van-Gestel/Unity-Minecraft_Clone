@@ -291,12 +291,16 @@ public class DragAndDropHandler : MonoBehaviour
         List<RaycastResult> results = new List<RaycastResult>();
         _m_Raycaster.Raycast(_m_PointerEventData, results);
 
-        foreach (RaycastResult result in results)
+        if (results.Count == 0) return null;
+
+        // Check if the topmost hit is a UIItemSlot or a child of one.
+        // If something else is on top (e.g. pause menu background), return null.
+        Transform hit = results[0].gameObject.transform;
+        while (hit != null)
         {
-            if (result.gameObject.CompareTag("UIItemSlot"))
-            {
-                return result.gameObject.GetComponent<UIItemSlot>();
-            }
+            if (hit.CompareTag("UIItemSlot"))
+                return hit.GetComponent<UIItemSlot>();
+            hit = hit.parent;
         }
 
         return null;
