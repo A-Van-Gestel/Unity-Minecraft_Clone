@@ -51,7 +51,7 @@ This document tracks all third-party assets, libraries, algorithms, and resource
     * *Notes:* Now also used as an implementation reference for the project's own in-editor block icon renderer.
 * **Crosshair**
     * *Source:* Custom made.
-* **Hotbar**
+* **Hotbar, UI Slot's, Buttons & Dirt Main Menu background**
     * *Source:* Ripped from Minecraft.
 
 ## ✒️ Fonts

@@ -17,6 +17,7 @@ namespace UI
 
         public GameObject settingsMenuObject;
         public GameObject worldSelectMenuObject;
+        public GameObject creditsMenuObject;
 
         #endregion
 
@@ -51,10 +52,20 @@ namespace UI
             // Wire up the SettingsMenuController's OnSettingsClosed callback
             if (settingsMenuObject != null)
             {
-                var settingsController = settingsMenuObject.GetComponent<SettingsMenuController>();
+                SettingsMenuController settingsController = settingsMenuObject.GetComponent<SettingsMenuController>();
                 if (settingsController != null)
                 {
                     settingsController.onSettingsClosed.AddListener(OnSettingsClosed);
+                }
+            }
+
+            // Wire up the CreditsMenuController's OnCreditsClosed callback
+            if (creditsMenuObject != null)
+            {
+                CreditsMenuController creditsController = creditsMenuObject.GetComponent<CreditsMenuController>();
+                if (creditsController != null)
+                {
+                    creditsController.onCreditsClosed.AddListener(OnCreditsClosed);
                 }
             }
         }
@@ -78,12 +89,31 @@ namespace UI
         }
 
         /// <summary>
+        /// Transitions from the main menu to the credits screen.
+        /// </summary>
+        public void EnterCredits()
+        {
+            mainMenuObject.SetActive(false);
+            creditsMenuObject.SetActive(true);
+        }
+
+        /// <summary>
         /// Called by the SettingsMenuController's OnSettingsClosed event.
         /// Transitions back to the main menu.
         /// </summary>
         private void OnSettingsClosed()
         {
             settingsMenuObject.SetActive(false);
+            mainMenuObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// Called by the CreditsMenuController's OnCreditsClosed event.
+        /// Transitions back to the main menu.
+        /// </summary>
+        private void OnCreditsClosed()
+        {
+            creditsMenuObject.SetActive(false);
             mainMenuObject.SetActive(true);
         }
 
