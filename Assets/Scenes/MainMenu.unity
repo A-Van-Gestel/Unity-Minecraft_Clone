@@ -1232,6 +1232,17 @@ RectTransform:
   m_CorrespondingSourceObject: {fileID: 7476286875750999397, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
   m_PrefabInstance: {fileID: 5222104658959289653}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &948903511 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 6988563824818292579, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
+  m_PrefabInstance: {fileID: 5222104658959289653}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 948903509}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c29013058bb3453fbfcc0ae9219caf62, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UI.WorldSelectMenu
 --- !u!1 &992233199
 GameObject:
   m_ObjectHideFlags: 0
@@ -3087,6 +3098,14 @@ PrefabInstance:
       propertyPath: m_SizeDelta.y
       value: 20
       objectReference: {fileID: 0}
+    - target: {fileID: 491628177996100050, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
+      propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Target
+      value: 
+      objectReference: {fileID: 948903511}
+    - target: {fileID: 491628177996100050, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
+      propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_MethodName
+      value: OnConfirmCreateClicked
+      objectReference: {fileID: 0}
     - target: {fileID: 1476054652235095216, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
       propertyPath: m_AnchorMax.x
       value: 1
@@ -3094,6 +3113,14 @@ PrefabInstance:
     - target: {fileID: 1476054652235095216, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
       propertyPath: m_AnchorMax.y
       value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4171297182396963568, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
+      propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Target
+      value: 
+      objectReference: {fileID: 948903511}
+    - target: {fileID: 4171297182396963568, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
+      propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_MethodName
+      value: OnCancelCreateClicked
       objectReference: {fileID: 0}
     - target: {fileID: 4183255360746657852, guid: d96d992dc6901034296120f4cb1b9ba8, type: 3}
       propertyPath: m_OnClick.m_PersistentCalls.m_Calls.Array.data[0].m_Target

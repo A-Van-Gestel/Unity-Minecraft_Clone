@@ -4301,7 +4301,6 @@ GameObject:
   - component: {fileID: 1080100303}
   - component: {fileID: 1080100308}
   - component: {fileID: 1080100307}
-  - component: {fileID: 1080100309}
   m_Layer: 5
   m_Name: Canvas
   m_TagString: Untagged
@@ -4420,21 +4419,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9eb3ba5cdf629704fa94897f4c9e4009, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.UIScaleController
---- !u!114 &1080100309
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1080100302}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ec1716d141aecab4384983d7269cc395, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::UI.PauseMenuController
-  pauseMenuPanel: {fileID: 928827592}
-  settingsMenuObject: {fileID: 1113966849}
-  helpMenuObject: {fileID: 0}
 --- !u!1 &1107507288
 GameObject:
   m_ObjectHideFlags: 0
