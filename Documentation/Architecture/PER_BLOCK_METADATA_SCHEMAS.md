@@ -2,7 +2,7 @@
 
 **Version:** 1.2 (Draft)  
 **Date:** 2026-04-24  
-**Status:** Proposed  
+**Status:** Implemented (2026-05-14)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production, Burst/DOTS Compatible)  
 **Context:** Packed voxel metadata, expanded block orientation, and BlockDatabase-driven authoring
 

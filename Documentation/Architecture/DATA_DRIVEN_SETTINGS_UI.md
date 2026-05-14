@@ -1,6 +1,6 @@
 # Data-Driven Settings UI Architecture
 
-**Status:** Design (Revised 2026-05-09)
+**Status:** Implemented (2026-05-14)
 
 ## Overview
 
@@ -38,6 +38,7 @@ public enum SettingsTab
     Controls,
     Graphics,
     World,
+    Performance,
     Dev
 }
 ```
@@ -61,6 +62,7 @@ private static readonly SettingsTab[] TAB_ORDER =
     SettingsTab.Controls,
     SettingsTab.Graphics,
     SettingsTab.World,
+    SettingsTab.Performance,
     SettingsTab.Dev
 };
 ```
@@ -532,10 +534,6 @@ public class Settings
     [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 1)]
     public CloudStyle clouds = CloudStyle.Fancy;
 
-    [SettingField(SettingsTab.Graphics, Label = "Max Mesh Rebuilds Per Frame", Order = 10)]
-    [Range(1, 50)]
-    public int maxMeshRebuildsPerFrame = 10;
-
     // --- World Generation (Read-only during play via [InitializationField]) ---
     [SettingField(SettingsTab.World, Label = "Lighting", Order = 0)]
     [InitializationField]
@@ -549,15 +547,31 @@ public class Settings
     [InitializationField]
     public bool enableMajorFloraPass = true;
 
+    // --- Performance ---
+    [SettingField(SettingsTab.Performance, Label = "Save Compression", Order = 0)]
+    public CompressionAlgorithm saveCompression = CompressionAlgorithm.LZ4;
+
+    [SettingField(SettingsTab.Performance, Label = "Max Initial Load Radius", Format = "f0", Order = 1)]
+    [Range(2, 32)]
+    public int maxInitialLoadRadius = 10;
+
+    [SettingField(SettingsTab.Performance, Label = "Max Mesh Rebuilds Per Frame", Format = "f0", Order = 2)]
+    [Range(1, 50)]
+    public int maxMeshRebuildsPerFrame = 10;
+
+    [SettingField(SettingsTab.Performance, Label = "Max Light Jobs Per Frame", Format = "f0", Order = 3)]
+    [Range(1, 128)]
+    public int maxLightJobsPerFrame = 32;
+
+    [SettingField(SettingsTab.Performance, Label = "Max Structure Mods Per Frame", Format = "f0", Order = 4)]
+    [Range(100, 50000)]
+    public int maxStructureModsPerFrame = 5000;
+
     // --- Fields WITHOUT [SettingField] are NOT shown in UI ---
     public const int DATA_LOAD_BUFFER = 3;
     public int LoadDistance => viewDistance + DATA_LOAD_BUFFER;
     public bool EnablePersistence => Debug.isDebugBuild ? !Dev.keepChunksInMemory : true;
     public bool enableVolatileSaveData = true;
-    public CompressionAlgorithm saveCompression = CompressionAlgorithm.LZ4;
-    public int maxLightJobsPerFrame = 32;
-    public int maxInitialLoadRadius = 10;
-    public int maxStructureModsPerFrame = 5000;
     public bool showChunkBorders = false;
     public bool enableDiagnosticLogs = false;
     public bool enableWaterDiagnosticLogs = false;
@@ -620,7 +634,7 @@ These operations are fully supported by IL2CPP in Unity 6. No `MakeGenericMethod
 
 - [X] Add `OnSettingChanged` event and `NotifySettingChanged()` to `SettingsManager`
 - [X] Add `bool IsInGame` property to `SettingsMenuController`
-- [ ] Update Main Menu and Pause Menu to set `IsInGame` before enabling settings
+- [X] Update Main Menu and Pause Menu to set `IsInGame` before enabling settings
 - [X] Refactor `SettingsMenuController` to shell role (remove all per-field `[SerializeField]` references)
 - [X] Preserve ScrollRect content swap and scroll-to-top on tab switch
 - [X] Migrate `UIScaleController` to use `OnSettingChanged` subscriber pattern

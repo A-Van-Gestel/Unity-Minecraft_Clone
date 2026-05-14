@@ -184,7 +184,7 @@ After each Phase 2 commit that touches `VoxelMeshHelper`, `MeshGenerationJob`, `
 
 ## Cross-references
 
-- **Design doc** that motivated this baseline: [`Documentation/Design/PER_BLOCK_METADATA_SCHEMAS.md`](../Design/PER_BLOCK_METADATA_SCHEMAS.md) — `§11 Phase 4.4` sets the 5% meshing budget.
+- **Architecture doc** that motivated this baseline: [`Documentation/Architecture/PER_BLOCK_METADATA_SCHEMAS.md`](../Architecture/PER_BLOCK_METADATA_SCHEMAS.md) — `§11 Phase 4.4` sets the 5% meshing budget.
 - **Folder conventions:** [`Documentation/Performance/README.md`](README.md).
 - **Benchmark source:** [`Assets/Scripts/Benchmarks/MeshGenerationBenchmark.cs`](../../Assets/Scripts/Benchmarks/MeshGenerationBenchmark.cs).
 - **Environment helper:** [`Assets/Scripts/Benchmarks/BenchmarkEnvironment.cs`](../../Assets/Scripts/Benchmarks/BenchmarkEnvironment.cs).
