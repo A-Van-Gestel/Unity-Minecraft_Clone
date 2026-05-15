@@ -1,11 +1,13 @@
 using System;
 using Data.WorldTypes;
+using Editor.Jobs;
+using Editor.Libraries;
+using JetBrains.Annotations;
 using Jobs.Data;
 using Jobs.Generators;
-using Jobs.Helpers;
 using Libraries;
 using Unity.Collections;
-using Unity.Mathematics;
+using Unity.Jobs;
 using UnityEditor;
 using UnityEngine;
 
@@ -19,7 +21,7 @@ namespace Editor.WorldTools
     /// </summary>
     public partial class NoisePreviewWindow
     {
-        #region Tab 1: World Blending
+        #region Tab 3: World Blending
 
         public enum BlendingRenderMode
         {
@@ -31,46 +33,24 @@ namespace Editor.WorldTools
 
             /// <summary>Select a biome and see its influence weight as a heatmap.</summary>
             BlendWeightHeatmap,
+
+            /// <summary>Visualizes the borderFade value at biome boundaries (density attenuation zones).</summary>
+            [UsedImplicitly]
+            BiomeBorderFade,
         }
 
         // --- World Blending State ---
         private WorldTypeDefinition _worldType;
         private BlendingRenderMode _blendRenderMode = BlendingRenderMode.Heightmap;
-        private int _blendSeed = 1337;
         private ResolutionOptions _blendResolution = ResolutionOptions.X256;
-        private Vector2Int _blendOffset = Vector2Int.zero;
-        private float _blendZoom = 1f;
-        private bool _blendShowChunkBorders = true;
-        private bool _blendAutoGenerate = true;
         private bool _blendShowWaterLevel = true;
         private int _heatmapBiomeIndex;
-
         private Texture2D _blendPreviewTexture;
 
-        // Distinct colors for biome Voronoi visualization
-        private static readonly Color[] s_biomeColors =
-        {
-            new Color(0.30f, 0.70f, 0.30f), // Green
-            new Color(0.85f, 0.80f, 0.50f), // Sandy
-            new Color(0.40f, 0.55f, 0.80f), // Blue
-            new Color(0.70f, 0.35f, 0.35f), // Red
-            new Color(0.90f, 0.90f, 0.95f), // Snowy White
-            new Color(0.55f, 0.40f, 0.25f), // Brown
-            new Color(0.20f, 0.50f, 0.45f), // Teal
-            new Color(0.75f, 0.55f, 0.75f), // Lavender
-        };
-
-        /// <summary>
-        /// Called from OnEnable. Initialize blending tab state.
-        /// </summary>
         private void OnEnableBlendingTab()
         {
-            // No persistent state to initialize beyond defaults
         }
 
-        /// <summary>
-        /// Called from OnDisable. Cleanup blending tab state.
-        /// </summary>
         private void OnDisableBlendingTab()
         {
             if (_blendPreviewTexture != null)
@@ -85,9 +65,8 @@ namespace Editor.WorldTools
             EditorGUILayout.BeginVertical();
 
             GUILayout.Label("World Blending Preview", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox(
-                "Visualize multi-biome terrain blending using the same BiomeBlender logic as runtime generation.",
-                MessageType.Info);
+            EditorUILayoutHelper.SectionNote("Visualize multi-biome terrain blending using the same BiomeBlender logic as runtime generation. " +
+                                             "Drag a <b>WorldTypeDefinition</b> asset to begin.");
 
             EditorGUI.BeginChangeCheck();
 
@@ -101,7 +80,6 @@ namespace Editor.WorldTools
                 return;
             }
 
-            // Filter to only Standard biomes
             int standardBiomeCount = CountStandardBiomes(_worldType);
             if (standardBiomeCount == 0)
             {
@@ -119,49 +97,83 @@ namespace Editor.WorldTools
             }
 
             _blendResolution = (ResolutionOptions)EditorGUILayout.EnumPopup("Resolution", _blendResolution);
-            _blendSeed = EditorGUILayout.IntField("World Seed", _blendSeed);
-            _blendZoom = EditorGUILayout.Slider("Zoom Scale", _blendZoom, 0.1f, 10f);
-            _blendOffset = EditorGUILayout.Vector2IntField("XZ Offset", _blendOffset);
+            _seed = EditorGUILayout.IntField("World Seed", _seed);
+            _zoom = EditorGUILayout.Slider("Zoom Scale", _zoom, 0.1f, 10f);
+            _offset = EditorGUILayout.Vector2IntField("XZ Offset", _offset);
             _blendShowWaterLevel = EditorGUILayout.Toggle("Show Water Level", _blendShowWaterLevel);
-            _blendShowChunkBorders = EditorGUILayout.Toggle("Show Chunk Borders", _blendShowChunkBorders);
-            _blendAutoGenerate = EditorGUILayout.Toggle("Auto Generate On Change", _blendAutoGenerate);
+            _showChunkBorders = EditorGUILayout.Toggle("Show Chunk Borders", _showChunkBorders);
+            _autoGenerate = EditorGUILayout.Toggle("Auto Generate", _autoGenerate);
 
             bool changed = EditorGUI.EndChangeCheck();
 
-            if (GUILayout.Button("Generate Preview") || (changed && _blendAutoGenerate))
+            if (GUILayout.Button("Generate Preview") || (changed && _autoGenerate))
             {
                 GenerateBlendingPreview();
             }
 
             EditorGUILayout.Space();
 
+            // --- Responsive texture display ---
             if (_blendPreviewTexture != null)
             {
-                Rect rect = GUILayoutUtility.GetAspectRect(1f);
-                if (rect.width > 512)
+                Rect rect = GUILayoutUtility.GetRect(0, 0, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+                if (rect.width > 10 && rect.height > 10)
                 {
-                    rect.width = 512;
-                    rect.height = 512;
-                    rect.x = (position.width - 512) / 2;
-                }
+                    float texAspect = (float)_blendPreviewTexture.width / _blendPreviewTexture.height;
+                    float rectAspect = rect.width / rect.height;
 
-                GUI.DrawTexture(rect, _blendPreviewTexture, ScaleMode.ScaleToFit);
+                    Rect drawRect;
+                    if (texAspect > rectAspect)
+                    {
+                        float h = rect.width / texAspect;
+                        drawRect = new Rect(rect.x, rect.y, rect.width, h);
+                    }
+                    else
+                    {
+                        float w = rect.height * texAspect;
+                        drawRect = new Rect(rect.x, rect.y, w, rect.height);
+                    }
+
+                    GUI.DrawTexture(drawRect, _blendPreviewTexture, ScaleMode.StretchToFill);
+
+                    // Screen-space chunk border overlays
+                    if (_showChunkBorders)
+                    {
+                        int texSize = _blendPreviewTexture.width;
+                        float worldMinX = _offset.x;
+                        float worldMaxX = worldMinX + texSize * _zoom;
+                        float worldMinZ = _offset.y;
+                        float worldMaxZ = worldMinZ + texSize * _zoom;
+                        float pxPerWorldX = drawRect.width / (worldMaxX - worldMinX);
+                        float pxPerWorldZ = drawRect.height / (worldMaxZ - worldMinZ);
+
+                        const int chunkW = VoxelData.ChunkWidth;
+                        int firstChunkX = Mathf.CeilToInt(worldMinX / chunkW) * chunkW;
+                        for (int wx = firstChunkX; wx <= (int)worldMaxX; wx += chunkW)
+                        {
+                            float lineX = drawRect.x + (wx - worldMinX) * pxPerWorldX;
+                            EditorGUI.DrawRect(new Rect(lineX, drawRect.y, 1, drawRect.height), Color.cyan);
+                        }
+
+                        int firstChunkZ = Mathf.CeilToInt(worldMinZ / chunkW) * chunkW;
+                        for (int wz = firstChunkZ; wz <= (int)worldMaxZ; wz += chunkW)
+                        {
+                            float lineY = drawRect.y + (wz - worldMinZ) * pxPerWorldZ;
+                            EditorGUI.DrawRect(new Rect(drawRect.x, lineY, drawRect.width, 1), Color.cyan);
+                        }
+                    }
+                }
             }
 
             EditorGUILayout.EndVertical();
         }
 
-        /// <summary>
-        /// Generates the blended terrain preview texture using BiomeBlender.
-        /// Replicates the runtime biome selection and blending pipeline in an editor-safe manner.
-        /// </summary>
         private void GenerateBlendingPreview()
         {
             if (_worldType == null) return;
 
             FastNoiseLite.InitializeLookupTables();
 
-            // --- Collect Standard Biomes ---
             StandardBiomeAttributes[] standardBiomes = GetStandardBiomes(_worldType);
             int biomeCount = standardBiomes.Length;
             if (biomeCount == 0) return;
@@ -170,23 +182,21 @@ namespace Editor.WorldTools
             if (_blendPreviewTexture == null || _blendPreviewTexture.width != texSize)
             {
                 if (_blendPreviewTexture != null) DestroyImmediate(_blendPreviewTexture);
-                _blendPreviewTexture = new Texture2D(texSize, texSize, TextureFormat.RGBA32, false);
-                _blendPreviewTexture.filterMode = FilterMode.Point;
+                _blendPreviewTexture = new Texture2D(texSize, texSize, TextureFormat.RGBA32, false)
+                {
+                    filterMode = FilterMode.Point,
+                };
             }
 
-            // --- Build NativeArrays mirroring StandardChunkGenerator.Initialize() ---
+            // --- Build NativeArrays ---
             NativeArray<StandardBiomeAttributesJobData> biomesJobData =
-                new NativeArray<StandardBiomeAttributesJobData>(biomeCount, Allocator.Temp);
-            NativeArray<FastNoiseLite> terrainNoises =
-                new NativeArray<FastNoiseLite>(biomeCount, Allocator.Temp);
-
-            // Multi-Noise arrays for the new blending overload
-            NativeArray<FastNoiseLite> contNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Temp);
-            NativeArray<FastNoiseLite> erosionNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Temp);
-            NativeArray<FastNoiseLite> pvNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Temp);
-            NativeArray<BurstSpline> contSplines = new NativeArray<BurstSpline>(biomeCount, Allocator.Temp);
-            NativeArray<BurstSpline> erosionSplines = new NativeArray<BurstSpline>(biomeCount, Allocator.Temp);
-            NativeArray<BurstSpline> pvSplines = new NativeArray<BurstSpline>(biomeCount, Allocator.Temp);
+                new NativeArray<StandardBiomeAttributesJobData>(biomeCount, Allocator.TempJob);
+            NativeArray<FastNoiseLite> contNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.TempJob);
+            NativeArray<FastNoiseLite> erosionNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.TempJob);
+            NativeArray<FastNoiseLite> pvNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.TempJob);
+            NativeArray<BurstSpline> contSplines = new NativeArray<BurstSpline>(biomeCount, Allocator.TempJob);
+            NativeArray<BurstSpline> erosionSplines = new NativeArray<BurstSpline>(biomeCount, Allocator.TempJob);
+            NativeArray<BurstSpline> pvSplines = new NativeArray<BurstSpline>(biomeCount, Allocator.TempJob);
 
             for (int i = 0; i < biomeCount; i++)
             {
@@ -202,35 +212,36 @@ namespace Editor.WorldTools
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
                     UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
                     FloraZoneCoverage = biome.floraZoneCoverage,
+                    Enable3DDensity = biome.enable3DDensity,
+                    DensityAmplitude = biome.densityAmplitude,
+                    EnableDensityWarp = biome.enableDensityWarp,
                 };
 
-#pragma warning disable CS0618 // Type or member is obsolete
-                terrainNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.terrainNoiseConfig, _blendSeed);
-#pragma warning restore CS0618 // Type or member is obsolete
-
-                // Build Multi-Noise data with legacy fallback per-biome
+                // Multi-Noise (with legacy fallback)
                 FastNoiseConfig contCfg = biome.continentalnessNoiseConfig;
                 FastNoiseConfig erosionCfg = biome.erosionNoiseConfig;
                 FastNoiseConfig pvCfg = biome.peaksAndValleysNoiseConfig;
+                bool hasMultiNoise = contCfg.frequency != 0f || erosionCfg.frequency != 0f || pvCfg.frequency != 0f;
 
-                bool biomeHasMultiNoise = contCfg.frequency != 0f || erosionCfg.frequency != 0f || pvCfg.frequency != 0f;
-                if (biomeHasMultiNoise)
+                if (hasMultiNoise)
                 {
                     contCfg.normalizeToZeroOne = false;
                     erosionCfg.normalizeToZeroOne = false;
                     pvCfg.normalizeToZeroOne = false;
-
-                    contNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(contCfg, _blendSeed);
-                    erosionNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(erosionCfg, _blendSeed);
-                    pvNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(pvCfg, _blendSeed);
+                    contNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(contCfg, _seed);
+                    erosionNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(erosionCfg, _seed);
+                    pvNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(pvCfg, _seed);
                     contSplines[i] = BurstSpline.FromAnimationCurve(biome.continentalnessCurve);
                     erosionSplines[i] = BurstSpline.FromAnimationCurve(biome.erosionCurve);
                     pvSplines[i] = BurstSpline.FromAnimationCurve(biome.peaksAndValleysCurve);
                 }
                 else
                 {
-                    // Legacy fallback: route terrainNoiseConfig through continentalness slot
-                    contNoises[i] = terrainNoises[i];
+#pragma warning disable CS0618 // Type or member is obsolete
+                    FastNoiseConfig legacyCfg = biome.terrainNoiseConfig;
+#pragma warning restore CS0618 // Type or member is obsolete
+                    legacyCfg.normalizeToZeroOne = false;
+                    contNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(legacyCfg, _seed);
                     erosionNoises[i] = FastNoiseLite.Create(0);
                     pvNoises[i] = FastNoiseLite.Create(0);
                     contSplines[i] = BurstSpline.CreateLinearRamp(biome.terrainAmplitude);
@@ -249,77 +260,54 @@ namespace Editor.WorldTools
                 PeaksValleysSplines = pvSplines,
             };
 
-            // --- Build Biome Selection Noise (Cellular / Voronoi) ---
             FastNoiseConfig selectionConfig = standardBiomes[0].biomeWeightNoiseConfig;
             selectionConfig.normalizeToZeroOne = true;
-            FastNoiseLite selectionNoise = FastNoiseFactory.CreateNoiseFromConfig(selectionConfig, _blendSeed);
+            FastNoiseLite selectionNoise = FastNoiseFactory.CreateNoiseFromConfig(selectionConfig, _seed);
 
             int seaLevel = _worldType.seaLevel;
 
-            Color[] pixels = new Color[texSize * texSize];
-
-            // --- Pixel Loop ---
-            for (int z = 0; z < texSize; z++)
+            // --- Map editor enum to job mode ---
+            WorldBlendingMode jobMode;
+            switch (_blendRenderMode)
             {
-                for (int x = 0; x < texSize; x++)
-                {
-                    float worldX = x * _blendZoom + _blendOffset.x;
-                    float worldZ = z * _blendZoom + _blendOffset.y;
-
-                    int gx = (int)math.floor(worldX);
-                    int gz = (int)math.floor(worldZ);
-
-                    Color pixelColor;
-
-                    switch (_blendRenderMode)
-                    {
-                        case BlendingRenderMode.Heightmap:
-                            pixelColor = EvaluateHeightmapPixel(gx, gz, seaLevel,
-                                ref selectionNoise, ref biomesJobData, ref multiNoise);
-                            break;
-
-                        case BlendingRenderMode.BiomeVoronoi:
-                            pixelColor = EvaluateVoronoiPixel(gx, gz,
-                                ref selectionNoise, ref biomesJobData, ref multiNoise, biomeCount);
-                            break;
-
-                        case BlendingRenderMode.BlendWeightHeatmap:
-                            pixelColor = EvaluateHeatmapPixel(gx, gz, _heatmapBiomeIndex,
-                                ref selectionNoise, ref biomesJobData, ref terrainNoises, biomeCount);
-                            break;
-
-                        default:
-                            pixelColor = Color.black;
-                            break;
-                    }
-
-                    // Chunk border overlay
-                    if (_blendShowChunkBorders)
-                    {
-                        bool isBorderX = !Mathf.Approximately(
-                            math.floor(worldX / VoxelData.ChunkWidth),
-                            math.floor((worldX + _blendZoom) / VoxelData.ChunkWidth));
-                        bool isBorderZ = !Mathf.Approximately(
-                            math.floor(worldZ / VoxelData.ChunkWidth),
-                            math.floor((worldZ + _blendZoom) / VoxelData.ChunkWidth));
-
-                        if (isBorderX || isBorderZ)
-                        {
-                            pixelColor = Color.cyan;
-                        }
-                    }
-
-                    pixels[z * texSize + x] = pixelColor;
-                }
+                case BlendingRenderMode.Heightmap: jobMode = WorldBlendingMode.Heightmap; break;
+                case BlendingRenderMode.BiomeVoronoi: jobMode = WorldBlendingMode.BiomeVoronoi; break;
+                case BlendingRenderMode.BlendWeightHeatmap: jobMode = WorldBlendingMode.BlendWeightHeatmap; break;
+                case BlendingRenderMode.BiomeBorderFade: jobMode = WorldBlendingMode.BiomeBorderFade; break;
+                default: jobMode = WorldBlendingMode.Heightmap; break;
             }
 
-            _blendPreviewTexture.SetPixels(pixels);
+            // --- Schedule Burst parallel job ---
+            // Use Persistent allocator since the job reads NativeArrays that must outlive scheduling
+            int pixelCount = texSize * texSize;
+            NativeArray<byte> outputPixels = new NativeArray<byte>(pixelCount * 4, Allocator.TempJob);
+
+            WorldBlendingPreviewJob job = new WorldBlendingPreviewJob
+            {
+                TextureSize = texSize,
+                Zoom = _zoom,
+                OffsetX = _offset.x,
+                OffsetZ = _offset.y,
+                Mode = jobMode,
+                SeaLevel = seaLevel,
+                BiomeCount = biomeCount,
+                TargetBiomeIndex = _heatmapBiomeIndex,
+                ShowWaterLevel = _blendShowWaterLevel,
+                SelectionNoise = selectionNoise,
+                Biomes = biomesJobData,
+                MultiNoise = multiNoise,
+                OutputPixels = outputPixels,
+            };
+
+            job.Schedule(pixelCount, 64).Complete();
+
+            _blendPreviewTexture.LoadRawTextureData(outputPixels);
             _blendPreviewTexture.Apply();
+            outputPixels.Dispose();
             Repaint();
 
             // Cleanup
             biomesJobData.Dispose();
-            terrainNoises.Dispose();
             contNoises.Dispose();
             erosionNoises.Dispose();
             pvNoises.Dispose();
@@ -328,181 +316,7 @@ namespace Editor.WorldTools
             pvSplines.Dispose();
         }
 
-        #region Pixel Evaluators
-
-        /// <summary>
-        /// Evaluates a single pixel in Heightmap mode — grayscale blended terrain height.
-        /// </summary>
-        private Color EvaluateHeightmapPixel(
-            int gx, int gz, int seaLevel,
-            ref FastNoiseLite selectionNoise,
-            ref NativeArray<StandardBiomeAttributesJobData> biomes,
-            ref MultiNoiseData multiNoise)
-        {
-            int height = (int)math.floor(BiomeBlender.CalculateBlendedTerrainHeight(
-                gx, gz, ref selectionNoise, ref biomes, ref multiNoise, out _));
-
-            if (_blendShowWaterLevel && height < seaLevel)
-            {
-                // Ocean blue tint, darker for deeper water
-                float depth = math.saturate((seaLevel - height) / 30f);
-                return Color.Lerp(new Color(0.25f, 0.55f, 0.85f), new Color(0.08f, 0.20f, 0.55f), depth);
-            }
-
-            // Normalize height to ~[0,1] for visualization (assume range 0–128)
-            float normalized = math.clamp(height / 128f, 0.05f, 1f);
-            return new Color(normalized, normalized, normalized, 1f);
-        }
-
-        /// <summary>
-        /// Evaluates a single pixel in Voronoi mode — biome-colored cells.
-        /// </summary>
-        private Color EvaluateVoronoiPixel(
-            int gx, int gz,
-            ref FastNoiseLite selectionNoise,
-            ref NativeArray<StandardBiomeAttributesJobData> biomes,
-            ref MultiNoiseData multiNoise,
-            int biomeCount)
-        {
-            // Get the raw cellular value to determine biome index
-            float cellValue = selectionNoise.GetNoise(gx, gz);
-            int biomeIndex = (int)math.floor(cellValue * biomeCount);
-            biomeIndex = math.clamp(biomeIndex, 0, biomeCount - 1);
-
-            Color biomeColor = s_biomeColors[biomeIndex % s_biomeColors.Length];
-
-            // Modulate brightness by terrain height for depth
-            int height = (int)math.floor(BiomeBlender.CalculateBlendedTerrainHeight(
-                gx, gz, ref selectionNoise, ref biomes, ref multiNoise, out _));
-            float brightness = math.clamp(height / 100f, 0.3f, 1.0f);
-
-            return biomeColor * brightness;
-        }
-
-        /// <summary>
-        /// Evaluates a single pixel in Heatmap mode — single biome's blend weight.
-        /// </summary>
-        private unsafe Color EvaluateHeatmapPixel(
-            int gx, int gz, int targetBiomeIndex,
-            ref FastNoiseLite selectionNoise,
-            ref NativeArray<StandardBiomeAttributesJobData> biomes,
-            ref NativeArray<FastNoiseLite> terrainNoises,
-            int biomeCount)
-        {
-            // Replicate the BiomeBlender weight calculation for a specific biome
-            selectionNoise.GetCellularEdgeData(gx, gz, out FastNoiseLite.CellularEdgeData edgeData);
-
-            int* b = stackalloc int[9];
-            float* rad = stackalloc float[9];
-            float* bw = stackalloc float[9];
-            BlendCurve* curves = stackalloc BlendCurve[9];
-            for (int i = 0; i < 9; i++)
-            {
-                b[i] = GetBiomeIndexFromHash(edgeData.Hashes[i], biomeCount);
-                rad[i] = biomes[b[i]].BlendRadius;
-                bw[i] = biomes[b[i]].BlendWeight;
-                curves[i] = biomes[b[i]].BlendCurve;
-            }
-
-            float trSum = 0f;
-            float localBlendRadiusSum = 0f;
-            float dist0 = edgeData.Distances[0];
-
-            for (int i = 0; i < 9; i++)
-            {
-                float tr = math.max(0f, 1f - (edgeData.Distances[i] - dist0));
-                trSum += tr;
-                localBlendRadiusSum += tr * rad[i];
-            }
-
-            float localBlendRadius = localBlendRadiusSum / trSum;
-            float wiggle = selectionNoise.GetNoise(gx * 0.25f, gz * 0.25f) * 0.5f * localBlendRadius;
-            float activeRadius = math.max(0.001f, localBlendRadius + wiggle);
-
-            float* raw = stackalloc float[9];
-            float totalRaw = 0f;
-            for (int i = 0; i < 9; i++)
-            {
-                raw[i] = math.max(0f, 1f - (edgeData.Distances[i] - dist0) / activeRadius) * bw[i];
-                totalRaw += raw[i];
-            }
-
-            // Calculate normalized + curved weight for the target biome
-            float targetWeight = 0f;
-            float totalSmooth = 0f;
-            for (int i = 0; i < 9; i++)
-            {
-                float norm = raw[i] / totalRaw;
-                float curved = ApplyBlendCurve(norm, curves[i]);
-                totalSmooth += curved;
-                if (b[i] == targetBiomeIndex)
-                {
-                    targetWeight += curved;
-                }
-            }
-
-            float finalWeight = totalSmooth > 0f ? targetWeight / totalSmooth : 0f;
-
-            // Render as heatmap: black (0) → blue → green → yellow → red (1)
-            return HeatmapColor(finalWeight);
-        }
-
-        #endregion
-
         #region Helper Methods
-
-        private static int GetBiomeIndexFromHash(int hash, int biomeCount)
-        {
-            float noiseValue = hash * (1.0f / 2147483648.0f);
-            noiseValue = (noiseValue + 1.0f) * 0.5f;
-            int idx = (int)math.floor(noiseValue * biomeCount);
-            return math.clamp(idx, 0, biomeCount - 1);
-        }
-
-        private static float ApplyBlendCurve(float t, BlendCurve curve)
-        {
-            switch (curve)
-            {
-                case BlendCurve.Linear:
-                    return t;
-                case BlendCurve.SmootherStep:
-                    return t * t * t * (t * (t * 6f - 15f) + 10f);
-                case BlendCurve.SmoothStep:
-                default:
-                    return t * t * (3f - 2f * t);
-            }
-        }
-
-        /// <summary>
-        /// Maps a [0,1] weight value to a scientific heatmap color ramp.
-        /// </summary>
-        private static Color HeatmapColor(float t)
-        {
-            t = math.saturate(t);
-
-            if (t < 0.25f)
-            {
-                float s = t / 0.25f;
-                return Color.Lerp(Color.black, Color.blue, s);
-            }
-
-            if (t < 0.5f)
-            {
-                float s = (t - 0.25f) / 0.25f;
-                return Color.Lerp(Color.blue, Color.green, s);
-            }
-
-            if (t < 0.75f)
-            {
-                float s = (t - 0.5f) / 0.25f;
-                return Color.Lerp(Color.green, Color.yellow, s);
-            }
-
-            {
-                float s = (t - 0.75f) / 0.25f;
-                return Color.Lerp(Color.yellow, Color.red, s);
-            }
-        }
 
         private static int CountStandardBiomes(WorldTypeDefinition worldType)
         {
@@ -526,9 +340,7 @@ namespace Editor.WorldTools
             foreach (BiomeBase b in worldType.biomes)
             {
                 if (b is StandardBiomeAttributes sba)
-                {
                     result[idx++] = sba;
-                }
             }
 
             return result;
@@ -539,10 +351,7 @@ namespace Editor.WorldTools
             StandardBiomeAttributes[] biomes = GetStandardBiomes(worldType);
             string[] names = new string[biomes.Length];
             for (int i = 0; i < biomes.Length; i++)
-            {
                 names[i] = string.IsNullOrEmpty(biomes[i].biomeName) ? $"Biome {i}" : biomes[i].biomeName;
-            }
-
             return names;
         }
 
