@@ -13,23 +13,6 @@ MonoBehaviour:
   m_Name: Forrest
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Forrest
-  terrainNoiseConfig:
-    seedOffset: 875465
-    frequency: 0.01875
-    noiseType: 3
-    rotationType3D: 0
-    fractalType: 0
-    octaves: 3
-    gain: 0.5
-    lacunarity: 2
-    weightedStrength: 0
-    pingPongStrength: 2
-    cellularDistanceFunction: 0
-    cellularReturnType: 0
-    cellularJitter: 1
-    domainWarpType: 0
-    domainWarpAmp: 0
-    normalizeToZeroOne: 0
   biomeWeightNoiseConfig:
     seedOffset: 875465
     frequency: 0.010625
@@ -52,7 +35,6 @@ MonoBehaviour:
   blendCurve: 1
   surfaceBlockDitheringWidth: 0.1
   baseTerrainHeight: 60
-  terrainAmplitude: 16
   continentalnessNoiseConfig:
     seedOffset: 100
     frequency: 0.002
