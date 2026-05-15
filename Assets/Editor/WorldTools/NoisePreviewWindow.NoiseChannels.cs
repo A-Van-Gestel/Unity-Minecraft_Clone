@@ -1,8 +1,10 @@
+using Editor.Jobs;
 using JetBrains.Annotations;
 using Jobs.Data;
 using Jobs.Generators;
 using Libraries;
-using Unity.Mathematics;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEditor;
 using UnityEngine;
 
@@ -56,6 +58,8 @@ namespace Editor.WorldTools
         private ResolutionOptions _ncResolution = ResolutionOptions.X256;
         private int _ncSliceY = 60;
         private Texture2D _noiseChannelsTexture;
+        private bool _ncShowLegend = true;
+        private bool _ncCurveExpanded;
 
         private void OnDisableNoiseChannelsTab()
         {
@@ -94,6 +98,7 @@ namespace Editor.WorldTools
                 _ncSliceY = EditorGUILayout.IntSlider("Y Slice", _ncSliceY, 0, VoxelData.ChunkHeight - 1);
 
             _showChunkBorders = EditorGUILayout.Toggle("Show Chunk Borders", _showChunkBorders);
+            _ncShowLegend = EditorGUILayout.Toggle("Show Legend", _ncShowLegend);
             _autoGenerate = EditorGUILayout.Toggle("Auto Generate", _autoGenerate);
 
             // Show the active channel's spline curve (read-only reference)
@@ -108,30 +113,26 @@ namespace Editor.WorldTools
 
             EditorGUILayout.Space();
 
-            // --- Responsive texture display ---
+            // --- Responsive texture display with optional legend ---
             if (_noiseChannelsTexture != null)
             {
                 Rect rect = GUILayoutUtility.GetRect(0, 0, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
                 if (rect.width > 10 && rect.height > 10)
                 {
-                    float texAspect = (float)_noiseChannelsTexture.width / _noiseChannelsTexture.height;
-                    float rectAspect = rect.width / rect.height;
+                    const float LEGEND_GAP = 8f;
+                    const float MIN_LEGEND_WIDTH = 120f;
 
-                    Rect drawRect;
-                    if (texAspect > rectAspect)
-                    {
-                        float h = rect.width / texAspect;
-                        drawRect = new Rect(rect.x, rect.y, rect.width, h);
-                    }
-                    else
-                    {
-                        float w = rect.height * texAspect;
-                        drawRect = new Rect(rect.x, rect.y, w, rect.height);
-                    }
+                    // Texture gets a square area; legend fills all remaining horizontal space
+                    float squareSize = Mathf.Min(rect.width, rect.height);
+                    // If legend is on, ensure the texture doesn't eat all the space
+                    if (_ncShowLegend)
+                        squareSize = Mathf.Min(squareSize, rect.width - MIN_LEGEND_WIDTH - LEGEND_GAP);
+
+                    Rect drawRect = new Rect(rect.x, rect.y, squareSize, squareSize);
 
                     GUI.DrawTexture(drawRect, _noiseChannelsTexture, ScaleMode.StretchToFill);
 
-                    // Chunk border overlays (1px screen lines at actual chunk boundaries)
+                    // Chunk border overlays
                     if (_showChunkBorders)
                     {
                         int texSize = _noiseChannelsTexture.width;
@@ -141,7 +142,7 @@ namespace Editor.WorldTools
                         float worldMaxZ = worldMinZ + texSize * _zoom;
                         float pixelsPerWorld = drawRect.width / (worldMaxX - worldMinX);
 
-                        int chunkW = VoxelData.ChunkWidth;
+                        const int chunkW = VoxelData.ChunkWidth;
                         int firstChunkX = Mathf.CeilToInt(worldMinX / chunkW) * chunkW;
                         for (int wx = firstChunkX; wx <= (int)worldMaxX; wx += chunkW)
                         {
@@ -156,6 +157,15 @@ namespace Editor.WorldTools
                             float lineY = drawRect.y + (wz - worldMinZ) * pixelsPerWorldZ;
                             EditorGUI.DrawRect(new Rect(drawRect.x, lineY, drawRect.width, 1), Color.cyan);
                         }
+                    }
+
+                    // Legend panel
+                    if (_ncShowLegend)
+                    {
+                        float legendX = drawRect.xMax + LEGEND_GAP;
+                        float legendW = rect.xMax - legendX;
+                        if (legendW > 40f)
+                            DrawNoiseLegend(new Rect(legendX, drawRect.y, legendW, drawRect.height));
                     }
                 }
             }
@@ -193,9 +203,197 @@ namespace Editor.WorldTools
 
             if (curve != null)
             {
+                EditorGUILayout.BeginHorizontal();
                 GUI.enabled = false;
-                EditorGUILayout.CurveField(label, curve, GUILayout.Height(50));
+                float curveHeight = _ncCurveExpanded ? 150f : 50f;
+                EditorGUILayout.CurveField(label, curve, GUILayout.Height(curveHeight));
                 GUI.enabled = true;
+
+                string buttonLabel = _ncCurveExpanded ? "▼" : "▲";
+                if (GUILayout.Button(buttonLabel, GUILayout.Width(24), GUILayout.Height(curveHeight)))
+                    _ncCurveExpanded = !_ncCurveExpanded;
+
+                EditorGUILayout.EndHorizontal();
+            }
+        }
+
+        /// <summary>
+        /// Draws a vertical gradient legend beside the noise texture, with labels and
+        /// contextual descriptions explaining what the color values mean for the active channel.
+        /// </summary>
+        private void DrawNoiseLegend(Rect legendRect)
+        {
+            const float BAR_WIDTH = 20f;
+            const float LABEL_OFFSET = 24f;
+            bool isDensity = _ncMode == NoiseChannelMode.DensitySlice;
+
+            // --- Title ---
+            GUIStyle titleStyle = new GUIStyle(EditorStyles.boldLabel) { fontSize = 10, alignment = TextAnchor.UpperLeft };
+            GUIStyle labelStyle = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleLeft };
+            GUIStyle descStyle = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.UpperLeft, wordWrap = true };
+            descStyle.normal.textColor = new Color(0.7f, 0.7f, 0.7f);
+
+            GetLegendContent(out string legendTitle, out string topLabel, out string midLabel, out string bottomLabel,
+                out string topDesc, out string midDesc, out string bottomDesc);
+
+            GUI.Label(new Rect(legendRect.x, legendRect.y, legendRect.width, 16), legendTitle, titleStyle);
+
+            // --- Gradient bar (below title) ---
+            float barTop = legendRect.y + 20f;
+            float barHeight = legendRect.height - 20f;
+            int steps = (int)barHeight;
+            if (steps < 2) return;
+
+            for (int i = 0; i < steps; i++)
+            {
+                float t = 1f - (float)i / (steps - 1);
+                Color color;
+
+                if (isDensity)
+                {
+                    if (t > 0.5f)
+                    {
+                        float s = (t - 0.5f) * 2f;
+                        color = Color.Lerp(Color.white, new Color(0.15f, 0.4f, 0.85f), s);
+                    }
+                    else
+                    {
+                        float s = (0.5f - t) * 2f;
+                        color = Color.Lerp(Color.white, new Color(0.8f, 0.3f, 0.1f), s);
+                    }
+                }
+                else
+                {
+                    color = new Color(t, t, t, 1f);
+                }
+
+                EditorGUI.DrawRect(new Rect(legendRect.x, barTop + i, BAR_WIDTH, 1), color);
+            }
+
+            // --- Labels + descriptions at top / middle / bottom of the gradient bar ---
+            float labelX = legendRect.x + LABEL_OFFSET;
+            float labelW = legendRect.width - LABEL_OFFSET;
+            const float descH = 28f;
+
+            // Top
+            GUI.Label(new Rect(labelX, barTop, labelW, 14), topLabel, labelStyle);
+            GUI.Label(new Rect(labelX, barTop + 13, labelW, descH), topDesc, descStyle);
+
+            // Middle
+            float midY = barTop + barHeight * 0.5f - 8;
+            GUI.Label(new Rect(labelX, midY, labelW, 14), midLabel, labelStyle);
+            GUI.Label(new Rect(labelX, midY + 13, labelW, descH), midDesc, descStyle);
+
+            // Bottom
+            GUI.Label(new Rect(labelX, barTop + barHeight - 42, labelW, 14), bottomLabel, labelStyle);
+            GUI.Label(new Rect(labelX, barTop + barHeight - 29, labelW, descH), bottomDesc, descStyle);
+        }
+
+        private void GetLegendContent(
+            out string legendTitle, out string topLabel, out string midLabel, out string bottomLabel,
+            out string topDesc, out string midDesc, out string bottomDesc)
+        {
+            switch (_ncMode)
+            {
+                case NoiseChannelMode.ContinentalnessRaw:
+                    legendTitle = "Continentalness";
+                    topLabel = "+1.0";
+                    topDesc = "Inland / Continental";
+                    midLabel = "0.0";
+                    midDesc = "Coastline";
+                    bottomLabel = "-1.0";
+                    bottomDesc = "Ocean / Low elevation";
+                    break;
+
+                case NoiseChannelMode.ContinentalnessSpline:
+                    legendTitle = "Continentalness (Spline)";
+                    topLabel = "+50 blocks";
+                    topDesc = "Max height offset added to base terrain";
+                    midLabel = "0 blocks";
+                    midDesc = "No height offset";
+                    bottomLabel = "-50 blocks";
+                    bottomDesc = "Max height reduction from base terrain";
+                    break;
+
+                case NoiseChannelMode.ErosionRaw:
+                    legendTitle = "Erosion";
+                    topLabel = "+1.0";
+                    topDesc = "Heavily eroded (flat plains, valleys)";
+                    midLabel = "0.0";
+                    midDesc = "Moderate terrain";
+                    bottomLabel = "-1.0";
+                    bottomDesc = "Low erosion (peaks, mountains)";
+                    break;
+
+                case NoiseChannelMode.ErosionSpline:
+                    legendTitle = "Erosion (Spline)";
+                    topLabel = "High";
+                    topDesc = "P&V multiplier is large (terrain varies more)";
+                    midLabel = "Mid";
+                    midDesc = "Moderate P&V influence";
+                    bottomLabel = "Low";
+                    bottomDesc = "P&V multiplier is small (terrain is flat)";
+                    break;
+
+                case NoiseChannelMode.PeaksValleysRaw:
+                    legendTitle = "Peaks & Valleys";
+                    topLabel = "+1.0";
+                    topDesc = "Local peak (hill top)";
+                    midLabel = "0.0";
+                    midDesc = "Neutral ground";
+                    bottomLabel = "-1.0";
+                    bottomDesc = "Local valley (depression)";
+                    break;
+
+                case NoiseChannelMode.PeaksValleysSpline:
+                    legendTitle = "Peaks & Valleys (Spline)";
+                    topLabel = "+50 blocks";
+                    topDesc = "Max local height boost (before erosion multiply)";
+                    midLabel = "0 blocks";
+                    midDesc = "No local variation";
+                    bottomLabel = "-50 blocks";
+                    bottomDesc = "Max local depression (before erosion multiply)";
+                    break;
+
+                case NoiseChannelMode.CombinedHeight:
+                    legendTitle = "Combined Height";
+                    topLabel = $"y={VoxelData.ChunkHeight}";
+                    topDesc = "Tallest possible terrain";
+                    midLabel = $"y={VoxelData.ChunkHeight / 2}";
+                    midDesc = "Mid-world height";
+                    bottomLabel = "y=0";
+                    bottomDesc = "Bedrock level";
+                    break;
+
+                case NoiseChannelMode.DensitySlice:
+                    legendTitle = "3D Density Slice";
+                    topLabel = "Air (-30)";
+                    topDesc = "Far above surface, empty space";
+                    midLabel = "Surface (0)";
+                    midDesc = "Terrain boundary (overhangs form here)";
+                    bottomLabel = "Solid (+30)";
+                    bottomDesc = "Deep underground, fully solid";
+                    break;
+
+                case NoiseChannelMode.LegacyTerrain:
+                    legendTitle = "Legacy Terrain";
+                    topLabel = $"y={VoxelData.ChunkHeight}";
+                    topDesc = "Max terrain height";
+                    midLabel = $"y={VoxelData.ChunkHeight / 2}";
+                    midDesc = "Mid-world";
+                    bottomLabel = "y=0";
+                    bottomDesc = "Bedrock (old formula: base + noise * amp)";
+                    break;
+
+                default:
+                    legendTitle = "Legend";
+                    topLabel = "High";
+                    topDesc = "";
+                    midLabel = "Mid";
+                    midDesc = "";
+                    bottomLabel = "Low";
+                    bottomDesc = "";
+                    break;
             }
         }
 
@@ -215,21 +413,13 @@ namespace Editor.WorldTools
                 };
             }
 
-            // Build the noise + spline for the selected channel
+            // --- Build noise + spline data for the job ---
             FastNoiseLite channelNoise = default;
             BurstSpline channelSpline = default;
             bool useSpline = false;
-            bool isDensitySlice = _ncMode == NoiseChannelMode.DensitySlice;
-            bool isCombinedHeight = _ncMode == NoiseChannelMode.CombinedHeight;
-            bool isLegacy = _ncMode == NoiseChannelMode.LegacyTerrain;
+            NoisePreviewMode jobMode;
 
-            // Multi-noise data (needed for Combined Height mode)
-            FastNoiseLite contNoise = default, erosionNoise = default, pvNoise = default;
-            BurstSpline contSpline = default, erosionSpline = default, pvSpline = default;
-            FastNoiseLite densityNoise = default;
-            FastNoiseLite densityWarpNoise = default;
-
-            // Build noises from biome config
+            // Multi-noise (always built — needed for Combined Height and Density Slice)
             FastNoiseConfig contCfg = _biome.continentalnessNoiseConfig;
             FastNoiseConfig erosionCfg = _biome.erosionNoiseConfig;
             FastNoiseConfig pvCfg = _biome.peaksAndValleysNoiseConfig;
@@ -237,130 +427,112 @@ namespace Editor.WorldTools
             erosionCfg.normalizeToZeroOne = false;
             pvCfg.normalizeToZeroOne = false;
 
-            contNoise = FastNoiseFactory.CreateNoiseFromConfig(contCfg, _seed);
-            erosionNoise = FastNoiseFactory.CreateNoiseFromConfig(erosionCfg, _seed);
-            pvNoise = FastNoiseFactory.CreateNoiseFromConfig(pvCfg, _seed);
-            contSpline = BurstSpline.FromAnimationCurve(_biome.continentalnessCurve);
-            erosionSpline = BurstSpline.FromAnimationCurve(_biome.erosionCurve);
-            pvSpline = BurstSpline.FromAnimationCurve(_biome.peaksAndValleysCurve);
+            FastNoiseLite contNoise = FastNoiseFactory.CreateNoiseFromConfig(contCfg, _seed);
+            FastNoiseLite erosionNoise = FastNoiseFactory.CreateNoiseFromConfig(erosionCfg, _seed);
+            FastNoiseLite pvNoise = FastNoiseFactory.CreateNoiseFromConfig(pvCfg, _seed);
+            BurstSpline contSpline = BurstSpline.FromAnimationCurve(_biome.continentalnessCurve);
+            BurstSpline erosionSpline = BurstSpline.FromAnimationCurve(_biome.erosionCurve);
+            BurstSpline pvSpline = BurstSpline.FromAnimationCurve(_biome.peaksAndValleysCurve);
 
-            if (isDensitySlice)
+            FastNoiseLite densityNoise = default;
+            FastNoiseLite densityWarpNoise = default;
+            if (_ncMode == NoiseChannelMode.DensitySlice)
             {
                 densityNoise = FastNoiseFactory.CreateNoiseFromConfig(_biome.densityNoiseConfig, _seed);
                 if (_biome.enableDensityWarp)
                     densityWarpNoise = FastNoiseFactory.CreateNoiseFromConfig(_biome.densityWarpConfig, _seed);
             }
 
+            // Map editor enum → Burst-safe job mode
             switch (_ncMode)
             {
                 case NoiseChannelMode.ContinentalnessRaw:
                     channelNoise = contNoise;
+                    jobMode = NoisePreviewMode.RawNoise;
                     break;
                 case NoiseChannelMode.ContinentalnessSpline:
                     channelNoise = contNoise;
                     channelSpline = contSpline;
                     useSpline = true;
+                    jobMode = NoisePreviewMode.SplineNoise;
                     break;
                 case NoiseChannelMode.ErosionRaw:
                     channelNoise = erosionNoise;
+                    jobMode = NoisePreviewMode.RawNoise;
                     break;
                 case NoiseChannelMode.ErosionSpline:
                     channelNoise = erosionNoise;
                     channelSpline = erosionSpline;
                     useSpline = true;
+                    jobMode = NoisePreviewMode.SplineNoise;
                     break;
                 case NoiseChannelMode.PeaksValleysRaw:
                     channelNoise = pvNoise;
+                    jobMode = NoisePreviewMode.RawNoise;
                     break;
                 case NoiseChannelMode.PeaksValleysSpline:
                     channelNoise = pvNoise;
                     channelSpline = pvSpline;
                     useSpline = true;
+                    jobMode = NoisePreviewMode.SplineNoise;
+                    break;
+                case NoiseChannelMode.CombinedHeight:
+                    jobMode = NoisePreviewMode.CombinedHeight;
+                    break;
+                case NoiseChannelMode.DensitySlice:
+                    jobMode = NoisePreviewMode.DensitySlice;
                     break;
                 case NoiseChannelMode.LegacyTerrain:
-#pragma warning disable CS0618 // Type or member is obsolete
+#pragma warning disable CS0618
                     FastNoiseConfig legacyCfg = _biome.terrainNoiseConfig;
-#pragma warning restore CS0618 // Type or member is obsolete
+#pragma warning restore CS0618
                     legacyCfg.normalizeToZeroOne = false;
                     channelNoise = FastNoiseFactory.CreateNoiseFromConfig(legacyCfg, _seed);
+                    jobMode = NoisePreviewMode.LegacyTerrain;
+                    break;
+                default:
+                    jobMode = NoisePreviewMode.RawNoise;
                     break;
             }
 
-            Color[] pixels = new Color[texSize * texSize];
+            // --- Schedule Burst parallel job ---
+            int pixelCount = texSize * texSize;
+            NativeArray<byte> outputPixels = new NativeArray<byte>(pixelCount * 4, Allocator.TempJob);
 
-            for (int z = 0; z < texSize; z++)
+            NoisePreviewJob job = new NoisePreviewJob
             {
-                for (int x = 0; x < texSize; x++)
-                {
-                    float worldX = x * _zoom + _offset.x;
-                    float worldZ = z * _zoom + _offset.y;
+                TextureSize = texSize,
+                Zoom = _zoom,
+                OffsetX = _offset.x,
+                OffsetZ = _offset.y,
+                Mode = jobMode,
+                BaseTerrainHeight = _biome.baseTerrainHeight,
+                TerrainAmplitude = _biome.terrainAmplitude,
+                DensityAmplitude = _biome.densityAmplitude,
+                ChunkHeight = VoxelData.ChunkHeight,
+                SliceY = _ncSliceY,
+                UseSpline = useSpline,
+                Enable3DDensity = _biome.enable3DDensity,
+                EnableDensityWarp = _biome.enableDensityWarp,
+                ChannelNoise = channelNoise,
+                ChannelSpline = channelSpline,
+                ContNoise = contNoise,
+                ErosionNoise = erosionNoise,
+                PvNoise = pvNoise,
+                ContSpline = contSpline,
+                ErosionSpline = erosionSpline,
+                PvSpline = pvSpline,
+                DensityNoise = densityNoise,
+                DensityWarpNoise = densityWarpNoise,
+                OutputPixels = outputPixels,
+            };
 
-                    float value;
+            job.Schedule(pixelCount, 64).Complete();
 
-                    if (isCombinedHeight)
-                    {
-                        float c = contSpline.Evaluate(contNoise.GetNoise(worldX, worldZ));
-                        float e = erosionSpline.Evaluate(erosionNoise.GetNoise(worldX, worldZ));
-                        float p = pvSpline.Evaluate(pvNoise.GetNoise(worldX, worldZ));
-                        float height = _biome.baseTerrainHeight + c + (p * e);
-                        value = math.clamp(height / VoxelData.ChunkHeight, 0f, 1f);
-                    }
-                    else if (isDensitySlice)
-                    {
-                        float c = contSpline.Evaluate(contNoise.GetNoise(worldX, worldZ));
-                        float e = erosionSpline.Evaluate(erosionNoise.GetNoise(worldX, worldZ));
-                        float p = pvSpline.Evaluate(pvNoise.GetNoise(worldX, worldZ));
-                        float baseHeight = _biome.baseTerrainHeight + c + (p * e);
-                        float density = baseHeight - _ncSliceY;
-
-                        if (_biome.enable3DDensity)
-                        {
-                            float dx = worldX, dy = _ncSliceY, dz = worldZ;
-                            if (_biome.enableDensityWarp)
-                                densityWarpNoise.DomainWarp(ref dx, ref dy, ref dz);
-                            density += densityNoise.GetNoise(dx, dy, dz) * _biome.densityAmplitude;
-                        }
-
-                        // Map density: positive (solid) = warm, negative (air) = cool, zero = white
-                        if (density > 0f)
-                        {
-                            float t = math.saturate(density / 30f);
-                            pixels[z * texSize + x] = Color.Lerp(Color.white, new Color(0.8f, 0.3f, 0.1f), t);
-                        }
-                        else
-                        {
-                            float t = math.saturate(-density / 30f);
-                            pixels[z * texSize + x] = Color.Lerp(Color.white, new Color(0.15f, 0.4f, 0.85f), t);
-                        }
-
-                        continue;
-                    }
-                    else if (isLegacy)
-                    {
-                        float raw = channelNoise.GetNoise(worldX, worldZ);
-                        float height = _biome.baseTerrainHeight + raw * _biome.terrainAmplitude;
-                        value = math.clamp(height / VoxelData.ChunkHeight, 0f, 1f);
-                    }
-                    else if (useSpline)
-                    {
-                        float raw = channelNoise.GetNoise(worldX, worldZ);
-                        float splineOut = channelSpline.Evaluate(raw);
-                        // Normalize spline output for display: assume output range roughly [-50, +50]
-                        value = math.clamp((splineOut + 50f) / 100f, 0f, 1f);
-                    }
-                    else
-                    {
-                        // Raw noise: [-1, 1] → [0, 1]
-                        value = (channelNoise.GetNoise(worldX, worldZ) + 1f) * 0.5f;
-                        value = math.clamp(value, 0f, 1f);
-                    }
-
-                    pixels[z * texSize + x] = new Color(value, value, value, 1f);
-                }
-            }
-
-            _noiseChannelsTexture.SetPixels(pixels);
+            // --- Copy to texture ---
+            _noiseChannelsTexture.LoadRawTextureData(outputPixels);
             _noiseChannelsTexture.Apply();
+            outputPixels.Dispose();
             Repaint();
         }
 

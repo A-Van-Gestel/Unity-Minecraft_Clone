@@ -19,7 +19,10 @@ namespace Editor.WorldTools
             X128 = 128,
             X256 = 256,
             X512 = 512,
+            X768 = 768,
             X1024 = 1024,
+            X1536 = 1536,
+            X2048 = 2048,
         }
 
         // --- Tab State ---
