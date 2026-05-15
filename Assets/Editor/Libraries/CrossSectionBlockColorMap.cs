@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Reflection;
 using Data;
 using UnityEngine;
 
@@ -9,6 +11,9 @@ namespace Editor.Libraries
     public static class CrossSectionBlockColorMap
     {
         private static readonly Color[] s_blockColors;
+#pragma warning disable UDR0001 // Lazily initialized via BuildBlockNameLookup null-check
+        private static Dictionary<ushort, string> s_blockNames;
+#pragma warning restore UDR0001
 
         static CrossSectionBlockColorMap()
         {
@@ -53,6 +58,26 @@ namespace Editor.Libraries
         public static Color GetBlockColor(ushort blockID)
         {
             return blockID < s_blockColors.Length ? s_blockColors[blockID] : s_blockColors[0];
+        }
+
+        /// <summary>
+        /// Returns the display name for the given block ID, or "Unknown (ID)" for unmapped blocks.
+        /// </summary>
+        public static string GetBlockName(ushort blockID)
+        {
+            if (s_blockNames == null) BuildBlockNameLookup();
+            return s_blockNames!.TryGetValue(blockID, out string name) ? name : $"Unknown ({blockID})";
+        }
+
+        private static void BuildBlockNameLookup()
+        {
+            // ReSharper disable once ConstantNullCoalescingCondition
+            s_blockNames = s_blockNames ?? new Dictionary<ushort, string>();
+            foreach (FieldInfo field in typeof(BlockIDs).GetFields(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (field.FieldType == typeof(ushort))
+                    s_blockNames[(ushort)field.GetValue(null)] = field.Name;
+            }
         }
 
         /// <summary>

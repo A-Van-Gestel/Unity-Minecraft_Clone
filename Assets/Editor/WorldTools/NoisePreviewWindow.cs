@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Data.WorldTypes;
 using Editor.Libraries;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
@@ -43,6 +44,7 @@ namespace Editor.WorldTools
         private Vector2Int _offset = Vector2Int.zero;
         private float _zoom = 1f;
         private int _chunkRadius = 2;
+        private int3 _crosshairPos = new int3(0, 60, 0);
         private bool _autoGenerate = true;
         private bool _liveUpdate = true;
         private bool _showChunkBorders = true;
