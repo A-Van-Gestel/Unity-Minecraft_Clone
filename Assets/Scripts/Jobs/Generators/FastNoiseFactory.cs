@@ -31,6 +31,8 @@ namespace Jobs.Generators
             noise.SetCellularReturnType(config.cellularReturnType);
             noise.SetCellularJitter(config.cellularJitter);
             noise.SetNormalizeToZeroOne(config.normalizeToZeroOne);
+            noise.SetDomainWarpType(config.domainWarpType);
+            noise.SetDomainWarpAmp(config.domainWarpAmp);
             return noise;
         }
     }

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Data.WorldTypes;
 
 namespace Jobs.Data
@@ -71,5 +72,16 @@ namespace Jobs.Data
 
         /// <summary>Number of cave layers for this biome in the shared array.</summary>
         public int CaveLayerCount;
+
+        /// <summary>Whether to evaluate 3D density noise for volumetric terrain.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool Enable3DDensity;
+
+        /// <summary>Max height variation of 3D noise. Defines the Dynamic Density Band bounds.</summary>
+        public float DensityAmplitude;
+
+        /// <summary>Whether to apply domain warping to density noise coordinates.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableDensityWarp;
     }
 }

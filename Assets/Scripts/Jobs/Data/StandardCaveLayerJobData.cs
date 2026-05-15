@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Data.WorldTypes;
 
 namespace Jobs.Data
@@ -39,6 +40,10 @@ namespace Jobs.Data
         public readonly float WormSeekDistance;
         public readonly float WormSeekChance;
 
+        /// <summary>Whether domain warping is enabled for this cave layer. Only used by Cheese and Noodle modes.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool EnableWarp;
+
         public StandardCaveLayerJobData(StandardCaveLayer layerConfig)
         {
             Mode = layerConfig.mode;
@@ -60,6 +65,8 @@ namespace Jobs.Data
             WormSeekInterval = layerConfig.wormSeekInterval;
             WormSeekDistance = layerConfig.wormSeekDistance;
             WormSeekChance = layerConfig.wormSeekChance;
+
+            EnableWarp = layerConfig.enableWarp;
         }
     }
 }

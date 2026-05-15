@@ -508,10 +508,7 @@ namespace Jobs.Data
 }
 ```
 
-> **Note on Domain Warp:** `FastNoiseConfig` intentionally excludes Domain Warp fields (`DomainWarpType`, `DomainWarpAmp`).
-> Domain Warp is a coordinate transformation (`DomainWarp(ref x, ref y)`) applied *before* a noise evaluation — it requires its own `FastNoiseLite` instance, separate from the noise instance it distorts.
-> Features that use Domain Warp (Sections 12.1.B, 12.1.E) should define a second `FastNoiseConfig` field (e.g., `DomainWarpConfig`) on the relevant job data struct, with `DomainWarpType` and `DomainWarpAmp` added to that config only.
-> This keeps the base `FastNoiseConfig` lean for the common case.
+> **Note on Domain Warp:** As of v2.3, `FastNoiseConfig` includes `DomainWarpType` and `DomainWarpAmp` fields. These default to `OpenSimplex2` and `0f` respectively, meaning existing configs are unaffected. Domain Warp is a coordinate transformation (`DomainWarp(ref x, ref y, ref z)`) applied *before* a noise evaluation — it requires its own `FastNoiseLite` instance, separate from the noise instance it distorts. Features that use Domain Warp (e.g., density warping, cave warping) define a separate `FastNoiseConfig` field (e.g., `densityWarpConfig`) whose `domainWarpType` and `domainWarpAmp` values configure the warp instance.
 
 **File Location:** `Assets/Scripts/Jobs/Data/StandardLodeJobData.cs`
 

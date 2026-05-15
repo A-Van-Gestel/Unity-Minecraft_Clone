@@ -175,7 +175,7 @@ namespace Jobs
                                         int cIdx = biome.CaveLayerStartIndex + s;
                                         StandardCaveLayerJobData seekLayer = AllCaveLayers[cIdx];
 
-                                        if (seekLayer.Mode == CaveMode.Blob || seekLayer.Mode == CaveMode.Spaghetti)
+                                        if (seekLayer.Mode == CaveMode.Cheese || seekLayer.Mode == CaveMode.Spaghetti || seekLayer.Mode == CaveMode.Noodle)
                                         {
                                             float noiseVal;
                                             if (seekLayer.Mode == CaveMode.Spaghetti)
@@ -187,6 +187,10 @@ namespace Jobs
                                                 float cb = CaveNoises[cIdx].GetNoise(lookPos.z, lookPos.y);
                                                 float ca = CaveNoises[cIdx].GetNoise(lookPos.z, lookPos.x);
                                                 noiseVal = (ab + bc + ac + ba + cb + ca) / 6f;
+                                            }
+                                            else if (seekLayer.Mode == CaveMode.Noodle)
+                                            {
+                                                noiseVal = 1.0f - math.abs(CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.y, lookPos.z));
                                             }
                                             else
                                             {

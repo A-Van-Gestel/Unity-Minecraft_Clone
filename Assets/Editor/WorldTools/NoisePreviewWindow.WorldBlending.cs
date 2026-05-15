@@ -180,6 +180,14 @@ namespace Editor.WorldTools
             NativeArray<FastNoiseLite> terrainNoises =
                 new NativeArray<FastNoiseLite>(biomeCount, Allocator.Temp);
 
+            // Multi-Noise arrays for the new blending overload
+            NativeArray<FastNoiseLite> contNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Temp);
+            NativeArray<FastNoiseLite> erosionNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Temp);
+            NativeArray<FastNoiseLite> pvNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Temp);
+            NativeArray<BurstSpline> contSplines = new NativeArray<BurstSpline>(biomeCount, Allocator.Temp);
+            NativeArray<BurstSpline> erosionSplines = new NativeArray<BurstSpline>(biomeCount, Allocator.Temp);
+            NativeArray<BurstSpline> pvSplines = new NativeArray<BurstSpline>(biomeCount, Allocator.Temp);
+
             for (int i = 0; i < biomeCount; i++)
             {
                 StandardBiomeAttributes biome = standardBiomes[i];
@@ -196,8 +204,50 @@ namespace Editor.WorldTools
                     FloraZoneCoverage = biome.floraZoneCoverage,
                 };
 
+#pragma warning disable CS0618 // Type or member is obsolete
                 terrainNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.terrainNoiseConfig, _blendSeed);
+#pragma warning restore CS0618 // Type or member is obsolete
+
+                // Build Multi-Noise data with legacy fallback per-biome
+                FastNoiseConfig contCfg = biome.continentalnessNoiseConfig;
+                FastNoiseConfig erosionCfg = biome.erosionNoiseConfig;
+                FastNoiseConfig pvCfg = biome.peaksAndValleysNoiseConfig;
+
+                bool biomeHasMultiNoise = contCfg.frequency != 0f || erosionCfg.frequency != 0f || pvCfg.frequency != 0f;
+                if (biomeHasMultiNoise)
+                {
+                    contCfg.normalizeToZeroOne = false;
+                    erosionCfg.normalizeToZeroOne = false;
+                    pvCfg.normalizeToZeroOne = false;
+
+                    contNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(contCfg, _blendSeed);
+                    erosionNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(erosionCfg, _blendSeed);
+                    pvNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(pvCfg, _blendSeed);
+                    contSplines[i] = BurstSpline.FromAnimationCurve(biome.continentalnessCurve);
+                    erosionSplines[i] = BurstSpline.FromAnimationCurve(biome.erosionCurve);
+                    pvSplines[i] = BurstSpline.FromAnimationCurve(biome.peaksAndValleysCurve);
+                }
+                else
+                {
+                    // Legacy fallback: route terrainNoiseConfig through continentalness slot
+                    contNoises[i] = terrainNoises[i];
+                    erosionNoises[i] = FastNoiseLite.Create(0);
+                    pvNoises[i] = FastNoiseLite.Create(0);
+                    contSplines[i] = BurstSpline.CreateLinearRamp(biome.terrainAmplitude);
+                    erosionSplines[i] = BurstSpline.FromAnimationCurve(null);
+                    pvSplines[i] = BurstSpline.FromAnimationCurve(null);
+                }
             }
+
+            MultiNoiseData multiNoise = new MultiNoiseData
+            {
+                ContinentalnessNoises = contNoises,
+                ErosionNoises = erosionNoises,
+                PeaksValleysNoises = pvNoises,
+                ContinentalnessSplines = contSplines,
+                ErosionSplines = erosionSplines,
+                PeaksValleysSplines = pvSplines,
+            };
 
             // --- Build Biome Selection Noise (Cellular / Voronoi) ---
             FastNoiseConfig selectionConfig = standardBiomes[0].biomeWeightNoiseConfig;
@@ -225,12 +275,12 @@ namespace Editor.WorldTools
                     {
                         case BlendingRenderMode.Heightmap:
                             pixelColor = EvaluateHeightmapPixel(gx, gz, seaLevel,
-                                ref selectionNoise, ref biomesJobData, ref terrainNoises);
+                                ref selectionNoise, ref biomesJobData, ref multiNoise);
                             break;
 
                         case BlendingRenderMode.BiomeVoronoi:
                             pixelColor = EvaluateVoronoiPixel(gx, gz,
-                                ref selectionNoise, ref biomesJobData, ref terrainNoises, biomeCount);
+                                ref selectionNoise, ref biomesJobData, ref multiNoise, biomeCount);
                             break;
 
                         case BlendingRenderMode.BlendWeightHeatmap:
@@ -270,6 +320,12 @@ namespace Editor.WorldTools
             // Cleanup
             biomesJobData.Dispose();
             terrainNoises.Dispose();
+            contNoises.Dispose();
+            erosionNoises.Dispose();
+            pvNoises.Dispose();
+            contSplines.Dispose();
+            erosionSplines.Dispose();
+            pvSplines.Dispose();
         }
 
         #region Pixel Evaluators
@@ -281,10 +337,10 @@ namespace Editor.WorldTools
             int gx, int gz, int seaLevel,
             ref FastNoiseLite selectionNoise,
             ref NativeArray<StandardBiomeAttributesJobData> biomes,
-            ref NativeArray<FastNoiseLite> terrainNoises)
+            ref MultiNoiseData multiNoise)
         {
-            int height = BiomeBlender.CalculateBlendedTerrainHeight(
-                gx, gz, ref selectionNoise, ref biomes, ref terrainNoises);
+            int height = (int)math.floor(BiomeBlender.CalculateBlendedTerrainHeight(
+                gx, gz, ref selectionNoise, ref biomes, ref multiNoise, out _));
 
             if (_blendShowWaterLevel && height < seaLevel)
             {
@@ -305,7 +361,7 @@ namespace Editor.WorldTools
             int gx, int gz,
             ref FastNoiseLite selectionNoise,
             ref NativeArray<StandardBiomeAttributesJobData> biomes,
-            ref NativeArray<FastNoiseLite> terrainNoises,
+            ref MultiNoiseData multiNoise,
             int biomeCount)
         {
             // Get the raw cellular value to determine biome index
@@ -316,8 +372,8 @@ namespace Editor.WorldTools
             Color biomeColor = s_biomeColors[biomeIndex % s_biomeColors.Length];
 
             // Modulate brightness by terrain height for depth
-            int height = BiomeBlender.CalculateBlendedTerrainHeight(
-                gx, gz, ref selectionNoise, ref biomes, ref terrainNoises);
+            int height = (int)math.floor(BiomeBlender.CalculateBlendedTerrainHeight(
+                gx, gz, ref selectionNoise, ref biomes, ref multiNoise, out _));
             float brightness = math.clamp(height / 100f, 0.3f, 1.0f);
 
             return biomeColor * brightness;

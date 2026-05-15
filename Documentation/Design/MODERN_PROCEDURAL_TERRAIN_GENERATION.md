@@ -1,8 +1,8 @@
 # Design Document: Modern Procedural Terrain Generation
 
-**Version:** 2.2 (Production-Ready)  
+**Version:** 2.3 (Implemented)  
 **Date:** May 2026  
-**Status:** Approved for Implementation  
+**Status:** Implemented  
 **Target:** Unity 6.4 (Standard World Gen System / Burst Compiler)  
 **Context:** Upgrading the 2D heightmap generation to a 3D volumetric density pipeline with Domain Warping and Multi-Noise (Continentalness, Erosion, Peaks & Valleys).
 
@@ -156,11 +156,17 @@ We expose Domain Warping parameters so that any `FastNoiseConfig` can optionally
         public bool enableDensityWarp = true;
         public FastNoiseConfig densityWarpConfig;
 
-        // Legacy field — replaced by Multi-Noise system above
+        // Legacy field — replaced by Multi-Noise system above.
+        // Kept (not deleted) so existing biome assets retain their serialized terrain noise
+        // data for migration and rollback purposes.
         [Obsolete("Use continentalnessNoiseConfig/erosionNoiseConfig/peaksAndValleysNoiseConfig instead.")]
         [HideInInspector]
         public FastNoiseConfig terrainNoiseConfig;
 ```
+
+> [!IMPORTANT]
+> **Existing Biome Asset Migration:** Adding new fields to a ScriptableObject is non-destructive — Unity preserves all existing serialized data. New fields (`continentalnessNoiseConfig`, `erosionNoiseConfig`, etc.) will deserialize with default values (frequency = 0, empty curves). To prevent flat terrain on first run after upgrading, `StandardChunkGenerator.Initialize()` must detect uninitialized Multi-Noise configs (e.g., `frequency == 0` on all three) and fall back to the legacy `terrainNoiseConfig + terrainAmplitude` formula until the designer
+> configures the new fields. This keeps the legacy `terrainNoiseConfig` field functional as a migration safety net. An editor migration tool or `OnValidate()` hook can later auto-populate reasonable Multi-Noise defaults from the legacy config.
 
 > [!WARNING]
 > **Multi-Noise `normalizeToZeroOne` Constraint:** The Continentalness, Erosion, and Peaks & Valleys noise configs must have `normalizeToZeroOne = false` (the default). Their outputs feed into `BurstSpline.Evaluate()` which expects the `[-1, 1]` input domain. If a designer accidentally enables normalization, the spline input becomes `[0, 1]` and terrain shapes will be wildly incorrect. `StandardChunkGenerator.Initialize()` should force this to `false` for these three configs before constructing the `FastNoiseLite` instances.
@@ -172,12 +178,14 @@ New fields mirroring the authoring class:
 ```csharp
 // Assets/Scripts/Jobs/Data/StandardBiomeAttributesJobData.cs — new fields
         /// <summary>Whether to evaluate 3D density noise for volumetric terrain.</summary>
+        [MarshalAs(UnmanagedType.U1)]
         public bool Enable3DDensity;
 
         /// <summary>Max height variation of 3D noise. Defines the Dynamic Density Band bounds.</summary>
         public float DensityAmplitude;
 
         /// <summary>Whether to apply domain warping to density noise coordinates.</summary>
+        [MarshalAs(UnmanagedType.U1)]
         public bool EnableDensityWarp;
 ```
 
@@ -199,66 +207,100 @@ public enum CaveMode
 }
 
 // Assets/Scripts/Jobs/Data/StandardCaveLayerJobData.cs — add field
+        [MarshalAs(UnmanagedType.U1)]
         public readonly bool EnableWarp;
 ```
 
-> [!IMPORTANT]
-> The `Blob` → `Cheese` rename requires `[FormerlySerializedAs("Blob")]` on the enum to preserve existing biome asset data. See the `unity-file-ops` skill for the serialization-safe rename protocol.
+> [!NOTE]
+> **`Blob` → `Cheese` Rename Safety:** Unity serializes enum fields by their **integer value**, not by name. Since `Cheese` occupies position 0 (the same slot `Blob` occupied), existing biome assets deserialize correctly without any attribute. `[FormerlySerializedAs]` is a field-level attribute and cannot be applied to individual enum members — it is not needed here.
 
 > [!NOTE]
 > **Domain Warp and Spaghetti:** Cave domain warping (`EnableWarp`) only applies to `Cheese` and `Noodle` modes, which use full 3D noise evaluation. The legacy `Spaghetti` mode uses 2D noise pairs (`GetNoise(x, y)`, `GetNoise(y, z)`, etc.) — applying a 3D warp to coordinates consumed by 2D calls produces inconsistent distortion (the warped Z shift is lost in pairs that don't use Z). Spaghetti always evaluates with unwarped `globalX, y, globalZ` coordinates.
 
 ### 3.6. Updating `BiomeBlender`
 
-The current `BiomeBlender.EvaluateHeight()` uses the legacy single-noise formula. It must be updated to use the Multi-Noise spline pipeline:
+The current `BiomeBlender.EvaluateHeight()` uses the legacy single-noise formula (`BaseTerrainHeight + noise * TerrainAmplitude`). It must be updated to use the Multi-Noise spline pipeline. To keep the parameter count manageable, we introduce a `MultiNoiseData` helper struct:
 
 ```csharp
 // Assets/Scripts/Jobs/Helpers/BiomeBlender.cs
+
+/// <summary>
+/// Groups the per-biome noise and spline arrays needed for Multi-Noise height evaluation.
+/// Passed by ref to avoid copying six NativeArray headers through the blending pipeline.
+/// </summary>
+public struct MultiNoiseData
+{
+    [ReadOnly] public NativeArray<FastNoiseLite> ContinentalnessNoises;
+    [ReadOnly] public NativeArray<FastNoiseLite> ErosionNoises;
+    [ReadOnly] public NativeArray<FastNoiseLite> PeaksValleysNoises;
+    [ReadOnly] public NativeArray<BurstSpline> ContinentalnessSplines;
+    [ReadOnly] public NativeArray<BurstSpline> ErosionSplines;
+    [ReadOnly] public NativeArray<BurstSpline> PeaksValleysSplines;
+}
+
+/// <summary>
+/// Calculates the blended terrain height at a global (x, z) column using Multi-Noise splines.
+/// Returns float (not int) to preserve sub-block precision for the Dynamic Density Band.
+/// </summary>
+public static float CalculateBlendedTerrainHeight(
+    int globalX,
+    int globalZ,
+    ref FastNoiseLite selectionNoise,
+    ref NativeArray<StandardBiomeAttributesJobData> biomes,
+    ref MultiNoiseData multiNoise)
+{
+    // ... existing 9-cell Voronoi IDW blending logic (unchanged) ...
+    // Replace the EvaluateHeight call with the updated version below.
+    // Return float instead of (int)math.floor(finalHeight).
+}
+
 private static float EvaluateHeight(
     int x, int z, int biomeIdx,
     ref NativeArray<StandardBiomeAttributesJobData> biomes,
-    ref NativeArray<FastNoiseLite> contNoises,
-    ref NativeArray<FastNoiseLite> erosionNoises,
-    ref NativeArray<FastNoiseLite> pvNoises,
-    ref NativeArray<BurstSpline> contSplines,
-    ref NativeArray<BurstSpline> erosionSplines,
-    ref NativeArray<BurstSpline> pvSplines)
+    ref MultiNoiseData mn)
 {
     StandardBiomeAttributesJobData b = biomes[biomeIdx];
-    float cont = contSplines[biomeIdx].Evaluate(contNoises[biomeIdx].GetNoise(x, z));
-    float erosion = erosionSplines[biomeIdx].Evaluate(erosionNoises[biomeIdx].GetNoise(x, z));
-    float pv = pvSplines[biomeIdx].Evaluate(pvNoises[biomeIdx].GetNoise(x, z));
+    float cont = mn.ContinentalnessSplines[biomeIdx].Evaluate(mn.ContinentalnessNoises[biomeIdx].GetNoise(x, z));
+    float erosion = mn.ErosionSplines[biomeIdx].Evaluate(mn.ErosionNoises[biomeIdx].GetNoise(x, z));
+    float pv = mn.PeaksValleysSplines[biomeIdx].Evaluate(mn.PeaksValleysNoises[biomeIdx].GetNoise(x, z));
     return b.BaseTerrainHeight + cont + (pv * erosion);
 }
 ```
 
-The `CalculateBlendedTerrainHeight` signature must be updated to accept the new arrays.
+> [!IMPORTANT]
+> **Return type change:** `CalculateBlendedTerrainHeight` now returns `float` instead of `int`. The Density Band computation needs sub-block precision; truncation to `int` happens at the call site after band bounds are computed. The existing 9-cell IDW blending logic, `ApplyCurve`, and `GetBiomeIndex` remain unchanged.
+
+The `StandardChunkGenerationJob` must construct a `MultiNoiseData` from its input arrays and pass it to the blender. This replaces the inline per-column multi-noise evaluation (see §4).
 
 ### 3.7. Generator Initialization & Memory Management
 
 `StandardChunkGenerator.Initialize()` must allocate and populate the following **new** `Allocator.Persistent` arrays:
 
-| Array | Size | Source |
-|---|---|---|
-| `_biomeContinentalnessNoises` | `biomeCount` | `biome.continentalnessNoiseConfig` |
-| `_biomeErosionNoises` | `biomeCount` | `biome.erosionNoiseConfig` |
-| `_biomePeaksValleysNoises` | `biomeCount` | `biome.peaksAndValleysNoiseConfig` |
-| `_biomeDensityNoises` | `biomeCount` | `biome.densityNoiseConfig` |
-| `_biomeDensityWarpNoises` | `biomeCount` | `biome.densityWarpConfig` |
-| `_biomeContinentalnessSplines` | `biomeCount` | `BurstSpline.FromAnimationCurve(biome.continentalnessCurve)` |
-| `_biomeErosionSplines` | `biomeCount` | `BurstSpline.FromAnimationCurve(biome.erosionCurve)` |
-| `_biomePVSplines` | `biomeCount` | `BurstSpline.FromAnimationCurve(biome.peaksAndValleysCurve)` |
-| `_caveWarpNoises` | `totalCaveLayerCount` | `caveLayer.warpConfig` |
+| Array                          | Size                  | Source                                                       |
+|--------------------------------|-----------------------|--------------------------------------------------------------|
+| `_biomeContinentalnessNoises`  | `biomeCount`          | `biome.continentalnessNoiseConfig`                           |
+| `_biomeErosionNoises`          | `biomeCount`          | `biome.erosionNoiseConfig`                                   |
+| `_biomePeaksValleysNoises`     | `biomeCount`          | `biome.peaksAndValleysNoiseConfig`                           |
+| `_biomeDensityNoises`          | `biomeCount`          | `biome.densityNoiseConfig`                                   |
+| `_biomeDensityWarpNoises`      | `biomeCount`          | `biome.densityWarpConfig`                                    |
+| `_biomeContinentalnessSplines` | `biomeCount`          | `BurstSpline.FromAnimationCurve(biome.continentalnessCurve)` |
+| `_biomeErosionSplines`         | `biomeCount`          | `BurstSpline.FromAnimationCurve(biome.erosionCurve)`         |
+| `_biomePVSplines`              | `biomeCount`          | `BurstSpline.FromAnimationCurve(biome.peaksAndValleysCurve)` |
+| `_caveWarpNoises`              | `totalCaveLayerCount` | `caveLayer.warpConfig` (see note below)                      |
 
 All must have corresponding `.Dispose()` calls in `StandardChunkGenerator.Dispose()`.
 
-The legacy `_biomeTerrainNoises` array becomes unused and should be removed.
+> [!NOTE]
+> **`_caveWarpNoises` Indexing:** This array is sized to `totalCaveLayerCount` and indexed by `caveIdx` (matching `_caveNoises`). Every cave layer gets an entry — including `Spaghetti` and `WormCarver` layers where warp is ignored. For layers with `enableWarp = false` or modes that don't support warping, populate the slot with a default-constructed `FastNoiseLite` instance (via `FastNoiseLite.Create(0)`). This avoids conditional indexing in the job and matches the existing pattern used by `_caveNoises` (which populates all slots regardless of mode).
+
+The legacy `_biomeTerrainNoises` array becomes unused and should be removed (but see §3.3 migration note — retain it until all biome assets have been migrated to Multi-Noise configs).
 
 ---
 
 ## 4. Burst Job Pipeline (`StandardChunkGenerationJob`)
 
 Core rewrite of the terrain generation loop. Key changes from v1.x:
+
 - Multi-Noise spline-based height calculation
 - 3D Density evaluation within a dynamic band
 - `lastSurfaceY` tracking for correct subsurface strata under overhangs
@@ -269,16 +311,22 @@ Core rewrite of the terrain generation loop. Key changes from v1.x:
 // Assets/Scripts/Jobs/StandardChunkGenerationJob.cs
 // ... existing biome dithering code ...
 
-// --- 1. MULTI-NOISE BASE TERRAIN ---
-float continentalness = BiomeContinentalnessNoises[biomeIndex].GetNoise(globalX, globalZ);
-float erosion = BiomeErosionNoises[biomeIndex].GetNoise(globalX, globalZ);
-float pv = BiomePeaksValleysNoises[biomeIndex].GetNoise(globalX, globalZ);
+// --- 1. MULTI-NOISE BASE TERRAIN (via BiomeBlender) ---
+// Height is evaluated through the existing 9-cell Voronoi IDW blending pipeline,
+// now using Multi-Noise splines instead of the legacy single-noise formula.
+// Returns float to preserve sub-block precision for the Density Band.
+MultiNoiseData multiNoise = new MultiNoiseData
+{
+    ContinentalnessNoises = BiomeContinentalnessNoises,
+    ErosionNoises = BiomeErosionNoises,
+    PeaksValleysNoises = BiomePeaksValleysNoises,
+    ContinentalnessSplines = BiomeContinentalnessSplines,
+    ErosionSplines = BiomeErosionSplines,
+    PeaksValleysSplines = BiomePVSplines,
+};
 
-float contOffset = BiomeContinentalnessSplines[biomeIndex].Evaluate(continentalness);
-float erosionMultiplier = BiomeErosionSplines[biomeIndex].Evaluate(erosion);
-float pvAmplitude = BiomePVSplines[biomeIndex].Evaluate(pv);
-
-float terrainHeightFloat = biome.BaseTerrainHeight + contOffset + (pvAmplitude * erosionMultiplier);
+float terrainHeightFloat = BiomeBlender.CalculateBlendedTerrainHeight(
+    globalX, globalZ, ref BiomeSelectionNoise, ref Biomes, ref multiNoise);
 int baseTerrainHeight = (int)math.floor(terrainHeightFloat);
 
 // Dynamic Density Band bounds (use ceil to never clip valid voxels)
@@ -287,7 +335,6 @@ int bandHigh = baseTerrainHeight + (int)math.ceil(biome.DensityAmplitude);
 
 bool highestBlockFound = false;
 float previousDensity = -1f;
-bool hasHitSurface = false;
 int lastSurfaceY = baseTerrainHeight; // Anchor for subsurface strata depth
 
 // --- 2. COLUMN ITERATION (Top-Down) ---
@@ -306,7 +353,14 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
             BiomeDensityWarpNoises[biomeIndex].DomainWarp(ref dx, ref dy, ref dz);
         }
 
-        // TODO: Production code must blend this across biome boundaries
+        // 3D density blending at biome boundaries:
+        // Use the same Voronoi edge distance from the BiomeBlender to blend the 3D density
+        // contribution from the 2-3 closest biomes. This prevents vertical cliff tearing
+        // at biome transitions where DensityAmplitude or noise configs differ.
+        // Implementation: retrieve the IDW weights from the blender (or cache them from the
+        // height pass above) and weighted-average the 3D noise * amplitude across neighbors.
+        // Only neighbors within the density band need evaluation — skip biomes whose
+        // baseTerrainHeight ± DensityAmplitude doesn't overlap the current Y level.
         density += BiomeDensityNoises[biomeIndex].GetNoise(dx, dy, dz) * biome.DensityAmplitude;
     }
 
@@ -319,7 +373,6 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
     // ----- VOLUMETRIC TERRAIN PASS -----
     else if (density > 0f)
     {
-        hasHitSurface = true;
         bool isExposedSurface = (previousDensity <= 0f);
 
         if (isExposedSurface)
@@ -367,7 +420,7 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
     }
     else // density <= 0f
     {
-        if (y < SeaLevel && !hasHitSurface)
+        if (y < SeaLevel)
             voxelValue = (byte)BlockIDs.Water;
         else
             voxelValue = (byte)BlockIDs.Air;
@@ -474,7 +527,13 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
 
 ## 5. `GetVoxel` Main-Thread Fallback
 
-`StandardChunkGenerator.GetVoxel()` is a synchronous main-thread voxel lookup used for structure expansion collision checks. It must be updated in parallel with the Burst job to use the same volumetric density logic (Multi-Noise splines, 3D density band, `lastSurfaceY` strata anchoring, and the new cave modes). If left on the legacy 2D heightmap, structures will be collision-tested against incorrect terrain, causing floating trees and buried structures.
+`StandardChunkGenerator.GetVoxel()` is a synchronous main-thread voxel lookup used exclusively by `World.GetHighestVoxel()` as a fallback when a chunk hasn't been generated yet (e.g., spawn point calculation). It is **not** used for structure collision checks — structures use `StructureSpawnMarker` + `ExpandStructure()` on the main thread, which operates on already-generated chunk data.
+
+Given that `GetVoxel` is a rarely-hit fallback path and maintaining a parallel main-thread implementation that exactly mirrors the Burst job pipeline is a significant maintenance burden (every job change requires a duplicate update), we recommend **not** updating `GetVoxel` to match the volumetric system. Instead:
+
+1. **Keep the legacy implementation as-is.** The spawn-point lookup only needs an approximate "highest solid block" — a 2D heightmap approximation is sufficient.
+2. **Add a comment** in `GetVoxel` noting it uses the legacy terrain formula and does not reflect volumetric overhangs, which is acceptable for its spawn-point-only usage.
+3. If exact parity is later needed, the preferred approach is to generate the target chunk via the normal job pipeline and read from the resulting `ChunkData`, rather than maintaining a second implementation.
 
 ---
 
@@ -486,11 +545,16 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
 * **3D Density Evaluation:** Low to Medium. The **Dynamic Density Band** skips ~95% of Y-levels.
 * **Overall Estimate:** ~1.5ms – 2.5ms per chunk increase in Burst. Well within streaming budgets.
 
-### 6.2. Cache Locality & Memory
+### 6.2. Subsurface Strata Evaluation Cost
+
+The legacy system runs the terrain layer loop only for blocks where `y < terrainHeight` (a small subsurface region near the surface). The volumetric system runs it for every voxel where `density > 0` and `!isExposedSurface` — potentially dozens of Y-levels per column when `DensityAmplitude` is large. The strata loop early-exits via `break` when a matching layer is found, so this is not catastrophic. However, biomes with many terrain layers and high `DensityAmplitude` will see a measurable increase. If profiling reveals this as a bottleneck, precomputing
+cumulative depth thresholds per-column (before the Y-loop) would eliminate the inner loop entirely.
+
+### 6.3. Cache Locality & Memory
 
 Zero new allocations inside the execution job. All data is pre-allocated `NativeArray<FastNoiseLite>` and `NativeArray<BurstSpline>` tables managed by `StandardChunkGenerator`.
 
-### 6.3. Visual Wins
+### 6.4. Visual Wins
 
 1. **True Overhangs & Arches:** Bypassing the strict $y = f(x,z)$ mapping permits gravity-defying terrain features naturally.
 2. **Organic River Valleys & Canyons:** Applying Domain Warp to Ridged noise generates winding, non-repetitive ravines that mimic natural hydraulic erosion.

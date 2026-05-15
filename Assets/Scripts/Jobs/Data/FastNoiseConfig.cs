@@ -76,6 +76,15 @@ namespace Jobs.Data
         [Tooltip("Jitter factor for Cellular noise cell points.")]
         public float cellularJitter;
 
+        /// <summary>Type of domain warp. Only relevant when this config drives a DomainWarp() call.</summary>
+        [Separator("Domain Warp Settings")]
+        [Tooltip("Type of domain warp. Only relevant when this config drives a DomainWarp() call.")]
+        public FastNoiseLite.DomainWarpType domainWarpType;
+
+        /// <summary>Strength/Amplitude of the coordinate distortion.</summary>
+        [Tooltip("Strength/Amplitude of the coordinate distortion.")]
+        public float domainWarpAmp;
+
         /// <summary>When true, remaps GetNoise output from [-1, 1] to [0, 1].</summary>
         [Separator("Output Settings")]
         [OverrideLabel("Normalize to [0, 1]")]

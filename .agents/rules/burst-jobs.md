@@ -14,7 +14,7 @@ All code under `Assets/Scripts/Jobs/` MUST compile under Unity's Burst compiler.
 ## Hard requirements (code will not compile if violated)
 
 - **No managed types.** No `class` fields, no `string`, no managed arrays (`new int[]`). Use `NativeArray<T>`, `NativeList<T>`, `NativeHashMap<K,V>`, or `static readonly` arrays for constant data.
-- **All struct fields must be blittable.** A raw `bool` is not blittable — use `[MarshalAs(UnmanagedType.U1)] public bool` or replace with `byte`/`int` flags.
+- **All struct fields must be blittable.** A raw `bool` is not blittable — always annotate with `[MarshalAs(UnmanagedType.U1)] public bool` to ensure correct marshalling. Alternatively, replace with `byte`/`int` flags. Note: Unity 6 Burst may silently accept unannotated `bool`, but the `MarshalAs` attribute is required by project convention for explicit correctness.
 - **No Unity API access.** No `GameObject`, `Transform`, `GetComponent`, `MonoBehaviour`, or scene-graph calls. Pass all required data into the job struct from the main thread.
 - **No `try`/`catch`/`finally`.** No exception handling of any kind inside Burst code.
 - **No virtual calls.** No `interface` dispatch, no `virtual` methods, no delegates (except `FunctionPointer<T>`).

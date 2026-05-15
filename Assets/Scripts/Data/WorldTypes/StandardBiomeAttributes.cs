@@ -19,6 +19,8 @@ namespace Data.WorldTypes
 
         [Header("Terrain Noise")]
         [Tooltip("Noise configuration for the terrain heightmap.")]
+        [Obsolete("Use continentalnessNoiseConfig/erosionNoiseConfig/peaksAndValleysNoiseConfig instead.")]
+        [HideInInspector]
         public FastNoiseConfig terrainNoiseConfig;
 
         [Tooltip("Noise configuration for biome weight / Voronoi selection.")]
@@ -52,6 +54,42 @@ namespace Data.WorldTypes
         [Tooltip("Vertical multiplier for terrain noise (e.g., 20 means hills reach BaseTerrainHeight ± 20). " +
                  "FastNoiseLite returns normalized -1.0 to 1.0; this gives it physical scale.")]
         public float terrainAmplitude = 20f;
+
+        [Header("Terrain Shape (Multi-Noise)")]
+        [Tooltip("Noise controlling macro landmass scale (Oceans vs Continents).")]
+        public FastNoiseConfig continentalnessNoiseConfig;
+
+        [Tooltip("Curve mapping Continentalness [-1, 1] to base height offset.")]
+        public AnimationCurve continentalnessCurve;
+
+        [Tooltip("Noise controlling weathering.")]
+        public FastNoiseConfig erosionNoiseConfig;
+
+        [Tooltip("Curve mapping Erosion [-1, 1] to height multiplier.")]
+        public AnimationCurve erosionCurve;
+
+        [Tooltip("Noise controlling localized hills and valleys.")]
+        public FastNoiseConfig peaksAndValleysNoiseConfig;
+
+        [Tooltip("Curve mapping P&V [-1, 1] to local amplitude.")]
+        public AnimationCurve peaksAndValleysCurve;
+
+        [Header("3D Density (Overhangs & Arches)")]
+        [Tooltip("Enable volumetric 3D density evaluation for terrain overhangs and arches.")]
+        public bool enable3DDensity;
+
+        [Tooltip("Noise configuration for the 3D density field.")]
+        public FastNoiseConfig densityNoiseConfig;
+
+        [Tooltip("Max height variation of 3D noise. Dynamically defines the Density Band.")]
+        public float densityAmplitude = 15f;
+
+        [Header("Domain Warping (Organic Distortion)")]
+        [Tooltip("Apply domain warping to the 3D density noise coordinates for organic terrain shapes.")]
+        public bool enableDensityWarp;
+
+        [Tooltip("Noise configuration for the density domain warp. Requires its own frequency and amplitude settings.")]
+        public FastNoiseConfig densityWarpConfig;
 
         [Header("Surface Blocks")]
         [BlockID]
@@ -152,14 +190,17 @@ namespace Data.WorldTypes
     /// </summary>
     public enum CaveMode : byte
     {
-        /// <summary>Blob (Single Noise) — Standard single 3D noise threshold. Produces chambers and pockets.</summary>
-        Blob,
+        /// <summary>Cheese (Single Noise) — Large open caverns via single 3D noise threshold. Renamed from Blob.</summary>
+        Cheese,
 
         /// <summary>Spaghetti (Axis-Pair Average) — Legacy-style 6-way 2D noise averaging. Produces interconnected tunnel networks.</summary>
         Spaghetti,
 
         /// <summary>Worm Carver (Random Walk) — Legacy-style recursive turtle generator for highly organic cave networks.</summary>
         WormCarver,
+
+        /// <summary>Noodle (Isoband) — Winding tubular corridors where |noise3D| is close to zero.</summary>
+        Noodle,
     }
 
     /// <summary>
@@ -192,7 +233,7 @@ namespace Data.WorldTypes
         public Color previewColor = Color.red;
 
         [Tooltip("Blob (Single Noise) produces chambers. Spaghetti (Axis-Pair Average) produces interconnected tunnel networks.")]
-        public CaveMode mode = CaveMode.Blob;
+        public CaveMode mode = CaveMode.Cheese;
 
         [Tooltip("FastNoiseLite noise configuration for defining the cave shapes.")]
         [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
@@ -201,6 +242,14 @@ namespace Data.WorldTypes
         [Tooltip("If the evaluated noise exceeds this threshold, the block is carved into air.")]
         [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
         public float threshold = 0.5f;
+
+        [Header("Cave Domain Warping")]
+        [Tooltip("Apply domain warping to this cave layer's noise coordinates. Only affects Cheese and Noodle modes (3D evaluation). Ignored for Spaghetti (2D legacy).")]
+        public bool enableWarp;
+
+        [ConditionalField(nameof(enableWarp))]
+        [Tooltip("Noise configuration for the cave domain warp. Requires its own frequency and amplitude settings.")]
+        public FastNoiseConfig warpConfig;
 
         [Header("Depth Bounds")]
         [Tooltip("Caves will not generate below this Y level.")]

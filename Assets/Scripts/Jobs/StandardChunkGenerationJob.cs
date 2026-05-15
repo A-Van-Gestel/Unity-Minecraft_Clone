@@ -58,6 +58,46 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<FastNoiseLite> BiomeTerrainNoises;
 
+        #region Multi-Noise Input Data
+
+        /// <summary>Per-biome Continentalness noise instances for multi-noise terrain height.</summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> BiomeContinentalnessNoises;
+
+        /// <summary>Per-biome Erosion noise instances for multi-noise terrain height.</summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> BiomeErosionNoises;
+
+        /// <summary>Per-biome Peaks &amp; Valleys noise instances for multi-noise terrain height.</summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> BiomePeaksValleysNoises;
+
+        /// <summary>Per-biome Continentalness splines baked from AnimationCurves.</summary>
+        [ReadOnly]
+        public NativeArray<BurstSpline> BiomeContinentalnessSplines;
+
+        /// <summary>Per-biome Erosion splines baked from AnimationCurves.</summary>
+        [ReadOnly]
+        public NativeArray<BurstSpline> BiomeErosionSplines;
+
+        /// <summary>Per-biome Peaks &amp; Valleys splines baked from AnimationCurves.</summary>
+        [ReadOnly]
+        public NativeArray<BurstSpline> BiomePVSplines;
+
+        /// <summary>Per-biome 3D density noise instances.</summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> BiomeDensityNoises;
+
+        /// <summary>Per-biome domain warp noise instances for density coordinate distortion.</summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> BiomeDensityWarpNoises;
+
+        /// <summary>Per-cave-layer domain warp noise instances. Indexed by caveIdx.</summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> CaveWarpNoises;
+
+        #endregion
+
         /// <summary>
         /// Pre-constructed FastNoiseLite instances for each biome's strata depth noise.
         /// </summary>
@@ -171,67 +211,105 @@ namespace Jobs
             surfaceBiomeIndex = math.clamp(surfaceBiomeIndex, 0, Biomes.Length - 1);
             StandardBiomeAttributesJobData surfaceBiome = Biomes[surfaceBiomeIndex];
 
-            // --- TERRAIN HEIGHT (2D noise blending) ---
-            int terrainHeight = BiomeBlender.CalculateBlendedTerrainHeight(
-                globalX, globalZ, ref BiomeSelectionNoise, ref Biomes, ref BiomeTerrainNoises);
+            // --- TERRAIN HEIGHT (Multi-Noise spline blending) ---
+            MultiNoiseData multiNoise = new MultiNoiseData
+            {
+                ContinentalnessNoises = BiomeContinentalnessNoises,
+                ErosionNoises = BiomeErosionNoises,
+                PeaksValleysNoises = BiomePeaksValleysNoises,
+                ContinentalnessSplines = BiomeContinentalnessSplines,
+                ErosionSplines = BiomeErosionSplines,
+                PeaksValleysSplines = BiomePVSplines,
+            };
+            float terrainHeightFloat = BiomeBlender.CalculateBlendedTerrainHeight(
+                globalX, globalZ, ref BiomeSelectionNoise, ref Biomes, ref multiNoise,
+                out float borderFade);
+            int terrainHeight = (int)math.floor(terrainHeightFloat);
+
+            // --- Dynamic Density Band bounds ---
+            // Attenuate 3D density amplitude near biome borders to prevent cliff tearing.
+            // borderFade = 0.0 at the Voronoi boundary, 1.0 deep inside the primary biome.
+            int baseTerrainHeight = terrainHeight;
+            float effectiveDensityAmplitude = biome.DensityAmplitude * borderFade;
+            int bandLow = baseTerrainHeight - (int)math.ceil(effectiveDensityAmplitude);
+            int bandHigh = baseTerrainHeight + (int)math.ceil(effectiveDensityAmplitude);
 
             bool highestBlockFound = false;
+            float previousDensity = -1f;
+            int lastSurfaceY = baseTerrainHeight;
+
+            // Pre-evaluate strata jitter once per column
+            float strataDepthJitter = StrataDepthNoises[surfaceBiomeIndex].GetNoise(globalX, globalZ);
+            int strataJitterBlocks = (int)math.round(strataDepthJitter * 2.5f);
 
             // --- COLUMN ITERATION (top-down) ---
             for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
             {
-                byte voxelValue;
+                // ReSharper disable once RedundantAssignment
+                byte voxelValue = (byte)BlockIDs.Air;
+                float density = baseTerrainHeight - y;
+
+                // ----- 3D DENSITY BAND & DOMAIN WARPING -----
+                if (biome.Enable3DDensity && y >= bandLow && y <= bandHigh)
+                {
+                    float dx = globalX, dy = y, dz = globalZ;
+
+                    if (biome.EnableDensityWarp)
+                    {
+                        BiomeDensityWarpNoises[biomeIndex].DomainWarp(ref dx, ref dy, ref dz);
+                    }
+
+                    density += BiomeDensityNoises[biomeIndex].GetNoise(dx, dy, dz) * effectiveDensityAmplitude;
+                }
 
                 // ----- IMMUTABLE PASS -----
                 if (y == 0)
                 {
                     voxelValue = (byte)BlockIDs.Bedrock;
+                    density = 1f;
                 }
-                // ----- BASIC TERRAIN PASS -----
-                else if (y == terrainHeight)
+                // ----- VOLUMETRIC TERRAIN PASS -----
+                else if (density > 0f)
                 {
-                    voxelValue = y < SeaLevel - 1 ? surfaceBiome.UnderwaterSurfaceBlockID : surfaceBiome.SurfaceBlockID;
-                }
-                else if (y > terrainHeight)
-                {
-                    if (y < SeaLevel)
+                    bool isExposedSurface = (previousDensity <= 0f);
+
+                    if (isExposedSurface)
                     {
-                        voxelValue = (byte)BlockIDs.Water;
+                        lastSurfaceY = y;
+                        voxelValue = y < SeaLevel - 1 ? surfaceBiome.UnderwaterSurfaceBlockID : surfaceBiome.SurfaceBlockID;
                     }
                     else
                     {
-                        voxelValue = (byte)BlockIDs.Air;
-                    }
-                }
-                else
-                {
-                    // Default to stone
-                    voxelValue = (byte)BlockIDs.Stone;
+                        // Subsurface strata — anchored to lastSurfaceY, NOT baseTerrainHeight
+                        voxelValue = (byte)BlockIDs.Stone;
+                        int depthCounter = 0;
 
-                    // Execute progressive dynamic subsurface strata layers top-down
-                    int depthCounter = 0;
-
-                    // Evaluate strata jitter noise (returns ~[-1, 1]) and scale by 2.5 blocks
-                    float depthJitter = StrataDepthNoises[surfaceBiomeIndex].GetNoise(globalX, globalZ);
-                    int jitterBlocks = (int)math.round(depthJitter * 2.5f);
-
-                    for (int i = 0; i < surfaceBiome.TerrainLayerCount; i++)
-                    {
-                        StandardTerrainLayerJobData layer = AllTerrainLayers[surfaceBiome.TerrainLayerStartIndex + i];
-                        int effectiveDepth = math.max(1, layer.Depth + jitterBlocks);
-
-                        if (y < terrainHeight - depthCounter && y >= terrainHeight - depthCounter - effectiveDepth)
+                        for (int i = 0; i < surfaceBiome.TerrainLayerCount; i++)
                         {
-                            voxelValue = layer.BlockID;
-                            break;
-                        }
+                            StandardTerrainLayerJobData layer = AllTerrainLayers[surfaceBiome.TerrainLayerStartIndex + i];
+                            int effectiveDepth = math.max(1, layer.Depth + strataJitterBlocks);
 
-                        depthCounter += effectiveDepth;
+                            if (y < lastSurfaceY - depthCounter && y >= lastSurfaceY - depthCounter - effectiveDepth)
+                            {
+                                voxelValue = layer.BlockID;
+                                break;
+                            }
+
+                            depthCounter += effectiveDepth;
+                        }
                     }
                 }
+                else // density <= 0f
+                {
+                    voxelValue = y < SeaLevel ? (byte)BlockIDs.Water : (byte)BlockIDs.Air;
+                }
 
-                // ----- SECOND PASS (Caves) -----
-                // We do not carve Air, Fluids, or Bedrock
+                // Track whether this voxel is an exposed surface (air-to-solid transition from above)
+                bool isExposedSurfaceForStructures = density > 0f && previousDensity <= 0f;
+                previousDensity = density;
+
+                // ----- CAVE CARVING PASS -----
+                // Guard: only carve solid, non-fluid, non-bedrock blocks
                 if (voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
                     BlockTypes[voxelValue].FluidType == FluidType.None)
                 {
@@ -240,11 +318,8 @@ namespace Jobs
                         int caveIdx = biome.CaveLayerStartIndex + i;
                         StandardCaveLayerJobData caveLayer = AllCaveLayers[caveIdx];
 
-                        // --- Depth bounds check ---
-                        if (y < caveLayer.MinHeight || y > caveLayer.MaxHeight)
-                            continue;
+                        if (y < caveLayer.MinHeight || y > caveLayer.MaxHeight) continue;
 
-                        // --- Depth fade (gradient attenuation near bounds) ---
                         float depthFade = 1f;
                         if (caveLayer.DepthFadeMargin > 0)
                         {
@@ -254,60 +329,71 @@ namespace Jobs
                             depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
                         }
 
-                        // --- Noise evaluation (branched by CaveMode) ---
-                        FastNoiseLite caveNoise = CaveNoises[caveIdx];
-                        float noiseVal;
-
-                        // Apply depth fade: raise the effective threshold near depth bounds
-                        // (depthFade=0 at edge → threshold becomes unreachable, depthFade=1 inside → normal threshold)
                         float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
 
+                        // --- WormCarver (preserved) ---
                         if (caveLayer.Mode == CaveMode.WormCarver)
                         {
-                            // Worm carvers are pre-calculated in a scatter pass (StandardWormCarverJob).
-                            // We just read the pre-calculated bitmask here.
                             if (WormMask.IsSet(ChunkMath.GetFlattenedIndexInChunk(x, y, z)))
                             {
                                 voxelValue = (byte)BlockIDs.Air;
                                 break;
                             }
 
-                            continue; // Skip noise evaluation
+                            continue;
                         }
+
+                        FastNoiseLite caveNoise = CaveNoises[caveIdx];
+
+                        // --- Cheese Caves (renamed from Blob) — large open caverns ---
+                        if (caveLayer.Mode == CaveMode.Cheese)
+                        {
+                            float cx = globalX, cy = y, cz = globalZ;
+                            if (caveLayer.EnableWarp)
+                                CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
+
+                            if (caveNoise.GetNoise(cx, cy, cz) > effectiveThreshold)
+                            {
+                                voxelValue = (byte)BlockIDs.Air;
+                                break;
+                            }
+                        }
+                        // --- Spaghetti (preserved) — legacy 6-way 2D axis-pair average ---
+                        // Domain warp is NOT applied: 2D noise pairs would lose the Z-axis warp shift.
                         else if (caveLayer.Mode == CaveMode.Spaghetti)
                         {
-                            // Optimized Bounding Volume strategy: evaluate low-frequency 3D noise first.
-                            // Scaling coordinates mimics evaluating a generalized broader volume.
                             float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
-
-                            // If the boundary check indicates highly dense solid rock, skip 6-way intersecting algorithm
                             if (bound < effectiveThreshold - 0.2f) continue;
 
-                            // Legacy-style 6-way axis-pair 2D noise averaging.
-                            // Creates intersecting ridges that form interconnected tunnel networks.
-                            // Normalization to [0,1] is handled by FastNoiseLite.NormalizeToZeroOne via config.
-                            float ab = caveNoise.GetNoise(globalX, y);
-                            float bc = caveNoise.GetNoise(y, globalZ);
-                            float ac = caveNoise.GetNoise(globalX, globalZ);
-                            float ba = caveNoise.GetNoise(y, globalX);
-                            float cb = caveNoise.GetNoise(globalZ, y);
-                            float ca = caveNoise.GetNoise(globalZ, globalX);
-                            noiseVal = (ab + bc + ac + ba + cb + ca) / 6f;
-                        }
-                        else // CaveMode.Blob
-                        {
-                            noiseVal = caveNoise.GetNoise(globalX, y, globalZ);
-                        }
+                            float noiseVal = (caveNoise.GetNoise(globalX, y) + caveNoise.GetNoise(y, globalZ) +
+                                              caveNoise.GetNoise(globalX, globalZ) + caveNoise.GetNoise(y, globalX) +
+                                              caveNoise.GetNoise(globalZ, y) + caveNoise.GetNoise(globalZ, globalX)) / 6f;
 
-                        if (noiseVal > effectiveThreshold)
+                            if (noiseVal > effectiveThreshold)
+                            {
+                                voxelValue = (byte)BlockIDs.Air;
+                                break;
+                            }
+                        }
+                        // --- Noodle (new) — winding tubular corridors via isoband ---
+                        else if (caveLayer.Mode == CaveMode.Noodle)
                         {
-                            voxelValue = (byte)BlockIDs.Air;
-                            break;
+                            float cx = globalX, cy = y, cz = globalZ;
+                            if (caveLayer.EnableWarp)
+                                CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
+
+                            float noiseVal = 1.0f - math.abs(caveNoise.GetNoise(cx, cy, cz));
+
+                            if (noiseVal > effectiveThreshold)
+                            {
+                                voxelValue = (byte)BlockIDs.Air;
+                                break;
+                            }
                         }
                     }
                 }
 
-                // ----- THIRD PASS (Lodes) -----
+                // ----- LODE PASS -----
                 if (voxelValue == BlockIDs.Stone)
                 {
                     for (int i = 0; i < biome.LodeCount; i++)
@@ -330,25 +416,16 @@ namespace Jobs
                 BlockTypeJobData voxelProps = BlockTypes[voxelValue];
 
                 // --- Pack voxel data ---
-                // Generation still uses the legacy meta encoding (orient=1 for solids, fluid level for fluids).
-                // Phase 2 callsite migration will replace this with schema-aware encoding via BurstVoxelMetadataUtility.
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
                 byte packedMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(
                     orientation: 1, fluidLevel: voxelProps.FluidLevel, isFluid: false);
                 OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(
                     voxelValue, 0, voxelProps.LightEmission, packedMeta);
 
-                // --- Heightmap ---
-                if (!highestBlockFound && voxelProps.IsLightObstructing)
-                {
-                    int heightmapIndex = x + VoxelData.ChunkWidth * z;
-                    OutputHeightMap[heightmapIndex] = (ushort)y;
-                    highestBlockFound = true;
-                }
-
                 // --- Structure placement (per-entry independent grids) ---
-                // We only place structures on non-Air, non-Fluid, solid surface blocks above sea level.
-                if (y == terrainHeight && y >= SeaLevel &&
+                // Place structures on the topmost exposed solid surface above sea level.
+                // Must run before heightmap tracking to ensure !highestBlockFound is still true.
+                if (isExposedSurfaceForStructures && !highestBlockFound && y >= SeaLevel &&
                     voxelValue != BlockIDs.Air && voxelProps.FluidType == FluidType.None)
                 {
                     // Pre-sample the biome's flora zone noise once for all entries that use it.
@@ -436,6 +513,14 @@ namespace Jobs
                             }
                         }
                     }
+                }
+
+                // --- Heightmap ---
+                if (!highestBlockFound && voxelProps.IsLightObstructing)
+                {
+                    int heightmapIndex = x + VoxelData.ChunkWidth * z;
+                    OutputHeightMap[heightmapIndex] = (ushort)y;
+                    highestBlockFound = true;
                 }
             }
 

@@ -419,7 +419,7 @@ namespace Editor.WorldTools
                     layerNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(layer.noiseConfig, _seed);
                     layerThresholds[i] = 0.5f; // Lode logic hardcoded internally
                     layerColors[i] = layer.previewColor;
-                    layerModes[i] = CaveMode.Blob; // Lodes evaluate as 3D blobs
+                    layerModes[i] = CaveMode.Cheese; // Lodes evaluate as 3D blobs
                 }
             }
 
