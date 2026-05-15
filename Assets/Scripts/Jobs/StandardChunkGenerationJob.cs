@@ -51,13 +51,6 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<StandardCaveLayerJobData> AllCaveLayers;
 
-        /// <summary>
-        /// Pre-constructed FastNoiseLite instances for each biome's terrain noise.
-        /// Indexed by biome index. Passed by value (72 bytes each).
-        /// </summary>
-        [ReadOnly]
-        public NativeArray<FastNoiseLite> BiomeTerrainNoises;
-
         #region Multi-Noise Input Data
 
         /// <summary>Per-biome Continentalness noise instances for multi-noise terrain height.</summary>

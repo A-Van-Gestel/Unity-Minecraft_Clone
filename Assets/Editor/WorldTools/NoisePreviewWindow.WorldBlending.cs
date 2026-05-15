@@ -208,7 +208,6 @@ namespace Editor.WorldTools
                     BlendCurve = biome.blendCurve,
                     SurfaceBlockDitheringWidth = biome.surfaceBlockDitheringWidth,
                     BaseTerrainHeight = biome.baseTerrainHeight,
-                    TerrainAmplitude = biome.terrainAmplitude,
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
                     UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
                     FloraZoneCoverage = biome.floraZoneCoverage,
@@ -217,37 +216,20 @@ namespace Editor.WorldTools
                     EnableDensityWarp = biome.enableDensityWarp,
                 };
 
-                // Multi-Noise (with legacy fallback)
+                // Build Multi-Noise arrays
                 FastNoiseConfig contCfg = biome.continentalnessNoiseConfig;
                 FastNoiseConfig erosionCfg = biome.erosionNoiseConfig;
                 FastNoiseConfig pvCfg = biome.peaksAndValleysNoiseConfig;
-                bool hasMultiNoise = contCfg.frequency != 0f || erosionCfg.frequency != 0f || pvCfg.frequency != 0f;
+                contCfg.normalizeToZeroOne = false;
+                erosionCfg.normalizeToZeroOne = false;
+                pvCfg.normalizeToZeroOne = false;
 
-                if (hasMultiNoise)
-                {
-                    contCfg.normalizeToZeroOne = false;
-                    erosionCfg.normalizeToZeroOne = false;
-                    pvCfg.normalizeToZeroOne = false;
-                    contNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(contCfg, _seed);
-                    erosionNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(erosionCfg, _seed);
-                    pvNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(pvCfg, _seed);
-                    contSplines[i] = BurstSpline.FromAnimationCurve(biome.continentalnessCurve);
-                    erosionSplines[i] = BurstSpline.FromAnimationCurve(biome.erosionCurve);
-                    pvSplines[i] = BurstSpline.FromAnimationCurve(biome.peaksAndValleysCurve);
-                }
-                else
-                {
-#pragma warning disable CS0618 // Type or member is obsolete
-                    FastNoiseConfig legacyCfg = biome.terrainNoiseConfig;
-#pragma warning restore CS0618 // Type or member is obsolete
-                    legacyCfg.normalizeToZeroOne = false;
-                    contNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(legacyCfg, _seed);
-                    erosionNoises[i] = FastNoiseLite.Create(0);
-                    pvNoises[i] = FastNoiseLite.Create(0);
-                    contSplines[i] = BurstSpline.CreateLinearRamp(biome.terrainAmplitude);
-                    erosionSplines[i] = BurstSpline.FromAnimationCurve(null);
-                    pvSplines[i] = BurstSpline.FromAnimationCurve(null);
-                }
+                contNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(contCfg, _seed);
+                erosionNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(erosionCfg, _seed);
+                pvNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(pvCfg, _seed);
+                contSplines[i] = BurstSpline.FromAnimationCurve(biome.continentalnessCurve);
+                erosionSplines[i] = BurstSpline.FromAnimationCurve(biome.erosionCurve);
+                pvSplines[i] = BurstSpline.FromAnimationCurve(biome.peaksAndValleysCurve);
             }
 
             MultiNoiseData multiNoise = new MultiNoiseData

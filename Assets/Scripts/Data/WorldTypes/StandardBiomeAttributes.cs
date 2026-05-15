@@ -17,12 +17,6 @@ namespace Data.WorldTypes
         [Tooltip("The name of the biome, mostly for debug purposes.")]
         public string biomeName = "New Biome";
 
-        [Header("Terrain Noise")]
-        [Tooltip("Noise configuration for the terrain heightmap.")]
-        [Obsolete("Use continentalnessNoiseConfig/erosionNoiseConfig/peaksAndValleysNoiseConfig instead.")]
-        [HideInInspector]
-        public FastNoiseConfig terrainNoiseConfig;
-
         [Tooltip("Noise configuration for biome weight / Voronoi selection.")]
         public FastNoiseConfig biomeWeightNoiseConfig;
 
@@ -48,12 +42,8 @@ namespace Data.WorldTypes
         public float surfaceBlockDitheringWidth = 0.10f;
 
         [Header("Terrain Shape")]
-        [Tooltip("Base terrain height in blocks. Noise output is added to this value.")]
+        [Tooltip("Base terrain height in blocks. Multi-Noise offsets are added to this value.")]
         public float baseTerrainHeight = 42f;
-
-        [Tooltip("Vertical multiplier for terrain noise (e.g., 20 means hills reach BaseTerrainHeight ± 20). " +
-                 "FastNoiseLite returns normalized -1.0 to 1.0; this gives it physical scale.")]
-        public float terrainAmplitude = 20f;
 
         [Header("Terrain Shape (Multi-Noise)")]
         [Tooltip("Noise controlling macro landmass scale (Oceans vs Continents).")]

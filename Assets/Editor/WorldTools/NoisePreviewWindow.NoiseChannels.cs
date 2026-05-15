@@ -47,10 +47,6 @@ namespace Editor.WorldTools
             [InspectorName("3D Density Slice")]
             [UsedImplicitly]
             DensitySlice,
-
-            [InspectorName("Terrain Noise (Legacy)")]
-            [UsedImplicitly]
-            LegacyTerrain,
         }
 
         // --- Noise Channels State ---
@@ -375,16 +371,6 @@ namespace Editor.WorldTools
                     bottomDesc = "Deep underground, fully solid";
                     break;
 
-                case NoiseChannelMode.LegacyTerrain:
-                    legendTitle = "Legacy Terrain";
-                    topLabel = $"y={VoxelData.ChunkHeight}";
-                    topDesc = "Max terrain height";
-                    midLabel = $"y={VoxelData.ChunkHeight / 2}";
-                    midDesc = "Mid-world";
-                    bottomLabel = "y=0";
-                    bottomDesc = "Bedrock (old formula: base + noise * amp)";
-                    break;
-
                 default:
                     legendTitle = "Legend";
                     topLabel = "High";
@@ -482,14 +468,6 @@ namespace Editor.WorldTools
                 case NoiseChannelMode.DensitySlice:
                     jobMode = NoisePreviewMode.DensitySlice;
                     break;
-                case NoiseChannelMode.LegacyTerrain:
-#pragma warning disable CS0618
-                    FastNoiseConfig legacyCfg = _biome.terrainNoiseConfig;
-#pragma warning restore CS0618
-                    legacyCfg.normalizeToZeroOne = false;
-                    channelNoise = FastNoiseFactory.CreateNoiseFromConfig(legacyCfg, _seed);
-                    jobMode = NoisePreviewMode.LegacyTerrain;
-                    break;
                 default:
                     jobMode = NoisePreviewMode.RawNoise;
                     break;
@@ -507,7 +485,6 @@ namespace Editor.WorldTools
                 OffsetZ = _offset.y,
                 Mode = jobMode,
                 BaseTerrainHeight = _biome.baseTerrainHeight,
-                TerrainAmplitude = _biome.terrainAmplitude,
                 DensityAmplitude = _biome.densityAmplitude,
                 ChunkHeight = VoxelData.ChunkHeight,
                 SliceY = _ncSliceY,

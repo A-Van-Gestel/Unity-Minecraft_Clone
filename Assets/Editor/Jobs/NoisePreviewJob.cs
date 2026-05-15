@@ -18,7 +18,6 @@ namespace Editor.Jobs
         SplineNoise = 1,
         CombinedHeight = 2,
         DensitySlice = 3,
-        LegacyTerrain = 4,
     }
 
     /// <summary>
@@ -48,9 +47,6 @@ namespace Editor.Jobs
 
         [ReadOnly]
         public float BaseTerrainHeight;
-
-        [ReadOnly]
-        public float TerrainAmplitude;
 
         [ReadOnly]
         public float DensityAmplitude;
@@ -179,18 +175,6 @@ namespace Editor.Jobs
                         b = (byte)math.lerp(255f, 217f, t);
                     }
 
-                    break;
-                }
-
-                case NoisePreviewMode.LegacyTerrain:
-                {
-                    float raw = ChannelNoise.GetNoise(worldX, worldZ);
-                    float height = BaseTerrainHeight + raw * TerrainAmplitude;
-                    float v = math.saturate(height / ChunkHeight);
-                    byte bv = (byte)(v * 255f);
-                    r = bv;
-                    g = bv;
-                    b = bv;
                     break;
                 }
 

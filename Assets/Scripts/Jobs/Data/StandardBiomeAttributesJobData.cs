@@ -28,12 +28,6 @@ namespace Jobs.Data
         /// <summary>Base height added to noise output.</summary>
         public float BaseTerrainHeight;
 
-        /// <summary>
-        /// Vertical multiplier for terrain noise. FastNoiseLite returns -1..1;
-        /// multiply by this for physical height in blocks.
-        /// </summary>
-        public float TerrainAmplitude;
-
         /// <summary>Block ID for the surface layer (e.g., Grass).</summary>
         public byte SurfaceBlockID;
 

@@ -28,7 +28,6 @@ namespace Jobs.Generators
         private NativeArray<StandardLodeJobData> _allLodesJobData;
         private NativeArray<StandardCaveLayerJobData> _allCaveLayersJobData;
         private NativeArray<BlockTypeJobData> _blockTypesJobData;
-        private NativeArray<FastNoiseLite> _biomeTerrainNoises;
         private NativeArray<FastNoiseLite> _strataDepthNoises;
         private NativeArray<FastNoiseLite> _lodeNoises;
         private NativeArray<FastNoiseLite> _caveNoises;
@@ -106,7 +105,6 @@ namespace Jobs.Generators
             _biomesJobData = new NativeArray<StandardBiomeAttributesJobData>(_standardBiomes.Length, Allocator.Persistent);
             _allTerrainLayersJobData = new NativeArray<StandardTerrainLayerJobData>(totalTerrainLayerCount, Allocator.Persistent);
             _allLodesJobData = new NativeArray<StandardLodeJobData>(totalLodeCount, Allocator.Persistent);
-            _biomeTerrainNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _strataDepthNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _lodeNoises = new NativeArray<FastNoiseLite>(totalLodeCount, Allocator.Persistent);
 
@@ -178,7 +176,6 @@ namespace Jobs.Generators
                     BlendCurve = biome.blendCurve,
                     SurfaceBlockDitheringWidth = biome.surfaceBlockDitheringWidth,
                     BaseTerrainHeight = biome.baseTerrainHeight,
-                    TerrainAmplitude = biome.terrainAmplitude,
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
                     UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
                     FloraZoneCoverage = biome.floraZoneCoverage,
@@ -217,11 +214,6 @@ namespace Jobs.Generators
                     currentStructurePoolIndex++;
                 }
 
-                // Build per-biome terrain noise (legacy — retained for GetVoxel fallback)
-#pragma warning disable CS0618 // Type or member is obsolete
-                _biomeTerrainNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.terrainNoiseConfig, _seed);
-#pragma warning restore CS0618 // Type or member is obsolete
-
                 // Build per-biome strata depth noise
                 _strataDepthNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.strataDepthNoiseConfig, _seed);
 
@@ -229,45 +221,21 @@ namespace Jobs.Generators
                 _floraZoneNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.floraZoneNoiseConfig, _seed);
 
                 // Build Multi-Noise terrain system arrays
+                // Build Multi-Noise terrain system arrays
+                // Force normalizeToZeroOne = false: splines expect [-1, 1] input domain.
                 FastNoiseConfig contCfg = biome.continentalnessNoiseConfig;
                 FastNoiseConfig erosionCfg = biome.erosionNoiseConfig;
                 FastNoiseConfig pvCfg = biome.peaksAndValleysNoiseConfig;
+                contCfg.normalizeToZeroOne = false;
+                erosionCfg.normalizeToZeroOne = false;
+                pvCfg.normalizeToZeroOne = false;
 
-                bool isMultiNoiseConfigured = contCfg.frequency != 0f || erosionCfg.frequency != 0f || pvCfg.frequency != 0f;
-
-                if (isMultiNoiseConfigured)
-                {
-                    // Force normalizeToZeroOne = false: splines expect [-1, 1] input domain.
-                    contCfg.normalizeToZeroOne = false;
-                    erosionCfg.normalizeToZeroOne = false;
-                    pvCfg.normalizeToZeroOne = false;
-
-                    _biomeContinentalnessNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(contCfg, _seed);
-                    _biomeErosionNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(erosionCfg, _seed);
-                    _biomePeaksValleysNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(pvCfg, _seed);
-                    _biomeContinentalnessSplines[i] = BurstSpline.FromAnimationCurve(biome.continentalnessCurve);
-                    _biomeErosionSplines[i] = BurstSpline.FromAnimationCurve(biome.erosionCurve);
-                    _biomePVSplines[i] = BurstSpline.FromAnimationCurve(biome.peaksAndValleysCurve);
-                }
-                else
-                {
-                    // Legacy migration fallback: route the old terrainNoiseConfig through the
-                    // multi-noise pipeline by placing it in the continentalness slot with a linear
-                    // ramp spline that maps [-1,1] → [-amplitude, amplitude]. Erosion and PV
-                    // slots produce zero, so the formula reduces to:
-                    // BaseTerrainHeight + (noise * TerrainAmplitude) + (0 * 0)
-#pragma warning disable CS0618 // Type or member is obsolete
-                    FastNoiseConfig legacyCfg = biome.terrainNoiseConfig;
-#pragma warning restore CS0618 // Type or member is obsolete
-                    legacyCfg.normalizeToZeroOne = false;
-
-                    _biomeContinentalnessNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(legacyCfg, _seed);
-                    _biomeErosionNoises[i] = FastNoiseLite.Create(0);
-                    _biomePeaksValleysNoises[i] = FastNoiseLite.Create(0);
-                    _biomeContinentalnessSplines[i] = BurstSpline.CreateLinearRamp(biome.terrainAmplitude);
-                    _biomeErosionSplines[i] = BurstSpline.FromAnimationCurve(null);
-                    _biomePVSplines[i] = BurstSpline.FromAnimationCurve(null);
-                }
+                _biomeContinentalnessNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(contCfg, _seed);
+                _biomeErosionNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(erosionCfg, _seed);
+                _biomePeaksValleysNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(pvCfg, _seed);
+                _biomeContinentalnessSplines[i] = BurstSpline.FromAnimationCurve(biome.continentalnessCurve);
+                _biomeErosionSplines[i] = BurstSpline.FromAnimationCurve(biome.erosionCurve);
+                _biomePVSplines[i] = BurstSpline.FromAnimationCurve(biome.peaksAndValleysCurve);
 
                 // Build 3D density + domain warp noises
                 _biomeDensityNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.densityNoiseConfig, _seed);
@@ -336,7 +304,6 @@ namespace Jobs.Generators
                 AllTerrainLayers = _allTerrainLayersJobData,
                 AllLodes = _allLodesJobData,
                 AllCaveLayers = _allCaveLayersJobData,
-                BiomeTerrainNoises = _biomeTerrainNoises,
                 StrataDepthNoises = _strataDepthNoises,
                 LodeNoises = _lodeNoises,
                 CaveNoises = _caveNoises,
@@ -397,11 +364,18 @@ namespace Jobs.Generators
 
             StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
 
-            // Terrain height
-#pragma warning disable CS0618 // Type or member is obsolete
-            int terrainHeight = BiomeBlender.CalculateBlendedTerrainHeight(
-                globalPos.x, globalPos.z, ref _biomeSelectionNoise, ref _biomesJobData, ref _biomeTerrainNoises);
-#pragma warning restore CS0618 // Type or member is obsolete
+            // Terrain height (uses multi-noise path — approximate for spawn-point fallback)
+            MultiNoiseData multiNoise = new MultiNoiseData
+            {
+                ContinentalnessNoises = _biomeContinentalnessNoises,
+                ErosionNoises = _biomeErosionNoises,
+                PeaksValleysNoises = _biomePeaksValleysNoises,
+                ContinentalnessSplines = _biomeContinentalnessSplines,
+                ErosionSplines = _biomeErosionSplines,
+                PeaksValleysSplines = _biomePVSplines,
+            };
+            int terrainHeight = (int)math.floor(BiomeBlender.CalculateBlendedTerrainHeight(
+                globalPos.x, globalPos.z, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out _));
 
             byte voxelValue;
             if (y == terrainHeight)
@@ -611,7 +585,6 @@ namespace Jobs.Generators
             if (_biomesJobData.IsCreated) _biomesJobData.Dispose();
             if (_allTerrainLayersJobData.IsCreated) _allTerrainLayersJobData.Dispose();
             if (_allLodesJobData.IsCreated) _allLodesJobData.Dispose();
-            if (_biomeTerrainNoises.IsCreated) _biomeTerrainNoises.Dispose();
             if (_strataDepthNoises.IsCreated) _strataDepthNoises.Dispose();
             if (_lodeNoises.IsCreated) _lodeNoises.Dispose();
             if (_allCaveLayersJobData.IsCreated) _allCaveLayersJobData.Dispose();

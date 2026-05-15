@@ -19,7 +19,7 @@ namespace Editor.WorldTools
 
         private static readonly string[] s_beSubTabLabels =
         {
-            "Terrain", "Surface & Strata", "Blending", "Caves & Lodes", "Flora", "Legacy",
+            "Terrain", "Surface & Strata", "Blending", "Caves & Lodes", "Flora",
         };
 
         private static readonly GUIContent s_emptyLabel = new GUIContent(" ");
@@ -62,7 +62,6 @@ namespace Editor.WorldTools
                 case 2: DrawBeBlendingSubTab(); break;
                 case 3: DrawBeCavesLodesSubTab(); break;
                 case 4: DrawBeFloraSubTab(); break;
-                case 5: DrawBeLegacySubTab(); break;
             }
 
             EditorGUILayout.EndScrollView();
@@ -231,6 +230,17 @@ namespace Editor.WorldTools
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("surfaceBlockDitheringWidth"),
                 new GUIContent("Dithering Width", "0 = hard cutoff, larger = wider organic transition."));
             EditorUILayoutHelper.EndGroup();
+
+            EditorGUILayout.Space(8);
+            EditorUILayoutHelper.DrawSeparator();
+
+            EditorUILayoutHelper.SectionHeader("Biome Selection Noise");
+            EditorUILayoutHelper.SectionNote("Shared across all biomes (taken from the first biome in the world type). " +
+                                             "Controls the Voronoi cell layout that determines where biomes appear in the world.");
+
+            EditorUILayoutHelper.BeginGroup();
+            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("biomeWeightNoiseConfig"), true);
+            EditorUILayoutHelper.EndGroup();
         }
 
         #endregion
@@ -298,68 +308,6 @@ namespace Editor.WorldTools
             EditorUILayoutHelper.BeginGroup();
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("minorFloraPool"), true);
             EditorUILayoutHelper.EndGroup();
-        }
-
-        #endregion
-
-        #region Sub-Tab: Legacy
-
-        private void DrawBeLegacySubTab()
-        {
-            EditorUILayoutHelper.SectionHeader("Legacy Terrain Config");
-            EditorGUILayout.HelpBox(
-                "These fields are from the pre-Multi-Noise system. They are used as fallback " +
-                "when all three Multi-Noise configs have frequency = 0.\n\n" +
-                "Legacy formula: BaseTerrainHeight + noise × TerrainAmplitude\n\n" +
-                "Do not edit unless migrating from the legacy system.",
-                MessageType.Warning);
-
-            EditorGUILayout.Space(4);
-
-            EditorUILayoutHelper.BeginGroup();
-            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("terrainAmplitude"),
-                new GUIContent("Terrain Amplitude", "Legacy vertical multiplier for terrain noise."));
-            EditorGUILayout.Space(4);
-            EditorUILayoutHelper.SubHeader("Terrain Noise Config");
-            DrawFastNoiseConfigFields("terrainNoiseConfig");
-            EditorUILayoutHelper.EndGroup();
-
-            EditorGUILayout.Space(8);
-
-            EditorUILayoutHelper.SectionNote("The Biome Weight Noise Config is shared across all biomes (taken from the first biome in the world type). " +
-                                             "It controls the Voronoi cell layout that determines where biomes appear.");
-
-            EditorUILayoutHelper.BeginGroup();
-            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("biomeWeightNoiseConfig"), true);
-            EditorUILayoutHelper.EndGroup();
-        }
-
-        #endregion
-
-        #region Drawing Helpers
-
-        /// <summary>
-        /// Draws all child fields of a <see cref="Jobs.Data.FastNoiseConfig"/> property by explicit path.
-        /// Required for fields marked with <c>[HideInInspector]</c>.
-        /// </summary>
-        private void DrawFastNoiseConfigFields(string parentPath)
-        {
-            string[] childNames =
-            {
-                "seedOffset", "frequency", "noiseType", "rotationType3D",
-                "fractalType", "octaves", "gain", "lacunarity",
-                "weightedStrength", "pingPongStrength",
-                "cellularDistanceFunction", "cellularReturnType", "cellularJitter",
-                "domainWarpType", "domainWarpAmp",
-                "normalizeToZeroOne",
-            };
-
-            foreach (string child in childNames)
-            {
-                SerializedProperty prop = _biomeSerializedObject.FindProperty($"{parentPath}.{child}");
-                if (prop != null)
-                    EditorGUILayout.PropertyField(prop);
-            }
         }
 
         #endregion

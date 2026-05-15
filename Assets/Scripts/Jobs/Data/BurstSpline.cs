@@ -68,22 +68,6 @@ namespace Jobs.Data
         }
 
         /// <summary>
-        /// Creates a linear ramp spline that maps [-1, 1] to [-scale, scale].
-        /// Used for legacy migration: reproduces <c>noise * terrainAmplitude</c> via the spline pipeline.
-        /// </summary>
-        /// <param name="scale">The output scale (e.g., <c>TerrainAmplitude</c>).</param>
-        public static BurstSpline CreateLinearRamp(float scale)
-        {
-            BurstSpline spline = default;
-            spline._count = 2;
-            spline._keys[0] = -1f;
-            spline._keys[1] = -scale;
-            spline._keys[2] = 1f;
-            spline._keys[3] = scale;
-            return spline;
-        }
-
-        /// <summary>
         /// Evaluates the spline at input <paramref name="t"/> using piecewise-linear interpolation.
         /// Burst-safe, zero allocation. Clamps to the first/last keyframe values outside the curve range.
         /// </summary>
