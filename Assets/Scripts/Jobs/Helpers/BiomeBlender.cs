@@ -60,9 +60,11 @@ namespace Jobs.Helpers
             float activeRadius = math.max(0.001f, localBlendRadius + wiggle);
 
             // Border fade: how deep we are inside the primary Voronoi cell.
-            // (dist1 - dist0) / activeRadius gives 0.0 at the boundary and grows toward 1.0 inside.
+            // Uses the same activeRadius and per-biome BlendCurve as the height blending,
+            // then scales by BlendWeight so low-weight biomes (e.g., Mountains 0.2) fade faster.
             float edgeGap = edgeData.Distances[1] - dist0;
-            borderFade = math.saturate(edgeGap / activeRadius);
+            float linearFade = math.saturate(edgeGap / activeRadius);
+            borderFade = ApplyCurve(linearFade, curves[0]) * math.saturate(bw[0]);
 
             float* raw = stackalloc float[9];
             float totalRaw = 0f;
