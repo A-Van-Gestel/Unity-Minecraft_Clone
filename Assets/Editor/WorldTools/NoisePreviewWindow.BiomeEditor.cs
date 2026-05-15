@@ -1,4 +1,10 @@
+using System.Collections.Generic;
+using Data.WorldTypes;
 using Editor.Libraries;
+using Editor.WorldTools.Libraries;
+using Libraries;
+using Unity.Collections;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
@@ -24,6 +30,21 @@ namespace Editor.WorldTools
 
         private static readonly GUIContent s_emptyLabel = new GUIContent(" ");
 
+        // Inline preview state
+        private bool _beShowPreview = true;
+        private Texture2D _bePreviewXY;
+        private Texture2D _bePreviewZY;
+        private Texture2D _bePreviewXZ;
+        private int _bePreviewChunkRadius = 4;
+        private XZQuality _beXZQuality = XZQuality.Half;
+        private bool _beShowCaves = true;
+        private bool _beShowLodes = true;
+        private bool _beShowWater = true;
+        private bool _beShowSeaLevel = true;
+        private bool _beShowBorders;
+        private bool _beAutoGenerate = true;
+        private int _beSeaLevel = 45;
+
         private void DrawBiomeEditorTab()
         {
             EditorGUILayout.BeginHorizontal();
@@ -42,6 +63,10 @@ namespace Editor.WorldTools
 
             _biomeSerializedObject.Update();
 
+            // Generate inline preview on first view or after biome selection change
+            if (_beShowPreview && _bePreviewXY == null)
+                GenerateInlineBiomePreview();
+
             // --- Top bar: biome name + live update ---
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("biomeName"), GUILayout.ExpandWidth(true));
@@ -53,7 +78,9 @@ namespace Editor.WorldTools
             _beSubTabIndex = GUILayout.Toolbar(_beSubTabIndex, s_beSubTabLabels, GUILayout.Height(22));
             EditorGUILayout.Space(6);
 
-            _biomeEditorScrollPos = EditorGUILayout.BeginScrollView(_biomeEditorScrollPos);
+            // --- Property scroll view (shrinks when preview is open) ---
+            _biomeEditorScrollPos = EditorGUILayout.BeginScrollView(_biomeEditorScrollPos,
+                _beShowPreview ? GUILayout.MaxHeight(position.height * 0.55f) : GUILayout.ExpandHeight(true));
 
             switch (_beSubTabIndex)
             {
@@ -66,15 +93,245 @@ namespace Editor.WorldTools
 
             EditorGUILayout.EndScrollView();
 
-            if (_biomeSerializedObject.ApplyModifiedProperties())
+            // --- Apply changes and trigger previews ---
+            bool biomeChanged = _biomeSerializedObject.ApplyModifiedProperties();
+            if (biomeChanged && _liveUpdate)
             {
-                if (_liveUpdate)
-                    RegenerateActivePreview();
+                RegenerateActivePreview();
+                if (_beShowPreview && _beAutoGenerate) GenerateInlineBiomePreview();
+            }
+
+            // --- Collapsible inline preview ---
+            EditorGUILayout.BeginHorizontal();
+            string previewToggleLabel = _beShowPreview ? "Preview ▼" : "Preview ▲";
+            if (GUILayout.Button(previewToggleLabel, EditorStyles.toolbarButton))
+            {
+                _beShowPreview = !_beShowPreview;
+                if (_beShowPreview && _bePreviewXY == null)
+                    GenerateInlineBiomePreview();
+            }
+
+            if (_beShowPreview)
+            {
+                GUILayout.Label(new GUIContent("Chunks", "Preview width in chunks."), GUILayout.Width(46));
+                EditorGUI.BeginChangeCheck();
+                _bePreviewChunkRadius = EditorGUILayout.IntSlider(_bePreviewChunkRadius, 1, 16, GUILayout.Width(160));
+                if (EditorGUI.EndChangeCheck() && _beAutoGenerate) GenerateInlineBiomePreview();
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            if (_beShowPreview)
+            {
+                EditorGUI.BeginChangeCheck();
+                EditorGUILayout.BeginHorizontal();
+                _beShowCaves = GUILayout.Toggle(_beShowCaves, new GUIContent("Caves", "Show cave carving."), EditorStyles.miniButton);
+                _beShowLodes = GUILayout.Toggle(_beShowLodes, new GUIContent("Lodes", "Show ore veins."), EditorStyles.miniButton);
+                _beShowWater = GUILayout.Toggle(_beShowWater, new GUIContent("Water", "Tint water with depth color."), EditorStyles.miniButton);
+                _beShowSeaLevel = GUILayout.Toggle(_beShowSeaLevel, new GUIContent("Sea Level", "Show sea level line."), EditorStyles.miniButton);
+                _beShowBorders = GUILayout.Toggle(_beShowBorders, new GUIContent("Borders", "Show chunk borders."), EditorStyles.miniButton);
+                _beAutoGenerate = GUILayout.Toggle(_beAutoGenerate, new GUIContent("Auto", "Auto-regenerate on changes."), EditorStyles.miniButton);
+                EditorGUILayout.EndHorizontal();
+
+                if (_beShowSeaLevel || _beShowWater)
+                    _beSeaLevel = EditorGUILayout.IntSlider("Sea Level", _beSeaLevel, 0, VoxelData.ChunkHeight - 1);
+
+                if (EditorGUI.EndChangeCheck() && _beAutoGenerate) GenerateInlineBiomePreview();
+
+                if (!_beAutoGenerate)
+                {
+                    if (GUILayout.Button("Generate Preview"))
+                        GenerateInlineBiomePreview();
+                }
+            }
+
+            if (_beShowPreview)
+            {
+                DrawInlineBiomePreview();
             }
 
             EditorGUILayout.EndVertical();
             EditorGUILayout.EndHorizontal();
         }
+
+        #region Inline Preview
+
+        private void GenerateInlineBiomePreview()
+        {
+            if (_biome == null) return;
+
+            FastNoiseLite.InitializeLookupTables();
+
+            StandardBiomeAttributes[] standardBiomes = GetAllStandardBiomes();
+            int biomeCount = standardBiomes.Length;
+            if (biomeCount == 0) return;
+
+            int selectedBiomeIdx = 0;
+            for (int i = 0; i < biomeCount; i++)
+            {
+                if (standardBiomes[i] == _biome)
+                {
+                    selectedBiomeIdx = i;
+                    break;
+                }
+            }
+
+            BuildCrossSectionData(standardBiomes, out CrossSectionNativeData data);
+
+            int span = _bePreviewChunkRadius * VoxelData.ChunkWidth;
+            const int chunkHeight = VoxelData.ChunkHeight;
+            int startX = _crosshairPos.x - span / 2;
+            int startZ = _crosshairPos.z - span / 2;
+
+            // --- X-Y (Front) ---
+            {
+                Dictionary<int, NativeBitArray> wormMasks = _beShowCaves
+                    ? GenerateWormMasksForSlice(span, _crosshairPos.z, true, ref data)
+                    : null;
+
+                CrossSectionPanelHelper.EnsureTexture(ref _bePreviewXY, span, chunkHeight);
+                Color[] pixels = new Color[span * chunkHeight];
+
+                for (int col = 0; col < span; col++)
+                {
+                    int gx = col + startX;
+                    GetWormMaskForColumn(gx, _crosshairPos.z, wormMasks, out NativeBitArray mask, out int lx, out int lz);
+                    ushort[] column = EvaluateColumn(gx, _crosshairPos.z, _beSeaLevel, selectedBiomeIdx,
+                        _beShowCaves, _beShowLodes, lx, lz, ref mask, ref data);
+                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, _beShowWater, _beSeaLevel);
+                }
+
+                _bePreviewXY.SetPixels(pixels);
+                _bePreviewXY.Apply();
+                DisposeWormMasks(wormMasks);
+            }
+
+            // --- Z-Y (Side) ---
+            {
+                Dictionary<int, NativeBitArray> wormMasks = _beShowCaves
+                    ? GenerateWormMasksForSlice(span, _crosshairPos.x, false, ref data)
+                    : null;
+
+                CrossSectionPanelHelper.EnsureTexture(ref _bePreviewZY, span, chunkHeight);
+                Color[] pixels = new Color[span * chunkHeight];
+
+                for (int col = 0; col < span; col++)
+                {
+                    int gz = col + startZ;
+                    GetWormMaskForColumn(_crosshairPos.x, gz, wormMasks, out NativeBitArray mask, out int lx, out int lz);
+                    ushort[] column = EvaluateColumn(_crosshairPos.x, gz, _beSeaLevel, selectedBiomeIdx,
+                        _beShowCaves, _beShowLodes, lx, lz, ref mask, ref data);
+                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, _beShowWater, _beSeaLevel);
+                }
+
+                _bePreviewZY.SetPixels(pixels);
+                _bePreviewZY.Apply();
+                DisposeWormMasks(wormMasks);
+            }
+
+            // --- X-Z (Top-Down) ---
+            if (_beXZQuality != XZQuality.Off)
+            {
+                int step = (int)_beXZQuality;
+                CrossSectionPanelHelper.EnsureTexture(ref _bePreviewXZ, span, span);
+                Color[] pixels = new Color[span * span];
+                int targetY = _crosshairPos.y;
+                NativeBitArray emptyMask = default;
+
+                for (int zCol = 0; zCol < span; zCol += step)
+                {
+                    for (int xCol = 0; xCol < span; xCol += step)
+                    {
+                        int gx = xCol + startX;
+                        int gz = zCol + startZ;
+                        GetWormMaskForColumn(gx, gz, null, out _, out int lx, out int lz);
+
+                        ushort[] column = EvaluateColumn(gx, gz, _beSeaLevel, selectedBiomeIdx,
+                            _beShowCaves, _beShowLodes, lx, lz, ref emptyMask, ref data);
+
+                        Color color = GetBlockColor(column[math.clamp(targetY, 0, chunkHeight - 1)], targetY, chunkHeight, _beShowWater, _beSeaLevel);
+
+                        for (int dz = 0; dz < step && zCol + dz < span; dz++)
+                        for (int dx = 0; dx < step && xCol + dx < span; dx++)
+                            pixels[(zCol + dz) * span + (xCol + dx)] = color;
+                    }
+                }
+
+                _bePreviewXZ.SetPixels(pixels);
+                _bePreviewXZ.Apply();
+            }
+
+            DisposeCrossSectionData(ref data);
+            Repaint();
+        }
+
+        private void DrawInlineBiomePreview()
+        {
+            if (_bePreviewXY == null) return;
+
+            Rect area = GUILayoutUtility.GetRect(0, 0, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+            if (area.width < 30 || area.height < 30) return;
+
+            const float GAP = 2f;
+            float panelW = (area.width - GAP * 2) / 3f;
+            float panelH = area.height;
+
+            Rect xyRect = new Rect(area.x, area.y, panelW, panelH);
+            Rect zyRect = new Rect(area.x + panelW + GAP, area.y, panelW, panelH);
+            Rect xzRect = new Rect(area.x + (panelW + GAP) * 2, area.y, panelW, panelH);
+
+            int span = _bePreviewChunkRadius * VoxelData.ChunkWidth;
+            int startX = _crosshairPos.x - span / 2;
+            int startZ = _crosshairPos.z - span / 2;
+
+            // Draw panels
+            CrossSectionPanelHelper.DrawPanelTexture(xyRect, _bePreviewXY, "X-Y (Front)");
+            CrossSectionPanelHelper.DrawPanelTexture(zyRect, _bePreviewZY, "Z-Y (Side)");
+            CrossSectionPanelHelper.DrawPanelTexture(xzRect, _bePreviewXZ, "X-Z (Top)");
+
+            // Crosshair overlays (always centered)
+            CrossSectionPanelHelper.DrawCrosshairOnPanel(xyRect, _bePreviewXY, span / 2, _crosshairPos.y);
+            CrossSectionPanelHelper.DrawCrosshairOnPanel(zyRect, _bePreviewZY, span / 2, _crosshairPos.y);
+            CrossSectionPanelHelper.DrawCrosshairOnPanel(xzRect, _bePreviewXZ, span / 2, span / 2);
+
+            // X-Z quality dropdown inside the panel
+            Rect xzLabelRect = new Rect(xzRect.x + 4, xzRect.y + 18, 46, 16);
+            Rect xzQualityRect = new Rect(xzRect.x + 50, xzRect.y + 18, 64, 16);
+            GUIStyle miniLabel = new GUIStyle(EditorStyles.miniLabel) { normal = { textColor = new Color(1f, 1f, 1f, 0.7f) } };
+            GUI.Label(xzLabelRect, new GUIContent("Quality", "Top-down sampling quality."), miniLabel);
+            EditorGUI.BeginChangeCheck();
+            _beXZQuality = (XZQuality)EditorGUI.EnumPopup(xzQualityRect, _beXZQuality);
+            if (EditorGUI.EndChangeCheck() && _beAutoGenerate) GenerateInlineBiomePreview();
+
+            // Sea level + chunk borders
+            if (_beShowSeaLevel)
+            {
+                CrossSectionPanelHelper.DrawSeaLevelLine(xyRect, _bePreviewXY, _beSeaLevel);
+                CrossSectionPanelHelper.DrawSeaLevelLine(zyRect, _bePreviewZY, _beSeaLevel);
+            }
+
+            if (_beShowBorders)
+            {
+                CrossSectionPanelHelper.DrawChunkBordersVertical(xyRect, _bePreviewXY, startX);
+                CrossSectionPanelHelper.DrawChunkBordersVertical(zyRect, _bePreviewZY, startZ);
+                CrossSectionPanelHelper.DrawChunkBordersTopDown(xzRect, _bePreviewXZ, startX, startZ);
+            }
+
+            // Click-to-move crosshair (always centered — updates position which shifts the view)
+            bool changed = false;
+            changed |= CrossSectionPanelHelper.HandlePanelClick(xyRect, _bePreviewXY, ref _crosshairPos, 0, startX, startZ);
+            changed |= CrossSectionPanelHelper.HandlePanelClick(zyRect, _bePreviewZY, ref _crosshairPos, 1, startX, startZ);
+            changed |= CrossSectionPanelHelper.HandlePanelClick(xzRect, _bePreviewXZ, ref _crosshairPos, 2, startX, startZ);
+
+            // Scroll-to-move depth
+            changed |= CrossSectionPanelHelper.HandlePanelScroll(xyRect, ref _crosshairPos, 0);
+            changed |= CrossSectionPanelHelper.HandlePanelScroll(zyRect, ref _crosshairPos, 1);
+            changed |= CrossSectionPanelHelper.HandlePanelScroll(xzRect, ref _crosshairPos, 2);
+
+            if (changed) GenerateInlineBiomePreview();
+        }
+
+        #endregion
 
         #region Sub-Tab: Terrain
 

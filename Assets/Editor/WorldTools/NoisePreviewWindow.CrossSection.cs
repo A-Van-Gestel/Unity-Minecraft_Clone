@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Data;
 using Data.WorldTypes;
 using Editor.Libraries;
+using Editor.WorldTools.Libraries;
 using Helpers;
 using JetBrains.Annotations;
 using Jobs;
@@ -179,9 +180,9 @@ namespace Editor.WorldTools
                 Rect xzRect = new Rect(panelArea.x, panelArea.y + halfH, halfW - GAP, halfH - GAP);
                 Rect infoRect = new Rect(panelArea.x + halfW, panelArea.y + halfH, halfW - GAP, halfH - GAP);
 
-                DrawPanelTexture(xyRect, _csTextureXY, "X-Y (Front)", _csLockXY);
-                DrawPanelTexture(zyRect, _csTextureZY, "Z-Y (Side)", _csLockZY);
-                DrawPanelTexture(xzRect, _csXZQuality != XZQuality.Off ? _csTextureXZ : null, "X-Z (Top)", _csLockXZ);
+                CrossSectionPanelHelper.DrawPanelTexture(xyRect, _csTextureXY, "X-Y (Front)", _csLockXY);
+                CrossSectionPanelHelper.DrawPanelTexture(zyRect, _csTextureZY, "Z-Y (Side)", _csLockZY);
+                CrossSectionPanelHelper.DrawPanelTexture(xzRect, _csXZQuality != XZQuality.Off ? _csTextureXZ : null, "X-Z (Top)", _csLockXZ);
 
                 // X-Z quality dropdown inside the panel (label carries the tooltip since EnumPopup tooltip requires a label)
                 Rect xzLabelRect = new Rect(xzRect.x + 4, xzRect.y + 18, 46, 16);
@@ -196,43 +197,40 @@ namespace Editor.WorldTools
                 // Chunk borders on all panels
                 if (_showChunkBorders)
                 {
-                    DrawChunkBordersOnVerticalPanel(xyRect, _csTextureXY);
-                    DrawChunkBordersOnVerticalPanel(zyRect, _csTextureZY);
-                    DrawChunkBordersOnTopDownPanel(xzRect, _csTextureXZ);
+                    CrossSectionPanelHelper.DrawChunkBordersVertical(xyRect, _csTextureXY, _offset.x);
+                    CrossSectionPanelHelper.DrawChunkBordersVertical(zyRect, _csTextureZY, _offset.y);
+                    CrossSectionPanelHelper.DrawChunkBordersTopDown(xzRect, _csTextureXZ, _offset.x, _offset.y);
                 }
 
                 // Crosshair overlays on each panel
                 if (_csTextureXY != null)
-                    DrawCrosshairOnPanel(xyRect, _csTextureXY, _crosshairPos.x - _offset.x, _crosshairPos.y);
+                    CrossSectionPanelHelper.DrawCrosshairOnPanel(xyRect, _csTextureXY, _crosshairPos.x - _offset.x, _crosshairPos.y);
                 if (_csTextureZY != null)
-                    DrawCrosshairOnPanel(zyRect, _csTextureZY, _crosshairPos.z - _offset.y, _crosshairPos.y);
+                    CrossSectionPanelHelper.DrawCrosshairOnPanel(zyRect, _csTextureZY, _crosshairPos.z - _offset.y, _crosshairPos.y);
                 if (_csTextureXZ != null)
-                    DrawCrosshairOnPanel(xzRect, _csTextureXZ, _crosshairPos.x - _offset.x, _crosshairPos.z - _offset.y);
+                    CrossSectionPanelHelper.DrawCrosshairOnPanel(xzRect, _csTextureXZ, _crosshairPos.x - _offset.x, _crosshairPos.z - _offset.y);
 
                 // Sea level line on X-Y and Z-Y panels
-                if (_csShowSeaLevelLine && _csTextureXY != null)
+                if (_csShowSeaLevelLine)
                 {
-                    float blockH = xyRect.height / _csTextureXY.height;
-                    float lineY = xyRect.yMax - (_csSeaLevel * blockH);
-                    EditorGUI.DrawRect(new Rect(xyRect.x, lineY, xyRect.width, 1), new Color(0.2f, 0.6f, 1f, 0.5f));
-                }
-
-                if (_csShowSeaLevelLine && _csTextureZY != null)
-                {
-                    float blockH = zyRect.height / _csTextureZY.height;
-                    float lineY = zyRect.yMax - (_csSeaLevel * blockH);
-                    EditorGUI.DrawRect(new Rect(zyRect.x, lineY, zyRect.width, 1), new Color(0.2f, 0.6f, 1f, 0.5f));
+                    CrossSectionPanelHelper.DrawSeaLevelLine(xyRect, _csTextureXY, _csSeaLevel);
+                    CrossSectionPanelHelper.DrawSeaLevelLine(zyRect, _csTextureZY, _csSeaLevel);
                 }
 
                 // Click-to-move crosshair
-                HandlePanelClick(xyRect, _csTextureXY, ref _crosshairPos, 0); // XY: updates X, Y
-                HandlePanelClick(zyRect, _csTextureZY, ref _crosshairPos, 1); // ZY: updates Z, Y
-                HandlePanelClick(xzRect, _csTextureXZ, ref _crosshairPos, 2); // XZ: updates X, Z
+                bool clickChanged = false;
+                if (!_csLockXY) clickChanged |= CrossSectionPanelHelper.HandlePanelClick(xyRect, _csTextureXY, ref _crosshairPos, 0, _offset.x, _offset.y);
+                if (!_csLockZY) clickChanged |= CrossSectionPanelHelper.HandlePanelClick(zyRect, _csTextureZY, ref _crosshairPos, 1, _offset.x, _offset.y);
+                if (!_csLockXZ) clickChanged |= CrossSectionPanelHelper.HandlePanelClick(xzRect, _csTextureXZ, ref _crosshairPos, 2, _offset.x, _offset.y);
 
-                // Scroll-to-move depth (scroll wheel changes the slice coordinate for the hovered panel)
-                HandlePanelScroll(xyRect, 0); // XY: scroll changes Z
-                HandlePanelScroll(zyRect, 1); // ZY: scroll changes X
-                HandlePanelScroll(xzRect, 2); // XZ: scroll changes Y
+                // Scroll-to-move depth
+                bool scrollChanged = false;
+                if (!_csLockXY) scrollChanged |= CrossSectionPanelHelper.HandlePanelScroll(xyRect, ref _crosshairPos, 0);
+                if (!_csLockZY) scrollChanged |= CrossSectionPanelHelper.HandlePanelScroll(zyRect, ref _crosshairPos, 1);
+                if (!_csLockXZ) scrollChanged |= CrossSectionPanelHelper.HandlePanelScroll(xzRect, ref _crosshairPos, 2);
+
+                if ((clickChanged || scrollChanged) && _autoGenerate)
+                    GenerateCrossSectionPreview();
 
                 // Info panel
                 DrawInfoPanel(infoRect);
@@ -242,219 +240,7 @@ namespace Editor.WorldTools
             EditorGUILayout.EndHorizontal();
         }
 
-        #region Panel Drawing
-
-        private static void DrawPanelTexture(Rect rect, Texture2D tex, string label, bool locked)
-        {
-            // Dark background
-            EditorGUI.DrawRect(rect, new Color(0.12f, 0.12f, 0.12f));
-
-            if (tex != null)
-            {
-                // Fit texture into panel preserving aspect ratio
-                float texAspect = (float)tex.width / tex.height;
-                float rectAspect = rect.width / rect.height;
-                Rect drawRect;
-                if (texAspect > rectAspect)
-                {
-                    float h = rect.width / texAspect;
-                    drawRect = new Rect(rect.x, rect.y + (rect.height - h) * 0.5f, rect.width, h);
-                }
-                else
-                {
-                    float w = rect.height * texAspect;
-                    drawRect = new Rect(rect.x + (rect.width - w) * 0.5f, rect.y, w, rect.height);
-                }
-
-                GUI.DrawTexture(drawRect, tex, ScaleMode.StretchToFill);
-            }
-
-            // Label overlay
-            GUIStyle labelStyle = new GUIStyle(EditorStyles.boldLabel)
-            {
-                normal = { textColor = new Color(1f, 1f, 1f, 0.7f) },
-                fontSize = 10,
-            };
-            GUI.Label(new Rect(rect.x + 4, rect.y + 2, 120, 16), locked ? label + " [locked]" : label, labelStyle);
-        }
-
-        private static void DrawCrosshairOnPanel(Rect panelRect, Texture2D tex, int localCol, int localRow)
-        {
-            if (tex == null) return;
-
-            // Map texture coordinates to panel screen coordinates
-            float texAspect = (float)tex.width / tex.height;
-            float rectAspect = panelRect.width / panelRect.height;
-            Rect drawRect;
-            if (texAspect > rectAspect)
-            {
-                float h = panelRect.width / texAspect;
-                drawRect = new Rect(panelRect.x, panelRect.y + (panelRect.height - h) * 0.5f, panelRect.width, h);
-            }
-            else
-            {
-                float w = panelRect.height * texAspect;
-                drawRect = new Rect(panelRect.x + (panelRect.width - w) * 0.5f, panelRect.y, w, panelRect.height);
-            }
-
-            float blockW = drawRect.width / tex.width;
-            float blockH = drawRect.height / tex.height;
-
-            Color crosshairColor = new Color(1f, 0.8f, 0.2f, 0.6f);
-
-            // Vertical line
-            if (localCol >= 0 && localCol < tex.width)
-            {
-                float lineX = drawRect.x + (localCol + 0.5f) * blockW;
-                EditorGUI.DrawRect(new Rect(lineX, drawRect.y, 1, drawRect.height), crosshairColor);
-            }
-
-            // Horizontal line (Y is flipped — row 0 is at bottom of texture)
-            if (localRow >= 0 && localRow < tex.height)
-            {
-                float lineY = drawRect.yMax - (localRow + 0.5f) * blockH;
-                EditorGUI.DrawRect(new Rect(drawRect.x, lineY, drawRect.width, 1), crosshairColor);
-            }
-        }
-
-        private void HandlePanelScroll(Rect panelRect, int panelType)
-        {
-            Event e = Event.current;
-            if (e.type != EventType.ScrollWheel) return;
-            if (!panelRect.Contains(e.mousePosition)) return;
-
-            int delta = e.delta.y > 0 ? -1 : 1;
-
-            switch (panelType)
-            {
-                case 0: // XY panel: scroll changes Z (depth into screen)
-                    if (!_csLockXY) _crosshairPos.z += delta;
-                    break;
-                case 1: // ZY panel: scroll changes X (depth into screen)
-                    if (!_csLockZY) _crosshairPos.x += delta;
-                    break;
-                case 2: // XZ panel: scroll changes Y (vertical slice)
-                    if (!_csLockXZ) _crosshairPos.y = math.clamp(_crosshairPos.y + delta, 0, VoxelData.ChunkHeight - 1);
-                    break;
-            }
-
-            e.Use();
-            if (_autoGenerate) GenerateCrossSectionPreview();
-        }
-
-        private void DrawChunkBordersOnVerticalPanel(Rect panelRect, Texture2D tex)
-        {
-            if (tex == null) return;
-            Rect drawRect = GetFittedRect(panelRect, tex);
-            float blockW = drawRect.width / tex.width;
-
-            for (int col = 0; col < tex.width; col++)
-            {
-                int worldCoord = col + _offset.x;
-                if (worldCoord % VoxelData.ChunkWidth == 0)
-                    EditorGUI.DrawRect(new Rect(drawRect.x + col * blockW, drawRect.y, 1, drawRect.height), Color.cyan);
-            }
-        }
-
-        private void DrawChunkBordersOnTopDownPanel(Rect panelRect, Texture2D tex)
-        {
-            if (tex == null) return;
-            Rect drawRect = GetFittedRect(panelRect, tex);
-            float blockW = drawRect.width / tex.width;
-            float blockH = drawRect.height / tex.height;
-
-            for (int col = 0; col < tex.width; col++)
-            {
-                int wx = col + _offset.x;
-                if (wx % VoxelData.ChunkWidth == 0)
-                    EditorGUI.DrawRect(new Rect(drawRect.x + col * blockW, drawRect.y, 1, drawRect.height), Color.cyan);
-            }
-
-            for (int row = 0; row < tex.height; row++)
-            {
-                int wz = row + _offset.y;
-                if (wz % VoxelData.ChunkWidth == 0)
-                    EditorGUI.DrawRect(new Rect(drawRect.x, drawRect.y + row * blockH, drawRect.width, 1), Color.cyan);
-            }
-        }
-
-        private static Rect GetFittedRect(Rect panelRect, Texture2D tex)
-        {
-            float texAspect = (float)tex.width / tex.height;
-            float rectAspect = panelRect.width / panelRect.height;
-            if (texAspect > rectAspect)
-            {
-                float h = panelRect.width / texAspect;
-                return new Rect(panelRect.x, panelRect.y + (panelRect.height - h) * 0.5f, panelRect.width, h);
-            }
-            else
-            {
-                float w = panelRect.height * texAspect;
-                return new Rect(panelRect.x + (panelRect.width - w) * 0.5f, panelRect.y, w, panelRect.height);
-            }
-        }
-
-        private void HandlePanelClick(Rect panelRect, Texture2D tex, ref int3 crosshair, int panelType)
-        {
-            if (tex == null) return;
-            Event e = Event.current;
-            if (e.type != EventType.MouseDown || e.button != 0) return;
-            if (!panelRect.Contains(e.mousePosition)) return;
-
-            // Compute draw rect (same as DrawPanelTexture)
-            float texAspect = (float)tex.width / tex.height;
-            float rectAspect = panelRect.width / panelRect.height;
-            Rect drawRect;
-            if (texAspect > rectAspect)
-            {
-                float h = panelRect.width / texAspect;
-                drawRect = new Rect(panelRect.x, panelRect.y + (panelRect.height - h) * 0.5f, panelRect.width, h);
-            }
-            else
-            {
-                float w = panelRect.height * texAspect;
-                drawRect = new Rect(panelRect.x + (panelRect.width - w) * 0.5f, panelRect.y, w, panelRect.height);
-            }
-
-            if (!drawRect.Contains(e.mousePosition)) return;
-
-            float normX = (e.mousePosition.x - drawRect.x) / drawRect.width;
-            float normY = 1f - (e.mousePosition.y - drawRect.y) / drawRect.height; // flip Y
-
-            int col = (int)(normX * tex.width);
-            int row = (int)(normY * tex.height);
-
-            switch (panelType)
-            {
-                case 0: // XY panel: col = X, row = Y
-                    if (!_csLockXY)
-                    {
-                        crosshair.x = col + _offset.x;
-                        crosshair.y = row;
-                    }
-
-                    break;
-                case 1: // ZY panel: col = Z, row = Y
-                    if (!_csLockZY)
-                    {
-                        crosshair.z = col + _offset.y;
-                        crosshair.y = row;
-                    }
-
-                    break;
-                case 2: // XZ panel: col = X, row = Z
-                    if (!_csLockXZ)
-                    {
-                        crosshair.x = col + _offset.x;
-                        crosshair.z = row + _offset.y;
-                    }
-
-                    break;
-            }
-
-            e.Use();
-            if (_autoGenerate) GenerateCrossSectionPreview();
-        }
+        #region Info Panel
 
         private void DrawInfoPanel(Rect rect)
         {
@@ -566,7 +352,7 @@ namespace Editor.WorldTools
                     ? GenerateWormMasksForSlice(span, _crosshairPos.z, true, ref data)
                     : null;
 
-                EnsureTexture(ref _csTextureXY, span, chunkHeight);
+                CrossSectionPanelHelper.EnsureTexture(ref _csTextureXY, span, chunkHeight);
                 Color[] xyPixels = new Color[span * chunkHeight];
 
                 for (int col = 0; col < span; col++)
@@ -578,7 +364,7 @@ namespace Editor.WorldTools
                     ushort[] column = EvaluateColumn(gx, gz, _csSeaLevel, forceBiome,
                         _csShowCaves, _csShowLodes, lx, lz, ref mask, ref data);
 
-                    WriteColumnToPixels(column, xyPixels, col, span, chunkHeight);
+                    WriteColumnToPixels(column, xyPixels, col, span, chunkHeight, _csShowWater, _csSeaLevel);
 
                     // Cache the column at the crosshair X for block name lookup
                     if (gx == _crosshairPos.x)
@@ -597,7 +383,7 @@ namespace Editor.WorldTools
                     ? GenerateWormMasksForSlice(span, _crosshairPos.x, false, ref data)
                     : null;
 
-                EnsureTexture(ref _csTextureZY, span, chunkHeight);
+                CrossSectionPanelHelper.EnsureTexture(ref _csTextureZY, span, chunkHeight);
                 Color[] zyPixels = new Color[span * chunkHeight];
 
                 for (int col = 0; col < span; col++)
@@ -609,7 +395,7 @@ namespace Editor.WorldTools
                     ushort[] column = EvaluateColumn(gx, gz, _csSeaLevel, forceBiome,
                         _csShowCaves, _csShowLodes, lx, lz, ref mask, ref data);
 
-                    WriteColumnToPixels(column, zyPixels, col, span, chunkHeight);
+                    WriteColumnToPixels(column, zyPixels, col, span, chunkHeight, _csShowWater, _csSeaLevel);
                 }
 
                 _csTextureZY.SetPixels(zyPixels);
@@ -622,7 +408,7 @@ namespace Editor.WorldTools
             {
                 int step = (int)_csXZQuality;
                 int texSize = span; // always full-res texture, upscale from sampled points
-                EnsureTexture(ref _csTextureXZ, texSize, texSize);
+                CrossSectionPanelHelper.EnsureTexture(ref _csTextureXZ, texSize, texSize);
                 Color[] xzPixels = new Color[texSize * texSize];
 
                 // Pre-generate worm masks for the full XZ area
@@ -644,7 +430,7 @@ namespace Editor.WorldTools
                             _csShowCaves, _csShowLodes, lx, lz, ref emptyMask, ref data);
 
                         ushort blockID = column[math.clamp(targetY, 0, chunkHeight - 1)];
-                        Color color = GetBlockColor(blockID, targetY, chunkHeight);
+                        Color color = GetBlockColor(blockID, targetY, chunkHeight, _csShowWater, _csSeaLevel);
 
                         // Fill the step×step block with the same color (nearest-neighbor upscale)
                         for (int dz = 0; dz < step && zCol + dz < texSize; dz++)
@@ -669,27 +455,20 @@ namespace Editor.WorldTools
 
         #region Generation Helpers
 
-        private static void EnsureTexture(ref Texture2D tex, int width, int height)
-        {
-            if (tex != null && tex.width == width && tex.height == height) return;
-            if (tex != null) DestroyImmediate(tex);
-            tex = new Texture2D(width, height, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point };
-        }
-
-        private Color GetBlockColor(ushort blockID, int y, int maxY)
+        private static Color GetBlockColor(ushort blockID, int y, int maxY, bool showWater, int seaLevel)
         {
             if (blockID == BlockIDs.Air) return CrossSectionBlockColorMap.GetSkyColor(y, maxY);
-            if (blockID == BlockIDs.Water && _csShowWater)
-                return CrossSectionBlockColorMap.GetWaterColor(y, _csSeaLevel);
+            if (blockID == BlockIDs.Water && showWater)
+                return CrossSectionBlockColorMap.GetWaterColor(y, seaLevel);
             if (blockID == BlockIDs.Water) return CrossSectionBlockColorMap.GetSkyColor(y, maxY);
             return CrossSectionBlockColorMap.GetBlockColor(blockID);
         }
 
-        private void WriteColumnToPixels(ushort[] column, Color[] pixels, int col, int width, int height)
+        private static void WriteColumnToPixels(ushort[] column, Color[] pixels, int col, int width, int height, bool showWater, int seaLevel)
         {
             for (int y = 0; y < height; y++)
             {
-                pixels[y * width + col] = GetBlockColor(column[y], y, height);
+                pixels[y * width + col] = GetBlockColor(column[y], y, height, showWater, seaLevel);
             }
         }
 
