@@ -1148,14 +1148,16 @@ namespace Libraries
             }
 
             float cellularJitter = 0.43701595f * mCellularJitterModifier;
-            int xPrimed = (xr - 1) * PrimeX;
-            int yPrimedBase = (yr - 1) * PrimeY;
+            // 5x5 search grid to eliminate seam artifacts at the 3x3 grid boundary.
+            // The sort-insert loop keeps only the 9 nearest cells regardless of how many are evaluated.
+            int xPrimed = (xr - 2) * PrimeX;
+            int yPrimedBase = (yr - 2) * PrimeY;
             unsafe
             {
-                for (int xi = xr - 1; xi <= xr + 1; xi++)
+                for (int xi = xr - 2; xi <= xr + 2; xi++)
                 {
                     int yPrimed = yPrimedBase;
-                    for (int yi = yr - 1; yi <= yr + 1; yi++)
+                    for (int yi = yr - 2; yi <= yr + 2; yi++)
                     {
                         int hash = Hash(seed, xPrimed, yPrimed);
                         int idx = hash & (255 << 1);

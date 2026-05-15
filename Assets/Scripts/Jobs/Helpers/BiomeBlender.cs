@@ -56,7 +56,9 @@ namespace Jobs.Helpers
 
             float localBlendRadius = localBlendRadiusSum / trSum;
 
-            float wiggle = selectionNoise.GetNoise(globalX * 0.25f, globalZ * 0.25f) * 0.5f * localBlendRadius;
+            // Organic wiggle using continuous simplex noise (not Cellular — CellValue has step discontinuities).
+            // Prime offsets prevent axis-alignment with terrain noise; frequency ~0.001 matches the original 0.25x Cellular scale.
+            float wiggle = noise.snoise(new float2(globalX * 0.001f + 7919f, globalZ * 0.001f + 6271f)) * 0.5f * localBlendRadius;
             float activeRadius = math.max(0.001f, localBlendRadius + wiggle);
 
             // Border fade: how deep we are inside the primary Voronoi cell.
@@ -139,7 +141,9 @@ namespace Jobs.Helpers
             float localBlendRadius = localBlendRadiusSum / trSum;
 
             // Add an organic low-frequency wiggle to the dynamically mixed blend radius.
-            float wiggle = selectionNoise.GetNoise(globalX * 0.25f, globalZ * 0.25f) * 0.5f * localBlendRadius;
+            // Organic wiggle using continuous simplex noise (not Cellular — CellValue has step discontinuities).
+            // Prime offsets prevent axis-alignment with terrain noise; frequency ~0.001 matches the original 0.25x Cellular scale.
+            float wiggle = noise.snoise(new float2(globalX * 0.001f + 7919f, globalZ * 0.001f + 6271f)) * 0.5f * localBlendRadius;
             float activeRadius = math.max(0.001f, localBlendRadius + wiggle);
 
             // 1. Calculate Raw Linear Inverse-Distance Weights, scaled by per-biome BlendWeight.
