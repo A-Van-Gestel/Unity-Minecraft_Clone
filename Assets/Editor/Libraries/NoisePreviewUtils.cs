@@ -1,5 +1,4 @@
 using Data.WorldTypes;
-using Editor.WorldTools;
 using Libraries;
 using Unity.Mathematics;
 
@@ -11,15 +10,22 @@ namespace Editor.Libraries
     public static class NoisePreviewUtils
     {
         /// <summary>
-        /// Evaluates a noise value at the specified coordinates, handling special 3D sampling (e.g. for caves/lodes).
+        /// Evaluates a noise value at the specified coordinates, handling 3D sampling for cave/lode modes.
         /// </summary>
-        public static float EvaluateNoiseVal(FastNoiseLite noise, float worldX, float worldZ, float sliceY, NoisePreviewWindow.NoiseTarget target, CaveMode caveMode)
+        /// <param name="noise">The noise instance to evaluate.</param>
+        /// <param name="worldX">Global X coordinate.</param>
+        /// <param name="worldZ">Global Z coordinate.</param>
+        /// <param name="sliceY">Y slice height for 3D evaluation.</param>
+        /// <param name="is3D">If true, evaluates as a 3D noise slice (cave/lode). If false, evaluates as 2D terrain noise.</param>
+        /// <param name="caveMode">Cave evaluation mode. Only used when <paramref name="is3D"/> is true.</param>
+        public static float EvaluateNoiseVal(FastNoiseLite noise, float worldX, float worldZ, float sliceY, bool is3D, CaveMode caveMode = CaveMode.Cheese)
         {
-            if (target == NoisePreviewWindow.NoiseTarget.Lode || (target == NoisePreviewWindow.NoiseTarget.CaveLayer && caveMode == CaveMode.Cheese))
+            if (!is3D)
             {
-                return noise.GetNoise(worldX, sliceY, worldZ);
+                return noise.GetNoise(worldX, worldZ);
             }
-            else if (target == NoisePreviewWindow.NoiseTarget.CaveLayer && caveMode == CaveMode.Spaghetti)
+
+            if (caveMode == CaveMode.Spaghetti)
             {
                 float ab = noise.GetNoise(worldX, sliceY);
                 float bc = noise.GetNoise(sliceY, worldZ);
@@ -29,12 +35,14 @@ namespace Editor.Libraries
                 float ca = noise.GetNoise(worldZ, worldX);
                 return (ab + bc + ac + ba + cb + ca) / 6f;
             }
-            else if (target == NoisePreviewWindow.NoiseTarget.CaveLayer && caveMode == CaveMode.Noodle)
+
+            if (caveMode == CaveMode.Noodle)
             {
                 return 1.0f - math.abs(noise.GetNoise(worldX, sliceY, worldZ));
             }
 
-            return noise.GetNoise(worldX, worldZ);
+            // Cheese (default) and Lode — standard 3D evaluation
+            return noise.GetNoise(worldX, sliceY, worldZ);
         }
     }
 }
