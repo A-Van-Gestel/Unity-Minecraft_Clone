@@ -84,6 +84,22 @@ public class WorldJobManager : IDisposable
     public byte GetVoxel(Vector3Int globalPos) => _chunkGenerator.GetVoxel(globalPos);
 
     /// <summary>
+    /// Returns terrain generation diagnostic data at the given column.
+    /// Delegated to the active generator strategy.
+    /// </summary>
+    public TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ) => _chunkGenerator.GetTerrainDebugInfo(globalX, globalZ);
+
+    /// <summary>
+    /// Evaluates a batch of pixels for the terrain debug minimap.
+    /// Delegated to the active generator strategy.
+    /// </summary>
+    public void EvaluateTerrainDebugPixels(int startIndex, int count, int textureSize,
+        int originX, int originZ, int scale, TerrainDebugRenderMode mode,
+        int biomeCount, int sliceY, byte[] outputPixels) =>
+        _chunkGenerator.EvaluateTerrainDebugPixels(startIndex, count, textureSize,
+            originX, originZ, scale, mode, biomeCount, sliceY, outputPixels);
+
+    /// <summary>
     /// Schedules a background job to generate voxel data for the given chunk coordinate.
     /// </summary>
     /// <param name="chunkCoord">The coordinate of the chunk to generate.</param>

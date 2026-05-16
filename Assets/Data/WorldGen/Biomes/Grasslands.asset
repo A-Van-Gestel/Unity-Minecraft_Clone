@@ -13,6 +13,7 @@ MonoBehaviour:
   m_Name: Grasslands
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Grasslands
+  debugPreviewColor: {r: 0.3, g: 0.7, b: 0.3, a: 1}
   biomeWeightNoiseConfig:
     seedOffset: 250
     frequency: 0.002625

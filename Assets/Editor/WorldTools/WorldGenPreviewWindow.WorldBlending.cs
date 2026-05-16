@@ -8,6 +8,7 @@ using Jobs.Generators;
 using Libraries;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
@@ -216,6 +217,7 @@ namespace Editor.WorldTools
                     Enable3DDensity = biome.enable3DDensity,
                     DensityAmplitude = biome.densityAmplitude,
                     EnableDensityWarp = biome.enableDensityWarp,
+                    DebugPreviewColor = new float3(biome.debugPreviewColor.r, biome.debugPreviewColor.g, biome.debugPreviewColor.b),
                 };
 
                 // Build Multi-Noise arrays

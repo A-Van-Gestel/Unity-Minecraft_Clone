@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Data.WorldTypes;
+using Unity.Mathematics;
 
 namespace Jobs.Data
 {
@@ -77,5 +78,8 @@ namespace Jobs.Data
         /// <summary>Whether to apply domain warping to density noise coordinates.</summary>
         [MarshalAs(UnmanagedType.U1)]
         public bool EnableDensityWarp;
+
+        /// <summary>RGB color for editor previews and in-game terrain debug overlay.</summary>
+        public float3 DebugPreviewColor;
     }
 }

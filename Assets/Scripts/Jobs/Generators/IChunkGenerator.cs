@@ -8,6 +8,35 @@ using UnityEngine;
 namespace Jobs.Generators
 {
     /// <summary>
+    /// Render modes for the in-game terrain generation debug minimap.
+    /// </summary>
+    public enum TerrainDebugRenderMode
+    {
+        BiomeVoronoi,
+        BiomeBorderFade,
+        BlendedHeightmap,
+        CombinedDensitySlice,
+    }
+
+    /// <summary>
+    /// Diagnostic data returned by <see cref="IChunkGenerator.GetTerrainDebugInfo"/>.
+    /// Main-thread only — not Burst-safe (contains managed string).
+    /// </summary>
+    public struct TerrainDebugInfo
+    {
+        public bool IsValid;
+        public int BiomeIndex;
+        public string BiomeName;
+        public float BlendedTerrainHeight;
+        public float BorderFade;
+        public float DensityAmplitude;
+        public float EffectiveDensityAmplitude;
+        public bool Enable3DDensity;
+        public float BlendRadius;
+        public float BlendWeight;
+    }
+
+    /// <summary>
     /// Abstraction for chunk generation strategies. Each world type provides its own implementation.
     /// The active generator is owned by <see cref="WorldJobManager"/> and delegates all scheduling,
     /// synchronous voxel queries, and flora expansion through this interface.
@@ -47,6 +76,33 @@ namespace Jobs.Generators
         /// Contains the global position and the pool entry index.</param>
         /// <returns>An enumerable of VoxelMods representing the full structure.</returns>
         IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker);
+
+        /// <summary>
+        /// Returns terrain generation diagnostic data at the given column.
+        /// Main-thread only, used by <see cref="DebugScreen"/> for runtime inspection.
+        /// </summary>
+        /// <param name="globalX">Global X coordinate.</param>
+        /// <param name="globalZ">Global Z coordinate.</param>
+        /// <returns>Diagnostic data for the terrain at this column.</returns>
+        TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ);
+
+        /// <summary>
+        /// Evaluates a batch of pixels for the terrain debug minimap.
+        /// Writes RGBA32 color data for each coordinate into the output array.
+        /// </summary>
+        /// <param name="startIndex">First pixel index to evaluate this frame.</param>
+        /// <param name="count">Number of pixels to evaluate.</param>
+        /// <param name="textureSize">Width/height of the square texture.</param>
+        /// <param name="originX">World X coordinate of the texture's bottom-left corner.</param>
+        /// <param name="originZ">World Z coordinate of the texture's bottom-left corner.</param>
+        /// <param name="scale">World blocks per pixel.</param>
+        /// <param name="mode">Which data channel to render.</param>
+        /// <param name="biomeCount">Total number of biomes (for color mapping).</param>
+        /// <param name="sliceY">Y level for density slice mode.</param>
+        /// <param name="outputPixels">RGBA32 byte array (length = textureSize * textureSize * 4).</param>
+        void EvaluateTerrainDebugPixels(int startIndex, int count, int textureSize,
+            int originX, int originZ, int scale, TerrainDebugRenderMode mode,
+            int biomeCount, int sliceY, byte[] outputPixels);
 
         /// <summary>
         /// Disposes of any internal NativeArrays allocated during Initialize.

@@ -17,6 +17,9 @@ namespace Data.WorldTypes
         [Tooltip("The name of the biome, mostly for debug purposes.")]
         public string biomeName = "New Biome";
 
+        [Tooltip("Color used in editor preview tools and the in-game terrain debug overlay to identify this biome.")]
+        public Color debugPreviewColor = Color.green;
+
         [Tooltip("Noise configuration for biome weight / Voronoi selection.")]
         public FastNoiseConfig biomeWeightNoiseConfig;
 

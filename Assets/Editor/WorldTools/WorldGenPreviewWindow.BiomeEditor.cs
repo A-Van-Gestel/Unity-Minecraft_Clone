@@ -63,9 +63,10 @@ namespace Editor.WorldTools
             if (_beShowPreview && _bePreviewXY == null)
                 GenerateInlineBiomePreview();
 
-            // --- Top bar: biome name + live update ---
+            // --- Top bar: biome name + preview color + live update ---
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("biomeName"), GUILayout.ExpandWidth(true));
+            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("debugPreviewColor"), GUIContent.none, GUILayout.Width(50));
             _liveUpdate = GUILayout.Toggle(_liveUpdate, "Live Update", EditorStyles.miniButton, GUILayout.Width(80));
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.Space(4);

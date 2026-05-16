@@ -13,6 +13,7 @@ MonoBehaviour:
   m_Name: Mountain
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Mountain
+  debugPreviewColor: {r: 0.55, g: 0.55, b: 0.6, a: 1}
   biomeWeightNoiseConfig:
     seedOffset: -231
     frequency: 0.05

@@ -1,3 +1,4 @@
+using DebugVisualizations;
 using Physics;
 using Serialization;
 using UnityEngine;
@@ -11,6 +12,7 @@ public class Player : MonoBehaviour
     private Transform _playerCamera;
     private World _world;
     private InputManager _input;
+    private TerrainGenDebugOverlay _terrainDebugOverlay;
 
     [Tooltip("Makes the player not be affected by gravity.")]
     public bool IsFlying
@@ -108,6 +110,16 @@ public class Player : MonoBehaviour
             orientation = 4; // Player is facing west.
     }
 
+    private void EnsureTerrainDebugOverlay()
+    {
+        if (_terrainDebugOverlay != null) return;
+        _terrainDebugOverlay = FindAnyObjectByType<TerrainGenDebugOverlay>();
+        if (_terrainDebugOverlay != null) return;
+        GameObject go = new GameObject("TerrainGenDebugOverlay");
+        _terrainDebugOverlay = go.AddComponent<TerrainGenDebugOverlay>();
+        _terrainDebugOverlay.SetPlayer(this);
+    }
+
     private void GetPlayerInputs()
     {
         // MOVEMENT & CAMERA
@@ -139,7 +151,11 @@ public class Player : MonoBehaviour
 
         if (_input.DebugCodePressed)
         {
-            // Debug method here
+            EnsureTerrainDebugOverlay();
+            if (_input.AltModifierHeld)
+                _terrainDebugOverlay.CycleMode();
+            else
+                _terrainDebugOverlay.Toggle();
         }
 
 

@@ -30,11 +30,12 @@ namespace Jobs.Helpers
         {
             selectionNoise.GetCellularEdgeData(globalX, globalZ, out FastNoiseLite.CellularEdgeData edgeData);
 
-            int* b = stackalloc int[9];
-            float* rad = stackalloc float[9];
-            float* bw = stackalloc float[9];
-            BlendCurve* curves = stackalloc BlendCurve[9];
-            for (int i = 0; i < 9; i++)
+            const int N = FastNoiseLite.CellularEdgeData.MaxCells;
+            int* b = stackalloc int[N];
+            float* rad = stackalloc float[N];
+            float* bw = stackalloc float[N];
+            BlendCurve* curves = stackalloc BlendCurve[N];
+            for (int i = 0; i < N; i++)
             {
                 b[i] = GetBiomeIndex(edgeData.Hashes[i], biomes.Length);
                 rad[i] = biomes[b[i]].BlendRadius;
@@ -46,7 +47,7 @@ namespace Jobs.Helpers
             float localBlendRadiusSum = 0f;
             float dist0 = edgeData.Distances[0];
 
-            for (int i = 0; i < 9; i++)
+            for (int i = 0; i < N; i++)
             {
                 float tr = math.max(0f, 1f - (edgeData.Distances[i] - dist0));
                 trSum += tr;
@@ -67,17 +68,17 @@ namespace Jobs.Helpers
             float linearFade = math.saturate(edgeGap / activeRadius);
             borderFade = ApplyCurve(linearFade, curves[0]) * math.saturate(bw[0]);
 
-            float* raw = stackalloc float[9];
+            float* raw = stackalloc float[N];
             float totalRaw = 0f;
-            for (int i = 0; i < 9; i++)
+            for (int i = 0; i < N; i++)
             {
                 raw[i] = math.max(0f, 1f - (edgeData.Distances[i] - dist0) / activeRadius) * bw[i];
                 totalRaw += raw[i];
             }
 
-            float* w = stackalloc float[9];
+            float* w = stackalloc float[N];
             float totalSmooth = 0f;
-            for (int i = 0; i < 9; i++)
+            for (int i = 0; i < N; i++)
             {
                 float norm = raw[i] / totalRaw;
                 w[i] = ApplyCurve(norm, curves[i]);
@@ -85,7 +86,7 @@ namespace Jobs.Helpers
             }
 
             float finalHeight = 0f;
-            for (int i = 0; i < 9; i++)
+            for (int i = 0; i < N; i++)
             {
                 if (w[i] > 0.001f)
                 {

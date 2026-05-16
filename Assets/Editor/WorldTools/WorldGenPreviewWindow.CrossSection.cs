@@ -672,6 +672,7 @@ namespace Editor.WorldTools
                     Enable3DDensity = biome.enable3DDensity,
                     DensityAmplitude = biome.densityAmplitude,
                     EnableDensityWarp = biome.enableDensityWarp,
+                    DebugPreviewColor = new float3(biome.debugPreviewColor.r, biome.debugPreviewColor.g, biome.debugPreviewColor.b),
                 };
 
                 for (int j = 0; j < layerCount; j++)

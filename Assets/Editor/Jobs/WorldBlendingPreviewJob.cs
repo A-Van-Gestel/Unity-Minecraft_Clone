@@ -163,11 +163,12 @@ namespace Editor.Jobs
         {
             SelectionNoise.GetCellularEdgeData(gx, gz, out FastNoiseLite.CellularEdgeData edgeData);
 
-            int* bi = stackalloc int[9];
-            float* rad = stackalloc float[9];
-            float* bw = stackalloc float[9];
-            BlendCurve* curves = stackalloc BlendCurve[9];
-            for (int i = 0; i < 9; i++)
+            const int N = FastNoiseLite.CellularEdgeData.MaxCells;
+            int* bi = stackalloc int[N];
+            float* rad = stackalloc float[N];
+            float* bw = stackalloc float[N];
+            BlendCurve* curves = stackalloc BlendCurve[N];
+            for (int i = 0; i < N; i++)
             {
                 float nv = edgeData.Hashes[i] * (1.0f / 2147483648.0f);
                 nv = (nv + 1.0f) * 0.5f;
@@ -179,7 +180,7 @@ namespace Editor.Jobs
 
             float trSum = 0f, localBlendRadiusSum = 0f;
             float dist0 = edgeData.Distances[0];
-            for (int i = 0; i < 9; i++)
+            for (int i = 0; i < N; i++)
             {
                 float tr = math.max(0f, 1f - (edgeData.Distances[i] - dist0));
                 trSum += tr;
@@ -187,19 +188,19 @@ namespace Editor.Jobs
             }
 
             float localBlendRadius = localBlendRadiusSum / trSum;
-            float wiggle = SelectionNoise.GetNoise(gx * 0.25f, gz * 0.25f) * 0.5f * localBlendRadius;
+            float wiggle = noise.snoise(new float2(gx * 0.001f + 7919f, gz * 0.001f + 6271f)) * 0.5f * localBlendRadius;
             float activeRadius = math.max(0.001f, localBlendRadius + wiggle);
 
-            float* raw = stackalloc float[9];
+            float* raw = stackalloc float[N];
             float totalRaw = 0f;
-            for (int i = 0; i < 9; i++)
+            for (int i = 0; i < N; i++)
             {
                 raw[i] = math.max(0f, 1f - (edgeData.Distances[i] - dist0) / activeRadius) * bw[i];
                 totalRaw += raw[i];
             }
 
             float targetWeight = 0f, totalSmooth = 0f;
-            for (int i = 0; i < 9; i++)
+            for (int i = 0; i < N; i++)
             {
                 float norm = raw[i] / totalRaw;
                 float curved = ApplyCurve(norm, curves[i]);
@@ -281,53 +282,12 @@ namespace Editor.Jobs
             b = (byte)(fb * 255f);
         }
 
-        private static void GetBiomeColorRGB(int biomeIndex, out float r, out float g, out float b)
+        private void GetBiomeColorRGB(int biomeIndex, out float r, out float g, out float b)
         {
-            // Same 8 distinct biome colors as the editor, encoded inline for Burst compatibility
-            int ci = biomeIndex % 8;
-            switch (ci)
-            {
-                case 0:
-                    r = 0.30f;
-                    g = 0.70f;
-                    b = 0.30f;
-                    return; // Green
-                case 1:
-                    r = 0.85f;
-                    g = 0.80f;
-                    b = 0.50f;
-                    return; // Sandy
-                case 2:
-                    r = 0.40f;
-                    g = 0.55f;
-                    b = 0.80f;
-                    return; // Blue
-                case 3:
-                    r = 0.70f;
-                    g = 0.35f;
-                    b = 0.35f;
-                    return; // Red
-                case 4:
-                    r = 0.90f;
-                    g = 0.90f;
-                    b = 0.95f;
-                    return; // Snowy
-                case 5:
-                    r = 0.55f;
-                    g = 0.40f;
-                    b = 0.25f;
-                    return; // Brown
-                case 6:
-                    r = 0.20f;
-                    g = 0.50f;
-                    b = 0.45f;
-                    return; // Teal
-                default:
-                    r = 0.75f;
-                    g = 0.55f;
-                    b = 0.75f;
-                    return; // Lavender
-            }
+            float3 c = Biomes[biomeIndex].DebugPreviewColor;
+            r = c.x;
+            g = c.y;
+            b = c.z;
         }
 
         #endregion

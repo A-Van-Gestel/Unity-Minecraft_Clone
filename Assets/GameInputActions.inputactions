@@ -82,7 +82,7 @@
                     "name": "AltModifier",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000009",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -136,7 +136,7 @@
                     "name": "ToggleChunkBorders",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000015",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -145,7 +145,7 @@
                     "name": "ToggleFlying",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000016",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -154,7 +154,7 @@
                     "name": "CycleVisMode",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000017",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -163,7 +163,7 @@
                     "name": "DebugCode",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000018",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -172,7 +172,7 @@
                     "name": "ToggleNoclip",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000019",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false

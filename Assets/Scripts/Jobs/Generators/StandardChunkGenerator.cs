@@ -192,6 +192,7 @@ namespace Jobs.Generators
                     Enable3DDensity = biome.enable3DDensity,
                     DensityAmplitude = biome.densityAmplitude,
                     EnableDensityWarp = biome.enableDensityWarp,
+                    DebugPreviewColor = new float3(biome.debugPreviewColor.r, biome.debugPreviewColor.g, biome.debugPreviewColor.b),
                 };
 
                 // Flatten major flora pool entries
@@ -470,6 +471,173 @@ namespace Jobs.Generators
             }
 
             return voxelValue;
+        }
+
+        /// <inheritdoc />
+        public TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ)
+        {
+            float biomeNoise = _biomeSelectionNoise.GetNoise(globalX, globalZ);
+            int biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
+            StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
+
+            MultiNoiseData multiNoise = new MultiNoiseData
+            {
+                ContinentalnessNoises = _biomeContinentalnessNoises,
+                ErosionNoises = _biomeErosionNoises,
+                PeaksValleysNoises = _biomePeaksValleysNoises,
+                ContinentalnessSplines = _biomeContinentalnessSplines,
+                ErosionSplines = _biomeErosionSplines,
+                PeaksValleysSplines = _biomePVSplines,
+            };
+            float blendedHeight = BiomeBlender.CalculateBlendedTerrainHeight(
+                globalX, globalZ, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise,
+                out float borderFade);
+
+            float effectiveDensityAmplitude = biome.DensityAmplitude * borderFade;
+
+            return new TerrainDebugInfo
+            {
+                IsValid = true,
+                BiomeIndex = biomeIndex,
+                BiomeName = biomeIndex < _standardBiomes.Length ? _standardBiomes[biomeIndex].biomeName : "Unknown",
+                BlendedTerrainHeight = blendedHeight,
+                BorderFade = borderFade,
+                DensityAmplitude = biome.DensityAmplitude,
+                EffectiveDensityAmplitude = effectiveDensityAmplitude,
+                Enable3DDensity = biome.Enable3DDensity,
+                BlendRadius = biome.BlendRadius,
+                BlendWeight = biome.BlendWeight,
+            };
+        }
+
+        /// <inheritdoc />
+        public void EvaluateTerrainDebugPixels(int startIndex, int count, int textureSize,
+            int originX, int originZ, int scale, TerrainDebugRenderMode mode,
+            int biomeCount, int sliceY, byte[] outputPixels)
+        {
+            MultiNoiseData multiNoise = new MultiNoiseData
+            {
+                ContinentalnessNoises = _biomeContinentalnessNoises,
+                ErosionNoises = _biomeErosionNoises,
+                PeaksValleysNoises = _biomePeaksValleysNoises,
+                ContinentalnessSplines = _biomeContinentalnessSplines,
+                ErosionSplines = _biomeErosionSplines,
+                PeaksValleysSplines = _biomePVSplines,
+            };
+
+            int totalPixels = textureSize * textureSize;
+            int endIndex = math.min(startIndex + count, totalPixels);
+
+            for (int idx = startIndex; idx < endIndex; idx++)
+            {
+                int px = idx % textureSize;
+                int pz = idx / textureSize;
+                int gx = originX + px * scale;
+                int gz = originZ + pz * scale;
+
+                float biomeNoise = _biomeSelectionNoise.GetNoise(gx, gz);
+                int biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
+
+                byte r, g, b;
+                switch (mode)
+                {
+                    case TerrainDebugRenderMode.BiomeVoronoi:
+                    {
+                        GetBiomeDebugColor(biomeIndex, out r, out g, out b);
+                        float height = BiomeBlender.CalculateBlendedTerrainHeight(
+                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out _);
+                        float brightness = math.clamp(height / 100f, 0.3f, 1.0f);
+                        r = (byte)(r * brightness);
+                        g = (byte)(g * brightness);
+                        b = (byte)(b * brightness);
+                        break;
+                    }
+                    case TerrainDebugRenderMode.BiomeBorderFade:
+                    {
+                        BiomeBlender.CalculateBlendedTerrainHeight(
+                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out float borderFade);
+                        GetBiomeDebugColor(biomeIndex, out r, out g, out b);
+                        float intensity = math.lerp(0.15f, 1.0f, borderFade);
+                        r = (byte)(r * intensity);
+                        g = (byte)(g * intensity);
+                        b = (byte)(b * intensity);
+                        break;
+                    }
+                    case TerrainDebugRenderMode.BlendedHeightmap:
+                    {
+                        float height = BiomeBlender.CalculateBlendedTerrainHeight(
+                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out _);
+                        float v = math.saturate(height / 128f);
+                        v = math.max(v, 0.05f);
+                        byte bv = (byte)(v * 255f);
+                        r = bv;
+                        g = bv;
+                        b = bv;
+
+                        if (height < _seaLevel)
+                        {
+                            float depth = math.saturate((_seaLevel - height) / 30f);
+                            r = (byte)math.lerp(64f, 20f, depth);
+                            g = (byte)math.lerp(140f, 51f, depth);
+                            b = (byte)math.lerp(217f, 140f, depth);
+                        }
+
+                        break;
+                    }
+                    case TerrainDebugRenderMode.CombinedDensitySlice:
+                    {
+                        float height = BiomeBlender.CalculateBlendedTerrainHeight(
+                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out float borderFade);
+                        StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
+                        float density = height - sliceY;
+
+                        if (biome.Enable3DDensity)
+                        {
+                            float effAmp = biome.DensityAmplitude * borderFade;
+                            float dx = gx, dy = sliceY, dz = gz;
+                            if (biome.EnableDensityWarp)
+                                _biomeDensityWarpNoises[biomeIndex].DomainWarp(ref dx, ref dy, ref dz);
+                            density += _biomeDensityNoises[biomeIndex].GetNoise(dx, dy, dz) * effAmp;
+                        }
+
+                        if (density > 0f)
+                        {
+                            float t = math.saturate(density / 30f);
+                            r = (byte)math.lerp(255f, 204f, t);
+                            g = (byte)math.lerp(255f, 77f, t);
+                            b = (byte)math.lerp(255f, 26f, t);
+                        }
+                        else
+                        {
+                            float t = math.saturate(-density / 30f);
+                            r = (byte)math.lerp(255f, 38f, t);
+                            g = (byte)math.lerp(255f, 102f, t);
+                            b = (byte)math.lerp(255f, 217f, t);
+                        }
+
+                        break;
+                    }
+                    default:
+                        r = 0;
+                        g = 0;
+                        b = 0;
+                        break;
+                }
+
+                int byteIdx = idx * 4;
+                outputPixels[byteIdx] = r;
+                outputPixels[byteIdx + 1] = g;
+                outputPixels[byteIdx + 2] = b;
+                outputPixels[byteIdx + 3] = 255;
+            }
+        }
+
+        private void GetBiomeDebugColor(int biomeIndex, out byte r, out byte g, out byte b)
+        {
+            float3 c = _biomesJobData[biomeIndex].DebugPreviewColor;
+            r = (byte)(c.x * 255f);
+            g = (byte)(c.y * 255f);
+            b = (byte)(c.z * 255f);
         }
 
         /// <inheritdoc />

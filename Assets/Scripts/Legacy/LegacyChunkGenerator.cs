@@ -108,6 +108,16 @@ namespace Legacy
         }
 
         /// <inheritdoc />
+        public TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ) => default;
+
+        /// <inheritdoc />
+        public void EvaluateTerrainDebugPixels(int startIndex, int count, int textureSize,
+            int originX, int originZ, int scale, TerrainDebugRenderMode mode,
+            int biomeCount, int sliceY, byte[] outputPixels)
+        {
+        }
+
+        /// <inheritdoc />
         public IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker)
         {
             Vector3Int position = new Vector3Int(marker.Position.x, marker.Position.y, marker.Position.z);

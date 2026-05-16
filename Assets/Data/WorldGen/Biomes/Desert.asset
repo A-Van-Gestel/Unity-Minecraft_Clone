@@ -13,6 +13,7 @@ MonoBehaviour:
   m_Name: Desert
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Desert
+  debugPreviewColor: {r: 0.85, g: 0.8, b: 0.5, a: 1}
   biomeWeightNoiseConfig:
     seedOffset: 1250
     frequency: 0.00425

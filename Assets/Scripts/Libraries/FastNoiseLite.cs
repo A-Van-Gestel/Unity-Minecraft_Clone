@@ -1310,8 +1310,11 @@ namespace Libraries
 
         public unsafe struct CellularEdgeData
         {
-            public fixed int Hashes[9];
-            public fixed float Distances[9];
+            /// <summary>All cells from the 5×5 search grid, sorted by distance.</summary>
+            public const int MaxCells = 25;
+
+            public fixed int Hashes[MaxCells];
+            public fixed float Distances[MaxCells];
         }
 
         public void GetCellularEdgeData(float x, float y, out CellularEdgeData edgeData)
@@ -1326,9 +1329,10 @@ namespace Libraries
             int yr = FastRound(y);
 
             edgeData = default;
+            const int N = CellularEdgeData.MaxCells;
             unsafe
             {
-                for (int i = 0; i < 9; i++)
+                for (int i = 0; i < N; i++)
                 {
                     edgeData.Distances[i] = float.MaxValue;
                     edgeData.Hashes[i] = 0;
@@ -1336,8 +1340,8 @@ namespace Libraries
             }
 
             float cellularJitter = 0.43701595f * mCellularJitterModifier;
-            // 5x5 search grid to eliminate seam artifacts at the 3x3 grid boundary.
-            // The sort-insert loop keeps only the 9 nearest cells regardless of how many are evaluated.
+            // 5x5 search grid — all 25 cells are tracked (sorted by distance) to eliminate
+            // truncation seams in the BiomeBlender when the blend radius is large.
             int xPrimed = (xr - 2) * PrimeX;
             int yPrimedBase = (yr - 2) * PrimeY;
             unsafe
@@ -1361,11 +1365,11 @@ namespace Libraries
                         else
                             newDistance = math.abs(vecX) + math.abs(vecY) + (vecX * vecX + vecY * vecY);
 
-                        for (int i = 0; i < 9; i++)
+                        for (int i = 0; i < N; i++)
                         {
                             if (newDistance < edgeData.Distances[i])
                             {
-                                for (int j = 8; j > i; j--)
+                                for (int j = N - 1; j > i; j--)
                                 {
                                     edgeData.Distances[j] = edgeData.Distances[j - 1];
                                     edgeData.Hashes[j] = edgeData.Hashes[j - 1];
@@ -1373,7 +1377,7 @@ namespace Libraries
 
                                 edgeData.Distances[i] = newDistance;
                                 edgeData.Hashes[i] = hash;
-                                break; // Break out of the loop once inserted
+                                break;
                             }
                         }
 
@@ -1388,7 +1392,7 @@ namespace Libraries
             {
                 unsafe
                 {
-                    for (int i = 0; i < 9; i++)
+                    for (int i = 0; i < N; i++)
                     {
                         edgeData.Distances[i] = math.sqrt(edgeData.Distances[i]);
                     }

@@ -13,6 +13,7 @@ MonoBehaviour:
   m_Name: Forrest
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Forrest
+  debugPreviewColor: {r: 0.15, g: 0.45, b: 0.2, a: 1}
   biomeWeightNoiseConfig:
     seedOffset: 875465
     frequency: 0.010625
