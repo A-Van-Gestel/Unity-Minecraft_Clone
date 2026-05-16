@@ -97,6 +97,16 @@ namespace Editor.Libraries
         }
 
         /// <summary>
+        /// Draws a compact validation message box with an icon and colored text.
+        /// </summary>
+        /// <param name="message">The warning/info text to display.</param>
+        /// <param name="type">Unity MessageType controlling the icon (Info, Warning, Error).</param>
+        public static void ValidationBox(string message, MessageType type)
+        {
+            EditorGUILayout.HelpBox(message, type);
+        }
+
+        /// <summary>
         /// Draws a thin horizontal separator line.
         /// </summary>
         public static void DrawSeparator()

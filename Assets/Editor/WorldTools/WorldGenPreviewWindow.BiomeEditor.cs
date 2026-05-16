@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Data.WorldTypes;
 using Editor.Libraries;
 using Editor.WorldTools.Libraries;
@@ -26,6 +27,10 @@ namespace Editor.WorldTools
         };
 
         private static readonly GUIContent s_emptyLabel = new GUIContent(" ");
+
+        // Validation state
+        private List<BiomeValidationResult> _beValidationResults = new List<BiomeValidationResult>();
+        private bool _beValidationDirty = true;
 
         // Inline preview state
         private bool _beShowPreview = true;
@@ -59,6 +64,9 @@ namespace Editor.WorldTools
 
             _biomeSerializedObject.Update();
 
+            if (_beValidationDirty)
+                RefreshBiomeValidation();
+
             // Generate inline preview on first view or after biome selection change
             if (_beShowPreview && _bePreviewXY == null)
                 GenerateInlineBiomePreview();
@@ -79,6 +87,8 @@ namespace Editor.WorldTools
             _biomeEditorScrollPos = EditorGUILayout.BeginScrollView(_biomeEditorScrollPos,
                 _beShowPreview ? GUILayout.MaxHeight(position.height * 0.55f) : GUILayout.ExpandHeight(true));
 
+            DrawValidationWarnings(_beSubTabIndex);
+
             switch (_beSubTabIndex)
             {
                 case 0: DrawBeTerrainSubTab(); break;
@@ -92,10 +102,14 @@ namespace Editor.WorldTools
 
             // --- Apply changes and trigger previews ---
             bool biomeChanged = _biomeSerializedObject.ApplyModifiedProperties();
-            if (biomeChanged && _liveUpdate)
+            if (biomeChanged)
             {
-                RegenerateActivePreview();
-                if (_beShowPreview && _beAutoGenerate) GenerateInlineBiomePreview();
+                _beValidationDirty = true;
+                if (_liveUpdate)
+                {
+                    RegenerateActivePreview();
+                    if (_beShowPreview && _beAutoGenerate) GenerateInlineBiomePreview();
+                }
             }
 
             // --- Collapsible inline preview ---
@@ -498,6 +512,45 @@ namespace Editor.WorldTools
             EditorUILayoutHelper.BeginGroup();
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("minorFloraPool"), true);
             EditorUILayoutHelper.EndGroup();
+        }
+
+        #endregion
+
+        #region Validation
+
+        private void RefreshBiomeValidation()
+        {
+            _beValidationDirty = false;
+
+            if (_biome == null)
+            {
+                _beValidationResults.Clear();
+                return;
+            }
+
+            int seaLevel = _worldType != null ? _worldType.seaLevel : _seaLevel;
+            _beValidationResults = BiomeConfigValidator.Validate(_biome, seaLevel);
+        }
+
+        private void DrawValidationWarnings(int subTabIndex)
+        {
+            if (_beValidationResults == null || _beValidationResults.Count == 0) return;
+
+            List<BiomeValidationResult> filtered = BiomeConfigValidator.FilterBySubTab(_beValidationResults, subTabIndex);
+            if (filtered.Count == 0) return;
+
+            for (int i = 0; i < filtered.Count; i++)
+            {
+                MessageType msgType = filtered[i].Severity switch
+                {
+                    ValidationSeverity.Error => MessageType.Error,
+                    ValidationSeverity.Warning => MessageType.Warning,
+                    _ => MessageType.Info,
+                };
+                EditorUILayoutHelper.ValidationBox(filtered[i].Message, msgType);
+            }
+
+            EditorGUILayout.Space(4);
         }
 
         #endregion

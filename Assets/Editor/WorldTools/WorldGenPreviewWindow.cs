@@ -236,6 +236,7 @@ namespace Editor.WorldTools
                     _biome = _biomeAssets[index];
                     _lastAssetWriteTime = default;
                     _biomeSerializedObject = new SerializedObject(_biome);
+                    _beValidationDirty = true;
                     if (_autoGenerate) RegenerateActivePreview();
                 }
             );
