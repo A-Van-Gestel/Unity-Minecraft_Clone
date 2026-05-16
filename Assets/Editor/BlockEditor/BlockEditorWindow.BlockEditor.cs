@@ -179,7 +179,7 @@ namespace Editor.BlockEditor
             if (_selectedBlock != null)
             {
                 // --- Title ---
-                EditorGUILayout.LabelField($"Editing: {_selectedBlock.blockName} (ID: {_selectedBlockIndex})", EditorStyles.boldLabel);
+                EditorUILayoutHelper.SectionHeader($"Editing: {_selectedBlock.blockName} (ID: {_selectedBlockIndex})");
                 EditorGUILayout.Space();
 
                 // --- Block details with Tooltips ---
@@ -200,7 +200,7 @@ namespace Editor.BlockEditor
                 EditorGUILayout.EndHorizontal();
 
                 EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Meshing", EditorStyles.boldLabel);
+                EditorUILayoutHelper.SubHeader("Meshing");
 
                 // --- Render Shape ---
                 EditorGUI.BeginChangeCheck();
@@ -217,7 +217,7 @@ namespace Editor.BlockEditor
                 }
 
                 EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Properties", EditorStyles.boldLabel);
+                EditorUILayoutHelper.SubHeader("Properties");
                 _selectedBlock.stackSize = EditorGUILayout.IntSlider(new GUIContent("Stack Size", "The maximum amount of this block that can be stacked."), _selectedBlock.stackSize, 1, 64);
                 _selectedBlock.isSolid = EditorGUILayout.Toggle(new GUIContent("Is Solid", "Indicates whether the player collides with this block."), _selectedBlock.isSolid);
 
@@ -321,8 +321,8 @@ namespace Editor.BlockEditor
                 _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighbouring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
                 _selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), _selectedBlock.isActive);
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Fluid Properties", EditorStyles.boldLabel);
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Fluid Properties");
                 _selectedBlock.fluidType = (FluidType)EditorGUILayout.EnumPopup(new GUIContent("Fluid Type", "The type of fluid this block represents. 'None' for solid blocks."), _selectedBlock.fluidType);
 
                 // --- Conditional Fluid Properties ---
@@ -355,8 +355,8 @@ namespace Editor.BlockEditor
                 }
 
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Metadata", EditorStyles.boldLabel);
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Metadata");
                 _selectedBlock.metadataSchema = (MetadataSchema)EditorGUILayout.EnumPopup(
                     new GUIContent("Metadata Schema",
                         "How the 8-bit voxel metadata byte is interpreted for this block.\n\n" +
@@ -430,13 +430,13 @@ namespace Editor.BlockEditor
                     }
                 }
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Lighting Properties", EditorStyles.boldLabel);
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Lighting Properties");
                 _selectedBlock.opacity = (byte)EditorGUILayout.IntSlider(new GUIContent("Opacity", "How many light levels will be blocked by this block."), _selectedBlock.opacity, 0, 15);
                 _selectedBlock.lightEmission = (byte)EditorGUILayout.IntSlider(new GUIContent("Light Emission", "How many light levels will be emitted by this block."), _selectedBlock.lightEmission, 0, 15);
 
                 EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Placement Rules & Tags", EditorStyles.boldLabel);
+                EditorUILayoutHelper.SubHeader("Placement Rules & Tags");
 
                 // --- Tag Preset Field ---
                 EditorGUILayout.BeginHorizontal();
@@ -534,8 +534,8 @@ namespace Editor.BlockEditor
                 _selectedBlock.canReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Can Replace Tags", "What tags can this block replace?"), _selectedBlock.canReplaceTags);
 
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Face Textures (ID)", EditorStyles.boldLabel);
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Face Textures (ID)");
 
                 // Only draw the texture selectors if the block is not a fluid. As fluids are drawn using shaders.
                 if (_selectedBlock.fluidType == FluidType.None)
@@ -606,8 +606,8 @@ namespace Editor.BlockEditor
                 }
 
                 // --- 3D Preview ---
-                EditorGUILayout.Space(20);
-                EditorGUILayout.LabelField("3D Preview", EditorStyles.boldLabel);
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("3D Preview");
 
                 // Add toggle for Force Opaque immediately under the header
                 EditorGUI.BeginChangeCheck();

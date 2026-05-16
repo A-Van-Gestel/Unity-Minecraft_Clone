@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.RegularExpressions;
+using Editor.Libraries;
 using UnityEditor;
 using UnityEditorInternal;
 using UnityEngine;
@@ -43,7 +44,7 @@ namespace Editor.AtlasPacker
 
         private void OnGUI()
         {
-            GUILayout.Label("Voxel Atlas Generator", EditorStyles.boldLabel);
+            EditorUILayoutHelper.SectionHeader("Voxel Atlas Generator");
             EditorGUILayout.Space();
 
             EditorGUI.BeginChangeCheck();
@@ -81,7 +82,7 @@ namespace Editor.AtlasPacker
             _scrollPos = EditorGUILayout.BeginScrollView(_scrollPos);
 
             // --- Settings Section ---
-            EditorGUILayout.LabelField("Settings", EditorStyles.boldLabel);
+            EditorUILayoutHelper.SubHeader("Settings");
             _config.blockSize = EditorGUILayout.IntField("Block Size (Pixels)", _config.blockSize);
             EditorGUILayout.LabelField("Save Path");
             _saveLocation = EditorGUILayout.TextField(_saveLocation);
@@ -118,7 +119,7 @@ namespace Editor.AtlasPacker
             // --- Atlas Preview Section ---
             if (_showPreview && _atlasPreview != null)
             {
-                EditorGUILayout.LabelField("Atlas Preview", EditorStyles.boldLabel);
+                EditorUILayoutHelper.SubHeader("Atlas Preview");
 
                 const int atlasBlocks = VoxelData.TextureAtlasSizeInBlocks;
                 string resLabel = $"{_atlasPreview.width}x{_atlasPreview.height} ({atlasBlocks}x{atlasBlocks} grid)";
@@ -135,7 +136,7 @@ namespace Editor.AtlasPacker
             }
 
             // --- Texture Mapping Section ---
-            EditorGUILayout.LabelField("Texture Mapping", EditorStyles.boldLabel);
+            EditorUILayoutHelper.SubHeader("Texture Mapping");
             EditorGUILayout.LabelField($"{_config.textures.Length} slots", EditorStyles.miniLabel);
 
             _reorderableList.DoLayoutList();

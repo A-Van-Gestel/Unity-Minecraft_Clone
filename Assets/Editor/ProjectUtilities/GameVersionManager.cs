@@ -1,5 +1,6 @@
 using System;
 using Data.Enums;
+using Editor.Libraries;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
@@ -64,7 +65,7 @@ namespace Editor.ProjectUtilities
                 guiHandler = _ =>
                 {
                     EditorGUILayout.Space();
-                    EditorGUILayout.LabelField("Version Configuration", EditorStyles.boldLabel);
+                    EditorUILayoutHelper.SectionHeader("Version Configuration");
 
                     EditorGUI.BeginChangeCheck();
                     DevelopmentStage newStage = (DevelopmentStage)EditorGUILayout.EnumPopup("Development Stage", CurrentStage);

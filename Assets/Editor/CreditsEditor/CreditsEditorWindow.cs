@@ -234,8 +234,8 @@ namespace Editor.CreditsEditor
             {
                 DrawEntryFields(_selectedEntry);
 
-                EditorGUILayout.Space(12);
-                EditorGUILayout.LabelField("Preview", EditorStyles.boldLabel);
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Preview");
                 string previewText = _selectedEntry.FormatRichText(false);
                 EditorGUILayout.LabelField(previewText, _previewStyle);
             }
@@ -250,13 +250,13 @@ namespace Editor.CreditsEditor
 
         private void DrawEntryFields(CreditEntry entry)
         {
-            EditorGUILayout.LabelField("Core", EditorStyles.boldLabel);
+            EditorUILayoutHelper.SubHeader("Core");
             entry.name = EditorGUILayout.TextField("Name", entry.name);
             entry.author = EditorGUILayout.TextField("Author", entry.author);
             entry.category = (CreditCategory)EditorGUILayout.EnumPopup("Category", entry.category);
 
             EditorGUILayout.Space(8);
-            EditorGUILayout.LabelField("License", EditorStyles.boldLabel);
+            EditorUILayoutHelper.SubHeader("License");
             entry.licenseType = (LicenseType)EditorGUILayout.EnumPopup("License Type", entry.licenseType);
             if (entry.licenseType == LicenseType.Custom)
             {
@@ -264,7 +264,7 @@ namespace Editor.CreditsEditor
             }
 
             EditorGUILayout.Space(8);
-            EditorGUILayout.LabelField("Details", EditorStyles.boldLabel);
+            EditorUILayoutHelper.SubHeader("Details");
             entry.url = EditorGUILayout.TextField("URL", entry.url);
             if (!string.IsNullOrEmpty(entry.url))
             {

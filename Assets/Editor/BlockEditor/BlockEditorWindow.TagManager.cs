@@ -131,7 +131,7 @@ namespace Editor.BlockEditor
 
             if (_selectedPreset != null)
             {
-                EditorGUILayout.LabelField($"Editing: {_selectedPreset.name}", EditorStyles.boldLabel);
+                EditorUILayoutHelper.SectionHeader($"Editing: {_selectedPreset.name}");
                 EditorGUILayout.Space();
 
                 // --- Asset Location ---

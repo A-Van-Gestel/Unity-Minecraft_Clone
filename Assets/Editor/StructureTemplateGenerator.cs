@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using Data.Structures;
+using Editor.Libraries;
 using Jobs.BurstData;
 using UnityEditor;
 using UnityEngine;
@@ -17,7 +18,7 @@ namespace Editor
 
         private void OnGUI()
         {
-            GUILayout.Label("Structure Generators", EditorStyles.boldLabel);
+            EditorUILayoutHelper.SectionHeader("Structure Generators");
 
             if (GUILayout.Button("Generate Standard Oak Tree"))
             {
@@ -30,7 +31,7 @@ namespace Editor
             }
 
             EditorGUILayout.Space(10);
-            GUILayout.Label("Asymmetric Structures (Rotation Test)", EditorStyles.boldLabel);
+            EditorUILayoutHelper.SubHeader("Asymmetric Structures (Rotation Test)");
 
             if (GUILayout.Button("Generate Fallen Oak Log"))
             {
