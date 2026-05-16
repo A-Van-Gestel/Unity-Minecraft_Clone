@@ -28,7 +28,7 @@ namespace Editor.WorldTools
 
         // --- Tab State ---
         private int _selectedTabIndex;
-        private static readonly string[] s_tabLabels = { "Cross-Section", "Noise Channels", "Biome Editing", "World Blending" };
+        private static readonly string[] s_tabLabels = { "Cross-Section", "Noise Channels", "Biome Editing", "World Type", "World Blending" };
 
         // --- Shared World Type & Biome Selection ---
         private WorldTypeDefinition _worldType;
@@ -167,7 +167,7 @@ namespace Editor.WorldTools
             {
                 case 0: GenerateCrossSectionPreview(); break;
                 case 1: GenerateNoiseChannelsPreview(); break;
-                case 3: GenerateBlendingPreview(); break;
+                case 4: GenerateBlendingPreview(); break;
             }
         }
 
@@ -175,8 +175,8 @@ namespace Editor.WorldTools
         {
             _selectedTabIndex = GUILayout.Toolbar(_selectedTabIndex, s_tabLabels, GUILayout.Height(25));
 
-            // Track which preview tab was last selected (skip tab 2 = Biome Editing, not a preview)
-            if (_selectedTabIndex != 2)
+            // Track which preview tab was last selected (skip tab 2 = Biome Editing and tab 3 = World Type, not previews)
+            if (_selectedTabIndex != 2 && _selectedTabIndex != 3)
                 _lastPreviewTabIndex = _selectedTabIndex;
 
             switch (_selectedTabIndex)
@@ -191,6 +191,9 @@ namespace Editor.WorldTools
                     DrawBiomeEditorTab();
                     break;
                 case 3:
+                    DrawWorldTypeTab();
+                    break;
+                case 4:
                     DrawWorldBlendingTab();
                     break;
             }
