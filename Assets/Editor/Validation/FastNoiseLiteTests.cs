@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using Benchmarks;
 using Libraries;
 using Unity.Burst;
@@ -39,11 +40,12 @@ namespace Editor.Validation
         private const float WARP_AMP = 30f;
 
         // ReSharper disable once InconsistentNaming
-        private const int BENCH_GRID_2D = 1024;
+        private const int BENCH_GRID_2D = 2048;
 
         // ReSharper disable once InconsistentNaming
-        private const int BENCH_GRID_3D = 128;
-        private const int BENCH_RUNS = 5;
+        private const int BENCH_GRID_3D = 160;
+        private const int BENCH_RUNS = 30;
+        private const int BENCH_WARMUP = 2;
         private const float BENCH_SPACING = 0.1f;
 
         #endregion
@@ -516,15 +518,27 @@ namespace Editor.Validation
                 _benchReport.AppendLine("<b>=== FASTNOISELITE BENCHMARK ===</b>");
                 _benchReport.AppendLine($"Grid: {BENCH_GRID_2D}×{BENCH_GRID_2D} (2D), " +
                                         $"{BENCH_GRID_3D}×{BENCH_GRID_3D}×{BENCH_GRID_3D} (3D), " +
-                                        $"{BENCH_RUNS} runs averaged, spacing={BENCH_SPACING}");
+                                        $"{BENCH_RUNS} runs (median of), {BENCH_WARMUP} warmup, spacing={BENCH_SPACING}");
                 _benchReport.AppendLine();
                 _benchReport.Append(BenchmarkEnvironment.DescribeSystem());
-                _benchReport.AppendLine($"{"Config",-28} {"2D ms",8} {"2D M/s",8} {"3D ms",8} {"3D M/s",8}");
-                _benchReport.AppendLine(new string('-', 60));
+                _benchReport.AppendLine(
+                    $"{"Config",-28} {"2D ms",8} {"±%",5} {"2D M/s",8}  {"3D ms",8} {"±%",5} {"3D M/s",8}");
+                _benchReport.AppendLine(new string('-', 76));
 
                 BenchmarkConfig[] benchConfigs =
                 {
-                    new BenchmarkConfig("Perlin", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.None), new BenchmarkConfig("OpenSimplex2", FastNoiseLite.NoiseType.OpenSimplex2, FastNoiseLite.FractalType.None), new BenchmarkConfig("OpenSimplex2S", FastNoiseLite.NoiseType.OpenSimplex2S, FastNoiseLite.FractalType.None), new BenchmarkConfig("Cellular", FastNoiseLite.NoiseType.Cellular, FastNoiseLite.FractalType.None), new BenchmarkConfig("ValueCubic", FastNoiseLite.NoiseType.ValueCubic, FastNoiseLite.FractalType.None), new BenchmarkConfig("Value", FastNoiseLite.NoiseType.Value, FastNoiseLite.FractalType.None), new BenchmarkConfig("Perlin+FBm4", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.FBm), new BenchmarkConfig("OS2+FBm4", FastNoiseLite.NoiseType.OpenSimplex2, FastNoiseLite.FractalType.FBm), new BenchmarkConfig("Cellular+FBm4", FastNoiseLite.NoiseType.Cellular, FastNoiseLite.FractalType.FBm), new BenchmarkConfig("Value+FBm4", FastNoiseLite.NoiseType.Value, FastNoiseLite.FractalType.FBm), new BenchmarkConfig("Perlin+Ridged4", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.Ridged), new BenchmarkConfig("Perlin+PingPong4", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.PingPong),
+                    new BenchmarkConfig("Perlin", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("OpenSimplex2", FastNoiseLite.NoiseType.OpenSimplex2, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("OpenSimplex2S", FastNoiseLite.NoiseType.OpenSimplex2S, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("Cellular", FastNoiseLite.NoiseType.Cellular, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("ValueCubic", FastNoiseLite.NoiseType.ValueCubic, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("Value", FastNoiseLite.NoiseType.Value, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("Perlin+FBm4", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.FBm),
+                    new BenchmarkConfig("OS2+FBm4", FastNoiseLite.NoiseType.OpenSimplex2, FastNoiseLite.FractalType.FBm),
+                    new BenchmarkConfig("Cellular+FBm4", FastNoiseLite.NoiseType.Cellular, FastNoiseLite.FractalType.FBm),
+                    new BenchmarkConfig("Value+FBm4", FastNoiseLite.NoiseType.Value, FastNoiseLite.FractalType.FBm),
+                    new BenchmarkConfig("Perlin+Ridged4", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.Ridged),
+                    new BenchmarkConfig("Perlin+PingPong4", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.PingPong),
                 };
 
                 foreach (BenchmarkConfig bc in benchConfigs)
@@ -536,75 +550,76 @@ namespace Editor.Validation
                     if (bc.Fractal != FastNoiseLite.FractalType.None)
                         fnl.SetFractalOctaves(FRACTAL_OCTAVES);
 
-                    double ms2D = RunBench2D(fnl);
-                    double ms3D = RunBench3D(fnl);
+                    BenchResult r2D = RunBench2D(fnl);
+                    BenchResult r3D = RunBench3D(fnl);
 
-                    const double samples2D = (double)BENCH_GRID_2D * BENCH_GRID_2D;
-                    const double samples3D = (double)BENCH_GRID_3D * BENCH_GRID_3D * BENCH_GRID_3D;
-                    double throughput2D = ms2D > 0 ? samples2D / ms2D / 1000.0 : 0;
-                    double throughput3D = ms3D > 0 ? samples3D / ms3D / 1000.0 : 0;
+                    const double SAMPLES_2D = (double)BENCH_GRID_2D * BENCH_GRID_2D;
+                    const double SAMPLES_3D = (double)BENCH_GRID_3D * BENCH_GRID_3D * BENCH_GRID_3D;
+                    double tp2D = r2D.MedianMs > 0 ? SAMPLES_2D / r2D.MedianMs / 1000.0 : 0;
+                    double tp3D = r3D.MedianMs > 0 ? SAMPLES_3D / r3D.MedianMs / 1000.0 : 0;
 
                     _benchReport.AppendLine(
-                        $"{bc.Name,-28} {ms2D,7:F2}  {throughput2D,7:F2}  {ms3D,7:F2}  {throughput3D,7:F2}");
+                        $"{bc.Name,-28} {r2D.MedianMs,8:F2} {r2D.SpreadPct,4:F1}% {tp2D,8:F2}" +
+                        $"  {r3D.MedianMs,8:F2} {r3D.SpreadPct,4:F1}% {tp3D,8:F2}");
                 }
             }
 
-            private static double RunBench2D(FastNoiseLite fnl)
+            private static BenchResult RunBench2D(FastNoiseLite fnl)
             {
-                const int count = BENCH_GRID_2D * BENCH_GRID_2D;
-                NativeArray<float> results = new NativeArray<float>(count, Allocator.TempJob);
+                const int COUNT = BENCH_GRID_2D * BENCH_GRID_2D;
+                NativeArray<float> results = new NativeArray<float>(COUNT, Allocator.TempJob);
 
-                // Warmup
-                NoiseBench2DJob warmup = new NoiseBench2DJob
+                for (int i = 0; i < BENCH_WARMUP; i++)
                 {
-                    Noise = fnl, GridSize = BENCH_GRID_2D, Spacing = BENCH_SPACING, Results = results,
-                };
-                warmup.Schedule().Complete();
-
-                long totalMs = 0;
-                for (int i = 0; i < BENCH_RUNS; i++)
-                {
-                    NoiseBench2DJob job = new NoiseBench2DJob
+                    new NoiseBench2DJob
                     {
                         Noise = fnl, GridSize = BENCH_GRID_2D, Spacing = BENCH_SPACING, Results = results,
-                    };
-                    Stopwatch sw = Stopwatch.StartNew();
-                    job.Schedule().Complete();
-                    sw.Stop();
-                    totalMs += sw.ElapsedMilliseconds;
+                    }.Schedule().Complete();
                 }
 
-                results.Dispose();
-                return (double)totalMs / BENCH_RUNS;
-            }
-
-            private static double RunBench3D(FastNoiseLite fnl)
-            {
-                const int count = BENCH_GRID_3D * BENCH_GRID_3D * BENCH_GRID_3D;
-                NativeArray<float> results = new NativeArray<float>(count, Allocator.TempJob);
-
-                // Warmup
-                NoiseBench3DJob warmup = new NoiseBench3DJob
-                {
-                    Noise = fnl, GridSize = BENCH_GRID_3D, Spacing = BENCH_SPACING, Results = results,
-                };
-                warmup.Schedule().Complete();
-
-                long totalMs = 0;
+                double[] samples = new double[BENCH_RUNS];
                 for (int i = 0; i < BENCH_RUNS; i++)
                 {
-                    NoiseBench3DJob job = new NoiseBench3DJob
-                    {
-                        Noise = fnl, GridSize = BENCH_GRID_3D, Spacing = BENCH_SPACING, Results = results,
-                    };
                     Stopwatch sw = Stopwatch.StartNew();
-                    job.Schedule().Complete();
+                    new NoiseBench2DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_2D, Spacing = BENCH_SPACING, Results = results,
+                    }.Schedule().Complete();
                     sw.Stop();
-                    totalMs += sw.ElapsedMilliseconds;
+                    samples[i] = sw.Elapsed.TotalMilliseconds;
                 }
 
                 results.Dispose();
-                return (double)totalMs / BENCH_RUNS;
+                return BenchResult.FromSamples(samples);
+            }
+
+            private static BenchResult RunBench3D(FastNoiseLite fnl)
+            {
+                const int COUNT = BENCH_GRID_3D * BENCH_GRID_3D * BENCH_GRID_3D;
+                NativeArray<float> results = new NativeArray<float>(COUNT, Allocator.TempJob);
+
+                for (int i = 0; i < BENCH_WARMUP; i++)
+                {
+                    new NoiseBench3DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_3D, Spacing = BENCH_SPACING, Results = results,
+                    }.Schedule().Complete();
+                }
+
+                double[] samples = new double[BENCH_RUNS];
+                for (int i = 0; i < BENCH_RUNS; i++)
+                {
+                    Stopwatch sw = Stopwatch.StartNew();
+                    new NoiseBench3DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_3D, Spacing = BENCH_SPACING, Results = results,
+                    }.Schedule().Complete();
+                    sw.Stop();
+                    samples[i] = sw.Elapsed.TotalMilliseconds;
+                }
+
+                results.Dispose();
+                return BenchResult.FromSamples(samples);
             }
 
             // ===== Reporting =====
@@ -620,8 +635,44 @@ namespace Editor.Validation
                         $"<color=red>[FastNoiseLiteTests] {_passed} passed, {_failed} FAILED.</color>");
 
                 sb.Append(_benchReport);
-                Debug.Log(sb.ToString());
+
+                string fullReport = sb.ToString();
+                Debug.Log(fullReport);
+                WriteReportToDisk(fullReport);
             }
+
+            /// <summary>
+            /// Strips Unity rich-text tags and writes the report to a timestamped file under
+            /// <c>Application.persistentDataPath/Benchmarks/</c>. The full path is logged to the console.
+            /// </summary>
+            private static void WriteReportToDisk(string richTextReport)
+            {
+                try
+                {
+                    string folder = Path.Combine(Application.persistentDataPath, "Benchmarks");
+                    Directory.CreateDirectory(folder);
+
+                    string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                    string fileName = $"FastNoiseLiteBenchmark_{timestamp}.log";
+                    string fullPath = Path.Combine(folder, fileName);
+
+                    string plainText = StripRichTextTags(richTextReport);
+                    File.WriteAllText(fullPath, plainText);
+
+                    Debug.Log($"<color=cyan>Report written to:</color> {fullPath}");
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"Failed to write FastNoiseLite report to disk: {e.Message}");
+                }
+            }
+
+            private static readonly Regex s_richTextTagPattern = new Regex(
+                @"</?(color|b|i|size|u)(=[^>]*)?>",
+                RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+            private static string StripRichTextTags(string input) =>
+                s_richTextTagPattern.Replace(input, string.Empty);
 
             // ===== Assertion Helpers =====
 
@@ -671,6 +722,36 @@ namespace Editor.Validation
                 Name = name;
                 Type = type;
                 Fractal = fractal;
+            }
+        }
+
+        /// <summary>
+        /// Holds the statistical summary of a single benchmark configuration's timed runs.
+        /// </summary>
+        private readonly struct BenchResult
+        {
+            public readonly double MedianMs;
+            private readonly double _minMs;
+            private readonly double _maxMs;
+
+            /// <summary>Spread as a percentage of the median: (max − min) / median × 100.</summary>
+            public double SpreadPct => MedianMs > 0 ? (_maxMs - _minMs) / MedianMs * 100.0 : 0;
+
+            private BenchResult(double median, double min, double max)
+            {
+                MedianMs = median;
+                _minMs = min;
+                _maxMs = max;
+            }
+
+            /// <summary>
+            /// Sorts the samples, then returns the median, min, and max.
+            /// </summary>
+            public static BenchResult FromSamples(double[] samples)
+            {
+                Array.Sort(samples);
+                double median = samples[samples.Length / 2];
+                return new BenchResult(median, samples[0], samples[^1]);
             }
         }
 
