@@ -10,7 +10,7 @@ namespace Editor.Jobs
 {
     /// <summary>
     /// Evaluation mode for the noise preview job.
-    /// Mirrors <c>NoisePreviewWindow.NoiseChannelMode</c> but as a Burst-safe integer enum.
+    /// Mirrors <c>WorldGenPreviewWindow.NoiseChannelMode</c> but as a Burst-safe integer enum.
     /// </summary>
     public enum NoisePreviewMode
     {

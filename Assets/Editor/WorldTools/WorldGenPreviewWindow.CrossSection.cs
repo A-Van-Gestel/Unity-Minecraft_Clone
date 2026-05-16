@@ -18,11 +18,11 @@ using UnityEngine;
 namespace Editor.WorldTools
 {
     /// <summary>
-    /// Partial class containing the Cross-Section tab for the Noise Preview window.
+    /// Partial class containing the Cross-Section tab for the World Gen Preview window.
     /// Renders 3 orthogonal terrain slices (X-Y front, Z-Y side, X-Z top-down) centered
     /// on an interactive crosshair, plus an info panel.
     /// </summary>
-    public partial class NoisePreviewWindow
+    public partial class WorldGenPreviewWindow
     {
         #region Tab 0: Cross Section
 

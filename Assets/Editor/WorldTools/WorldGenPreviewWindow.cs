@@ -10,10 +10,10 @@ using UnityEngine;
 namespace Editor.WorldTools
 {
     /// <summary>
-    /// Multi-tab editor window for authoring and previewing multi-noise terrain generation.
+    /// Multi-tab editor window for authoring and previewing world generation (terrain, caves, biomes, blending).
     /// Split across partial class files: core (this file), CrossSection, NoiseChannels, BiomeEditor, WorldBlending.
     /// </summary>
-    public partial class NoisePreviewWindow : EditorWindow
+    public partial class WorldGenPreviewWindow : EditorWindow
     {
         public enum ResolutionOptions
         {
@@ -53,10 +53,10 @@ namespace Editor.WorldTools
         private SerializedObject _biomeSerializedObject;
         private int _lastPreviewTabIndex;
 
-        [MenuItem("Minecraft Clone/Noise Preview")]
+        [MenuItem("Minecraft Clone/World Gen Preview")]
         public static void ShowWindow()
         {
-            GetWindow<NoisePreviewWindow>("Noise Preview");
+            GetWindow<WorldGenPreviewWindow>("World Gen Preview");
         }
 
         private void OnEnable()

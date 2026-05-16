@@ -11,11 +11,11 @@ using UnityEngine;
 namespace Editor.WorldTools
 {
     /// <summary>
-    /// Partial class containing the Noise Channels tab for the Noise Preview window.
+    /// Partial class containing the Noise Channels tab for the World Gen Preview window.
     /// Visualizes individual multi-noise channels (Continentalness, Erosion, P&amp;V)
     /// and their spline-mapped outputs as 2D top-down maps.
     /// </summary>
-    public partial class NoisePreviewWindow
+    public partial class WorldGenPreviewWindow
     {
         #region Tab 1: Noise Channels
 

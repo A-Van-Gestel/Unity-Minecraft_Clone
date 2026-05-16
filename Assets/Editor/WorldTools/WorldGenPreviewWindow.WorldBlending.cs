@@ -14,12 +14,12 @@ using UnityEngine;
 namespace Editor.WorldTools
 {
     /// <summary>
-    /// Partial class containing the World Blending tab for the Noise Preview window.
+    /// Partial class containing the World Blending tab for the World Gen Preview window.
     /// Renders a multi-biome blended terrain preview using the same BiomeBlender logic
     /// as the runtime StandardChunkGenerationJob, allowing designers to visualize
     /// biome transitions without entering Play Mode.
     /// </summary>
-    public partial class NoisePreviewWindow
+    public partial class WorldGenPreviewWindow
     {
         #region Tab 3: World Blending
 

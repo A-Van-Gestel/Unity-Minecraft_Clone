@@ -11,12 +11,12 @@ using UnityEngine;
 namespace Editor.WorldTools
 {
     /// <summary>
-    /// Partial class containing the Biome Editing tab for the Noise Preview window.
+    /// Partial class containing the Biome Editing tab for the World Gen Preview window.
     /// Provides inline <see cref="SerializedObject"/>-based editing of all
     /// <see cref="Data.WorldTypes.StandardBiomeAttributes"/> fields with Undo support and live-update.
     /// Organized into sub-tabs for focused editing workflows.
     /// </summary>
-    public partial class NoisePreviewWindow
+    public partial class WorldGenPreviewWindow
     {
         #region Tab 2: Biome Editing
 
