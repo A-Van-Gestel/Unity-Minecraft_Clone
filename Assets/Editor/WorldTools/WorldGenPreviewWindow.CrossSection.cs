@@ -341,113 +341,152 @@ namespace Editor.WorldTools
 
             BuildCrossSectionData(standardBiomes, out CrossSectionNativeData data);
 
-            const int chunkHeight = VoxelData.ChunkHeight;
-            int forceBiome = _csMode == CrossSectionMode.SingleBiome ? selectedBiomeIdx : -1;
-
-            // --- X-Y Panel (Front) — iterate X at fixed Z ---
-            if (!_csLockXY)
+            ThreePanelParams p = new ThreePanelParams
             {
-                Dictionary<int, NativeBitArray> wormMasksXY = _csShowCaves
-                    ? GenerateWormMasksForSlice(span, _crosshairPos.z, true, ref data)
-                    : null;
+                Span = span,
+                CrosshairPos = _crosshairPos,
+                OffsetX = _offset.x,
+                OffsetZ = _offset.y,
+                SeaLevel = _seaLevel,
+                ForceBiomeIdx = _csMode == CrossSectionMode.SingleBiome ? selectedBiomeIdx : -1,
+                ShowCaves = _csShowCaves,
+                ShowLodes = _csShowLodes,
+                ShowWater = _csShowWater,
+                XZQuality = _csXZQuality,
+                SkipXY = _csLockXY,
+                SkipZY = _csLockZY,
+                SkipXZ = _csLockXZ,
+            };
 
-                CrossSectionPanelHelper.EnsureTexture(ref _csTextureXY, span, chunkHeight);
-                Color[] xyPixels = new Color[span * chunkHeight];
-
-                for (int col = 0; col < span; col++)
-                {
-                    int gx = col + _offset.x;
-                    int gz = _crosshairPos.z;
-                    GetWormMaskForColumn(gx, gz, wormMasksXY, out NativeBitArray mask, out int lx, out int lz);
-
-                    ushort[] column = EvaluateColumn(gx, gz, _seaLevel, forceBiome,
-                        _csShowCaves, _csShowLodes, lx, lz, ref mask, ref data);
-
-                    WriteColumnToPixels(column, xyPixels, col, span, chunkHeight, _csShowWater, _seaLevel);
-
-                    // Cache the column at the crosshair X for block name lookup
-                    if (gx == _crosshairPos.x)
-                        _csCrosshairColumn = column;
-                }
-
-                _csTextureXY.SetPixels(xyPixels);
-                _csTextureXY.Apply();
-                DisposeWormMasks(wormMasksXY);
-            }
-
-            // --- Z-Y Panel (Side) — iterate Z at fixed X ---
-            if (!_csLockZY)
-            {
-                Dictionary<int, NativeBitArray> wormMasksZY = _csShowCaves
-                    ? GenerateWormMasksForSlice(span, _crosshairPos.x, false, ref data)
-                    : null;
-
-                CrossSectionPanelHelper.EnsureTexture(ref _csTextureZY, span, chunkHeight);
-                Color[] zyPixels = new Color[span * chunkHeight];
-
-                for (int col = 0; col < span; col++)
-                {
-                    int gz = col + _offset.y;
-                    int gx = _crosshairPos.x;
-                    GetWormMaskForColumn(gx, gz, wormMasksZY, out NativeBitArray mask, out int lx, out int lz);
-
-                    ushort[] column = EvaluateColumn(gx, gz, _seaLevel, forceBiome,
-                        _csShowCaves, _csShowLodes, lx, lz, ref mask, ref data);
-
-                    WriteColumnToPixels(column, zyPixels, col, span, chunkHeight, _csShowWater, _seaLevel);
-                }
-
-                _csTextureZY.SetPixels(zyPixels);
-                _csTextureZY.Apply();
-                DisposeWormMasks(wormMasksZY);
-            }
-
-            // --- X-Z Panel (Top-Down) — iterate X and Z at fixed Y ---
-            if (!_csLockXZ && _csXZQuality != XZQuality.Off)
-            {
-                int step = (int)_csXZQuality;
-                int texSize = span; // always full-res texture, upscale from sampled points
-                CrossSectionPanelHelper.EnsureTexture(ref _csTextureXZ, texSize, texSize);
-                Color[] xzPixels = new Color[texSize * texSize];
-
-                // Pre-generate worm masks for the full XZ area
-                // We need masks for all chunks in the XZ range — complex, so skip worm carving for top-down
-                // (worm masks are per-chunk, and we'd need masks for chunkRadius² chunks)
-                int targetY = _crosshairPos.y;
-
-                for (int zCol = 0; zCol < texSize; zCol += step)
-                {
-                    for (int xCol = 0; xCol < texSize; xCol += step)
-                    {
-                        int gx = xCol + _offset.x;
-                        int gz = zCol + _offset.y;
-
-                        NativeBitArray emptyMask = default;
-                        GetWormMaskForColumn(gx, gz, null, out _, out int lx, out int lz);
-
-                        ushort[] column = EvaluateColumn(gx, gz, _seaLevel, forceBiome,
-                            _csShowCaves, _csShowLodes, lx, lz, ref emptyMask, ref data);
-
-                        ushort blockID = column[math.clamp(targetY, 0, chunkHeight - 1)];
-                        Color color = GetBlockColor(blockID, targetY, chunkHeight, _csShowWater, _seaLevel);
-
-                        // Fill the step×step block with the same color (nearest-neighbor upscale)
-                        for (int dz = 0; dz < step && zCol + dz < texSize; dz++)
-                        {
-                            for (int dx = 0; dx < step && xCol + dx < texSize; dx++)
-                            {
-                                xzPixels[(zCol + dz) * texSize + (xCol + dx)] = color;
-                            }
-                        }
-                    }
-                }
-
-                _csTextureXZ.SetPixels(xzPixels);
-                _csTextureXZ.Apply();
-            }
+            _csCrosshairColumn = GenerateThreePanelPreview(ref p, ref data,
+                ref _csTextureXY, ref _csTextureZY, ref _csTextureXZ);
 
             DisposeCrossSectionData(ref data);
             Repaint();
+        }
+
+        #endregion
+
+        #region Shared Three-Panel Generation
+
+        /// <summary>
+        /// Parameters for <see cref="GenerateThreePanelPreview"/>.
+        /// </summary>
+        private struct ThreePanelParams
+        {
+            public int Span;
+            public int3 CrosshairPos;
+            public int OffsetX, OffsetZ;
+            public int SeaLevel;
+            public int ForceBiomeIdx;
+            public bool ShowCaves, ShowLodes, ShowWater;
+            public XZQuality XZQuality;
+            public bool SkipXY, SkipZY, SkipXZ;
+        }
+
+        /// <summary>
+        /// Generates up to 3 cross-section textures (X-Y front, Z-Y side, X-Z top-down)
+        /// using the shared column evaluator. Reused by both the Cross-Section tab and the Biome Editor inline preview.
+        /// </summary>
+        /// <returns>The evaluated column at the crosshair X position (for block name lookup), or null.</returns>
+        private ushort[] GenerateThreePanelPreview(
+            ref ThreePanelParams p,
+            ref CrossSectionNativeData data,
+            ref Texture2D texXY, ref Texture2D texZY, ref Texture2D texXZ)
+        {
+            int span = p.Span;
+            const int chunkHeight = VoxelData.ChunkHeight;
+            ushort[] crosshairColumn = null;
+
+            // --- X-Y (Front) — iterate X at fixed Z ---
+            if (!p.SkipXY)
+            {
+                Dictionary<int, NativeBitArray> wormMasks = p.ShowCaves
+                    ? GenerateWormMasksForSlice(span, p.CrosshairPos.z, true, ref data)
+                    : null;
+
+                CrossSectionPanelHelper.EnsureTexture(ref texXY, span, chunkHeight);
+                Color[] pixels = new Color[span * chunkHeight];
+
+                for (int col = 0; col < span; col++)
+                {
+                    int gx = col + p.OffsetX;
+                    GetWormMaskForColumn(gx, p.CrosshairPos.z, wormMasks, out NativeBitArray mask, out int lx, out int lz);
+
+                    ushort[] column = EvaluateColumn(gx, p.CrosshairPos.z, p.SeaLevel, p.ForceBiomeIdx,
+                        p.ShowCaves, p.ShowLodes, lx, lz, ref mask, ref data);
+
+                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, p.ShowWater, p.SeaLevel);
+
+                    if (gx == p.CrosshairPos.x)
+                        crosshairColumn = column;
+                }
+
+                texXY.SetPixels(pixels);
+                texXY.Apply();
+                DisposeWormMasks(wormMasks);
+            }
+
+            // --- Z-Y (Side) — iterate Z at fixed X ---
+            if (!p.SkipZY)
+            {
+                Dictionary<int, NativeBitArray> wormMasks = p.ShowCaves
+                    ? GenerateWormMasksForSlice(span, p.CrosshairPos.x, false, ref data)
+                    : null;
+
+                CrossSectionPanelHelper.EnsureTexture(ref texZY, span, chunkHeight);
+                Color[] pixels = new Color[span * chunkHeight];
+
+                for (int col = 0; col < span; col++)
+                {
+                    int gz = col + p.OffsetZ;
+                    GetWormMaskForColumn(p.CrosshairPos.x, gz, wormMasks, out NativeBitArray mask, out int lx, out int lz);
+
+                    ushort[] column = EvaluateColumn(p.CrosshairPos.x, gz, p.SeaLevel, p.ForceBiomeIdx,
+                        p.ShowCaves, p.ShowLodes, lx, lz, ref mask, ref data);
+
+                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, p.ShowWater, p.SeaLevel);
+                }
+
+                texZY.SetPixels(pixels);
+                texZY.Apply();
+                DisposeWormMasks(wormMasks);
+            }
+
+            // --- X-Z (Top-Down) — iterate X and Z at fixed Y ---
+            if (!p.SkipXZ && p.XZQuality != XZQuality.Off)
+            {
+                int step = (int)p.XZQuality;
+                CrossSectionPanelHelper.EnsureTexture(ref texXZ, span, span);
+                Color[] pixels = new Color[span * span];
+                int targetY = p.CrosshairPos.y;
+
+                for (int zCol = 0; zCol < span; zCol += step)
+                {
+                    for (int xCol = 0; xCol < span; xCol += step)
+                    {
+                        int gx = xCol + p.OffsetX;
+                        int gz = zCol + p.OffsetZ;
+                        NativeBitArray emptyMask = default;
+                        GetWormMaskForColumn(gx, gz, null, out _, out int lx, out int lz);
+
+                        ushort[] column = EvaluateColumn(gx, gz, p.SeaLevel, p.ForceBiomeIdx,
+                            p.ShowCaves, p.ShowLodes, lx, lz, ref emptyMask, ref data);
+
+                        Color color = GetBlockColor(column[math.clamp(targetY, 0, chunkHeight - 1)],
+                            targetY, chunkHeight, p.ShowWater, p.SeaLevel);
+
+                        for (int dz = 0; dz < step && zCol + dz < span; dz++)
+                        for (int dx = 0; dx < step && xCol + dx < span; dx++)
+                            pixels[(zCol + dz) * span + (xCol + dx)] = color;
+                    }
+                }
+
+                texXZ.SetPixels(pixels);
+                texXZ.Apply();
+            }
+
+            return crosshairColumn;
         }
 
         #endregion
