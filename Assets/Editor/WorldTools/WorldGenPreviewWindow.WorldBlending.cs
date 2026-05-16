@@ -40,7 +40,6 @@ namespace Editor.WorldTools
         }
 
         // --- World Blending State ---
-        private WorldTypeDefinition _worldType;
         private BlendingRenderMode _blendRenderMode = BlendingRenderMode.Heightmap;
         private ResolutionOptions _blendResolution = ResolutionOptions.X256;
         private bool _blendShowWaterLevel = true;
@@ -65,13 +64,14 @@ namespace Editor.WorldTools
             EditorGUILayout.BeginVertical();
 
             GUILayout.Label("World Blending Preview", EditorStyles.boldLabel);
-            EditorUILayoutHelper.SectionNote("Visualize multi-biome terrain blending using the same BiomeBlender logic as runtime generation. " +
-                                             "Drag a <b>WorldTypeDefinition</b> asset to begin.");
+            EditorUILayoutHelper.SectionNote("Visualize multi-biome terrain blending using the same BiomeBlender logic as runtime generation.");
 
+            // World Type selector (synced with shared state)
             EditorGUI.BeginChangeCheck();
-
             _worldType = (WorldTypeDefinition)EditorGUILayout.ObjectField(
                 "World Type", _worldType, typeof(WorldTypeDefinition), false);
+            if (EditorGUI.EndChangeCheck() && _worldType != null)
+                _seaLevel = _worldType.seaLevel;
 
             if (_worldType == null)
             {
@@ -87,6 +87,8 @@ namespace Editor.WorldTools
                 EditorGUILayout.EndVertical();
                 return;
             }
+
+            EditorGUI.BeginChangeCheck();
 
             _blendRenderMode = (BlendingRenderMode)EditorGUILayout.EnumPopup("Render Mode", _blendRenderMode);
 
@@ -246,7 +248,7 @@ namespace Editor.WorldTools
             selectionConfig.normalizeToZeroOne = true;
             FastNoiseLite selectionNoise = FastNoiseFactory.CreateNoiseFromConfig(selectionConfig, _seed);
 
-            int seaLevel = _worldType.seaLevel;
+            int seaLevel = _seaLevel;
 
             // --- Map editor enum to job mode ---
             WorldBlendingMode jobMode;

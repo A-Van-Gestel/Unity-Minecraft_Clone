@@ -30,7 +30,9 @@ namespace Editor.WorldTools
         private int _selectedTabIndex;
         private static readonly string[] s_tabLabels = { "Cross-Section", "Noise Channels", "Biome Editing", "World Blending" };
 
-        // --- Shared Biome Selection State ---
+        // --- Shared World Type & Biome Selection ---
+        private WorldTypeDefinition _worldType;
+        private int _seaLevel = 45;
         private const string BIOME_SAVE_DIR = "Assets/Data/WorldGen/Biomes";
         private List<StandardBiomeAttributes> _biomeAssets;
         private StandardBiomeAttributes _biome;
@@ -61,6 +63,7 @@ namespace Editor.WorldTools
 
         private void OnEnable()
         {
+            AutoDetectWorldType();
             RefreshBiomeList();
             OnEnableBlendingTab();
 
@@ -68,6 +71,45 @@ namespace Editor.WorldTools
             EditorApplication.update -= PollForAssetChanges;
             EditorApplication.update += PollForAssetChanges;
 #pragma warning restore UDR0004
+        }
+
+        /// <summary>
+        /// Auto-detects a <see cref="WorldTypeDefinition"/> if exactly one exists with Standard biomes.
+        /// </summary>
+        private void AutoDetectWorldType()
+        {
+            if (_worldType != null) return;
+
+            string[] guids = AssetDatabase.FindAssets("t:WorldTypeDefinition");
+            WorldTypeDefinition candidate = null;
+            int validCount = 0;
+
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                WorldTypeDefinition wt = AssetDatabase.LoadAssetAtPath<WorldTypeDefinition>(path);
+                if (wt == null || wt.biomes == null) continue;
+
+                bool hasStandard = false;
+                foreach (BiomeBase b in wt.biomes)
+                {
+                    if (b is StandardBiomeAttributes)
+                    {
+                        hasStandard = true;
+                        break;
+                    }
+                }
+
+                if (!hasStandard) continue;
+                candidate = wt;
+                validCount++;
+            }
+
+            if (validCount == 1)
+            {
+                _worldType = candidate;
+                _seaLevel = _worldType.seaLevel;
+            }
         }
 
         /// <summary>
@@ -162,6 +204,24 @@ namespace Editor.WorldTools
         private void DrawBiomeList()
         {
             EditorGUILayout.BeginVertical(GUILayout.Width(180));
+
+            // World Type selector
+            EditorGUI.BeginChangeCheck();
+            _worldType = (WorldTypeDefinition)EditorGUILayout.ObjectField(
+                _worldType, typeof(WorldTypeDefinition), false, GUILayout.Height(18));
+            if (EditorGUI.EndChangeCheck() && _worldType != null)
+            {
+                _seaLevel = _worldType.seaLevel;
+            }
+
+            if (_worldType != null)
+            {
+                GUI.enabled = false;
+                EditorGUILayout.IntField("Sea Level", _seaLevel, GUILayout.Height(16));
+                GUI.enabled = true;
+            }
+
+            EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Biomes", EditorStyles.boldLabel);
 
             EditorGUIHelper.DrawSearchableSelectionList(

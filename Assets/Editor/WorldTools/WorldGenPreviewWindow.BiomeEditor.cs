@@ -43,7 +43,6 @@ namespace Editor.WorldTools
         private bool _beShowSeaLevel = true;
         private bool _beShowBorders;
         private bool _beAutoGenerate = true;
-        private int _beSeaLevel = 45;
 
         private void DrawBiomeEditorTab()
         {
@@ -134,7 +133,7 @@ namespace Editor.WorldTools
                 EditorGUILayout.EndHorizontal();
 
                 if (_beShowSeaLevel || _beShowWater)
-                    _beSeaLevel = EditorGUILayout.IntSlider("Sea Level", _beSeaLevel, 0, VoxelData.ChunkHeight - 1);
+                    _seaLevel = EditorGUILayout.IntSlider("Sea Level", _seaLevel, 0, VoxelData.ChunkHeight - 1);
 
                 if (EditorGUI.EndChangeCheck() && _beAutoGenerate) GenerateInlineBiomePreview();
 
@@ -196,9 +195,9 @@ namespace Editor.WorldTools
                 {
                     int gx = col + startX;
                     GetWormMaskForColumn(gx, _crosshairPos.z, wormMasks, out NativeBitArray mask, out int lx, out int lz);
-                    ushort[] column = EvaluateColumn(gx, _crosshairPos.z, _beSeaLevel, selectedBiomeIdx,
+                    ushort[] column = EvaluateColumn(gx, _crosshairPos.z, _seaLevel, selectedBiomeIdx,
                         _beShowCaves, _beShowLodes, lx, lz, ref mask, ref data);
-                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, _beShowWater, _beSeaLevel);
+                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, _beShowWater, _seaLevel);
                 }
 
                 _bePreviewXY.SetPixels(pixels);
@@ -219,9 +218,9 @@ namespace Editor.WorldTools
                 {
                     int gz = col + startZ;
                     GetWormMaskForColumn(_crosshairPos.x, gz, wormMasks, out NativeBitArray mask, out int lx, out int lz);
-                    ushort[] column = EvaluateColumn(_crosshairPos.x, gz, _beSeaLevel, selectedBiomeIdx,
+                    ushort[] column = EvaluateColumn(_crosshairPos.x, gz, _seaLevel, selectedBiomeIdx,
                         _beShowCaves, _beShowLodes, lx, lz, ref mask, ref data);
-                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, _beShowWater, _beSeaLevel);
+                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, _beShowWater, _seaLevel);
                 }
 
                 _bePreviewZY.SetPixels(pixels);
@@ -246,10 +245,10 @@ namespace Editor.WorldTools
                         int gz = zCol + startZ;
                         GetWormMaskForColumn(gx, gz, null, out _, out int lx, out int lz);
 
-                        ushort[] column = EvaluateColumn(gx, gz, _beSeaLevel, selectedBiomeIdx,
+                        ushort[] column = EvaluateColumn(gx, gz, _seaLevel, selectedBiomeIdx,
                             _beShowCaves, _beShowLodes, lx, lz, ref emptyMask, ref data);
 
-                        Color color = GetBlockColor(column[math.clamp(targetY, 0, chunkHeight - 1)], targetY, chunkHeight, _beShowWater, _beSeaLevel);
+                        Color color = GetBlockColor(column[math.clamp(targetY, 0, chunkHeight - 1)], targetY, chunkHeight, _beShowWater, _seaLevel);
 
                         for (int dz = 0; dz < step && zCol + dz < span; dz++)
                         for (int dx = 0; dx < step && xCol + dx < span; dx++)
@@ -306,8 +305,8 @@ namespace Editor.WorldTools
             // Sea level + chunk borders
             if (_beShowSeaLevel)
             {
-                CrossSectionPanelHelper.DrawSeaLevelLine(xyRect, _bePreviewXY, _beSeaLevel);
-                CrossSectionPanelHelper.DrawSeaLevelLine(zyRect, _bePreviewZY, _beSeaLevel);
+                CrossSectionPanelHelper.DrawSeaLevelLine(xyRect, _bePreviewXY, _seaLevel);
+                CrossSectionPanelHelper.DrawSeaLevelLine(zyRect, _bePreviewZY, _seaLevel);
             }
 
             if (_beShowBorders)

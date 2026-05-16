@@ -65,7 +65,6 @@ namespace Editor.WorldTools
         private bool _csShowLodes = true;
         private bool _csShowWater = true;
         private bool _csShowSeaLevelLine = true;
-        private int _csSeaLevel = 45;
 
         private bool _csCenterCrosshair = true;
 
@@ -156,7 +155,7 @@ namespace Editor.WorldTools
             EditorGUILayout.EndHorizontal();
 
             if (_csShowSeaLevelLine || _csShowWater)
-                _csSeaLevel = EditorGUILayout.IntSlider("Sea Level", _csSeaLevel, 0, VoxelData.ChunkHeight - 1);
+                _seaLevel = EditorGUILayout.IntSlider("Sea Level", _seaLevel, 0, VoxelData.ChunkHeight - 1);
 
             bool changed = EditorGUI.EndChangeCheck();
 
@@ -213,8 +212,8 @@ namespace Editor.WorldTools
                 // Sea level line on X-Y and Z-Y panels
                 if (_csShowSeaLevelLine)
                 {
-                    CrossSectionPanelHelper.DrawSeaLevelLine(xyRect, _csTextureXY, _csSeaLevel);
-                    CrossSectionPanelHelper.DrawSeaLevelLine(zyRect, _csTextureZY, _csSeaLevel);
+                    CrossSectionPanelHelper.DrawSeaLevelLine(xyRect, _csTextureXY, _seaLevel);
+                    CrossSectionPanelHelper.DrawSeaLevelLine(zyRect, _csTextureZY, _seaLevel);
                 }
 
                 // Click-to-move crosshair
@@ -361,10 +360,10 @@ namespace Editor.WorldTools
                     int gz = _crosshairPos.z;
                     GetWormMaskForColumn(gx, gz, wormMasksXY, out NativeBitArray mask, out int lx, out int lz);
 
-                    ushort[] column = EvaluateColumn(gx, gz, _csSeaLevel, forceBiome,
+                    ushort[] column = EvaluateColumn(gx, gz, _seaLevel, forceBiome,
                         _csShowCaves, _csShowLodes, lx, lz, ref mask, ref data);
 
-                    WriteColumnToPixels(column, xyPixels, col, span, chunkHeight, _csShowWater, _csSeaLevel);
+                    WriteColumnToPixels(column, xyPixels, col, span, chunkHeight, _csShowWater, _seaLevel);
 
                     // Cache the column at the crosshair X for block name lookup
                     if (gx == _crosshairPos.x)
@@ -392,10 +391,10 @@ namespace Editor.WorldTools
                     int gx = _crosshairPos.x;
                     GetWormMaskForColumn(gx, gz, wormMasksZY, out NativeBitArray mask, out int lx, out int lz);
 
-                    ushort[] column = EvaluateColumn(gx, gz, _csSeaLevel, forceBiome,
+                    ushort[] column = EvaluateColumn(gx, gz, _seaLevel, forceBiome,
                         _csShowCaves, _csShowLodes, lx, lz, ref mask, ref data);
 
-                    WriteColumnToPixels(column, zyPixels, col, span, chunkHeight, _csShowWater, _csSeaLevel);
+                    WriteColumnToPixels(column, zyPixels, col, span, chunkHeight, _csShowWater, _seaLevel);
                 }
 
                 _csTextureZY.SetPixels(zyPixels);
@@ -426,11 +425,11 @@ namespace Editor.WorldTools
                         NativeBitArray emptyMask = default;
                         GetWormMaskForColumn(gx, gz, null, out _, out int lx, out int lz);
 
-                        ushort[] column = EvaluateColumn(gx, gz, _csSeaLevel, forceBiome,
+                        ushort[] column = EvaluateColumn(gx, gz, _seaLevel, forceBiome,
                             _csShowCaves, _csShowLodes, lx, lz, ref emptyMask, ref data);
 
                         ushort blockID = column[math.clamp(targetY, 0, chunkHeight - 1)];
-                        Color color = GetBlockColor(blockID, targetY, chunkHeight, _csShowWater, _csSeaLevel);
+                        Color color = GetBlockColor(blockID, targetY, chunkHeight, _csShowWater, _seaLevel);
 
                         // Fill the step×step block with the same color (nearest-neighbor upscale)
                         for (int dz = 0; dz < step && zCol + dz < texSize; dz++)
