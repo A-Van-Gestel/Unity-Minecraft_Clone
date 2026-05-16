@@ -2060,7 +2060,8 @@ namespace Libraries
             private static unsafe float* AllocAndCopy(float[] source)
             {
                 long sizeInBytes = (long)source.Length * sizeof(float);
-                float* dst = (float*)UnsafeUtility.Malloc(sizeInBytes, UnsafeUtility.AlignOf<float>(), Allocator.Persistent);
+                const int CACHE_LINE = 64;
+                float* dst = (float*)UnsafeUtility.Malloc(sizeInBytes, CACHE_LINE, Allocator.Persistent);
 
                 fixed (float* src = source)
                 {
