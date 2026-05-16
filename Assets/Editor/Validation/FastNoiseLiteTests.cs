@@ -251,6 +251,7 @@ namespace Editor.Validation
                 Test_OutputRange(configs);
                 Test_SeedSensitivity();
                 Test_NormalizeRange();
+                Test_BatchGridBitIdentical(configs);
             }
 
             /// <summary>
@@ -353,6 +354,58 @@ namespace Editor.Validation
                     float actual = norm.GetNoise(c.x, c.y);
                     AssertNear(expected, actual, TOLERANCE,
                         $"Normalize 2D ({c.x},{c.y}): expected {expected}, got {actual}");
+                }
+            }
+
+            /// <summary>
+            /// GetNoiseGrid must produce bit-identical output to calling GetNoise in a scalar loop.
+            /// Tests all noise configs at integer coordinates matching the batch API.
+            /// </summary>
+            private void Test_BatchGridBitIdentical(NoiseTestConfig[] configs)
+            {
+                const int GRID_SIZE = 8;
+                const int START_X = -100;
+                const int START_Y = 50;
+                const int START_Z = -25;
+
+                NativeArray<float> gridOutput2D = new NativeArray<float>(GRID_SIZE * GRID_SIZE, Allocator.TempJob);
+                NativeArray<float> gridOutput3D = new NativeArray<float>(GRID_SIZE * GRID_SIZE * GRID_SIZE, Allocator.TempJob);
+
+                try
+                {
+                    foreach (NoiseTestConfig cfg in configs)
+                    {
+                        FastNoiseLite fnl = ConfigureNoise(in cfg);
+
+                        // 2D: compare batch vs scalar
+                        fnl.GetNoiseGrid(START_X, START_Y, GRID_SIZE, GRID_SIZE, gridOutput2D);
+                        for (int iy = 0; iy < GRID_SIZE; iy++)
+                        for (int ix = 0; ix < GRID_SIZE; ix++)
+                        {
+                            float scalar = fnl.GetNoise(START_X + ix, START_Y + iy);
+                            float batch = gridOutput2D[iy * GRID_SIZE + ix];
+                            AssertEqual(scalar, batch,
+                                $"BatchGrid2D {cfg.Name} ({START_X + ix},{START_Y + iy})");
+                        }
+
+                        // 3D: compare batch vs scalar
+                        fnl.GetNoiseGrid(START_X, START_Y, START_Z, GRID_SIZE, GRID_SIZE, GRID_SIZE, gridOutput3D);
+                        for (int iz = 0; iz < GRID_SIZE; iz++)
+                        for (int iy = 0; iy < GRID_SIZE; iy++)
+                        for (int ix = 0; ix < GRID_SIZE; ix++)
+                        {
+                            float scalar = fnl.GetNoise(
+                                START_X + ix, START_Y + iy, START_Z + iz);
+                            float batch = gridOutput3D[iz * GRID_SIZE * GRID_SIZE + iy * GRID_SIZE + ix];
+                            AssertEqual(scalar, batch,
+                                $"BatchGrid3D {cfg.Name} ({START_X + ix},{START_Y + iy},{START_Z + iz})");
+                        }
+                    }
+                }
+                finally
+                {
+                    gridOutput2D.Dispose();
+                    gridOutput3D.Dispose();
                 }
             }
 
@@ -562,6 +615,47 @@ namespace Editor.Validation
                         $"{bc.Name,-28} {r2D.MedianMs,8:F2} {r2D.SpreadPct,4:F1}% {tp2D,8:F2}" +
                         $"  {r3D.MedianMs,8:F2} {r3D.SpreadPct,4:F1}% {tp3D,8:F2}");
                 }
+
+                // Batch API comparison — both paths evaluate the SAME integer coordinate grid
+                _benchReport.AppendLine();
+                _benchReport.AppendLine("<b>=== BATCH vs SCALAR (same integer coords) ===</b>");
+                _benchReport.AppendLine(
+                    $"{"Config",-28} {"Scalar",8} {"Batch",8} {"Δ%",6}  {"Scalar",8} {"Batch",8} {"Δ%",6}");
+                _benchReport.AppendLine(
+                    $"{"",28} {"2D ms",8} {"2D ms",8} {"2D",6}  {"3D ms",8} {"3D ms",8} {"3D",6}");
+                _benchReport.AppendLine(new string('-', 76));
+
+                BenchmarkConfig[] batchConfigs =
+                {
+                    new BenchmarkConfig("Perlin", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("OpenSimplex2", FastNoiseLite.NoiseType.OpenSimplex2, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("Cellular", FastNoiseLite.NoiseType.Cellular, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("Value", FastNoiseLite.NoiseType.Value, FastNoiseLite.FractalType.None),
+                    new BenchmarkConfig("Perlin+FBm4", FastNoiseLite.NoiseType.Perlin, FastNoiseLite.FractalType.FBm),
+                    new BenchmarkConfig("OS2+FBm4", FastNoiseLite.NoiseType.OpenSimplex2, FastNoiseLite.FractalType.FBm),
+                };
+
+                foreach (BenchmarkConfig bc in batchConfigs)
+                {
+                    FastNoiseLite fnl = FastNoiseLite.Create(SEED);
+                    fnl.SetFrequency(FREQUENCY);
+                    fnl.SetNoiseType(bc.Type);
+                    fnl.SetFractalType(bc.Fractal);
+                    if (bc.Fractal != FastNoiseLite.FractalType.None)
+                        fnl.SetFractalOctaves(FRACTAL_OCTAVES);
+
+                    BenchResult s2D = RunBenchScalarIntGrid2D(fnl);
+                    BenchResult b2D = RunBenchBatch2D(fnl);
+                    BenchResult s3D = RunBenchScalarIntGrid3D(fnl);
+                    BenchResult b3D = RunBenchBatch3D(fnl);
+
+                    double delta2D = s2D.MedianMs > 0 ? (b2D.MedianMs - s2D.MedianMs) / s2D.MedianMs * 100.0 : 0;
+                    double delta3D = s3D.MedianMs > 0 ? (b3D.MedianMs - s3D.MedianMs) / s3D.MedianMs * 100.0 : 0;
+
+                    _benchReport.AppendLine(
+                        $"{bc.Name,-28} {s2D.MedianMs,8:F2} {b2D.MedianMs,8:F2} {delta2D,5:F1}%" +
+                        $"  {s3D.MedianMs,8:F2} {b3D.MedianMs,8:F2} {delta3D,5:F1}%");
+                }
             }
 
             private static BenchResult RunBench2D(FastNoiseLite fnl)
@@ -613,6 +707,124 @@ namespace Editor.Validation
                     new NoiseBench3DJob
                     {
                         Noise = fnl, GridSize = BENCH_GRID_3D, Spacing = BENCH_SPACING, Results = results,
+                    }.Schedule().Complete();
+                    sw.Stop();
+                    samples[i] = sw.Elapsed.TotalMilliseconds;
+                }
+
+                results.Dispose();
+                return BenchResult.FromSamples(samples);
+            }
+
+            private static BenchResult RunBenchScalarIntGrid2D(FastNoiseLite fnl)
+            {
+                const int COUNT = BENCH_GRID_2D * BENCH_GRID_2D;
+                NativeArray<float> results = new NativeArray<float>(COUNT, Allocator.TempJob);
+
+                for (int i = 0; i < BENCH_WARMUP; i++)
+                {
+                    new NoiseScalarIntGrid2DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_2D, Results = results,
+                    }.Schedule().Complete();
+                }
+
+                double[] samples = new double[BENCH_RUNS];
+                for (int i = 0; i < BENCH_RUNS; i++)
+                {
+                    Stopwatch sw = Stopwatch.StartNew();
+                    new NoiseScalarIntGrid2DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_2D, Results = results,
+                    }.Schedule().Complete();
+                    sw.Stop();
+                    samples[i] = sw.Elapsed.TotalMilliseconds;
+                }
+
+                results.Dispose();
+                return BenchResult.FromSamples(samples);
+            }
+
+            private static BenchResult RunBenchScalarIntGrid3D(FastNoiseLite fnl)
+            {
+                const int COUNT = BENCH_GRID_3D * BENCH_GRID_3D * BENCH_GRID_3D;
+                NativeArray<float> results = new NativeArray<float>(COUNT, Allocator.TempJob);
+
+                for (int i = 0; i < BENCH_WARMUP; i++)
+                {
+                    new NoiseScalarIntGrid3DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_3D, Results = results,
+                    }.Schedule().Complete();
+                }
+
+                double[] samples = new double[BENCH_RUNS];
+                for (int i = 0; i < BENCH_RUNS; i++)
+                {
+                    Stopwatch sw = Stopwatch.StartNew();
+                    new NoiseScalarIntGrid3DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_3D, Results = results,
+                    }.Schedule().Complete();
+                    sw.Stop();
+                    samples[i] = sw.Elapsed.TotalMilliseconds;
+                }
+
+                results.Dispose();
+                return BenchResult.FromSamples(samples);
+            }
+
+            private static BenchResult RunBenchBatch2D(FastNoiseLite fnl)
+            {
+                const int COUNT = BENCH_GRID_2D * BENCH_GRID_2D;
+                NativeArray<float> results = new NativeArray<float>(COUNT, Allocator.TempJob);
+
+                for (int i = 0; i < BENCH_WARMUP; i++)
+                {
+                    new NoiseBatchBench2DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_2D, StartX = 0, StartY = 0, Results = results,
+                    }.Schedule().Complete();
+                }
+
+                double[] samples = new double[BENCH_RUNS];
+                for (int i = 0; i < BENCH_RUNS; i++)
+                {
+                    Stopwatch sw = Stopwatch.StartNew();
+                    new NoiseBatchBench2DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_2D, StartX = 0, StartY = 0, Results = results,
+                    }.Schedule().Complete();
+                    sw.Stop();
+                    samples[i] = sw.Elapsed.TotalMilliseconds;
+                }
+
+                results.Dispose();
+                return BenchResult.FromSamples(samples);
+            }
+
+            private static BenchResult RunBenchBatch3D(FastNoiseLite fnl)
+            {
+                const int COUNT = BENCH_GRID_3D * BENCH_GRID_3D * BENCH_GRID_3D;
+                NativeArray<float> results = new NativeArray<float>(COUNT, Allocator.TempJob);
+
+                for (int i = 0; i < BENCH_WARMUP; i++)
+                {
+                    new NoiseBatchBench3DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_3D, StartX = 0, StartY = 0, StartZ = 0,
+                        Results = results,
+                    }.Schedule().Complete();
+                }
+
+                double[] samples = new double[BENCH_RUNS];
+                for (int i = 0; i < BENCH_RUNS; i++)
+                {
+                    Stopwatch sw = Stopwatch.StartNew();
+                    new NoiseBatchBench3DJob
+                    {
+                        Noise = fnl, GridSize = BENCH_GRID_3D, StartX = 0, StartY = 0, StartZ = 0,
+                        Results = results,
                     }.Schedule().Complete();
                     sw.Stop();
                     samples[i] = sw.Elapsed.TotalMilliseconds;
@@ -795,6 +1007,78 @@ namespace Editor.Validation
                 for (int y = 0; y < GridSize; y++)
                 for (int x = 0; x < GridSize; x++)
                     Results[idx++] = Noise.GetNoise(x * Spacing, y * Spacing, z * Spacing);
+            }
+        }
+
+        [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
+        private struct NoiseScalarIntGrid2DJob : IJob
+        {
+            public FastNoiseLite Noise;
+            public int GridSize;
+
+            [WriteOnly]
+            public NativeArray<float> Results;
+
+            public void Execute()
+            {
+                int idx = 0;
+                for (int y = 0; y < GridSize; y++)
+                for (int x = 0; x < GridSize; x++)
+                    Results[idx++] = Noise.GetNoise(x, y);
+            }
+        }
+
+        [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
+        private struct NoiseScalarIntGrid3DJob : IJob
+        {
+            public FastNoiseLite Noise;
+            public int GridSize;
+
+            [WriteOnly]
+            public NativeArray<float> Results;
+
+            public void Execute()
+            {
+                int idx = 0;
+                for (int z = 0; z < GridSize; z++)
+                for (int y = 0; y < GridSize; y++)
+                for (int x = 0; x < GridSize; x++)
+                    Results[idx++] = Noise.GetNoise(x, y, z);
+            }
+        }
+
+        [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
+        private struct NoiseBatchBench2DJob : IJob
+        {
+            public FastNoiseLite Noise;
+            public int GridSize;
+            public int StartX;
+            public int StartY;
+
+            [WriteOnly]
+            public NativeArray<float> Results;
+
+            public void Execute()
+            {
+                Noise.GetNoiseGrid(StartX, StartY, GridSize, GridSize, Results);
+            }
+        }
+
+        [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
+        private struct NoiseBatchBench3DJob : IJob
+        {
+            public FastNoiseLite Noise;
+            public int GridSize;
+            public int StartX;
+            public int StartY;
+            public int StartZ;
+
+            [WriteOnly]
+            public NativeArray<float> Results;
+
+            public void Execute()
+            {
+                Noise.GetNoiseGrid(StartX, StartY, StartZ, GridSize, GridSize, GridSize, Results);
             }
         }
 

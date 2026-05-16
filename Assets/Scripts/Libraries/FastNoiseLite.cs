@@ -280,6 +280,194 @@ namespace Libraries
         }
 
         // ========================================================================
+        // Batch Evaluation API
+        // ========================================================================
+
+        /// <summary>
+        /// Evaluates 2D noise on a uniform integer grid, writing results to <paramref name="output"/>
+        /// in row-major order (x varies fastest): <c>output[y * countX + x]</c>.
+        /// </summary>
+        /// <param name="startX">Global X coordinate of the grid origin.</param>
+        /// <param name="startY">Global Y coordinate of the grid origin.</param>
+        /// <param name="countX">Number of samples along the X axis.</param>
+        /// <param name="countY">Number of samples along the Y axis.</param>
+        /// <param name="output">Caller-allocated array. Length must be &gt;= <paramref name="countX"/> * <paramref name="countY"/>.</param>
+        public void GetNoiseGrid(int startX, int startY, int countX, int countY, NativeArray<float> output)
+        {
+            int idx = 0;
+
+            switch (mFractalType)
+            {
+                case FractalType.FBm:
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        TransformNoiseCoordinate(ref x, ref y);
+                        output[idx++] = GenFractalFBm(x, y);
+                    }
+
+                    break;
+
+                case FractalType.Ridged:
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        TransformNoiseCoordinate(ref x, ref y);
+                        output[idx++] = GenFractalRidged(x, y);
+                    }
+
+                    break;
+
+                case FractalType.PingPong:
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        TransformNoiseCoordinate(ref x, ref y);
+                        output[idx++] = GenFractalPingPong(x, y);
+                    }
+
+                    break;
+
+                default:
+                    int seed = mSeed;
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        TransformNoiseCoordinate(ref x, ref y);
+                        output[idx++] = GenNoiseSingle(seed, x, y);
+                    }
+
+                    break;
+            }
+
+            if (mNormalizeToZeroOne)
+                NormalizeBatchOutput(output, countX * countY);
+        }
+
+        /// <summary>
+        /// Evaluates 3D noise on a uniform integer grid, writing results to <paramref name="output"/>
+        /// in row-major order (x varies fastest, then y, then z):
+        /// <c>output[z * countY * countX + y * countX + x]</c>.
+        /// </summary>
+        /// <param name="startX">Global X coordinate of the grid origin.</param>
+        /// <param name="startY">Global Y coordinate of the grid origin.</param>
+        /// <param name="startZ">Global Z coordinate of the grid origin.</param>
+        /// <param name="countX">Number of samples along the X axis.</param>
+        /// <param name="countY">Number of samples along the Y axis.</param>
+        /// <param name="countZ">Number of samples along the Z axis.</param>
+        /// <param name="output">Caller-allocated array. Length must be &gt;= <paramref name="countX"/> * <paramref name="countY"/> * <paramref name="countZ"/>.</param>
+        public void GetNoiseGrid(int startX, int startY, int startZ,
+            int countX, int countY, int countZ, NativeArray<float> output)
+        {
+            int idx = 0;
+
+            switch (mFractalType)
+            {
+                case FractalType.FBm:
+                    for (int iz = 0; iz < countZ; iz++)
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        float z = startZ + iz;
+                        TransformNoiseCoordinate(ref x, ref y, ref z);
+                        output[idx++] = GenFractalFBm(x, y, z);
+                    }
+
+                    break;
+
+                case FractalType.Ridged:
+                    for (int iz = 0; iz < countZ; iz++)
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        float z = startZ + iz;
+                        TransformNoiseCoordinate(ref x, ref y, ref z);
+                        output[idx++] = GenFractalRidged(x, y, z);
+                    }
+
+                    break;
+
+                case FractalType.PingPong:
+                    for (int iz = 0; iz < countZ; iz++)
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        float z = startZ + iz;
+                        TransformNoiseCoordinate(ref x, ref y, ref z);
+                        output[idx++] = GenFractalPingPong(x, y, z);
+                    }
+
+                    break;
+
+                default:
+                    int seed = mSeed;
+                    for (int iz = 0; iz < countZ; iz++)
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        float z = startZ + iz;
+                        TransformNoiseCoordinate(ref x, ref y, ref z);
+                        output[idx++] = GenNoiseSingle(seed, x, y, z);
+                    }
+
+                    break;
+            }
+
+            if (mNormalizeToZeroOne)
+                NormalizeBatchOutput(output, countX * countY * countZ);
+        }
+
+        /// <summary>
+        /// Evaluates 2D noise at arbitrary positions provided in <paramref name="positions"/>.
+        /// </summary>
+        /// <param name="positions">Array of 2D sample coordinates.</param>
+        /// <param name="output">Caller-allocated array. Length must be &gt;= <paramref name="positions"/>.Length.</param>
+        public void GetNoiseBatch(NativeArray<float2> positions, NativeArray<float> output)
+        {
+            for (int i = 0; i < positions.Length; i++)
+            {
+                float2 p = positions[i];
+                output[i] = GetNoise(p.x, p.y);
+            }
+        }
+
+        /// <summary>
+        /// Evaluates 3D noise at arbitrary positions provided in <paramref name="positions"/>.
+        /// </summary>
+        /// <param name="positions">Array of 3D sample coordinates.</param>
+        /// <param name="output">Caller-allocated array. Length must be &gt;= <paramref name="positions"/>.Length.</param>
+        public void GetNoiseBatch(NativeArray<float3> positions, NativeArray<float> output)
+        {
+            for (int i = 0; i < positions.Length; i++)
+            {
+                float3 p = positions[i];
+                output[i] = GetNoise(p.x, p.y, p.z);
+            }
+        }
+
+        private static void NormalizeBatchOutput(NativeArray<float> output, int count)
+        {
+            for (int i = 0; i < count; i++)
+                output[i] = (output[i] + 1f) * 0.5f;
+        }
+
+        // ========================================================================
         // Internal Logic
         // ========================================================================
 
