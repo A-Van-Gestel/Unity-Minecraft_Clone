@@ -86,6 +86,7 @@ public class World : MonoBehaviour
 
     private bool _applyingModifications;
     private readonly Queue<VoxelMod> _modifications = new Queue<VoxelMod>();
+    private readonly WaitForSeconds _tickWait = new WaitForSeconds(VoxelData.TickLength);
 
     // UI
     [Header("UI")]
@@ -953,7 +954,7 @@ public class World : MonoBehaviour
                 ListPool<ChunkCoord>.Release(snapshot);
             }
 
-            yield return new WaitForSeconds(VoxelData.TickLength);
+            yield return _tickWait;
         }
         // ReSharper disable once IteratorNeverReturns
     }
@@ -1465,12 +1466,12 @@ public class World : MonoBehaviour
     /// <summary>
     /// Enqueues a batch of voxel modifications to be processed.
     /// </summary>
-    /// <param name="voxelMods">The queue of voxel modifications to process.</param>
-    public void EnqueueVoxelModifications(IEnumerable<VoxelMod> voxelMods)
+    /// <param name="voxelMods">The list of voxel modifications to process.</param>
+    public void EnqueueVoxelModifications(List<VoxelMod> voxelMods)
     {
-        foreach (VoxelMod mod in voxelMods)
+        foreach (VoxelMod voxelMod in voxelMods)
         {
-            _modifications.Enqueue(mod);
+            _modifications.Enqueue(voxelMod);
         }
     }
 
