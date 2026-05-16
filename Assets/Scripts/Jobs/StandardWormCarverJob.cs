@@ -14,7 +14,7 @@ namespace Jobs
     /// Uses a scatter approach: loops through surrounding chunks, simulates worms,
     /// and marks blocks that intersect the current chunk.
     /// </summary>
-    [BurstCompile(FloatPrecision.Standard, FloatMode.Default)]
+    [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
     public struct StandardWormCarverJob : IJob
     {
         [ReadOnly]

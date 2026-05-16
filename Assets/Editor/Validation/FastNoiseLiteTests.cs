@@ -759,7 +759,7 @@ namespace Editor.Validation
 
         #region Burst Benchmark Jobs
 
-        [BurstCompile(CompileSynchronously = true)]
+        [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
         private struct NoiseBench2DJob : IJob
         {
             public FastNoiseLite Noise;
@@ -778,7 +778,7 @@ namespace Editor.Validation
             }
         }
 
-        [BurstCompile(CompileSynchronously = true)]
+        [BurstCompile(CompileSynchronously = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
         private struct NoiseBench3DJob : IJob
         {
             public FastNoiseLite Noise;

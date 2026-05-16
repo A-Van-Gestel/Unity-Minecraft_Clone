@@ -18,7 +18,7 @@ namespace Jobs
     /// Replaces the legacy <c>ChunkGenerationJob</c> for the Standard world type.
     /// Uses <c>Unity.Mathematics</c> types throughout for SIMD auto-vectorization.
     /// </summary>
-    [BurstCompile(FloatPrecision.Standard, FloatMode.Default)]
+    [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
     public struct StandardChunkGenerationJob : IJobFor
     {
         #region Input Data

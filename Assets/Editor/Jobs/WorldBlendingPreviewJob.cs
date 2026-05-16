@@ -25,7 +25,7 @@ namespace Editor.Jobs
     /// Burst-compiled parallel job for multi-biome world blending preview.
     /// Each work item evaluates one pixel using <see cref="BiomeBlender.CalculateBlendedTerrainHeight"/>.
     /// </summary>
-    [BurstCompile(FloatPrecision.Standard, FloatMode.Default)]
+    [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
     public struct WorldBlendingPreviewJob : IJobParallelFor
     {
         #region Configuration

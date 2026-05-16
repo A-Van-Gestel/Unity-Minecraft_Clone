@@ -25,7 +25,7 @@ namespace Editor.Jobs
     /// Each work item evaluates one pixel in the output texture.
     /// Used by the Noise Channels tab and World Blending tab for high-performance preview generation.
     /// </summary>
-    [BurstCompile(FloatPrecision.Standard, FloatMode.Default)]
+    [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
     public struct NoisePreviewJob : IJobParallelFor
     {
         #region Configuration
