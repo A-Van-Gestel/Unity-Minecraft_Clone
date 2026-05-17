@@ -86,7 +86,7 @@ public class World : MonoBehaviour
 
     private bool _applyingModifications;
     private readonly Queue<VoxelMod> _modifications = new Queue<VoxelMod>();
-    private readonly WaitForSeconds _tickWait = new WaitForSeconds(VoxelData.TickLength);
+    private float _tickTimer;
 
     // UI
     [Header("UI")]
@@ -514,8 +514,8 @@ public class World : MonoBehaviour
         Debug.Log("Initializing clouds...");
         clouds?.Initialize();
 
-        Debug.Log("Staring world tick...");
-        StartCoroutine(Tick());
+        Debug.Log("Starting world tick...");
+        _tickTimer = 0f;
 
         Debug.Log("World initialization complete.");
         Debug.Log("--- Startup complete ---");
@@ -952,35 +952,37 @@ public class World : MonoBehaviour
         _playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
     }
 
-    private IEnumerator Tick()
+    /// <summary>
+    /// Processes tick updates for all active chunks at a fixed interval.
+    /// Replaces the former coroutine-based Tick() to eliminate MoveNext GC overhead.
+    /// </summary>
+    private void ProcessTickUpdates()
     {
-        while (true)
-        {
-            // FIX: Snapshot _activeChunks to prevent InvalidOperationException if
-            // CheckViewDistance modifies the set between coroutine yields.
-            using HashSet<ChunkCoord>.Enumerator enumerator = _activeChunks.GetEnumerator();
-            List<ChunkCoord> snapshot = ListPool<ChunkCoord>.Get();
-            try
-            {
-                while (enumerator.MoveNext())
-                    snapshot.Add(enumerator.Current);
+        _tickTimer += Time.deltaTime;
+        if (_tickTimer < VoxelData.TickLength) return;
+        _tickTimer -= VoxelData.TickLength;
 
-                foreach (ChunkCoord chunkCoord in snapshot)
+        // Snapshot _activeChunks to prevent InvalidOperationException if
+        // CheckViewDistance modifies the set during iteration.
+        using HashSet<ChunkCoord>.Enumerator enumerator = _activeChunks.GetEnumerator();
+        List<ChunkCoord> snapshot = ListPool<ChunkCoord>.Get();
+        try
+        {
+            while (enumerator.MoveNext())
+                snapshot.Add(enumerator.Current);
+
+            foreach (ChunkCoord chunkCoord in snapshot)
+            {
+                if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
                 {
-                    if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
-                    {
-                        chunk.TickUpdate();
-                    }
+                    chunk.TickUpdate();
                 }
             }
-            finally
-            {
-                ListPool<ChunkCoord>.Release(snapshot);
-            }
-
-            yield return _tickWait;
         }
-        // ReSharper disable once IteratorNeverReturns
+        finally
+        {
+            ListPool<ChunkCoord>.Release(snapshot);
+        }
     }
 
     private void Update()
@@ -1152,6 +1154,9 @@ public class World : MonoBehaviour
 
         // Run Pool Cleanup
         ChunkPool.Update();
+
+        // Process block behavior ticks (grass spreading, fluid flow, etc.)
+        ProcessTickUpdates();
 
         // Check if settings changed to update pool target
         // (Optional: You can move this to a dedicated ApplySettings method)
