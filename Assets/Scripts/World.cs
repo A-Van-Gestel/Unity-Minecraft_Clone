@@ -1587,29 +1587,7 @@ public class World : MonoBehaviour
                             BlockType incomingProps = blockDatabase.blockTypes[v.ID];
                             BlockType existingProps = blockDatabase.blockTypes[existingState.Value.ID];
 
-                            // Rule A: Nothing can replace an Unbreakable block.
-                            if ((existingProps.tags & BlockTags.UNBREAKABLE) != 0)
-                            {
-                                canPlace = false;
-                            }
-                            // Rule B: If the incoming block has specific replacement rules...
-                            else if (incomingProps.canReplaceTags != BlockTags.NONE)
-                            {
-                                // ...and the existing block has NO tags that match, it can't be placed.
-                                // The bitwise AND (&) will be 0 if there are no common flags.
-                                if ((existingProps.tags & incomingProps.canReplaceTags) == 0)
-                                {
-                                    // We make one exception: anything can replace "Air", which we define as a block with NONE tags.
-                                    if (existingProps.tags != BlockTags.NONE)
-                                    {
-                                        canPlace = false;
-                                    }
-                                }
-                            }
-                            // Rule C: If the incoming block is set to NONE, it means it can only
-                            // replace Air or any block with the REPLACEABLE tag.
-                            else if (existingProps.tags != BlockTags.NONE &&
-                                     (existingProps.tags & BlockTags.REPLACEABLE) == 0)
+                            if (!BlockTagUtility.CanReplace(incomingProps, existingProps))
                             {
                                 canPlace = false;
                             }

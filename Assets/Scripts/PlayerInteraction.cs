@@ -229,10 +229,28 @@ public class PlayerInteraction : MonoBehaviour
             // If the targeted block is replaceable (e.g. grass), the place position
             // should be the block itself (replace it) rather than adjacent to it.
             VoxelState? hitState = _world.GetVoxelState(result.HitPosition);
-            if (hitState.HasValue &&
-                (hitState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0)
+            if (hitState.HasValue)
             {
-                result.PlacePosition = result.HitPosition;
+                bool isReplaceable;
+
+                // Also check if the currently held block has explicit tags allowing it to replace the hit block
+                if (toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem)
+                {
+                    ushort heldBlockId = toolbar.slots[toolbar.slotIndex].ItemSlot.Stack.ID;
+                    BlockType heldProps = _world.BlockTypes[heldBlockId];
+
+                    isReplaceable = BlockTagUtility.CanReplace(heldProps, hitState.Value.Properties);
+                }
+                else
+                {
+                    // Fallback if not holding anything
+                    isReplaceable = (hitState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0;
+                }
+
+                if (isReplaceable)
+                {
+                    result.PlacePosition = result.HitPosition;
+                }
             }
 
             highlightBlock.position = result.HitPosition;

@@ -311,7 +311,7 @@ MonoBehaviour:
     lightEmission: 0
     tagPreset: {fileID: 0}
     tags: 261
-    canReplaceTags: 4294967295
+    canReplaceTags: 8258
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -787,7 +787,7 @@ MonoBehaviour:
     lightEmission: 0
     tagPreset: {fileID: 11400000, guid: 371aa74a265a2b448911164183310f2e, type: 2}
     tags: 24640
-    canReplaceTags: 0
+    canReplaceTags: 8192
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0

@@ -58,4 +58,50 @@ namespace Data
         /// </summary>
         OnlyReplaceAir,
     }
+
+    /// <summary>
+    /// Utility class for evaluating block tag interactions.
+    /// </summary>
+    public static class BlockTagUtility
+    {
+        /// <summary>
+        /// Evaluates whether an incoming block is allowed to replace an existing block
+        /// based on the tag definitions and replacement rules of both blocks.
+        /// </summary>
+        /// <param name="incomingProps">The block properties of the block being placed.</param>
+        /// <param name="existingProps">The block properties of the block being replaced.</param>
+        /// <returns>True if the replacement is allowed, false otherwise.</returns>
+        public static bool CanReplace(BlockType incomingProps, BlockType existingProps)
+        {
+            // Rule A: Nothing can replace an Unbreakable block.
+            if ((existingProps.tags & BlockTags.UNBREAKABLE) != 0)
+            {
+                return false;
+            }
+
+            // Rule B: If the incoming block has specific replacement rules...
+            if (incomingProps.canReplaceTags != BlockTags.NONE)
+            {
+                // ...and the existing block has NO tags that match, it can't be placed.
+                // The bitwise AND (&) will be 0 if there are no common flags.
+                if ((existingProps.tags & incomingProps.canReplaceTags) == 0)
+                {
+                    // We make one exception: anything can replace "Air", which we define as a block with NONE tags.
+                    if (existingProps.tags != BlockTags.NONE)
+                    {
+                        return false;
+                    }
+                }
+            }
+            // Rule C: If the incoming block is set to NONE, it means it can only
+            // replace Air or any block with the REPLACEABLE tag.
+            else if (existingProps.tags != BlockTags.NONE &&
+                     (existingProps.tags & BlockTags.REPLACEABLE) == 0)
+            {
+                return false;
+            }
+
+            return true;
+        }
+    }
 }
