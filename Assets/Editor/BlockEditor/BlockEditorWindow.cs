@@ -287,6 +287,13 @@ namespace Editor.BlockEditor
 
         private void OnGUI()
         {
+            // --- Handle Keyboard Shortcuts ---
+            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.S && (Event.current.control || Event.current.command))
+            {
+                SaveBlockData();
+                Event.current.Use();
+            }
+
             if (_blockDatabase == null)
             {
                 EditorGUILayout.HelpBox("Could not find the 'BlockDatabase.asset'. Please ensure it exists in your project by creating one via the Assets > Create menu.", MessageType.Error);
