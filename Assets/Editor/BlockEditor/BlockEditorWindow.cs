@@ -79,6 +79,8 @@ namespace Editor.BlockEditor
 
         private void OnEnable()
         {
+            saveChangesMessage = "You have unsaved changes in the Block Editor. Do you want to save them before closing?";
+
             // --- Initialize Preview Widget ---
             _meshPreviewWidget = new MeshPreviewWidget();
             _meshPreviewWidget.Initialize();
@@ -178,6 +180,7 @@ namespace Editor.BlockEditor
                 });
             }
 
+            hasUnsavedChanges = false;
             Debug.Log("Block Editor: Loaded " + _blockTypesCopy.Count + " block types from BlockDatabase asset.");
         }
 
@@ -233,13 +236,21 @@ namespace Editor.BlockEditor
             if (generatedSuccessfully)
             {
                 _blockIdsStale = false;
+                hasUnsavedChanges = false;
                 EditorUtility.DisplayDialog("Success", $"Saved {_blockTypesCopy.Count} block types to the BlockDatabase asset and regenerated BlockIDs.cs.", "OK");
             }
             else
             {
                 _blockIdsStale = true;
+                hasUnsavedChanges = false;
                 EditorUtility.DisplayDialog("Warning", $"Saved {_blockTypesCopy.Count} block types, but BlockIDs.cs generation failed. See console for details.", "OK");
             }
+        }
+
+        public override void SaveChanges()
+        {
+            SaveBlockData();
+            base.SaveChanges();
         }
 
         #endregion

@@ -75,6 +75,7 @@ namespace Editor.BlockEditor
                 int count = BlockIconGenerator.GenerateAllIcons(
                     _blockTypesCopy, _blockDatabase, forceRegen, s_iconSizes[_iconSizeIndex]);
 
+                if (count > 0) hasUnsavedChanges = true;
                 EditorUtility.DisplayDialog("Complete", $"Generated {count} block icon(s).", "OK");
             }
 
@@ -183,10 +184,13 @@ namespace Editor.BlockEditor
                 EditorGUILayout.Space();
 
                 // --- Block details with Tooltips ---
+                EditorGUI.BeginChangeCheck();
                 _selectedBlock.blockName = EditorGUILayout.TextField(new GUIContent("Block Name", "The display name of the block."), _selectedBlock.blockName);
                 EditorGUILayout.BeginHorizontal();
                 _selectedBlock.icon = (Sprite)EditorGUILayout.ObjectField(new GUIContent("Icon", "The icon that appears in the toolbar and inventory."), _selectedBlock.icon, typeof(Sprite), false, GUILayout.Width(200));
+                bool oldChanged1 = GUI.changed;
                 _iconSizeIndex = EditorGUILayout.Popup(_iconSizeIndex, s_iconSizeLabels, GUILayout.Width(70));
+                GUI.changed = oldChanged1;
                 if (GUILayout.Button("🎨 Generate", GUILayout.Width(90)))
                 {
                     Sprite generatedIcon = BlockIconGenerator.GenerateAndSaveIcon(
@@ -194,6 +198,7 @@ namespace Editor.BlockEditor
                     if (generatedIcon != null)
                     {
                         _selectedBlock.icon = generatedIcon;
+                        hasUnsavedChanges = true;
                     }
                 }
 
@@ -287,6 +292,7 @@ namespace Editor.BlockEditor
                                         bounds.min = tempMesh.bounds.min + new Vector3(0.5f, 0.5f, 0.5f);
                                         bounds.max = tempMesh.bounds.max + new Vector3(0.5f, 0.5f, 0.5f);
                                         DestroyImmediate(tempMesh);
+                                        hasUnsavedChanges = true;
                                     }
                                 }
                             }
@@ -342,6 +348,7 @@ namespace Editor.BlockEditor
                     EditorGUILayout.LabelField("Editor Preview", EditorStyles.boldLabel);
 
                     // Begin a change check. This is more efficient than comparing before/after values.
+                    bool oldChanged2 = GUI.changed;
                     EditorGUI.BeginChangeCheck();
                     _previewFluidLevel = EditorGUILayout.IntSlider(new GUIContent("Preview Fluid Level", "Adjust the fluid level for the 3D preview below. This does not affect game data."), _previewFluidLevel, 0, 15);
 
@@ -350,6 +357,8 @@ namespace Editor.BlockEditor
                     {
                         UpdatePreviewMesh();
                     }
+
+                    GUI.changed = oldChanged2;
 
                     EditorGUI.indentLevel--;
                 }
@@ -395,6 +404,7 @@ namespace Editor.BlockEditor
                 {
                     EditorGUILayout.Space();
                     EditorGUILayout.LabelField("Orientation Preview", EditorStyles.boldLabel);
+                    bool oldChanged3 = GUI.changed;
                     EditorGUI.BeginChangeCheck();
 
                     switch (_selectedBlock.metadataSchema)
@@ -428,6 +438,8 @@ namespace Editor.BlockEditor
                     {
                         UpdatePreviewMesh();
                     }
+
+                    GUI.changed = oldChanged3;
                 }
 
                 EditorUILayoutHelper.DrawSeparator();
@@ -506,6 +518,7 @@ namespace Editor.BlockEditor
                     {
                         _selectedBlock.tags = presetTags;
                         _selectedBlock.canReplaceTags = presetCanReplace;
+                        hasUnsavedChanges = true;
                     }
 
                     // Save: only enabled when overrides exist
@@ -610,6 +623,7 @@ namespace Editor.BlockEditor
                 EditorUILayoutHelper.SubHeader("3D Preview");
 
                 // Add toggle for Force Opaque immediately under the header
+                bool oldChanged4 = GUI.changed;
                 EditorGUI.BeginChangeCheck();
                 _forceOpaquePreview = EditorGUILayout.Toggle(new GUIContent("Force Opaque", "If true, renders transparent blocks (like water or glass) as fully opaque in the preview instead of faintly transparent."), _forceOpaquePreview);
                 if (EditorGUI.EndChangeCheck())
@@ -618,9 +632,16 @@ namespace Editor.BlockEditor
                     Repaint();
                 }
 
+                GUI.changed = oldChanged4;
+
                 if (GUILayout.Button("Refresh Preview", GUILayout.Height(25)))
                 {
                     UpdatePreviewMesh();
+                }
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    hasUnsavedChanges = true;
                 }
 
                 Draw3DPreview();
@@ -647,6 +668,7 @@ namespace Editor.BlockEditor
                 blockName = $"New Block {_blockTypesCopy.Count}",
             };
             _blockTypesCopy.Add(newBlock);
+            hasUnsavedChanges = true;
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
@@ -704,6 +726,7 @@ namespace Editor.BlockEditor
 
             int insertIndex = _selectedBlockIndex + 1;
             _blockTypesCopy.Insert(insertIndex, newBlock);
+            hasUnsavedChanges = true;
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
@@ -730,6 +753,7 @@ namespace Editor.BlockEditor
                     "Cancel"))
             {
                 _blockTypesCopy.RemoveAt(_selectedBlockIndex);
+                hasUnsavedChanges = true;
 
                 // Clear selection
                 _selectedBlock = null;
@@ -752,6 +776,7 @@ namespace Editor.BlockEditor
             if (newPreset != null)
             {
                 _selectedBlock.tagPreset = newPreset;
+                hasUnsavedChanges = true;
             }
         }
 
