@@ -560,6 +560,9 @@ public class World : MonoBehaviour
     private async Awaitable LoadOrGenerateChunk(ChunkCoord chunkCoord)
     {
         Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+        bool logSaveDiagnostics = settings.enableSaveSystemDiagnosticLogs;
+#endif
 
         // We assume placeholder exists in worldData.Chunks[chunkVoxelPos]
         ChunkData data = worldData.Chunks[chunkVoxelPos];
@@ -586,7 +589,10 @@ public class World : MonoBehaviour
 
             if (loaded != null)
             {
-                Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} loaded successfully, calling PopulateFromSave");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                if (logSaveDiagnostics)
+                    Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} loaded successfully, calling PopulateFromSave");
+#endif
 
                 // Hydrate the placeholder
                 data.PopulateFromSave(loaded);
@@ -597,7 +603,10 @@ public class World : MonoBehaviour
                 // Apply Pending Mods (Trees, etc that spilled over)
                 if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
                 {
-                    Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {chunkCoord}");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    if (logSaveDiagnostics)
+                        Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {chunkCoord}");
+#endif
                     foreach (VoxelMod mod in pendingMods)
                     {
                         // Apply directly to data (fast)
@@ -611,7 +620,10 @@ public class World : MonoBehaviour
                 // Restore lighting queues
                 if (LightingStateManager.TryGetAndRemove(chunkCoord, out HashSet<Vector2Int> localCols))
                 {
-                    Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {chunkCoord}");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    if (logSaveDiagnostics)
+                        Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {chunkCoord}");
+#endif
 
                     HashSet<Vector2Int> globalCols = new HashSet<Vector2Int>();
                     foreach (Vector2Int lCol in localCols)
@@ -630,11 +642,17 @@ public class World : MonoBehaviour
                 // Check for initial lighting needs
                 if (data.NeedsInitialLighting)
                 {
-                    Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} needs initial lighting. Checking neighbors...");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    if (logSaveDiagnostics)
+                        Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} needs initial lighting. Checking neighbors...");
+#endif
 
                     if (AreNeighborsDataReady(chunkCoord))
                     {
-                        Debug.Log($"[LoadOrGenerateChunk] Neighbors ready - triggering lighting for {chunkCoord}");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                        if (logSaveDiagnostics)
+                            Debug.Log($"[LoadOrGenerateChunk] Neighbors ready - triggering lighting for {chunkCoord}");
+#endif
 
                         // 1. Fill the queue (RecalculateSunLightLight populates the queues in data)
                         data.RecalculateSunLightLight();
@@ -647,7 +665,10 @@ public class World : MonoBehaviour
                     }
                     else
                     {
-                        Debug.Log($"[LoadOrGenerateChunk] Neighbors not ready - deferring lighting for {chunkCoord}");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                        if (logSaveDiagnostics)
+                            Debug.Log($"[LoadOrGenerateChunk] Neighbors not ready - deferring lighting for {chunkCoord}");
+#endif
                     }
                 }
                 else
@@ -668,7 +689,10 @@ public class World : MonoBehaviour
                 return;
             }
 
-            Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} not on disk, scheduling generation");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if (logSaveDiagnostics)
+                Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} not on disk, scheduling generation");
+#endif
         }
 
         // 2. Not on disk (or Persistence disabled) -> Generate

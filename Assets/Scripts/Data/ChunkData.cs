@@ -266,7 +266,10 @@ namespace Data
         /// <param name="loadedData">The chunk data object loaded from disk.</param>
         public void PopulateFromSave(ChunkData loadedData)
         {
-            Debug.Log($"[PopulateFromSave] Starting for chunk {Position}");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
+                Debug.Log($"[PopulateFromSave] Starting for chunk {Position}");
+#endif
 
             // Copy value types / arrays of value types
             // Note: heightMap is a fixed size array, so we copy contents, not the reference, just to be safe.
@@ -312,7 +315,10 @@ namespace Data
 
             IsPopulated = true;
 
-            Debug.Log($"[PopulateFromSave] Completed for chunk {Position}");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
+                Debug.Log($"[PopulateFromSave] Completed for chunk {Position}");
+#endif
         }
 
         #endregion

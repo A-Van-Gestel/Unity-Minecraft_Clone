@@ -267,6 +267,14 @@ public class Settings
              TooltipTags.Warning + "High log spam. Will severely impact performance.")]
     public bool enableWaterDiagnosticLogs = false;
 
+    /// <summary>
+    /// If true, enables diagnostic console logs for the save system (chunk serialization, region file I/O).
+    /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Save System Diagnostic Logs", DebugOnly = true, Order = 12)]
+    [Tooltip("Enables diagnostic console logs for the save system (chunk loading, saving, region I/O).\n\n" +
+             TooltipTags.Warning + "High log spam during chunk loading. Will severely impact performance.")]
+    public bool enableSaveSystemDiagnosticLogs = false;
+
     #endregion
 
     #region Internal (Non-UI) Fields

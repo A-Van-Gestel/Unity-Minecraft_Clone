@@ -52,6 +52,9 @@ namespace Serialization
         /// <returns>The deserialized <see cref="ChunkData"/>, or null if the chunk does not exist on disk.</returns>
         public async Task<ChunkData> LoadChunkAsync(Vector2Int chunkVoxelPos)
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            bool logSaveDiagnostics = World.Instance.settings.enableSaveSystemDiagnosticLogs;
+#endif
             // Run I/O on background thread
             return await Task.Run(() =>
             {
@@ -62,7 +65,8 @@ namespace Serialization
                 if (data == null)
                 {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
-                    Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
+                    if (logSaveDiagnostics)
+                        Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
 #endif
                     return null;
                 }
@@ -72,9 +76,8 @@ namespace Serialization
 
                 if (chunk == null)
                 {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
                     Debug.LogWarning($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} deserialization failed -> Will be (re-)generated");
-#endif
+
                     return null;
                 }
 
@@ -181,7 +184,8 @@ namespace Serialization
         public void Dispose()
         {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
-            Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
+            if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
+                Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
 #endif
             foreach (Lazy<RegionFile> lazyRegion in _regions.Values)
             {
@@ -193,7 +197,10 @@ namespace Serialization
             }
 
             _regions.Clear();
-            Debug.Log("[ChunkStorageManager] All regions disposed.");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
+                Debug.Log("[ChunkStorageManager] All regions disposed.");
+#endif
         }
 
         // -------------------------------------------------------------------------
