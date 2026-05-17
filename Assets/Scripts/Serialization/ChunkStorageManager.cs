@@ -184,8 +184,7 @@ namespace Serialization
         public void Dispose()
         {
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
-                Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
+            Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
 #endif
             foreach (Lazy<RegionFile> lazyRegion in _regions.Values)
             {
@@ -198,8 +197,7 @@ namespace Serialization
 
             _regions.Clear();
 #if DEVELOPMENT_BUILD || UNITY_EDITOR
-            if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
-                Debug.Log("[ChunkStorageManager] All regions disposed.");
+            Debug.Log("[ChunkStorageManager] All regions disposed.");
 #endif
         }
 
