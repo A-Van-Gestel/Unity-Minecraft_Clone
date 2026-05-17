@@ -6,7 +6,7 @@ Reference for all 10 Unity MCP profiler tools. These tools query GC allocations,
 **Before calling any profiler tool**, verify profiling data exists:
 
 ```json
-Unity_ManageEditor: { "Action": "GetState" }
+Unity_ManageEditor: {"Action": "GetState"}
 ```
 
 Check the response for active profiling data. If the profiler has no data, these tools return empty/error results.
@@ -57,7 +57,7 @@ Check the response for active profiling data. If the profiler has no data, these
 
 **Step-by-step profiler drill-down:**
 
-1. **Confirm data exists:** `Unity_ManageEditor` -> `GetState`
+1. **Confirm data exists:** `Unity_ManageEditor` -> `GetState` (must show `IsPlaying: true` or paused with profiler data loaded)
 2. **Start broad:** `GetOverallGcAllocations` or `GetFrameRangeTopTimeSummary` over a frame range
 3. **Identify hot frames:** Look for spikes in the summary
 4. **Drill into hot frame:** `GetFrameGcAllocations` or `GetFrameTopTimeSamples` on the specific frame
@@ -65,3 +65,64 @@ Check the response for active profiling data. If the profiler has no data, these
 6. **Cross-thread analysis:** `GetRelatedSamples` to find correlated work on job threads
 
 </drill_down_workflow>
+
+<runcommand_profiler_fallback>
+
+**IMPORTANT: The MCP profiler tools may throw `TargetInvocationException` errors.** When they do, fall back to `Unity_RunCommand` using `ProfilerDriver` + `HierarchyFrameDataView` APIs directly. This approach is proven reliable and gives full control over the query.
+
+**Required usings:**
+
+```csharp
+using UnityEditorInternal;
+using UnityEditor.Profiling;
+```
+
+**Get frame range:**
+
+```csharp
+int firstFrame = ProfilerDriver.firstFrameIndex;
+int lastFrame = ProfilerDriver.lastFrameIndex;
+bool recording = ProfilerDriver.enabled;
+```
+
+**Read GC allocations per frame (overview):**
+
+```csharp
+// MergeSamplesWithTheSameName for summaries, ViewModes.Default for per-call detail
+using (var fd = ProfilerDriver.GetHierarchyFrameDataView(frameIndex, 0,
+    HierarchyFrameDataView.ViewModes.MergeSamplesWithTheSameName,
+    HierarchyFrameDataView.columnGcMemory, false))
+{
+    if (!fd.valid) continue;
+    int rootId = fd.GetRootItemID();
+    var children = new List<int>();
+    fd.GetItemChildren(rootId, children);
+    foreach (int childId in children)
+    {
+        float gc = fd.GetItemColumnDataAsFloat(childId, HierarchyFrameDataView.columnGcMemory);
+        string name = fd.GetItemName(childId);
+    }
+}
+```
+
+**Recursive GC tree dump (identify exact allocators):**
+
+Use `ViewModes.Default` (not merged) and recurse via `GetItemChildren` to walk the full hierarchy. Each leaf `GC.Alloc` node shows the allocation size. Its parent is the code site that allocated.
+
+**API pitfalls to avoid:**
+
+- `result.Log("{0:N0}", value)` — format specifiers like `{0:N0}` do NOT work in `result.Log()`. Use string concatenation instead: `result.Log("Total: " + value + " B")`.
+- `HierarchyFrameDataView.GetItemCallsCount()` — does NOT exist. Do not attempt to call it.
+- `RawFrameDataView.GetSampleMetadataAsLong(sampleIndex, 4)` — metadata index 4 is NOT GC bytes. Throws `IndexOutOfRangeException`. Use `HierarchyFrameDataView` with `columnGcMemory` instead.
+- **Output size:** Deep recursive dumps of high-allocation frames can exceed the MCP output limit. Cap recursion depth, or sample specific frames rather than dumping all.
+- **Frame 0 is startup.** Skip it when analyzing steady-state idle GC. Start from frame 1 or later.
+
+**Recommended workflow:**
+
+1. Confirm profiler state: frame range + `ProfilerDriver.enabled`
+2. Sample ~20 evenly spaced frames for a GC overview (identify which frames spike)
+3. Full-scan all frames to count frequency and total GC per source category
+4. Deep-dump (ViewModes.Default, depth 12+) on the worst frames to trace exact allocators
+5. Cross-reference profiler sample names with codebase (e.g. `World.Tick() [Coroutine: MoveNext]` → `World.cs`)
+
+</runcommand_profiler_fallback>
