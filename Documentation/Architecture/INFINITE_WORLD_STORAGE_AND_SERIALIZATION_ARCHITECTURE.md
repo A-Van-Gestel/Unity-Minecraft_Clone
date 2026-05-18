@@ -479,15 +479,19 @@ If a chunk unloads during states 1-4, critical data is lost, resulting in "black
 **Layer 1: Per-Chunk Flags (Transient)**
 
 ```csharp
-// In ChunkData.cs
-[NonSerialized]
-public bool NeedsInitialLighting = false;        // Needs first lighting pass
+// In ChunkData.cs — Properties with dirty-set callback.
+// Setting any flag to true invokes OnLightWorkFlagged, which enqueues
+// the chunk's position into a ConcurrentQueue for main-thread processing.
+[NonSerialized] private bool _needsInitialLighting;
+[NonSerialized] private bool _hasLightChangesToProcess;
+[NonSerialized] private bool _needsEdgeCheck;
+
+public bool NeedsInitialLighting { get => ...; set { ...; if (value) OnLightWorkFlagged?.Invoke(Position); } }
+public bool HasLightChangesToProcess { get => ...; set { ...; if (value) OnLightWorkFlagged?.Invoke(Position); } }
+public bool NeedsEdgeCheck { get => ...; set { ...; if (value) OnLightWorkFlagged?.Invoke(Position); } }
 
 [NonSerialized]
-public bool HasLightChangesToProcess = false;    // Has pending BFS work
-
-[NonSerialized]
-public bool IsAwaitingMainThreadProcess = false; // Job done, waiting for apply
+public bool IsAwaitingMainThreadProcess = false; // Job done, waiting for apply (plain field — no callback)
 ```
 
 **Layer 2: Per-Chunk Queues (Serialized)**
@@ -814,6 +818,7 @@ Batching all updates for a single neighbor chunk into one `AddPending()` call re
 Extensive testing with circular flying patterns (worst-case scenario). No black spots observed in 30+ minute sessions.
 
 **Files Modified:**
+
 * `ChunkData.cs` - PopulateFromSave()
 * `LightingStateManager.cs` - New file
 * `World.cs` - UnloadChunks(), LoadOrGenerateChunk()

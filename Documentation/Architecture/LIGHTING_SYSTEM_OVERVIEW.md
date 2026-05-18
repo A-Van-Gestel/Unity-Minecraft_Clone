@@ -99,14 +99,18 @@ When a player places or breaks a block (`ChunkData.ModifyVoxel`):
 
 ### 3.2 Job Scheduling (`WorldJobManager.ScheduleLightingUpdate`)
 
-On the main thread each frame:
+On the main thread each frame, `World.Update()` iterates a **dirty set** (`_chunksNeedingLightWork`) containing only chunks with pending work, rather than scanning all loaded chunks:
 
-1. Scan for chunks with `HasLightChangesToProcess`.
-2. Check that all 8 neighbors have finished terrain generation (`AreNeighborsDataReady`).
-3. Create snapshot copies of the center chunk map (writable) and all 8 neighbor maps (read-only).
-4. Transfer the managed light queues to `NativeQueue`s for the job.
-5. Check `SunlightRecalculationQueue` for pending column recalculations (from unloaded neighbor recovery).
-6. Schedule the `NeighborhoodLightingJob`.
+1. **Drain staging queue:** Background threads (e.g., deserialization) enqueue positions into a `ConcurrentQueue<Vector2Int>`. The main thread drains this into the `HashSet` at the start of each frame.
+2. **Iterate dirty set:** For each chunk in the set, check flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`).
+3. Check that all 8 neighbors have finished terrain generation (`AreNeighborsDataReady`).
+4. Create snapshot copies of the center chunk map (writable) and all 8 neighbor maps (read-only).
+5. Transfer the managed light queues to `NativeQueue`s for the job.
+6. Check `SunlightRecalculationQueue` for pending column recalculations (from unloaded neighbor recovery).
+7. Schedule the `NeighborhoodLightingJob`.
+8. **Self-clean:** Remove the chunk from the dirty set when all flags are clear.
+
+A time-based fail-safe full scan (every ~1 second) re-populates the dirty set from `worldData.Chunks.Values` to catch any missed registrations. See [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) Section 4 for the full pseudocode.
 
 ### 3.3 The Job (`NeighborhoodLightingJob`)
 

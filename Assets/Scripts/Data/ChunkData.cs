@@ -48,30 +48,76 @@ namespace Data
         public bool IsLoading = false;
 
         // --- lighting ---
+
+        /// <summary>
+        /// Static callback invoked when any lighting work flag transitions to <c>true</c>.
+        /// Set by <see cref="World"/> during initialization to register the chunk in the dirty set.
+        /// </summary>
+        public static Action<Vector2Int> OnLightWorkFlagged;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void DomainReset()
+        {
+            OnLightWorkFlagged = null;
+        }
+
+        [NonSerialized]
+        private bool _needsInitialLighting;
+
+        [NonSerialized]
+        private bool _hasLightChangesToProcess;
+
+        [NonSerialized]
+        private bool _needsEdgeCheck;
+
         /// <summary>
         /// A transient flag indicating that the chunk's data has been populated, but it has not yet undergone its initial, mandatory lighting calculation.
         /// </summary>
-        [NonSerialized]
-        public bool NeedsInitialLighting = false;
+        public bool NeedsInitialLighting
+        {
+            get => _needsInitialLighting;
+            set
+            {
+                if (_needsInitialLighting == value) return;
+                _needsInitialLighting = value;
+                if (value) OnLightWorkFlagged?.Invoke(Position);
+            }
+        }
 
         /// <summary>
         /// A transient flag indicating that the chunk has pending general light changes that need to be processed on the main thread.
         /// </summary>
-        [NonSerialized]
-        public bool HasLightChangesToProcess = false;
+        public bool HasLightChangesToProcess
+        {
+            get => _hasLightChangesToProcess;
+            set
+            {
+                if (_hasLightChangesToProcess == value) return;
+                _hasLightChangesToProcess = value;
+                if (value) OnLightWorkFlagged?.Invoke(Position);
+            }
+        }
+
+        /// <summary>
+        /// A transient flag indicating that this chunk needs an edge consistency check against its neighbors.
+        /// Set after initial lighting stabilizes; requires all neighbors to be lit before scheduling.
+        /// </summary>
+        public bool NeedsEdgeCheck
+        {
+            get => _needsEdgeCheck;
+            set
+            {
+                if (_needsEdgeCheck == value) return;
+                _needsEdgeCheck = value;
+                if (value) OnLightWorkFlagged?.Invoke(Position);
+            }
+        }
 
         /// <summary>
         /// A transient flag indicating that a lighting job for this chunk has completed, but its results (e.g., cross-chunk modifications) are still pending processing on the main thread.
         /// </summary>
         [NonSerialized]
         public bool IsAwaitingMainThreadProcess = false;
-
-        /// <summary>
-        /// A transient flag indicating that this chunk needs an edge consistency check against its neighbors.
-        /// Set after initial lighting stabilizes; requires all neighbors to be lit before scheduling.
-        /// </summary>
-        [NonSerialized]
-        public bool NeedsEdgeCheck = false;
 
         /// <summary>
         /// Tracks the number of post-generation edge check rounds remaining for this chunk.

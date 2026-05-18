@@ -136,7 +136,7 @@ flowchart TD
     A["1. CheckViewDistance()"] --> B["2. ProcessGenerationJobs()"]
     B --> C["3. ApplyModifications()"]
     C --> D["4. ProcessLightingJobs()<br/>(from PREVIOUS frame)"]
-    D --> E["5. Lighting Scan & Schedule<br/>(iterates worldData.Chunks.Values)"]
+    D --> E["5. Lighting Dirty-Set Scan<br/>(iterates _chunksNeedingLightWork)"]
     E --> F["6. ProcessMeshJobs()<br/>(from PREVIOUS frame)"]
     F --> G["7. Schedule New Mesh Jobs<br/>(from _chunksToBuildMesh)"]
     G --> H["8. ChunksToDraw.Dequeue()<br/>(apply to GPU)"]
@@ -144,13 +144,31 @@ flowchart TD
     style G fill: #ffa07a, color: #fff
 ```
 
-### Step 5: Lighting Scan (The Critical Section)
+### Step 5: Lighting Dirty-Set Scan (The Critical Section)
 
-This is where most pipeline stalls originate. The scan iterates `worldData.Chunks.Values` (a **Dictionary** — iteration order is non-deterministic and not guaranteed to be stable across frames).
+This is where most pipeline stalls originate. The scan iterates `_chunksNeedingLightWork` — a `HashSet<Vector2Int>` containing only chunks whose lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) have been set to `true`.
+
+**Registration:** The three lighting flags on `ChunkData` are properties with setters. When any flag transitions to `true`, a static callback (`ChunkData.OnLightWorkFlagged`) enqueues the chunk's position into a `ConcurrentQueue<Vector2Int>` — this is thread-safe and supports flag-setting from background deserialization threads (`ChunkSerializer.ReadChunkInternal` via `Task.Run`). The main thread drains this queue into the `HashSet` at the start of each frame.
+
+**Fail-safe:** Every ~1 second (`FULL_LIGHT_SCAN_SECONDS`), a full scan of `worldData.Chunks.Values` runs to catch any chunks that were missed by the callback (e.g., flags set before the callback was registered). This prevents permanent stalls.
+
+**Self-cleaning:** When the scan encounters a position whose chunk was unloaded (`TryGetValue` returns false), the stale entry is removed automatically. When a chunk's flags are all clear after processing, it is also removed.
 
 ```
+// Drain thread-safe staging queue into main-thread HashSet:
+while _lightWorkQueue.TryDequeue(pos):
+    _chunksNeedingLightWork.Add(pos)
+
+// Fail-safe full scan (every ~1 second):
 foreach chunkData in worldData.Chunks.Values:
+    if populated AND any lighting flag set:
+        _chunksNeedingLightWork.Add(position)
+
+// Dirty-set iteration:
+snapshot = ListPool.Get(_chunksNeedingLightWork)
+foreach pos in snapshot:
     if lightJobsScheduled >= maxLightJobsPerFrame (32): BREAK  ← throttle
+    if !worldData.Chunks.TryGetValue(pos): REMOVE, SKIP       ← self-clean
     if !chunkData.IsPopulated: SKIP
     if lightingJobs.ContainsKey(coord): SKIP  ← already running
 
@@ -172,6 +190,10 @@ foreach chunkData in worldData.Chunks.Values:
             scheduled = ScheduleLightingUpdate()       ← clears HasLight...
 
         if scheduled: lightJobsScheduled++
+
+    // Remove if all flags are clear
+    if !NeedsInitialLighting AND !HasLightChangesToProcess AND !NeedsEdgeCheck:
+        _chunksNeedingLightWork.Remove(pos)
 ```
 
 > [!IMPORTANT]
@@ -427,10 +449,12 @@ When `IsStable = false`:
 
 ### 9.1 Dictionary Iteration + Throttle Starvation
 
-**Mechanism:** The lighting scan iterates `worldData.Chunks.Values` (a `Dictionary<Vector2Int, ChunkData>`). Dictionary iteration order is **non-deterministic** and may change when entries are added/removed.
-Combined with the `maxLightJobsPerFrame = 32` throttle and the `break` on line 1004, certain chunks may be consistently visited late in the iteration and starved if the throttle is exhausted by chunks visited earlier.
+**Mechanism:** The lighting scan previously iterated `worldData.Chunks.Values` (a `Dictionary<Vector2Int, ChunkData>`). Dictionary iteration order is **non-deterministic** and may change when entries are added/removed.
+Combined with the `maxLightJobsPerFrame = 32` throttle and the `break`, certain chunks could be consistently visited late in the iteration and starved if the throttle was exhausted by chunks visited earlier.
 
-**Risk Level:** Medium. The throttle of 32 is generous, but during rapid player movement with many chunks loading simultaneously, it's possible.
+**Risk Level:** Low. ~~Medium~~.
+
+**Status:** ✅ **MITIGATED** — The lighting scan now iterates a dirty set (`_chunksNeedingLightWork`) containing only chunks with pending work, instead of all loaded chunks. This drastically reduces iteration count during steady state (0–5 entries vs 625+). The `HashSet` iteration order is still non-deterministic, but with far fewer entries, throttle starvation is effectively eliminated.
 
 ### 9.2 Cross-Chunk Mod Ping-Pong
 

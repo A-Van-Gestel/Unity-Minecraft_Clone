@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -87,6 +88,14 @@ public class World : MonoBehaviour
     private bool _applyingModifications;
     private readonly Queue<VoxelMod> _modifications = new Queue<VoxelMod>();
     private float _tickTimer;
+
+    // Lighting dirty-set: tracks only chunks with pending lighting work instead of scanning all loaded chunks.
+    // The ConcurrentQueue is the thread-safe staging buffer written to by the callback (which may fire
+    // from background deserialization threads). It is drained into the HashSet on the main thread each frame.
+    private readonly ConcurrentQueue<Vector2Int> _lightWorkQueue = new ConcurrentQueue<Vector2Int>();
+    private readonly HashSet<Vector2Int> _chunksNeedingLightWork = new HashSet<Vector2Int>();
+    private float _fullLightScanTimer;
+    private const float FULL_LIGHT_SCAN_SECONDS = 1.0f;
 
     // UI
     [Header("UI")]
@@ -199,6 +208,11 @@ public class World : MonoBehaviour
 
             // --- Prepare Job-Safe Data (Block Types & Custom Meshes only — biomes are owned by the generator) ---
             PrepareGlobalJobData();
+
+            // Register the dirty-set callback so ChunkData flag setters automatically register work.
+            // Route through ConcurrentQueue for thread safety — deserialization can set flags
+            // from background threads (ChunkSerializer.ReadChunkInternal via Task.Run).
+            ChunkData.OnLightWorkFlagged = pos => _lightWorkQueue.Enqueue(pos);
         }
     }
 
@@ -294,6 +308,10 @@ public class World : MonoBehaviour
             worldData.Chunks.Clear();
             worldData.ModifiedChunks.Clear();
         }
+
+        // Cleanup lighting dirty set and callback
+        _chunksNeedingLightWork.Clear();
+        ChunkData.OnLightWorkFlagged = null;
 
         // Cleanup chunk pool
         ChunkPool?.Clear();
@@ -1030,69 +1048,118 @@ public class World : MonoBehaviour
         // 3. Process completed lighting jobs from the PREVIOUS frame.
         JobManager.ProcessLightingJobs();
 
-        // 4. Scan all loaded chunks for lighting work and schedule jobs (New "Pull" system)
+        // 4. Schedule lighting jobs from the dirty set (only chunks with pending work).
         if (settings.enableLighting)
         {
+            // Drain the thread-safe staging queue into the main-thread HashSet.
+            // Background deserialization threads may enqueue positions here.
+            while (_lightWorkQueue.TryDequeue(out Vector2Int queuedPos))
+                _chunksNeedingLightWork.Add(queuedPos);
+
             int lightJobsScheduled = 0;
 
-            foreach (ChunkData chunkData in worldData.Chunks.Values)
+            // Fail-safe: periodic full scan to catch any chunks whose dirty-set registration
+            // was missed (e.g., from a code path that set a flag before the callback was registered).
+            // This runs every ~1 second and ensures the system can never permanently stall.
+            _fullLightScanTimer += Time.deltaTime;
+            if (_fullLightScanTimer >= FULL_LIGHT_SCAN_SECONDS)
             {
-                if (lightJobsScheduled >= settings.maxLightJobsPerFrame) break; // Respect the throttle
-
-                // Skip placeholder data that hasn't generated terrain yet
-                if (!chunkData.IsPopulated) continue;
-
-                // Create coord from position
-                ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
-
-                // If no job is currently running...
-                if (!JobManager.LightingJobs.ContainsKey(chunkCoord))
+                _fullLightScanTimer = 0f;
+                foreach (ChunkData cd in worldData.Chunks.Values)
                 {
-                    // --- Prioritize initial lighting ---
-                    if (chunkData.NeedsInitialLighting)
+                    if (cd.IsPopulated && (cd.NeedsInitialLighting ||
+                                           cd.HasLightChangesToProcess || cd.NeedsEdgeCheck))
                     {
-                        // Before scheduling, we must still ensure neighbors have their data ready.
-                        if (AreNeighborsDataReady(chunkCoord))
-                        {
-                            // This is the first lighting pass, so we trigger the full recalculation.
-                            chunkData.RecalculateSunLightLight();
-                            if (JobManager.ScheduleLightingUpdate(chunkData))
-                            {
-                                // The request has been fulfilled, so clear the flag.
-                                chunkData.NeedsInitialLighting = false;
-                                lightJobsScheduled++;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        bool scheduled = false;
-
-                        // --- Edge consistency check ---
-                        // After initial lighting stabilizes, validate border light against neighbors.
-                        // Requires all neighbors to be lit so the edge comparison is meaningful.
-                        if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
-                        {
-                            // Schedule a lighting job with edge checking enabled.
-                            // The job's PerformEdgeCheck flag is set from chunkData.NeedsEdgeCheck
-                            // inside ScheduleLightingUpdate, which also clears the flag.
-                            chunkData.HasLightChangesToProcess = true;
-                            scheduled = JobManager.ScheduleLightingUpdate(chunkData);
-                        }
-
-                        // --- Regular lighting updates ---
-                        // If no edge check was scheduled (or it was skipped), check for regular updates.
-                        // We use `!scheduled` so that if an edge check WAS scheduled, the job covers it,
-                        // but if NeedsEdgeCheck was true and AreNeighborsReadyAndLit was false,
-                        // we STILL try to process regular lighting changes if neighbors generated.
-                        if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
-                        {
-                            scheduled = JobManager.ScheduleLightingUpdate(chunkData);
-                        }
-
-                        if (scheduled) lightJobsScheduled++;
+                        _chunksNeedingLightWork.Add(cd.Position);
                     }
                 }
+            }
+
+            // Snapshot the dirty set into a pooled list to allow safe modification during iteration.
+            List<Vector2Int> dirtySnapshot = ListPool<Vector2Int>.Get();
+            try
+            {
+                foreach (Vector2Int pos in _chunksNeedingLightWork)
+                    dirtySnapshot.Add(pos);
+
+                foreach (Vector2Int pos in dirtySnapshot)
+                {
+                    if (lightJobsScheduled >= settings.maxLightJobsPerFrame) break; // Respect the throttle
+
+                    // If the chunk was unloaded, clean up the stale entry
+                    if (!worldData.Chunks.TryGetValue(pos, out ChunkData chunkData))
+                    {
+                        _chunksNeedingLightWork.Remove(pos);
+                        continue;
+                    }
+
+                    // Skip placeholder data that hasn't generated terrain yet
+                    if (!chunkData.IsPopulated) continue;
+
+                    // Create coord from position
+                    ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
+
+                    // If no job is currently running...
+                    if (!JobManager.LightingJobs.ContainsKey(chunkCoord))
+                    {
+                        // --- Prioritize initial lighting ---
+                        if (chunkData.NeedsInitialLighting)
+                        {
+                            // Before scheduling, we must still ensure neighbors have their data ready.
+                            if (AreNeighborsDataReady(chunkCoord))
+                            {
+                                // This is the first lighting pass, so we trigger the full recalculation.
+                                chunkData.RecalculateSunLightLight();
+                                if (JobManager.ScheduleLightingUpdate(chunkData))
+                                {
+                                    // The request has been fulfilled, so clear the flag.
+                                    chunkData.NeedsInitialLighting = false;
+                                    lightJobsScheduled++;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            bool scheduled = false;
+
+                            // --- Edge consistency check ---
+                            // After initial lighting stabilizes, validate border light against neighbors.
+                            // Requires all neighbors to be lit so the edge comparison is meaningful.
+                            if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
+                            {
+                                // Schedule a lighting job with edge checking enabled.
+                                // The job's PerformEdgeCheck flag is set from chunkData.NeedsEdgeCheck
+                                // inside ScheduleLightingUpdate, which also clears the flag.
+                                chunkData.HasLightChangesToProcess = true;
+                                scheduled = JobManager.ScheduleLightingUpdate(chunkData);
+                            }
+
+                            // --- Regular lighting updates ---
+                            // If no edge check was scheduled (or it was skipped), check for regular updates.
+                            // We use `!scheduled` so that if an edge check WAS scheduled, the job covers it,
+                            // but if NeedsEdgeCheck was true and AreNeighborsReadyAndLit was false,
+                            // we STILL try to process regular lighting changes if neighbors generated.
+                            if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
+                            {
+                                scheduled = JobManager.ScheduleLightingUpdate(chunkData);
+                            }
+
+                            if (scheduled) lightJobsScheduled++;
+                        }
+                    }
+
+                    // Remove from dirty set if chunk has no remaining work
+                    if (!chunkData.NeedsInitialLighting &&
+                        !chunkData.HasLightChangesToProcess &&
+                        !chunkData.NeedsEdgeCheck)
+                    {
+                        _chunksNeedingLightWork.Remove(pos);
+                    }
+                }
+            }
+            finally
+            {
+                ListPool<Vector2Int>.Release(dirtySnapshot);
             }
         }
 
