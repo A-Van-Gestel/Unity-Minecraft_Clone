@@ -60,22 +60,22 @@ namespace DebugVisualizations
         // --- Static Caching ---
         // We cache the mesh so we don't regenerate it for every single chunk.
         // This reduces memory overhead from ~400 meshes to 1 mesh for the entire world.
-        private static Mesh _cachedMesh;
+        private static Mesh s_cachedMesh;
 
         // Track settings to detect changes in the Inspector and rebuild the mesh if necessary.
-        private static int _cachedGridInterval;
-        private static bool _cachedCrossSectionSetting;
-        private static float _cachedBorderThick;
-        private static float _cachedSectionThick;
+        private static int s_cachedGridInterval;
+        private static bool s_cachedCrossSectionSetting;
+        private static float s_cachedBorderThick;
+        private static float s_cachedSectionThick;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void DomainReset()
         {
-            _cachedMesh = null;
-            _cachedGridInterval = 0;
-            _cachedCrossSectionSetting = false;
-            _cachedBorderThick = 0f;
-            _cachedSectionThick = 0f;
+            s_cachedMesh = null;
+            s_cachedGridInterval = 0;
+            s_cachedCrossSectionSetting = false;
+            s_cachedBorderThick = 0f;
+            s_cachedSectionThick = 0f;
         }
 
         #endregion
@@ -92,17 +92,17 @@ namespace DebugVisualizations
 
             // Check if we need to build (or rebuild) the shared mesh.
             // This happens on the very first chunk load, or if the developer changes settings in the Inspector at runtime.
-            if (_cachedMesh == null ||
-                _cachedGridInterval != gridInterval ||
-                _cachedCrossSectionSetting != renderSectionsInternalCross ||
-                !Mathf.Approximately(_cachedBorderThick, borderThickness) ||
-                !Mathf.Approximately(_cachedSectionThick, sectionFrameThickness))
+            if (s_cachedMesh == null ||
+                s_cachedGridInterval != gridInterval ||
+                s_cachedCrossSectionSetting != renderSectionsInternalCross ||
+                !Mathf.Approximately(s_cachedBorderThick, borderThickness) ||
+                !Mathf.Approximately(s_cachedSectionThick, sectionFrameThickness))
             {
                 RebuildSharedMesh();
             }
 
             // Apply the shared mesh. This is a lightweight reference copy.
-            GetComponent<MeshFilter>().sharedMesh = _cachedMesh;
+            GetComponent<MeshFilter>().sharedMesh = s_cachedMesh;
 
             // Assign materials.
             // We have 4 SubMeshes, so we need an array of 4 Materials.
@@ -123,17 +123,17 @@ namespace DebugVisualizations
         private void RebuildSharedMesh()
         {
             // Update cache trackers to prevent unnecessary rebuilds
-            _cachedGridInterval = gridInterval;
-            _cachedCrossSectionSetting = renderSectionsInternalCross;
-            _cachedBorderThick = borderThickness;
-            _cachedSectionThick = sectionFrameThickness;
+            s_cachedGridInterval = gridInterval;
+            s_cachedCrossSectionSetting = renderSectionsInternalCross;
+            s_cachedBorderThick = borderThickness;
+            s_cachedSectionThick = sectionFrameThickness;
 
             // Clean up old mesh if it existed to prevent memory leaks in Editor
-            if (_cachedMesh != null) Destroy(_cachedMesh);
+            if (s_cachedMesh != null) Destroy(s_cachedMesh);
 
-            _cachedMesh = new Mesh();
+            s_cachedMesh = new Mesh();
 #if UNITY_EDITOR
-            _cachedMesh.name = "SharedChunkBorderMesh";
+            s_cachedMesh.name = "SharedChunkBorderMesh";
 #endif
 
             // Pre-allocate a vertex list.
@@ -162,24 +162,24 @@ namespace DebugVisualizations
 
             // --- Apply Data to Mesh ---
             // 1. Set vertices once for the whole mesh.
-            _cachedMesh.SetVertices(allVertices);
+            s_cachedMesh.SetVertices(allVertices);
 
             // 2. Define SubMeshes.
-            _cachedMesh.subMeshCount = 4;
+            s_cachedMesh.subMeshCount = 4;
 
             // Note: We deliberately mix Topologies here.
             // SubMeshes 0 & 2 use Triangles (for thickness).
             // SubMeshes 1 & 3 use Lines (for performance).
-            _cachedMesh.SetIndices(borderIndices, MeshTopology.Triangles, 0);
-            _cachedMesh.SetIndices(gridIndices, MeshTopology.Lines, 1);
-            _cachedMesh.SetIndices(sectionFrameIndices, MeshTopology.Triangles, 2);
-            _cachedMesh.SetIndices(sectionCrossIndices, MeshTopology.Lines, 3);
+            s_cachedMesh.SetIndices(borderIndices, MeshTopology.Triangles, 0);
+            s_cachedMesh.SetIndices(gridIndices, MeshTopology.Lines, 1);
+            s_cachedMesh.SetIndices(sectionFrameIndices, MeshTopology.Triangles, 2);
+            s_cachedMesh.SetIndices(sectionCrossIndices, MeshTopology.Lines, 3);
 
-            _cachedMesh.RecalculateBounds();
+            s_cachedMesh.RecalculateBounds();
 
             // Optimization: Upload to GPU and mark no longer readable.
             // Since we never modify this mesh after generation, this frees up system memory.
-            _cachedMesh.UploadMeshData(false);
+            s_cachedMesh.UploadMeshData(false);
         }
 
         #region Geometry Generators (Thick Lines using Triangles)

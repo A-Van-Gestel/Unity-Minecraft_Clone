@@ -12,17 +12,17 @@ using Random = UnityEngine.Random;
 public static partial class BlockBehavior
 {
     [ThreadStatic]
-    private static List<VoxelMod> _tMods;
+    private static List<VoxelMod> s_tMods;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void DomainReset()
     {
-        _tMods = null;
+        s_tMods = null;
     }
 
     // A ThreadStatic reusable list to avoid allocating memory while ensuring thread-safety.
     // Lazy initialized because ThreadStatic inline initializers only run for the first thread.
-    private static List<VoxelMod> Mods => _tMods ??= new List<VoxelMod>();
+    private static List<VoxelMod> Mods => s_tMods ??= new List<VoxelMod>();
 
     // OPTIMIZATION: Cached spread vectors to prevent array allocations every tick
     private static readonly Vector3Int[] s_grassSpreadVectors =

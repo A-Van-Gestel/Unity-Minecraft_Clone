@@ -12,12 +12,12 @@ namespace Serialization
     /// </summary>
     public static class CompressionFactory
     {
-        private static bool? _lz4Available;
+        private static bool? s_lz4Available;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void DomainReset()
         {
-            _lz4Available = null;
+            s_lz4Available = null;
         }
 
         /// <summary>
@@ -25,20 +25,20 @@ namespace Serialization
         /// </summary>
         private static bool IsLZ4Available()
         {
-            if (_lz4Available.HasValue) return _lz4Available.Value;
+            if (s_lz4Available.HasValue) return s_lz4Available.Value;
 
             try
             {
                 // Test instantiation. This will throw DllNotFoundException if the native plugin is missing.
                 using MemoryStream testStream = new MemoryStream();
                 using LZ4Stream lz4 = new LZ4Stream(testStream, CompressionMode.Compress, true);
-                _lz4Available = true;
+                s_lz4Available = true;
                 return true;
             }
             catch (Exception ex) // Catches DllNotFoundException and TypeInitializationException
             {
                 Debug.LogError($"[CompressionFactory] LZ4 native library not found or failed to initialize. Falling back to GZip. Error: {ex.Message}");
-                _lz4Available = false;
+                s_lz4Available = false;
                 return false;
             }
         }
