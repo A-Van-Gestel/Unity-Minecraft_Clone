@@ -233,7 +233,9 @@ public class ChunkPoolManager
 
         // Update name
         ChunkCoord chunkCoord = ChunkCoord.FromWorldPosition(position);
+#if UNITY_EDITOR
         border.name = $"Border {chunkCoord.X.ToString()}, {chunkCoord.Z.ToString()}";
+#endif
 
         // Set active
         border.SetActive(true);

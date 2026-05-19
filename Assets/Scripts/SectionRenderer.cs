@@ -22,7 +22,11 @@ public class SectionRenderer
 
     public SectionRenderer(Transform parent, int sectionIndex)
     {
+#if UNITY_EDITOR
         GameObject = new GameObject($"Section_{sectionIndex}");
+#else
+        GameObject = new GameObject();
+#endif
         GameObject.transform.SetParent(parent);
         GameObject.transform.localPosition = new Vector3(0, sectionIndex * ChunkMath.SECTION_SIZE, 0);
         GameObject.transform.localRotation = Quaternion.identity;

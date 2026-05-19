@@ -132,7 +132,9 @@ namespace DebugVisualizations
             if (_cachedMesh != null) Destroy(_cachedMesh);
 
             _cachedMesh = new Mesh();
+#if UNITY_EDITOR
             _cachedMesh.name = "SharedChunkBorderMesh";
+#endif
 
             // Pre-allocate a vertex list.
             // Vertices are shared across all submeshes to minimize memory footprint.

@@ -37,7 +37,11 @@ public class Chunk
         Coord = chunkCoord;
 
         // Create GameObject hierarchy
+#if UNITY_EDITOR
         ChunkGameObject = new GameObject($"Chunk {Coord.X.ToString()}, {Coord.Z.ToString()}");
+#else
+        ChunkGameObject = new GameObject();
+#endif
         ChunkGameObject.transform.SetParent(World.Instance.transform);
 
         // Pre-add the load animation component to avoid runtime AddComponent (which causes boxing/GC overhead)
@@ -73,7 +77,9 @@ public class Chunk
         ChunkPosition = Coord.ToWorldPosition();
 
         // Update GameObject identity
+#if UNITY_EDITOR
         ChunkGameObject.name = $"Chunk {Coord.X.ToString()}, {Coord.Z.ToString()}";
+#endif
 
         if (World.Instance.settings.enableChunkLoadAnimations && _loadAnimation != null)
         {

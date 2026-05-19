@@ -34,7 +34,11 @@ namespace DebugVisualizations
         /// <param name="parent">The parent transform to attach the GameObject to.</param>
         public VisualizerChunkData(ChunkCoord chunkCoord, Material mat, Transform parent)
         {
+#if UNITY_EDITOR
             ChunkObject = new GameObject($"Visualizer_{chunkCoord.X.ToString()}_{chunkCoord.Z.ToString()}");
+#else
+            ChunkObject = new GameObject();
+#endif
             ChunkObject.transform.SetParent(parent);
             ChunkObject.transform.position = chunkCoord.ToWorldPosition();
 
@@ -61,7 +65,9 @@ namespace DebugVisualizations
         {
             ChunkObject.transform.SetParent(parent);
             ChunkObject.transform.position = chunkCoord.ToWorldPosition();
+#if UNITY_EDITOR
             ChunkObject.name = $"Visualizer_{chunkCoord.X.ToString()}_{chunkCoord.Z.ToString()}";
+#endif
             ChunkObject.SetActive(true);
 
             // Ensure material is correct (in case setting changed)

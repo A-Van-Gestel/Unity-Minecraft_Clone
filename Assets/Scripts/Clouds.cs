@@ -294,7 +294,9 @@ public class Clouds : MonoBehaviour
         GameObject newCloudTile = new GameObject();
         newCloudTile.transform.position = position;
         newCloudTile.transform.parent = transform;
+#if UNITY_EDITOR
         newCloudTile.name = $"Cloud {position.x}, {position.z}";
+#endif
         MeshFilter mF = newCloudTile.AddComponent<MeshFilter>();
         MeshRenderer mR = newCloudTile.AddComponent<MeshRenderer>();
 
