@@ -17,11 +17,7 @@ namespace Serialization
         public ModificationManager(string worldName, bool useVolatilePath)
         {
             // Determine Save Path
-            string basePath = useVolatilePath
-                ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
-                : Path.Combine(Application.persistentDataPath, "Saves");
-
-            string folder = Path.Combine(basePath, worldName);
+            string folder = SaveSystem.GetSavePath(worldName, useVolatilePath);
             if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
             _filePath = Path.Combine(folder, "pending_mods.bin");
         }

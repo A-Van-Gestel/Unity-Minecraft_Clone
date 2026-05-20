@@ -1,8 +1,10 @@
 using System;
+using Data;
 using Data.Enums;
 using TMPro;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace UI
 {
@@ -126,6 +128,20 @@ namespace UI
 #else
          Application.Quit();
 #endif
+        }
+
+        /// <summary>
+        /// Automatically configures and launches a benchmark profiling session.
+        /// Bypasses the World Select Menu.
+        /// </summary>
+        public void RunBenchmark()
+        {
+            WorldLaunchState.CurrentMode = RuntimeMode.Benchmark;
+            WorldLaunchState.WorldName = $"Benchmark_{DateTime.Now:yyyyMMdd_HHmmss}";
+            WorldLaunchState.Seed = 0; // Deterministic seed
+            WorldLaunchState.IsNewGame = true;
+
+            SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single);
         }
     }
 }

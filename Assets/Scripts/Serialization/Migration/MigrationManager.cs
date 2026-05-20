@@ -97,9 +97,7 @@ namespace Serialization.Migration
             string savePath = SaveSystem.GetSavePath(worldName, useVolatilePath);
 
             // EVALUATE UNITY APIs ON THE MAIN THREAD before offloading anything:
-            string basePath = useVolatilePath
-                ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
-                : Path.Combine(Application.persistentDataPath, "Saves");
+            string basePath = Directory.GetParent(savePath).FullName;
 
             // Add a timestamp to the backup to guarantee uniqueness and prevent overwrites
             string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");

@@ -21,11 +21,7 @@ namespace Serialization
 
         public LightingStateManager(string worldName, bool useVolatilePath)
         {
-            string basePath = useVolatilePath
-                ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
-                : Path.Combine(Application.persistentDataPath, "Saves");
-
-            string folder = Path.Combine(basePath, worldName);
+            string folder = SaveSystem.GetSavePath(worldName, useVolatilePath);
             if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
             _filePath = Path.Combine(folder, "pending_lighting.bin");
         }

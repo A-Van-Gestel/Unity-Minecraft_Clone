@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Data;
+using Data.Enums;
 using Data.WorldTypes;
 using Serialization;
 using UnityEngine;
@@ -22,8 +24,8 @@ public static class SaveSystem
     //          legacy semantics; their schema migration is deferred to a future version.
     //          First chunk-format migration in the project; bumps chunk format version to 4.
     //          Affects chunks AND pending mods. See Migration_v5_to_v6_LegacyToSchemaBased.cs.
-    // v6 → v7: Added global structural dimensions (chunkHeight, chunkWidth, worldSizeInChunks) 
-    //          to level.dat for future extensibility, and standardized the naming of the 
+    // v6 → v7: Added global structural dimensions (chunkHeight, chunkWidth, worldSizeInChunks)
+    //          to level.dat for future extensibility, and standardized the naming of the
     //          pending_lighting.bin file. See Migration_v6_to_v7_SaveFormatExtensibility.cs.
     public const int CURRENT_VERSION = 7;
 
@@ -33,11 +35,16 @@ public static class SaveSystem
     /// <param name="worldName">The identifier name of the world.</param>
     /// <param name="useVolatilePath">If true, returns a temporary editor-only path instead of the persistent user path.</param>
     /// <returns>The absolute physical folder path.</returns>
+    /// <remarks>
+    /// TODO: The `useVolatilePath` could probably be replaced with a new `RuntimeMode.Volatile` runtime mode with a dedicated switch arm.
+    /// </remarks>
     public static string GetSavePath(string worldName, bool useVolatilePath)
     {
-        string baseFolder = useVolatilePath
-            ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
-            : Path.Combine(Application.persistentDataPath, "Saves");
+        string baseFolder = WorldLaunchState.CurrentMode switch
+        {
+            RuntimeMode.Benchmark => Path.Combine(Application.persistentDataPath, "Benchmark_Saves"),
+            _ => useVolatilePath ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves") : Path.Combine(Application.persistentDataPath, "Saves")
+        };
 
         return Path.Combine(baseFolder, worldName);
     }
@@ -220,6 +227,19 @@ public static class SaveSystem
 
         Directory.Delete(path, true); // Recursive delete
         Debug.Log($"Deleted world: {worldName}");
+    }
+
+    /// <summary>
+    /// Permanently deletes all benchmark saves to free up disk space.
+    /// </summary>
+    public static void ClearAllBenchmarks()
+    {
+        string path = Path.Combine(Application.persistentDataPath, "Benchmark_Saves");
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, true);
+            Debug.Log("Cleared all benchmark saves.");
+        }
     }
 
     // --- Helper methods ---

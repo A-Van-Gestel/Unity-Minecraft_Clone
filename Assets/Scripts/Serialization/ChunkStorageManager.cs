@@ -30,11 +30,8 @@ namespace Serialization
         public ChunkStorageManager(string worldName, bool useVolatilePath, int saveVersion)
         {
             // Determine Save Path
-            string basePath = useVolatilePath
-                ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
-                : Path.Combine(Application.persistentDataPath, "Saves");
-
-            _saveFolderPath = Path.Combine(basePath, worldName, "Region");
+            string worldPath = SaveSystem.GetSavePath(worldName, useVolatilePath);
+            _saveFolderPath = Path.Combine(worldPath, "Region");
             _codec = RegionAddressCodec.ForVersion(saveVersion);
 
             if (!Directory.Exists(_saveFolderPath)) Directory.CreateDirectory(_saveFolderPath);

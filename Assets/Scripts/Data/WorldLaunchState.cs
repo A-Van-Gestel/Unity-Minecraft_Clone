@@ -1,3 +1,4 @@
+using Data.Enums;
 using Data.WorldTypes;
 using UnityEngine;
 
@@ -13,6 +14,11 @@ namespace Data
         public static bool IsNewGame = true;
 
         /// <summary>
+        /// The current operational mode of the game.
+        /// </summary>
+        public static RuntimeMode CurrentMode = RuntimeMode.Default;
+
+        /// <summary>
         /// The world type selected by the user during world creation.
         /// New worlds default to the fast, Burst-compiled Standard path.
         /// </summary>
@@ -24,6 +30,7 @@ namespace Data
             WorldName = "New World";
             Seed = 0;
             IsNewGame = true;
+            CurrentMode = RuntimeMode.Default;
             SelectedWorldType = WorldTypeID.Standard;
         }
     }

@@ -140,7 +140,7 @@ namespace UI
             {
                 if (_deferredRebindCoroutine != null)
                     StopCoroutine(_deferredRebindCoroutine);
-                
+
                 _deferredRebindCoroutine = StartCoroutine(DeferredRebind());
             }
         }
@@ -157,6 +157,17 @@ namespace UI
         {
             SettingsManager.SaveSettings(SettingsManager.LoadSettings());
             onSettingsClosed?.Invoke();
+        }
+
+        /// <summary>
+        /// Clears all benchmark saves from disk. Can be hooked up to a UI Button.
+        /// </summary>
+        /// <remarks
+        /// TODO: Implement into settings UI.
+        /// </remarks>
+        public void ClearAllBenchmarks()
+        {
+            SaveSystem.ClearAllBenchmarks();
         }
 
         #endregion

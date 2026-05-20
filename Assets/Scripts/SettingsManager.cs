@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using Data;
+using Data.Enums;
 using MyBox;
 using Serialization;
 using UI.Attributes;
@@ -361,6 +363,16 @@ public static class SettingsManager
     /// <returns>The singleton Settings object.</returns>
     public static Settings LoadSettings()
     {
+        // Bypass disk loading and return fresh defaults for Benchmark mode
+        if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark)
+        {
+            if (s_cachedSettings != null)
+                return s_cachedSettings;
+
+            s_cachedSettings = new Settings();
+            return s_cachedSettings;
+        }
+
         // Return cached instance if available
         if (s_cachedSettings != null)
             return s_cachedSettings;

@@ -1,3 +1,6 @@
+using Benchmarks;
+using Data;
+using Data.Enums;
 using DebugVisualizations;
 using Physics;
 using Serialization;
@@ -69,11 +72,23 @@ public class Player : MonoBehaviour
             playerBodyLocalPosition = new Vector3(playerBodyLocalPosition.x, VoxelRigidbody.collisionHeight / 2f, playerBodyLocalPosition.z);
             playerBody.localPosition = playerBodyLocalPosition;
         }
+
+        if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark)
+        {
+            gameObject.AddComponent<BenchmarkController>();
+            IsFlying = true;
+            IsNoclipping = true;
+        }
     }
 
     private void Update()
     {
-        if (!World.InUI)
+        if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark)
+        {
+            // BenchmarkController handles movement/rotation
+            VoxelRigidbody.SetMovementIntent(Vector3.zero);
+        }
+        else if (!World.InUI)
         {
             GetPlayerInputs();
 
