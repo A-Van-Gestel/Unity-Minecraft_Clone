@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using Data;
 using Data.Enums;
 using UnityEngine;
@@ -11,15 +12,19 @@ namespace Benchmarks
     /// Controls the player during a benchmark profiling run.
     /// Drives the player through a two-pass waypoint system to stress-test the
     /// chunk generation, lighting, meshing, and disk loading pipelines.
-    /// <para><b>Pass 1 — Generation (Phases 0–1):</b> A zigzag sweep across the world that
-    /// maximizes unique chunk coverage. Row spacing and world-edge margins are derived
-    /// from the current <see cref="Settings.LoadDistance"/> to ensure optimal chunk throughput.</para>
-    /// <para><b>Pass 2 — Loading (Phases 2–3):</b> Diagonal cross-cuts through previously
-    /// generated territory at escalating speeds, forcing chunks to be reloaded from disk.</para>
-    /// <para>The benchmark runs through four timed speed phases (30 s each). Phases 0–1
-    /// navigate generation waypoints; phases 2–3 switch to loading waypoints. Each pass
-    /// loops its waypoints if exhausted before phases end. The benchmark ends when all
-    /// phases complete.</para>
+    /// <para><b>Pass 1 — Generation:</b> A zigzag sweep across a configurable
+    /// benchmark region (see <see cref="Settings.benchmarkRegionSize"/>) that
+    /// maximizes unique chunk coverage. Row spacing and margins are derived
+    /// from the current <see cref="Settings.LoadDistance"/> to ensure optimal chunk throughput.
+    /// The pass completes when all generation waypoints have been visited, with speed
+    /// escalating on a timer within the pass.</para>
+    /// <para><b>Transition:</b> All active jobs are drained, world data is saved to disk,
+    /// and chunks are force-unloaded from memory via <see cref="World.ForceUnloadAllChunks"/>.
+    /// This ensures the loading pass exercises the deserialization pipeline.</para>
+    /// <para><b>Pass 2 — Loading:</b> Diagonal cross-cuts through previously generated
+    /// territory at escalating speeds, forcing chunks to be reloaded from disk. Each speed
+    /// phase runs for a fixed duration; loading waypoints loop if exhausted before phases end.
+    /// The benchmark ends when all loading phases complete.</para>
     /// </summary>
     public class BenchmarkController : MonoBehaviour
     {
@@ -37,41 +42,30 @@ namespace Benchmarks
         private const float FLIGHT_HEIGHT = VoxelData.ChunkHeight * FLIGHT_HEIGHT_RATIO;
 
         /// <summary>
-        /// Number of speed phases dedicated to the generation pass.
-        /// Phases [0, GENERATION_PHASE_COUNT) use generation waypoints;
-        /// phases [GENERATION_PHASE_COUNT, total) use loading waypoints.
-        /// </summary>
-        private const int GENERATION_PHASE_COUNT = 2;
-
-        // ── Phase Configuration ──────────────────────────────────────────
-
-        /// <summary>
-        /// Movement speeds for each benchmark phase, in meters/second.
-        /// Phases 0–1 are generation-oriented (slower), phases 2–3 are loading-oriented (faster).
-        /// </summary>
-        private static readonly float[] s_phaseSpeeds = { 10f, 20f, 50f, 100f, 200f };
-
-        /// <summary>
         /// Duration of each speed phase in seconds.
         /// </summary>
         private const float TIME_PER_PHASE = 30f;
+
+        // ── Fallback Phase Configuration ─────────────────────────────────
+
+        private static readonly float[] s_defaultGenerationSpeeds = { 10f, 20f, 50f, 100f, 200f };
+        private static readonly float[] s_defaultLoadingSpeeds = { 50f, 100f, 200f };
 
         // ── Runtime State ────────────────────────────────────────────────
 
         private readonly List<Vector3> _generationWaypoints = new List<Vector3>();
         private readonly List<Vector3> _loadingWaypoints = new List<Vector3>();
+        private float[] _generationSpeeds;
+        private float[] _loadingSpeeds;
         private int _activeWaypointIndex;
-        private bool _inLoadingPass;
-        private int _currentPhase;
-        private float _phaseTimer;
-        private bool _isInitialized;
         private Transform _playerCamera;
 
         // ── Lifecycle ────────────────────────────────────────────────────
 
         /// <summary>
-        /// Coroutine entry point. Waits for the world to fully load, then builds
-        /// the waypoint path and begins the benchmark run.
+        /// Coroutine entry point. Waits for the world to fully load, parses
+        /// speed configuration, then runs the complete benchmark:
+        /// generation pass → transition → loading pass.
         /// </summary>
         public IEnumerator Start()
         {
@@ -90,7 +84,11 @@ namespace Benchmarks
                 yield return null;
             }
 
-            BuildWaypoints();
+            Settings settings = SettingsManager.LoadSettings();
+            _generationSpeeds = ParseSpeedString(settings.benchmarkGenerationSpeeds, s_defaultGenerationSpeeds, "Generation");
+            _loadingSpeeds = ParseSpeedString(settings.benchmarkLoadingSpeeds, s_defaultLoadingSpeeds, "Loading");
+
+            BuildWaypoints(settings);
 
             if (_generationWaypoints.Count < 2)
             {
@@ -99,105 +97,128 @@ namespace Benchmarks
                 yield break;
             }
 
-            // Start on generation pass
-            _inLoadingPass = false;
-            _activeWaypointIndex = 1;
-
-            // Teleport to first generation waypoint and face the second
-            transform.position = _generationWaypoints[0];
-            FaceWaypoint(_generationWaypoints[1]);
-
-            _isInitialized = true;
             Debug.Log($"[Benchmark] Started profiling run. " +
                       $"{_generationWaypoints.Count} generation waypoints, " +
                       $"{_loadingWaypoints.Count} loading waypoints. " +
-                      $"Phase 0: {s_phaseSpeeds[0]}m/s (Generation Pass)");
+                      $"Generation speeds: [{string.Join(", ", _generationSpeeds)}] m/s, " +
+                      $"Loading speeds: [{string.Join(", ", _loadingSpeeds)}] m/s.");
+
+            // === Pass 1: Generation ===
+            yield return RunGenerationPass();
+
+            // === Transition: Drain Jobs → Save → Force Unload ===
+            yield return TransitionToLoadingPass();
+
+            // === Pass 2: Loading ===
+            yield return RunLoadingPass();
+
+            EndBenchmark();
+        }
+
+        // ── Pass Execution ───────────────────────────────────────────────
+
+        /// <summary>
+        /// Runs the generation pass: visits every generation waypoint exactly once.
+        /// Speed escalates every <see cref="TIME_PER_PHASE"/> seconds, clamping
+        /// at the highest generation speed if all phases are exhausted before
+        /// all waypoints are visited.
+        /// </summary>
+        private IEnumerator RunGenerationPass()
+        {
+            transform.position = _generationWaypoints[0];
+            _activeWaypointIndex = 1;
+            FaceWaypoint(_generationWaypoints[1]);
+
+            int speedIndex = 0;
+            float phaseTimer = 0f;
+
+            Debug.Log($"[Benchmark] Generation Pass — Phase 0: {_generationSpeeds[0]}m/s");
+
+            while (_activeWaypointIndex < _generationWaypoints.Count)
+            {
+                phaseTimer += Time.deltaTime;
+                if (phaseTimer >= TIME_PER_PHASE && speedIndex < _generationSpeeds.Length - 1)
+                {
+                    phaseTimer = 0f;
+                    speedIndex++;
+                    Debug.Log($"[Benchmark] Generation Pass — Phase {speedIndex}: " +
+                              $"{_generationSpeeds[speedIndex]}m/s");
+                }
+
+                StepTowardWaypoint(_generationWaypoints, _generationSpeeds[speedIndex], loop: false);
+                yield return null;
+            }
+
+            Debug.Log("[Benchmark] === Generation Pass Complete ===");
         }
 
         /// <summary>
-        /// Advances the phase timer, handles pass switching, and moves the player
-        /// toward the current waypoint.
+        /// Transitions from the generation pass to the loading pass by delegating
+        /// to <see cref="World.ForceUnloadAllChunks"/>, which drains all active jobs,
+        /// saves world data, and removes every chunk from memory in a single pass.
         /// </summary>
-        public void Update()
+        private IEnumerator TransitionToLoadingPass()
         {
-            if (!_isInitialized) return;
-
-            // ── Phase timer ──
-            _phaseTimer += Time.deltaTime;
-            if (_phaseTimer >= TIME_PER_PHASE)
-            {
-                _phaseTimer = 0f;
-                _currentPhase++;
-
-                if (_currentPhase >= s_phaseSpeeds.Length)
-                {
-                    EndBenchmark();
-                    return;
-                }
-
-                // Switch to loading pass when entering the loading phase range
-                if (_currentPhase >= GENERATION_PHASE_COUNT && !_inLoadingPass)
-                {
-                    SwitchToLoadingPass();
-                }
-
-                string passLabel = _inLoadingPass ? "Loading Pass" : "Generation Pass";
-                Debug.Log($"[Benchmark] Entering Phase {_currentPhase}: " +
-                          $"{s_phaseSpeeds[_currentPhase]}m/s ({passLabel})");
-            }
-
-            MoveTowardWaypoint();
+            Debug.Log("[Benchmark] === Transition: Force-unloading all chunks... ===");
+            yield return World.Instance.ForceUnloadAllChunks();
+            Debug.Log("[Benchmark] === Transition Complete ===");
         }
 
-        // ── Pass Switching ───────────────────────────────────────────────
-
         /// <summary>
-        /// Transitions from the generation pass to the loading pass.
-        /// Resets the waypoint index and teleports the player to the first loading waypoint.
+        /// Runs the loading pass: loops through loading waypoints for a fixed
+        /// duration per speed phase. Chunks are loaded from disk since memory
+        /// was cleared during the transition.
         /// </summary>
-        private void SwitchToLoadingPass()
+        private IEnumerator RunLoadingPass()
         {
-            _inLoadingPass = true;
-            _activeWaypointIndex = 0;
-
-            if (_loadingWaypoints.Count > 0)
+            if (_loadingWaypoints.Count < 2)
             {
-                transform.position = _loadingWaypoints[0];
-                _activeWaypointIndex = 1;
-
-                if (_loadingWaypoints.Count > 1)
-                    FaceWaypoint(_loadingWaypoints[1]);
+                Debug.LogWarning("[Benchmark] Insufficient loading waypoints. Skipping loading pass.");
+                yield break;
             }
 
-            Debug.Log("[Benchmark] === Switching to Loading Pass ===");
+            transform.position = _loadingWaypoints[0];
+            _activeWaypointIndex = 1;
+            FaceWaypoint(_loadingWaypoints[1]);
+
+            for (int i = 0; i < _loadingSpeeds.Length; i++)
+            {
+                float phaseTimer = 0f;
+
+                Debug.Log($"[Benchmark] Loading Pass — Phase {i}: {_loadingSpeeds[i]}m/s");
+
+                while (phaseTimer < TIME_PER_PHASE)
+                {
+                    phaseTimer += Time.deltaTime;
+                    StepTowardWaypoint(_loadingWaypoints, _loadingSpeeds[i], loop: true);
+                    yield return null;
+                }
+            }
+
+            Debug.Log("[Benchmark] === Loading Pass Complete ===");
         }
 
         // ── Movement ─────────────────────────────────────────────────────
 
         /// <summary>
-        /// Moves the player toward the current waypoint at the active phase speed.
-        /// Uses the generation or loading waypoint list based on the current pass.
-        /// Loops the active list's waypoints if exhausted before phases end.
+        /// Advances the player one frame toward the current waypoint in the given list.
         /// </summary>
-        private void MoveTowardWaypoint()
+        /// <param name="waypoints">The active waypoint list.</param>
+        /// <param name="speed">Movement speed in meters/second.</param>
+        /// <param name="loop">If true, loops back to the first waypoint when exhausted.
+        /// If false, stops advancing once all waypoints have been visited.</param>
+        private void StepTowardWaypoint(List<Vector3> waypoints, float speed, bool loop)
         {
-            List<Vector3> activeList = _inLoadingPass ? _loadingWaypoints : _generationWaypoints;
+            if (waypoints.Count == 0) return;
 
-            if (activeList.Count == 0)
+            if (_activeWaypointIndex >= waypoints.Count)
             {
-                EndBenchmark();
-                return;
-            }
-
-            // Loop waypoints when exhausted
-            if (_activeWaypointIndex >= activeList.Count)
-            {
+                if (!loop) return;
                 _activeWaypointIndex = 0;
-                Debug.Log($"[Benchmark] Looping {(_inLoadingPass ? "loading" : "generation")} waypoints.");
+                Debug.Log("[Benchmark] Looping loading waypoints.");
             }
 
-            Vector3 target = activeList[_activeWaypointIndex];
-            float speed = s_phaseSpeeds[_currentPhase];
+            Vector3 target = waypoints[_activeWaypointIndex];
             float step = speed * Time.deltaTime;
 
             Vector3 currentPos = transform.position;
@@ -211,10 +232,10 @@ namespace Benchmarks
                 _activeWaypointIndex++;
 
                 // Face next waypoint (with loop-aware index)
-                int nextIndex = _activeWaypointIndex < activeList.Count
+                int nextIndex = _activeWaypointIndex < waypoints.Count
                     ? _activeWaypointIndex
-                    : 0;
-                FaceWaypoint(activeList[nextIndex]);
+                    : (loop ? 0 : _activeWaypointIndex - 1);
+                FaceWaypoint(waypoints[nextIndex]);
             }
             else
             {
@@ -242,48 +263,150 @@ namespace Benchmarks
             }
         }
 
+        // ── Configuration Parsing ────────────────────────────────────────
+
+        /// <summary>
+        /// Parses a semicolon-separated string of speeds into a float array.
+        /// Falls back to the provided defaults if the string is empty or malformed.
+        /// </summary>
+        /// <param name="input">Semicolon-separated speed values (e.g., "10; 20; 50").</param>
+        /// <param name="fallback">Default speeds used when parsing fails.</param>
+        /// <param name="label">Label for log messages (e.g., "Generation").</param>
+        /// <returns>Parsed speed array, or the fallback on failure.</returns>
+        private static float[] ParseSpeedString(string input, float[] fallback, string label)
+        {
+            if (string.IsNullOrWhiteSpace(input))
+            {
+                Debug.LogWarning($"[Benchmark] {label} speeds string is empty. Using defaults.");
+                return fallback;
+            }
+
+            string[] parts = input.Split(';');
+            List<float> speeds = new List<float>(parts.Length);
+
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string trimmed = parts[i].Trim();
+                if (float.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out float speed) && speed > 0f)
+                {
+                    speeds.Add(speed);
+                }
+                else
+                {
+                    Debug.LogWarning($"[Benchmark] {label} speeds: ignoring invalid entry \"{trimmed}\" at index {i}.");
+                }
+            }
+
+            if (speeds.Count == 0)
+            {
+                Debug.LogWarning($"[Benchmark] {label} speeds: no valid entries parsed. Using defaults.");
+                return fallback;
+            }
+
+            return speeds.ToArray();
+        }
+
         // ── Waypoint Building ────────────────────────────────────────────
 
         /// <summary>
         /// Builds the complete waypoint sequences for both passes.
-        /// Row spacing and world-edge margins are derived from the current
-        /// <see cref="Settings.LoadDistance"/> to ensure chunk generation throughput
-        /// is optimal for the configured view distance.
+        /// The benchmark region is derived from <see cref="Settings.benchmarkRegionSize"/>,
+        /// auto-scaled upward if needed to sustain all generation speed phases, and
+        /// clamped to the actual world size. Row spacing and margins are derived from
+        /// the current <see cref="Settings.LoadDistance"/> to ensure chunk generation
+        /// throughput is optimal for the configured view distance.
         /// </summary>
-        private void BuildWaypoints()
+        /// <param name="settings">The active settings instance.</param>
+        private void BuildWaypoints(Settings settings)
         {
             _generationWaypoints.Clear();
             _loadingWaypoints.Clear();
 
-            Settings settings = SettingsManager.LoadSettings();
             int loadDistance = settings.LoadDistance;
 
             const int chunkWidth = VoxelData.ChunkWidth;
             const int worldChunks = VoxelData.WorldSizeInChunks;
 
-            // Margin from world edges: equal to load distance so edge chunks
+            int configuredRegion = Mathf.Min(settings.benchmarkRegionSize, worldChunks);
+
+            // Margin from region edges: equal to load distance so edge chunks
             // have their full neighborhood available for lighting and meshing.
             int marginChunks = loadDistance;
 
             // Row stride: 2× load distance ensures each row shift generates
             // a full band of previously unseen chunks with zero overlap.
             int rowStrideChunks = loadDistance * 2;
+            float rowStride = rowStrideChunks * chunkWidth;
+
+            // Auto-scale region if too small for the configured generation speeds
+            int minimumRegion = CalculateMinimumRegionChunks(_generationSpeeds, marginChunks, rowStride, chunkWidth);
+            int regionChunks = configuredRegion;
+
+            if (regionChunks < minimumRegion)
+            {
+                int scaledRegion = Mathf.Min(minimumRegion, worldChunks);
+                Debug.LogWarning($"[Benchmark] Configured region ({configuredRegion} chunks) is too small " +
+                                 $"for the generation speed phases. Auto-increasing to {scaledRegion} chunks " +
+                                 $"(minimum required: {minimumRegion}).");
+                regionChunks = scaledRegion;
+            }
+
+            // Center the benchmark region within the world
+            int regionStartChunk = (worldChunks - regionChunks) / 2;
 
             // World-space bounds (in blocks), inset by margin
-            float minEdge = marginChunks * chunkWidth;
-            float maxEdge = (worldChunks - marginChunks) * chunkWidth;
-            float rowStride = rowStrideChunks * chunkWidth;
+            float minEdge = (regionStartChunk + marginChunks) * chunkWidth;
+            float maxEdge = (regionStartChunk + regionChunks - marginChunks) * chunkWidth;
+
+            if (maxEdge <= minEdge)
+            {
+                Debug.LogError($"[Benchmark] Region too small for margin. " +
+                               $"RegionChunks={regionChunks}, Margin={marginChunks}. " +
+                               $"Increase benchmarkRegionSize or decrease viewDistance.");
+                return;
+            }
 
             BuildGenerationWaypoints(minEdge, maxEdge, rowStride);
             BuildLoadingWaypoints(minEdge, maxEdge);
 
             Debug.Log($"[Benchmark] Built {_generationWaypoints.Count + _loadingWaypoints.Count} waypoints " +
                       $"({_generationWaypoints.Count} generation, {_loadingWaypoints.Count} loading). " +
+                      $"Region={regionChunks} chunks{(regionChunks != configuredRegion ? $" (configured: {configuredRegion})" : "")}, " +
                       $"LoadDistance={loadDistance}, Margin={marginChunks}, RowStride={rowStrideChunks}");
         }
 
         /// <summary>
-        /// Generates zigzag sweep waypoints across the world.
+        /// Calculates the minimum benchmark region size (in chunks) needed to produce
+        /// enough zigzag waypoint distance to sustain all generation speed phases.
+        /// <para>The zigzag pattern produces <c>numRows × sweepWidth</c> total distance.
+        /// Each speed phase consumes <c>speed × TIME_PER_PHASE</c> distance. The region
+        /// must be large enough that the total waypoint distance exceeds the sum of all
+        /// phase distances.</para>
+        /// </summary>
+        /// <param name="generationSpeeds">The generation speed phases.</param>
+        /// <param name="marginChunks">Edge margin in chunks (equal to load distance).</param>
+        /// <param name="rowStride">Distance between zigzag rows in blocks.</param>
+        /// <param name="chunkWidth">Width of a single chunk in blocks.</param>
+        /// <returns>The minimum region size in chunks, including margins.</returns>
+        private static int CalculateMinimumRegionChunks(float[] generationSpeeds, int marginChunks, float rowStride, int chunkWidth)
+        {
+            float totalTravelDistance = 0f;
+            foreach (float generationSpeed in generationSpeeds)
+            {
+                totalTravelDistance += generationSpeed * TIME_PER_PHASE;
+            }
+
+            // Zigzag distance ≈ sweepWidth² / rowStride (for large regions).
+            // Solve: sweepWidth² / rowStride >= totalTravelDistance
+            // sweepWidth >= sqrt(totalTravelDistance * rowStride)
+            float minSweepWidth = Mathf.Sqrt(totalTravelDistance * rowStride);
+            int minUsableChunks = Mathf.CeilToInt(minSweepWidth / chunkWidth);
+
+            return minUsableChunks + 2 * marginChunks;
+        }
+
+        /// <summary>
+        /// Generates zigzag sweep waypoints across the benchmark region.
         /// Each row alternates direction (left→right, right→left) to minimize
         /// dead travel and maximize unique chunk generation.
         /// <code>
@@ -373,8 +496,6 @@ namespace Benchmarks
         /// </summary>
         private void EndBenchmark()
         {
-            _isInitialized = false;
-
             Debug.Log("[Benchmark] Benchmark Complete. Saving world data...");
 
             // Save world data so region files and level.dat are fully persisted

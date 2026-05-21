@@ -246,6 +246,54 @@ public class Settings
 
     #endregion
 
+    #region Benchmark Tab
+
+    // ═══════════════════════════════════════════════════════════════════
+    // BENCHMARK TAB
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The side length (in chunks) of the square region the benchmark sweeps.
+    /// Waypoints are generated within this region centered on the world origin,
+    /// independent of the actual <see cref="VoxelData.WorldSizeInChunks"/>.
+    /// </summary>
+    [Header("Benchmark Region")]
+    [SettingField(SettingsTab.Benchmark, Label = "Region Size (chunks)", Format = "f0", Order = 0)]
+    [Range(16, 512)]
+    [Tooltip("The side length (in chunks) of the square area the benchmark sweeps.\n" +
+             "Larger regions produce longer runs but cover more of the world.\n\n" +
+             TooltipTags.Performance + "Very large regions (256+) may produce extremely long benchmark runs.\n" +
+             TooltipTags.DefaultColorStart + "64" + TooltipTags.DefaultColorEnd)]
+    public int benchmarkRegionSize = 64;
+
+    /// <summary>
+    /// Semicolon-separated movement speeds (m/s) for the generation pass.
+    /// Each entry becomes a speed phase lasting <c>TIME_PER_PHASE</c> seconds.
+    /// The final speed is held until all waypoints are visited.
+    /// Parsed at benchmark initialization time.
+    /// </summary>
+    [Header("Speed Phases (m/s)")]
+    [SettingField(SettingsTab.Benchmark, Label = "Gen", Order = 1)]
+    [Tooltip("Semicolon-separated list of movement speeds for the generation pass.\n" +
+             "Each value becomes a timed speed phase. The last speed is held until all waypoints are visited.\n\n" +
+             TooltipTags.Note + "More phases or higher speeds require a larger Region Size.\n" +
+             TooltipTags.DefaultColorStart + "10; 20; 50; 100; 200" + TooltipTags.DefaultColorEnd)]
+    public string benchmarkGenerationSpeeds = "10; 20; 50; 100; 200";
+
+    /// <summary>
+    /// Semicolon-separated movement speeds (m/s) for the loading pass.
+    /// Each entry becomes a speed phase lasting <c>TIME_PER_PHASE</c> seconds.
+    /// Loading waypoints loop if exhausted before phases end.
+    /// Parsed at benchmark initialization time.
+    /// </summary>
+    [SettingField(SettingsTab.Benchmark, Label = "Load", Order = 2)]
+    [Tooltip("Semicolon-separated list of movement speeds for the loading (deserialization) pass.\n" +
+             "Each value becomes a timed speed phase. Waypoints loop if exhausted before phases end.\n\n" +
+             TooltipTags.DefaultColorStart + "50; 100; 200" + TooltipTags.DefaultColorEnd)]
+    public string benchmarkLoadingSpeeds = "50; 100; 200";
+
+    #endregion
+
     #region Dev Tab (Settings class portion)
 
     // ═══════════════════════════════════════════════════════════════════
@@ -363,13 +411,15 @@ public static class SettingsManager
     /// <returns>The singleton Settings object.</returns>
     public static Settings LoadSettings()
     {
-        // Bypass disk loading and return fresh defaults for Benchmark mode
+        // Benchmark mode: use deterministic defaults for gameplay settings,
+        // but overlay user-configured benchmark-specific fields from disk.
         if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark)
         {
             if (s_cachedSettings != null)
                 return s_cachedSettings;
 
             s_cachedSettings = new Settings();
+            OverlayBenchmarkSettingsFromDisk(s_cachedSettings);
             return s_cachedSettings;
         }
 
@@ -512,5 +562,32 @@ public static class SettingsManager
         }
 
         return json;
+    }
+
+    /// <summary>
+    /// Reads the saved settings file (if it exists) and overlays benchmark-specific
+    /// fields onto the provided defaults. This allows benchmark mode to use
+    /// deterministic gameplay settings while still honoring user-configured
+    /// benchmark parameters (e.g., region size).
+    /// </summary>
+    /// <param name="defaults">The fresh defaults to overlay onto.</param>
+    private static void OverlayBenchmarkSettingsFromDisk(Settings defaults)
+    {
+        if (!File.Exists(s_settingsFilePath)) return;
+
+        try
+        {
+            string json = File.ReadAllText(s_settingsFilePath);
+            Settings saved = JsonUtility.FromJson<Settings>(json);
+            if (saved == null) return;
+
+            defaults.benchmarkRegionSize = saved.benchmarkRegionSize;
+            defaults.benchmarkGenerationSpeeds = saved.benchmarkGenerationSpeeds;
+            defaults.benchmarkLoadingSpeeds = saved.benchmarkLoadingSpeeds;
+        }
+        catch (Exception)
+        {
+            // Overlay failed — keep defaults
+        }
     }
 }

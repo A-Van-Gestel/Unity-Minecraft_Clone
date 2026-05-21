@@ -13,6 +13,7 @@ namespace UI.Enums
         Graphics,
         World,
         Performance,
+        Benchmark,
         Dev,
     }
 }

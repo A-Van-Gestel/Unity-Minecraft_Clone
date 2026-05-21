@@ -56,6 +56,7 @@ namespace UI
             SettingsTab.Graphics,
             SettingsTab.World,
             SettingsTab.Performance,
+            SettingsTab.Benchmark,
             SettingsTab.Dev,
         };
 
@@ -832,8 +833,8 @@ namespace UI
             {
                 if (Array.IndexOf(s_tabOrder, tab) == -1)
                 {
-                    Debug.LogError($"[SettingsUIGenerator] SettingsTab.{tab} is missing from TAB_ORDER! " +
-                                   "Add it to the TAB_ORDER array in SettingsUIGenerator.");
+                    Debug.LogError($"[SettingsUIGenerator] SettingsTab.{tab} is missing from s_tabOrder! " +
+                                   "Add it to the 's_tabOrder' array in SettingsUIGenerator.");
                 }
             }
         }

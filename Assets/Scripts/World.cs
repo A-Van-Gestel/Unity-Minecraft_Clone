@@ -1875,20 +1875,8 @@ public class World : MonoBehaviour
             {
                 if (globalCols != null && globalCols.Count > 0)
                 {
-                    // Convert to Local Coordinates (0-15) for storage
-                    HashSet<Vector2Int> localCols = HashSetPool<Vector2Int>.Get(); // POOLING
-                    foreach (Vector2Int gCol in globalCols)
-                    {
-                        localCols.Add(new Vector2Int(gCol.x - chunkVoxelPos.x, gCol.y - chunkVoxelPos.y));
-                    }
-
-                    // Save to Persistence
-                    LightingStateManager.AddPending(chunkCoord, localCols);
-
-                    Debug.Log($"[LIGHTING RESCUE] Saved {localCols.Count.ToString()} orphaned sunlight columns for chunk {chunkCoord.ToString()}");
-
-                    // Release temp set (AddPending makes its own copy)
-                    HashSetPool<Vector2Int>.Release(localCols);
+                    PersistOrphanedSunlightColumns(chunkVoxelPos, globalCols);
+                    Debug.Log($"[LIGHTING RESCUE] Saved {globalCols.Count.ToString()} orphaned sunlight columns for chunk {chunkCoord.ToString()}");
                 }
 
                 worldData.SunlightRecalculationQueue.Remove(chunkVoxelPos);
@@ -1945,6 +1933,27 @@ public class World : MonoBehaviour
 
         // 5. Return temp pools back to pool list
         ListPool<ChunkCoord>.Release(chunksToRemove); // Free the ListPool
+    }
+
+    /// <summary>
+    /// Converts global-coordinate sunlight columns to chunk-local coordinates and
+    /// persists them to <see cref="LightingStateManager"/> so they can be restored
+    /// when the chunk is reloaded. Uses a pooled temporary set for the conversion.
+    /// </summary>
+    /// <param name="chunkVoxelPos">The chunk's voxel-space world origin.</param>
+    /// <param name="globalCols">The global-coordinate columns to persist.</param>
+    private void PersistOrphanedSunlightColumns(Vector2Int chunkVoxelPos, HashSet<Vector2Int> globalCols)
+    {
+        ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkVoxelPos);
+
+        HashSet<Vector2Int> localCols = HashSetPool<Vector2Int>.Get();
+        foreach (Vector2Int gCol in globalCols)
+        {
+            localCols.Add(new Vector2Int(gCol.x - chunkVoxelPos.x, gCol.y - chunkVoxelPos.y));
+        }
+
+        LightingStateManager.AddPending(chunkCoord, localCols);
+        HashSetPool<Vector2Int>.Release(localCols);
     }
 
     /// <summary>
@@ -3008,6 +3017,82 @@ public class World : MonoBehaviour
 
         SaveSystem.SaveWorld(Instance);
         Debug.Log("[Manual Save] World data saved successfully.");
+    }
+
+    /// <summary>
+    /// Coroutine that forcibly unloads every chunk currently in memory.
+    /// <list type="number">
+    /// <item>Waits for all active generation, lighting, and meshing jobs to complete.</item>
+    /// <item>Saves all modified chunks synchronously to disk.</item>
+    /// <item>Persists orphaned sunlight recalculation queues to <see cref="LightingStateManager"/>.</item>
+    /// <item>Returns all visual <see cref="Chunk"/> objects and <see cref="ChunkData"/> instances to their pools.</item>
+    /// <item>Clears all tracking collections (mesh queue, borders, lighting dirty-set).</item>
+    /// </list>
+    /// <para>After this coroutine completes, <c>worldData.Chunks.Count == 0</c> and the world
+    /// is ready for a fresh loading pass that exercises the deserialization pipeline.</para>
+    /// </summary>
+    public IEnumerator ForceUnloadAllChunks()
+    {
+        // 1. Wait for all active jobs to drain
+        while (JobManager.GenerationJobs.Count > 0 ||
+               JobManager.MeshJobs.Count > 0 ||
+               JobManager.LightingJobs.Count > 0)
+        {
+            yield return null;
+        }
+
+        // 2. Save all modified chunks synchronously
+        SaveAllModifiedChunks(true);
+        SaveSystem.SaveWorld(Instance);
+
+        // 3. Persist orphaned sunlight recalculation queues
+        foreach (KeyValuePair<Vector2Int, HashSet<Vector2Int>> kvp in worldData.SunlightRecalculationQueue)
+        {
+            if (kvp.Value == null || kvp.Value.Count == 0) continue;
+            PersistOrphanedSunlightColumns(kvp.Key, kvp.Value);
+            HashSetPool<Vector2Int>.Release(kvp.Value);
+        }
+
+        worldData.SunlightRecalculationQueue.Clear();
+
+        // 4. Return all visual chunks to pool and clear borders
+        foreach (KeyValuePair<ChunkCoord, Chunk> kvp in _chunkMap)
+        {
+            if (_chunkBorders.TryGetValue(kvp.Key, out GameObject border))
+            {
+                ChunkPool.ReturnBorder(border);
+            }
+
+            if (voxelVisualizer != null)
+                voxelVisualizer.ClearChunkVisualization(kvp.Key);
+
+            ChunkPool.Return(kvp.Value);
+        }
+
+        _chunkMap.Clear();
+        _chunkBorders.Clear();
+
+        // 5. Clear mesh build queue
+        _chunksToBuildMesh.Clear();
+        _chunksToBuildMeshSet.Clear();
+
+        // 6. Return all ChunkData to pool and clear world data
+        foreach (ChunkData data in worldData.Chunks.Values)
+        {
+            ChunkPool.ReturnChunkData(data);
+        }
+
+        worldData.Chunks.Clear();
+        worldData.ModifiedChunks.Clear();
+
+        // 7. Clear lighting dirty-set and active chunk tracking
+        _chunksNeedingLightWork.Clear();
+        _activeChunks.Clear();
+
+        // 8. Invalidate player chunk coord so CheckViewDistance re-evaluates fully
+        _playerLastChunkCoord = new ChunkCoord(int.MinValue, int.MinValue);
+
+        Debug.Log("[World] ForceUnloadAllChunks complete. All chunks removed from memory.");
     }
 
     /// <summary>
