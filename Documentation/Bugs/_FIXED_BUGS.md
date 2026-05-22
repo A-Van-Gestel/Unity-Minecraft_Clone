@@ -616,3 +616,49 @@ Furthermore, applying animations from the pool caused a 1-frame visual flash, an
 
 ---
 
+## User Interface
+
+### ~~02. Shortcut Info Panel~~
+
+**Severity:** Feature  
+**Files:** `HelpMenuController.cs`, `PauseMenuController.cs`  
+**Fixed:** May 2026
+
+**Symptom:** Users did not know about keyboard shortcuts (F3 Debug Screen, F6 Noclip, etc.).  
+**Fix:** Implemented a Help menu accessible from the pause screen that displays all available keyboard shortcuts and controls.
+
+---
+
+### ~~03. Block Name Visibility~~
+
+**Severity:** Feature  
+**Files:** `BlockTooltipBuilder.cs`, `UIItemSlot.cs`, `Settings.cs`  
+**Fixed:** May 2026
+
+**Symptom:** No block name displayed when hovering over items in the hotbar or inventory.  
+**Fix:** Implemented a configurable tooltip system with three detail levels (Name Only, Standard, Technical) controlled by `Settings.itemTooltipDetail`. Tooltips appear on hover via `TooltipTrigger` and `TooltipPanel`.
+
+---
+
+### ~~04. Settings Page Overhaul~~
+
+**Severity:** Feature  
+**Files:** `SettingsUIGenerator.cs`, `SettingFieldAttribute.cs`, `SettingsMenuController.cs`, `SettingsUIPrefabLibrary.cs`  
+**Fixed:** May 2026
+
+**Symptom:** Settings page was minimal with no tabs or advanced configuration.  
+**Fix:** Built a reflection-based auto-generated Settings UI. Fields annotated with `[SettingField(tab)]` are automatically discovered, sorted, and rendered as the appropriate control type (Toggle, Slider, Dropdown, InputField, Button). Supports 7 tabs (General, Controls, Graphics, World, Performance, Benchmark, Dev), `[Header]` sections, tooltips, `DebugOnly` visibility gating, and `[InitializationField]` locking during gameplay.
+
+---
+
+### ~~06. In-game Pause Screen~~
+
+**Severity:** Feature  
+**Files:** `PauseMenuController.cs`, `WorldUIManager.cs`  
+**Fixed:** May 2026
+
+**Symptom:** No way to pause, access settings, or quit to main menu during gameplay.  
+**Fix:** Implemented `PauseMenuController` with Resume, Settings (in-game mode with locked initialization fields), Help, Save & Quit to Main Menu, and Save & Quit to Desktop options. Settings menu reuse is handled via `SettingsMenuController.IsInGame` flag.
+
+---
+
