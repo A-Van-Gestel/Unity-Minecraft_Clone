@@ -35,9 +35,6 @@ public static class SaveSystem
     /// <param name="worldName">The identifier name of the world.</param>
     /// <param name="useVolatilePath">If true, returns a temporary editor-only path instead of the persistent user path.</param>
     /// <returns>The absolute physical folder path.</returns>
-    /// <remarks>
-    /// TODO: The `useVolatilePath` could probably be replaced with a new `RuntimeMode.Volatile` runtime mode with a dedicated switch arm.
-    /// </remarks>
     public static string GetSavePath(string worldName, bool useVolatilePath)
     {
         string baseFolder = WorldLaunchState.CurrentMode switch
