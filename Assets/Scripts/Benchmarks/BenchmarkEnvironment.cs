@@ -1,7 +1,10 @@
 using System;
+using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using Unity.Burst;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 #if UNITY_EDITOR
 using System.Diagnostics;
 #endif
@@ -62,6 +65,64 @@ namespace Benchmarks
             sb.AppendLine();
 
             return sb.ToString();
+        }
+
+        // ----- Shared Report Utilities -----
+
+        private static readonly Regex s_richTextTagPattern = new Regex(
+            @"</?(color|b|i|size|u)(=[^>]*)?>",
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Strips Unity rich-text tags (<c>&lt;color&gt;</c>, <c>&lt;b&gt;</c>, <c>&lt;i&gt;</c>, etc.)
+        /// so the string reads cleanly in a plain-text editor.
+        /// </summary>
+        /// <param name="richText">The rich-text input string.</param>
+        /// <returns>The input with all recognized rich-text tags removed.</returns>
+        public static string StripRichTextTags(string richText) =>
+            s_richTextTagPattern.Replace(richText, string.Empty);
+
+        /// <summary>
+        /// Formats a <see cref="TimeSpan"/> as a compact human-readable string.
+        /// Examples: <c>"42.3 s"</c>, <c>"7m 12s"</c>, <c>"1h 4m 32s"</c>.
+        /// </summary>
+        /// <param name="ts">The duration to format.</param>
+        /// <returns>A compact duration string.</returns>
+        public static string FormatDuration(TimeSpan ts)
+        {
+            if (ts.TotalSeconds < 60)
+                return $"{ts.TotalSeconds:F1} s";
+            if (ts.TotalHours < 1)
+                return $"{(int)ts.TotalMinutes}m {ts.Seconds}s";
+            return $"{(int)ts.TotalHours}h {ts.Minutes}m {ts.Seconds}s";
+        }
+
+        /// <summary>
+        /// Strips rich-text tags from a report string and writes the plain-text version to a
+        /// timestamped file under <c>Application.persistentDataPath/Benchmarks/</c>.
+        /// </summary>
+        /// <param name="richTextReport">The full report with rich-text tags.</param>
+        /// <param name="filenamePrefix">Prefix for the output file (e.g., "BenchmarkRun" or "MeshGenerationBenchmark").</param>
+        public static void WriteReportToDisk(string richTextReport, string filenamePrefix)
+        {
+            try
+            {
+                string folder = Path.Combine(Application.persistentDataPath, "Benchmarks");
+                Directory.CreateDirectory(folder);
+
+                string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                string fileName = $"{filenamePrefix}_{timestamp}.log";
+                string fullPath = Path.Combine(folder, fileName);
+
+                string plainText = StripRichTextTags(richTextReport);
+                File.WriteAllText(fullPath, plainText);
+
+                Debug.Log($"<color=cyan>[Benchmark] Report written to:</color> {fullPath}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Benchmark] Failed to write report to disk: {e.Message}");
+            }
         }
 
         // ----- Helpers -----

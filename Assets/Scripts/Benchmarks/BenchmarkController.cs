@@ -1,10 +1,12 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using Data;
 using Data.Enums;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Debug = UnityEngine.Debug;
 
 namespace Benchmarks
 {
@@ -46,6 +48,19 @@ namespace Benchmarks
         /// </summary>
         private const float TIME_PER_PHASE = 30f;
 
+        /// <summary>
+        /// Number of frames to wait after the chunk pipeline drains before starting
+        /// a measured phase. Allows <see cref="PerformanceMonitor"/>'s moving averages
+        /// (30–60 frame windows) to flush any spike data from the preceding teleport.
+        /// </summary>
+        private const int SETTLE_FRAMES = 60;
+
+        // ── Phase Group Names ────────────────────────────────────────────
+
+        private const string GROUP_GENERATION = "Generation Pass";
+        private const string GROUP_TRANSITION = "Transition";
+        private const string GROUP_LOADING = "Loading Pass";
+
         // ── Fallback Phase Configuration ─────────────────────────────────
 
         private static readonly float[] s_defaultGenerationSpeeds = { 10f, 20f, 50f, 100f, 200f };
@@ -59,6 +74,9 @@ namespace Benchmarks
         private float[] _loadingSpeeds;
         private int _activeWaypointIndex;
         private Transform _playerCamera;
+        private BenchmarkMetricsCollector _metricsCollector;
+        private int _regionChunks;
+        private int _configuredRegionChunks;
 
         // ── Lifecycle ────────────────────────────────────────────────────
 
@@ -97,6 +115,13 @@ namespace Benchmarks
                 yield break;
             }
 
+            Debug.Log("[Benchmark] Waiting for initial chunk pipeline to settle...");
+            yield return WaitForChunkPipelineToSettle();
+
+            _metricsCollector = new BenchmarkMetricsCollector(_generationSpeeds.Length + _loadingSpeeds.Length + 1);
+            _metricsCollector.StartRecording();
+            Stopwatch totalStopwatch = Stopwatch.StartNew();
+
             Debug.Log($"[Benchmark] Started profiling run. " +
                       $"{_generationWaypoints.Count} generation waypoints, " +
                       $"{_loadingWaypoints.Count} loading waypoints. " +
@@ -112,7 +137,26 @@ namespace Benchmarks
             // === Pass 2: Loading ===
             yield return RunLoadingPass();
 
+            totalStopwatch.Stop();
+            _metricsCollector.StopRecording();
+
+            BenchmarkReportGenerator.GenerateAndWriteReport(
+                _metricsCollector,
+                _generationSpeeds,
+                _loadingSpeeds,
+                TIME_PER_PHASE,
+                _regionChunks,
+                _configuredRegionChunks,
+                _generationWaypoints.Count,
+                _loadingWaypoints.Count,
+                totalStopwatch.Elapsed);
+
             EndBenchmark();
+        }
+
+        private void OnDestroy()
+        {
+            _metricsCollector?.StopRecording();
         }
 
         // ── Pass Execution ───────────────────────────────────────────────
@@ -129,9 +173,12 @@ namespace Benchmarks
             _activeWaypointIndex = 1;
             FaceWaypoint(_generationWaypoints[1]);
 
+            yield return WaitForChunkPipelineToSettle();
+
             int speedIndex = 0;
             float phaseTimer = 0f;
 
+            _metricsCollector.BeginPhase($"{_generationSpeeds[0]} m/s", GROUP_GENERATION);
             Debug.Log($"[Benchmark] Generation Pass — Phase 0: {_generationSpeeds[0]}m/s");
 
             while (_activeWaypointIndex < _generationWaypoints.Count)
@@ -141,6 +188,7 @@ namespace Benchmarks
                 {
                     phaseTimer = 0f;
                     speedIndex++;
+                    _metricsCollector.BeginPhase($"{_generationSpeeds[speedIndex]} m/s", GROUP_GENERATION);
                     Debug.Log($"[Benchmark] Generation Pass — Phase {speedIndex}: " +
                               $"{_generationSpeeds[speedIndex]}m/s");
                 }
@@ -149,6 +197,7 @@ namespace Benchmarks
                 yield return null;
             }
 
+            _metricsCollector.EndPhase();
             Debug.Log("[Benchmark] === Generation Pass Complete ===");
         }
 
@@ -159,8 +208,10 @@ namespace Benchmarks
         /// </summary>
         private IEnumerator TransitionToLoadingPass()
         {
+            _metricsCollector.BeginPhase("Drain + Save + Unload", GROUP_TRANSITION);
             Debug.Log("[Benchmark] === Transition: Force-unloading all chunks... ===");
             yield return World.Instance.ForceUnloadAllChunks();
+            _metricsCollector.EndPhase();
             Debug.Log("[Benchmark] === Transition Complete ===");
         }
 
@@ -181,10 +232,13 @@ namespace Benchmarks
             _activeWaypointIndex = 1;
             FaceWaypoint(_loadingWaypoints[1]);
 
+            yield return WaitForChunkPipelineToSettle();
+
             for (int i = 0; i < _loadingSpeeds.Length; i++)
             {
                 float phaseTimer = 0f;
 
+                _metricsCollector.BeginPhase($"{_loadingSpeeds[i]} m/s", GROUP_LOADING);
                 Debug.Log($"[Benchmark] Loading Pass — Phase {i}: {_loadingSpeeds[i]}m/s");
 
                 while (phaseTimer < TIME_PER_PHASE)
@@ -193,9 +247,31 @@ namespace Benchmarks
                     StepTowardWaypoint(_loadingWaypoints, _loadingSpeeds[i], loop: true);
                     yield return null;
                 }
+
+                _metricsCollector.EndPhase();
             }
 
             Debug.Log("[Benchmark] === Loading Pass Complete ===");
+        }
+
+        // ── Pipeline Settling ────────────────────────────────────────────
+
+        /// <summary>
+        /// Waits for all active generation, lighting, and meshing jobs to complete.
+        /// Called after teleporting to a new waypoint origin so the load-radius burst
+        /// from the teleport is excluded from the timed measurement phases.
+        /// </summary>
+        private static IEnumerator WaitForChunkPipelineToSettle()
+        {
+            while (World.Instance.JobManager.HasActiveJobs)
+            {
+                yield return null;
+            }
+
+            // Wait additional frames for PerformanceMonitor's moving averages (30–60 frame
+            // windows) to naturally flush any spike data from the teleport/job burst.
+            for (int i = 0; i < SETTLE_FRAMES; i++)
+                yield return null;
         }
 
         // ── Movement ─────────────────────────────────────────────────────
@@ -327,7 +403,8 @@ namespace Benchmarks
             const int chunkWidth = VoxelData.ChunkWidth;
             const int worldChunks = VoxelData.WorldSizeInChunks;
 
-            int configuredRegion = Mathf.Min(settings.benchmarkRegionSize, worldChunks);
+            _configuredRegionChunks = Mathf.Min(settings.benchmarkRegionSize, worldChunks);
+            int configuredRegion = _configuredRegionChunks;
 
             // Margin from region edges: equal to load distance so edge chunks
             // have their full neighborhood available for lighting and meshing.
@@ -350,6 +427,8 @@ namespace Benchmarks
                                  $"(minimum required: {minimumRegion}).");
                 regionChunks = scaledRegion;
             }
+
+            _regionChunks = regionChunks;
 
             // Center the benchmark region within the world
             int regionStartChunk = (worldChunks - regionChunks) / 2;
@@ -496,6 +575,8 @@ namespace Benchmarks
         /// </summary>
         private void EndBenchmark()
         {
+            _metricsCollector?.StopRecording();
+
             Debug.Log("[Benchmark] Benchmark Complete. Saving world data...");
 
             // Save world data so region files and level.dat are fully persisted

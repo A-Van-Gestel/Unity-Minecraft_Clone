@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
-using System.Text.RegularExpressions;
 using Benchmarks;
 using Libraries;
 using Unity.Burst;
@@ -850,41 +849,8 @@ namespace Editor.Validation
 
                 string fullReport = sb.ToString();
                 Debug.Log(fullReport);
-                WriteReportToDisk(fullReport);
+                BenchmarkEnvironment.WriteReportToDisk(fullReport, "FastNoiseLiteBenchmark");
             }
-
-            /// <summary>
-            /// Strips Unity rich-text tags and writes the report to a timestamped file under
-            /// <c>Application.persistentDataPath/Benchmarks/</c>. The full path is logged to the console.
-            /// </summary>
-            private static void WriteReportToDisk(string richTextReport)
-            {
-                try
-                {
-                    string folder = Path.Combine(Application.persistentDataPath, "Benchmarks");
-                    Directory.CreateDirectory(folder);
-
-                    string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                    string fileName = $"FastNoiseLiteBenchmark_{timestamp}.log";
-                    string fullPath = Path.Combine(folder, fileName);
-
-                    string plainText = StripRichTextTags(richTextReport);
-                    File.WriteAllText(fullPath, plainText);
-
-                    Debug.Log($"<color=cyan>Report written to:</color> {fullPath}");
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"Failed to write FastNoiseLite report to disk: {e.Message}");
-                }
-            }
-
-            private static readonly Regex s_richTextTagPattern = new Regex(
-                @"</?(color|b|i|size|u)(=[^>]*)?>",
-                RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-            private static string StripRichTextTags(string input) =>
-                s_richTextTagPattern.Replace(input, string.Empty);
 
             // ===== Assertion Helpers =====
 

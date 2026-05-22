@@ -30,6 +30,11 @@ public class WorldJobManager : IDisposable
     public Dictionary<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> MeshJobs { get; } = new Dictionary<ChunkCoord, (JobHandle, MeshDataJobOutput)>();
     public Dictionary<ChunkCoord, LightingJobData> LightingJobs { get; } = new Dictionary<ChunkCoord, LightingJobData>();
 
+    /// <summary>
+    /// True if any generation, meshing, or lighting jobs are currently active.
+    /// </summary>
+    public bool HasActiveJobs => GenerationJobs.Count > 0 || MeshJobs.Count > 0 || LightingJobs.Count > 0;
+
     #endregion
 
     // --- Cached Collections for GC Optimization ---

@@ -3034,9 +3034,7 @@ public class World : MonoBehaviour
     public IEnumerator ForceUnloadAllChunks()
     {
         // 1. Wait for all active jobs to drain
-        while (JobManager.GenerationJobs.Count > 0 ||
-               JobManager.MeshJobs.Count > 0 ||
-               JobManager.LightingJobs.Count > 0)
+        while (JobManager.HasActiveJobs)
         {
             yield return null;
         }
