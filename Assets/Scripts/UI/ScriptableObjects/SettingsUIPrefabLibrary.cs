@@ -26,6 +26,7 @@ namespace UI.ScriptableObjects
         public ControlEntry sliderPrefab;
         public ControlEntry dropdownPrefab;
         public ControlEntry inputFieldPrefab;
+        public ControlEntry buttonPrefab;
 
         /// <summary>
         /// Pairs a UI prefab with its LayoutElement configuration.

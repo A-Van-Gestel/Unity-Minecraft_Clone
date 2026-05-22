@@ -1,4 +1,7 @@
 using System.Collections;
+using JetBrains.Annotations;
+using UI.Attributes;
+using UI.Enums;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -160,11 +163,14 @@ namespace UI
         }
 
         /// <summary>
-        /// Clears all benchmark saves from disk. Can be hooked up to a UI Button.
+        /// Clears all benchmark saves from disk.
         /// </summary>
-        /// <remarks
-        /// TODO: Implement into settings UI.
-        /// </remarks>
+        [UsedImplicitly]
+        [SettingAction(SettingsTab.Benchmark, Label = "Clear All Benchmark Saves", Order = 100,
+            Header = "Actions",
+            Tooltip = "Deletes all benchmark world saves from disk.\n" +
+                      "This only removes the generated world data used during benchmark runs — " +
+                      "performance report logs are not affected.")]
         public void ClearAllBenchmarks()
         {
             SaveSystem.ClearAllBenchmarks();

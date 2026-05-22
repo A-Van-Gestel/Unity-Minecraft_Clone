@@ -39,3 +39,8 @@ MonoBehaviour:
     preferredHeight: 50
     flexibleWidth: 1
     flexibleHeight: 0
+  buttonPrefab:
+    prefab: {fileID: 1817907604769527979, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
+    preferredHeight: 50
+    flexibleWidth: 1
+    flexibleHeight: 0

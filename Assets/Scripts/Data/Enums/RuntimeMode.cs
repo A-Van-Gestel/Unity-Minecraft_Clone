@@ -13,6 +13,6 @@ namespace Data.Enums
         /// <summary>
         /// Automated profiling mode with isolated saves and programmatic player movement.
         /// </summary>
-        Benchmark
+        Benchmark,
     }
 }

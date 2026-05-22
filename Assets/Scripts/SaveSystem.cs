@@ -43,7 +43,7 @@ public static class SaveSystem
         string baseFolder = WorldLaunchState.CurrentMode switch
         {
             RuntimeMode.Benchmark => Path.Combine(Application.persistentDataPath, "Benchmark_Saves"),
-            _ => useVolatilePath ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves") : Path.Combine(Application.persistentDataPath, "Saves")
+            _ => useVolatilePath ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves") : Path.Combine(Application.persistentDataPath, "Saves"),
         };
 
         return Path.Combine(baseFolder, worldName);

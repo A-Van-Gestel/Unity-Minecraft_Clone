@@ -41,6 +41,11 @@ namespace UI
         [SerializeField]
         private Transform _tabContentParent;
 
+        [Header("Action Target")]
+        [Tooltip("The controller whose [SettingAction] methods are scanned for action buttons.")]
+        [SerializeField]
+        private SettingsMenuController _controller;
+
         #endregion
 
         #region Tab Order
@@ -139,6 +144,34 @@ namespace UI
             public int DeclarationIndex;
         }
 
+        /// <summary>
+        /// Intermediate data for a <see cref="SettingActionAttribute"/>-annotated method.
+        /// </summary>
+        private struct ActionEntry
+        {
+            public MethodInfo Method;
+            public SettingActionAttribute Attribute;
+            public object Target;
+            public int DeclarationIndex;
+        }
+
+        /// <summary>
+        /// Discriminated union for sorting fields and actions together within a tab.
+        /// </summary>
+        private enum TabItemKind
+        {
+            Field,
+            Action,
+        }
+
+        private struct TabItem
+        {
+            public TabItemKind Kind;
+            public int Index;
+            public int Order;
+            public int DeclarationIndex;
+        }
+
         #endregion
 
         #region Public API
@@ -172,23 +205,62 @@ namespace UI
                 return;
             }
 
+            if (_controller == null)
+            {
+                Debug.LogWarning("[SettingsUIGenerator] _controller (SettingsMenuController) is not assigned! " +
+                                 "[SettingAction] buttons will not be generated.");
+            }
+
             ValidateTabOrder();
 
             _settings = SettingsManager.LoadSettings();
 
-            // Collect all annotated fields from Settings and DevSettings
-            var fieldsByTab = CollectFields();
+            // Collect all annotated fields and action methods
+            int declarationIndex = 0;
+            var fieldsByTab = CollectFields(ref declarationIndex);
+            var actionsByTab = CollectActions(ref declarationIndex);
 
             // Generate tabs and controls
             foreach (SettingsTab tab in s_tabOrder)
             {
-                if (!fieldsByTab.TryGetValue(tab, out List<FieldEntry> fields)) continue;
-                if (fields.Count == 0) continue;
+                fieldsByTab.TryGetValue(tab, out List<FieldEntry> fields);
+                actionsByTab.TryGetValue(tab, out List<ActionEntry> actions);
 
-                // Sort fields: by Order (ascending), then by declaration order for ties
-                fields.Sort((a, b) =>
+                int fieldCount = fields?.Count ?? 0;
+                int actionCount = actions?.Count ?? 0;
+                if (fieldCount + actionCount == 0) continue;
+
+                // Build unified sorted list of fields + actions
+                List<TabItem> items = new List<TabItem>(fieldCount + actionCount);
+                if (fields != null)
                 {
-                    int cmp = a.Attribute.Order.CompareTo(b.Attribute.Order);
+                    for (int i = 0; i < fields.Count; i++)
+                    {
+                        items.Add(new TabItem
+                        {
+                            Kind = TabItemKind.Field, Index = i,
+                            Order = fields[i].Attribute.Order,
+                            DeclarationIndex = fields[i].DeclarationIndex,
+                        });
+                    }
+                }
+
+                if (actions != null)
+                {
+                    for (int i = 0; i < actions.Count; i++)
+                    {
+                        items.Add(new TabItem
+                        {
+                            Kind = TabItemKind.Action, Index = i,
+                            Order = actions[i].Attribute.Order,
+                            DeclarationIndex = actions[i].DeclarationIndex,
+                        });
+                    }
+                }
+
+                items.Sort((a, b) =>
+                {
+                    int cmp = a.Order.CompareTo(b.Order);
                     return cmp != 0 ? cmp : a.DeclarationIndex.CompareTo(b.DeclarationIndex);
                 });
 
@@ -198,17 +270,32 @@ namespace UI
 
                 // Populate controls
                 Transform contentTransform = tabEntry.ContentPanel.transform;
-                foreach (FieldEntry entry in fields)
+                foreach (TabItem item in items)
                 {
-                    // Instantiate [Header] if present
-                    HeaderAttribute header = entry.Field.GetCustomAttribute<HeaderAttribute>();
-                    if (header != null)
+                    if (item.Kind == TabItemKind.Field)
                     {
-                        InstantiateHeader(header.header, contentTransform);
-                    }
+                        FieldEntry entry = fields[item.Index];
 
-                    // Instantiate and bind the control
-                    CreateAndBindControl(entry, contentTransform);
+                        // Instantiate [Header] if present
+                        HeaderAttribute header = entry.Field.GetCustomAttribute<HeaderAttribute>();
+                        if (header != null)
+                        {
+                            InstantiateHeader(header.header, contentTransform);
+                        }
+
+                        CreateAndBindControl(entry, contentTransform);
+                    }
+                    else
+                    {
+                        ActionEntry actionEntry = actions[item.Index];
+
+                        if (!string.IsNullOrEmpty(actionEntry.Attribute.Header))
+                        {
+                            InstantiateHeader(actionEntry.Attribute.Header, contentTransform);
+                        }
+
+                        CreateButton(actionEntry, contentTransform);
+                    }
                 }
             }
 
@@ -279,16 +366,55 @@ namespace UI
         /// Collects all <see cref="SettingFieldAttribute"/>-annotated fields from Settings and DevSettings,
         /// grouped by tab. Respects the DebugOnly visibility gate.
         /// </summary>
-        private Dictionary<SettingsTab, List<FieldEntry>> CollectFields()
+        private Dictionary<SettingsTab, List<FieldEntry>> CollectFields(ref int declarationIndex)
         {
             var result = new Dictionary<SettingsTab, List<FieldEntry>>();
-            int declarationIndex = 0;
 
             // Scan Settings fields
             CollectFieldsFrom(typeof(Settings), _settings, result, ref declarationIndex);
 
             // Scan DevSettings fields (hardcoded path: Settings.Dev)
             CollectFieldsFrom(typeof(DevSettings), _settings.Dev, result, ref declarationIndex);
+
+            return result;
+        }
+
+        /// <summary>
+        /// Collects all <see cref="SettingActionAttribute"/>-annotated parameterless methods
+        /// from the action target (<see cref="_controller"/>), grouped by tab.
+        /// </summary>
+        private Dictionary<SettingsTab, List<ActionEntry>> CollectActions(ref int declarationIndex)
+        {
+            var result = new Dictionary<SettingsTab, List<ActionEntry>>();
+            if (_controller == null) return result;
+
+            MethodInfo[] methods = _controller.GetType()
+                .GetMethods(BindingFlags.Public | BindingFlags.Instance);
+
+            foreach (MethodInfo method in methods)
+            {
+                SettingActionAttribute attr = method.GetCustomAttribute<SettingActionAttribute>();
+                if (attr == null) continue;
+                if (attr.DebugOnly && !Debug.isDebugBuild) continue;
+
+                if (method.GetParameters().Length > 0)
+                {
+                    Debug.LogWarning($"[SettingsUIGenerator] [SettingAction] method '{method.Name}' " +
+                                     "has parameters. Only parameterless methods are supported. Skipping.");
+                    continue;
+                }
+
+                if (!result.ContainsKey(attr.Tab))
+                    result[attr.Tab] = new List<ActionEntry>();
+
+                result[attr.Tab].Add(new ActionEntry
+                {
+                    Method = method,
+                    Attribute = attr,
+                    Target = _controller,
+                    DeclarationIndex = declarationIndex++,
+                });
+            }
 
             return result;
         }
@@ -707,6 +833,58 @@ namespace UI
                 ControlRoot = obj,
                 Selectable = inputField,
             };
+        }
+
+        /// <summary>
+        /// Instantiates a button control for a <see cref="SettingActionAttribute"/>-annotated method.
+        /// Wires the button's <c>onClick</c> event to invoke the method via reflection.
+        /// Does not create a <see cref="ControlBinding"/> since buttons have no value to rebind.
+        /// </summary>
+        /// <param name="entry">The action method and its attribute metadata.</param>
+        /// <param name="parent">The tab content panel transform to instantiate under.</param>
+        private void CreateButton(ActionEntry entry, Transform parent)
+        {
+            SettingsUIPrefabLibrary.ControlEntry config = _library.buttonPrefab;
+            if (config?.prefab == null)
+            {
+                Debug.LogWarning("[SettingsUIGenerator] buttonPrefab is not assigned in the library. " +
+                                 $"Skipping action '{entry.Method.Name}'.");
+                return;
+            }
+
+            GameObject obj = Instantiate(config.prefab, parent);
+            string label = entry.Attribute.Label ?? ConvertCamelCaseToTitleCase(entry.Method.Name);
+            obj.name = $"Button_{entry.Method.Name}";
+            ApplyLayout(obj, config);
+
+            TextMeshProUGUI text = obj.GetComponentInChildren<TextMeshProUGUI>();
+            if (text != null) text.text = label;
+
+            Button button = obj.GetComponentInChildren<Button>();
+            if (button != null)
+            {
+                MethodInfo method = entry.Method;
+                object target = entry.Target;
+                button.onClick.AddListener(() =>
+                {
+                    try
+                    {
+                        method.Invoke(target, null);
+                    }
+                    catch (TargetInvocationException e)
+                    {
+                        Debug.LogError($"[SettingsUIGenerator] Action '{method.Name}' threw: " +
+                                       $"{e.InnerException?.Message ?? e.Message}");
+                    }
+                });
+            }
+
+            if (!string.IsNullOrEmpty(entry.Attribute.Tooltip))
+            {
+                TooltipTrigger trigger = obj.AddComponent<TooltipTrigger>();
+                trigger.text = entry.Attribute.Tooltip;
+                trigger.hoverPositionOverride = TooltipHoverPosition.FollowMouse;
+            }
         }
 
         #endregion

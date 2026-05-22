@@ -1586,6 +1586,17 @@ RectTransform:
   m_CorrespondingSourceObject: {fileID: 2901800787528890957, guid: f25fae20a74ca404391c94bf64dfbd18, type: 3}
   m_PrefabInstance: {fileID: 4112346084438581428}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &1355645073 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 4189936679619508135, guid: f25fae20a74ca404391c94bf64dfbd18, type: 3}
+  m_PrefabInstance: {fileID: 4112346084438581428}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1355645069}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e7627107369e64746b3eaf94ade91453, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UI.SettingsMenuController
 --- !u!1 &1428849213
 GameObject:
   m_ObjectHideFlags: 0
@@ -3291,6 +3302,10 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 3917708156565163584, guid: f25fae20a74ca404391c94bf64dfbd18, type: 3}
+      propertyPath: _controller
+      value: 
+      objectReference: {fileID: 1355645073}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []

@@ -43,7 +43,18 @@ Settings page overhaul, different tabs, advanced settings, expose all settings a
 
 ---
 
-## 05. In-game Pause Screen
+## 05. Settings UI: Sub-Page / Pop-Up Navigation Support
+
+**Severity:** Feature  
+**Files:** `SettingsUIGenerator.cs`, `SettingActionAttribute.cs`
+
+The `[SettingAction]` attribute system supports simple action buttons (e.g., "Clear All Benchmarks"). A future extension should support **sub-page navigation**: a button that opens a pop-up or child panel with additional settings, and triggers a callback on close to refresh the parent settings page.
+
+**Proposed approach:** Add an optional `NavigatesTo` property to `SettingActionAttribute` (or a dedicated `[SettingSubPage]` attribute). The generator would handle panel open/close lifecycle and auto-call `RebindValues()` on the parent when the sub-page dismisses.
+
+---
+
+## 06. In-game Pause Screen
 
 **Severity:** Feature
 **Files:** UI

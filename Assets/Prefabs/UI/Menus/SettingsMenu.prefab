@@ -373,6 +373,7 @@ MonoBehaviour:
   _library: {fileID: 11400000, guid: f90c922fe5cc2d84aafaeeaee77e8df3, type: 2}
   _tabButtonContainer: {fileID: 3719143196480677902}
   _tabContentParent: {fileID: 4261722834170343303}
+  _controller: {fileID: 4189936679619508135}
 --- !u!114 &3458353966847578204
 MonoBehaviour:
   m_ObjectHideFlags: 0
