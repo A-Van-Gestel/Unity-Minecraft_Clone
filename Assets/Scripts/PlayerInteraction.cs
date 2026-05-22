@@ -1,4 +1,5 @@
 using Data;
+using Data.Enums;
 using Helpers;
 using Jobs.BurstData;
 using MyBox;
@@ -53,7 +54,7 @@ public class PlayerInteraction : MonoBehaviour
 
     private void Update()
     {
-        if (World.InUI) return;
+        if (World.InUI || WorldLaunchState.CurrentMode == RuntimeMode.Benchmark) return;
 
         PlaceCursorBlocks();
         HandleBlockModificationInput();

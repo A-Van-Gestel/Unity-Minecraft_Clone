@@ -103,7 +103,8 @@ namespace Benchmarks
         /// </summary>
         /// <param name="richTextReport">The full report with rich-text tags.</param>
         /// <param name="filenamePrefix">Prefix for the output file (e.g., "BenchmarkRun" or "MeshGenerationBenchmark").</param>
-        public static void WriteReportToDisk(string richTextReport, string filenamePrefix)
+        /// <returns>The full file path on success, or <c>null</c> on failure.</returns>
+        public static string WriteReportToDisk(string richTextReport, string filenamePrefix)
         {
             try
             {
@@ -118,10 +119,12 @@ namespace Benchmarks
                 File.WriteAllText(fullPath, plainText);
 
                 Debug.Log($"<color=cyan>[Benchmark] Report written to:</color> {fullPath}");
+                return fullPath;
             }
             catch (Exception e)
             {
                 Debug.LogError($"[Benchmark] Failed to write report to disk: {e.Message}");
+                return null;
             }
         }
 

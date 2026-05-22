@@ -6,6 +6,19 @@ using UnityEngine;
 namespace Benchmarks
 {
     /// <summary>
+    /// Contains the output of a benchmark report generation: the formatted report text
+    /// and the file path where the plain-text version was saved.
+    /// </summary>
+    public struct BenchmarkReportResult
+    {
+        /// <summary>The full report with Unity rich-text tags (suitable for TMP display).</summary>
+        public string ReportRichText;
+
+        /// <summary>The absolute file path of the saved plain-text report, or null if writing failed.</summary>
+        public string LogFilePath;
+    }
+
+    /// <summary>
     /// Generates a structured performance report from benchmark metrics and writes it to disk.
     /// Reuses <see cref="BenchmarkEnvironment.DescribeSystem"/> for the system/build/Burst header
     /// and <see cref="BenchmarkEnvironment.WriteReportToDisk"/> for file output.
@@ -13,8 +26,8 @@ namespace Benchmarks
     public static class BenchmarkReportGenerator
     {
         /// <summary>
-        /// Generates the full benchmark report, logs it to the console, and writes a plain-text
-        /// copy to <c>Application.persistentDataPath/Benchmarks/</c>.
+        /// Generates the full benchmark report, logs it to the console, writes a plain-text
+        /// copy to disk, and returns both the rich-text report and the saved file path.
         /// </summary>
         /// <param name="collector">The completed metrics collector containing per-phase results.</param>
         /// <param name="generationSpeeds">The generation speed phases used (m/s).</param>
@@ -25,7 +38,8 @@ namespace Benchmarks
         /// <param name="generationWaypointCount">Number of generation waypoints built.</param>
         /// <param name="loadingWaypointCount">Number of loading waypoints built.</param>
         /// <param name="totalDuration">Wall-clock duration of the entire benchmark run.</param>
-        public static void GenerateAndWriteReport(
+        /// <returns>A <see cref="BenchmarkReportResult"/> containing the report text and file path.</returns>
+        public static BenchmarkReportResult GenerateAndWriteReport(
             BenchmarkMetricsCollector collector,
             float[] generationSpeeds,
             float[] loadingSpeeds,
@@ -47,7 +61,13 @@ namespace Benchmarks
 
             string report = sb.ToString();
             Debug.Log(report);
-            BenchmarkEnvironment.WriteReportToDisk(report, "BenchmarkRun");
+            string filePath = BenchmarkEnvironment.WriteReportToDisk(report, "BenchmarkRun");
+
+            return new BenchmarkReportResult
+            {
+                ReportRichText = report,
+                LogFilePath = filePath,
+            };
         }
 
         // ── Report Sections ──────────────────────────────────────────────
@@ -183,6 +203,5 @@ namespace Benchmarks
             sb.AppendLine($"  {"-- Group Total --",-18} {BenchmarkEnvironment.FormatDuration(TimeSpan.FromSeconds(duration)),9}   Avg CPU: {avgCpu:F1} ms   Peak CPU: {peakCpu:F1} ms");
             sb.AppendLine();
         }
-
     }
 }

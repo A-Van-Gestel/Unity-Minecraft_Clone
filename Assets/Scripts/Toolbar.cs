@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Data.Enums;
 using Serialization;
 using UI;
 using UI.Enums;
@@ -35,7 +36,7 @@ public class Toolbar : MonoBehaviour
 
     private void Update()
     {
-        // Disable toolbar when in Pause Menu
+        if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark) return;
         if (WorldUIManager.Instance != null && WorldUIManager.Instance.IsPauseMenuOpen) return;
 
         // SCROLL WHEEL
