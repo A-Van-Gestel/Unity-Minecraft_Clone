@@ -80,7 +80,7 @@ namespace Editor.Libraries
 
                 // --- Enhanced Camera Setup ---
                 _previewRenderUtility.camera.nearClipPlane = 0.01f;
-                _previewRenderUtility.camera.farClipPlane = 1000f;
+                _previewRenderUtility.camera.farClipPlane = 10000f;
 
                 // Make the camera background transparent to reveal the checkerboard.
                 _previewRenderUtility.camera.cameraType = CameraType.Preview;

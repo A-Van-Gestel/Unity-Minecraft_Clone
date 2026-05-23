@@ -49,7 +49,7 @@ namespace Editor.WorldTools
                 GUILayout.Width(40));
 
             EditorGUI.BeginChangeCheck();
-            _chunkRadius = EditorGUILayout.IntSlider(_chunkRadius, 1, 6, GUILayout.Width(140));
+            _chunkRadius = EditorGUILayout.IntSlider(_chunkRadius, 1, 32, GUILayout.Width(140));
             bool radiusChanged = EditorGUI.EndChangeCheck();
 
             GUILayout.FlexibleSpace();
@@ -128,7 +128,7 @@ namespace Editor.WorldTools
             if (viewportRect.width < 10 || viewportRect.height < 10) return;
             if (_meshPreviewWidget == null) return;
 
-            _meshPreviewWidget.HandleScrollZoom(viewportRect, zoomSpeed: 2f, minDistance: 5f, maxDistance: 200f);
+            _meshPreviewWidget.HandleScrollZoom(viewportRect, zoomSpeed: 15f, minDistance: 5f, maxDistance: 3000f);
             _meshPreviewWidget.BeginDraw(viewportRect);
 
             DrawAllSectionMeshes();
