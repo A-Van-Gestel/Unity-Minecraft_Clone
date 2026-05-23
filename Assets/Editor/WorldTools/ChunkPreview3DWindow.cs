@@ -74,6 +74,11 @@ namespace Editor.WorldTools
         private Material _transparentMaterial;
         private Material _fluidMaterial;
 
+        // --- Editor Preview Materials (created for PreviewRenderUtility — must be destroyed) ---
+        private Material _editorOpaqueMaterial;
+        private Material _editorTransparentMaterial;
+        private Material _editorFluidMaterial;
+
         private enum PipelinePhase
         {
             Idle,
@@ -123,6 +128,8 @@ namespace Editor.WorldTools
             _opaqueMaterial = null;
             _transparentMaterial = null;
             _fluidMaterial = null;
+
+            DisposeEditorMaterials();
         }
 
         private void OnGUI()
@@ -187,21 +194,68 @@ namespace Editor.WorldTools
 
         private void InitializePreviewMaterials()
         {
+            DisposeEditorMaterials();
+
             BlockDatabase db = EditorBlockDatabaseCache.Database;
             if (db != null)
             {
                 _opaqueMaterial = db.opaqueMaterial;
                 _transparentMaterial = db.transparentMaterial;
                 _fluidMaterial = db.liquidMaterial;
+
+                // Configure editor-safe preview materials that support SRPDefaultUnlit pass,
+                // which is required for rendering correctly in PreviewRenderUtility cameras.
+                Material tempBlock = null;
+                Material tempFluid = null;
+
+                _editorOpaqueMaterial = EditorPreviewMaterialUtility.GetConfiguredMaterial(
+                    false, _opaqueMaterial, ref tempBlock, ref tempFluid);
+                if (_editorOpaqueMaterial != null)
+                    _editorOpaqueMaterial.hideFlags = HideFlags.HideAndDontSave;
+
+                tempBlock = null;
+                tempFluid = null;
+                _editorTransparentMaterial = EditorPreviewMaterialUtility.GetConfiguredMaterial(
+                    false, _transparentMaterial, ref tempBlock, ref tempFluid);
+                if (_editorTransparentMaterial != null)
+                    _editorTransparentMaterial.hideFlags = HideFlags.HideAndDontSave;
+
+                tempBlock = null;
+                tempFluid = null;
+                _editorFluidMaterial = EditorPreviewMaterialUtility.GetConfiguredMaterial(
+                    true, _fluidMaterial, ref tempBlock, ref tempFluid);
+                if (_editorFluidMaterial != null)
+                    _editorFluidMaterial.hideFlags = HideFlags.HideAndDontSave;
             }
             else
             {
                 // Fallback: use the ChunkPreview editor shader if BlockDatabase is not available.
                 Shader chunkPreview = Shader.Find("Hidden/Editor/ChunkPreview");
                 Shader fallback = chunkPreview ?? Shader.Find("Sprites/Default") ?? Shader.Find("Hidden/Internal-Colored");
-                _opaqueMaterial = new Material(fallback) { hideFlags = HideFlags.HideAndDontSave };
-                _transparentMaterial = _opaqueMaterial;
-                _fluidMaterial = _opaqueMaterial;
+                _editorOpaqueMaterial = new Material(fallback) { hideFlags = HideFlags.HideAndDontSave };
+                _editorTransparentMaterial = _editorOpaqueMaterial;
+                _editorFluidMaterial = _editorOpaqueMaterial;
+            }
+        }
+
+        private void DisposeEditorMaterials()
+        {
+            if (_editorOpaqueMaterial != null)
+            {
+                DestroyImmediate(_editorOpaqueMaterial);
+                _editorOpaqueMaterial = null;
+            }
+
+            if (_editorTransparentMaterial != null && _editorTransparentMaterial != _editorOpaqueMaterial)
+            {
+                DestroyImmediate(_editorTransparentMaterial);
+                _editorTransparentMaterial = null;
+            }
+
+            if (_editorFluidMaterial != null && _editorFluidMaterial != _editorOpaqueMaterial)
+            {
+                DestroyImmediate(_editorFluidMaterial);
+                _editorFluidMaterial = null;
             }
         }
 

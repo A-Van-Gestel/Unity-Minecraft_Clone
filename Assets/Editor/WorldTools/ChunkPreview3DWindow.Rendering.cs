@@ -138,7 +138,7 @@ namespace Editor.WorldTools
         /// </summary>
         private void DrawAllSectionMeshes()
         {
-            if (_meshPreviewWidget == null || _opaqueMaterial == null) return;
+            if (_meshPreviewWidget == null || _editorOpaqueMaterial == null) return;
 
             // Ensure the runtime shaders have valid lighting globals for editor preview.
             SetPreviewShaderGlobals();
@@ -155,21 +155,19 @@ namespace Editor.WorldTools
 
                 if (entry.HasOpaque)
                 {
-                    _meshPreviewWidget.DrawMeshDirect(entry.Mesh, localToWorld, _opaqueMaterial, sub);
+                    _meshPreviewWidget.DrawMeshDirect(entry.Mesh, localToWorld, _editorOpaqueMaterial, sub);
                     sub++;
                 }
 
                 if (entry.HasTransparent)
                 {
-                    _meshPreviewWidget.DrawMeshDirect(entry.Mesh, localToWorld,
-                        _transparentMaterial != null ? _transparentMaterial : _opaqueMaterial, sub);
+                    _meshPreviewWidget.DrawMeshDirect(entry.Mesh, localToWorld, _editorTransparentMaterial, sub);
                     sub++;
                 }
 
                 if (entry.HasFluid)
                 {
-                    _meshPreviewWidget.DrawMeshDirect(entry.Mesh, localToWorld,
-                        _fluidMaterial != null ? _fluidMaterial : _opaqueMaterial, sub);
+                    _meshPreviewWidget.DrawMeshDirect(entry.Mesh, localToWorld, _editorFluidMaterial, sub);
                 }
             }
         }
