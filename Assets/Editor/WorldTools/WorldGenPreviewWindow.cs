@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Data.WorldTypes;
 using Editor.Libraries;
+using Editor.WorldTools.Libraries;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
@@ -169,6 +170,8 @@ namespace Editor.WorldTools
                 case 1: GenerateNoiseChannelsPreview(); break;
                 case 4: GenerateBlendingPreview(); break;
             }
+
+            WorldGenPreviewSettings.Publish(_seed, _worldType);
         }
 
         private void OnGUI()

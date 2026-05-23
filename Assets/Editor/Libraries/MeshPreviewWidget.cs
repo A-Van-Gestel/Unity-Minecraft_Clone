@@ -289,6 +289,51 @@ namespace Editor.Libraries
         private Material _wireMaterial;
 
         /// <summary>
+        /// Draws a mesh with an explicit material and local-to-world transform, bypassing the
+        /// block preview material pipeline. Used for rendering section meshes from the meshing job.
+        /// Must be called between <see cref="BeginDraw"/> and <see cref="EndDraw"/>.
+        /// </summary>
+        /// <param name="mesh">The mesh to draw.</param>
+        /// <param name="localToWorld">The local-to-world transform matrix (before preview rotation).</param>
+        /// <param name="material">The material to use for rendering.</param>
+        /// <param name="submesh">The submesh index to draw.</param>
+        public void DrawMeshDirect(Mesh mesh, Matrix4x4 localToWorld, Material material, int submesh)
+        {
+            if (_previewRenderUtility == null || mesh == null || material == null) return;
+            if (submesh >= mesh.subMeshCount) return;
+
+            Matrix4x4 rotationMatrix = Matrix4x4.TRS(
+                Vector3.zero,
+                Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0),
+                Vector3.one);
+
+            _previewRenderUtility.DrawMesh(mesh, rotationMatrix * localToWorld, material, submesh);
+        }
+
+        /// <summary>
+        /// Handles scroll-wheel zoom by adjusting the camera's Z position.
+        /// Call this during <see cref="BeginDraw"/> or before drawing.
+        /// </summary>
+        /// <param name="previewRect">The rect of the preview area to capture scroll events in.</param>
+        /// <param name="zoomSpeed">How fast scrolling zooms the camera.</param>
+        /// <param name="minDistance">Minimum camera distance (closest zoom).</param>
+        /// <param name="maxDistance">Maximum camera distance (furthest zoom).</param>
+        public void HandleScrollZoom(Rect previewRect, float zoomSpeed = 0.5f, float minDistance = 1f, float maxDistance = 200f)
+        {
+            if (_previewRenderUtility == null) return;
+
+            Event e = Event.current;
+            if (e.type == EventType.ScrollWheel && previewRect.Contains(e.mousePosition))
+            {
+                Vector3 pos = _previewRenderUtility.camera.transform.position;
+                pos.z = Mathf.Clamp(pos.z + e.delta.y * zoomSpeed, -maxDistance, -minDistance);
+                _previewRenderUtility.camera.transform.position = pos;
+                _cameraPosition = pos;
+                e.Use();
+            }
+        }
+
+        /// <summary>
         /// Draws a wireframe cube within a custom drawing session.
         /// </summary>
         /// <param name="center">The center position of the cube relative to the preview pivot.</param>
