@@ -1,5 +1,6 @@
 using System;
 using Data.WorldTypes;
+using Unity.Mathematics;
 
 namespace Editor.WorldTools.Libraries
 {
@@ -25,17 +26,33 @@ namespace Editor.WorldTools.Libraries
         /// The currently published world type definition.
         /// </summary>
         public static WorldTypeDefinition WorldType { get; private set; }
+
+        /// <summary>
+        /// The currently published crosshair position.
+        /// </summary>
+        public static int3 CrosshairPos { get; private set; }
+
+        /// <summary>
+        /// Whether the preview should generate in single biome mode.
+        /// </summary>
+        public static bool IsSingleBiomeMode { get; private set; }
+
+        /// <summary>
+        /// The currently selected biome for single biome mode.
+        /// </summary>
+        public static StandardBiomeAttributes SelectedBiome { get; private set; }
 #pragma warning restore UDR0001
 
         /// <summary>
         /// Publishes new settings and notifies all subscribers.
         /// </summary>
-        /// <param name="seed">The new seed value.</param>
-        /// <param name="worldType">The new world type definition.</param>
-        public static void Publish(int seed, WorldTypeDefinition worldType)
+        public static void Publish(int seed, WorldTypeDefinition worldType, int3 crosshairPos, bool isSingleBiomeMode, StandardBiomeAttributes selectedBiome)
         {
             Seed = seed;
             WorldType = worldType;
+            CrosshairPos = crosshairPos;
+            IsSingleBiomeMode = isSingleBiomeMode;
+            SelectedBiome = selectedBiome;
             OnSettingsChanged?.Invoke();
         }
     }

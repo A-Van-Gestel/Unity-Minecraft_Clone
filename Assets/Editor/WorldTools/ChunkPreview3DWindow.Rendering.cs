@@ -1,4 +1,5 @@
 using Data;
+using Editor.Libraries;
 using Helpers;
 using Unity.Burst;
 using Unity.Collections;
@@ -40,8 +41,10 @@ namespace Editor.WorldTools
             // Center the preview grid around the origin
             float centerOffset = _chunkRadius * VoxelData.ChunkWidth * 0.5f;
             // Visible chunks start at index 1 (border at 0), so subtract 1 chunk worth
-            float chunkWorldX = (chunkCoord.X - 1) * VoxelData.ChunkWidth - centerOffset;
-            float chunkWorldZ = (chunkCoord.Z - 1) * VoxelData.ChunkWidth - centerOffset;
+            int localX = chunkCoord.X - _gridStartX;
+            int localZ = chunkCoord.Z - _gridStartZ;
+            float chunkWorldX = (localX - 1) * VoxelData.ChunkWidth - centerOffset;
+            float chunkWorldZ = (localZ - 1) * VoxelData.ChunkWidth - centerOffset;
 
             int sectionCount = output.SectionStats.Length;
             for (int s = 0; s < sectionCount; s++)

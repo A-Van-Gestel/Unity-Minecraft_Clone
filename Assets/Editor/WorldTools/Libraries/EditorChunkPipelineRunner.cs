@@ -48,14 +48,14 @@ namespace Editor.WorldTools.Libraries
         /// <param name="seed">The world seed for terrain generation.</param>
         /// <param name="worldType">The world type definition containing biome configurations.</param>
         /// <param name="blockDatabase">The block database asset.</param>
-        public void Initialize(int seed, WorldTypeDefinition worldType, BlockDatabase blockDatabase)
+        public void Initialize(int seed, WorldTypeDefinition worldType, BlockDatabase blockDatabase, bool isSingleBiomeMode = false, StandardBiomeAttributes selectedBiome = null)
         {
             Dispose();
 
             (_jobDataManager, _fluidTemplates) = EditorJobDataManagerFactory.Create(blockDatabase);
 
             _generator = new StandardChunkGenerator();
-            _generator.Initialize(seed, worldType, _jobDataManager);
+            _generator.Initialize(seed, worldType, _jobDataManager, isSingleBiomeMode, selectedBiome);
 
             _isInitialized = true;
         }

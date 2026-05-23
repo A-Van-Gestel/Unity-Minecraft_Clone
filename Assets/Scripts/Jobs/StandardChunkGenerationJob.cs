@@ -18,7 +18,7 @@ namespace Jobs
     /// Replaces the legacy <c>ChunkGenerationJob</c> for the Standard world type.
     /// Uses <c>Unity.Mathematics</c> types throughout for SIMD auto-vectorization.
     /// </summary>
-    [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
+    [BurstCompile]
     public struct StandardChunkGenerationJob : IJobFor
     {
         #region Input Data
@@ -144,6 +144,12 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<FastNoiseLite> EntryFloraZoneNoises;
 
+        [ReadOnly]
+        public bool IsSingleBiomeMode;
+
+        [ReadOnly]
+        public int ForceBiomeIndex;
+
         #endregion
 
         #region Output Data
@@ -182,11 +188,19 @@ namespace Jobs
             int globalZ = z + ChunkPosition.y;
 
             // --- BIOME SELECTION (Voronoi / Cellular) ---
-            // Single evaluation per column — O(1) regardless of biome count.
-            float biomeNoise = BiomeSelectionNoise.GetNoise(globalX, globalZ);
-            // Noise is enforced to [0,1] normalization internally
-            int biomeIndex = (int)math.floor(biomeNoise * Biomes.Length);
-            biomeIndex = math.clamp(biomeIndex, 0, Biomes.Length - 1);
+            int biomeIndex;
+            if (IsSingleBiomeMode)
+            {
+                biomeIndex = ForceBiomeIndex;
+            }
+            else
+            {
+                // Single evaluation per column — O(1) regardless of biome count.
+                float biomeNoise = BiomeSelectionNoise.GetNoise(globalX, globalZ);
+                // Noise is enforced to [0,1] normalization internally
+                biomeIndex = (int)math.floor(biomeNoise * Biomes.Length);
+                biomeIndex = math.clamp(biomeIndex, 0, Biomes.Length - 1);
+            }
 
             StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
 
@@ -199,9 +213,18 @@ namespace Jobs
             float ditherX = globalX + ditherNoiseX * biome.SurfaceBlockDitheringWidth * 30f;
             float ditherZ = globalZ + ditherNoiseZ * biome.SurfaceBlockDitheringWidth * 30f;
 
-            float ditheredBiomeNoise = BiomeSelectionNoise.GetNoise(ditherX, ditherZ);
-            int surfaceBiomeIndex = (int)math.floor(ditheredBiomeNoise * Biomes.Length);
-            surfaceBiomeIndex = math.clamp(surfaceBiomeIndex, 0, Biomes.Length - 1);
+            int surfaceBiomeIndex;
+            if (IsSingleBiomeMode)
+            {
+                surfaceBiomeIndex = ForceBiomeIndex;
+            }
+            else
+            {
+                float ditheredBiomeNoise = BiomeSelectionNoise.GetNoise(ditherX, ditherZ);
+                surfaceBiomeIndex = (int)math.floor(ditheredBiomeNoise * Biomes.Length);
+                surfaceBiomeIndex = math.clamp(surfaceBiomeIndex, 0, Biomes.Length - 1);
+            }
+
             StandardBiomeAttributesJobData surfaceBiome = Biomes[surfaceBiomeIndex];
 
             // --- TERRAIN HEIGHT (Multi-Noise spline blending) ---
@@ -215,7 +238,7 @@ namespace Jobs
                 PeaksValleysSplines = BiomePVSplines,
             };
             float terrainHeightFloat = BiomeBlender.CalculateBlendedTerrainHeight(
-                globalX, globalZ, ref BiomeSelectionNoise, ref Biomes, ref multiNoise,
+                globalX, globalZ, ref BiomeSelectionNoise, ref Biomes, ref multiNoise, IsSingleBiomeMode, ForceBiomeIndex,
                 out float borderFade);
             int terrainHeight = (int)math.floor(terrainHeightFloat);
 

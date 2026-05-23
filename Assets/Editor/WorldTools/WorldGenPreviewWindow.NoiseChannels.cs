@@ -1,4 +1,5 @@
 using Editor.Jobs;
+using Editor.WorldTools.Libraries;
 using JetBrains.Annotations;
 using Jobs.Data;
 using Jobs.Generators;
@@ -101,6 +102,11 @@ namespace Editor.WorldTools
             DrawChannelSplinePreview();
 
             bool changed = EditorGUI.EndChangeCheck();
+
+            if (changed)
+            {
+                WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
+            }
 
             if (GUILayout.Button("Generate Preview") || (changed && _autoGenerate))
             {

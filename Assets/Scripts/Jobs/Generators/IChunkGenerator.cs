@@ -50,7 +50,9 @@ namespace Jobs.Generators
         /// <param name="seed">The deterministic world seed.</param>
         /// <param name="worldType">The ScriptableObject containing biome configuration.</param>
         /// <param name="globalJobData">World-type-agnostic data (Blocks, Meshes, etc.).</param>
-        void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData);
+        /// <param name="isSingleBiomeMode">Whether to override Voronoi selection with a single biome.</param>
+        /// <param name="selectedBiome">The single biome to use (when isSingleBiomeMode is true).</param>
+        void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData, bool isSingleBiomeMode = false, StandardBiomeAttributes selectedBiome = null);
 
         /// <summary>
         /// Schedules the generation job and returns a populated GenerationJobData struct.

@@ -52,6 +52,23 @@ namespace Editor.WorldTools
             _chunkRadius = EditorGUILayout.IntSlider(_chunkRadius, 1, 32, GUILayout.Width(140));
             bool radiusChanged = EditorGUI.EndChangeCheck();
 
+            EditorGUI.BeginChangeCheck();
+            _isSingleBiomeMode = EditorGUILayout.Popup(
+                _isSingleBiomeMode ? 1 : 0,
+                new[] { "World View", "Single Biome" },
+                EditorStyles.toolbarPopup,
+                GUILayout.Width(90)) == 1;
+            bool modeChanged = EditorGUI.EndChangeCheck();
+
+            bool biomeChanged = false;
+            if (_isSingleBiomeMode)
+            {
+                EditorGUI.BeginChangeCheck();
+                _selectedBiome = (StandardBiomeAttributes)EditorGUILayout.ObjectField(
+                    _selectedBiome, typeof(StandardBiomeAttributes), false, GUILayout.Width(120));
+                biomeChanged = EditorGUI.EndChangeCheck();
+            }
+
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
@@ -101,6 +118,21 @@ namespace Editor.WorldTools
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
+            // --- Row 3: Crosshair ---
+            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+            GUILayout.Label(new GUIContent("Crosshair", "The 3D point where chunks are generated around."), GUILayout.Width(60));
+            GUILayout.Label("X", GUILayout.Width(12));
+            EditorGUI.BeginChangeCheck();
+            _crosshairPos.x = EditorGUIHelper.IntFieldWithSteppers(_crosshairPos.x, int.MinValue, int.MaxValue);
+            _crosshairPos.y = EditorGUILayout.IntSlider(
+                new GUIContent("Y", "Vertical slice height."),
+                _crosshairPos.y, 0, VoxelData.ChunkHeight - 1);
+            GUILayout.Label("Z", GUILayout.Width(12));
+            _crosshairPos.z = EditorGUIHelper.IntFieldWithSteppers(_crosshairPos.z, int.MinValue, int.MaxValue);
+            bool crosshairChanged = EditorGUI.EndChangeCheck();
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+
             EditorGUILayout.EndVertical();
 
             // Handle setting changes
@@ -108,15 +140,15 @@ namespace Editor.WorldTools
             {
                 StartPipeline();
             }
-            else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged))
+            else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged || modeChanged || biomeChanged || crosshairChanged))
             {
                 StartPipeline();
             }
 
             // Publish settings for sync
-            if (seedChanged || worldTypeChanged)
+            if (seedChanged || worldTypeChanged || modeChanged || biomeChanged || crosshairChanged)
             {
-                WorldGenPreviewSettings.Publish(_seed, _worldType);
+                WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _isSingleBiomeMode, _selectedBiome);
             }
         }
 

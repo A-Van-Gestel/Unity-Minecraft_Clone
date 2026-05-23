@@ -35,6 +35,12 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<FastNoiseLite> CaveNoises;
 
+        [ReadOnly]
+        public bool IsSingleBiomeMode;
+
+        [ReadOnly]
+        public int ForceBiomeIndex;
+
         [WriteOnly]
         public NativeBitArray OutputWormMask;
 
@@ -89,9 +95,18 @@ namespace Jobs
                     int globalCz = cz * VoxelData.ChunkWidth;
 
                     // Evaluate the center of this chunk to find its biome and determine worm parameters
-                    float biomeNoise = BiomeSelectionNoise.GetNoise(globalCx + VoxelData.ChunkWidth * 0.5f, globalCz + VoxelData.ChunkWidth * 0.5f);
-                    int biomeIndex = (int)math.floor(biomeNoise * Biomes.Length);
-                    biomeIndex = math.clamp(biomeIndex, 0, Biomes.Length - 1);
+                    int biomeIndex;
+                    if (IsSingleBiomeMode)
+                    {
+                        biomeIndex = ForceBiomeIndex;
+                    }
+                    else
+                    {
+                        float biomeNoise = BiomeSelectionNoise.GetNoise(globalCx + VoxelData.ChunkWidth * 0.5f, globalCz + VoxelData.ChunkWidth * 0.5f);
+                        biomeIndex = (int)math.floor(biomeNoise * Biomes.Length);
+                        biomeIndex = math.clamp(biomeIndex, 0, Biomes.Length - 1);
+                    }
+
                     StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
 
                     for (int layerIdx = 0; layerIdx < biome.CaveLayerCount; layerIdx++)

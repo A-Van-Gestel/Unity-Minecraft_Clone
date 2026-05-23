@@ -71,7 +71,53 @@ namespace Editor.WorldTools
 #pragma warning disable UDR0004
             EditorApplication.update -= PollForAssetChanges;
             EditorApplication.update += PollForAssetChanges;
+
+            WorldGenPreviewSettings.OnSettingsChanged -= OnPreviewSettingsChanged;
+            WorldGenPreviewSettings.OnSettingsChanged += OnPreviewSettingsChanged;
 #pragma warning restore UDR0004
+        }
+
+        private void OnPreviewSettingsChanged()
+        {
+            bool changed = false;
+            if (_seed != WorldGenPreviewSettings.Seed)
+            {
+                _seed = WorldGenPreviewSettings.Seed;
+                changed = true;
+            }
+
+            if (_worldType != WorldGenPreviewSettings.WorldType)
+            {
+                _worldType = WorldGenPreviewSettings.WorldType;
+                if (_worldType != null) _seaLevel = _worldType.seaLevel;
+                changed = true;
+            }
+
+            if (!WorldGenPreviewSettings.CrosshairPos.Equals(_crosshairPos))
+            {
+                _crosshairPos = WorldGenPreviewSettings.CrosshairPos;
+                changed = true;
+            }
+
+            CrossSectionMode newMode = WorldGenPreviewSettings.IsSingleBiomeMode ? CrossSectionMode.SingleBiome : CrossSectionMode.WorldView;
+            if (_csMode != newMode)
+            {
+                _csMode = newMode;
+                changed = true;
+            }
+
+            if (_biome != WorldGenPreviewSettings.SelectedBiome)
+            {
+                _biome = WorldGenPreviewSettings.SelectedBiome;
+                _selectedBiomeIndex = _biomeAssets?.IndexOf(_biome) ?? -1;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                Repaint();
+                if (_autoGenerate) RegenerateActivePreview();
+            }
         }
 
         /// <summary>
@@ -131,6 +177,7 @@ namespace Editor.WorldTools
 
         private void OnDisable()
         {
+            WorldGenPreviewSettings.OnSettingsChanged -= OnPreviewSettingsChanged;
             EditorApplication.update -= PollForAssetChanges;
             OnDisableBlendingTab();
             OnDisableCrossSectionTab();
@@ -171,7 +218,7 @@ namespace Editor.WorldTools
                 case 4: GenerateBlendingPreview(); break;
             }
 
-            WorldGenPreviewSettings.Publish(_seed, _worldType);
+            WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
         }
 
         private void OnGUI()

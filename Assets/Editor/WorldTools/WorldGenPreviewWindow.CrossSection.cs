@@ -159,6 +159,11 @@ namespace Editor.WorldTools
 
             bool changed = EditorGUI.EndChangeCheck();
 
+            if (changed)
+            {
+                WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
+            }
+
             if (GUILayout.Button("Generate Preview") || (changed && _autoGenerate))
             {
                 GenerateCrossSectionPreview();
@@ -800,7 +805,7 @@ namespace Editor.WorldTools
             else
             {
                 terrainHeightFloat = BiomeBlender.CalculateBlendedTerrainHeight(
-                    globalX, globalZ, ref data.SelectionNoise, ref data.Biomes, ref data.MultiNoise, out borderFade);
+                    globalX, globalZ, ref data.SelectionNoise, ref data.Biomes, ref data.MultiNoise, false, -1, out borderFade);
             }
 
             int baseTerrainHeight = (int)math.floor(terrainHeightFloat);

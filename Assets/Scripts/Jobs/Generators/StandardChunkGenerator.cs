@@ -63,14 +63,18 @@ namespace Jobs.Generators
         /// </summary>
         private CompositeStructureTemplate[] _structureTemplateLookup;
 
+        private bool _isSingleBiomeMode;
+        private int _forceBiomeIndex;
+
         #region IChunkGenerator
 
         /// <inheritdoc />
-        public void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData)
+        public void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData, bool isSingleBiomeMode = false, StandardBiomeAttributes selectedBiome = null)
         {
             _seed = seed;
             _seaLevel = worldType.seaLevel;
             _blockTypesJobData = globalJobData.BlockTypesJobData;
+            _isSingleBiomeMode = isSingleBiomeMode;
 
             // --- Lookup Table Warmup (CRITICAL) ---
             // Forces the FastNoiseLite SharedStatic lookup tables to allocate unmanaged memory
@@ -83,6 +87,10 @@ namespace Jobs.Generators
             for (int i = 0; i < worldType.biomes.Length; i++)
             {
                 _standardBiomes[i] = (StandardBiomeAttributes)worldType.biomes[i];
+                if (isSingleBiomeMode && selectedBiome != null && _standardBiomes[i] == selectedBiome)
+                {
+                    _forceBiomeIndex = i;
+                }
             }
 
             // --- Flatten biomes + lodes + caves + structure pools into NativeArrays ---
@@ -290,6 +298,8 @@ namespace Jobs.Generators
                 AllCaveLayers = _allCaveLayersJobData,
                 BiomeSelectionNoise = _biomeSelectionNoise,
                 CaveNoises = _caveNoises,
+                IsSingleBiomeMode = _isSingleBiomeMode,
+                ForceBiomeIndex = _forceBiomeIndex,
                 OutputWormMask = wormMask,
             };
 
@@ -321,6 +331,8 @@ namespace Jobs.Generators
                 BiomeDensityNoises = _biomeDensityNoises,
                 BiomeDensityWarpNoises = _biomeDensityWarpNoises,
                 CaveWarpNoises = _caveWarpNoises,
+                IsSingleBiomeMode = _isSingleBiomeMode,
+                ForceBiomeIndex = _forceBiomeIndex,
                 OutputMap = outputMap,
                 OutputHeightMap = outputHeightMap,
                 Modifications = modificationsQueue.AsParallelWriter(),
@@ -358,10 +370,18 @@ namespace Jobs.Generators
             // Bedrock
             if (y == 0) return 8;
 
-            // Biome selection (now enforced to normalized [0,1] domain)
-            float biomeNoise = _biomeSelectionNoise.GetNoise(globalPos.x, globalPos.z);
-            int biomeIndex = (int)math.floor(biomeNoise * _biomesJobData.Length);
-            biomeIndex = math.clamp(biomeIndex, 0, _biomesJobData.Length - 1);
+            // Biome selection
+            int biomeIndex;
+            if (_isSingleBiomeMode)
+            {
+                biomeIndex = _forceBiomeIndex;
+            }
+            else
+            {
+                float biomeNoise = _biomeSelectionNoise.GetNoise(globalPos.x, globalPos.z);
+                biomeIndex = (int)math.floor(biomeNoise * _biomesJobData.Length);
+                biomeIndex = math.clamp(biomeIndex, 0, _biomesJobData.Length - 1);
+            }
 
             StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
 
@@ -376,7 +396,7 @@ namespace Jobs.Generators
                 PeaksValleysSplines = _biomePVSplines,
             };
             int terrainHeight = (int)math.floor(BiomeBlender.CalculateBlendedTerrainHeight(
-                globalPos.x, globalPos.z, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out _));
+                globalPos.x, globalPos.z, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, _isSingleBiomeMode, _forceBiomeIndex, out _));
 
             byte voxelValue;
             if (y == terrainHeight)
@@ -476,8 +496,17 @@ namespace Jobs.Generators
         /// <inheritdoc />
         public TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ)
         {
-            float biomeNoise = _biomeSelectionNoise.GetNoise(globalX, globalZ);
-            int biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
+            int biomeIndex;
+            if (_isSingleBiomeMode)
+            {
+                biomeIndex = _forceBiomeIndex;
+            }
+            else
+            {
+                float biomeNoise = _biomeSelectionNoise.GetNoise(globalX, globalZ);
+                biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
+            }
+
             StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
 
             MultiNoiseData multiNoise = new MultiNoiseData
@@ -490,7 +519,7 @@ namespace Jobs.Generators
                 PeaksValleysSplines = _biomePVSplines,
             };
             float blendedHeight = BiomeBlender.CalculateBlendedTerrainHeight(
-                globalX, globalZ, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise,
+                globalX, globalZ, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, _isSingleBiomeMode, _forceBiomeIndex,
                 out float borderFade);
 
             float effectiveDensityAmplitude = biome.DensityAmplitude * borderFade;
@@ -535,8 +564,16 @@ namespace Jobs.Generators
                 int gx = originX + px * scale;
                 int gz = originZ + pz * scale;
 
-                float biomeNoise = _biomeSelectionNoise.GetNoise(gx, gz);
-                int biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
+                int biomeIndex;
+                if (_isSingleBiomeMode)
+                {
+                    biomeIndex = _forceBiomeIndex;
+                }
+                else
+                {
+                    float biomeNoise = _biomeSelectionNoise.GetNoise(gx, gz);
+                    biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
+                }
 
                 byte r, g, b;
                 switch (mode)
@@ -545,7 +582,7 @@ namespace Jobs.Generators
                     {
                         GetBiomeDebugColor(biomeIndex, out r, out g, out b);
                         float height = BiomeBlender.CalculateBlendedTerrainHeight(
-                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out _);
+                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, _isSingleBiomeMode, _forceBiomeIndex, out _);
                         float brightness = math.clamp(height / 100f, 0.3f, 1.0f);
                         r = (byte)(r * brightness);
                         g = (byte)(g * brightness);
@@ -555,7 +592,7 @@ namespace Jobs.Generators
                     case TerrainDebugRenderMode.BiomeBorderFade:
                     {
                         BiomeBlender.CalculateBlendedTerrainHeight(
-                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out float borderFade);
+                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, _isSingleBiomeMode, _forceBiomeIndex, out float borderFade);
                         GetBiomeDebugColor(biomeIndex, out r, out g, out b);
                         float intensity = math.lerp(0.15f, 1.0f, borderFade);
                         r = (byte)(r * intensity);
@@ -566,7 +603,7 @@ namespace Jobs.Generators
                     case TerrainDebugRenderMode.BlendedHeightmap:
                     {
                         float height = BiomeBlender.CalculateBlendedTerrainHeight(
-                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out _);
+                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, _isSingleBiomeMode, _forceBiomeIndex, out _);
                         float v = math.saturate(height / 128f);
                         v = math.max(v, 0.05f);
                         byte bv = (byte)(v * 255f);
@@ -587,7 +624,7 @@ namespace Jobs.Generators
                     case TerrainDebugRenderMode.CombinedDensitySlice:
                     {
                         float height = BiomeBlender.CalculateBlendedTerrainHeight(
-                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, out float borderFade);
+                            gx, gz, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, _isSingleBiomeMode, _forceBiomeIndex, out float borderFade);
                         StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
                         float density = height - sliceY;
 

@@ -26,8 +26,16 @@ namespace Jobs.Helpers
             ref FastNoiseLite selectionNoise,
             ref NativeArray<StandardBiomeAttributesJobData> biomes,
             ref MultiNoiseData multiNoise,
+            bool isSingleBiomeMode,
+            int forceBiomeIndex,
             out float borderFade)
         {
+            if (isSingleBiomeMode)
+            {
+                borderFade = 1.0f;
+                return EvaluateMultiNoiseHeight(globalX, globalZ, forceBiomeIndex, ref biomes, ref multiNoise);
+            }
+
             selectionNoise.GetCellularEdgeData(globalX, globalZ, out FastNoiseLite.CellularEdgeData edgeData);
 
             const int N = FastNoiseLite.CellularEdgeData.MaxCells;

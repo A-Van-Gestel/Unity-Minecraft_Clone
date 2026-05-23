@@ -5,6 +5,7 @@ using Editor.DataGeneration;
 using Editor.Libraries;
 using Editor.WorldTools.Libraries;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
@@ -42,6 +43,18 @@ namespace Editor.WorldTools
 
         [SerializeField]
         private bool _syncWithPreviewWindow = true;
+
+        [SerializeField]
+        private int3 _crosshairPos = new int3(0, 60, 0);
+
+        [SerializeField]
+        private bool _isSingleBiomeMode = false;
+
+        [SerializeField]
+        private StandardBiomeAttributes _selectedBiome = null;
+
+        private int _gridStartX;
+        private int _gridStartZ;
 
         // --- 3D Preview ---
         private MeshPreviewWidget _meshPreviewWidget;
@@ -102,6 +115,15 @@ namespace Editor.WorldTools
             AutoDetectWorldType();
             InitializePreviewWidget();
             InitializePreviewMaterials();
+
+            if (_syncWithPreviewWindow && WorldGenPreviewSettings.WorldType != null)
+            {
+                _seed = WorldGenPreviewSettings.Seed;
+                _worldType = WorldGenPreviewSettings.WorldType;
+                _crosshairPos = WorldGenPreviewSettings.CrosshairPos;
+                _isSingleBiomeMode = WorldGenPreviewSettings.IsSingleBiomeMode;
+                _selectedBiome = WorldGenPreviewSettings.SelectedBiome;
+            }
 
 #pragma warning disable UDR0004
             EditorApplication.update -= PollPipeline;
@@ -288,8 +310,29 @@ namespace Editor.WorldTools
                 changed = true;
             }
 
-            if (changed && _autoUpdate)
-                StartPipeline();
+            if (!WorldGenPreviewSettings.CrosshairPos.Equals(_crosshairPos))
+            {
+                _crosshairPos = WorldGenPreviewSettings.CrosshairPos;
+                changed = true;
+            }
+
+            if (WorldGenPreviewSettings.IsSingleBiomeMode != _isSingleBiomeMode)
+            {
+                _isSingleBiomeMode = WorldGenPreviewSettings.IsSingleBiomeMode;
+                changed = true;
+            }
+
+            if (WorldGenPreviewSettings.SelectedBiome != _selectedBiome)
+            {
+                _selectedBiome = WorldGenPreviewSettings.SelectedBiome;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                Repaint();
+                if (_autoUpdate) StartPipeline();
+            }
         }
 
         private void StartPipeline()
@@ -312,7 +355,7 @@ namespace Editor.WorldTools
             DisposeSectionMeshes();
 
             _pipelineRunner = new EditorChunkPipelineRunner();
-            _pipelineRunner.Initialize(_seed, _worldType, db);
+            _pipelineRunner.Initialize(_seed, _worldType, db, _isSingleBiomeMode, _selectedBiome);
 
             ScheduleAllGeneration();
         }

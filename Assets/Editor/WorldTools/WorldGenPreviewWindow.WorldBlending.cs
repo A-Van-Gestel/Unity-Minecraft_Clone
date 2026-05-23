@@ -2,6 +2,7 @@ using System;
 using Data.WorldTypes;
 using Editor.Jobs;
 using Editor.Libraries;
+using Editor.WorldTools.Libraries;
 using JetBrains.Annotations;
 using Jobs.Data;
 using Jobs.Generators;
@@ -108,6 +109,11 @@ namespace Editor.WorldTools
             _autoGenerate = EditorGUILayout.Toggle("Auto Generate", _autoGenerate);
 
             bool changed = EditorGUI.EndChangeCheck();
+
+            if (changed)
+            {
+                WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
+            }
 
             if (GUILayout.Button("Generate Preview") || (changed && _autoGenerate))
             {

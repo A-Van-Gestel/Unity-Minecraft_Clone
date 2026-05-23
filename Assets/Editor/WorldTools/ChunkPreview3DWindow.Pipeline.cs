@@ -34,11 +34,17 @@ namespace Editor.WorldTools
             int totalSize = _chunkRadius + 2;
             _totalGridSize = totalSize * totalSize;
 
+            int crosshairChunkX = Mathf.FloorToInt((float)_crosshairPos.x / VoxelData.ChunkWidth);
+            int crosshairChunkZ = Mathf.FloorToInt((float)_crosshairPos.z / VoxelData.ChunkWidth);
+
+            _gridStartX = crosshairChunkX - (_chunkRadius / 2 + 1);
+            _gridStartZ = crosshairChunkZ - (_chunkRadius / 2 + 1);
+
             for (int x = 0; x < totalSize; x++)
             {
                 for (int z = 0; z < totalSize; z++)
                 {
-                    ChunkCoord coord = new ChunkCoord(x, z);
+                    ChunkCoord coord = new ChunkCoord(_gridStartX + x, _gridStartZ + z);
                     GenerationJobData jobData = _pipelineRunner.ScheduleGeneration(coord);
                     _generationJobs.Add(coord, jobData);
                 }
@@ -136,7 +142,7 @@ namespace Editor.WorldTools
             {
                 for (int z = 0; z < totalSize; z++)
                 {
-                    ChunkCoord coord = new ChunkCoord(x, z);
+                    ChunkCoord coord = new ChunkCoord(_gridStartX + x, _gridStartZ + z);
                     LightingJobData? jobData = _pipelineRunner.ScheduleLighting(coord, _chunkMaps, _heightMaps);
                     if (jobData.HasValue)
                     {
@@ -262,7 +268,7 @@ namespace Editor.WorldTools
             {
                 for (int z = 1; z <= _chunkRadius; z++)
                 {
-                    ChunkCoord coord = new ChunkCoord(x, z);
+                    ChunkCoord coord = new ChunkCoord(_gridStartX + x, _gridStartZ + z);
                     Vector2Int voxelOrigin = coord.ToVoxelOrigin();
 
                     var result = _pipelineRunner.ScheduleMeshing(coord, voxelOrigin, _chunkMaps);

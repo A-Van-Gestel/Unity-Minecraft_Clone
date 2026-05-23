@@ -123,7 +123,7 @@ namespace Editor.Jobs
         private void EvalHeightmap(int gx, int gz, out byte r, out byte g, out byte b)
         {
             float heightF = BiomeBlender.CalculateBlendedTerrainHeight(
-                gx, gz, ref SelectionNoise, ref Biomes, ref MultiNoise, out _);
+                gx, gz, ref SelectionNoise, ref Biomes, ref MultiNoise, false, -1, out _);
             int height = (int)math.floor(heightF);
 
             if (ShowWaterLevel && height < SeaLevel)
@@ -151,7 +151,7 @@ namespace Editor.Jobs
             GetBiomeColorRGB(biomeIndex, out float br, out float bg, out float bb);
 
             float heightF = BiomeBlender.CalculateBlendedTerrainHeight(
-                gx, gz, ref SelectionNoise, ref Biomes, ref MultiNoise, out _);
+                gx, gz, ref SelectionNoise, ref Biomes, ref MultiNoise, false, -1, out _);
             float brightness = math.clamp(heightF / 100f, 0.3f, 1.0f);
 
             r = (byte)(br * brightness * 255f);
@@ -216,7 +216,7 @@ namespace Editor.Jobs
         private void EvalBorderFade(int gx, int gz, out byte r, out byte g, out byte b)
         {
             BiomeBlender.CalculateBlendedTerrainHeight(
-                gx, gz, ref SelectionNoise, ref Biomes, ref MultiNoise, out float borderFade);
+                gx, gz, ref SelectionNoise, ref Biomes, ref MultiNoise, false, -1, out float borderFade);
 
             float cellValue = SelectionNoise.GetNoise(gx, gz);
             int biomeIndex = math.clamp((int)math.floor(cellValue * BiomeCount), 0, BiomeCount - 1);

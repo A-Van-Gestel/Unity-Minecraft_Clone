@@ -28,7 +28,7 @@ namespace Legacy
         #region IChunkGenerator
 
         /// <inheritdoc />
-        public void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData)
+        public void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData, bool isSingleBiomeMode = false, StandardBiomeAttributes selectedBiome = null)
         {
             _seed = seed;
             _seaLevel = worldType.seaLevel;
