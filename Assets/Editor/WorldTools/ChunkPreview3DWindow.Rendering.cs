@@ -1,6 +1,8 @@
 using Data;
 using Helpers;
+using Unity.Burst;
 using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -22,6 +24,19 @@ namespace Editor.WorldTools
         /// </summary>
         private void ConvertMeshOutput(ChunkCoord chunkCoord, MeshDataJobOutput output)
         {
+            // Run a fast Burst job to adjust coordinate spaces from Chunk-Space to Section-Space.
+            // This modifies the data in-place efficiently.
+            PostProcessMeshJob postProcessJob = new PostProcessMeshJob
+            {
+                Vertices = output.Vertices,
+                OpaqueTris = output.Triangles,
+                TransparentTris = output.TransparentTriangles,
+                FluidTris = output.FluidTriangles,
+                Stats = output.SectionStats,
+                SectionHeight = ChunkMath.SECTION_SIZE,
+            };
+            postProcessJob.Schedule().Complete();
+
             // Center the preview grid around the origin
             float centerOffset = _chunkRadius * VoxelData.ChunkWidth * 0.5f;
             // Visible chunks start at index 1 (border at 0), so subtract 1 chunk worth
@@ -32,7 +47,8 @@ namespace Editor.WorldTools
             for (int s = 0; s < sectionCount; s++)
             {
                 MeshSectionStats stats = output.SectionStats[s];
-                if (stats.VertexCount == 0) continue;
+                int totalIndices = stats.OpaqueTriCount + stats.TransparentTriCount + stats.FluidTriCount;
+                if (stats.VertexCount == 0 || totalIndices == 0) continue;
 
                 Mesh mesh = new Mesh();
                 mesh.name = $"Preview_C{chunkCoord.X}_{chunkCoord.Z}_S{s}";
@@ -52,7 +68,6 @@ namespace Editor.WorldTools
                     stats.VertexCount, 3, flags);
 
                 // --- Index buffer with submeshes ---
-                int totalIndices = stats.OpaqueTriCount + stats.TransparentTriCount + stats.FluidTriCount;
                 mesh.SetIndexBufferParams(totalIndices, IndexFormat.UInt32);
 
                 int currentOffset = 0;
@@ -155,6 +170,56 @@ namespace Editor.WorldTools
                 {
                     _meshPreviewWidget.DrawMeshDirect(entry.Mesh, localToWorld,
                         _fluidMaterial != null ? _fluidMaterial : _opaqueMaterial, sub);
+                }
+            }
+        }
+
+        [BurstCompile]
+        private struct PostProcessMeshJob : IJob
+        {
+            public NativeList<Vector3> Vertices;
+            public NativeList<int> OpaqueTris;
+            public NativeList<int> TransparentTris;
+            public NativeList<int> FluidTris;
+
+            [ReadOnly]
+            public NativeArray<MeshSectionStats> Stats;
+
+            public int SectionHeight;
+
+            public void Execute()
+            {
+                // We iterate sections inside the job to avoid overhead of scheduling many tiny jobs
+                for (int i = 0; i < Stats.Length; i++)
+                {
+                    MeshSectionStats s = Stats[i];
+                    if (s.VertexCount == 0) continue;
+
+                    float yOffset = i * SectionHeight;
+                    int vertStart = s.VertexStartIndex;
+
+                    // 1. Adjust Vertices: Subtract section Y offset so they are local to the Section GameObject
+                    for (int v = 0; v < s.VertexCount; v++)
+                    {
+                        int index = vertStart + v;
+                        Vector3 pos = Vertices[index];
+                        pos.y -= yOffset;
+                        Vertices[index] = pos;
+                    }
+
+                    // 2. Adjust Indices: Relativize indices to start at 0 for this section
+                    int offset = -vertStart;
+                    AdjustIndices(OpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount, offset);
+                    AdjustIndices(TransparentTris, s.TransparentTriStartIndex, s.TransparentTriCount, offset);
+                    AdjustIndices(FluidTris, s.FluidTriStartIndex, s.FluidTriCount, offset);
+                }
+            }
+
+            private static void AdjustIndices(NativeList<int> indices, int start, int count, int offset)
+            {
+                for (int k = 0; k < count; k++)
+                {
+                    indices[start + k] += offset;
                 }
             }
         }
