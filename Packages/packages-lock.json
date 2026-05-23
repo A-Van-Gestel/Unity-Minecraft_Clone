@@ -7,7 +7,7 @@
       "dependencies": {
         "com.unity.ugui": "1.0.0"
       },
-      "hash": "b3cbe94fbc353815106b8286b99fff93043bf78a"
+      "hash": "4cfe5d2b162bde91db2a3a1465ad7705d734e62c"
     },
     "com.github-glitchenzo.nugetforunity": {
       "version": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
