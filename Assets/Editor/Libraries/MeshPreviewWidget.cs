@@ -127,6 +127,12 @@ namespace Editor.Libraries
 
             EditorPreviewMaterialUtility.DisposeCachedMaterials(ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
 
+            if (_planeMesh != null)
+            {
+                Object.DestroyImmediate(_planeMesh);
+                _planeMesh = null;
+            }
+
             _activePreviewMaterial = null;
         }
 
@@ -375,6 +381,45 @@ namespace Editor.Libraries
             Matrix4x4 finalMatrix = rotationMatrix * positionMatrix;
 
             _previewRenderUtility.DrawMesh(_wireCubeMesh, finalMatrix, _wireMaterial, 0, _previewPropertyBlock);
+        }
+
+        private Mesh _planeMesh;
+
+        /// <summary>
+        /// Draws a transparent plane within a custom drawing session.
+        /// </summary>
+        /// <param name="center">The center position of the plane relative to the preview pivot.</param>
+        /// <param name="size">The size dimensions of the plane (X and Z).</param>
+        /// <param name="color">The color of the plane (supports transparency via alpha).</param>
+        public void DrawTransparentPlane(Vector3 center, Vector2 size, Color color)
+        {
+            if (_previewRenderUtility == null) return;
+
+            if (_planeMesh == null)
+            {
+                _planeMesh = new Mesh();
+                _planeMesh.vertices = new[]
+                {
+                    new Vector3(-0.5f, 0, -0.5f), new Vector3(0.5f, 0, -0.5f),
+                    new Vector3(-0.5f, 0, 0.5f), new Vector3(0.5f, 0, 0.5f),
+                };
+                _planeMesh.SetIndices(new[] { 0, 2, 1, 2, 3, 1 }, MeshTopology.Triangles, 0);
+            }
+
+            if (_wireMaterial == null)
+            {
+                _wireMaterial = new Material(Shader.Find("Hidden/Internal-Colored"));
+            }
+
+            _previewPropertyBlock ??= new MaterialPropertyBlock();
+            _previewPropertyBlock.Clear();
+            _previewPropertyBlock.SetColor(s_color, color);
+
+            Matrix4x4 rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
+            Matrix4x4 positionMatrix = Matrix4x4.Translate(center) * Matrix4x4.Scale(new Vector3(size.x, 1, size.y));
+            Matrix4x4 finalMatrix = rotationMatrix * positionMatrix;
+
+            _previewRenderUtility.DrawMesh(_planeMesh, finalMatrix, _wireMaterial, 0, _previewPropertyBlock);
         }
     }
 }

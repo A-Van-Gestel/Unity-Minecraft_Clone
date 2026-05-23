@@ -45,6 +45,12 @@ namespace Editor.WorldTools
         private bool _syncWithPreviewWindow = true;
 
         [SerializeField]
+        private bool _showYPlane = true;
+
+        [SerializeField]
+        private bool _showSeaLevelPlane = true;
+
+        [SerializeField]
         private int3 _crosshairPos = new int3(0, 60, 0);
 
         [SerializeField]
@@ -297,41 +303,54 @@ namespace Editor.WorldTools
         {
             if (!_syncWithPreviewWindow) return;
 
-            bool changed = false;
+            bool needsRebuild = false;
             if (WorldGenPreviewSettings.Seed != _seed)
             {
                 _seed = WorldGenPreviewSettings.Seed;
-                changed = true;
+                needsRebuild = true;
             }
 
             if (WorldGenPreviewSettings.WorldType != null && WorldGenPreviewSettings.WorldType != _worldType)
             {
                 _worldType = WorldGenPreviewSettings.WorldType;
-                changed = true;
+                needsRebuild = true;
             }
 
+            bool needsRepaint = false;
             if (!WorldGenPreviewSettings.CrosshairPos.Equals(_crosshairPos))
             {
+                int oldChunkX = Mathf.FloorToInt((float)_crosshairPos.x / VoxelData.ChunkWidth);
+                int oldChunkZ = Mathf.FloorToInt((float)_crosshairPos.z / VoxelData.ChunkWidth);
+
                 _crosshairPos = WorldGenPreviewSettings.CrosshairPos;
-                changed = true;
+
+                int newChunkX = Mathf.FloorToInt((float)_crosshairPos.x / VoxelData.ChunkWidth);
+                int newChunkZ = Mathf.FloorToInt((float)_crosshairPos.z / VoxelData.ChunkWidth);
+
+                if (oldChunkX != newChunkX || oldChunkZ != newChunkZ)
+                {
+                    needsRebuild = true;
+                }
+
+                needsRepaint = true;
             }
 
             if (WorldGenPreviewSettings.IsSingleBiomeMode != _isSingleBiomeMode)
             {
                 _isSingleBiomeMode = WorldGenPreviewSettings.IsSingleBiomeMode;
-                changed = true;
+                needsRebuild = true;
             }
 
             if (WorldGenPreviewSettings.SelectedBiome != _selectedBiome)
             {
                 _selectedBiome = WorldGenPreviewSettings.SelectedBiome;
-                changed = true;
+                needsRebuild = true;
             }
 
-            if (changed)
+            if (needsRebuild || needsRepaint)
             {
                 Repaint();
-                if (_autoUpdate) StartPipeline();
+                if (_autoUpdate && needsRebuild) StartPipeline();
             }
         }
 

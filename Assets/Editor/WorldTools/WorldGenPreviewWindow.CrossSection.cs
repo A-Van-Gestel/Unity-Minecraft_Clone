@@ -233,8 +233,14 @@ namespace Editor.WorldTools
                 if (!_csLockZY) scrollChanged |= CrossSectionPanelHelper.HandlePanelScroll(zyRect, ref _crosshairPos, 1);
                 if (!_csLockXZ) scrollChanged |= CrossSectionPanelHelper.HandlePanelScroll(xzRect, ref _crosshairPos, 2);
 
-                if ((clickChanged || scrollChanged) && _autoGenerate)
-                    GenerateCrossSectionPreview();
+                if (clickChanged || scrollChanged)
+                {
+                    WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
+                    if (_autoGenerate)
+                    {
+                        GenerateCrossSectionPreview();
+                    }
+                }
 
                 // Info panel
                 DrawInfoPanel(infoRect);

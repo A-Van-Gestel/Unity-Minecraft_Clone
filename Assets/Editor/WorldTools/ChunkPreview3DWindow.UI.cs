@@ -122,14 +122,34 @@ namespace Editor.WorldTools
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             GUILayout.Label(new GUIContent("Crosshair", "The 3D point where chunks are generated around."), GUILayout.Width(60));
             GUILayout.Label("X", GUILayout.Width(12));
+            int oldChunkX = Mathf.FloorToInt((float)_crosshairPos.x / VoxelData.ChunkWidth);
+            int oldChunkZ = Mathf.FloorToInt((float)_crosshairPos.z / VoxelData.ChunkWidth);
+
             EditorGUI.BeginChangeCheck();
             _crosshairPos.x = EditorGUIHelper.IntFieldWithSteppers(_crosshairPos.x, int.MinValue, int.MaxValue);
+            GUILayout.Label("Z", GUILayout.Width(12));
+            _crosshairPos.z = EditorGUIHelper.IntFieldWithSteppers(_crosshairPos.z, int.MinValue, int.MaxValue);
+            bool crosshairXZChanged = EditorGUI.EndChangeCheck();
+
+            int newChunkX = Mathf.FloorToInt((float)_crosshairPos.x / VoxelData.ChunkWidth);
+            int newChunkZ = Mathf.FloorToInt((float)_crosshairPos.z / VoxelData.ChunkWidth);
+            bool crosshairChunkChanged = (oldChunkX != newChunkX) || (oldChunkZ != newChunkZ);
+
+            EditorGUI.BeginChangeCheck();
             _crosshairPos.y = EditorGUILayout.IntSlider(
                 new GUIContent("Y", "Vertical slice height."),
                 _crosshairPos.y, 0, VoxelData.ChunkHeight - 1);
-            GUILayout.Label("Z", GUILayout.Width(12));
-            _crosshairPos.z = EditorGUIHelper.IntFieldWithSteppers(_crosshairPos.z, int.MinValue, int.MaxValue);
-            bool crosshairChanged = EditorGUI.EndChangeCheck();
+            bool crosshairYChanged = EditorGUI.EndChangeCheck();
+            bool crosshairChanged = crosshairXZChanged || crosshairYChanged;
+
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+
+            // --- Row 4: View Toggles ---
+            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+            GUILayout.Label("Display:", GUILayout.Width(60));
+            _showYPlane = GUILayout.Toggle(_showYPlane, new GUIContent("Y-Level Plane", "Show the vertical slice plane."), EditorStyles.miniButton);
+            _showSeaLevelPlane = GUILayout.Toggle(_showSeaLevelPlane, new GUIContent("Sea Level Plane", "Show the sea level plane."), EditorStyles.miniButton);
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
@@ -140,7 +160,7 @@ namespace Editor.WorldTools
             {
                 StartPipeline();
             }
-            else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged || modeChanged || biomeChanged || crosshairChanged))
+            else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged || modeChanged || biomeChanged || crosshairChunkChanged))
             {
                 StartPipeline();
             }
@@ -164,6 +184,26 @@ namespace Editor.WorldTools
             _meshPreviewWidget.BeginDraw(viewportRect);
 
             DrawAllSectionMeshes();
+
+            float gridWidth = _chunkRadius * VoxelData.ChunkWidth;
+            Vector2 planeSize = new Vector2(gridWidth, gridWidth);
+
+            // Add a small offset to avoid z-fighting with block meshes
+            const float zFightOffset = 0.05f;
+
+            // Draw Crosshair Y Plane (Yellow)
+            if (_showYPlane)
+            {
+                float crosshairY = _crosshairPos.y - (VoxelData.ChunkHeight * 0.5f) + zFightOffset;
+                _meshPreviewWidget.DrawTransparentPlane(new Vector3(0, crosshairY, 0), planeSize, new Color(1f, 1f, 0f, 0.25f));
+            }
+
+            // Draw Sea Level Plane (Blue)
+            if (_showSeaLevelPlane && _worldType != null)
+            {
+                float seaLevelY = _worldType.seaLevel - (VoxelData.ChunkHeight * 0.5f) + zFightOffset;
+                _meshPreviewWidget.DrawTransparentPlane(new Vector3(0, seaLevelY, 0), planeSize, new Color(0f, 0.5f, 1f, 0.25f));
+            }
 
             _meshPreviewWidget.EndDraw(viewportRect);
         }
