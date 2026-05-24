@@ -551,9 +551,13 @@ public class Settings
     [InitializationField]
     public bool enableWater = true;
 
-    [SettingField(SettingsTab.World, Label = "Tree Generation (Structure Pass)", Order = 4)]
+    [SettingField(SettingsTab.World, Label = "Major Flora Generation", Order = 4)]
     [InitializationField]
     public bool enableMajorFloraPass = true;
+
+    [SettingField(SettingsTab.World, Label = "Minor Flora Generation", Order = 5)]
+    [InitializationField]
+    public bool enableMinorFloraPass = true;
 
     // --- Performance ---
     [SettingField(SettingsTab.Performance, Label = "Save Compression", Order = 0)]

@@ -455,12 +455,16 @@ namespace Jobs
                     float biomeZoneNoiseVal = biomeFloraZoneNoise.GetNoise(globalX, globalZ);
                     bool isInBiomeFloraZone = biomeZoneNoiseVal > 1f - biome.FloraZoneCoverage;
 
-                    // Process major flora pool entries
+                    // Process major and minor flora pool entries
                     int totalPoolEntries = biome.MajorFloraPoolCount + biome.MinorFloraPoolCount;
                     for (int poolPass = 0; poolPass < totalPoolEntries; poolPass++)
                     {
+                        bool isMajor = poolPass < biome.MajorFloraPoolCount;
+                        if (isMajor && !FeatureFlags.EnableMajorFlora) continue;
+                        if (!isMajor && !FeatureFlags.EnableMinorFlora) continue;
+
                         int entryIndex;
-                        if (poolPass < biome.MajorFloraPoolCount)
+                        if (isMajor)
                             entryIndex = biome.MajorFloraPoolStartIndex + poolPass;
                         else
                             entryIndex = biome.MinorFloraPoolStartIndex + (poolPass - biome.MajorFloraPoolCount);

@@ -64,6 +64,8 @@ namespace Editor.WorldTools
         private bool _csShowCaves = true;
         private bool _csShowLodes = true;
         private bool _csShowWater = true;
+        private bool _csShowMajorFlora = false;
+        private bool _csShowMinorFlora = false;
         private bool _csShowSeaLevelLine = true;
 
         private bool _csCenterCrosshair = true;
@@ -148,6 +150,8 @@ namespace Editor.WorldTools
             _csShowCaves = GUILayout.Toggle(_csShowCaves, new GUIContent("Caves", "Show cave carving (Cheese, Spaghetti, Noodle, WormCarver)."), EditorStyles.miniButton);
             _csShowLodes = GUILayout.Toggle(_csShowLodes, new GUIContent("Lodes", "Show ore vein replacement in stone."), EditorStyles.miniButton);
             _csShowWater = GUILayout.Toggle(_csShowWater, new GUIContent("Water", "Tint water blocks with depth-based color."), EditorStyles.miniButton);
+            _csShowMajorFlora = GUILayout.Toggle(_csShowMajorFlora, new GUIContent("Flora", "Show major flora spawn points (trees, cacti, boulders)."), EditorStyles.miniButton);
+            _csShowMinorFlora = GUILayout.Toggle(_csShowMinorFlora, new GUIContent("Grass", "Show minor flora spawn points (grass, flowers, decorations)."), EditorStyles.miniButton);
             _csShowSeaLevelLine = GUILayout.Toggle(_csShowSeaLevelLine, new GUIContent("Sea Level", "Draw a horizontal line at sea level on vertical panels."), EditorStyles.miniButton);
             _showChunkBorders = GUILayout.Toggle(_showChunkBorders, new GUIContent("Borders", "Draw chunk boundary lines on all panels."), EditorStyles.miniButton);
             _csCenterCrosshair = GUILayout.Toggle(_csCenterCrosshair, new GUIContent("Center", "Keep the crosshair centered in all panels. When off, panels auto-scroll if crosshair leaves the view."), EditorStyles.miniButton);

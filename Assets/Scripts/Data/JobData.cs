@@ -335,6 +335,14 @@ namespace Data
         [MarshalAs(UnmanagedType.U1)]
         public bool EnableWater;
 
+        /// <summary>When false, major flora structure markers (trees, cacti, boulders) are not emitted.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableMajorFlora;
+
+        /// <summary>When false, minor flora structure markers (grass, flowers, decorations) are not emitted.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableMinorFlora;
+
         /// <summary>
         /// Returns feature flags with all passes enabled.
         /// </summary>
@@ -343,6 +351,8 @@ namespace Data
             EnableCaves = true,
             EnableLodes = true,
             EnableWater = true,
+            EnableMajorFlora = true,
+            EnableMinorFlora = true,
         };
     }
 

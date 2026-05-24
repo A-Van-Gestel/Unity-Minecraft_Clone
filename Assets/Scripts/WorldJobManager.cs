@@ -81,6 +81,8 @@ public class WorldJobManager : IDisposable
             EnableCaves = settings.enableCaves,
             EnableLodes = settings.enableLodes,
             EnableWater = settings.enableWater,
+            EnableMajorFlora = settings.enableMajorFloraPass,
+            EnableMinorFlora = settings.enableMinorFloraPass,
         };
     }
 

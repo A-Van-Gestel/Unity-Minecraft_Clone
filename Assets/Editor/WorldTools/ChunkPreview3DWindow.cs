@@ -75,6 +75,12 @@ namespace Editor.WorldTools
         private bool _enableWater = true;
 
         [SerializeField]
+        private bool _enableMajorFlora = true;
+
+        [SerializeField]
+        private bool _enableMinorFlora = true;
+
+        [SerializeField]
         private int3 _crosshairPos = new int3(0, 60, 0);
 
         [SerializeField]
@@ -418,6 +424,8 @@ namespace Editor.WorldTools
                 EnableCaves = _enableCaves,
                 EnableLodes = _enableLodes,
                 EnableWater = _enableWater,
+                EnableMajorFlora = _enableMajorFlora,
+                EnableMinorFlora = _enableMinorFlora,
             };
 
             ScheduleAllGeneration();

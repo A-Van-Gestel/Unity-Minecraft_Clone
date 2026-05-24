@@ -93,6 +93,14 @@ namespace Editor.WorldTools
                 _enableWater,
                 new GUIContent("Water", "Enable water fill below sea level."),
                 EditorStyles.toolbarButton, GUILayout.Width(46));
+            _enableMajorFlora = GUILayout.Toggle(
+                _enableMajorFlora,
+                new GUIContent("Flora", "Enable major flora structures (trees, cacti, boulders)."),
+                EditorStyles.toolbarButton, GUILayout.Width(40));
+            _enableMinorFlora = GUILayout.Toggle(
+                _enableMinorFlora,
+                new GUIContent("Grass", "Enable minor flora (grass, flowers, decorations)."),
+                EditorStyles.toolbarButton, GUILayout.Width(42));
             bool generationToggleChanged = EditorGUI.EndChangeCheck();
 
             _syncWithPreviewWindow = GUILayout.Toggle(

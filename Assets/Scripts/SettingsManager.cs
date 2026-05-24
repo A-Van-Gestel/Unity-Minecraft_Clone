@@ -192,14 +192,24 @@ public class Settings
     public bool enableWater = true;
 
     /// <summary>
-    /// If true, enables the structure pass of world generation (e.g., trees and large flora).
+    /// If true, major flora structures (trees, cacti, boulders) are placed during generation.
     /// </summary>
-    [SettingField(SettingsTab.World, Label = "Tree Generation (Structure Pass)", Order = 4)]
+    [SettingField(SettingsTab.World, Label = "Major Flora Generation", Order = 4)]
     [InitializationField]
-    [Tooltip("Enables the structure pass for world generation.\n\n" +
-             "Includes: Trees, cacti, and other large multi-block flora.\n\n" +
-             TooltipTags.Note + "Currently unused.")]
+    [Tooltip("Enables major flora structure placement during world generation.\n\n" +
+             "Includes: Trees, cacti, boulders, and other large multi-block structures.\n\n" +
+             TooltipTags.Note + "Requires a new world or unexplored chunks to take effect.")]
     public bool enableMajorFloraPass = true;
+
+    /// <summary>
+    /// If true, minor flora (grass, flowers, decorations) are placed during generation.
+    /// </summary>
+    [SettingField(SettingsTab.World, Label = "Minor Flora Generation", Order = 5)]
+    [InitializationField]
+    [Tooltip("Enables minor flora placement during world generation.\n\n" +
+             "Includes: Grass, flowers, and other small single-block decorations.\n\n" +
+             TooltipTags.Note + "Requires a new world or unexplored chunks to take effect.")]
+    public bool enableMinorFloraPass = true;
 
     #endregion
 
