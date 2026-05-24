@@ -14,6 +14,7 @@ using Unity.Collections;
 using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
+using Random = Unity.Mathematics.Random;
 
 namespace Editor.WorldTools
 {
@@ -367,6 +368,8 @@ namespace Editor.WorldTools
                 ShowCaves = _csShowCaves,
                 ShowLodes = _csShowLodes,
                 ShowWater = _csShowWater,
+                ShowMajorFlora = _csShowMajorFlora,
+                ShowMinorFlora = _csShowMinorFlora,
                 XZQuality = _csXZQuality,
                 SkipXY = _csLockXY,
                 SkipZY = _csLockZY,
@@ -395,6 +398,7 @@ namespace Editor.WorldTools
             public int SeaLevel;
             public int ForceBiomeIdx;
             public bool ShowCaves, ShowLodes, ShowWater;
+            public bool ShowMajorFlora, ShowMinorFlora;
             public XZQuality XZQuality;
             public bool SkipXY, SkipZY, SkipXZ;
         }
@@ -412,6 +416,7 @@ namespace Editor.WorldTools
             int span = p.Span;
             const int chunkHeight = VoxelData.ChunkHeight;
             ushort[] crosshairColumn = null;
+            bool showAnyFlora = p.ShowMajorFlora || p.ShowMinorFlora;
 
             // --- X-Y (Front) — iterate X at fixed Z ---
             if (!p.SkipXY)
@@ -429,9 +434,18 @@ namespace Editor.WorldTools
                     GetWormMaskForColumn(gx, p.CrosshairPos.z, wormMasks, out NativeBitArray mask, out int lx, out int lz);
 
                     ushort[] column = EvaluateColumn(gx, p.CrosshairPos.z, p.SeaLevel, p.ForceBiomeIdx,
-                        p.ShowCaves, p.ShowLodes, lx, lz, ref mask, ref data);
+                        p.ShowCaves, p.ShowLodes, lx, lz, ref mask, ref data,
+                        out int floraSurfaceY, out int floraBiomeIdx);
 
                     WriteColumnToPixels(column, pixels, col, span, chunkHeight, p.ShowWater, p.SeaLevel);
+
+                    if (showAnyFlora && floraSurfaceY >= 0)
+                    {
+                        int spawnY = CheckFloraSpawnPoint(gx, p.CrosshairPos.z, floraSurfaceY, p.SeaLevel,
+                            floraBiomeIdx, _seed, p.ShowMajorFlora, p.ShowMinorFlora, ref data, out bool isMajor);
+                        if (spawnY >= 0)
+                            pixels[spawnY * span + col] = isMajor ? s_majorFloraMarkerColor : s_minorFloraMarkerColor;
+                    }
 
                     if (gx == p.CrosshairPos.x)
                         crosshairColumn = column;
@@ -458,9 +472,18 @@ namespace Editor.WorldTools
                     GetWormMaskForColumn(p.CrosshairPos.x, gz, wormMasks, out NativeBitArray mask, out int lx, out int lz);
 
                     ushort[] column = EvaluateColumn(p.CrosshairPos.x, gz, p.SeaLevel, p.ForceBiomeIdx,
-                        p.ShowCaves, p.ShowLodes, lx, lz, ref mask, ref data);
+                        p.ShowCaves, p.ShowLodes, lx, lz, ref mask, ref data,
+                        out int floraSurfaceY, out int floraBiomeIdx);
 
                     WriteColumnToPixels(column, pixels, col, span, chunkHeight, p.ShowWater, p.SeaLevel);
+
+                    if (showAnyFlora && floraSurfaceY >= 0)
+                    {
+                        int spawnY = CheckFloraSpawnPoint(p.CrosshairPos.x, gz, floraSurfaceY, p.SeaLevel,
+                            floraBiomeIdx, _seed, p.ShowMajorFlora, p.ShowMinorFlora, ref data, out bool isMajor);
+                        if (spawnY >= 0)
+                            pixels[spawnY * span + col] = isMajor ? s_majorFloraMarkerColor : s_minorFloraMarkerColor;
+                    }
                 }
 
                 texZY.SetPixels(pixels);
@@ -486,10 +509,19 @@ namespace Editor.WorldTools
                         GetWormMaskForColumn(gx, gz, null, out _, out int lx, out int lz);
 
                         ushort[] column = EvaluateColumn(gx, gz, p.SeaLevel, p.ForceBiomeIdx,
-                            p.ShowCaves, p.ShowLodes, lx, lz, ref emptyMask, ref data);
+                            p.ShowCaves, p.ShowLodes, lx, lz, ref emptyMask, ref data,
+                            out int floraSurfaceY, out int floraBiomeIdx);
 
                         Color color = GetBlockColor(column[math.clamp(targetY, 0, chunkHeight - 1)],
                             targetY, chunkHeight, p.ShowWater, p.SeaLevel);
+
+                        if (showAnyFlora && floraSurfaceY >= 0)
+                        {
+                            int spawnY = CheckFloraSpawnPoint(gx, gz, floraSurfaceY, p.SeaLevel,
+                                floraBiomeIdx, _seed, p.ShowMajorFlora, p.ShowMinorFlora, ref data, out bool isMajor);
+                            if (spawnY >= 0)
+                                color = isMajor ? s_majorFloraMarkerColor : s_minorFloraMarkerColor;
+                        }
 
                         for (int dz = 0; dz < step && zCol + dz < span; dz++)
                         for (int dx = 0; dx < step && xCol + dx < span; dx++)
@@ -505,6 +537,9 @@ namespace Editor.WorldTools
         }
 
         #endregion
+
+        private static readonly Color s_majorFloraMarkerColor = new Color(1f, 0.2f, 0.8f, 1f);
+        private static readonly Color s_minorFloraMarkerColor = new Color(0.2f, 1f, 0.6f, 1f);
 
         #region Generation Helpers
 
@@ -593,6 +628,135 @@ namespace Editor.WorldTools
                 m.Dispose();
         }
 
+        /// <summary>
+        /// Checks whether a column is elected as a flora spawn point for any structure pool entry.
+        /// Returns the Y of the spawn point (surface block), or -1 if no election.
+        /// </summary>
+        /// <param name="isMajorHit">True if the elected entry is from the major flora pool.</param>
+        private static int CheckFloraSpawnPoint(
+            int globalX, int globalZ, int surfaceY, int seaLevel,
+            int biomeIndex, int seed,
+            bool showMajor, bool showMinor,
+            ref CrossSectionNativeData data,
+            out bool isMajorHit)
+        {
+            isMajorHit = false;
+            if (surfaceY < seaLevel) return -1;
+
+            StandardBiomeAttributesJobData biome = data.Biomes[biomeIndex];
+
+            FastNoiseLite biomeFloraZoneNoise = data.FloraZoneNoises[biomeIndex];
+            float biomeZoneNoiseVal = biomeFloraZoneNoise.GetNoise(globalX, globalZ);
+            bool isInBiomeFloraZone = biomeZoneNoiseVal > 1f - biome.FloraZoneCoverage;
+
+            int totalPoolEntries = biome.MajorFloraPoolCount + biome.MinorFloraPoolCount;
+            for (int poolPass = 0; poolPass < totalPoolEntries; poolPass++)
+            {
+                bool isMajor = poolPass < biome.MajorFloraPoolCount;
+                if (isMajor && !showMajor) continue;
+                if (!isMajor && !showMinor) continue;
+
+                int entryIndex;
+                if (isMajor)
+                    entryIndex = biome.MajorFloraPoolStartIndex + poolPass;
+                else
+                    entryIndex = biome.MinorFloraPoolStartIndex + (poolPass - biome.MajorFloraPoolCount);
+
+                StructurePoolEntryJobData entry = data.AllStructurePoolEntries[entryIndex];
+
+                if (surfaceY < entry.MinPlacementHeight || surfaceY > entry.MaxPlacementHeight)
+                    continue;
+
+                if (entry.UseFloraZone)
+                {
+                    if (entry.FloraZoneNoiseIndex >= 0)
+                    {
+                        float entryZoneNoiseVal = data.EntryFloraZoneNoises[entry.FloraZoneNoiseIndex]
+                            .GetNoise(globalX, globalZ);
+                        if (entryZoneNoiseVal <= 1f - entry.FloraZoneCoverage)
+                            continue;
+                    }
+                    else
+                    {
+                        if (!isInBiomeFloraZone)
+                            continue;
+                    }
+                }
+
+                int spacing = math.max(1, entry.Spacing);
+                int cellX = (int)math.floor((float)globalX / spacing);
+                int cellZ = (int)math.floor((float)globalZ / spacing);
+
+                uint cellHash = math.hash(new int4(cellX, cellZ, seed, entryIndex));
+                Random cellRandom = new Random(math.max(1u, cellHash));
+
+                int edgePadding;
+                if (entry.Padding < 0)
+                    edgePadding = spacing >= 5 ? 1 : 0;
+                else
+                    edgePadding = math.clamp(entry.Padding, 0, (spacing - 1) / 2);
+
+                int innerMinX = cellX * spacing + edgePadding;
+                int innerMaxX = cellX * spacing + spacing - edgePadding;
+                int innerMinZ = cellZ * spacing + edgePadding;
+                int innerMaxZ = cellZ * spacing + spacing - edgePadding;
+
+                int targetX = cellRandom.NextInt(innerMinX, innerMaxX);
+                int targetZ = cellRandom.NextInt(innerMinZ, innerMaxZ);
+
+                if (globalX == targetX && globalZ == targetZ)
+                {
+                    if (cellRandom.NextFloat() <= entry.Chance)
+                    {
+                        isMajorHit = isMajor;
+                        return surfaceY;
+                    }
+                }
+            }
+
+            return -1;
+        }
+
+        private static int CountFloraZoneOverrides(StructurePoolEntry[] pool)
+        {
+            if (pool == null) return 0;
+            int count = 0;
+            for (int i = 0; i < pool.Length; i++)
+            {
+                if (pool[i].useFloraZone && pool[i].useOverrideFloraZoneNoise)
+                    count++;
+            }
+
+            return count;
+        }
+
+        private StructurePoolEntryJobData BuildPoolEntryJobData(
+            ref StructurePoolEntry entry, NativeArray<FastNoiseLite> entryFloraNoises, ref int currentIdx)
+        {
+            int floraNoiseIndex = -1;
+            float floraZoneCoverage = 0f;
+
+            if (entry.useFloraZone && entry.useOverrideFloraZoneNoise)
+            {
+                floraNoiseIndex = currentIdx;
+                entryFloraNoises[currentIdx] = FastNoiseFactory.CreateNoiseFromConfig(entry.overrideFloraZoneNoise, _seed);
+                floraZoneCoverage = entry.overrideFloraZoneCoverage;
+                currentIdx++;
+            }
+
+            return new StructurePoolEntryJobData
+            {
+                Spacing = entry.spacing,
+                Padding = entry.padding,
+                Chance = entry.chance,
+                MinPlacementHeight = entry.minPlacementHeight,
+                MaxPlacementHeight = entry.maxPlacementHeight,
+                UseFloraZone = entry.useFloraZone,
+                FloraZoneNoiseIndex = floraNoiseIndex,
+                FloraZoneCoverage = floraZoneCoverage,
+            };
+        }
+
         #endregion
 
         #region Data Building
@@ -611,6 +775,11 @@ namespace Editor.WorldTools
             public NativeArray<StandardLodeJobData> AllLodes;
             public NativeArray<FastNoiseLite> LodeNoises;
             public FastNoiseLite SelectionNoise;
+
+            // Structure pool data for flora spawn point markers
+            public NativeArray<StructurePoolEntryJobData> AllStructurePoolEntries;
+            public NativeArray<FastNoiseLite> FloraZoneNoises;
+            public NativeArray<FastNoiseLite> EntryFloraZoneNoises;
         }
 
         private StandardBiomeAttributes[] GetAllStandardBiomes()
@@ -645,11 +814,16 @@ namespace Editor.WorldTools
             data.StrataDepthNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Persistent);
 
             int totalCaves = 0, totalLodes = 0, totalLayers = 0;
+            int totalPoolEntries = 0, totalFloraZoneOverrides = 0;
             foreach (StandardBiomeAttributes b in standardBiomes)
             {
                 totalCaves += b.caveLayers?.Length ?? 0;
                 totalLodes += b.lodes?.Length ?? 0;
                 totalLayers += b.terrainLayers?.Length ?? 0;
+                totalPoolEntries += b.majorFloraPool?.Length ?? 0;
+                totalPoolEntries += b.minorFloraPool?.Length ?? 0;
+                totalFloraZoneOverrides += CountFloraZoneOverrides(b.majorFloraPool);
+                totalFloraZoneOverrides += CountFloraZoneOverrides(b.minorFloraPool);
             }
 
             data.AllCaveLayers = new NativeArray<StandardCaveLayerJobData>(totalCaves, Allocator.Persistent);
@@ -658,8 +832,11 @@ namespace Editor.WorldTools
             data.AllLodes = new NativeArray<StandardLodeJobData>(totalLodes, Allocator.Persistent);
             data.LodeNoises = new NativeArray<FastNoiseLite>(totalLodes, Allocator.Persistent);
             data.AllTerrainLayers = new NativeArray<StandardTerrainLayerJobData>(totalLayers, Allocator.Persistent);
+            data.AllStructurePoolEntries = new NativeArray<StructurePoolEntryJobData>(totalPoolEntries, Allocator.Persistent);
+            data.FloraZoneNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Persistent);
+            data.EntryFloraZoneNoises = new NativeArray<FastNoiseLite>(totalFloraZoneOverrides, Allocator.Persistent);
 
-            int caveIdx = 0, lodeIdx = 0, layerIdx = 0;
+            int caveIdx = 0, lodeIdx = 0, layerIdx = 0, poolIdx = 0, entryFloraIdx = 0;
 
             for (int i = 0; i < biomeCount; i++)
             {
@@ -667,6 +844,8 @@ namespace Editor.WorldTools
                 int caveCount = biome.caveLayers?.Length ?? 0;
                 int lodeCount = biome.lodes?.Length ?? 0;
                 int layerCount = biome.terrainLayers?.Length ?? 0;
+                int majorPoolCount = biome.majorFloraPool?.Length ?? 0;
+                int minorPoolCount = biome.minorFloraPool?.Length ?? 0;
 
                 data.Biomes[i] = new StandardBiomeAttributesJobData
                 {
@@ -678,6 +857,10 @@ namespace Editor.WorldTools
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
                     UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
                     FloraZoneCoverage = biome.floraZoneCoverage,
+                    MajorFloraPoolStartIndex = poolIdx,
+                    MajorFloraPoolCount = majorPoolCount,
+                    MinorFloraPoolStartIndex = poolIdx + majorPoolCount,
+                    MinorFloraPoolCount = minorPoolCount,
                     TerrainLayerStartIndex = layerIdx,
                     TerrainLayerCount = layerCount,
                     LodeStartIndex = lodeIdx,
@@ -707,6 +890,25 @@ namespace Editor.WorldTools
                     data.AllLodes[lodeIdx + j] = new StandardLodeJobData(biome.lodes[j]);
                     data.LodeNoises[lodeIdx + j] = FastNoiseFactory.CreateNoiseFromConfig(biome.lodes[j].noiseConfig, _seed);
                 }
+
+                // Flatten structure pool entries
+                for (int j = 0; j < majorPoolCount; j++)
+                {
+                    StructurePoolEntry entry = biome.majorFloraPool[j];
+                    data.AllStructurePoolEntries[poolIdx] = BuildPoolEntryJobData(
+                        ref entry, data.EntryFloraZoneNoises, ref entryFloraIdx);
+                    poolIdx++;
+                }
+
+                for (int j = 0; j < minorPoolCount; j++)
+                {
+                    StructurePoolEntry entry = biome.minorFloraPool[j];
+                    data.AllStructurePoolEntries[poolIdx] = BuildPoolEntryJobData(
+                        ref entry, data.EntryFloraZoneNoises, ref entryFloraIdx);
+                    poolIdx++;
+                }
+
+                data.FloraZoneNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.floraZoneNoiseConfig, _seed);
 
                 // Build Multi-Noise arrays
                 FastNoiseConfig contCfg = biome.continentalnessNoiseConfig;
@@ -767,6 +969,9 @@ namespace Editor.WorldTools
             if (data.AllLodes.IsCreated) data.AllLodes.Dispose();
             if (data.LodeNoises.IsCreated) data.LodeNoises.Dispose();
             if (data.AllTerrainLayers.IsCreated) data.AllTerrainLayers.Dispose();
+            if (data.AllStructurePoolEntries.IsCreated) data.AllStructurePoolEntries.Dispose();
+            if (data.FloraZoneNoises.IsCreated) data.FloraZoneNoises.Dispose();
+            if (data.EntryFloraZoneNoises.IsCreated) data.EntryFloraZoneNoises.Dispose();
         }
 
         #endregion
@@ -780,10 +985,13 @@ namespace Editor.WorldTools
             int globalX, int globalZ, int seaLevel,
             int forceBiomeIdx, bool showCaves, bool showLodes,
             int localX, int localZ, ref NativeBitArray wormMask,
-            ref CrossSectionNativeData data)
+            ref CrossSectionNativeData data,
+            out int floraSurfaceY, out int floraBiomeIndex)
         {
             const int chunkHeight = VoxelData.ChunkHeight;
             ushort[] column = new ushort[chunkHeight];
+            floraSurfaceY = -1;
+            bool floraHighestBlockFound = false;
 
             int biomeIndex;
             if (forceBiomeIdx >= 0)
@@ -794,6 +1002,7 @@ namespace Editor.WorldTools
                 biomeIndex = math.clamp((int)math.floor(biomeNoise * data.Biomes.Length), 0, data.Biomes.Length - 1);
             }
 
+            floraBiomeIndex = biomeIndex;
             StandardBiomeAttributesJobData biome = data.Biomes[biomeIndex];
             int surfaceBiomeIndex = biomeIndex;
             StandardBiomeAttributesJobData surfaceBiome = biome;
@@ -836,6 +1045,7 @@ namespace Editor.WorldTools
             {
                 // ReSharper disable once RedundantAssignment
                 ushort voxelValue = BlockIDs.Air;
+                bool isExposedSurface = false;
                 float density = baseTerrainHeight - y;
 
                 if (biome.Enable3DDensity && y >= bandLow && y <= bandHigh)
@@ -853,7 +1063,7 @@ namespace Editor.WorldTools
                 }
                 else if (density > 0f)
                 {
-                    bool isExposedSurface = (previousDensity <= 0f);
+                    isExposedSurface = (previousDensity <= 0f);
 
                     if (isExposedSurface)
                     {
@@ -968,6 +1178,24 @@ namespace Editor.WorldTools
                                 voxelValue = lode.BlockID;
                         }
                     }
+                }
+
+                // Track the flora-eligible surface Y, matching the generation job's guard:
+                // density transition (exposed surface) + post-cave non-air/non-fluid + first occurrence only.
+                if (!floraHighestBlockFound && isExposedSurface && y >= seaLevel &&
+                    voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Water)
+                {
+                    floraSurfaceY = y;
+                }
+
+                // Mirror the generation job's heightmap tracking: the job uses IsLightObstructing
+                // (Opacity > 0), but BlockTypeJobData is not available here. Using != Air is equivalent
+                // for all current generation-placed blocks (stone, water, bedrock, lodes — all have
+                // Opacity > 0). Would diverge only if a zero-opacity non-Air block were added to a
+                // biome's terrain layers or lode config.
+                if (!floraHighestBlockFound && voxelValue != BlockIDs.Air)
+                {
+                    floraHighestBlockFound = true;
                 }
 
                 column[y] = voxelValue;
