@@ -269,6 +269,7 @@ namespace Editor.WorldTools
             _meshJobs.Clear();
 
             int visiblePerAxis = _chunkRadius * 2;
+            MeshClipBounds clip = BuildClipBounds();
 
             // Only mesh the visible inner chunks (skip border)
             for (int x = 1; x <= visiblePerAxis; x++)
@@ -278,8 +279,7 @@ namespace Editor.WorldTools
                     ChunkCoord coord = new ChunkCoord(_gridStartX + x, _gridStartZ + z);
                     Vector2Int voxelOrigin = coord.ToVoxelOrigin();
 
-                    int maxY = _enableYClip ? _crosshairPos.y : -1;
-                    var result = _pipelineRunner.ScheduleMeshing(coord, voxelOrigin, _chunkMaps, maxY);
+                    var result = _pipelineRunner.ScheduleMeshing(coord, voxelOrigin, _chunkMaps, clip);
                     if (result.HasValue)
                     {
                         _meshJobs.Add(coord, result.Value);
@@ -327,6 +327,16 @@ namespace Editor.WorldTools
             }
 
             Repaint();
+        }
+
+        private MeshClipBounds BuildClipBounds()
+        {
+            return new MeshClipBounds
+            {
+                MaxX = _enableXClip ? _crosshairPos.x : int.MaxValue,
+                MaxY = _enableYClip ? _crosshairPos.y : int.MaxValue,
+                MaxZ = _enableZClip ? _crosshairPos.z : int.MaxValue,
+            };
         }
 
         private void ComputeGlobalMaxBlockHeight()

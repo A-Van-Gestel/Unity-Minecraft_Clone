@@ -24,11 +24,10 @@ namespace Jobs
         public NativeArray<BlockTypeJobData> BlockTypes;
 
         /// <summary>
-        /// When zero or positive, voxels at Y &gt;= this value are treated as air.
-        /// The mesher generates exposed faces at the cut boundary.
-        /// Set to -1 to disable clipping (full chunk height).
+        /// Axis-aligned clip bounds. Voxels at coordinates &gt;= each Max value are treated as air.
+        /// Use <see cref="MeshClipBounds.Disabled"/> for no clipping.
         /// </summary>
-        public int MaxVisibleY;
+        public MeshClipBounds ClipBounds;
 
         // --- CUSTOM MESH DATA ---
         [ReadOnly]
@@ -85,7 +84,9 @@ namespace Jobs
 
         // --- INTERNAL TRACKING ---
         private int _vertexIndex;
-        private int _effectiveMaxY;
+        private int _clipMaxY;
+        private int _clipLocalMaxX;
+        private int _clipLocalMaxZ;
 
         // --- HELPERS ---
         private static readonly Vector3Int[] s_fluidNeighborOffsets =
@@ -102,16 +103,33 @@ namespace Jobs
         public void Execute()
         {
             _vertexIndex = 0;
-            _effectiveMaxY = MaxVisibleY >= 0 ? MaxVisibleY : VoxelData.ChunkHeight;
+
+            // Precompute effective clip bounds once per job execution.
+            // Y has no vertical neighbor chunks, so the disabled fallback is ChunkHeight (128).
+            // X/Z neighbor lookups reach pos 16/-1, so disabled must exceed that range.
+            _clipMaxY = ClipBounds.MaxY < int.MaxValue ? ClipBounds.MaxY : VoxelData.ChunkHeight;
+            int originX = (int)ChunkPosition.x;
+            int originZ = (int)ChunkPosition.z;
+            _clipLocalMaxX = ClipBounds.MaxX < int.MaxValue ? ClipBounds.MaxX - originX : int.MaxValue;
+            _clipLocalMaxZ = ClipBounds.MaxZ < int.MaxValue ? ClipBounds.MaxZ - originZ : int.MaxValue;
+
             const int sectionHeight = 16;
             const int sectionCount = VoxelData.ChunkHeight / sectionHeight;
+
+            // Early-out: if the chunk is entirely beyond any clip axis, emit empty stats.
+            if (_clipMaxY <= 0 || _clipLocalMaxX <= 0 || _clipLocalMaxZ <= 0)
+            {
+                for (int s = 0; s < sectionCount; s++)
+                    Output.SectionStats[s] = default;
+                return;
+            }
 
             for (int s = 0; s < sectionCount; s++)
             {
                 int startY = s * sectionHeight;
 
                 // Skip sections entirely above the visible Y limit.
-                if (startY >= _effectiveMaxY)
+                if (startY >= _clipMaxY)
                 {
                     Output.SectionStats[s] = default;
                     continue;
@@ -122,7 +140,6 @@ namespace Jobs
                 // OPTIMIZATION: Skip completely empty sections.
                 if (section.IsEmpty)
                 {
-                    // Record empty stats for this section so the renderer knows to disable it.
                     Output.SectionStats[s] = default;
                     continue;
                 }
@@ -133,13 +150,15 @@ namespace Jobs
                 int startTrans = Output.TransparentTriangles.Length;
                 int startFluid = Output.FluidTriangles.Length;
 
-                int endY = math.min(startY + sectionHeight, _effectiveMaxY);
+                int endY = math.min(startY + sectionHeight, _clipMaxY);
                 bool isSectionFullyVisible = endY == startY + sectionHeight;
+                bool isXZFullyVisible = _clipLocalMaxX >= VoxelData.ChunkWidth
+                                     && _clipLocalMaxZ >= VoxelData.ChunkWidth;
 
                 // OPTIMIZATION: "Shell" Iteration for fully solid sections.
-                // Only valid when the full section is visible — the MaxVisibleY cut
-                // creates a new boundary that the shell optimization does not cover.
-                if (section.IsFullySolid && isSectionFullyVisible)
+                // Only valid when the full section is visible on all axes — any clip
+                // boundary creates internal faces that the shell optimization does not cover.
+                if (section.IsFullySolid && isSectionFullyVisible && isXZFullyVisible)
                 {
                     IterateSolidSection(startY, endY);
                 }
@@ -214,11 +233,13 @@ namespace Jobs
             // Memory Layout: Index = x + (y * 16) + (z * 256)
             // Iterating X innermost ensures we access the NativeArray sequentially (0, 1, 2...),
             // which maximizes CPU cache hits.
-            for (int z = 0; z < VoxelData.ChunkWidth; z++)
+            int xEnd = math.min(VoxelData.ChunkWidth, _clipLocalMaxX);
+            int zEnd = math.min(VoxelData.ChunkWidth, _clipLocalMaxZ);
+            for (int z = 0; z < zEnd; z++)
             {
                 for (int y = startY; y < endY; y++)
                 {
-                    for (int x = 0; x < VoxelData.ChunkWidth; x++)
+                    for (int x = 0; x < xEnd; x++)
                     {
                         ProcessVoxel(x, y, z);
                     }
@@ -641,7 +662,8 @@ namespace Jobs
         /// <returns>A VoxelState if the position is in a loaded neighbor chunk, otherwise null.</returns>
         private VoxelState? GetVoxelStateFromLocalPos(Vector3Int pos)
         {
-            if (pos.y < 0 || pos.y >= _effectiveMaxY) return null;
+            if (pos.y < 0 || pos.y >= _clipMaxY ||
+                pos.x >= _clipLocalMaxX || pos.z >= _clipLocalMaxZ) return null;
 
             // Fast path for internal voxels
             if (pos.x >= 0 && pos.x < VoxelData.ChunkWidth &&

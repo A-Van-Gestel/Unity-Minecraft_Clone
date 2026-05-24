@@ -39,7 +39,7 @@ namespace Editor.WorldTools
         private bool _enableLighting = true;
 
         [SerializeField]
-        private bool _autoUpdate;
+        private bool _autoUpdate = true;
 
         [SerializeField]
         private bool _syncWithPreviewWindow = true;
@@ -48,7 +48,13 @@ namespace Editor.WorldTools
         private bool _showYPlane = false;
 
         [SerializeField]
+        private bool _enableXClip = false;
+
+        [SerializeField]
         private bool _enableYClip = false;
+
+        [SerializeField]
+        private bool _enableZClip = false;
 
         [SerializeField]
         private bool _showSeaLevelPlane = false;
@@ -359,10 +365,18 @@ namespace Editor.WorldTools
                 needsRebuild = true;
             }
 
+            bool needsRemesh = !needsRebuild && needsRepaint
+                                             && (_enableXClip || _enableYClip || _enableZClip);
+
             if (needsRebuild || needsRepaint)
             {
                 Repaint();
                 if (_autoUpdate && needsRebuild) StartPipeline();
+                else if (_autoUpdate && needsRemesh)
+                {
+                    RemeshOnly();
+                    _lastClipY = _crosshairPos.y;
+                }
             }
         }
 

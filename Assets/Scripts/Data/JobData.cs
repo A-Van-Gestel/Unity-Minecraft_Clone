@@ -315,4 +315,31 @@ namespace Data
         public bool IsEmpty;
         public bool IsFullySolid;
     }
+
+    /// <summary>
+    /// Axis-aligned clip bounds for <see cref="Jobs.MeshGenerationJob"/>. Voxels at coordinates
+    /// greater than or equal to each Max value are treated as air during face culling.
+    /// Use <see cref="Disabled"/> for no clipping (all axes set to <see cref="int.MaxValue"/>).
+    /// </summary>
+    public struct MeshClipBounds
+    {
+        /// <summary>Global X coordinate at or above which voxels are treated as air.</summary>
+        public int MaxX;
+
+        /// <summary>World Y coordinate at or above which voxels are treated as air.</summary>
+        public int MaxY;
+
+        /// <summary>Global Z coordinate at or above which voxels are treated as air.</summary>
+        public int MaxZ;
+
+        /// <summary>
+        /// Returns clip bounds with all axes disabled (set to <see cref="int.MaxValue"/>).
+        /// </summary>
+        public static MeshClipBounds Disabled => new MeshClipBounds
+        {
+            MaxX = int.MaxValue,
+            MaxY = int.MaxValue,
+            MaxZ = int.MaxValue,
+        };
+    }
 }

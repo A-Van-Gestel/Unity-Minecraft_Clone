@@ -145,17 +145,24 @@ namespace Editor.WorldTools
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
-            // --- Row 4: View Toggles ---
+            // --- Row 4: Clip & Plane Toggles ---
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-            GUILayout.Label("Display:", GUILayout.Width(60));
             _richToggleStyle ??= new GUIStyle(EditorStyles.miniButton) { richText = true };
+
+            GUILayout.Label("Clip:", GUILayout.Width(30));
             EditorGUI.BeginChangeCheck();
-            _enableYClip = GUILayout.Toggle(_enableYClip, new GUIContent("<color=#FFAA00>Y-Clip</color>", "Clip mesh above the crosshair Y level to reveal interior cross-sections."), _richToggleStyle);
-            bool yClipToggled = EditorGUI.EndChangeCheck();
-            _showYPlane = GUILayout.Toggle(_showYPlane, new GUIContent("<color=#FFFF00>Y-Plane</color>", "Show the vertical slice plane (Yellow)."), _richToggleStyle);
-            _showXPlane = GUILayout.Toggle(_showXPlane, new GUIContent("<color=#FF4444>X-Plane</color>", "Show the X-axis cross-section plane (Red)."), _richToggleStyle);
-            _showZPlane = GUILayout.Toggle(_showZPlane, new GUIContent("<color=#44FF44>Z-Plane</color>", "Show the Z-axis cross-section plane (Green)."), _richToggleStyle);
-            _showSeaLevelPlane = GUILayout.Toggle(_showSeaLevelPlane, new GUIContent("<color=#4488FF>Sea Level</color>", "Show the sea level plane (Blue)."), _richToggleStyle);
+            _enableXClip = GUILayout.Toggle(_enableXClip, new GUIContent("<color=#FF6600>X</color>", "Clip mesh beyond the crosshair X to reveal cross-sections."), _richToggleStyle);
+            _enableYClip = GUILayout.Toggle(_enableYClip, new GUIContent("<color=#FFAA00>Y</color>", "Clip mesh above the crosshair Y level to reveal interior cross-sections."), _richToggleStyle);
+            _enableZClip = GUILayout.Toggle(_enableZClip, new GUIContent("<color=#66CC00>Z</color>", "Clip mesh beyond the crosshair Z to reveal cross-sections."), _richToggleStyle);
+            bool anyClipToggled = EditorGUI.EndChangeCheck();
+
+            GUILayout.Space(6);
+            GUILayout.Label("Planes:", GUILayout.Width(42));
+            _showYPlane = GUILayout.Toggle(_showYPlane, new GUIContent("<color=#FFFF00>Y</color>", "Show the vertical slice plane (Yellow)."), _richToggleStyle);
+            _showXPlane = GUILayout.Toggle(_showXPlane, new GUIContent("<color=#FF4444>X</color>", "Show the X-axis cross-section plane (Red)."), _richToggleStyle);
+            _showZPlane = GUILayout.Toggle(_showZPlane, new GUIContent("<color=#44FF44>Z</color>", "Show the Z-axis cross-section plane (Green)."), _richToggleStyle);
+            _showSeaLevelPlane = GUILayout.Toggle(_showSeaLevelPlane, new GUIContent("<color=#4488FF>Sea</color>", "Show the sea level plane (Blue)."), _richToggleStyle);
+
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
@@ -170,12 +177,15 @@ namespace Editor.WorldTools
             {
                 StartPipeline();
             }
-            else if (_autoUpdate && (yClipToggled || (crosshairYChanged && _enableYClip)))
+            else if (_autoUpdate && (anyClipToggled
+                                     || (crosshairYChanged && _enableYClip)
+                                     || (crosshairXZChanged && (_enableXClip || _enableZClip))))
             {
-                bool bothAboveTerrain = _enableYClip
-                                        && _crosshairPos.y > _globalMaxBlockHeight
-                                        && _lastClipY > _globalMaxBlockHeight;
-                if (!bothAboveTerrain)
+                bool onlyYChanged = !anyClipToggled && !crosshairXZChanged && crosshairYChanged;
+                bool yClipAboveTerrain = onlyYChanged
+                                         && _crosshairPos.y > _globalMaxBlockHeight
+                                         && _lastClipY > _globalMaxBlockHeight;
+                if (!yClipAboveTerrain)
                 {
                     RemeshOnly();
                     _lastClipY = _crosshairPos.y;
