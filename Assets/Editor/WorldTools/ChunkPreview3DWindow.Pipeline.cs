@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using Data;
+using Editor.DataGeneration;
+using Editor.WorldTools.Libraries;
 using Helpers;
 using Jobs;
 using Jobs.BurstData;
@@ -119,6 +121,8 @@ namespace Editor.WorldTools
 
             if (_generationJobs.Count == 0)
             {
+                ComputeGlobalMaxBlockHeight();
+
                 if (_enableLighting)
                 {
                     _lightingIteration = 0;
@@ -274,7 +278,8 @@ namespace Editor.WorldTools
                     ChunkCoord coord = new ChunkCoord(_gridStartX + x, _gridStartZ + z);
                     Vector2Int voxelOrigin = coord.ToVoxelOrigin();
 
-                    var result = _pipelineRunner.ScheduleMeshing(coord, voxelOrigin, _chunkMaps);
+                    int maxY = _enableYClip ? _crosshairPos.y : -1;
+                    var result = _pipelineRunner.ScheduleMeshing(coord, voxelOrigin, _chunkMaps, maxY);
                     if (result.HasValue)
                     {
                         _meshJobs.Add(coord, result.Value);
@@ -319,13 +324,49 @@ namespace Editor.WorldTools
                 _phase = PipelinePhase.Complete;
                 _statusText = $"Complete. {_sectionMeshes.Count} sections rendered.";
                 _progress = 1f;
-
-                // Dispose pipeline runner to free native memory (generator data, etc.)
-                _pipelineRunner?.Dispose();
-                _pipelineRunner = null;
             }
 
             Repaint();
+        }
+
+        private void ComputeGlobalMaxBlockHeight()
+        {
+            int maxHeight = 0;
+            foreach (NativeArray<ushort> blockHeights in _heightMaps.Values)
+            {
+                foreach (ushort blockHeight in blockHeights)
+                {
+                    if (blockHeight > maxHeight) maxHeight = blockHeight;
+                }
+            }
+
+            _globalMaxBlockHeight = maxHeight;
+        }
+
+        /// <summary>
+        /// Re-runs meshing only using the existing generated and lit chunk data.
+        /// Used when only the visual cut changes (Y-plane toggle or Y slider) without
+        /// requiring a full generation/lighting pass.
+        /// </summary>
+        private void RemeshOnly()
+        {
+            if (_chunkMaps.Count == 0) return;
+            if (_phase != PipelinePhase.Idle && _phase != PipelinePhase.Complete) return;
+
+            CompleteAllInFlightJobs();
+            DisposeSectionMeshes();
+
+            // Ensure we have a pipeline runner with valid job data.
+            if (_pipelineRunner == null || !_pipelineRunner.IsInitialized)
+            {
+                BlockDatabase db = EditorBlockDatabaseCache.Database;
+                if (_worldType == null || db == null) return;
+
+                _pipelineRunner = new EditorChunkPipelineRunner();
+                _pipelineRunner.Initialize(_seed, _worldType, db, _isSingleBiomeMode, _selectedBiome);
+            }
+
+            ScheduleAllMeshing();
         }
 
         private void CompleteAllInFlightJobs()

@@ -145,7 +145,6 @@ namespace Editor.WorldTools
         {
             if (_meshPreviewWidget == null || _editorOpaqueMaterial == null) return;
 
-            // Ensure the runtime shaders have valid lighting globals for editor preview.
             SetPreviewShaderGlobals();
 
             foreach (SectionMeshEntry entry in _sectionMeshes)

@@ -215,6 +215,7 @@ public class WorldJobManager : IDisposable
             CustomTris = _world.JobDataManager.CustomTrisJobData,
             WaterVertexTemplates = _world.FluidVertexTemplates.WaterVertexTemplates,
             LavaVertexTemplates = _world.FluidVertexTemplates.LavaVertexTemplates,
+            MaxVisibleY = -1,
             Output = meshOutput,
         };
 

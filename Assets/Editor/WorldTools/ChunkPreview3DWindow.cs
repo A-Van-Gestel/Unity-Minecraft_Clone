@@ -48,6 +48,9 @@ namespace Editor.WorldTools
         private bool _showYPlane = false;
 
         [SerializeField]
+        private bool _enableYClip = false;
+
+        [SerializeField]
         private bool _showSeaLevelPlane = false;
 
         [SerializeField]
@@ -67,6 +70,8 @@ namespace Editor.WorldTools
 
         private int _gridStartX;
         private int _gridStartZ;
+        private int _lastClipY;
+        private int _globalMaxBlockHeight;
 
         // --- 3D Preview ---
         private MeshPreviewWidget _meshPreviewWidget;
@@ -379,6 +384,8 @@ namespace Editor.WorldTools
             CancelAndDisposePipeline();
             DisposeGeneratedData();
             DisposeSectionMeshes();
+
+            _lastClipY = _crosshairPos.y;
 
             if (_meshPreviewWidget != null)
                 _meshPreviewWidget.CameraPosition = new Vector3(0, 0, -GetCameraDistanceForRadius(_chunkRadius));

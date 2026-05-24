@@ -166,11 +166,13 @@ namespace Editor.WorldTools.Libraries
         /// <param name="chunkCoord">The chunk coordinate to mesh.</param>
         /// <param name="chunkVoxelPos">The voxel-space origin of the chunk.</param>
         /// <param name="maps">Dictionary of all chunk maps keyed by voxel origin.</param>
+        /// <param name="maxVisibleY">When zero or positive, voxels at Y &gt;= this value are treated as air. -1 disables clipping.</param>
         /// <returns>A tuple of the combined job handle and mesh output, or null if neighbors are missing.</returns>
         public (JobHandle handle, MeshDataJobOutput output)? ScheduleMeshing(
             ChunkCoord chunkCoord,
             Vector2Int chunkVoxelPos,
-            Dictionary<Vector2Int, NativeArray<uint>> maps)
+            Dictionary<Vector2Int, NativeArray<uint>> maps,
+            int maxVisibleY = -1)
         {
             if (!maps.TryGetValue(chunkVoxelPos, out NativeArray<uint> centerMap))
                 return null;
@@ -225,6 +227,7 @@ namespace Editor.WorldTools.Libraries
                 CustomTris = _jobDataManager.CustomTrisJobData,
                 WaterVertexTemplates = _fluidTemplates.WaterVertexTemplates,
                 LavaVertexTemplates = _fluidTemplates.LavaVertexTemplates,
+                MaxVisibleY = maxVisibleY,
                 Output = meshOutput,
             };
 

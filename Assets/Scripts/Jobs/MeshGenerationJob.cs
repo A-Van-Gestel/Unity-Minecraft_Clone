@@ -23,6 +23,13 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<BlockTypeJobData> BlockTypes;
 
+        /// <summary>
+        /// When zero or positive, voxels at Y &gt;= this value are treated as air.
+        /// The mesher generates exposed faces at the cut boundary.
+        /// Set to -1 to disable clipping (full chunk height).
+        /// </summary>
+        public int MaxVisibleY;
+
         // --- CUSTOM MESH DATA ---
         [ReadOnly]
         public NativeArray<CustomMeshData> CustomMeshes;
@@ -78,6 +85,7 @@ namespace Jobs
 
         // --- INTERNAL TRACKING ---
         private int _vertexIndex;
+        private int _effectiveMaxY;
 
         // --- HELPERS ---
         private static readonly Vector3Int[] s_fluidNeighborOffsets =
@@ -94,11 +102,21 @@ namespace Jobs
         public void Execute()
         {
             _vertexIndex = 0;
+            _effectiveMaxY = MaxVisibleY >= 0 ? MaxVisibleY : VoxelData.ChunkHeight;
             const int sectionHeight = 16;
             const int sectionCount = VoxelData.ChunkHeight / sectionHeight;
 
             for (int s = 0; s < sectionCount; s++)
             {
+                int startY = s * sectionHeight;
+
+                // Skip sections entirely above the visible Y limit.
+                if (startY >= _effectiveMaxY)
+                {
+                    Output.SectionStats[s] = default;
+                    continue;
+                }
+
                 SectionJobData section = SectionData[s];
 
                 // OPTIMIZATION: Skip completely empty sections.
@@ -115,13 +133,13 @@ namespace Jobs
                 int startTrans = Output.TransparentTriangles.Length;
                 int startFluid = Output.FluidTriangles.Length;
 
-                int startY = s * sectionHeight;
-                int endY = startY + sectionHeight;
+                int endY = math.min(startY + sectionHeight, _effectiveMaxY);
+                bool isSectionFullyVisible = endY == startY + sectionHeight;
 
                 // OPTIMIZATION: "Shell" Iteration for fully solid sections.
-                // If a section is full of opaque blocks, we only need to check the outer boundary faces
-                // because internal blocks will never be visible.
-                if (section.IsFullySolid)
+                // Only valid when the full section is visible — the MaxVisibleY cut
+                // creates a new boundary that the shell optimization does not cover.
+                if (section.IsFullySolid && isSectionFullyVisible)
                 {
                     IterateSolidSection(startY, endY);
                 }
@@ -623,7 +641,7 @@ namespace Jobs
         /// <returns>A VoxelState if the position is in a loaded neighbor chunk, otherwise null.</returns>
         private VoxelState? GetVoxelStateFromLocalPos(Vector3Int pos)
         {
-            if (pos.y is < 0 or >= VoxelData.ChunkHeight) return null;
+            if (pos.y < 0 || pos.y >= _effectiveMaxY) return null;
 
             // Fast path for internal voxels
             if (pos.x >= 0 && pos.x < VoxelData.ChunkWidth &&

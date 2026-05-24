@@ -149,6 +149,9 @@ namespace Editor.WorldTools
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             GUILayout.Label("Display:", GUILayout.Width(60));
             _richToggleStyle ??= new GUIStyle(EditorStyles.miniButton) { richText = true };
+            EditorGUI.BeginChangeCheck();
+            _enableYClip = GUILayout.Toggle(_enableYClip, new GUIContent("<color=#FFAA00>Y-Clip</color>", "Clip mesh above the crosshair Y level to reveal interior cross-sections."), _richToggleStyle);
+            bool yClipToggled = EditorGUI.EndChangeCheck();
             _showYPlane = GUILayout.Toggle(_showYPlane, new GUIContent("<color=#FFFF00>Y-Plane</color>", "Show the vertical slice plane (Yellow)."), _richToggleStyle);
             _showXPlane = GUILayout.Toggle(_showXPlane, new GUIContent("<color=#FF4444>X-Plane</color>", "Show the X-axis cross-section plane (Red)."), _richToggleStyle);
             _showZPlane = GUILayout.Toggle(_showZPlane, new GUIContent("<color=#44FF44>Z-Plane</color>", "Show the Z-axis cross-section plane (Green)."), _richToggleStyle);
@@ -166,6 +169,17 @@ namespace Editor.WorldTools
             else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged || modeChanged || biomeChanged || crosshairChunkChanged))
             {
                 StartPipeline();
+            }
+            else if (_autoUpdate && (yClipToggled || (crosshairYChanged && _enableYClip)))
+            {
+                bool bothAboveTerrain = _enableYClip
+                                        && _crosshairPos.y > _globalMaxBlockHeight
+                                        && _lastClipY > _globalMaxBlockHeight;
+                if (!bothAboveTerrain)
+                {
+                    RemeshOnly();
+                    _lastClipY = _crosshairPos.y;
+                }
             }
 
             // Publish settings for sync
