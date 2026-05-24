@@ -45,10 +45,16 @@ namespace Editor.WorldTools
         private bool _syncWithPreviewWindow = true;
 
         [SerializeField]
-        private bool _showYPlane = true;
+        private bool _showYPlane = false;
 
         [SerializeField]
-        private bool _showSeaLevelPlane = true;
+        private bool _showSeaLevelPlane = false;
+
+        [SerializeField]
+        private bool _showXPlane = false;
+
+        [SerializeField]
+        private bool _showZPlane = false;
 
         [SerializeField]
         private int3 _crosshairPos = new int3(0, 60, 0);
@@ -64,6 +70,7 @@ namespace Editor.WorldTools
 
         // --- 3D Preview ---
         private MeshPreviewWidget _meshPreviewWidget;
+        private GUIStyle _richToggleStyle;
 
         // --- Pipeline State ---
         private PipelinePhase _phase = PipelinePhase.Idle;
@@ -216,7 +223,7 @@ namespace Editor.WorldTools
 
         private static float GetCameraDistanceForRadius(int chunkRadius)
         {
-            float terrainExtent = Mathf.Max(chunkRadius * VoxelData.ChunkWidth, VoxelData.ChunkHeight);
+            float terrainExtent = Mathf.Max(chunkRadius * 2 * VoxelData.ChunkWidth, VoxelData.ChunkHeight);
             return terrainExtent / (2f * Mathf.Tan(15f * Mathf.Deg2Rad)) * 1.2f;
         }
 
@@ -372,6 +379,9 @@ namespace Editor.WorldTools
             CancelAndDisposePipeline();
             DisposeGeneratedData();
             DisposeSectionMeshes();
+
+            if (_meshPreviewWidget != null)
+                _meshPreviewWidget.CameraPosition = new Vector3(0, 0, -GetCameraDistanceForRadius(_chunkRadius));
 
             _pipelineRunner = new EditorChunkPipelineRunner();
             _pipelineRunner.Initialize(_seed, _worldType, db, _isSingleBiomeMode, _selectedBiome);

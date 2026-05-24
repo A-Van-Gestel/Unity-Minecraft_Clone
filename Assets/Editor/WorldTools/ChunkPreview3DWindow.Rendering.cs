@@ -38,8 +38,10 @@ namespace Editor.WorldTools
             };
             postProcessJob.Schedule().Complete();
 
-            // Center the preview grid around the origin
-            float centerOffset = _chunkRadius * VoxelData.ChunkWidth * 0.5f;
+            // Center the preview grid around the origin.
+            // There are (_chunkRadius * 2) visible chunks, so total width is (_chunkRadius * 2 * 16).
+            // Half of that is _chunkRadius * 16.
+            float centerOffset = _chunkRadius * VoxelData.ChunkWidth;
             // Visible chunks start at index 1 (border at 0), so subtract 1 chunk worth
             int localX = chunkCoord.X - _gridStartX;
             int localZ = chunkCoord.Z - _gridStartZ;

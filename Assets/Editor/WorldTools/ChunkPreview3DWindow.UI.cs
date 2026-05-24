@@ -148,8 +148,11 @@ namespace Editor.WorldTools
             // --- Row 4: View Toggles ---
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             GUILayout.Label("Display:", GUILayout.Width(60));
-            _showYPlane = GUILayout.Toggle(_showYPlane, new GUIContent("Y-Level Plane", "Show the vertical slice plane."), EditorStyles.miniButton);
-            _showSeaLevelPlane = GUILayout.Toggle(_showSeaLevelPlane, new GUIContent("Sea Level Plane", "Show the sea level plane."), EditorStyles.miniButton);
+            _richToggleStyle ??= new GUIStyle(EditorStyles.miniButton) { richText = true };
+            _showYPlane = GUILayout.Toggle(_showYPlane, new GUIContent("<color=#FFFF00>Y-Plane</color>", "Show the vertical slice plane (Yellow)."), _richToggleStyle);
+            _showXPlane = GUILayout.Toggle(_showXPlane, new GUIContent("<color=#FF4444>X-Plane</color>", "Show the X-axis cross-section plane (Red)."), _richToggleStyle);
+            _showZPlane = GUILayout.Toggle(_showZPlane, new GUIContent("<color=#44FF44>Z-Plane</color>", "Show the Z-axis cross-section plane (Green)."), _richToggleStyle);
+            _showSeaLevelPlane = GUILayout.Toggle(_showSeaLevelPlane, new GUIContent("<color=#4488FF>Sea Level</color>", "Show the sea level plane (Blue)."), _richToggleStyle);
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
@@ -185,8 +188,10 @@ namespace Editor.WorldTools
 
             DrawAllSectionMeshes();
 
-            float gridWidth = _chunkRadius * VoxelData.ChunkWidth;
-            Vector2 planeSize = new Vector2(gridWidth, gridWidth);
+            float gridWidth = _chunkRadius * 2f * VoxelData.ChunkWidth;
+            Vector2 horizontalPlaneSize = new Vector2(gridWidth, gridWidth);
+            Vector2 xPlaneSize = new Vector2(VoxelData.ChunkHeight, gridWidth);
+            Vector2 zPlaneSize = new Vector2(gridWidth, VoxelData.ChunkHeight);
 
             // Add a small offset to avoid z-fighting with block meshes
             const float zFightOffset = 0.05f;
@@ -195,14 +200,30 @@ namespace Editor.WorldTools
             if (_showYPlane)
             {
                 float crosshairY = _crosshairPos.y - (VoxelData.ChunkHeight * 0.5f) + zFightOffset;
-                _meshPreviewWidget.DrawTransparentPlane(new Vector3(0, crosshairY, 0), planeSize, new Color(1f, 1f, 0f, 0.25f));
+                _meshPreviewWidget.DrawTransparentPlane(new Vector3(0, crosshairY, 0), horizontalPlaneSize, new Color(1f, 1f, 0f, 0.25f));
+            }
+
+            // Draw Crosshair X Plane (Red)
+            if (_showXPlane)
+            {
+                int crosshairChunkX = Mathf.FloorToInt((float)_crosshairPos.x / VoxelData.ChunkWidth);
+                float localCrosshairX = _crosshairPos.x - (crosshairChunkX * VoxelData.ChunkWidth) + 0.5f + zFightOffset;
+                _meshPreviewWidget.DrawTransparentPlane(new Vector3(localCrosshairX, 0, 0), xPlaneSize, new Color(1f, 0f, 0f, 0.25f), Quaternion.Euler(0, 0, 90));
+            }
+
+            // Draw Crosshair Z Plane (Green)
+            if (_showZPlane)
+            {
+                int crosshairChunkZ = Mathf.FloorToInt((float)_crosshairPos.z / VoxelData.ChunkWidth);
+                float localCrosshairZ = _crosshairPos.z - (crosshairChunkZ * VoxelData.ChunkWidth) + 0.5f + zFightOffset;
+                _meshPreviewWidget.DrawTransparentPlane(new Vector3(0, 0, localCrosshairZ), zPlaneSize, new Color(0f, 1f, 0f, 0.25f), Quaternion.Euler(90, 0, 0));
             }
 
             // Draw Sea Level Plane (Blue)
             if (_showSeaLevelPlane && _worldType != null)
             {
                 float seaLevelY = _worldType.seaLevel - (VoxelData.ChunkHeight * 0.5f) + zFightOffset;
-                _meshPreviewWidget.DrawTransparentPlane(new Vector3(0, seaLevelY, 0), planeSize, new Color(0f, 0.5f, 1f, 0.25f));
+                _meshPreviewWidget.DrawTransparentPlane(new Vector3(0, seaLevelY, 0), horizontalPlaneSize, new Color(0f, 0.5f, 1f, 0.25f));
             }
 
             _meshPreviewWidget.EndDraw(viewportRect);

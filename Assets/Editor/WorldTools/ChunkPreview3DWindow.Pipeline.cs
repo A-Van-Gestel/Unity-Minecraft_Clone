@@ -31,14 +31,15 @@ namespace Editor.WorldTools
         private void ScheduleAllGeneration()
         {
             _generationJobs.Clear();
-            int totalSize = _chunkRadius + 2;
+            int visiblePerAxis = _chunkRadius * 2;
+            int totalSize = visiblePerAxis + 2;
             _totalGridSize = totalSize * totalSize;
 
             int crosshairChunkX = Mathf.FloorToInt((float)_crosshairPos.x / VoxelData.ChunkWidth);
             int crosshairChunkZ = Mathf.FloorToInt((float)_crosshairPos.z / VoxelData.ChunkWidth);
 
-            _gridStartX = crosshairChunkX - (_chunkRadius / 2 + 1);
-            _gridStartZ = crosshairChunkZ - (_chunkRadius / 2 + 1);
+            _gridStartX = crosshairChunkX - _chunkRadius - 1;
+            _gridStartZ = crosshairChunkZ - _chunkRadius - 1;
 
             for (int x = 0; x < totalSize; x++)
             {
@@ -135,7 +136,7 @@ namespace Editor.WorldTools
         private void ScheduleAllLighting()
         {
             _lightingJobs.Clear();
-            int totalSize = _chunkRadius + 2;
+            int totalSize = _chunkRadius * 2 + 2;
 
             int scheduled = 0;
             for (int x = 0; x < totalSize; x++)
@@ -263,10 +264,12 @@ namespace Editor.WorldTools
         {
             _meshJobs.Clear();
 
-            // Only mesh the visible inner NxN chunks (skip border)
-            for (int x = 1; x <= _chunkRadius; x++)
+            int visiblePerAxis = _chunkRadius * 2;
+
+            // Only mesh the visible inner chunks (skip border)
+            for (int x = 1; x <= visiblePerAxis; x++)
             {
-                for (int z = 1; z <= _chunkRadius; z++)
+                for (int z = 1; z <= visiblePerAxis; z++)
                 {
                     ChunkCoord coord = new ChunkCoord(_gridStartX + x, _gridStartZ + z);
                     Vector2Int voxelOrigin = coord.ToVoxelOrigin();
@@ -279,7 +282,7 @@ namespace Editor.WorldTools
                 }
             }
 
-            int meshCount = _chunkRadius * _chunkRadius;
+            int meshCount = visiblePerAxis * visiblePerAxis;
             _phase = PipelinePhase.Meshing;
             _statusText = $"Meshing {_meshJobs.Count}/{meshCount} chunks...";
             _progress = 0f;
@@ -305,7 +308,8 @@ namespace Editor.WorldTools
             foreach (ChunkCoord key in _completedKeys)
                 _meshJobs.Remove(key);
 
-            int totalMesh = _chunkRadius * _chunkRadius;
+            int visiblePerAxis = _chunkRadius * 2;
+            int totalMesh = visiblePerAxis * visiblePerAxis;
             int completed = totalMesh - _meshJobs.Count;
             _progress = (float)completed / totalMesh;
             _statusText = $"Meshing {completed}/{totalMesh} chunks...";

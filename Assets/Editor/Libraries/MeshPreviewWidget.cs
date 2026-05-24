@@ -389,9 +389,21 @@ namespace Editor.Libraries
         /// Draws a transparent plane within a custom drawing session.
         /// </summary>
         /// <param name="center">The center position of the plane relative to the preview pivot.</param>
-        /// <param name="size">The size dimensions of the plane (X and Z).</param>
+        /// <param name="size">The size dimensions of the plane.</param>
         /// <param name="color">The color of the plane (supports transparency via alpha).</param>
         public void DrawTransparentPlane(Vector3 center, Vector2 size, Color color)
+        {
+            DrawTransparentPlane(center, size, color, Quaternion.identity);
+        }
+
+        /// <summary>
+        /// Draws a transparent plane within a custom drawing session.
+        /// </summary>
+        /// <param name="center">The center position of the plane relative to the preview pivot.</param>
+        /// <param name="size">The size dimensions of the plane.</param>
+        /// <param name="color">The color of the plane (supports transparency via alpha).</param>
+        /// <param name="rotation">The rotation of the plane.</param>
+        public void DrawTransparentPlane(Vector3 center, Vector2 size, Color color, Quaternion rotation)
         {
             if (_previewRenderUtility == null) return;
 
@@ -415,9 +427,9 @@ namespace Editor.Libraries
             _previewPropertyBlock.Clear();
             _previewPropertyBlock.SetColor(s_color, color);
 
-            Matrix4x4 rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
-            Matrix4x4 positionMatrix = Matrix4x4.Translate(center) * Matrix4x4.Scale(new Vector3(size.x, 1, size.y));
-            Matrix4x4 finalMatrix = rotationMatrix * positionMatrix;
+            Matrix4x4 cameraRotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
+            Matrix4x4 planeTRS = Matrix4x4.TRS(center, rotation, new Vector3(size.x, 1, size.y));
+            Matrix4x4 finalMatrix = cameraRotationMatrix * planeTRS;
 
             _previewRenderUtility.DrawMesh(_planeMesh, finalMatrix, _wireMaterial, 0, _previewPropertyBlock);
         }
