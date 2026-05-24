@@ -75,6 +75,17 @@ namespace Editor.WorldTools.Libraries
         }
 
         /// <summary>
+        /// Expands a structure spawn marker into its constituent voxel modifications.
+        /// Must be called on the main thread after generation completes.
+        /// </summary>
+        /// <param name="marker">The spawn marker emitted during generation.</param>
+        /// <returns>An enumerable of voxel modifications representing the full structure.</returns>
+        public IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker)
+        {
+            return _generator.ExpandStructure(marker);
+        }
+
+        /// <summary>
         /// Schedules a lighting job for the given chunk using stored map data.
         /// Builds the initial sunlight column recalculation queue for all 256 columns.
         /// </summary>

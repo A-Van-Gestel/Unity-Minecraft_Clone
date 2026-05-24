@@ -25,14 +25,17 @@ namespace Editor.WorldTools
             new Dictionary<ChunkCoord, (JobHandle, MeshDataJobOutput)>();
 
         private readonly List<ChunkCoord> _completedKeys = new List<ChunkCoord>();
+        private readonly List<StructureSpawnMarker> _pendingMarkers = new List<StructureSpawnMarker>();
 
         private int _totalGridSize;
         private int _lightingIteration;
+        private bool _structuresWerePlaced;
         private const int MAX_LIGHTING_ITERATIONS = 5;
 
         private void ScheduleAllGeneration()
         {
             _generationJobs.Clear();
+            _pendingMarkers.Clear();
             int visiblePerAxis = _chunkRadius * 2;
             int totalSize = visiblePerAxis + 2;
             _totalGridSize = totalSize * totalSize;
@@ -106,7 +109,13 @@ namespace Editor.WorldTools
                 _chunkMaps[voxelOrigin] = mapCopy;
                 _heightMaps[voxelOrigin] = heightMapCopy;
 
-                // Dispose the generation job's own containers (flora markers are ignored in Phase 1)
+                // Collect structure spawn markers before disposing
+                if (data.StructureSpawns.IsCreated)
+                {
+                    while (data.StructureSpawns.TryDequeue(out StructureSpawnMarker marker))
+                        _pendingMarkers.Add(marker);
+                }
+
                 data.Dispose();
 
                 _completedKeys.Add(kvp.Key);
@@ -121,6 +130,8 @@ namespace Editor.WorldTools
 
             if (_generationJobs.Count == 0)
             {
+                ExpandStructuresAndApplyMods();
+                RecomputeHeightMaps();
                 ComputeGlobalMaxBlockHeight();
 
                 if (_enableLighting)
@@ -135,6 +146,130 @@ namespace Editor.WorldTools
             }
 
             Repaint();
+        }
+
+        /// <summary>
+        /// Expands all collected structure spawn markers into voxel modifications
+        /// and applies them to the stored chunk maps. Handles cross-chunk routing
+        /// for structures that span chunk boundaries (e.g., tree canopies).
+        /// </summary>
+        private void ExpandStructuresAndApplyMods()
+        {
+            _structuresWerePlaced = false;
+            if (_pendingMarkers.Count == 0) return;
+
+            _statusText = $"Expanding {_pendingMarkers.Count} structures...";
+            Repaint();
+
+            foreach (StructureSpawnMarker marker in _pendingMarkers)
+            {
+                foreach (VoxelMod mod in _pipelineRunner.ExpandStructure(marker))
+                {
+                    ApplyVoxelModToMap(mod);
+                }
+            }
+
+            _structuresWerePlaced = true;
+            _pendingMarkers.Clear();
+        }
+
+        /// <summary>
+        /// Applies a single voxel modification to the stored chunk maps.
+        /// Translates the mod's global position to the correct chunk and local offset.
+        /// </summary>
+        private void ApplyVoxelModToMap(VoxelMod mod)
+        {
+            int chunkX = Mathf.FloorToInt((float)mod.GlobalPosition.x / VoxelData.ChunkWidth) * VoxelData.ChunkWidth;
+            int chunkZ = Mathf.FloorToInt((float)mod.GlobalPosition.z / VoxelData.ChunkWidth) * VoxelData.ChunkWidth;
+            Vector2Int targetOrigin = new Vector2Int(chunkX, chunkZ);
+
+            if (!_chunkMaps.TryGetValue(targetOrigin, out NativeArray<uint> targetMap)) return;
+
+            int localX = mod.GlobalPosition.x - chunkX;
+            int localY = mod.GlobalPosition.y;
+            int localZ = mod.GlobalPosition.z - chunkZ;
+
+            if (localX < 0 || localX >= VoxelData.ChunkWidth ||
+                localY < 0 || localY >= VoxelData.ChunkHeight ||
+                localZ < 0 || localZ >= VoxelData.ChunkWidth)
+                return;
+
+            int flatIndex = ChunkMath.GetFlattenedIndexInChunk(localX, localY, localZ);
+            if (flatIndex < 0 || flatIndex >= targetMap.Length) return;
+
+            uint existing = targetMap[flatIndex];
+            ushort existingId = (ushort)(existing & 0xFFFF);
+
+            // Apply replacement rules
+            switch (mod.Rule)
+            {
+                case ReplacementRule.OnlyReplaceAir:
+                    if (existingId != BlockIDs.Air) return;
+                    break;
+                case ReplacementRule.ForcePlace:
+                    if (existingId == BlockIDs.Bedrock) return;
+                    break;
+                case ReplacementRule.Default:
+                default:
+                    if (existingId == BlockIDs.Bedrock) return;
+                    if (existingId != BlockIDs.Air && existingId != BlockIDs.Water)
+                    {
+                        if (_pipelineRunner.JobDataManager != null)
+                        {
+                            BlockTypeJobData existingProps = _pipelineRunner.JobDataManager.BlockTypesJobData[existingId];
+                            if (existingProps.IsSolid && !existingProps.IsTransparentForMesh) return;
+                        }
+                    }
+
+                    break;
+            }
+
+            // Pack the new block ID and meta, preserving light values (will be overwritten by lighting)
+            targetMap[flatIndex] = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, 0, 0, mod.Meta);
+        }
+
+        /// <summary>
+        /// Rebuilds all per-column heightmaps from the current chunk maps.
+        /// Must be called after structure expansion to ensure the lighting job
+        /// receives accurate highest-block data (prevents sunlight leaking through canopies).
+        /// </summary>
+        private void RecomputeHeightMaps()
+        {
+            if (!_structuresWerePlaced || _chunkMaps.Count == 0) return;
+
+            NativeArray<BlockTypeJobData> blockTypes = _pipelineRunner.JobDataManager.BlockTypesJobData;
+
+            foreach (KeyValuePair<Vector2Int, NativeArray<uint>> kvp in _chunkMaps)
+            {
+                Vector2Int origin = kvp.Key;
+                NativeArray<uint> map = kvp.Value;
+
+                if (!_heightMaps.TryGetValue(origin, out NativeArray<ushort> heightMap)) continue;
+
+                for (int x = 0; x < VoxelData.ChunkWidth; x++)
+                {
+                    for (int z = 0; z < VoxelData.ChunkWidth; z++)
+                    {
+                        int heightmapIndex = x + VoxelData.ChunkWidth * z;
+                        ushort highestY = 0;
+
+                        for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
+                        {
+                            int flatIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                            uint packed = map[flatIndex];
+                            ushort blockId = (ushort)(packed & 0xFFFF);
+
+                            if (blockId != 0 && blockTypes[blockId].IsLightObstructing)
+                            {
+                                highestY = (ushort)y;
+                                break;
+                            }
+                        }
+
+                        heightMap[heightmapIndex] = highestY;
+                    }
+                }
+            }
         }
 
         private void ScheduleAllLighting()
