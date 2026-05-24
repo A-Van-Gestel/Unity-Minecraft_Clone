@@ -128,7 +128,6 @@ namespace Editor.WorldTools
                 {
                     Mesh = mesh,
                     WorldPosition = new Vector3(chunkWorldX, sectionY - VoxelData.ChunkHeight * 0.5f, chunkWorldZ),
-                    SubMeshCount = subMeshCount,
                     HasOpaque = stats.OpaqueTriCount > 0,
                     HasTransparent = stats.TransparentTriCount > 0,
                     HasFluid = stats.FluidTriCount > 0,

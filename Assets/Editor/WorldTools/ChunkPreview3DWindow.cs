@@ -100,7 +100,6 @@ namespace Editor.WorldTools
         {
             public Mesh Mesh;
             public Vector3 WorldPosition;
-            public int SubMeshCount;
             public bool HasOpaque;
             public bool HasTransparent;
             public bool HasFluid;
@@ -123,7 +122,6 @@ namespace Editor.WorldTools
             Lighting,
             LightingIteration,
             Meshing,
-            Converting,
             Complete,
         }
 
