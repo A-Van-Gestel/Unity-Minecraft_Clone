@@ -28,6 +28,9 @@ namespace Legacy
         #region IChunkGenerator
 
         /// <inheritdoc />
+        public GenerationFeatureFlags FeatureFlags { get; set; } = GenerationFeatureFlags.Default;
+
+        /// <inheritdoc />
         public void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData, bool isSingleBiomeMode = false, StandardBiomeAttributes selectedBiome = null)
         {
             _seed = seed;

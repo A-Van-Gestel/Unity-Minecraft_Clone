@@ -161,20 +161,40 @@ public class Settings
     public bool enableLighting = true;
 
     /// <summary>
-    /// If true, enables the second pass of world generation (e.g., ore lodes).
+    /// If true, cave carving (Cheese, Spaghetti, Noodle, WormCarver) is applied during generation.
     /// </summary>
     [Header("World Generation")]
-    [SettingField(SettingsTab.World, Label = "Ore Generation (Second Pass)", Order = 1)]
+    [SettingField(SettingsTab.World, Label = "Cave Generation", Order = 1)]
     [InitializationField]
-    [Tooltip("Enables the secondary world generation pass for underground features.\n\n" +
-             "Includes: Ore veins, caves, and structural underground carving.\n\n" +
-             TooltipTags.Note + "Currently unused.")]
-    public bool enableSecondPass = true;
+    [Tooltip("Enables cave carving during world generation.\n\n" +
+             "Includes: Cheese caves, Spaghetti caves, Noodle caves, and Worm Carvers.\n\n" +
+             TooltipTags.Note + "Requires a new world or unexplored chunks to take effect.")]
+    public bool enableCaves = true;
+
+    /// <summary>
+    /// If true, lode veins replace stone blocks during generation.
+    /// </summary>
+    [SettingField(SettingsTab.World, Label = "Lode Generation", Order = 2)]
+    [InitializationField]
+    [Tooltip("Enables lode vein replacement in stone during world generation.\n\n" +
+             "Currently generates: Dirt and Sand pockets embedded in stone.\n" +
+             "Ore veins (coal, iron, gold, etc.) are not yet implemented.\n\n" +
+             TooltipTags.Note + "Requires a new world or unexplored chunks to take effect.")]
+    public bool enableLodes = true;
+
+    /// <summary>
+    /// If true, water fills empty space below sea level during generation.
+    /// </summary>
+    [SettingField(SettingsTab.World, Label = "Water Generation", Order = 3)]
+    [InitializationField]
+    [Tooltip("Enables water fill below sea level during world generation.\n\n" +
+             TooltipTags.Note + "Requires a new world or unexplored chunks to take effect.")]
+    public bool enableWater = true;
 
     /// <summary>
     /// If true, enables the structure pass of world generation (e.g., trees and large flora).
     /// </summary>
-    [SettingField(SettingsTab.World, Label = "Tree Generation (Structure Pass)", Order = 2)]
+    [SettingField(SettingsTab.World, Label = "Tree Generation (Structure Pass)", Order = 4)]
     [InitializationField]
     [Tooltip("Enables the structure pass for world generation.\n\n" +
              "Includes: Trees, cacti, and other large multi-block flora.\n\n" +

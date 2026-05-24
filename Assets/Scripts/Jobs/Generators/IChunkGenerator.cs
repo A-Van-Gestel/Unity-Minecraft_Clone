@@ -44,6 +44,13 @@ namespace Jobs.Generators
     public interface IChunkGenerator
     {
         /// <summary>
+        /// Controls which optional generation passes (caves, lodes, water) are executed.
+        /// Defaults to <see cref="GenerationFeatureFlags.Default"/> (all passes enabled).
+        /// Set before calling <see cref="ScheduleGeneration"/> to take effect.
+        /// </summary>
+        GenerationFeatureFlags FeatureFlags { get; set; }
+
+        /// <summary>
         /// Injects explicit dependencies required for generation.
         /// Called once during WorldJobManager construction.
         /// </summary>

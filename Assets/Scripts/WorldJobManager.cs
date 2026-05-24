@@ -74,6 +74,14 @@ public class WorldJobManager : IDisposable
         };
 
         _chunkGenerator.Initialize(VoxelData.Seed, activeWorldType, globalJobData);
+
+        Settings settings = SettingsManager.LoadSettings();
+        _chunkGenerator.FeatureFlags = new GenerationFeatureFlags
+        {
+            EnableCaves = settings.enableCaves,
+            EnableLodes = settings.enableLodes,
+            EnableWater = settings.enableWater,
+        };
     }
 
     #endregion

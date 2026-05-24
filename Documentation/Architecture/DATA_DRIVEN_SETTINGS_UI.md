@@ -539,11 +539,19 @@ public class Settings
     [InitializationField]
     public bool enableLighting = true;
 
-    [SettingField(SettingsTab.World, Label = "Ore Generation (Second Pass)", Order = 1)]
+    [SettingField(SettingsTab.World, Label = "Cave Generation", Order = 1)]
     [InitializationField]
-    public bool enableSecondPass = true;
+    public bool enableCaves = true;
 
-    [SettingField(SettingsTab.World, Label = "Tree Generation (Structure Pass)", Order = 2)]
+    [SettingField(SettingsTab.World, Label = "Lode Generation", Order = 2)]
+    [InitializationField]
+    public bool enableLodes = true;
+
+    [SettingField(SettingsTab.World, Label = "Water Generation", Order = 3)]
+    [InitializationField]
+    public bool enableWater = true;
+
+    [SettingField(SettingsTab.World, Label = "Tree Generation (Structure Pass)", Order = 4)]
     [InitializationField]
     public bool enableMajorFloraPass = true;
 
