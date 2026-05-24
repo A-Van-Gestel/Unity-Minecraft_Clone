@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Data;
 using Data.WorldTypes;
 using Helpers;
@@ -145,10 +146,15 @@ namespace Jobs
         public NativeArray<FastNoiseLite> EntryFloraZoneNoises;
 
         [ReadOnly]
+        [MarshalAs(UnmanagedType.U1)]
         public bool IsSingleBiomeMode;
 
         [ReadOnly]
         public int ForceBiomeIndex;
+
+        /// <summary>Controls which optional generation passes (caves, lodes, water) are executed.</summary>
+        [ReadOnly]
+        public GenerationFeatureFlags FeatureFlags;
 
         #endregion
 
@@ -292,7 +298,7 @@ namespace Jobs
                     if (isExposedSurface)
                     {
                         lastSurfaceY = y;
-                        voxelValue = y < SeaLevel - 1 ? surfaceBiome.UnderwaterSurfaceBlockID : surfaceBiome.SurfaceBlockID;
+                        voxelValue = (y < SeaLevel - 1 && FeatureFlags.EnableWater) ? surfaceBiome.UnderwaterSurfaceBlockID : surfaceBiome.SurfaceBlockID;
                     }
                     else
                     {
@@ -317,7 +323,7 @@ namespace Jobs
                 }
                 else // density <= 0f
                 {
-                    voxelValue = y < SeaLevel ? (byte)BlockIDs.Water : (byte)BlockIDs.Air;
+                    voxelValue = (y < SeaLevel && FeatureFlags.EnableWater) ? (byte)BlockIDs.Water : (byte)BlockIDs.Air;
                 }
 
                 // Track whether this voxel is an exposed surface (air-to-solid transition from above)
@@ -326,7 +332,7 @@ namespace Jobs
 
                 // ----- CAVE CARVING PASS -----
                 // Guard: only carve solid, non-fluid, non-bedrock blocks
-                if (voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
+                if (FeatureFlags.EnableCaves && voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
                     BlockTypes[voxelValue].FluidType == FluidType.None)
                 {
                     for (int i = 0; i < biome.CaveLayerCount; i++)
@@ -410,7 +416,7 @@ namespace Jobs
                 }
 
                 // ----- LODE PASS -----
-                if (voxelValue == BlockIDs.Stone)
+                if (FeatureFlags.EnableLodes && voxelValue == BlockIDs.Stone)
                 {
                     for (int i = 0; i < biome.LodeCount; i++)
                     {

@@ -80,6 +80,21 @@ namespace Editor.WorldTools
                 new GUIContent("Lighting", "Enable BFS sunlight + blocklight pass before meshing."),
                 EditorStyles.toolbarButton, GUILayout.Width(60));
 
+            EditorGUI.BeginChangeCheck();
+            _enableCaves = GUILayout.Toggle(
+                _enableCaves,
+                new GUIContent("Caves", "Enable cave carving (Cheese, Spaghetti, Noodle, WormCarver)."),
+                EditorStyles.toolbarButton, GUILayout.Width(46));
+            _enableLodes = GUILayout.Toggle(
+                _enableLodes,
+                new GUIContent("Lodes", "Enable ore vein replacement in stone."),
+                EditorStyles.toolbarButton, GUILayout.Width(44));
+            _enableWater = GUILayout.Toggle(
+                _enableWater,
+                new GUIContent("Water", "Enable water fill below sea level."),
+                EditorStyles.toolbarButton, GUILayout.Width(46));
+            bool generationToggleChanged = EditorGUI.EndChangeCheck();
+
             _syncWithPreviewWindow = GUILayout.Toggle(
                 _syncWithPreviewWindow,
                 new GUIContent("Sync", "Mirror seed and world type from the World Gen Preview window."),
@@ -173,7 +188,7 @@ namespace Editor.WorldTools
             {
                 StartPipeline();
             }
-            else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged || modeChanged || biomeChanged || crosshairChunkChanged))
+            else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged || modeChanged || biomeChanged || crosshairChunkChanged || generationToggleChanged))
             {
                 StartPipeline();
             }

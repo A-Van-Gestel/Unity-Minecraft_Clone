@@ -66,6 +66,9 @@ namespace Jobs.Generators
         private bool _isSingleBiomeMode;
         private int _forceBiomeIndex;
 
+        /// <summary>Controls which optional generation passes (caves, lodes, water) are executed.</summary>
+        public GenerationFeatureFlags FeatureFlags { get; set; } = GenerationFeatureFlags.Default;
+
         #region IChunkGenerator
 
         /// <inheritdoc />
@@ -290,20 +293,24 @@ namespace Jobs.Generators
             NativeBitArray wormMask = new NativeBitArray(
                 VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent);
 
-            StandardWormCarverJob wormJob = new StandardWormCarverJob
+            JobHandle wormHandle = default;
+            if (FeatureFlags.EnableCaves)
             {
-                BaseSeed = _seed,
-                ChunkPosition = new int2(chunkVoxelPos.x, chunkVoxelPos.y),
-                Biomes = _biomesJobData,
-                AllCaveLayers = _allCaveLayersJobData,
-                BiomeSelectionNoise = _biomeSelectionNoise,
-                CaveNoises = _caveNoises,
-                IsSingleBiomeMode = _isSingleBiomeMode,
-                ForceBiomeIndex = _forceBiomeIndex,
-                OutputWormMask = wormMask,
-            };
+                StandardWormCarverJob wormJob = new StandardWormCarverJob
+                {
+                    BaseSeed = _seed,
+                    ChunkPosition = new int2(chunkVoxelPos.x, chunkVoxelPos.y),
+                    Biomes = _biomesJobData,
+                    AllCaveLayers = _allCaveLayersJobData,
+                    BiomeSelectionNoise = _biomeSelectionNoise,
+                    CaveNoises = _caveNoises,
+                    IsSingleBiomeMode = _isSingleBiomeMode,
+                    ForceBiomeIndex = _forceBiomeIndex,
+                    OutputWormMask = wormMask,
+                };
 
-            JobHandle wormHandle = wormJob.Schedule(default);
+                wormHandle = wormJob.Schedule(default);
+            }
 
             StandardChunkGenerationJob job = new StandardChunkGenerationJob
             {
@@ -333,6 +340,7 @@ namespace Jobs.Generators
                 CaveWarpNoises = _caveWarpNoises,
                 IsSingleBiomeMode = _isSingleBiomeMode,
                 ForceBiomeIndex = _forceBiomeIndex,
+                FeatureFlags = FeatureFlags,
                 OutputMap = outputMap,
                 OutputHeightMap = outputHeightMap,
                 Modifications = modificationsQueue.AsParallelWriter(),

@@ -66,6 +66,15 @@ namespace Editor.WorldTools
         private bool _showZPlane = false;
 
         [SerializeField]
+        private bool _enableCaves = true;
+
+        [SerializeField]
+        private bool _enableLodes = true;
+
+        [SerializeField]
+        private bool _enableWater = true;
+
+        [SerializeField]
         private int3 _crosshairPos = new int3(0, 60, 0);
 
         [SerializeField]
@@ -404,6 +413,12 @@ namespace Editor.WorldTools
 
             _pipelineRunner = new EditorChunkPipelineRunner();
             _pipelineRunner.Initialize(_seed, _worldType, db, _isSingleBiomeMode, _selectedBiome);
+            _pipelineRunner.FeatureFlags = new GenerationFeatureFlags
+            {
+                EnableCaves = _enableCaves,
+                EnableLodes = _enableLodes,
+                EnableWater = _enableWater,
+            };
 
             ScheduleAllGeneration();
         }

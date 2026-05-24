@@ -31,6 +31,9 @@ namespace Editor.WorldTools.Libraries
         /// </summary>
         public bool IsInitialized => _isInitialized;
 
+        /// <summary>Controls which optional generation passes (caves, lodes, water) are executed.</summary>
+        public GenerationFeatureFlags FeatureFlags { get; set; } = GenerationFeatureFlags.Default;
+
         /// <summary>
         /// The job data manager containing block types and custom mesh data.
         /// </summary>
@@ -67,6 +70,7 @@ namespace Editor.WorldTools.Libraries
         /// <returns>The generation job data containing the handle and output containers.</returns>
         public GenerationJobData ScheduleGeneration(ChunkCoord coord)
         {
+            _generator.FeatureFlags = FeatureFlags;
             return _generator.ScheduleGeneration(coord);
         }
 

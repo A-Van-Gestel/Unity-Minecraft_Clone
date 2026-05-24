@@ -317,6 +317,36 @@ namespace Data
     }
 
     /// <summary>
+    /// Burst-safe configuration flags for <see cref="Jobs.StandardChunkGenerationJob"/>.
+    /// Controls which optional generation passes (caves, lodes, water) are executed.
+    /// Use <see cref="Default"/> for full generation with all passes enabled.
+    /// </summary>
+    public struct GenerationFeatureFlags
+    {
+        /// <summary>When false, cave carving (Cheese, Spaghetti, Noodle, WormCarver) is skipped.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableCaves;
+
+        /// <summary>When false, lode/ore vein replacement in stone is skipped.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableLodes;
+
+        /// <summary>When false, water fill below sea level is replaced with air.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableWater;
+
+        /// <summary>
+        /// Returns feature flags with all passes enabled.
+        /// </summary>
+        public static GenerationFeatureFlags Default => new GenerationFeatureFlags
+        {
+            EnableCaves = true,
+            EnableLodes = true,
+            EnableWater = true,
+        };
+    }
+
+    /// <summary>
     /// Axis-aligned clip bounds for <see cref="Jobs.MeshGenerationJob"/>. Voxels at coordinates
     /// greater than or equal to each Max value are treated as air during face culling.
     /// Use <see cref="Disabled"/> for no clipping (all axes set to <see cref="int.MaxValue"/>).
