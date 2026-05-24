@@ -324,6 +324,7 @@ namespace Editor.WorldTools
                 _phase = PipelinePhase.Complete;
                 _statusText = $"Complete. {_sectionMeshes.Count} sections rendered.";
                 _progress = 1f;
+                UpdatePivotOffset();
             }
 
             Repaint();

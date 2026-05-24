@@ -137,6 +137,38 @@ namespace Editor.WorldTools
         }
 
         /// <summary>
+        /// Computes the AABB center of all visible section meshes and sets it as the
+        /// <see cref="MeshPreviewWidget.PivotOffset"/> so the camera orbits around visible content.
+        /// </summary>
+        private void UpdatePivotOffset()
+        {
+            if (_meshPreviewWidget == null || _sectionMeshes.Count == 0)
+            {
+                if (_meshPreviewWidget != null) _meshPreviewWidget.PivotOffset = Vector3.zero;
+                return;
+            }
+
+            Vector3 min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+            foreach (SectionMeshEntry entry in _sectionMeshes)
+            {
+                if (entry.Mesh == null) continue;
+                Bounds bounds = entry.Mesh.bounds;
+                min = Vector3.Min(min, entry.WorldPosition + bounds.min);
+                max = Vector3.Max(max, entry.WorldPosition + bounds.max);
+            }
+
+            if (min.x > max.x)
+            {
+                _meshPreviewWidget.PivotOffset = Vector3.zero;
+                return;
+            }
+
+            _meshPreviewWidget.PivotOffset = (min + max) * 0.5f;
+        }
+
+        /// <summary>
         /// Draws all converted section meshes using <see cref="MeshPreviewWidget.DrawMeshDirect"/>.
         /// Assigns the correct runtime material (opaque, transparent, fluid) to each submesh
         /// based on the flags set during <see cref="ConvertMeshOutput"/>.

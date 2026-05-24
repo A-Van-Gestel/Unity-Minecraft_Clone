@@ -43,6 +43,12 @@ namespace Editor.Libraries
         public float CameraFieldOfView { get; set; } = 30f;
         public float LightIntensity { get; set; } = 1.2f;
 
+        /// <summary>
+        /// Offset applied before rotation so the camera orbits around this point
+        /// instead of the origin. Set to the center of visible content when clipping.
+        /// </summary>
+        public Vector3 PivotOffset { get; set; }
+
         public Bounds? WireframeBounds { get; set; }
         public Color WireframeColor { get; set; } = Color.green;
 
@@ -313,7 +319,8 @@ namespace Editor.Libraries
                 Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0),
                 Vector3.one);
 
-            _previewRenderUtility.DrawMesh(mesh, rotationMatrix * localToWorld, material, submesh);
+            Matrix4x4 pivotShift = Matrix4x4.Translate(-PivotOffset);
+            _previewRenderUtility.DrawMesh(mesh, rotationMatrix * pivotShift * localToWorld, material, submesh);
         }
 
         /// <summary>
@@ -428,8 +435,9 @@ namespace Editor.Libraries
             _previewPropertyBlock.SetColor(s_color, color);
 
             Matrix4x4 cameraRotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
+            Matrix4x4 pivotShift = Matrix4x4.Translate(-PivotOffset);
             Matrix4x4 planeTRS = Matrix4x4.TRS(center, rotation, new Vector3(size.x, 1, size.y));
-            Matrix4x4 finalMatrix = cameraRotationMatrix * planeTRS;
+            Matrix4x4 finalMatrix = cameraRotationMatrix * pivotShift * planeTRS;
 
             _previewRenderUtility.DrawMesh(_planeMesh, finalMatrix, _wireMaterial, 0, _previewPropertyBlock);
         }
