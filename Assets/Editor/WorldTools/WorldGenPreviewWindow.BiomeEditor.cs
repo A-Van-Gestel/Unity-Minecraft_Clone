@@ -463,10 +463,11 @@ namespace Editor.WorldTools
         private void DrawBeCavesLodesSubTab()
         {
             EditorUILayoutHelper.SectionHeader("Cave Generation");
-            EditorUILayoutHelper.SectionNote("<b>Cheese</b> — Large open caverns (3D noise > threshold)\n" +
-                                             "<b>Spaghetti</b> — Interconnected tunnel networks (6-way 2D noise average)\n" +
-                                             "<b>Noodle</b> — Winding tubular corridors (1 - |noise| > threshold)\n" +
-                                             "<b>Worm Carver</b> — Organic random-walk tunnels with branching\n\n" +
+            EditorUILayoutHelper.SectionNote("<b>Cheese</b> — Large open caverns. Carves where <i>noise > threshold</i>. Higher threshold = smaller/rarer caverns.\n" +
+                                             "<b>Spaghetti</b> — Interconnected tunnel networks (6-way 2D noise average). Higher threshold = rarer tunnels.\n" +
+                                             "<b>Noodle</b> — Winding tubular corridors. Carves where <i>(1 - |noise|) > threshold</i>, i.e. where noise is near zero. " +
+                                             "<b>Higher threshold = narrower tubes</b> (0.95 = tight fissures, 0.85 = wide tunnels). Typical range: 0.85–0.96.\n" +
+                                             "<b>Worm Carver</b> — Organic random-walk tunnels with branching. Threshold is not used.\n\n" +
                                              "Cheese and Noodle support domain warping. Depth Fade attenuates carving near height bounds.");
 
             EditorUILayoutHelper.BeginGroup();

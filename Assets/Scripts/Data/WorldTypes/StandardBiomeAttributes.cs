@@ -232,7 +232,8 @@ namespace Data.WorldTypes
         [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
         public FastNoiseConfig noiseConfig;
 
-        [Tooltip("If the evaluated noise exceeds this threshold, the block is carved into air.")]
+        [Tooltip("Cheese/Spaghetti: carves when noise > threshold (higher = rarer caves). " +
+                 "Noodle: carves when (1 - |noise|) > threshold, so higher = narrower tubes (e.g. 0.93 = tight corridors, 0.85 = wide tunnels).")]
         [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
         public float threshold = 0.5f;
 
