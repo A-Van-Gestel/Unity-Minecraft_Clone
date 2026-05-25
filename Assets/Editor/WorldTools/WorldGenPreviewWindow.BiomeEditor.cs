@@ -42,6 +42,8 @@ namespace Editor.WorldTools
         private bool _beShowCaves = true;
         private bool _beShowLodes = true;
         private bool _beShowWater = true;
+        private bool _beShowMajorFlora;
+        private bool _beShowMinorFlora;
         private bool _beShowSeaLevel = true;
         private bool _beShowBorders;
         private bool _beAutoGenerate = true;
@@ -140,6 +142,8 @@ namespace Editor.WorldTools
                 _beShowCaves = GUILayout.Toggle(_beShowCaves, new GUIContent("Caves", "Show cave carving."), EditorStyles.miniButton);
                 _beShowLodes = GUILayout.Toggle(_beShowLodes, new GUIContent("Lodes", "Show ore veins."), EditorStyles.miniButton);
                 _beShowWater = GUILayout.Toggle(_beShowWater, new GUIContent("Water", "Tint water with depth color."), EditorStyles.miniButton);
+                _beShowMajorFlora = GUILayout.Toggle(_beShowMajorFlora, new GUIContent("Flora", "Show major flora spawn points (trees, cacti, boulders)."), EditorStyles.miniButton);
+                _beShowMinorFlora = GUILayout.Toggle(_beShowMinorFlora, new GUIContent("Grass", "Show minor flora spawn points (grass, flowers, decorations)."), EditorStyles.miniButton);
                 _beShowSeaLevel = GUILayout.Toggle(_beShowSeaLevel, new GUIContent("Sea Level", "Show sea level line."), EditorStyles.miniButton);
                 _beShowBorders = GUILayout.Toggle(_beShowBorders, new GUIContent("Borders", "Show chunk borders."), EditorStyles.miniButton);
                 _beAutoGenerate = GUILayout.Toggle(_beAutoGenerate, new GUIContent("Auto", "Auto-regenerate on changes."), EditorStyles.miniButton);
@@ -203,6 +207,8 @@ namespace Editor.WorldTools
                 ShowCaves = _beShowCaves,
                 ShowLodes = _beShowLodes,
                 ShowWater = _beShowWater,
+                ShowMajorFlora = _beShowMajorFlora,
+                ShowMinorFlora = _beShowMinorFlora,
                 XZQuality = _beXZQuality,
             };
 
