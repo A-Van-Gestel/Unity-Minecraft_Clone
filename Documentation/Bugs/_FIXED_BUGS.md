@@ -476,6 +476,30 @@ Furthermore, applying animations from the pool caused a 1-frame visual flash, an
 
 ---
 
+### ~~TODO: 2D Cross-Section Preview missing flora / structure rendering~~
+
+**Severity:** Feature Gap  
+**Files:** `Assets/Editor/WorldTools/WorldGenPreviewWindow.CrossSection.cs` — `EvaluateColumn()`, `CheckFloraSpawnPoint()`  
+**Fixed:** May 2026
+
+**Original issue:** `EvaluateColumn()` replicated the runtime `StandardChunkGenerationJob` logic per block column but skipped flora and structure placement entirely. All flora and structures were absent from the X-Y, Z-Y, and X-Z panels.
+
+**Fix:** `EvaluateColumn()` now outputs `floraSurfaceY` and `floraBiomeIdx` per column. A new `CheckFloraSpawnPoint()` method evaluates `StructurePoolEntry` grid election per-column and renders structure template blocks inline on all three cross-section panels. Cross-chunk structures are excluded since the preview only renders 2D slices.
+
+---
+
+### ~~TODO: 3D Chunk Preview missing flora / structure rendering~~
+
+**Severity:** Feature Gap  
+**Files:** `Assets/Editor/WorldTools/ChunkPreview3DWindow.Pipeline.cs` — `ExpandStructuresAndApplyMods()`  
+**Fixed:** May 2026
+
+**Original issue:** The `ChunkPreview3DWindow` used runtime Burst jobs for terrain generation, lighting, and meshing, but skipped structure expansion after generation. `StructureSpawnMarker`s emitted by `StandardChunkGenerationJob` were disposed unused.
+
+**Fix:** Implemented `ExpandStructuresAndApplyMods()` which dequeues `StructureSpawnMarker`s after generation completes, calls `IChunkGenerator.ExpandStructure()` on the main thread to produce `VoxelMod`s, and applies each modification to the correct chunk's `NativeArray<uint>` map using coordinate translation (global position → chunk origin + local offset). Cross-chunk `VoxelMod`s (structures spanning chunk boundaries) are routed to neighbor chunk maps via `ApplyVoxelModToMap`. Heightmaps are recomputed before the lighting phase begins.
+
+---
+
 ## Block Behavior
 
 ### ~~04. Fluid `FluidLevel` set redundantly in `HandleFluidFlow`~~
