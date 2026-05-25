@@ -472,3 +472,56 @@ MonoBehaviour:
     wormSeekInterval: 10
     wormSeekDistance: 10
     wormSeekChance: 0.5
+  - layerName: Noodle Corridors
+    previewColor: {r: 0.2, g: 0.8, b: 0.8, a: 1}
+    mode: 3
+    noiseConfig:
+      seedOffset: 67890
+      frequency: 0.035
+      noiseType: 0
+      rotationType3D: 2
+      fractalType: 1
+      octaves: 2
+      gain: 0.5
+      lacunarity: 2
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    threshold: 0.92
+    enableWarp: 0
+    warpConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    minHeight: 10
+    maxHeight: 52
+    depthFadeMargin: 8
+    wormSpawnChance: 1
+    maxWormsPerChunk: 3
+    wormBaseRadius: 3
+    wormWaviness: 0.5
+    wormMinLength: 50
+    wormMaxLength: 200
+    wormBranchChance: 0.05
+    maxBranchDepth: 2
+    wormSeekInterval: 10
+    wormSeekDistance: 10
+    wormSeekChance: 0.5

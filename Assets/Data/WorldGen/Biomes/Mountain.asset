@@ -444,3 +444,56 @@ MonoBehaviour:
     wormSeekInterval: 10
     wormSeekDistance: 10
     wormSeekChance: 0.5
+  - layerName: Noodle Alpine Fissures
+    previewColor: {r: 0.5, g: 0.5, b: 0.9, a: 1}
+    mode: 3
+    noiseConfig:
+      seedOffset: 67890
+      frequency: 0.035
+      noiseType: 0
+      rotationType3D: 2
+      fractalType: 1
+      octaves: 2
+      gain: 0.5
+      lacunarity: 2
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    threshold: 0.95
+    enableWarp: 0
+    warpConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    minHeight: 15
+    maxHeight: 85
+    depthFadeMargin: 16
+    wormSpawnChance: 1
+    maxWormsPerChunk: 3
+    wormBaseRadius: 3
+    wormWaviness: 0.5
+    wormMinLength: 50
+    wormMaxLength: 200
+    wormBranchChance: 0.05
+    maxBranchDepth: 2
+    wormSeekInterval: 10
+    wormSeekDistance: 10
+    wormSeekChance: 0.5
