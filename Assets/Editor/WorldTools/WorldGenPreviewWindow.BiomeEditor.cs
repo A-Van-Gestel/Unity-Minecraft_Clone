@@ -109,9 +109,11 @@ namespace Editor.WorldTools
                 _beValidationDirty = true;
                 if (_liveUpdate)
                 {
-                    _debounceTimer.Cancel();
-                    RegenerateActivePreview();
-                    if (_beShowPreview && _beAutoGenerate) GenerateInlineBiomePreview();
+                    _debounceTimer.Request(() =>
+                    {
+                        RegenerateActivePreview();
+                        if (_beShowPreview && _beAutoGenerate) GenerateInlineBiomePreview();
+                    });
                 }
             }
 

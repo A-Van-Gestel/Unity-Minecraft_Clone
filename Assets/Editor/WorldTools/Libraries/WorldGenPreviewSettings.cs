@@ -46,6 +46,13 @@ namespace Editor.WorldTools.Libraries
         /// The currently published sea level override.
         /// </summary>
         public static int SeaLevel { get; private set; }
+
+        /// <summary>
+        /// Monotonically increasing counter that increments on every <see cref="Publish"/> call.
+        /// Subscribers can compare against a cached value to detect changes that don't alter
+        /// any individual property (e.g., biome ScriptableObject contents modified in-place).
+        /// </summary>
+        public static int Revision { get; private set; }
 #pragma warning restore UDR0001
 
         /// <summary>
@@ -59,6 +66,7 @@ namespace Editor.WorldTools.Libraries
             IsSingleBiomeMode = isSingleBiomeMode;
             SelectedBiome = selectedBiome;
             SeaLevel = seaLevel;
+            Revision++;
             OnSettingsChanged?.Invoke();
         }
     }

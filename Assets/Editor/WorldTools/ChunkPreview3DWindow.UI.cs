@@ -10,6 +10,12 @@ namespace Editor.WorldTools
     {
         private void DrawToolbar()
         {
+            if (Event.current.type == EventType.Layout)
+            {
+                _layoutSingleBiomeMode = _isSingleBiomeMode;
+                _layoutPhase = _phase;
+            }
+
             EditorGUILayout.BeginVertical();
 
             // --- Row 1: World Type, Seed, Radius ---
@@ -63,7 +69,7 @@ namespace Editor.WorldTools
             bool modeChanged = EditorGUI.EndChangeCheck();
 
             bool biomeChanged = false;
-            if (_isSingleBiomeMode)
+            if (_layoutSingleBiomeMode)
             {
                 EditorGUI.BeginChangeCheck();
                 _selectedBiome = (StandardBiomeAttributes)EditorGUILayout.ObjectField(
@@ -133,8 +139,8 @@ namespace Editor.WorldTools
 
             GUILayout.Space(8);
 
-            // Progress bar
-            if (_phase != PipelinePhase.Idle && _phase != PipelinePhase.Complete)
+            // Progress bar (use cached phase so control count is stable across Layout/Repaint)
+            if (_layoutPhase != PipelinePhase.Idle && _layoutPhase != PipelinePhase.Complete)
             {
                 Rect progressRect = GUILayoutUtility.GetRect(120, 16, GUILayout.Width(120));
                 EditorGUI.ProgressBar(progressRect, _progress, $"{(int)(_progress * 100)}%");

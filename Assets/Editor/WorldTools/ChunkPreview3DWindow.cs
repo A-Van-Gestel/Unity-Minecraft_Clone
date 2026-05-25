@@ -100,10 +100,15 @@ namespace Editor.WorldTools
         private int _gridStartZ;
         private int _lastClipY;
         private int _globalMaxBlockHeight;
+        private int _lastSyncRevision;
 
         // --- 3D Preview ---
         private MeshPreviewWidget _meshPreviewWidget;
         private GUIStyle _richToggleStyle;
+
+        // Layout-pass cache: snapshot values that affect control count so Layout/Repaint stay consistent.
+        private bool _layoutSingleBiomeMode;
+        private PipelinePhase _layoutPhase;
 
         // --- Pipeline State ---
         private PipelinePhase _phase = PipelinePhase.Idle;
@@ -168,6 +173,7 @@ namespace Editor.WorldTools
                 _isSingleBiomeMode = WorldGenPreviewSettings.IsSingleBiomeMode;
                 _selectedBiome = WorldGenPreviewSettings.SelectedBiome;
                 _seaLevel = WorldGenPreviewSettings.SeaLevel;
+                _lastSyncRevision = WorldGenPreviewSettings.Revision;
             }
 
 #pragma warning disable UDR0004
@@ -398,6 +404,13 @@ namespace Editor.WorldTools
                 _seaLevel = WorldGenPreviewSettings.SeaLevel;
                 needsRebuild = true;
             }
+
+            // Biome ScriptableObject contents may change without altering any broker property
+            // (same reference, different field values). The revision counter catches these.
+            if (!needsRebuild && WorldGenPreviewSettings.Revision != _lastSyncRevision)
+                needsRebuild = true;
+
+            _lastSyncRevision = WorldGenPreviewSettings.Revision;
 
             bool needsRemesh = !needsRebuild && needsRepaint
                                              && (_enableXClip || _enableYClip || _enableZClip);
