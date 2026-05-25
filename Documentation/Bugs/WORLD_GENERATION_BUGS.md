@@ -48,3 +48,26 @@ Full flora support requires:
 - String seeds parsed as integers bypass this hack entirely, so numeric strings and string-hashed names behave differently.
 
 ---
+
+## TODO: 3D Chunk Preview LOD / Quality Control for Large Radii
+
+**Severity:** Feature Gap  
+**Files:** `Assets/Editor/WorldTools/ChunkPreview3DWindow.cs`, `ChunkPreview3DWindow.Pipeline.cs`, `EditorChunkPipelineRunner.cs`, `MeshGenerationJob.cs`
+
+The Cross Section and Biome Editor tabs offer an **X-Z Quality** dropdown (`Off / Full / Half / Quarter / Eighth`) that skips blocks and upscales for faster 2D rendering. The 3D Chunk Preview window has no equivalent — it always generates and meshes every chunk at full resolution, making large radii (8+) slow to iterate on.
+
+**Proposed approach (two phases):**
+
+**Phase 1 — Editor Preview LOD:**  
+Add a "Quality" or "LOD" dropdown to the 3D Chunk Preview toolbar (e.g., `Full / Half / Quarter`). At reduced quality levels, reduce the effective mesh detail by either:
+
+- **Skip-and-upscale meshing:** Mesh every Nth section and scale the output geometry, or
+- **Reduced-resolution generation:** Generate chunks at a coarser voxel grid (e.g., 8x8x8 instead of 16x16x16) and mesh from that, or
+- **Distance-based LOD:** Full-resolution meshing for the center chunk(s), progressively lower detail for outer rings.
+
+The distance-based approach is the most visually useful — center detail stays sharp while outer terrain provides context without the generation cost.
+
+**Phase 2 — Runtime LOD (future optimization):**  
+Once the editor LOD system is proven, port the distance-based variant into the runtime chunk pipeline. Far chunks could use simplified meshes (fewer triangles, merged faces) to reduce draw calls and GPU load. This would integrate with the existing `MeshGenerationJob` section system and the chunk readiness pipeline.
+
+---
