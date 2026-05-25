@@ -198,6 +198,10 @@ namespace Editor.WorldTools
 
             int span = _bePreviewChunkRadius * VoxelData.ChunkWidth;
 
+            int maxMinCavePocketSize = 0;
+            for (int i = 0; i < biomeCount; i++)
+                maxMinCavePocketSize = Mathf.Max(maxMinCavePocketSize, standardBiomes[i].minCavePocketSize);
+
             ThreePanelParams p = new ThreePanelParams
             {
                 Span = span,
@@ -212,6 +216,7 @@ namespace Editor.WorldTools
                 ShowMajorFlora = _beShowMajorFlora,
                 ShowMinorFlora = _beShowMinorFlora,
                 XZQuality = _beXZQuality,
+                MinCavePocketSize = maxMinCavePocketSize,
             };
 
             GenerateThreePanelPreview(ref p, ref data,
@@ -468,9 +473,14 @@ namespace Editor.WorldTools
                                              "<b>Noodle</b> — Winding tubular corridors. Carves where <i>(1 - |noise|) > threshold</i>, i.e. where noise is near zero. " +
                                              "<b>Higher threshold = narrower tubes</b> (0.95 = tight fissures, 0.85 = wide tunnels). Typical range: 0.85–0.96.\n" +
                                              "<b>Worm Carver</b> — Organic random-walk tunnels with branching. Threshold is not used.\n\n" +
-                                             "Cheese and Noodle support domain warping. Depth Fade attenuates carving near height bounds.");
+                                             "Cheese and Noodle support domain warping. Depth Fade attenuates carving near height bounds.\n\n" +
+                                             "<b>Isolation Filter</b> — Volume-based post-carve cleanup pass. Finds connected cave air regions via flood fill and " +
+                                             "restores pockets smaller than the threshold to their original terrain blocks. " +
+                                             "4 = removes pockets of 1–3 blocks (recommended). 0 = disabled.");
 
             EditorUILayoutHelper.BeginGroup();
+            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("minCavePocketSize"));
+            EditorGUILayout.Space(4);
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("caveLayers"), true);
             EditorUILayoutHelper.EndGroup();
 

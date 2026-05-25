@@ -79,6 +79,13 @@ namespace Jobs.Data
         [MarshalAs(UnmanagedType.U1)]
         public bool EnableDensityWarp;
 
+        /// <summary>
+        /// Minimum connected air volume (in blocks) for a cave pocket to survive filtering.
+        /// Pockets smaller than this are restored to their original terrain blocks by <see cref="CaveIsolationFilterJob"/>.
+        /// 0 = disabled.
+        /// </summary>
+        public int MinCavePocketSize;
+
         /// <summary>RGB color for editor previews and in-game terrain debug overlay.</summary>
         public float3 DebugPreviewColor;
     }

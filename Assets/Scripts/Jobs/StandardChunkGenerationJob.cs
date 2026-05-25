@@ -167,6 +167,16 @@ namespace Jobs
         [WriteOnly]
         public NativeArray<ushort> OutputHeightMap;
 
+        /// <summary>Per-voxel byte flag marking blocks carved by cave generation. Consumed by <see cref="CaveIsolationFilterJob"/>.</summary>
+        [WriteOnly]
+        [NativeDisableParallelForRestriction]
+        public NativeArray<byte> OutputCaveMask;
+
+        /// <summary>Original block IDs stored before cave carving. Only meaningful where OutputCaveMask is set.</summary>
+        [WriteOnly]
+        [NativeDisableParallelForRestriction]
+        public NativeArray<ushort> OutputPreCaveBlockIDs;
+
         /// <summary>
         /// ParallelWriter allows concurrent Enqueue from worker threads.
         /// <see cref="VoxelMod"/> with <c>Vector3Int</c> is fully blittable — safe in Burst.
@@ -330,6 +340,25 @@ namespace Jobs
                 bool isExposedSurfaceForStructures = density > 0f && previousDensity <= 0f;
                 previousDensity = density;
 
+                // ----- LODE PASS (runs before cave carving so PreCaveBlockIDs captures post-lode values) -----
+                if (FeatureFlags.EnableLodes && voxelValue == BlockIDs.Stone)
+                {
+                    for (int i = 0; i < biome.LodeCount; i++)
+                    {
+                        int lodeIdx = biome.LodeStartIndex + i;
+                        StandardLodeJobData lode = AllLodes[lodeIdx];
+                        if (y > lode.MinHeight && y < lode.MaxHeight)
+                        {
+                            FastNoiseLite lodeNoise = LodeNoises[lodeIdx];
+                            float noiseVal = lodeNoise.GetNoise(globalX, y, globalZ);
+                            if (noiseVal > lode.Threshold)
+                            {
+                                voxelValue = lode.BlockID;
+                            }
+                        }
+                    }
+                }
+
                 // ----- CAVE CARVING PASS -----
                 // Guard: only carve solid, non-fluid, non-bedrock blocks
                 if (FeatureFlags.EnableCaves && voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
@@ -356,8 +385,11 @@ namespace Jobs
                         // --- WormCarver (preserved) ---
                         if (caveLayer.Mode == CaveMode.WormCarver)
                         {
-                            if (WormMask.IsSet(ChunkMath.GetFlattenedIndexInChunk(x, y, z)))
+                            int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                            if (WormMask.IsSet(flatIdx))
                             {
+                                OutputPreCaveBlockIDs[flatIdx] = voxelValue;
+                                OutputCaveMask[flatIdx] = 1;
                                 voxelValue = (byte)BlockIDs.Air;
                                 break;
                             }
@@ -376,6 +408,9 @@ namespace Jobs
 
                             if (caveNoise.GetNoise(cx, cy, cz) > effectiveThreshold)
                             {
+                                int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                                OutputPreCaveBlockIDs[flatIdx] = voxelValue;
+                                OutputCaveMask[flatIdx] = 1;
                                 voxelValue = (byte)BlockIDs.Air;
                                 break;
                             }
@@ -393,6 +428,9 @@ namespace Jobs
 
                             if (noiseVal > effectiveThreshold)
                             {
+                                int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                                OutputPreCaveBlockIDs[flatIdx] = voxelValue;
+                                OutputCaveMask[flatIdx] = 1;
                                 voxelValue = (byte)BlockIDs.Air;
                                 break;
                             }
@@ -408,27 +446,11 @@ namespace Jobs
 
                             if (noiseVal > effectiveThreshold)
                             {
+                                int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                                OutputPreCaveBlockIDs[flatIdx] = voxelValue;
+                                OutputCaveMask[flatIdx] = 1;
                                 voxelValue = (byte)BlockIDs.Air;
                                 break;
-                            }
-                        }
-                    }
-                }
-
-                // ----- LODE PASS -----
-                if (FeatureFlags.EnableLodes && voxelValue == BlockIDs.Stone)
-                {
-                    for (int i = 0; i < biome.LodeCount; i++)
-                    {
-                        int lodeIdx = biome.LodeStartIndex + i;
-                        StandardLodeJobData lode = AllLodes[lodeIdx];
-                        if (y > lode.MinHeight && y < lode.MaxHeight)
-                        {
-                            FastNoiseLite lodeNoise = LodeNoises[lodeIdx];
-                            float noiseVal = lodeNoise.GetNoise(globalX, y, globalZ);
-                            if (noiseVal > lode.Threshold)
-                            {
-                                voxelValue = lode.BlockID;
                             }
                         }
                     }

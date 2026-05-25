@@ -391,6 +391,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
+  minCavePocketSize: 12
   caveLayers:
   - layerName: Cave Network
     previewColor: {r: 1, g: 0, b: 0, a: 1}

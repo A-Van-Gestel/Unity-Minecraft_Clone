@@ -1,6 +1,6 @@
 # Design Document: Modern Procedural Terrain Generation
 
-**Version:** 2.4 (Implemented — Legacy Removed)  
+**Version:** 2.5 (Implemented — Cave Isolation Filter)  
 **Date:** May 2026  
 **Status:** Implemented  
 **Target:** Unity 6.4 (Standard World Gen System / Burst Compiler)  
@@ -295,8 +295,10 @@ Core rewrite of the terrain generation loop. Key changes from v1.x:
 - Multi-Noise spline-based height calculation
 - 3D Density evaluation within a dynamic band
 - `lastSurfaceY` tracking for correct subsurface strata under overhangs
+- Lode pass runs **before** cave carving so `PreCaveBlockIDs` captures post-lode values
 - `FluidType`-based cave carve guard
 - Preserved legacy cave modes + new `Noodle` mode
+- Cave isolation filter post-pass (`CaveIsolationFilterJob`) — volume-based flood fill removes small disconnected cave pockets
 
 ```csharp
 // Assets/Scripts/Jobs/StandardChunkGenerationJob.cs
@@ -413,8 +415,14 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
 
     previousDensity = density;
 
+    // ----- LODE PASS (runs before cave carving) -----
+    // Lodes run first so that PreCaveBlockIDs captures post-lode values.
+    // ... existing lode code ...
+
     // ----- CAVE CARVING PASS -----
-    // Guard: only carve solid, non-fluid, non-bedrock blocks
+    // Guard: only carve solid, non-fluid, non-bedrock blocks.
+    // Before setting voxelValue = Air, writes to OutputCaveMask and
+    // OutputPreCaveBlockIDs for the isolation filter post-pass.
     if (voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
         BlockTypes[voxelValue].FluidType == FluidType.None)
     {
@@ -441,6 +449,9 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
             {
                 if (WormMask.IsSet(ChunkMath.GetFlattenedIndexInChunk(x, y, z)))
                 {
+                    int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                    OutputPreCaveBlockIDs[flatIdx] = (ushort)voxelValue;
+                    OutputCaveMask[flatIdx] = 1;
                     voxelValue = (byte)BlockIDs.Air;
                     break;
                 }
@@ -458,6 +469,9 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
 
                 if (caveNoise.GetNoise(cx, cy, cz) > effectiveThreshold)
                 {
+                    int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                    OutputPreCaveBlockIDs[flatIdx] = (ushort)voxelValue;
+                    OutputCaveMask[flatIdx] = 1;
                     voxelValue = (byte)BlockIDs.Air;
                     break;
                 }
@@ -477,6 +491,9 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
 
                 if (noiseVal > effectiveThreshold)
                 {
+                    int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                    OutputPreCaveBlockIDs[flatIdx] = (ushort)voxelValue;
+                    OutputCaveMask[flatIdx] = 1;
                     voxelValue = (byte)BlockIDs.Air;
                     break;
                 }
@@ -494,6 +511,9 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
 
                 if (noiseVal > effectiveThreshold)
                 {
+                    int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                    OutputPreCaveBlockIDs[flatIdx] = (ushort)voxelValue;
+                    OutputCaveMask[flatIdx] = 1;
                     voxelValue = (byte)BlockIDs.Air;
                     break;
                 }
@@ -501,12 +521,38 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
         }
     }
 
-    // ----- LODE PASS -----
-    // ... existing lode code ...
-
     // ...[Pack Voxel & Write to OutputMap] ...
 }
 ```
+
+### 4.1. Cave Isolation Filter (`CaveIsolationFilterJob`)
+
+A Burst-compiled `IJob` post-pass that removes isolated cave air pockets via connected-component flood fill. Scheduled after `StandardChunkGenerationJob` on the same `VoxelMap`.
+
+**Temporary buffers** (allocated per-chunk during generation, disposed after the filter):
+
+| Buffer            | Type                  | Size                    | Purpose                                                     |
+|-------------------|-----------------------|-------------------------|-------------------------------------------------------------|
+| `CaveMask`        | `NativeArray<byte>`   | 32,768 bytes (32KB)     | 1 byte per voxel — marks blocks carved by any cave mode     |
+| `PreCaveBlockIDs` | `NativeArray<ushort>` | 32,768 × 2 bytes (64KB) | Original block ID before cave carving (post-lode, pre-cave) |
+
+**Job chain:**
+
+```
+WormCarverJob (IJob) → StandardChunkGenerationJob (IJobFor, writes CaveMask + PreCaveBlockIDs)
+                     → CaveIsolationFilterJob (IJob, flood-fills CaveMask, restores small pockets)
+```
+
+**Algorithm:** For each connected region of cave-carved air (identified via `CaveMask`), BFS flood fill computes the region volume. If the volume is below the per-biome `MinCavePocketSize` threshold, all voxels in that region are restored to their original pre-cave blocks from `PreCaveBlockIDs`. Restoration repacks the block ID with correct `LightEmission` and `FluidLevel` via `BlockTypes`.
+
+**Design decisions:**
+
+- **`NativeArray<byte>` over `NativeBitArray`:** Each `IJobFor` worker writes to a distinct byte index, avoiding the non-atomic read-modify-write race that `NativeBitArray.Set()` has on shared 64-bit words.
+- **Per-biome field, global runtime threshold:** `MinCavePocketSize` lives on `StandardBiomeAttributes`. At runtime, `StandardChunkGenerator.Initialize()` takes the max across all biomes — conservative but avoids per-voxel biome tracking.
+- **Out-of-chunk = boundary:** Neighbors outside 16×16×128 bounds are not traversed. A pocket at a chunk edge is evaluated independently (conservative — may filter a pocket that connects in a neighbor chunk).
+- **Conditional scheduling:** Only scheduled when `_globalMinCavePocketSize > 0 && FeatureFlags.EnableCaves`. When disabled, neither `CaveMask` nor `PreCaveBlockIDs` are allocated.
+
+**Editor preview:** The CrossSection and BiomeEditor tabs approximate this filter with a 2D flood fill (`ApplyCaveIsolationFilter2D`) on their vertical slices. The 3D Chunk Preview uses the real job pipeline.
 
 ---
 
@@ -533,7 +579,7 @@ cumulative depth thresholds per-column (before the Y-loop) would eliminate the i
 
 ### 6.3. Cache Locality & Memory
 
-Zero new allocations inside the execution job. All data is pre-allocated `NativeArray<FastNoiseLite>` and `NativeArray<BurstSpline>` tables managed by `StandardChunkGenerator`.
+Zero new allocations inside the main execution job (`StandardChunkGenerationJob`). All data is pre-allocated `NativeArray<FastNoiseLite>` and `NativeArray<BurstSpline>` tables managed by `StandardChunkGenerator`. The `CaveIsolationFilterJob` post-pass allocates temporary `NativeArray` buffers (`CaveMask` 32KB, `PreCaveBlockIDs` 64KB) per chunk; these are disposed after the filter completes.
 
 ### 6.4. Visual Wins
 

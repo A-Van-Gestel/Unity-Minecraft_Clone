@@ -63,6 +63,9 @@ namespace Jobs.Generators
         /// </summary>
         private CompositeStructureTemplate[] _structureTemplateLookup;
 
+        /// <summary>Global max minimum cave pocket size across all biomes. 0 = filter job is skipped entirely.</summary>
+        private int _globalMinCavePocketSize;
+
         private bool _isSingleBiomeMode;
         private int _forceBiomeIndex;
 
@@ -213,8 +216,11 @@ namespace Jobs.Generators
                     Enable3DDensity = biome.enable3DDensity,
                     DensityAmplitude = biome.densityAmplitude,
                     EnableDensityWarp = biome.enableDensityWarp,
+                    MinCavePocketSize = biome.minCavePocketSize,
                     DebugPreviewColor = new float3(biome.debugPreviewColor.r, biome.debugPreviewColor.g, biome.debugPreviewColor.b),
                 };
+
+                _globalMinCavePocketSize = Mathf.Max(_globalMinCavePocketSize, biome.minCavePocketSize);
 
                 // Flatten major flora pool entries
                 for (int j = 0; j < majorPoolCount; j++)
@@ -300,8 +306,13 @@ namespace Jobs.Generators
             NativeArray<ushort> outputHeightMap = new NativeArray<ushort>(
                 VoxelData.ChunkWidth * VoxelData.ChunkWidth, Allocator.Persistent);
 
-            NativeBitArray wormMask = new NativeBitArray(
-                VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, Allocator.Persistent);
+            const int totalVoxels = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
+
+            NativeBitArray wormMask = new NativeBitArray(totalVoxels, Allocator.Persistent);
+
+            bool needCaveMask = FeatureFlags.EnableCaves;
+            NativeArray<byte> caveMask = new NativeArray<byte>(needCaveMask ? totalVoxels : 0, Allocator.Persistent);
+            NativeArray<ushort> preCaveBlockIDs = new NativeArray<ushort>(needCaveMask ? totalVoxels : 0, Allocator.Persistent);
 
             JobHandle wormHandle = default;
             if (FeatureFlags.EnableCaves)
@@ -356,14 +367,32 @@ namespace Jobs.Generators
                 Modifications = modificationsQueue.AsParallelWriter(),
                 StructureSpawns = structureSpawnsQueue.AsParallelWriter(),
                 WormMask = wormMask,
+                OutputCaveMask = caveMask,
+                OutputPreCaveBlockIDs = preCaveBlockIDs,
             };
 
-            JobHandle handle = job.ScheduleParallelByRef(VoxelData.ChunkWidth * VoxelData.ChunkWidth, 8, wormHandle);
+            JobHandle terrainHandle = job.ScheduleParallelByRef(VoxelData.ChunkWidth * VoxelData.ChunkWidth, 8, wormHandle);
 
-            // Auto-dispose the worm mask when the terrain generation is complete.
-            // Using Allocator.Persistent and this JobHandle extension ensures it's cleaned up safely
-            // without needing explicit tracking inside GenerationJobData.
-            wormMask.Dispose(handle);
+            wormMask.Dispose(terrainHandle);
+
+            // --- Cave Isolation Filter (post-pass, volume-based flood fill) ---
+            JobHandle handle = terrainHandle;
+            if (_globalMinCavePocketSize > 0 && FeatureFlags.EnableCaves)
+            {
+                CaveIsolationFilterJob filterJob = new CaveIsolationFilterJob
+                {
+                    MinPocketSize = _globalMinCavePocketSize,
+                    CaveMask = caveMask,
+                    PreCaveBlockIDs = preCaveBlockIDs,
+                    VoxelMap = outputMap,
+                    BlockTypes = _blockTypesJobData,
+                };
+
+                handle = filterJob.Schedule(terrainHandle);
+            }
+
+            caveMask.Dispose(handle);
+            preCaveBlockIDs.Dispose(handle);
 
             return new GenerationJobData
             {

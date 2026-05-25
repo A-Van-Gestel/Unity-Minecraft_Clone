@@ -337,6 +337,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
+  minCavePocketSize: 12
   caveLayers:
   - layerName: Worm Carver
     previewColor: {r: 1, g: 0, b: 0.7748437, a: 1}

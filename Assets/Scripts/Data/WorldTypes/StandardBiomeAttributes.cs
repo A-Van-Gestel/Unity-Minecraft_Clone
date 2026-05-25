@@ -128,6 +128,12 @@ namespace Data.WorldTypes
         public StandardLode[] lodes;
 
         [Header("Cave Generation")]
+        [Range(0, 64)]
+        [Tooltip("Minimum connected air volume (in blocks) for a cave pocket to survive the post-carve filter. " +
+                 "Connected regions smaller than this are filled back with their original terrain blocks. " +
+                 "0 = disabled. 4 = removes pockets of 1-3 blocks. Higher values filter larger isolated pockets.")]
+        public int minCavePocketSize;
+
         [Tooltip("Layered noise configurations for generating 3D caves (e.g., cheese and spaghetti networks).")]
         public StandardCaveLayer[] caveLayers;
     }

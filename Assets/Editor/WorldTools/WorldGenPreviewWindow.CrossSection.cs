@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Data;
 using Data.WorldTypes;
@@ -363,6 +364,10 @@ namespace Editor.WorldTools
 
             BuildCrossSectionData(standardBiomes, out CrossSectionNativeData data);
 
+            int maxMinCavePocketSize = 0;
+            for (int i = 0; i < biomeCount; i++)
+                maxMinCavePocketSize = Mathf.Max(maxMinCavePocketSize, standardBiomes[i].minCavePocketSize);
+
             ThreePanelParams p = new ThreePanelParams
             {
                 Span = span,
@@ -380,6 +385,7 @@ namespace Editor.WorldTools
                 SkipXY = _csLockXY,
                 SkipZY = _csLockZY,
                 SkipXZ = _csLockXZ,
+                MinCavePocketSize = maxMinCavePocketSize,
             };
 
             _csCrosshairColumn = GenerateThreePanelPreview(ref p, ref data,
@@ -407,6 +413,7 @@ namespace Editor.WorldTools
             public bool ShowMajorFlora, ShowMinorFlora;
             public XZQuality XZQuality;
             public bool SkipXY, SkipZY, SkipXZ;
+            public int MinCavePocketSize;
         }
 
         /// <summary>
@@ -434,27 +441,50 @@ namespace Editor.WorldTools
                 CrossSectionPanelHelper.EnsureTexture(ref texXY, span, chunkHeight);
                 Color[] pixels = new Color[span * chunkHeight];
 
+                bool needCaveFilter = p.ShowCaves && p.MinCavePocketSize > 0;
+                ushort[][] allColumns = new ushort[span][];
+                byte[] caveMaskGrid = needCaveFilter ? new byte[span * chunkHeight] : null;
+                ushort[] preCaveGrid = needCaveFilter ? new ushort[span * chunkHeight] : null;
+                int[] floraYs = new int[span];
+                int[] floraBiomeIdxs = new int[span];
+
                 for (int col = 0; col < span; col++)
                 {
                     int gx = col + p.OffsetX;
                     GetWormMaskForColumn(gx, p.CrosshairPos.z, wormMasks, out NativeBitArray mask, out int lx, out int lz);
 
-                    ushort[] column = EvaluateColumn(gx, p.CrosshairPos.z, p.SeaLevel, p.ForceBiomeIdx,
+                    byte[] colCaveMask = needCaveFilter ? new byte[chunkHeight] : null;
+                    ushort[] colPreCave = needCaveFilter ? new ushort[chunkHeight] : null;
+
+                    allColumns[col] = EvaluateColumn(gx, p.CrosshairPos.z, p.SeaLevel, p.ForceBiomeIdx,
                         p.ShowCaves, p.ShowLodes, lx, lz, ref mask, ref data,
-                        out int floraSurfaceY, out int floraBiomeIdx);
+                        out floraYs[col], out floraBiomeIdxs[col],
+                        colCaveMask, colPreCave);
 
-                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, p.ShowWater, p.SeaLevel);
+                    if (needCaveFilter)
+                        Array.Copy(colCaveMask, 0, caveMaskGrid, col * chunkHeight, chunkHeight);
+                    if (needCaveFilter)
+                        Array.Copy(colPreCave, 0, preCaveGrid, col * chunkHeight, chunkHeight);
+                }
 
-                    if (showAnyFlora && floraSurfaceY >= 0)
+                if (needCaveFilter)
+                    ApplyCaveIsolationFilter2D(allColumns, caveMaskGrid, preCaveGrid, span, chunkHeight, p.MinCavePocketSize);
+
+                for (int col = 0; col < span; col++)
+                {
+                    WriteColumnToPixels(allColumns[col], pixels, col, span, chunkHeight, p.ShowWater, p.SeaLevel);
+
+                    if (showAnyFlora && floraYs[col] >= 0)
                     {
-                        int spawnY = CheckFloraSpawnPoint(gx, p.CrosshairPos.z, floraSurfaceY, p.SeaLevel,
-                            floraBiomeIdx, _seed, p.ShowMajorFlora, p.ShowMinorFlora, ref data, out bool isMajor);
+                        int gx = col + p.OffsetX;
+                        int spawnY = CheckFloraSpawnPoint(gx, p.CrosshairPos.z, floraYs[col], p.SeaLevel,
+                            floraBiomeIdxs[col], _seed, p.ShowMajorFlora, p.ShowMinorFlora, ref data, out bool isMajor);
                         if (spawnY >= 0)
                             pixels[spawnY * span + col] = isMajor ? s_majorFloraMarkerColor : s_minorFloraMarkerColor;
                     }
 
-                    if (gx == p.CrosshairPos.x)
-                        crosshairColumn = column;
+                    if (col + p.OffsetX == p.CrosshairPos.x)
+                        crosshairColumn = allColumns[col];
                 }
 
                 texXY.SetPixels(pixels);
@@ -472,21 +502,44 @@ namespace Editor.WorldTools
                 CrossSectionPanelHelper.EnsureTexture(ref texZY, span, chunkHeight);
                 Color[] pixels = new Color[span * chunkHeight];
 
+                bool needCaveFilter = p.ShowCaves && p.MinCavePocketSize > 0;
+                ushort[][] allColumns = new ushort[span][];
+                byte[] caveMaskGrid = needCaveFilter ? new byte[span * chunkHeight] : null;
+                ushort[] preCaveGrid = needCaveFilter ? new ushort[span * chunkHeight] : null;
+                int[] floraYs = new int[span];
+                int[] floraBiomeIdxs = new int[span];
+
                 for (int col = 0; col < span; col++)
                 {
                     int gz = col + p.OffsetZ;
                     GetWormMaskForColumn(p.CrosshairPos.x, gz, wormMasks, out NativeBitArray mask, out int lx, out int lz);
 
-                    ushort[] column = EvaluateColumn(p.CrosshairPos.x, gz, p.SeaLevel, p.ForceBiomeIdx,
+                    byte[] colCaveMask = needCaveFilter ? new byte[chunkHeight] : null;
+                    ushort[] colPreCave = needCaveFilter ? new ushort[chunkHeight] : null;
+
+                    allColumns[col] = EvaluateColumn(p.CrosshairPos.x, gz, p.SeaLevel, p.ForceBiomeIdx,
                         p.ShowCaves, p.ShowLodes, lx, lz, ref mask, ref data,
-                        out int floraSurfaceY, out int floraBiomeIdx);
+                        out floraYs[col], out floraBiomeIdxs[col],
+                        colCaveMask, colPreCave);
 
-                    WriteColumnToPixels(column, pixels, col, span, chunkHeight, p.ShowWater, p.SeaLevel);
+                    if (needCaveFilter)
+                        Array.Copy(colCaveMask, 0, caveMaskGrid, col * chunkHeight, chunkHeight);
+                    if (needCaveFilter)
+                        Array.Copy(colPreCave, 0, preCaveGrid, col * chunkHeight, chunkHeight);
+                }
 
-                    if (showAnyFlora && floraSurfaceY >= 0)
+                if (needCaveFilter)
+                    ApplyCaveIsolationFilter2D(allColumns, caveMaskGrid, preCaveGrid, span, chunkHeight, p.MinCavePocketSize);
+
+                for (int col = 0; col < span; col++)
+                {
+                    WriteColumnToPixels(allColumns[col], pixels, col, span, chunkHeight, p.ShowWater, p.SeaLevel);
+
+                    if (showAnyFlora && floraYs[col] >= 0)
                     {
-                        int spawnY = CheckFloraSpawnPoint(p.CrosshairPos.x, gz, floraSurfaceY, p.SeaLevel,
-                            floraBiomeIdx, _seed, p.ShowMajorFlora, p.ShowMinorFlora, ref data, out bool isMajor);
+                        int gz = col + p.OffsetZ;
+                        int spawnY = CheckFloraSpawnPoint(p.CrosshairPos.x, gz, floraYs[col], p.SeaLevel,
+                            floraBiomeIdxs[col], _seed, p.ShowMajorFlora, p.ShowMinorFlora, ref data, out bool isMajor);
                         if (spawnY >= 0)
                             pixels[spawnY * span + col] = isMajor ? s_majorFloraMarkerColor : s_minorFloraMarkerColor;
                     }
@@ -992,7 +1045,8 @@ namespace Editor.WorldTools
             int forceBiomeIdx, bool showCaves, bool showLodes,
             int localX, int localZ, ref NativeBitArray wormMask,
             ref CrossSectionNativeData data,
-            out int floraSurfaceY, out int floraBiomeIndex)
+            out int floraSurfaceY, out int floraBiomeIndex,
+            byte[] caveMask = null, ushort[] preCaveBlockIDs = null)
         {
             const int chunkHeight = VoxelData.ChunkHeight;
             ushort[] column = new ushort[chunkHeight];
@@ -1101,6 +1155,21 @@ namespace Editor.WorldTools
 
                 previousDensity = density;
 
+                // Lode pass runs before cave carving (matches StandardChunkGenerationJob ordering)
+                if (showLodes && voxelValue == BlockIDs.Stone)
+                {
+                    for (int i = 0; i < biome.LodeCount; i++)
+                    {
+                        int lIdx = biome.LodeStartIndex + i;
+                        StandardLodeJobData lode = data.AllLodes[lIdx];
+                        if (y > lode.MinHeight && y < lode.MaxHeight)
+                        {
+                            if (data.LodeNoises[lIdx].GetNoise(globalX, y, globalZ) > lode.Threshold)
+                                voxelValue = lode.BlockID;
+                        }
+                    }
+                }
+
                 if (showCaves && voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock && voxelValue != BlockIDs.Water)
                 {
                     for (int i = 0; i < biome.CaveLayerCount; i++)
@@ -1117,6 +1186,12 @@ namespace Editor.WorldTools
                                 int flatIdx = ChunkMath.GetFlattenedIndexInChunk(localX, y, localZ);
                                 if (flatIdx >= 0 && flatIdx < wormMask.Length && wormMask.IsSet(flatIdx))
                                 {
+                                    if (caveMask != null)
+                                    {
+                                        caveMask[y] = 1;
+                                        preCaveBlockIDs[y] = voxelValue;
+                                    }
+
                                     voxelValue = BlockIDs.Air;
                                     break;
                                 }
@@ -1141,6 +1216,12 @@ namespace Editor.WorldTools
                             if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
                             if (caveNoise.GetNoise(cx, cy, cz) > effectiveThreshold)
                             {
+                                if (caveMask != null)
+                                {
+                                    caveMask[y] = 1;
+                                    preCaveBlockIDs[y] = voxelValue;
+                                }
+
                                 voxelValue = BlockIDs.Air;
                                 break;
                             }
@@ -1154,6 +1235,12 @@ namespace Editor.WorldTools
                                               caveNoise.GetNoise(globalZ, y) + caveNoise.GetNoise(globalZ, globalX)) / 6f;
                             if (noiseVal > effectiveThreshold)
                             {
+                                if (caveMask != null)
+                                {
+                                    caveMask[y] = 1;
+                                    preCaveBlockIDs[y] = voxelValue;
+                                }
+
                                 voxelValue = BlockIDs.Air;
                                 break;
                             }
@@ -1165,23 +1252,15 @@ namespace Editor.WorldTools
                             float noiseVal = 1.0f - math.abs(caveNoise.GetNoise(cx, cy, cz));
                             if (noiseVal > effectiveThreshold)
                             {
+                                if (caveMask != null)
+                                {
+                                    caveMask[y] = 1;
+                                    preCaveBlockIDs[y] = voxelValue;
+                                }
+
                                 voxelValue = BlockIDs.Air;
                                 break;
                             }
-                        }
-                    }
-                }
-
-                if (showLodes && voxelValue == BlockIDs.Stone)
-                {
-                    for (int i = 0; i < biome.LodeCount; i++)
-                    {
-                        int lIdx = biome.LodeStartIndex + i;
-                        StandardLodeJobData lode = data.AllLodes[lIdx];
-                        if (y > lode.MinHeight && y < lode.MaxHeight)
-                        {
-                            if (data.LodeNoises[lIdx].GetNoise(globalX, y, globalZ) > lode.Threshold)
-                                voxelValue = lode.BlockID;
                         }
                     }
                 }
@@ -1208,6 +1287,74 @@ namespace Editor.WorldTools
             }
 
             return column;
+        }
+
+        #endregion
+
+        #region Cave Isolation Filter (2D)
+
+        /// <summary>
+        /// Applies a 2D connected-component flood fill on cave-masked voxels in a vertical slice.
+        /// Connected regions smaller than <paramref name="minPocketSize"/> are restored to their
+        /// pre-cave block IDs, approximating the 3D <see cref="CaveIsolationFilterJob"/> behavior.
+        /// </summary>
+        private static void ApplyCaveIsolationFilter2D(
+            ushort[][] columns, byte[] caveMaskGrid, ushort[] preCaveGrid,
+            int width, int height, int minPocketSize)
+        {
+            int totalCells = width * height;
+            byte[] visited = new byte[totalCells];
+            List<int> queue = new List<int>(64);
+            List<int> region = new List<int>(64);
+
+            for (int i = 0; i < totalCells; i++)
+            {
+                if (caveMaskGrid[i] == 0 || visited[i] != 0) continue;
+
+                queue.Clear();
+                region.Clear();
+
+                queue.Add(i);
+                visited[i] = 1;
+
+                int head = 0;
+                while (head < queue.Count)
+                {
+                    int current = queue[head++];
+                    region.Add(current);
+
+                    int cx = current / height;
+                    int cy = current % height;
+
+                    TryEnqueue2D(cx + 1, cy, width, height, caveMaskGrid, visited, queue);
+                    TryEnqueue2D(cx - 1, cy, width, height, caveMaskGrid, visited, queue);
+                    TryEnqueue2D(cx, cy + 1, width, height, caveMaskGrid, visited, queue);
+                    TryEnqueue2D(cx, cy - 1, width, height, caveMaskGrid, visited, queue);
+                }
+
+                if (region.Count < minPocketSize)
+                {
+                    foreach (int idx in region)
+                    {
+                        int col = idx / height;
+                        int y = idx % height;
+                        columns[col][y] = preCaveGrid[idx];
+                        caveMaskGrid[idx] = 0;
+                    }
+                }
+            }
+        }
+
+        private static void TryEnqueue2D(int x, int y, int width, int height,
+            byte[] caveMaskGrid, byte[] visited, List<int> queue)
+        {
+            if (x < 0 || x >= width || y < 0 || y >= height) return;
+            int idx = x * height + y;
+            if (caveMaskGrid[idx] != 0 && visited[idx] == 0)
+            {
+                visited[idx] = 1;
+                queue.Add(idx);
+            }
         }
 
         #endregion
