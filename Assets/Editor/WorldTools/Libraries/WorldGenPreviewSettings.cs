@@ -41,18 +41,24 @@ namespace Editor.WorldTools.Libraries
         /// The currently selected biome for single biome mode.
         /// </summary>
         public static StandardBiomeAttributes SelectedBiome { get; private set; }
+
+        /// <summary>
+        /// The currently published sea level override.
+        /// </summary>
+        public static int SeaLevel { get; private set; }
 #pragma warning restore UDR0001
 
         /// <summary>
         /// Publishes new settings and notifies all subscribers.
         /// </summary>
-        public static void Publish(int seed, WorldTypeDefinition worldType, int3 crosshairPos, bool isSingleBiomeMode, StandardBiomeAttributes selectedBiome)
+        public static void Publish(int seed, WorldTypeDefinition worldType, int3 crosshairPos, bool isSingleBiomeMode, StandardBiomeAttributes selectedBiome, int seaLevel)
         {
             Seed = seed;
             WorldType = worldType;
             CrosshairPos = crosshairPos;
             IsSingleBiomeMode = isSingleBiomeMode;
             SelectedBiome = selectedBiome;
+            SeaLevel = seaLevel;
             OnSettingsChanged?.Invoke();
         }
     }

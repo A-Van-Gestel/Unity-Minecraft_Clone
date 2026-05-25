@@ -93,7 +93,12 @@ namespace Editor.WorldTools
             if (_worldType != WorldGenPreviewSettings.WorldType)
             {
                 _worldType = WorldGenPreviewSettings.WorldType;
-                if (_worldType != null) _seaLevel = _worldType.seaLevel;
+                changed = true;
+            }
+
+            if (_seaLevel != WorldGenPreviewSettings.SeaLevel)
+            {
+                _seaLevel = WorldGenPreviewSettings.SeaLevel;
                 changed = true;
             }
 
@@ -223,7 +228,7 @@ namespace Editor.WorldTools
                 case 4: GenerateBlendingPreview(); break;
             }
 
-            WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
+            WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome, _seaLevel);
         }
 
         private void OnGUI()

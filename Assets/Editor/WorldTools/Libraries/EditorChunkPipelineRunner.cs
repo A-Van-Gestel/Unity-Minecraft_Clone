@@ -35,6 +35,12 @@ namespace Editor.WorldTools.Libraries
         public GenerationFeatureFlags FeatureFlags { get; set; } = GenerationFeatureFlags.Default;
 
         /// <summary>
+        /// When set, overrides the sea level from the <see cref="WorldTypeDefinition"/> asset.
+        /// Leave <c>null</c> to use the world type's default sea level.
+        /// </summary>
+        public int? SeaLevelOverride { get; set; }
+
+        /// <summary>
         /// The job data manager containing block types and custom mesh data.
         /// </summary>
         public JobDataManager JobDataManager => _jobDataManager;
@@ -71,6 +77,8 @@ namespace Editor.WorldTools.Libraries
         public GenerationJobData ScheduleGeneration(ChunkCoord coord)
         {
             _generator.FeatureFlags = FeatureFlags;
+            if (SeaLevelOverride.HasValue)
+                _generator.SeaLevel = SeaLevelOverride.Value;
             return _generator.ScheduleGeneration(coord);
         }
 
@@ -207,7 +215,7 @@ namespace Editor.WorldTools.Libraries
             // Compute SectionJobData from the raw map
             const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
             NativeArray<SectionJobData> sectionData = new NativeArray<SectionJobData>(sectionCount, Allocator.Persistent);
-            ComputeSectionData(centerMap, sectionData, sectionCount);
+            ComputeSectionData(centerMap, _jobDataManager.BlockTypesJobData, sectionData, sectionCount);
 
             // Create snapshot copies for the job
             NativeArray<uint> mapCopy = new NativeArray<uint>(centerMap, Allocator.Persistent);
@@ -296,6 +304,7 @@ namespace Editor.WorldTools.Libraries
 
         private static void ComputeSectionData(
             NativeArray<uint> map,
+            NativeArray<BlockTypeJobData> blockTypes,
             NativeArray<SectionJobData> sectionData,
             int sectionCount)
         {
@@ -303,6 +312,7 @@ namespace Editor.WorldTools.Libraries
             {
                 int yStart = s * ChunkMath.SECTION_SIZE;
                 int nonAirCount = 0;
+                int opaqueCount = 0;
                 const int totalVoxels = VoxelData.ChunkWidth * ChunkMath.SECTION_SIZE * VoxelData.ChunkWidth;
 
                 for (int x = 0; x < VoxelData.ChunkWidth; x++)
@@ -314,7 +324,9 @@ namespace Editor.WorldTools.Libraries
                             int index = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
                             uint packed = map[index];
                             ushort blockId = (ushort)(packed & 0xFFFF);
-                            if (blockId != 0) nonAirCount++;
+                            if (blockId == 0) continue;
+                            nonAirCount++;
+                            if (blockId < blockTypes.Length && blockTypes[blockId].IsOpaque) opaqueCount++;
                         }
                     }
                 }
@@ -322,7 +334,7 @@ namespace Editor.WorldTools.Libraries
                 sectionData[s] = new SectionJobData
                 {
                     IsEmpty = nonAirCount == 0,
-                    IsFullySolid = nonAirCount == totalVoxels,
+                    IsFullySolid = opaqueCount == totalVoxels,
                 };
             }
         }

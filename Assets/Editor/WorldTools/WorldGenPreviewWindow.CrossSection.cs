@@ -166,7 +166,7 @@ namespace Editor.WorldTools
 
             if (changed)
             {
-                WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
+                WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome, _seaLevel);
             }
 
             if (GUILayout.Button("Generate Preview"))
@@ -245,7 +245,7 @@ namespace Editor.WorldTools
 
                 if (clickChanged || scrollChanged)
                 {
-                    WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
+                    WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome, _seaLevel);
                     if (_autoGenerate)
                     {
                         _debounceTimer.Cancel();

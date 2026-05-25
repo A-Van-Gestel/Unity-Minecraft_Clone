@@ -69,6 +69,16 @@ namespace Jobs.Generators
         /// <summary>Controls which optional generation passes (caves, lodes, water) are executed.</summary>
         public GenerationFeatureFlags FeatureFlags { get; set; } = GenerationFeatureFlags.Default;
 
+        /// <summary>
+        /// Overrides the sea level after <see cref="Initialize"/> has been called.
+        /// Used by editor preview tools to experiment with different water levels
+        /// without modifying the <see cref="WorldTypeDefinition"/> asset.
+        /// </summary>
+        public int SeaLevel
+        {
+            set => _seaLevel = value;
+        }
+
         #region IChunkGenerator
 
         /// <inheritdoc />

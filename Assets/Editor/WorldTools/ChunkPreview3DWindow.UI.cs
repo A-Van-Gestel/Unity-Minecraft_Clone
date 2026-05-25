@@ -23,6 +23,8 @@ namespace Editor.WorldTools
             _worldType = (WorldTypeDefinition)EditorGUILayout.ObjectField(
                 _worldType, typeof(WorldTypeDefinition), false, GUILayout.Width(160));
             bool worldTypeChanged = EditorGUI.EndChangeCheck();
+            if (worldTypeChanged && _worldType != null)
+                _seaLevel = _worldType.seaLevel;
 
             GUILayout.Space(8);
 
@@ -186,6 +188,12 @@ namespace Editor.WorldTools
             _showZPlane = GUILayout.Toggle(_showZPlane, new GUIContent("<color=#44FF44>Z</color>", "Show the Z-axis cross-section plane (Green)."), _richToggleStyle);
             _showSeaLevelPlane = GUILayout.Toggle(_showSeaLevelPlane, new GUIContent("<color=#4488FF>Sea</color>", "Show the sea level plane (Blue)."), _richToggleStyle);
 
+            GUILayout.Space(6);
+            EditorGUI.BeginChangeCheck();
+            GUILayout.Label(new GUIContent("Sea Level", "Water surface level. Affects generation (water fill, underwater surfaces) and the sea plane."), GUILayout.Width(58));
+            _seaLevel = EditorGUILayout.IntSlider(_seaLevel, 0, VoxelData.ChunkHeight - 1, GUILayout.Width(160));
+            bool seaLevelChanged = EditorGUI.EndChangeCheck();
+
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
@@ -197,7 +205,7 @@ namespace Editor.WorldTools
                 _debounceTimer.Cancel();
                 StartPipeline();
             }
-            else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged || modeChanged || biomeChanged || crosshairChunkChanged || generationToggleChanged))
+            else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged || modeChanged || biomeChanged || crosshairChunkChanged || generationToggleChanged || seaLevelChanged))
             {
                 _debounceTimer.Request(StartPipeline);
             }
@@ -217,9 +225,9 @@ namespace Editor.WorldTools
             }
 
             // Publish settings for sync
-            if (seedChanged || worldTypeChanged || modeChanged || biomeChanged || crosshairChanged)
+            if (seedChanged || worldTypeChanged || modeChanged || biomeChanged || crosshairChanged || seaLevelChanged)
             {
-                WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _isSingleBiomeMode, _selectedBiome);
+                WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _isSingleBiomeMode, _selectedBiome, _seaLevel);
             }
         }
 
@@ -268,9 +276,9 @@ namespace Editor.WorldTools
             }
 
             // Draw Sea Level Plane (Blue)
-            if (_showSeaLevelPlane && _worldType != null)
+            if (_showSeaLevelPlane)
             {
-                float seaLevelY = _worldType.seaLevel - (VoxelData.ChunkHeight * 0.5f) + zFightOffset;
+                float seaLevelY = _seaLevel - (VoxelData.ChunkHeight * 0.5f) + zFightOffset;
                 _meshPreviewWidget.DrawTransparentPlane(new Vector3(0, seaLevelY, 0), horizontalPlaneSize, new Color(0f, 0.5f, 1f, 0.25f));
             }
 

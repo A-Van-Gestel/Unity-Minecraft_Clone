@@ -85,6 +85,9 @@ namespace Editor.WorldTools
         private bool _enableMinorFlora = true;
 
         [SerializeField]
+        private int _seaLevel = 45;
+
+        [SerializeField]
         private int3 _crosshairPos = new int3(0, 60, 0);
 
         [SerializeField]
@@ -164,6 +167,7 @@ namespace Editor.WorldTools
                 _crosshairPos = WorldGenPreviewSettings.CrosshairPos;
                 _isSingleBiomeMode = WorldGenPreviewSettings.IsSingleBiomeMode;
                 _selectedBiome = WorldGenPreviewSettings.SelectedBiome;
+                _seaLevel = WorldGenPreviewSettings.SeaLevel;
             }
 
 #pragma warning disable UDR0004
@@ -236,7 +240,10 @@ namespace Editor.WorldTools
             }
 
             if (validCount == 1)
+            {
                 _worldType = candidate;
+                _seaLevel = candidate.seaLevel;
+            }
         }
 
         private void InitializePreviewWidget()
@@ -386,6 +393,12 @@ namespace Editor.WorldTools
                 needsRebuild = true;
             }
 
+            if (WorldGenPreviewSettings.SeaLevel != _seaLevel)
+            {
+                _seaLevel = WorldGenPreviewSettings.SeaLevel;
+                needsRebuild = true;
+            }
+
             bool needsRemesh = !needsRebuild && needsRepaint
                                              && (_enableXClip || _enableYClip || _enableZClip);
 
@@ -435,6 +448,7 @@ namespace Editor.WorldTools
                 EnableMajorFlora = _enableMajorFlora,
                 EnableMinorFlora = _enableMinorFlora,
             };
+            _pipelineRunner.SeaLevelOverride = _seaLevel;
 
             ScheduleAllGeneration();
         }
