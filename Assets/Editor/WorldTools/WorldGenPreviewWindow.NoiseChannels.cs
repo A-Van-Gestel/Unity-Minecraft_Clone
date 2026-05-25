@@ -108,9 +108,14 @@ namespace Editor.WorldTools
                 WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
             }
 
-            if (GUILayout.Button("Generate Preview") || (changed && _autoGenerate))
+            if (GUILayout.Button("Generate Preview"))
             {
+                _debounceTimer.Cancel();
                 GenerateNoiseChannelsPreview();
+            }
+            else if (changed && _autoGenerate)
+            {
+                _debounceTimer.Request(GenerateNoiseChannelsPreview);
             }
 
             EditorGUILayout.Space();

@@ -25,6 +25,10 @@ namespace Editor.WorldTools
         // --- Pipeline Runner ---
         private EditorChunkPipelineRunner _pipelineRunner;
 
+        // --- Debounce ---
+        private const double AUTO_UPDATE_DEBOUNCE_SECONDS = 0.10;
+        private readonly EditorDebounceTimer _debounceTimer = new EditorDebounceTimer(AUTO_UPDATE_DEBOUNCE_SECONDS);
+
         // --- Settings ---
         [SerializeField]
         private WorldTypeDefinition _worldType;
@@ -193,9 +197,13 @@ namespace Editor.WorldTools
 
         private void OnGUI()
         {
+            _debounceTimer.Poll();
             DrawToolbar();
             DrawPreviewViewport();
             DrawStatusBar();
+
+            if (_debounceTimer.IsPending)
+                Repaint();
         }
 
         private void AutoDetectWorldType()
@@ -384,7 +392,7 @@ namespace Editor.WorldTools
             if (needsRebuild || needsRepaint)
             {
                 Repaint();
-                if (_autoUpdate && needsRebuild) StartPipeline();
+                if (_autoUpdate && needsRebuild) _debounceTimer.Request(StartPipeline);
                 else if (_autoUpdate && needsRemesh)
                 {
                     RemeshOnly();

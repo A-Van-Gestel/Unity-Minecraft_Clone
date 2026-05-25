@@ -169,9 +169,14 @@ namespace Editor.WorldTools
                 WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
             }
 
-            if (GUILayout.Button("Generate Preview") || (changed && _autoGenerate))
+            if (GUILayout.Button("Generate Preview"))
             {
+                _debounceTimer.Cancel();
                 GenerateCrossSectionPreview();
+            }
+            else if (changed && _autoGenerate)
+            {
+                _debounceTimer.Request(GenerateCrossSectionPreview);
             }
 
             EditorGUILayout.Space(2);
@@ -201,7 +206,7 @@ namespace Editor.WorldTools
                 EditorGUI.BeginChangeCheck();
                 _csXZQuality = (XZQuality)EditorGUI.EnumPopup(xzQualityRect, _csXZQuality);
                 if (EditorGUI.EndChangeCheck() && _autoGenerate)
-                    GenerateCrossSectionPreview();
+                    _debounceTimer.Request(GenerateCrossSectionPreview);
 
                 // Chunk borders on all panels
                 if (_showChunkBorders)
@@ -243,6 +248,7 @@ namespace Editor.WorldTools
                     WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome);
                     if (_autoGenerate)
                     {
+                        _debounceTimer.Cancel();
                         GenerateCrossSectionPreview();
                     }
                 }

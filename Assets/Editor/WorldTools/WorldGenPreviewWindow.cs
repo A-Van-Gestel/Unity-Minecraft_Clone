@@ -42,6 +42,10 @@ namespace Editor.WorldTools
         private Vector2 _biomeListScrollPos;
         private DateTime _lastAssetWriteTime;
 
+        // --- Debounce ---
+        private const double AUTO_GENERATE_DEBOUNCE_SECONDS = 0.10;
+        private readonly EditorDebounceTimer _debounceTimer = new EditorDebounceTimer(AUTO_GENERATE_DEBOUNCE_SECONDS);
+
         // --- Shared Preview State ---
         private int _seed = 1337;
         private Vector2Int _offset = Vector2Int.zero;
@@ -116,7 +120,7 @@ namespace Editor.WorldTools
             if (changed)
             {
                 Repaint();
-                if (_autoGenerate) RegenerateActivePreview();
+                if (_autoGenerate) _debounceTimer.Request(RegenerateActivePreview);
             }
         }
 
@@ -201,6 +205,7 @@ namespace Editor.WorldTools
             if (writeTime != _lastAssetWriteTime)
             {
                 _lastAssetWriteTime = writeTime;
+                _debounceTimer.Cancel();
                 RegenerateActivePreview();
             }
         }
@@ -223,6 +228,8 @@ namespace Editor.WorldTools
 
         private void OnGUI()
         {
+            _debounceTimer.Poll();
+
             _selectedTabIndex = GUILayout.Toolbar(_selectedTabIndex, s_tabLabels, GUILayout.Height(25));
 
             // Track which preview tab was last selected (skip tab 2 = Biome Editing and tab 3 = World Type, not previews)
@@ -247,6 +254,9 @@ namespace Editor.WorldTools
                     DrawWorldBlendingTab();
                     break;
             }
+
+            if (_debounceTimer.IsPending)
+                Repaint();
         }
 
         #region Shared Biome List
@@ -293,7 +303,11 @@ namespace Editor.WorldTools
                     _bePreviewXY = null;
                     _bePreviewZY = null;
                     _bePreviewXZ = null;
-                    if (_autoGenerate) RegenerateActivePreview();
+                    if (_autoGenerate)
+                    {
+                        _debounceTimer.Cancel();
+                        RegenerateActivePreview();
+                    }
                 }
             );
 
@@ -335,7 +349,11 @@ namespace Editor.WorldTools
                 _biome = duplicated;
                 _biomeSerializedObject = new SerializedObject(_biome);
                 _lastAssetWriteTime = default;
-                if (_autoGenerate) RegenerateActivePreview();
+                if (_autoGenerate)
+                {
+                    _debounceTimer.Cancel();
+                    RegenerateActivePreview();
+                }
             }
 
             GUI.backgroundColor = new Color(1f, 0.6f, 0.6f);

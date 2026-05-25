@@ -194,11 +194,12 @@ namespace Editor.WorldTools
             // Handle setting changes
             if (generateClicked)
             {
+                _debounceTimer.Cancel();
                 StartPipeline();
             }
             else if (_autoUpdate && (worldTypeChanged || seedChanged || radiusChanged || modeChanged || biomeChanged || crosshairChunkChanged || generationToggleChanged))
             {
-                StartPipeline();
+                _debounceTimer.Request(StartPipeline);
             }
             else if (_autoUpdate && (anyClipToggled
                                      || (crosshairYChanged && _enableYClip)
