@@ -1,4 +1,5 @@
 using Data.WorldTypes;
+using Jobs.Data;
 using Libraries;
 using Unity.Mathematics;
 
@@ -38,7 +39,8 @@ namespace Editor.Libraries
 
             if (caveMode == CaveMode.Noodle)
             {
-                return 1.0f - math.abs(noise.GetNoise(worldX, sliceY, worldZ));
+                float raw = noise.GetNoise(worldX, sliceY, worldZ);
+                return 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
             }
 
             // Cheese (default) and Lode — standard 3D evaluation

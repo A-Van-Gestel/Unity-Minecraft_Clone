@@ -671,6 +671,7 @@ namespace Editor.WorldTools
                     AllCaveLayers = data.AllCaveLayers,
                     BiomeSelectionNoise = data.SelectionNoise,
                     CaveNoises = data.CaveNoises,
+                    CaveZoneNoises = data.CaveZoneNoises,
                     OutputWormMask = wormMask,
                 };
                 wormJob.Execute();
@@ -831,6 +832,7 @@ namespace Editor.WorldTools
             public NativeArray<StandardCaveLayerJobData> AllCaveLayers;
             public NativeArray<FastNoiseLite> CaveNoises;
             public NativeArray<FastNoiseLite> CaveWarpNoises;
+            public NativeArray<FastNoiseLite> CaveZoneNoises;
             public NativeArray<StandardLodeJobData> AllLodes;
             public NativeArray<FastNoiseLite> LodeNoises;
             public FastNoiseLite SelectionNoise;
@@ -888,6 +890,7 @@ namespace Editor.WorldTools
             data.AllCaveLayers = new NativeArray<StandardCaveLayerJobData>(totalCaves, Allocator.Persistent);
             data.CaveNoises = new NativeArray<FastNoiseLite>(totalCaves, Allocator.Persistent);
             data.CaveWarpNoises = new NativeArray<FastNoiseLite>(totalCaves, Allocator.Persistent);
+            data.CaveZoneNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Persistent);
             data.AllLodes = new NativeArray<StandardLodeJobData>(totalLodes, Allocator.Persistent);
             data.LodeNoises = new NativeArray<FastNoiseLite>(totalLodes, Allocator.Persistent);
             data.AllTerrainLayers = new NativeArray<StandardTerrainLayerJobData>(totalLayers, Allocator.Persistent);
@@ -916,6 +919,7 @@ namespace Editor.WorldTools
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
                     UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
                     FloraZoneCoverage = biome.floraZoneCoverage,
+                    CaveZoneAttenuation = biome.caveZoneAttenuation,
                     MajorFloraPoolStartIndex = poolIdx,
                     MajorFloraPoolCount = majorPoolCount,
                     MinorFloraPoolStartIndex = poolIdx + majorPoolCount,
@@ -968,6 +972,7 @@ namespace Editor.WorldTools
                 }
 
                 data.FloraZoneNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.floraZoneNoiseConfig, _seed);
+                data.CaveZoneNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.caveZoneNoiseConfig, _seed);
 
                 // Build Multi-Noise arrays
                 FastNoiseConfig contCfg = biome.continentalnessNoiseConfig;
@@ -1025,6 +1030,7 @@ namespace Editor.WorldTools
             if (data.AllCaveLayers.IsCreated) data.AllCaveLayers.Dispose();
             if (data.CaveNoises.IsCreated) data.CaveNoises.Dispose();
             if (data.CaveWarpNoises.IsCreated) data.CaveWarpNoises.Dispose();
+            if (data.CaveZoneNoises.IsCreated) data.CaveZoneNoises.Dispose();
             if (data.AllLodes.IsCreated) data.AllLodes.Dispose();
             if (data.LodeNoises.IsCreated) data.LodeNoises.Dispose();
             if (data.AllTerrainLayers.IsCreated) data.AllTerrainLayers.Dispose();
@@ -1101,6 +1107,13 @@ namespace Editor.WorldTools
 
             bool hasWormMask = wormMask.IsCreated;
 
+            float caveZoneThresholdBoost = 0f;
+            if (biome.CaveZoneAttenuation > 0f)
+            {
+                float zoneNoise = data.CaveZoneNoises[biomeIndex].GetNoise(globalX, globalZ);
+                caveZoneThresholdBoost = (1f - zoneNoise) * 0.5f * biome.CaveZoneAttenuation;
+            }
+
             for (int y = chunkHeight - 1; y >= 0; y--)
             {
                 // ReSharper disable once RedundantAssignment
@@ -1170,7 +1183,8 @@ namespace Editor.WorldTools
                     }
                 }
 
-                if (showCaves && voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock && voxelValue != BlockIDs.Water)
+                if (showCaves && voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
+                    voxelValue != BlockIDs.Water && voxelValue != BlockIDs.Lava)
                 {
                     for (int i = 0; i < biome.CaveLayerCount; i++)
                     {
@@ -1207,7 +1221,8 @@ namespace Editor.WorldTools
                             depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
                         }
 
-                        float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
+                        float zoneBoostedThreshold = caveLayer.Threshold + caveZoneThresholdBoost;
+                        float effectiveThreshold = zoneBoostedThreshold + (1f - depthFade) * (1f - zoneBoostedThreshold);
                         FastNoiseLite caveNoise = data.CaveNoises[cIdx];
 
                         if (caveLayer.Mode == CaveMode.Cheese)
@@ -1249,7 +1264,8 @@ namespace Editor.WorldTools
                         {
                             float cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
-                            float noiseVal = 1.0f - math.abs(caveNoise.GetNoise(cx, cy, cz));
+                            float raw = caveNoise.GetNoise(cx, cy, cz);
+                            float noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
                             if (noiseVal > effectiveThreshold)
                             {
                                 if (caveMask != null)

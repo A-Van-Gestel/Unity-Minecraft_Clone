@@ -57,6 +57,7 @@ MonoBehaviour:
     enableLodes: 1
     enableWater: 1
     enableMajorFloraPass: 1
+    enableMinorFloraPass: 1
     saveCompression: 2
     maxInitialLoadRadius: 10
     maxMeshRebuildsPerFrame: 10

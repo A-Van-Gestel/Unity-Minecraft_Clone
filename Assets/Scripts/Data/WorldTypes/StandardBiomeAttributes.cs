@@ -128,6 +128,18 @@ namespace Data.WorldTypes
         public StandardLode[] lodes;
 
         [Header("Cave Generation")]
+        [Tooltip("2D noise field (range [-1, 1]) controlling spatial cave density variation. " +
+                 "High noise regions produce full cave networks; low noise regions produce fewer, smaller caves. " +
+                 "The gradient is smooth — no hard boundaries between cave-dense and cave-sparse areas.")]
+        public FastNoiseConfig caveZoneNoiseConfig;
+
+        [Tooltip("How much the cave zone noise attenuates cave generation in low-noise regions. " +
+                 "0 = uniform caves everywhere (zone noise ignored). " +
+                 "Higher values create more spatial variation between cave-dense clusters and cave-sparse gaps. " +
+                 "Caves are never fully gated — even low-noise areas can generate smaller networks.")]
+        [Range(0f, 1f)]
+        public float caveZoneAttenuation;
+
         [Range(0, 64)]
         [Tooltip("Minimum connected air volume (in blocks) for a cave pocket to survive the post-carve filter. " +
                  "Connected regions smaller than this are filled back with their original terrain blocks. " +

@@ -35,6 +35,10 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<FastNoiseLite> CaveNoises;
 
+        /// <summary>Per-biome cave zone gating noises. Worms only spawn in columns that pass the zone check.</summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> CaveZoneNoises;
+
         [ReadOnly]
         public bool IsSingleBiomeMode;
 
@@ -109,14 +113,24 @@ namespace Jobs
 
                     StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
 
+                    // Cave zone attenuation: modulate worm spawn chance based on zone noise
+                    float wormSpawnFactor = 1f;
+                    if (biome.CaveZoneAttenuation > 0f)
+                    {
+                        float centerX = globalCx + VoxelData.ChunkWidth * 0.5f;
+                        float centerZ = globalCz + VoxelData.ChunkWidth * 0.5f;
+                        float zoneNoise = CaveZoneNoises[biomeIndex].GetNoise(centerX, centerZ);
+                        wormSpawnFactor = 1f - (1f - zoneNoise) * 0.5f * biome.CaveZoneAttenuation;
+                    }
+
                     for (int layerIdx = 0; layerIdx < biome.CaveLayerCount; layerIdx++)
                     {
                         StandardCaveLayerJobData caveLayer = AllCaveLayers[biome.CaveLayerStartIndex + layerIdx];
 
                         if (caveLayer.Mode != CaveMode.WormCarver) continue;
 
-                        // Check if a worm spawns in this chunk at all
-                        if (rand.NextFloat(0f, 1f) > caveLayer.WormSpawnChance) continue;
+                        // Check if a worm spawns — spawn chance modulated by cave zone
+                        if (rand.NextFloat(0f, 1f) > caveLayer.WormSpawnChance * wormSpawnFactor) continue;
 
                         // Spawn 1 to max worms per chunk
                         int numWorms = rand.NextInt(1, caveLayer.MaxWormsPerChunk + 1);
@@ -205,7 +219,8 @@ namespace Jobs
                                             }
                                             else if (seekLayer.Mode == CaveMode.Noodle)
                                             {
-                                                noiseVal = 1.0f - math.abs(CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.y, lookPos.z));
+                                                float raw = CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.y, lookPos.z);
+                                                noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
                                             }
                                             else
                                             {

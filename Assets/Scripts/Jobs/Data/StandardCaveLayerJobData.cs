@@ -9,6 +9,15 @@ namespace Jobs.Data
     /// </summary>
     public struct StandardCaveLayerJobData
     {
+        /// <summary>Smoothing radius for the noodle isoband. Rounds the abs() cusp into a smooth curve.</summary>
+        private const float NOODLE_SMOOTH_RADIUS = 0.06f;
+
+        /// <summary>Squared smoothing radius, pre-computed to avoid per-voxel multiply.</summary>
+        public const float NoodleSmoothRadiusSq = NOODLE_SMOOTH_RADIUS * NOODLE_SMOOTH_RADIUS;
+
+        /// <summary>Smoothing offset subtracted after sqrt to preserve the same band width as abs().</summary>
+        public const float NoodleSmoothOffset = NOODLE_SMOOTH_RADIUS;
+
         /// <summary>Noise evaluation strategy.</summary>
         public readonly CaveMode Mode;
 

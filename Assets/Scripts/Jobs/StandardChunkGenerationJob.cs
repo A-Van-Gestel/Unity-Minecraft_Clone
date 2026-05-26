@@ -113,6 +113,13 @@ namespace Jobs
         public NativeArray<FastNoiseLite> CaveNoises;
 
         /// <summary>
+        /// Pre-constructed FastNoiseLite instances for each biome's cave zone gating.
+        /// Indexed per biome. Evaluated as 2D noise to determine whether a column can have caves.
+        /// </summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> CaveZoneNoises;
+
+        /// <summary>
         /// Pre-constructed FastNoiseLite instances for each biome's flora zones.
         /// </summary>
         [ReadOnly]
@@ -274,6 +281,14 @@ namespace Jobs
             float strataDepthJitter = StrataDepthNoises[surfaceBiomeIndex].GetNoise(globalX, globalZ);
             int strataJitterBlocks = (int)math.round(strataDepthJitter * 2.5f);
 
+            // Pre-evaluate cave zone attenuation once per column ([-1, 1] noise range)
+            float caveZoneThresholdBoost = 0f;
+            if (biome.CaveZoneAttenuation > 0f)
+            {
+                float zoneNoise = CaveZoneNoises[biomeIndex].GetNoise(globalX, globalZ);
+                caveZoneThresholdBoost = (1f - zoneNoise) * 0.5f * biome.CaveZoneAttenuation;
+            }
+
             // --- COLUMN ITERATION (top-down) ---
             for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
             {
@@ -361,7 +376,8 @@ namespace Jobs
 
                 // ----- CAVE CARVING PASS -----
                 // Guard: only carve solid, non-fluid, non-bedrock blocks
-                if (FeatureFlags.EnableCaves && voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
+                if (FeatureFlags.EnableCaves &&
+                    voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
                     BlockTypes[voxelValue].FluidType == FluidType.None)
                 {
                     for (int i = 0; i < biome.CaveLayerCount; i++)
@@ -380,7 +396,8 @@ namespace Jobs
                             depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
                         }
 
-                        float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
+                        float zoneBoostedThreshold = caveLayer.Threshold + caveZoneThresholdBoost;
+                        float effectiveThreshold = zoneBoostedThreshold + (1f - depthFade) * (1f - zoneBoostedThreshold);
 
                         // --- WormCarver (preserved) ---
                         if (caveLayer.Mode == CaveMode.WormCarver)
@@ -442,7 +459,8 @@ namespace Jobs
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
 
-                            float noiseVal = 1.0f - math.abs(caveNoise.GetNoise(cx, cy, cz));
+                            float raw = caveNoise.GetNoise(cx, cy, cz);
+                            float noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
 
                             if (noiseVal > effectiveThreshold)
                             {

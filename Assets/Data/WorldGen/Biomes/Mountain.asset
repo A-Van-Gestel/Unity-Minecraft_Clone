@@ -337,6 +337,24 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
+  caveZoneNoiseConfig:
+    seedOffset: 0
+    frequency: 0.04
+    noiseType: 0
+    rotationType3D: 2
+    fractalType: 0
+    octaves: 1
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 0
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 0
+    domainWarpType: 0
+    domainWarpAmp: 0
+    normalizeToZeroOne: 0
+  caveZoneAttenuation: 0.28
   minCavePocketSize: 12
   caveLayers:
   - layerName: Worm Carver
@@ -412,7 +430,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    threshold: 0.55
+    threshold: 0.8
     enableWarp: 0
     warpConfig:
       seedOffset: 0
@@ -450,7 +468,7 @@ MonoBehaviour:
     mode: 3
     noiseConfig:
       seedOffset: 67890
-      frequency: 0.035
+      frequency: 0.025
       noiseType: 0
       rotationType3D: 2
       fractalType: 1
@@ -465,15 +483,15 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    threshold: 0.95
-    enableWarp: 0
+    threshold: 0.93
+    enableWarp: 1
     warpConfig:
       seedOffset: 0
-      frequency: 0
+      frequency: 0.015
       noiseType: 0
-      rotationType3D: 0
+      rotationType3D: 2
       fractalType: 0
-      octaves: 0
+      octaves: 1
       gain: 0
       lacunarity: 0
       weightedStrength: 0
@@ -482,7 +500,7 @@ MonoBehaviour:
       cellularReturnType: 0
       cellularJitter: 0
       domainWarpType: 0
-      domainWarpAmp: 0
+      domainWarpAmp: 8
       normalizeToZeroOne: 0
     minHeight: 15
     maxHeight: 85

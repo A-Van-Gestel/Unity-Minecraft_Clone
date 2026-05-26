@@ -31,6 +31,7 @@ namespace Jobs.Generators
         private NativeArray<FastNoiseLite> _strataDepthNoises;
         private NativeArray<FastNoiseLite> _lodeNoises;
         private NativeArray<FastNoiseLite> _caveNoises;
+        private NativeArray<FastNoiseLite> _caveZoneNoises;
         private NativeArray<FastNoiseLite> _floraZoneNoises;
         private FastNoiseLite _biomeSelectionNoise;
 
@@ -134,6 +135,7 @@ namespace Jobs.Generators
 
             _allCaveLayersJobData = new NativeArray<StandardCaveLayerJobData>(totalCaveLayerCount, Allocator.Persistent);
             _caveNoises = new NativeArray<FastNoiseLite>(totalCaveLayerCount, Allocator.Persistent);
+            _caveZoneNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _floraZoneNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _allStructurePoolEntries = new NativeArray<StructurePoolEntryJobData>(totalStructurePoolEntryCount, Allocator.Persistent);
             _entryFloraZoneNoises = new NativeArray<FastNoiseLite>(totalEntryFloraZoneOverrides, Allocator.Persistent);
@@ -203,6 +205,7 @@ namespace Jobs.Generators
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
                     UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
                     FloraZoneCoverage = biome.floraZoneCoverage,
+                    CaveZoneAttenuation = biome.caveZoneAttenuation,
                     MajorFloraPoolStartIndex = majorPoolStart,
                     MajorFloraPoolCount = majorPoolCount,
                     MinorFloraPoolStartIndex = majorPoolStart + majorPoolCount,
@@ -247,6 +250,9 @@ namespace Jobs.Generators
 
                 // Build per-biome flora zone noise
                 _floraZoneNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.floraZoneNoiseConfig, _seed);
+
+                // Build per-biome cave zone noise
+                _caveZoneNoises[i] = FastNoiseFactory.CreateNoiseFromConfig(biome.caveZoneNoiseConfig, _seed);
 
                 // Build Multi-Noise terrain system arrays
                 // Build Multi-Noise terrain system arrays
@@ -325,6 +331,7 @@ namespace Jobs.Generators
                     AllCaveLayers = _allCaveLayersJobData,
                     BiomeSelectionNoise = _biomeSelectionNoise,
                     CaveNoises = _caveNoises,
+                    CaveZoneNoises = _caveZoneNoises,
                     IsSingleBiomeMode = _isSingleBiomeMode,
                     ForceBiomeIndex = _forceBiomeIndex,
                     OutputWormMask = wormMask,
@@ -346,6 +353,7 @@ namespace Jobs.Generators
                 StrataDepthNoises = _strataDepthNoises,
                 LodeNoises = _lodeNoises,
                 CaveNoises = _caveNoises,
+                CaveZoneNoises = _caveZoneNoises,
                 FloraZoneNoises = _floraZoneNoises,
                 BiomeSelectionNoise = _biomeSelectionNoise,
                 AllStructurePoolEntries = _allStructurePoolEntries,
@@ -474,9 +482,16 @@ namespace Jobs.Generators
                 }
             }
 
-            // Caves
-            if (voxelValue != 0 && voxelValue != 8 && voxelValue != 19 && _blockTypesJobData[voxelValue].FluidType == FluidType.None)
+            // Caves — zone noise attenuates thresholds for smooth spatial variation
+            if (voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock && _blockTypesJobData[voxelValue].FluidType == FluidType.None)
             {
+                float caveZoneBoost = 0f;
+                if (biome.CaveZoneAttenuation > 0f)
+                {
+                    float zoneNoise = _caveZoneNoises[biomeIndex].GetNoise(globalPos.x, globalPos.z);
+                    caveZoneBoost = (1f - zoneNoise) * 0.5f * biome.CaveZoneAttenuation;
+                }
+
                 for (int i = 0; i < biome.CaveLayerCount; i++)
                 {
                     int caveIdx = biome.CaveLayerStartIndex + i;
@@ -496,24 +511,31 @@ namespace Jobs.Generators
                     FastNoiseLite caveNoise = _caveNoises[caveIdx];
                     float noiseVal;
 
+                    float zoneBoostedThreshold = caveLayer.Threshold + caveZoneBoost;
+                    float effectiveThreshold = zoneBoostedThreshold + (1f - depthFade) * (1f - zoneBoostedThreshold);
+
+                    if (caveLayer.Mode == CaveMode.WormCarver) continue;
+
                     if (caveLayer.Mode == CaveMode.Spaghetti)
                     {
-                        // 25% frequency bounding check
                         float bound = caveNoise.GetNoise(globalPos.x * 0.25f, y * 0.25f, globalPos.z * 0.25f);
-                        float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
-                        if (bound < effectiveThreshold - 0.2f) continue; // Skip to save performance
+                        if (bound < effectiveThreshold - 0.2f) continue;
 
                         noiseVal = (caveNoise.GetNoise(globalPos.x, y) + caveNoise.GetNoise(y, globalPos.z) +
                                     caveNoise.GetNoise(globalPos.x, globalPos.z) + caveNoise.GetNoise(y, globalPos.x) +
                                     caveNoise.GetNoise(globalPos.z, y) + caveNoise.GetNoise(globalPos.z, globalPos.x)) / 6f;
+                    }
+                    else if (caveLayer.Mode == CaveMode.Noodle)
+                    {
+                        float raw = caveNoise.GetNoise(globalPos.x, y, globalPos.z);
+                        noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
                     }
                     else
                     {
                         noiseVal = caveNoise.GetNoise(globalPos.x, y, globalPos.z);
                     }
 
-                    float finalThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
-                    if (noiseVal > finalThreshold)
+                    if (noiseVal > effectiveThreshold)
                     {
                         voxelValue = 0; // Air
                         break;
@@ -841,6 +863,7 @@ namespace Jobs.Generators
             if (_lodeNoises.IsCreated) _lodeNoises.Dispose();
             if (_allCaveLayersJobData.IsCreated) _allCaveLayersJobData.Dispose();
             if (_caveNoises.IsCreated) _caveNoises.Dispose();
+            if (_caveZoneNoises.IsCreated) _caveZoneNoises.Dispose();
             if (_floraZoneNoises.IsCreated) _floraZoneNoises.Dispose();
             if (_allStructurePoolEntries.IsCreated) _allStructurePoolEntries.Dispose();
             if (_entryFloraZoneNoises.IsCreated) _entryFloraZoneNoises.Dispose();
