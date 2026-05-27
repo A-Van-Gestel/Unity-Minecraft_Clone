@@ -193,6 +193,7 @@ namespace Data
             HasLightChangesToProcess = false;
             IsAwaitingMainThreadProcess = false;
             NeedsEdgeCheck = false;
+            RemainingEdgeCheckRounds = 2;
 
             // Clear Queues (retains capacity)
             _sunlightBfsQueue.Clear();
