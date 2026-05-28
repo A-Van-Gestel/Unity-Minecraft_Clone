@@ -504,6 +504,20 @@ namespace Editor.WorldTools
             EditorUILayoutHelper.EndGroup();
 
             EditorGUILayout.Space(8);
+
+            EditorUILayoutHelper.SubHeader("Trunk Worm Modifiers");
+            EditorUILayoutHelper.SectionNote("Biome-local overrides for world-level trunk worms. " +
+                                             "Trunk worm config is on the <b>WorldTypeDefinition</b> asset — these fields only modify trunk behavior within this biome.\n\n" +
+                                             "<b>Spawn Suppression</b> — Reduces the chance of trunks <i>originating</i> here (0 = normal, 1 = no trunk spawns). " +
+                                             "Trunks from neighbors still pass through.\n" +
+                                             "<b>Vertical Bias Override</b> — Per-step override of the trunk's horizontal bias while passing through this biome. " +
+                                             "-1 = disabled (use world-level value).");
+            EditorUILayoutHelper.BeginGroup();
+            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("trunkSpawnSuppression"));
+            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("trunkVerticalBiasOverride"));
+            EditorUILayoutHelper.EndGroup();
+
+            EditorGUILayout.Space(8);
             EditorUILayoutHelper.DrawSeparator();
 
             EditorUILayoutHelper.SectionHeader("Ore Veins (Lodes)");

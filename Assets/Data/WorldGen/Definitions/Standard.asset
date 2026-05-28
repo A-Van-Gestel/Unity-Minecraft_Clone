@@ -21,3 +21,22 @@ MonoBehaviour:
   - {fileID: 11400000, guid: d73f7600d69642868aa79f1f75788e55, type: 2}
   seaLevel: 54
   solidGroundHeight: 52
+  trunkWormConfig:
+    enabled: 0
+    spawnChance: 0.008
+    maxWormsPerCell: 1
+    radiusMin: 3
+    radiusMax: 5
+    radiusWaveCount: 3
+    waviness: 0.33
+    horizontalBias: 0.7
+    minLength: 200
+    maxLength: 400
+    minHeight: 10
+    maxHeight: 50
+    branchChance: 0.03
+    maxBranchDepth: 1
+    noiseSeeking:
+      checkInterval: 10
+      seekDistance: 10
+      seekChance: 0.5

@@ -508,13 +508,17 @@ The `WorldGenPreviewWindow.BiomeEditor.cs` "Caves & Lodes" sub-tab (`DrawBeCaves
 
 ### 4.1 Evaluation Paths (Must Stay in Sync)
 
-Cave generation logic is evaluated in three independent code paths. Any formula change must be applied to all three:
+Cave generation logic is evaluated in four independent code paths. Any formula change must be applied to all four:
 
-| Path                     | File                                    | Purpose                                   |
-|--------------------------|-----------------------------------------|-------------------------------------------|
-| **Burst Job**            | `StandardChunkGenerationJob.cs`         | Runtime chunk generation (Burst-compiled) |
-| **Main-Thread Fallback** | `StandardChunkGenerator.GetVoxel()`     | Spawn-point lookup (non-Burst)            |
-| **Editor Preview**       | `WorldGenPreviewWindow.CrossSection.cs` | Cross-section visualizer                  |
+| Path                     | File                                    | Purpose                                            |
+|--------------------------|-----------------------------------------|----------------------------------------------------|
+| **Burst Job**            | `StandardChunkGenerationJob.cs`         | Runtime chunk generation (Burst-compiled)          |
+| **Main-Thread Fallback** | `StandardChunkGenerator.GetVoxel()`     | Spawn-point lookup (non-Burst)                     |
+| **Editor Preview**       | `WorldGenPreviewWindow.CrossSection.cs` | Cross-section visualizer                           |
+| **Worm Seek**            | `StandardWormCarverJob.cs`              | Noise-seeking evaluation for worm steering (Burst) |
+
+> [!NOTE]
+> The **Worm Seek** path only evaluates Spaghetti and Noodle noise for steering decisions — it does not carve voxels. A formula drift here won't produce incorrect terrain, but worms will seek toward phantom features (or miss real ones), leading to tunnels that dead-end into solid rock instead of connecting to open caves. See [WORLD_GENERATION_BUGS.md](../Bugs/WORLD_GENERATION_BUGS.md) for the tracking entry.
 
 ### 4.2 Key Formulas
 

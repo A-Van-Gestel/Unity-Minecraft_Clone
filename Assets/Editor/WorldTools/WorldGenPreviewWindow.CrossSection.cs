@@ -674,6 +674,7 @@ namespace Editor.WorldTools
                     CaveZoneNoises = data.CaveZoneNoises,
                     IsSingleBiomeMode = forceBiomeIdx >= 0,
                     ForceBiomeIndex = math.max(0, forceBiomeIdx),
+                    TrunkConfig = data.TrunkConfig,
                     OutputWormMask = wormMask,
                 };
                 wormJob.Execute();
@@ -838,6 +839,7 @@ namespace Editor.WorldTools
             public NativeArray<StandardLodeJobData> AllLodes;
             public NativeArray<FastNoiseLite> LodeNoises;
             public FastNoiseLite SelectionNoise;
+            public TrunkWormConfigJobData TrunkConfig;
 
             // Structure pool data for flora spawn point markers
             public NativeArray<StructurePoolEntryJobData> AllStructurePoolEntries;
@@ -934,6 +936,8 @@ namespace Editor.WorldTools
                     Enable3DDensity = biome.enable3DDensity,
                     DensityAmplitude = biome.densityAmplitude,
                     EnableDensityWarp = biome.enableDensityWarp,
+                    TrunkSpawnSuppression = biome.trunkSpawnSuppression,
+                    TrunkVerticalBiasOverride = biome.trunkVerticalBiasOverride,
                     DebugPreviewColor = new float3(biome.debugPreviewColor.r, biome.debugPreviewColor.g, biome.debugPreviewColor.b),
                 };
 
@@ -1014,6 +1018,8 @@ namespace Editor.WorldTools
             FastNoiseConfig selCfg = standardBiomes[0].biomeWeightNoiseConfig;
             selCfg.normalizeToZeroOne = true;
             data.SelectionNoise = FastNoiseFactory.CreateNoiseFromConfig(selCfg, _seed);
+
+            data.TrunkConfig = new TrunkWormConfigJobData(_worldType != null ? _worldType.trunkWormConfig : null);
         }
 
         private static void DisposeCrossSectionData(ref CrossSectionNativeData data)

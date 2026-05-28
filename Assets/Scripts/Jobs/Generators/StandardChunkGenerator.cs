@@ -67,6 +67,9 @@ namespace Jobs.Generators
         /// <summary>Global max minimum cave pocket size across all biomes. 0 = filter job is skipped entirely.</summary>
         private int _globalMinCavePocketSize;
 
+        /// <summary>Blittable trunk worm config built from the world type's <see cref="TrunkWormConfig"/>.</summary>
+        private TrunkWormConfigJobData _trunkWormConfigJobData;
+
         private bool _isSingleBiomeMode;
         private int _forceBiomeIndex;
 
@@ -219,6 +222,8 @@ namespace Jobs.Generators
                     DensityAmplitude = biome.densityAmplitude,
                     EnableDensityWarp = biome.enableDensityWarp,
                     MinCavePocketSize = biome.minCavePocketSize,
+                    TrunkSpawnSuppression = biome.trunkSpawnSuppression,
+                    TrunkVerticalBiasOverride = biome.trunkVerticalBiasOverride,
                     DebugPreviewColor = new float3(biome.debugPreviewColor.r, biome.debugPreviewColor.g, biome.debugPreviewColor.b),
                 };
 
@@ -281,6 +286,9 @@ namespace Jobs.Generators
                 currentTerrainLayerIndex += terrainLayerCount;
             }
 
+            // --- Trunk Worm Config ---
+            _trunkWormConfigJobData = new TrunkWormConfigJobData(worldType.trunkWormConfig);
+
             // --- Biome Selection Noise (Cellular / Voronoi) ---
             // If the first biome has a BiomeWeightNoiseConfig, use it as the global biome selection noise.
             // Otherwise, use sensible defaults for Cellular noise.
@@ -333,6 +341,7 @@ namespace Jobs.Generators
                     CaveZoneNoises = _caveZoneNoises,
                     IsSingleBiomeMode = _isSingleBiomeMode,
                     ForceBiomeIndex = _forceBiomeIndex,
+                    TrunkConfig = _trunkWormConfigJobData,
                     OutputWormMask = wormMask,
                 };
 

@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace Data.WorldTypes
@@ -39,5 +40,83 @@ namespace Data.WorldTypes
 
         [Tooltip("Legacy field. Only used by LegacyWorldGen format. Standard generation uses Biome-specific BaseTerrainHeight.")]
         public int solidGroundHeight = 42;
+
+        [Header("Trunk Worm Layer")]
+        [Tooltip("World-level trunk worm configuration. Trunk worms create long cross-biome cave highways " +
+                 "that provide the exploration backbone. Leave disabled for worlds without trunk caves.")]
+        public TrunkWormConfig trunkWormConfig;
+    }
+
+    /// <summary>
+    /// World-level configuration for Tier 1 (Trunk) worm carvers.
+    /// Trunk worms create long cross-biome cave highways using a deterministic
+    /// world-level scatter grid, independent of per-biome cave layers.
+    /// </summary>
+    [Serializable]
+    public class TrunkWormConfig
+    {
+        [Tooltip("Enable trunk worm generation for this world type.")]
+        public bool enabled;
+
+        [Header("Spawn")]
+        [Range(0f, 1f)]
+        [Tooltip("Probability [0, 1] that a scatter grid cell spawns a trunk worm system. " +
+                 "0.005-0.01 = sparse highway network. 0.02+ = dense network.")]
+        public float spawnChance = 0.008f;
+
+        [Range(1, 5)]
+        [Tooltip("Maximum number of trunk worms per scatter grid cell if it passes the spawn check.")]
+        public int maxWormsPerCell = 1;
+
+        [Header("Shape")]
+        [Range(2f, 8f)]
+        [Tooltip("Minimum carving radius. Narrow squeezes along the trunk tunnel.")]
+        public float radiusMin = 3f;
+
+        [Range(3f, 12f)]
+        [Tooltip("Maximum carving radius. Wide chambers along the trunk tunnel.")]
+        public float radiusMax = 5f;
+
+        [Range(1, 8)]
+        [Tooltip("How many wide/narrow cycles occur along the trunk worm's length.")]
+        public int radiusWaveCount = 3;
+
+        [Range(0.1f, 1f)]
+        [Tooltip("How strongly the trunk worm perturbs its pitch/yaw angles per step.")]
+        public float waviness = 0.33f;
+
+        [Range(0f, 1f)]
+        [Tooltip("How strongly trunk worms are pulled toward horizontal. " +
+                 "0.6-0.8 recommended for maximum biome crossings.")]
+        public float horizontalBias = 0.7f;
+
+        [Header("Length")]
+        [Range(50, 500)]
+        [Tooltip("Minimum number of steps the trunk worm will march.")]
+        public int minLength = 200;
+
+        [Range(100, 800)]
+        [Tooltip("Maximum number of steps the trunk worm will march.")]
+        public int maxLength = 400;
+
+        [Header("Depth Bounds")]
+        [Tooltip("Trunk worms will not spawn below this Y level.")]
+        public int minHeight = 10;
+
+        [Tooltip("Trunk worms will not spawn above this Y level.")]
+        public int maxHeight = 50;
+
+        [Header("Branching")]
+        [Range(0f, 0.1f)]
+        [Tooltip("Probability per step that a trunk worm splits. Keep low (0.02-0.04) for occasional forks.")]
+        public float branchChance = 0.03f;
+
+        [Range(0, 3)]
+        [Tooltip("Maximum branch depth for trunk worms.")]
+        public int maxBranchDepth = 1;
+
+        [Header("Noise Seeking")]
+        [Tooltip("Noise seeking configuration for trunk worms. Trunk worms seek layers flagged with isSeekableByTrunkWorms.")]
+        public WormNoiseSeeking noiseSeeking = WormNoiseSeeking.Default;
     }
 }

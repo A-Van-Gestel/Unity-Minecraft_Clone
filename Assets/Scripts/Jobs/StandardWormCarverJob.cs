@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Data.WorldTypes;
 using Helpers;
 using Jobs.Data;
@@ -45,8 +46,13 @@ namespace Jobs
         [ReadOnly]
         public int ForceBiomeIndex;
 
+        [ReadOnly]
+        public TrunkWormConfigJobData TrunkConfig;
+
         [WriteOnly]
         public NativeBitArray OutputWormMask;
+
+        private const int TRUNK_SEED_SALT = 0x5472756E; // "Trun" as int — decorrelates trunk RNG from local worm RNG
 
         private struct WormState
         {
@@ -57,11 +63,32 @@ namespace Jobs
             public int BranchDepth;
         }
 
+        private struct WormParams
+        {
+            public float RadiusMin;
+            public float RadiusMax;
+            public int RadiusWaveCount;
+            public float Waviness;
+            public float HorizontalBias;
+            public float BranchChance;
+            public int MaxBranchDepth;
+            public int MinLength;
+            public int MaxLength;
+            public int SeekInterval;
+            public float SeekDistance;
+            public float SeekChance;
+
+            [MarshalAs(UnmanagedType.U1)]
+            public bool IsTrunk;
+
+            public int OriginBiomeIndex;
+        }
+
         public void Execute()
         {
-            // Calculate max search radius based on the maximum worm length in any biome
-            int maxWormLength = 0;
-            float maxWormRadius = 0;
+            // Calculate max search radius across both trunk and local worms
+            int maxWormLength = TrunkConfig.Enabled ? TrunkConfig.MaxLength : 0;
+            float maxWormRadius = TrunkConfig.Enabled ? TrunkConfig.RadiusMax : 0;
 
             for (int i = 0; i < AllCaveLayers.Length; i++)
             {
@@ -74,11 +101,15 @@ namespace Jobs
 
             if (maxWormLength == 0) return; // No worm carvers in the world
 
-            // Convert max length + radius to chunks
-            int chunkSearchRadius = (int)math.ceil((maxWormLength + maxWormRadius) / VoxelData.ChunkWidth);
+            // Each step advances radius * 0.5 blocks. Convert step count to
+            // approximate max displacement in blocks (conservative upper bound).
+            float maxStepSize = maxWormRadius * 0.5f;
+            int chunkSearchRadius = (int)math.ceil((maxWormLength * maxStepSize + maxWormRadius) / VoxelData.ChunkWidth);
 
-            // Limit to a reasonable max to prevent infinite loops if someone configures a 10,000 block worm
-            chunkSearchRadius = math.min(chunkSearchRadius, 8);
+            // Cap to prevent catastrophic O(n²) iteration counts. Worms exceeding
+            // this radius will produce gaps — very long trunk worms may need spatial
+            // hashing or path caching for correct cross-chunk discovery.
+            chunkSearchRadius = math.min(chunkSearchRadius, 16);
 
             int currentChunkX = ChunkPosition.x / VoxelData.ChunkWidth;
             int currentChunkZ = ChunkPosition.y / VoxelData.ChunkWidth;
@@ -91,37 +122,74 @@ namespace Jobs
             {
                 for (int cz = currentChunkZ - chunkSearchRadius; cz <= currentChunkZ + chunkSearchRadius; cz++)
                 {
-                    // Generate a unique deterministic seed for this chunk
-                    uint chunkHash = math.hash(new int3(cx, cz, BaseSeed));
-                    Random rand = new Random(math.max(1u, chunkHash));
-
                     int globalCx = cx * VoxelData.ChunkWidth;
                     int globalCz = cz * VoxelData.ChunkWidth;
 
-                    // Evaluate the center of this chunk to find its biome and determine worm parameters
-                    int biomeIndex;
-                    if (IsSingleBiomeMode)
-                    {
-                        biomeIndex = ForceBiomeIndex;
-                    }
-                    else
-                    {
-                        float biomeNoise = BiomeSelectionNoise.GetNoise(globalCx + VoxelData.ChunkWidth * 0.5f, globalCz + VoxelData.ChunkWidth * 0.5f);
-                        biomeIndex = (int)math.floor(biomeNoise * Biomes.Length);
-                        biomeIndex = math.clamp(biomeIndex, 0, Biomes.Length - 1);
-                    }
-
-                    StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
-
-                    // Pre-evaluate cave zone noise for this chunk (per-layer attenuation applied inside the loop)
                     float centerX = globalCx + VoxelData.ChunkWidth * 0.5f;
                     float centerZ = globalCz + VoxelData.ChunkWidth * 0.5f;
+                    int biomeIndex = GetBiomeIndex(centerX, centerZ);
+                    StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
+
+                    // --- Trunk worms (world-level scatter grid) ---
+                    if (TrunkConfig.Enabled)
+                    {
+                        uint trunkHash = math.hash(new int3(cx, cz, BaseSeed + TRUNK_SEED_SALT));
+                        Random trunkRand = new Random(math.max(1u, trunkHash));
+
+                        float trunkSpawnChance = TrunkConfig.SpawnChance * (1f - biome.TrunkSpawnSuppression);
+                        if (trunkRand.NextFloat() < trunkSpawnChance)
+                        {
+                            int numTrunks = trunkRand.NextInt(1, TrunkConfig.MaxWormsPerCell + 1);
+                            NativeList<WormState> trunkStack = new NativeList<WormState>(Allocator.Temp);
+
+                            for (int w = 0; w < numTrunks; w++)
+                            {
+                                trunkStack.Add(new WormState
+                                {
+                                    Pos = new float3(
+                                        globalCx + trunkRand.NextFloat(0, VoxelData.ChunkWidth),
+                                        trunkRand.NextFloat(TrunkConfig.MinHeight, TrunkConfig.MaxHeight),
+                                        globalCz + trunkRand.NextFloat(0, VoxelData.ChunkWidth)
+                                    ),
+                                    Yaw = trunkRand.NextFloat(0, math.PI * 2f),
+                                    Pitch = trunkRand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f),
+                                    LengthRemaining = trunkRand.NextInt(TrunkConfig.MinLength, TrunkConfig.MaxLength),
+                                    BranchDepth = 0,
+                                });
+                            }
+
+                            WormParams trunkParams = new WormParams
+                            {
+                                RadiusMin = TrunkConfig.RadiusMin,
+                                RadiusMax = TrunkConfig.RadiusMax,
+                                RadiusWaveCount = TrunkConfig.RadiusWaveCount,
+                                Waviness = TrunkConfig.Waviness,
+                                HorizontalBias = TrunkConfig.HorizontalBias,
+                                BranchChance = TrunkConfig.BranchChance,
+                                MaxBranchDepth = TrunkConfig.MaxBranchDepth,
+                                MinLength = TrunkConfig.MinLength,
+                                MaxLength = TrunkConfig.MaxLength,
+                                SeekInterval = TrunkConfig.SeekInterval,
+                                SeekDistance = TrunkConfig.SeekDistance,
+                                SeekChance = TrunkConfig.SeekChance,
+                                IsTrunk = true,
+                                OriginBiomeIndex = biomeIndex,
+                            };
+
+                            SimulateWormStack(ref trunkRand, trunkStack, trunkParams, chunkMin, chunkMax);
+                            trunkStack.Dispose();
+                        }
+                    }
+
+                    // --- Local worms (per-biome cave layers) ---
+                    uint chunkHash = math.hash(new int3(cx, cz, BaseSeed));
+                    Random rand = new Random(math.max(1u, chunkHash));
+
                     float chunkZoneNoise = CaveZoneNoises[biomeIndex].GetNoise(centerX, centerZ);
 
                     for (int layerIdx = 0; layerIdx < biome.CaveLayerCount; layerIdx++)
                     {
                         StandardCaveLayerJobData caveLayer = AllCaveLayers[biome.CaveLayerStartIndex + layerIdx];
-
                         if (caveLayer.Mode != CaveMode.WormCarver) continue;
 
                         // Per-layer zone attenuation modulates spawn chance
@@ -135,7 +203,6 @@ namespace Jobs
 
                         // Spawn 1 to max worms per chunk
                         int numWorms = rand.NextInt(1, caveLayer.MaxWormsPerChunk + 1);
-
                         NativeList<WormState> wormStack = new NativeList<WormState>(Allocator.Temp);
 
                         for (int w = 0; w < numWorms; w++)
@@ -155,170 +222,225 @@ namespace Jobs
                             });
                         }
 
-                        while (wormStack.Length > 0)
+                        WormParams localParams = new WormParams
                         {
-                            int lastIdx = wormStack.Length - 1;
-                            WormState worm = wormStack[lastIdx];
-                            wormStack.RemoveAt(lastIdx);
+                            RadiusMin = caveLayer.WormRadiusMin,
+                            RadiusMax = caveLayer.WormRadiusMax,
+                            RadiusWaveCount = caveLayer.WormRadiusWaveCount,
+                            Waviness = caveLayer.WormWaviness,
+                            HorizontalBias = caveLayer.WormHorizontalBias,
+                            BranchChance = caveLayer.WormBranchChance,
+                            MaxBranchDepth = caveLayer.MaxBranchDepth,
+                            MinLength = caveLayer.WormMinLength,
+                            MaxLength = caveLayer.WormMaxLength,
+                            SeekInterval = caveLayer.WormSeekInterval,
+                            SeekDistance = caveLayer.WormSeekDistance,
+                            SeekChance = caveLayer.WormSeekChance,
+                            IsTrunk = false,
+                            OriginBiomeIndex = biomeIndex,
+                        };
 
-                            int totalLength = worm.LengthRemaining;
-                            float3 pos = worm.Pos;
-                            float yaw = worm.Yaw;
-                            float pitch = worm.Pitch;
-
-                            // Raymarch the worm
-                            for (int step = 0; step < worm.LengthRemaining; step++)
-                            {
-                                // Modulate radius along the worm's length
-                                float t = math.saturate((float)step / totalLength);
-                                float wave = math.sin(t * math.PI * caveLayer.WormRadiusWaveCount) * 0.5f + 0.5f;
-                                float radius = math.lerp(caveLayer.WormRadiusMin, caveLayer.WormRadiusMax, wave);
-
-                                // Move position forward
-                                float3 forward = new float3(
-                                    math.cos(yaw) * math.cos(pitch),
-                                    math.sin(pitch),
-                                    math.sin(yaw) * math.cos(pitch)
-                                );
-
-                                // Advance position by half radius to ensure overlapping carving spheres
-                                pos += forward * (radius * 0.5f);
-
-                                // Perturb angles
-                                yaw += rand.NextFloat(-caveLayer.WormWaviness, caveLayer.WormWaviness);
-                                pitch += rand.NextFloat(-caveLayer.WormWaviness, caveLayer.WormWaviness);
-                                pitch = math.clamp(pitch, -math.PI * 0.4f, math.PI * 0.4f);
-
-                                // Horizontal bias: gently restore pitch toward horizontal
-                                pitch = math.lerp(pitch, 0f, caveLayer.WormHorizontalBias * 0.1f);
-
-                                // Seeking Phase (Ping nearby noise fields)
-                                if (caveLayer.WormSeekInterval > 0 && step % caveLayer.WormSeekInterval == 0 && rand.NextFloat() < caveLayer.WormSeekChance)
-                                {
-                                    // Generate a random "look" direction
-                                    float lookYaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
-                                    float lookPitch = pitch + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
-
-                                    float3 seekForward = new float3(
-                                        math.cos(lookYaw) * math.cos(lookPitch),
-                                        math.sin(lookPitch),
-                                        math.sin(lookYaw) * math.cos(lookPitch)
-                                    );
-
-                                    float3 lookPos = pos + seekForward * caveLayer.WormSeekDistance;
-
-                                    bool foundCave = false;
-                                    for (int s = 0; s < biome.CaveLayerCount; s++)
-                                    {
-                                        int cIdx = biome.CaveLayerStartIndex + s;
-                                        StandardCaveLayerJobData seekLayer = AllCaveLayers[cIdx];
-
-                                        if (seekLayer.Mode == CaveMode.Cheese || seekLayer.Mode == CaveMode.Spaghetti || seekLayer.Mode == CaveMode.Noodle)
-                                        {
-                                            float noiseVal;
-                                            if (seekLayer.Mode == CaveMode.Spaghetti)
-                                            {
-                                                float ab = CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.y);
-                                                float bc = CaveNoises[cIdx].GetNoise(lookPos.y, lookPos.z);
-                                                float ac = CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.z);
-                                                float ba = CaveNoises[cIdx].GetNoise(lookPos.y, lookPos.x);
-                                                float cb = CaveNoises[cIdx].GetNoise(lookPos.z, lookPos.y);
-                                                float ca = CaveNoises[cIdx].GetNoise(lookPos.z, lookPos.x);
-                                                noiseVal = (ab + bc + ac + ba + cb + ca) / 6f;
-                                            }
-                                            else if (seekLayer.Mode == CaveMode.Noodle)
-                                            {
-                                                float raw = CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.y, lookPos.z);
-                                                noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
-                                            }
-                                            else
-                                            {
-                                                noiseVal = CaveNoises[cIdx].GetNoise(lookPos.x, lookPos.y, lookPos.z);
-                                            }
-
-                                            // Since threshold defines the cave boundary, anything > threshold is AIR.
-                                            // We detect if lookPos is very close to AIR.
-                                            if (noiseVal > seekLayer.Threshold - 0.1f)
-                                            {
-                                                foundCave = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    if (foundCave)
-                                    {
-                                        // Lock onto the detected cave
-                                        yaw = lookYaw;
-                                        pitch = lookPitch;
-
-                                        // Ensure we live long enough to reach it (use average radius for stable step estimate)
-                                        float avgRadius = (caveLayer.WormRadiusMin + caveLayer.WormRadiusMax) * 0.5f;
-                                        int neededSteps = (int)math.ceil(caveLayer.WormSeekDistance / (avgRadius * 0.5f));
-                                        int remainingSteps = worm.LengthRemaining - step;
-                                        if (remainingSteps < neededSteps)
-                                        {
-                                            worm.LengthRemaining += (neededSteps - remainingSteps);
-                                        }
-                                    }
-                                }
-
-                                // Branching Phase
-                                if (caveLayer.WormBranchChance > 0f && rand.NextFloat() < caveLayer.WormBranchChance && worm.BranchDepth < caveLayer.MaxBranchDepth)
-                                {
-                                    wormStack.Add(new WormState
-                                    {
-                                        Pos = pos,
-                                        Yaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f), // branch sideways
-                                        Pitch = pitch + rand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f),
-                                        LengthRemaining = rand.NextInt(caveLayer.WormMinLength / 2, caveLayer.WormMaxLength / 2),
-                                        BranchDepth = worm.BranchDepth + 1,
-                                    });
-                                }
-
-                                // Carving Phase
-                                float3 closestPt = math.clamp(pos, chunkMin, chunkMax);
-                                float distSq = math.distancesq(pos, closestPt);
-
-                                if (distSq <= radius * radius)
-                                {
-                                    // The carving sphere intersects the current chunk!
-                                    // Carve the local blocks
-                                    int minX = math.max(0, (int)math.floor(pos.x - radius) - ChunkPosition.x);
-                                    int maxX = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.x + radius) - ChunkPosition.x);
-
-                                    int minY = math.max(1, (int)math.floor(pos.y - radius)); // Don't carve bedrock
-                                    int maxY = math.min(VoxelData.ChunkHeight - 1, (int)math.ceil(pos.y + radius));
-
-                                    int minZ = math.max(0, (int)math.floor(pos.z - radius) - ChunkPosition.y);
-                                    int maxZ = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.z + radius) - ChunkPosition.y);
-
-                                    float radSq = radius * radius;
-
-                                    for (int x = minX; x <= maxX; x++)
-                                    {
-                                        for (int y = minY; y <= maxY; y++)
-                                        {
-                                            for (int z = minZ; z <= maxZ; z++)
-                                            {
-                                                float3 blockPos = new float3(ChunkPosition.x + x, y, ChunkPosition.y + z);
-                                                if (math.distancesq(pos, blockPos) <= radSq)
-                                                {
-                                                    // Mark as carved
-                                                    int flatIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
-                                                    OutputWormMask.Set(flatIndex, true);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
+                        SimulateWormStack(ref rand, wormStack, localParams, chunkMin, chunkMax);
                         wormStack.Dispose();
                     }
                 }
             }
         }
+
+        #region Helpers
+
+        private int GetBiomeIndex(float worldX, float worldZ)
+        {
+            if (IsSingleBiomeMode) return ForceBiomeIndex;
+            float biomeNoise = BiomeSelectionNoise.GetNoise(worldX, worldZ);
+            int idx = (int)math.floor(biomeNoise * Biomes.Length);
+            return math.clamp(idx, 0, Biomes.Length - 1);
+        }
+
+        private float EvaluateLayerNoise(int noiseArrayIndex, CaveMode mode, float3 pos)
+        {
+            if (mode == CaveMode.Spaghetti)
+            {
+                float ab = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y);
+                float bc = CaveNoises[noiseArrayIndex].GetNoise(pos.y, pos.z);
+                float ac = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.z);
+                float ba = CaveNoises[noiseArrayIndex].GetNoise(pos.y, pos.x);
+                float cb = CaveNoises[noiseArrayIndex].GetNoise(pos.z, pos.y);
+                float ca = CaveNoises[noiseArrayIndex].GetNoise(pos.z, pos.x);
+                return (ab + bc + ac + ba + cb + ca) / 6f;
+            }
+
+            if (mode == CaveMode.Noodle)
+            {
+                float raw = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
+                return 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
+            }
+
+            return CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
+        }
+
+        private const int BIOME_CACHE_INTERVAL = 16;
+
+        private void SimulateWormStack(ref Random rand, NativeList<WormState> wormStack, WormParams p, float3 chunkMin, float3 chunkMax)
+        {
+            while (wormStack.Length > 0)
+            {
+                int lastIdx = wormStack.Length - 1;
+                WormState worm = wormStack[lastIdx];
+                wormStack.RemoveAt(lastIdx);
+
+                int totalLength = worm.LengthRemaining;
+                float3 pos = worm.Pos;
+                float yaw = worm.Yaw;
+                float pitch = worm.Pitch;
+                int cachedStepBiomeIdx = p.OriginBiomeIndex;
+
+                // Raymarch the worm
+                for (int step = 0; step < worm.LengthRemaining; step++)
+                {
+                    // Modulate radius along the worm's length
+                    float t = math.saturate((float)step / totalLength);
+                    float wave = math.sin(t * math.PI * p.RadiusWaveCount) * 0.5f + 0.5f;
+                    float radius = math.lerp(p.RadiusMin, p.RadiusMax, wave);
+
+                    // Move position forward
+                    float3 forward = new float3(
+                        math.cos(yaw) * math.cos(pitch),
+                        math.sin(pitch),
+                        math.sin(yaw) * math.cos(pitch)
+                    );
+
+                    // Advance position by half radius to ensure overlapping carving spheres
+                    pos += forward * (radius * 0.5f);
+
+                    // Perturb angles
+                    yaw += rand.NextFloat(-p.Waviness, p.Waviness);
+                    pitch += rand.NextFloat(-p.Waviness, p.Waviness);
+                    pitch = math.clamp(pitch, -math.PI * 0.4f, math.PI * 0.4f);
+
+                    // Horizontal bias (trunk worms may have per-biome override)
+                    float effectiveBias = p.HorizontalBias;
+                    if (p.IsTrunk)
+                    {
+                        if (step % BIOME_CACHE_INTERVAL == 0)
+                            cachedStepBiomeIdx = GetBiomeIndex(pos.x, pos.z);
+                        float biomeOverride = Biomes[cachedStepBiomeIdx].TrunkVerticalBiasOverride;
+                        if (biomeOverride >= 0f)
+                            effectiveBias = biomeOverride;
+                    }
+
+                    pitch = math.lerp(pitch, 0f, effectiveBias * 0.1f);
+
+                    // Seeking Phase
+                    if (p.SeekInterval > 0 && step % p.SeekInterval == 0 && rand.NextFloat() < p.SeekChance)
+                    {
+                        // Generate a random "look" direction
+                        float lookYaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
+                        float lookPitch = pitch + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
+
+                        float3 seekForward = new float3(
+                            math.cos(lookYaw) * math.cos(lookPitch),
+                            math.sin(lookPitch),
+                            math.sin(lookYaw) * math.cos(lookPitch)
+                        );
+                        float3 lookPos = pos + seekForward * p.SeekDistance;
+
+                        // Trunk worms sample biome at look-ahead position (cross-biome aware);
+                        // local worms use their origin biome
+                        int seekBiomeIndex = p.IsTrunk ? GetBiomeIndex(lookPos.x, lookPos.z) : p.OriginBiomeIndex;
+                        StandardBiomeAttributesJobData seekBiome = Biomes[seekBiomeIndex];
+
+                        bool foundCave = false;
+                        for (int s = 0; s < seekBiome.CaveLayerCount; s++)
+                        {
+                            int cIdx = seekBiome.CaveLayerStartIndex + s;
+                            StandardCaveLayerJobData seekLayer = AllCaveLayers[cIdx];
+
+                            // WormCarver layers don't produce meaningful noise fields — never seek toward them
+                            if (seekLayer.Mode == CaveMode.WormCarver) continue;
+
+                            bool isSeekable = p.IsTrunk ? seekLayer.IsSeekableByTrunkWorms : seekLayer.IsSeekableByLocalWorms;
+                            if (!isSeekable) continue;
+
+                            float noiseVal = EvaluateLayerNoise(cIdx, seekLayer.Mode, lookPos);
+                            if (noiseVal > seekLayer.Threshold - 0.1f)
+                            {
+                                foundCave = true;
+                                break;
+                            }
+                        }
+
+                        if (foundCave)
+                        {
+                            // Lock onto the detected cave
+                            yaw = lookYaw;
+                            pitch = lookPitch;
+
+                            // Ensure we live long enough to reach it (use average radius for stable step estimate)
+                            float avgRadius = (p.RadiusMin + p.RadiusMax) * 0.5f;
+                            int neededSteps = (int)math.ceil(p.SeekDistance / (avgRadius * 0.5f));
+                            int remainingSteps = worm.LengthRemaining - step;
+                            if (remainingSteps < neededSteps)
+                            {
+                                worm.LengthRemaining += (neededSteps - remainingSteps);
+                                totalLength = worm.LengthRemaining;
+                            }
+                        }
+                    }
+
+                    // Branching Phase
+                    if (p.BranchChance > 0f && rand.NextFloat() < p.BranchChance && worm.BranchDepth < p.MaxBranchDepth)
+                    {
+                        int branchMin = p.MinLength / 2;
+                        int branchMax = math.max(branchMin + 1, p.MaxLength / 2);
+                        wormStack.Add(new WormState
+                        {
+                            Pos = pos,
+                            Yaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f),
+                            Pitch = pitch + rand.NextFloat(-math.PI * 0.25f, math.PI * 0.25f),
+                            LengthRemaining = rand.NextInt(branchMin, branchMax),
+                            BranchDepth = worm.BranchDepth + 1,
+                        });
+                    }
+
+                    // Carving Phase
+                    CarveBlocksInChunk(pos, radius, chunkMin, chunkMax);
+                }
+            }
+        }
+
+        private void CarveBlocksInChunk(float3 pos, float radius, float3 chunkMin, float3 chunkMax)
+        {
+            float3 closestPt = math.clamp(pos, chunkMin, chunkMax);
+            float distSq = math.distancesq(pos, closestPt);
+            if (distSq > radius * radius) return;
+
+            int minX = math.max(0, (int)math.floor(pos.x - radius) - ChunkPosition.x);
+            int maxX = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.x + radius) - ChunkPosition.x);
+            int minY = math.max(1, (int)math.floor(pos.y - radius));
+            int maxY = math.min(VoxelData.ChunkHeight - 1, (int)math.ceil(pos.y + radius));
+            int minZ = math.max(0, (int)math.floor(pos.z - radius) - ChunkPosition.y);
+            int maxZ = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.z + radius) - ChunkPosition.y);
+
+            float radSq = radius * radius;
+            for (int x = minX; x <= maxX; x++)
+            {
+                for (int y = minY; y <= maxY; y++)
+                {
+                    for (int z = minZ; z <= maxZ; z++)
+                    {
+                        float3 blockPos = new float3(ChunkPosition.x + x, y, ChunkPosition.y + z);
+                        if (math.distancesq(pos, blockPos) <= radSq)
+                        {
+                            // Mark as carved
+                            int flatIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                            OutputWormMask.Set(flatIndex, true);
+                        }
+                    }
+                }
+            }
+        }
+
+        #endregion
     }
 }

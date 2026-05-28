@@ -20,6 +20,19 @@ This document outlines **open** bugs related to world generation, seed handling,
 
 ---
 
+## TODO: Noise Evaluation Duplication — Worm Carver Seek Is a 4th Unsynchronized Path
+
+**Severity:** Technical Debt / Latent Bug  
+**Files:** `Assets/Scripts/Jobs/StandardWormCarverJob.cs` — `EvaluateLayerNoise()` (line ~252)
+
+The worm carver's noise-seeking logic (`EvaluateLayerNoise`) re-implements the Spaghetti 6-sample average and Noodle isoband formula that already exists in `StandardChunkGenerationJob.cs` and `StandardChunkGenerator.GetVoxel()`. The design document ([IMPROVED_CAVE_GENERATION.md §4.1](../Design/IMPROVED_CAVE_GENERATION.md)) identifies three evaluation paths that **must stay in sync** — the worm carver's seek evaluation is now effectively a **4th path** that is not listed there.
+
+If the Spaghetti averaging, Noodle smoothing formula, zone attenuation boost, or depth fade logic is updated in the primary evaluation paths without also updating `EvaluateLayerNoise`, worms will seek toward phantom cave features (or miss real ones), producing disconnected tunnels that dead-end into solid rock.
+
+**Proposed fix:** Extract the shared noise evaluation into a single Burst-compatible static method (or shared struct) that all four code paths call. Until then, any formula change must be manually applied to all four locations — see §4.1 of the design doc.
+
+---
+
 ## TODO: 3D Chunk Preview LOD / Quality Control for Large Radii
 
 **Severity:** Feature Gap  

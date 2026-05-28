@@ -86,6 +86,12 @@ namespace Jobs.Data
         /// </summary>
         public int MinCavePocketSize;
 
+        /// <summary>Reduces the chance of trunk worms originating in this biome. 0 = normal, 1 = fully suppressed.</summary>
+        public float TrunkSpawnSuppression;
+
+        /// <summary>Per-step horizontal bias override for trunk worms passing through this biome. -1 = disabled.</summary>
+        public float TrunkVerticalBiasOverride;
+
         /// <summary>RGB color for editor previews and in-game terrain debug overlay.</summary>
         public float3 DebugPreviewColor;
     }

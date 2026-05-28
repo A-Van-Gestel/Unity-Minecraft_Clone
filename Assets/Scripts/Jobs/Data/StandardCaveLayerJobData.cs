@@ -27,6 +27,14 @@ namespace Jobs.Data
         /// <summary>Per-layer cave zone attenuation strength. 0 = no zone effect.</summary>
         public readonly float ZoneAttenuation;
 
+        /// <summary>Whether trunk worms can seek toward this layer's noise field.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool IsSeekableByTrunkWorms;
+
+        /// <summary>Whether local (per-biome) worms can seek toward this layer's noise field.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool IsSeekableByLocalWorms;
+
         /// <summary>Caves will not generate below this Y level.</summary>
         public readonly int MinHeight;
 
@@ -65,6 +73,8 @@ namespace Jobs.Data
             Mode = layerConfig.mode;
             Threshold = layerConfig.threshold;
             ZoneAttenuation = layerConfig.zoneAttenuation;
+            IsSeekableByTrunkWorms = layerConfig.isSeekableByTrunkWorms;
+            IsSeekableByLocalWorms = layerConfig.isSeekableByLocalWorms;
             MinHeight = layerConfig.minHeight;
             MaxHeight = layerConfig.maxHeight;
             DepthFadeMargin = layerConfig.depthFadeMargin;
@@ -83,11 +93,69 @@ namespace Jobs.Data
             WormBranchChance = layerConfig.wormBranchChance;
             MaxBranchDepth = layerConfig.maxBranchDepth;
 
-            WormSeekInterval = layerConfig.wormSeekInterval;
-            WormSeekDistance = layerConfig.wormSeekDistance;
-            WormSeekChance = layerConfig.wormSeekChance;
+            WormSeekInterval = layerConfig.wormNoiseSeeking.checkInterval;
+            WormSeekDistance = layerConfig.wormNoiseSeeking.seekDistance;
+            WormSeekChance = layerConfig.wormNoiseSeeking.seekChance;
 
             EnableWarp = layerConfig.enableWarp;
+        }
+    }
+
+    /// <summary>
+    /// Blittable representation of a world-level trunk worm configuration.
+    /// Constructed from <see cref="TrunkWormConfig"/> by <see cref="Jobs.Generators.StandardChunkGenerator"/>.
+    /// </summary>
+    public struct TrunkWormConfigJobData
+    {
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool Enabled;
+
+        public readonly float SpawnChance;
+        public readonly int MaxWormsPerCell;
+
+        public readonly float RadiusMin;
+        public readonly float RadiusMax;
+        public readonly int RadiusWaveCount;
+        public readonly float Waviness;
+        public readonly float HorizontalBias;
+
+        public readonly int MinLength;
+        public readonly int MaxLength;
+        public readonly int MinHeight;
+        public readonly int MaxHeight;
+
+        public readonly float BranchChance;
+        public readonly int MaxBranchDepth;
+
+        public readonly int SeekInterval;
+        public readonly float SeekDistance;
+        public readonly float SeekChance;
+
+        public TrunkWormConfigJobData(TrunkWormConfig config)
+        {
+            if (config == null)
+            {
+                this = default;
+                return;
+            }
+
+            Enabled = config.enabled;
+            SpawnChance = config.spawnChance;
+            MaxWormsPerCell = config.maxWormsPerCell;
+            RadiusMin = config.radiusMin;
+            RadiusMax = config.radiusMax;
+            RadiusWaveCount = config.radiusWaveCount;
+            Waviness = config.waviness;
+            HorizontalBias = config.horizontalBias;
+            MinLength = config.minLength;
+            MaxLength = config.maxLength;
+            MinHeight = config.minHeight;
+            MaxHeight = config.maxHeight;
+            BranchChance = config.branchChance;
+            MaxBranchDepth = config.maxBranchDepth;
+            SeekInterval = config.noiseSeeking.checkInterval;
+            SeekDistance = config.noiseSeeking.seekDistance;
+            SeekChance = config.noiseSeeking.seekChance;
         }
     }
 }

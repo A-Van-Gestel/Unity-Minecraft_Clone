@@ -146,6 +146,19 @@ namespace Data.WorldTypes
                  "0 = disabled. 4 = removes pockets of 1-3 blocks. Higher values filter larger isolated pockets.")]
         public int minCavePocketSize;
 
+        [Header("Trunk Worm Modifiers")]
+        [Range(0f, 1f)]
+        [Tooltip("Reduces the chance of a trunk worm originating in this biome. " +
+                 "0 = trunk spawns allowed normally. 1 = no trunk spawns originate here. " +
+                 "Trunks from neighboring biomes can still pass through regardless of this value.")]
+        public float trunkSpawnSuppression;
+
+        [Tooltip("Per-step override of the trunk worm's horizontal bias while it passes through this biome. " +
+                 "-1 = disabled (use the world-level trunk config value). " +
+                 "0-1 = override value (e.g., Mountain 0.3 makes trunks dip vertically through mountain rock).")]
+        [Range(-1f, 1f)]
+        public float trunkVerticalBiasOverride = -1f;
+
         [Tooltip("Layered noise configurations for generating 3D caves (e.g., cheese and spaghetti networks).")]
         public StandardCaveLayer[] caveLayers;
     }
@@ -272,6 +285,19 @@ namespace Data.WorldTypes
                  "Typically used on Noodle layers; Worm and Cheese layers usually leave this at 0.")]
         public float zoneAttenuation;
 
+        [Header("Noise Seekability")]
+        [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
+        [Tooltip("When enabled, world-level trunk worms will steer toward this layer's " +
+                 "cave features during noise seeking. Typically enabled for Cheese layers " +
+                 "(to connect trunks to chambers) and disabled for Noodle layers.")]
+        public bool isSeekableByTrunkWorms;
+
+        [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
+        [Tooltip("When enabled, per-biome local worms will steer toward this layer's " +
+                 "cave features during noise seeking. Typically enabled for Cheese layers " +
+                 "(worms connect to chambers) and disabled for Noodle and other Worm layers.")]
+        public bool isSeekableByLocalWorms;
+
         [Header("Depth Bounds")]
         [Tooltip("Caves will not generate below this Y level.")]
         public int minHeight = 5;
@@ -351,18 +377,35 @@ namespace Data.WorldTypes
 
         [Header("Worm Carver Noise Seeking")]
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Tooltip("How many steps the worm takes between seeking checks. 0 = disabled.")]
-        [Range(0, 50)]
-        public int wormSeekInterval = 10;
+        [Tooltip("Noise seeking configuration controlling how worms detect and steer toward nearby cave features.")]
+        public WormNoiseSeeking wormNoiseSeeking = WormNoiseSeeking.Default;
+    }
 
-        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Tooltip("How far ahead the worm looks for Blob/Spaghetti caves.")]
+    /// <summary>
+    /// Groups the noise-seeking parameters for worm carvers.
+    /// These three fields always belong together and are meaningless individually.
+    /// </summary>
+    [Serializable]
+    public struct WormNoiseSeeking
+    {
+        [Range(0, 30)]
+        [Tooltip("Steps between noise-seeking checks. 0 = seeking disabled.")]
+        public int checkInterval;
+
         [Range(1f, 30f)]
-        public float wormSeekDistance = 10f;
+        [Tooltip("How far ahead the worm looks when seeking (in blocks).")]
+        public float seekDistance;
 
-        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Tooltip("Probability [0, 1] that the worm actually steers towards a detected cave.")]
         [Range(0f, 1f)]
-        public float wormSeekChance = 0.5f;
+        [Tooltip("Probability of performing a seek check when the interval fires.")]
+        public float seekChance;
+
+        /// <summary>Default values matching the original separate field defaults.</summary>
+        public static WormNoiseSeeking Default => new WormNoiseSeeking
+        {
+            checkInterval = 10,
+            seekDistance = 10f,
+            seekChance = 0.5f,
+        };
     }
 }
