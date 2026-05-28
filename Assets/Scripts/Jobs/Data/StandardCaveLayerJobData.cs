@@ -24,6 +24,9 @@ namespace Jobs.Data
         /// <summary>If the evaluated noise exceeds this threshold, the block is carved into air.</summary>
         public readonly float Threshold;
 
+        /// <summary>Per-layer cave zone attenuation strength. 0 = no zone effect.</summary>
+        public readonly float ZoneAttenuation;
+
         /// <summary>Caves will not generate below this Y level.</summary>
         public readonly int MinHeight;
 
@@ -61,6 +64,7 @@ namespace Jobs.Data
         {
             Mode = layerConfig.mode;
             Threshold = layerConfig.threshold;
+            ZoneAttenuation = layerConfig.zoneAttenuation;
             MinHeight = layerConfig.minHeight;
             MaxHeight = layerConfig.maxHeight;
             DepthFadeMargin = layerConfig.depthFadeMargin;

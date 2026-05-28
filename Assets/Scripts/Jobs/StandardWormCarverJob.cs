@@ -113,15 +113,10 @@ namespace Jobs
 
                     StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
 
-                    // Cave zone attenuation: modulate worm spawn chance based on zone noise
-                    float wormSpawnFactor = 1f;
-                    if (biome.CaveZoneAttenuation > 0f)
-                    {
-                        float centerX = globalCx + VoxelData.ChunkWidth * 0.5f;
-                        float centerZ = globalCz + VoxelData.ChunkWidth * 0.5f;
-                        float zoneNoise = CaveZoneNoises[biomeIndex].GetNoise(centerX, centerZ);
-                        wormSpawnFactor = 1f - (1f - zoneNoise) * 0.5f * biome.CaveZoneAttenuation;
-                    }
+                    // Pre-evaluate cave zone noise for this chunk (per-layer attenuation applied inside the loop)
+                    float centerX = globalCx + VoxelData.ChunkWidth * 0.5f;
+                    float centerZ = globalCz + VoxelData.ChunkWidth * 0.5f;
+                    float chunkZoneNoise = CaveZoneNoises[biomeIndex].GetNoise(centerX, centerZ);
 
                     for (int layerIdx = 0; layerIdx < biome.CaveLayerCount; layerIdx++)
                     {
@@ -129,7 +124,13 @@ namespace Jobs
 
                         if (caveLayer.Mode != CaveMode.WormCarver) continue;
 
-                        // Check if a worm spawns — spawn chance modulated by cave zone
+                        // Per-layer zone attenuation modulates spawn chance
+                        float wormSpawnFactor = 1f;
+                        if (caveLayer.ZoneAttenuation > 0f)
+                        {
+                            wormSpawnFactor = 1f - (1f - chunkZoneNoise) * 0.5f * caveLayer.ZoneAttenuation;
+                        }
+
                         if (rand.NextFloat(0f, 1f) > caveLayer.WormSpawnChance * wormSpawnFactor) continue;
 
                         // Spawn 1 to max worms per chunk
@@ -169,7 +170,7 @@ namespace Jobs
                             for (int step = 0; step < worm.LengthRemaining; step++)
                             {
                                 // Modulate radius along the worm's length
-                                float t = (float)step / totalLength;
+                                float t = math.saturate((float)step / totalLength);
                                 float wave = math.sin(t * math.PI * caveLayer.WormRadiusWaveCount) * 0.5f + 0.5f;
                                 float radius = math.lerp(caveLayer.WormRadiusMin, caveLayer.WormRadiusMax, wave);
 
@@ -251,8 +252,9 @@ namespace Jobs
                                         yaw = lookYaw;
                                         pitch = lookPitch;
 
-                                        // Ensure we live long enough to reach it
-                                        int neededSteps = (int)math.ceil(caveLayer.WormSeekDistance / (radius * 0.5f));
+                                        // Ensure we live long enough to reach it (use average radius for stable step estimate)
+                                        float avgRadius = (caveLayer.WormRadiusMin + caveLayer.WormRadiusMax) * 0.5f;
+                                        int neededSteps = (int)math.ceil(caveLayer.WormSeekDistance / (avgRadius * 0.5f));
                                         int remainingSteps = worm.LengthRemaining - step;
                                         if (remainingSteps < neededSteps)
                                         {

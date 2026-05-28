@@ -263,6 +263,15 @@ namespace Data.WorldTypes
         [Tooltip("Noise configuration for the cave domain warp. Requires its own frequency and amplitude settings.")]
         public FastNoiseConfig warpConfig;
 
+        [Header("Zone Attenuation")]
+        [Range(0f, 1f)]
+        [Tooltip("Per-layer cave zone attenuation strength. " +
+                 "How much the biome's cave zone noise suppresses this layer in low-noise regions. " +
+                 "0 = no zone effect (uniform density). " +
+                 "Higher values create more spatial variation. " +
+                 "Typically used on Noodle layers; Worm and Cheese layers usually leave this at 0.")]
+        public float zoneAttenuation;
+
         [Header("Depth Bounds")]
         [Tooltip("Caves will not generate below this Y level.")]
         public int minHeight = 5;

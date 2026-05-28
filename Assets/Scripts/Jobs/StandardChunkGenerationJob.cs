@@ -281,13 +281,8 @@ namespace Jobs
             float strataDepthJitter = StrataDepthNoises[surfaceBiomeIndex].GetNoise(globalX, globalZ);
             int strataJitterBlocks = (int)math.round(strataDepthJitter * 2.5f);
 
-            // Pre-evaluate cave zone attenuation once per column ([-1, 1] noise range)
-            float caveZoneThresholdBoost = 0f;
-            if (biome.CaveZoneAttenuation > 0f)
-            {
-                float zoneNoise = CaveZoneNoises[biomeIndex].GetNoise(globalX, globalZ);
-                caveZoneThresholdBoost = (1f - zoneNoise) * 0.5f * biome.CaveZoneAttenuation;
-            }
+            // Pre-evaluate cave zone noise once per column (per-layer attenuation applied inside the loop)
+            float caveZoneNoise = CaveZoneNoises[biomeIndex].GetNoise(globalX, globalZ);
 
             // --- COLUMN ITERATION (top-down) ---
             for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
@@ -396,7 +391,10 @@ namespace Jobs
                             depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
                         }
 
-                        float zoneBoostedThreshold = caveLayer.Threshold + caveZoneThresholdBoost;
+                        float zoneBoost = caveLayer.ZoneAttenuation > 0f
+                            ? (1f - caveZoneNoise) * 0.5f * caveLayer.ZoneAttenuation
+                            : 0f;
+                        float zoneBoostedThreshold = caveLayer.Threshold + zoneBoost;
                         float effectiveThreshold = zoneBoostedThreshold + (1f - depthFade) * (1f - zoneBoostedThreshold);
 
                         // --- WormCarver (preserved) ---

@@ -424,6 +424,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
+    zoneAttenuation: 0
     minHeight: 5
     maxHeight: 40
     depthFadeMargin: 8
@@ -481,6 +482,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 8
       normalizeToZeroOne: 0
+    zoneAttenuation: 0.17
     minHeight: 10
     maxHeight: 52
     depthFadeMargin: 8

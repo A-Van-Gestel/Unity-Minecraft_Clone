@@ -57,6 +57,7 @@ namespace Editor.WorldTools.Libraries
             ValidateBlendRadius(biome, results);
             ValidateCaveThresholds(biome, results);
             ValidateCaveHeightBounds(biome, results);
+            ValidateWormRadiusBounds(biome, results);
 
             return results;
         }
@@ -350,6 +351,33 @@ namespace Editor.WorldTools.Libraries
                         SubTabIndex = SUB_TAB_CAVES,
                         Message = $"\"{name}\": depthFadeMargin ({cave.depthFadeMargin}) covers the entire height range ({range} blocks). " +
                                   "The cave will be fully faded everywhere — effectively disabled.",
+                    });
+                }
+            }
+        }
+
+        /// <summary>
+        /// Checks for Worm Carver layers where radiusMin exceeds radiusMax (inverted wave semantics).
+        /// </summary>
+        private static void ValidateWormRadiusBounds(StandardBiomeAttributes biome, List<BiomeValidationResult> results)
+        {
+            if (biome.caveLayers == null) return;
+
+            for (int i = 0; i < biome.caveLayers.Length; i++)
+            {
+                StandardCaveLayer cave = biome.caveLayers[i];
+                if (cave.mode != CaveMode.WormCarver) continue;
+
+                string name = string.IsNullOrEmpty(cave.layerName) ? $"Cave Layer {i}" : cave.layerName;
+
+                if (cave.wormRadiusMin > cave.wormRadiusMax)
+                {
+                    results.Add(new BiomeValidationResult
+                    {
+                        Severity = ValidationSeverity.Warning,
+                        SubTabIndex = SUB_TAB_CAVES,
+                        Message = $"\"{name}\": wormRadiusMin ({cave.wormRadiusMin:F1}) > wormRadiusMax ({cave.wormRadiusMax:F1}) — " +
+                                  "the radius wave is inverted (pinch points will be widest).",
                     });
                 }
             }

@@ -435,7 +435,7 @@ namespace Editor.WorldTools
             if (!p.SkipXY)
             {
                 Dictionary<int, NativeBitArray> wormMasks = p.ShowCaves
-                    ? GenerateWormMasksForSlice(span, p.CrosshairPos.z, true, ref data)
+                    ? GenerateWormMasksForSlice(span, p.CrosshairPos.z, true, p.ForceBiomeIdx, ref data)
                     : null;
 
                 CrossSectionPanelHelper.EnsureTexture(ref texXY, span, chunkHeight);
@@ -496,7 +496,7 @@ namespace Editor.WorldTools
             if (!p.SkipZY)
             {
                 Dictionary<int, NativeBitArray> wormMasks = p.ShowCaves
-                    ? GenerateWormMasksForSlice(span, p.CrosshairPos.x, false, ref data)
+                    ? GenerateWormMasksForSlice(span, p.CrosshairPos.x, false, p.ForceBiomeIdx, ref data)
                     : null;
 
                 CrossSectionPanelHelper.EnsureTexture(ref texZY, span, chunkHeight);
@@ -641,7 +641,7 @@ namespace Editor.WorldTools
         /// <param name="fixedCoord">The fixed coordinate (Z for X-Y slice, X for Z-Y slice).</param>
         /// <param name="fixedIsZ">True if fixedCoord is Z (X-Y slice), false if fixedCoord is X (Z-Y slice).</param>
         private Dictionary<int, NativeBitArray> GenerateWormMasksForSlice(
-            int spanBlocks, int fixedCoord, bool fixedIsZ, ref CrossSectionNativeData data)
+            int spanBlocks, int fixedCoord, bool fixedIsZ, int forceBiomeIdx, ref CrossSectionNativeData data)
         {
             Dictionary<int, NativeBitArray> masks = new Dictionary<int, NativeBitArray>();
 
@@ -672,6 +672,8 @@ namespace Editor.WorldTools
                     BiomeSelectionNoise = data.SelectionNoise,
                     CaveNoises = data.CaveNoises,
                     CaveZoneNoises = data.CaveZoneNoises,
+                    IsSingleBiomeMode = forceBiomeIdx >= 0,
+                    ForceBiomeIndex = math.max(0, forceBiomeIdx),
                     OutputWormMask = wormMask,
                 };
                 wormJob.Execute();
@@ -919,7 +921,6 @@ namespace Editor.WorldTools
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
                     UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
                     FloraZoneCoverage = biome.floraZoneCoverage,
-                    CaveZoneAttenuation = biome.caveZoneAttenuation,
                     MajorFloraPoolStartIndex = poolIdx,
                     MajorFloraPoolCount = majorPoolCount,
                     MinorFloraPoolStartIndex = poolIdx + majorPoolCount,
@@ -1107,12 +1108,8 @@ namespace Editor.WorldTools
 
             bool hasWormMask = wormMask.IsCreated;
 
-            float caveZoneThresholdBoost = 0f;
-            if (biome.CaveZoneAttenuation > 0f)
-            {
-                float zoneNoise = data.CaveZoneNoises[biomeIndex].GetNoise(globalX, globalZ);
-                caveZoneThresholdBoost = (1f - zoneNoise) * 0.5f * biome.CaveZoneAttenuation;
-            }
+            // Pre-evaluate cave zone noise once per column (per-layer attenuation applied inside the loop)
+            float caveZoneNoise = data.CaveZoneNoises[biomeIndex].GetNoise(globalX, globalZ);
 
             for (int y = chunkHeight - 1; y >= 0; y--)
             {
@@ -1221,7 +1218,10 @@ namespace Editor.WorldTools
                             depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
                         }
 
-                        float zoneBoostedThreshold = caveLayer.Threshold + caveZoneThresholdBoost;
+                        float zoneBoost = caveLayer.ZoneAttenuation > 0f
+                            ? (1f - caveZoneNoise) * 0.5f * caveLayer.ZoneAttenuation
+                            : 0f;
+                        float zoneBoostedThreshold = caveLayer.Threshold + zoneBoost;
                         float effectiveThreshold = zoneBoostedThreshold + (1f - depthFade) * (1f - zoneBoostedThreshold);
                         FastNoiseLite caveNoise = data.CaveNoises[cIdx];
 

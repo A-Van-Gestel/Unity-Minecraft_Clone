@@ -205,7 +205,6 @@ namespace Jobs.Generators
                     SurfaceBlockID = (byte)biome.surfaceBlockID,
                     UnderwaterSurfaceBlockID = (byte)biome.underwaterSurfaceBlockID,
                     FloraZoneCoverage = biome.floraZoneCoverage,
-                    CaveZoneAttenuation = biome.caveZoneAttenuation,
                     MajorFloraPoolStartIndex = majorPoolStart,
                     MajorFloraPoolCount = majorPoolCount,
                     MinorFloraPoolStartIndex = majorPoolStart + majorPoolCount,
@@ -485,12 +484,7 @@ namespace Jobs.Generators
             // Caves — zone noise attenuates thresholds for smooth spatial variation
             if (voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock && _blockTypesJobData[voxelValue].FluidType == FluidType.None)
             {
-                float caveZoneBoost = 0f;
-                if (biome.CaveZoneAttenuation > 0f)
-                {
-                    float zoneNoise = _caveZoneNoises[biomeIndex].GetNoise(globalPos.x, globalPos.z);
-                    caveZoneBoost = (1f - zoneNoise) * 0.5f * biome.CaveZoneAttenuation;
-                }
+                float caveZoneNoise = _caveZoneNoises[biomeIndex].GetNoise(globalPos.x, globalPos.z);
 
                 for (int i = 0; i < biome.CaveLayerCount; i++)
                 {
@@ -511,7 +505,10 @@ namespace Jobs.Generators
                     FastNoiseLite caveNoise = _caveNoises[caveIdx];
                     float noiseVal;
 
-                    float zoneBoostedThreshold = caveLayer.Threshold + caveZoneBoost;
+                    float zoneBoost = caveLayer.ZoneAttenuation > 0f
+                        ? (1f - caveZoneNoise) * 0.5f * caveLayer.ZoneAttenuation
+                        : 0f;
+                    float zoneBoostedThreshold = caveLayer.Threshold + zoneBoost;
                     float effectiveThreshold = zoneBoostedThreshold + (1f - depthFade) * (1f - zoneBoostedThreshold);
 
                     if (caveLayer.Mode == CaveMode.WormCarver) continue;

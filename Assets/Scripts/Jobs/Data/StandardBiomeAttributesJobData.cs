@@ -38,9 +38,6 @@ namespace Jobs.Data
         /// <summary>Percentage of the biome covered by flora zones. Larger = larger zones, 1.0 = entire biome is a zone.</summary>
         public float FloraZoneCoverage;
 
-        /// <summary>How much the cave zone noise attenuates cave thresholds. 0 = no effect. Higher = more spatial variation in cave density.</summary>
-        public float CaveZoneAttenuation;
-
         /// <summary>Index into the shared NativeArray&lt;StructurePoolEntryJobData&gt; for this biome's major flora pool.</summary>
         public int MajorFloraPoolStartIndex;
 

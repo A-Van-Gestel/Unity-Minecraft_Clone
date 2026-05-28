@@ -478,15 +478,20 @@ namespace Editor.WorldTools
                                              "restores pockets smaller than the threshold to their original terrain blocks. " +
                                              "4 = removes pockets of 1–3 blocks (recommended). 0 = disabled.");
 
-            EditorUILayoutHelper.SubHeader("Cave Zone Attenuation");
+            EditorUILayoutHelper.SubHeader("Cave Zone Noise");
             EditorUILayoutHelper.SectionNote("2D noise field controlling spatial cave density variation. High noise regions produce full cave networks; " +
-                                             "low noise regions produce fewer, smaller caves with smooth transitions. " +
-                                             "<b>Attenuation</b> controls how much the noise suppresses caves (0 = uniform, higher = more variation).");
+                                             "low noise regions produce fewer, smaller caves with smooth transitions.\n\n" +
+                                             "<b>Attenuation is now per-layer.</b> Set <i>Zone Attenuation</i> on individual cave layers below " +
+                                             "(typically Noodle layers only). Cheese and Worm layers usually leave it at 0.");
 
             EditorUILayoutHelper.BeginGroup();
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("caveZoneNoiseConfig"), s_emptyLabel, true);
-            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("caveZoneAttenuation"),
-                new GUIContent("Zone Attenuation"));
+            using (new EditorGUI.DisabledGroupScope(true))
+            {
+                EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("caveZoneAttenuation"),
+                    new GUIContent("Zone Attenuation (Legacy)"));
+            }
+
             EditorUILayoutHelper.EndGroup();
 
             EditorGUILayout.Space(4);
