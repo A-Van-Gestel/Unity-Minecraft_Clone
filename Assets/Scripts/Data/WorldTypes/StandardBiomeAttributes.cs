@@ -286,14 +286,38 @@ namespace Data.WorldTypes
         public int maxWormsPerChunk = 3;
 
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Tooltip("The base radius of the worm cave in blocks.")]
+        [Tooltip("The base radius of the worm cave in blocks. Superseded by wormRadiusMin/Max when radius variation is enabled.")]
         [Range(1f, 10f)]
         public float wormBaseRadius = 3f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Range(1f, 8f)]
+        [Tooltip("Minimum carving radius. Narrow squeezes along the tunnel.")]
+        public float wormRadiusMin = 2f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Range(2f, 12f)]
+        [Tooltip("Maximum carving radius. Wide chambers along the tunnel.")]
+        public float wormRadiusMax = 4f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Range(1, 8)]
+        [Tooltip("How many wide/narrow cycles occur along the worm's length. " +
+                 "1 = one pinch point. 4 = alternating every ~50 steps.")]
+        public int wormRadiusWaveCount = 3;
 
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
         [Tooltip("How strongly the worm perturbs its pitch/yaw angles per step.")]
         [Range(0.1f, 1f)]
         public float wormWaviness = 0.5f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Range(0f, 1f)]
+        [Tooltip("How strongly worms are pulled toward horizontal. " +
+                 "0 = no bias (original behavior). " +
+                 "0.5 = gentle leveling. " +
+                 "1.0 = strongly horizontal with only brief vertical dips.")]
+        public float wormHorizontalBias = 0.5f;
 
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
         [Tooltip("Minimum number of steps the worm will march.")]

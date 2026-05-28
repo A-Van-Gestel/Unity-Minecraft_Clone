@@ -34,7 +34,11 @@ namespace Jobs.Data
         public readonly int DepthFadeMargin;
 
         public readonly float WormBaseRadius;
+        public readonly float WormRadiusMin;
+        public readonly float WormRadiusMax;
+        public readonly int WormRadiusWaveCount;
         public readonly float WormWaviness;
+        public readonly float WormHorizontalBias;
         public readonly int WormMinLength;
         public readonly int WormMaxLength;
         public readonly float WormSpawnChance;
@@ -62,7 +66,11 @@ namespace Jobs.Data
             DepthFadeMargin = layerConfig.depthFadeMargin;
 
             WormBaseRadius = layerConfig.wormBaseRadius;
+            WormRadiusMin = layerConfig.wormRadiusMin;
+            WormRadiusMax = layerConfig.wormRadiusMax;
+            WormRadiusWaveCount = layerConfig.wormRadiusWaveCount;
             WormWaviness = layerConfig.wormWaviness;
+            WormHorizontalBias = layerConfig.wormHorizontalBias;
             WormMinLength = layerConfig.wormMinLength;
             WormMaxLength = layerConfig.wormMaxLength;
             WormSpawnChance = layerConfig.wormSpawnChance;

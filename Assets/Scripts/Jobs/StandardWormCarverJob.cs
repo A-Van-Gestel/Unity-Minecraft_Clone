@@ -68,7 +68,7 @@ namespace Jobs
                 if (AllCaveLayers[i].Mode == CaveMode.WormCarver)
                 {
                     maxWormLength = math.max(maxWormLength, AllCaveLayers[i].WormMaxLength);
-                    maxWormRadius = math.max(maxWormRadius, AllCaveLayers[i].WormBaseRadius);
+                    maxWormRadius = math.max(maxWormRadius, math.max(AllCaveLayers[i].WormBaseRadius, AllCaveLayers[i].WormRadiusMax));
                 }
             }
 
@@ -160,7 +160,7 @@ namespace Jobs
                             WormState worm = wormStack[lastIdx];
                             wormStack.RemoveAt(lastIdx);
 
-                            float radius = caveLayer.WormBaseRadius;
+                            int totalLength = worm.LengthRemaining;
                             float3 pos = worm.Pos;
                             float yaw = worm.Yaw;
                             float pitch = worm.Pitch;
@@ -168,6 +168,11 @@ namespace Jobs
                             // Raymarch the worm
                             for (int step = 0; step < worm.LengthRemaining; step++)
                             {
+                                // Modulate radius along the worm's length
+                                float t = (float)step / totalLength;
+                                float wave = math.sin(t * math.PI * caveLayer.WormRadiusWaveCount) * 0.5f + 0.5f;
+                                float radius = math.lerp(caveLayer.WormRadiusMin, caveLayer.WormRadiusMax, wave);
+
                                 // Move position forward
                                 float3 forward = new float3(
                                     math.cos(yaw) * math.cos(pitch),
@@ -182,6 +187,9 @@ namespace Jobs
                                 yaw += rand.NextFloat(-caveLayer.WormWaviness, caveLayer.WormWaviness);
                                 pitch += rand.NextFloat(-caveLayer.WormWaviness, caveLayer.WormWaviness);
                                 pitch = math.clamp(pitch, -math.PI * 0.4f, math.PI * 0.4f);
+
+                                // Horizontal bias: gently restore pitch toward horizontal
+                                pitch = math.lerp(pitch, 0f, caveLayer.WormHorizontalBias * 0.1f);
 
                                 // Seeking Phase (Ping nearby noise fields)
                                 if (caveLayer.WormSeekInterval > 0 && step % caveLayer.WormSeekInterval == 0 && rand.NextFloat() < caveLayer.WormSeekChance)

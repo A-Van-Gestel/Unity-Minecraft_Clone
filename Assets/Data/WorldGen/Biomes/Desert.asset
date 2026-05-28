@@ -404,7 +404,11 @@ MonoBehaviour:
     wormSpawnChance: 1
     maxWormsPerChunk: 3
     wormBaseRadius: 3
+    wormRadiusMin: 2
+    wormRadiusMax: 4
+    wormRadiusWaveCount: 3
     wormWaviness: 0.5
+    wormHorizontalBias: 0.5
     wormMinLength: 50
     wormMaxLength: 200
     wormBranchChance: 0.05
@@ -457,7 +461,11 @@ MonoBehaviour:
     wormSpawnChance: 1
     maxWormsPerChunk: 3
     wormBaseRadius: 3
+    wormRadiusMin: 2
+    wormRadiusMax: 4
+    wormRadiusWaveCount: 3
     wormWaviness: 0.5
+    wormHorizontalBias: 0.5
     wormMinLength: 50
     wormMaxLength: 200
     wormBranchChance: 0.05
