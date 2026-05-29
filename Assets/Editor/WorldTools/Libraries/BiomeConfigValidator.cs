@@ -59,6 +59,7 @@ namespace Editor.WorldTools.Libraries
             ValidateCaveHeightBounds(biome, results);
             ValidateWormRadiusBounds(biome, results);
             ValidateWormSquashFactor(biome, results);
+            ValidateWormRadiusNoise(biome, results);
 
             return results;
         }
@@ -385,6 +386,24 @@ namespace Editor.WorldTools.Libraries
         }
 
         /// <summary>
+        /// Checks for Worm Carver layers where radius noise is enabled but frequency is too low to produce visible variation.
+        /// </summary>
+        private static void ValidateWormRadiusNoise(StandardBiomeAttributes biome, List<BiomeValidationResult> results)
+        {
+            if (biome.caveLayers == null) return;
+
+            for (int i = 0; i < biome.caveLayers.Length; i++)
+            {
+                StandardCaveLayer cave = biome.caveLayers[i];
+                if (cave.mode != CaveMode.WormCarver) continue;
+                if (cave.wormRadiusNoiseStrength <= 0f) continue;
+
+                string name = string.IsNullOrEmpty(cave.layerName) ? $"Cave Layer {i}" : cave.layerName;
+                ValidateRadiusNoiseFrequency(cave.wormRadiusNoiseFrequency, name, SUB_TAB_CAVES, results);
+            }
+        }
+
+        /// <summary>
         /// Checks for Worm Carver layers with extreme effective squash values.
         /// Accounts for <see cref="WormSquashAxis"/> to validate the post-inversion value the job will use.
         /// </summary>
@@ -429,7 +448,28 @@ namespace Editor.WorldTools.Libraries
             float effective = WormSquashAxisHelper.ToEffectiveSquash(config.squashAxis, config.squashFactor);
             ValidateEffectiveSquash(effective, config.squashAxis, config.squashFactor, "Trunk Worm", SUB_TAB_CAVES, results);
 
+            if (config.radiusNoiseStrength > 0f)
+                ValidateRadiusNoiseFrequency(config.radiusNoiseFrequency, "Trunk Worm", SUB_TAB_CAVES, results);
+
             return results;
+        }
+
+        /// <summary>
+        /// Shared validation for radius noise frequency, used by both per-biome and trunk worm validators.
+        /// </summary>
+        private static void ValidateRadiusNoiseFrequency(float frequency, string name, int subTabIndex,
+            List<BiomeValidationResult> results)
+        {
+            if (frequency < 0.02f)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Info,
+                    SubTabIndex = subTabIndex,
+                    Message = $"\"{name}\": radius noise frequency ({frequency:F3}) is very low — " +
+                              "noise features span 50+ blocks, producing nearly constant radius shifts rather than visible variation.",
+                });
+            }
         }
 
         /// <summary>

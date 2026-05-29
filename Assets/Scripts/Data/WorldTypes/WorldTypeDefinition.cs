@@ -92,6 +92,15 @@ namespace Data.WorldTypes
         [Tooltip("How many wide/narrow cycles occur along the trunk worm's length.")]
         public int radiusWaveCount = 3;
 
+        [Range(0f, 1f)]
+        [Tooltip("How much Perlin noise replaces the deterministic sine wave for radius variation. " +
+                 "0 = pure sine wave. 1.0 = fully noise-driven.")]
+        public float radiusNoiseStrength;
+
+        [Range(0.01f, 0.5f)]
+        [Tooltip("Spatial frequency of the radius noise. Lower = gradual width changes, higher = frequent pinches.")]
+        public float radiusNoiseFrequency = 0.1f;
+
         [Range(0.1f, 1f)]
         [Tooltip("How strongly the trunk worm perturbs its pitch/yaw angles per step.")]
         public float waviness = 0.33f;

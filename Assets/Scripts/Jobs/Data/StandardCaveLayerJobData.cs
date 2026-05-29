@@ -49,6 +49,8 @@ namespace Jobs.Data
         public readonly float WormRadiusMax;
         public readonly float WormSquashFactor;
         public readonly int WormRadiusWaveCount;
+        public readonly float WormRadiusNoiseStrength;
+        public readonly float WormRadiusNoiseFrequency;
         public readonly float WormWaviness;
         public readonly float WormHorizontalBias;
         public readonly int WormMinLength;
@@ -85,6 +87,8 @@ namespace Jobs.Data
             WormRadiusMax = layerConfig.wormRadiusMax;
             WormSquashFactor = WormSquashAxisHelper.ToEffectiveSquash(layerConfig.wormSquashAxis, layerConfig.wormSquashFactor);
             WormRadiusWaveCount = layerConfig.wormRadiusWaveCount;
+            WormRadiusNoiseStrength = layerConfig.wormRadiusNoiseStrength;
+            WormRadiusNoiseFrequency = layerConfig.wormRadiusNoiseFrequency;
             WormWaviness = layerConfig.wormWaviness;
             WormHorizontalBias = layerConfig.wormHorizontalBias;
             WormMinLength = layerConfig.wormMinLength;
@@ -119,6 +123,8 @@ namespace Jobs.Data
         public readonly float RadiusMax;
         public readonly float SquashFactor;
         public readonly int RadiusWaveCount;
+        public readonly float RadiusNoiseStrength;
+        public readonly float RadiusNoiseFrequency;
         public readonly float Waviness;
         public readonly float HorizontalBias;
 
@@ -140,6 +146,7 @@ namespace Jobs.Data
             {
                 this = default;
                 SquashFactor = 1f;
+                RadiusNoiseFrequency = 0.1f;
                 return;
             }
 
@@ -150,6 +157,8 @@ namespace Jobs.Data
             RadiusMax = config.radiusMax;
             SquashFactor = WormSquashAxisHelper.ToEffectiveSquash(config.squashAxis, config.squashFactor);
             RadiusWaveCount = config.radiusWaveCount;
+            RadiusNoiseStrength = config.radiusNoiseStrength;
+            RadiusNoiseFrequency = config.radiusNoiseFrequency;
             Waviness = config.waviness;
             HorizontalBias = config.horizontalBias;
             MinLength = config.minLength;

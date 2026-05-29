@@ -207,6 +207,15 @@ public int wormRadiusWaveCount = 3;
 
 The existing `wormBaseRadius` field would be deprecated in favor of `wormRadiusMin` / `wormRadiusMax` (with a migration that maps `baseRadius` to both min and max for backwards compatibility).
 
+**Noise-modulated radius (Implemented):** A hybrid blend mode replaces or augments the sine wave with 3D simplex noise (`Unity.Mathematics.noise.snoise(float3)`) sampled at the worm's world position. Two new fields control this: `wormRadiusNoiseStrength` (0 = pure sine wave, 1 = pure noise) and `wormRadiusNoiseFrequency` (spatial frequency of the noise). The blend formula is:
+
+```
+radiusFactor = lerp(sineWave, saturate(snoise(pos * frequency) * 0.5 + 0.5), strength)
+radius = lerp(radiusMin, radiusMax, radiusFactor)
+```
+
+Using the worm's 3D position as noise input makes each worm naturally unique (different paths sample different noise values) with spatially coherent variation (nearby steps produce smooth radius transitions). The sine wave remains available at strength 0 for structured rhythm. Trunk worms have equivalent `radiusNoiseStrength` / `radiusNoiseFrequency` fields on `TrunkWormConfig`. `BiomeConfigValidator` warns when noise is enabled but frequency is very low (< 0.02), which produces features too large to create visible variation.
+
 #### 3.1.3 Ellipsoidal Carving ~~(Optional, Lower Priority)~~ (Implemented)
 
 **Problem:** Spherical carving produces a circular cross-section. Real caves have wider-than-tall profiles.
@@ -221,7 +230,8 @@ if (math.lengthsq(delta) <= radSq) { /* carve */ }
 
 This is a simple change but significantly affects cave feel --- tunnels become wider hallways rather than circular tubes.
 
-**Implemented as:** `wormSquashFactor` + `wormSquashAxis` on `StandardCaveLayer` (per-biome local worms) and `squashFactor` + `squashAxis` on `TrunkWormConfig` (world-level trunk worms). Squash range `[0.3, 1.0]`, default `1.0` (sphere, backwards compatible). A `WormSquashAxis` enum (`Vertical` / `Horizontal`) selects the compressed axis: Vertical produces wider-than-tall hallways, Horizontal produces taller-than-wide fissures. The axis conversion is applied in the JobData constructors via `WormSquashAxisHelper.ToEffectiveSquash()` — `Horizontal` inverts the value (`1 / squash`) — so the Burst job always works with a single effective squash float. The Y bounding box of the carving loop is scaled to `radius * effectiveSquash`, and the chunk AABB early-out uses a bounding sphere that encloses the ellipsoid regardless of squash direction. `BiomeConfigValidator` warns when effective squash < 0.5 or > 2.0.
+**Implemented as:** `wormSquashFactor` + `wormSquashAxis` on `StandardCaveLayer` (per-biome local worms) and `squashFactor` + `squashAxis` on `TrunkWormConfig` (world-level trunk worms). Squash range `[0.3, 1.0]`, default `1.0` (sphere, backwards compatible). A `WormSquashAxis` enum (`Vertical` / `Horizontal`) selects the compressed axis: Vertical produces wider-than-tall hallways, Horizontal produces taller-than-wide fissures. The axis conversion is applied in the JobData constructors via `WormSquashAxisHelper.ToEffectiveSquash()` — `Horizontal` inverts
+the value (`1 / squash`) — so the Burst job always works with a single effective squash float. The Y bounding box of the carving loop is scaled to `radius * effectiveSquash`, and the chunk AABB early-out uses a bounding sphere that encloses the ellipsoid regardless of squash direction. `BiomeConfigValidator` warns when effective squash < 0.5 or > 2.0.
 
 ### 3.2 Zone Attenuation: Per-Layer Opt-In
 
@@ -699,7 +709,7 @@ Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 —
 ### Phase 5: Optional Enhancements
 
 - ~~**Ellipsoidal carving** for wider-than-tall worm profiles.~~ (Implemented --- see Section 3.1.3)
-- **Worm radius noise** (Perlin-modulated radius instead of sine wave) for less predictable width variation.
+- ~~**Worm radius noise** (Perlin-modulated radius instead of sine wave) for less predictable width variation.~~ (Implemented --- see Section 3.1.2)
 - **Worm Y-level attraction** (tendency to carve toward specific Y bands, e.g., diamond-level in Minecraft terms).
 - **Spaghetti revival** --- if the 2D repetition problem can be solved (3D noise pairs, per-axis domain warp), Spaghetti could return as an alternative connectivity generator.
 - **CaveDensityAnalyzer fix** for non-WorldType biomes and trunk worm support (see Section 4.3 known limitations).

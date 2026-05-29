@@ -384,6 +384,20 @@ namespace Data.WorldTypes
         public int wormRadiusWaveCount = 3;
 
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Range(0f, 1f)]
+        [Tooltip("How much Perlin noise replaces the deterministic sine wave for radius variation. " +
+                 "0 = pure sine wave (current behavior). 0.5 = structured rhythm + organic variation. " +
+                 "1.0 = fully noise-driven (unpredictable width changes).")]
+        public float wormRadiusNoiseStrength;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Range(0.01f, 0.5f)]
+        [Tooltip("Spatial frequency of the radius noise. Lower values produce long, gradual width changes. " +
+                 "Higher values produce more frequent, localized pinches and bulges. " +
+                 "Only used when wormRadiusNoiseStrength > 0.")]
+        public float wormRadiusNoiseFrequency = 0.1f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
         [Tooltip("How strongly the worm perturbs its pitch/yaw angles per step.")]
         [Range(0.1f, 1f)]
         public float wormWaviness = 0.5f;

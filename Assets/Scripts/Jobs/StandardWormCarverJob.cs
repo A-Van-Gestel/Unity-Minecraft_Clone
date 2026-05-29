@@ -69,6 +69,8 @@ namespace Jobs
             public float RadiusMax;
             public float SquashFactor;
             public int RadiusWaveCount;
+            public float RadiusNoiseStrength;
+            public float RadiusNoiseFrequency;
             public float Waviness;
             public float HorizontalBias;
             public float BranchChance;
@@ -165,6 +167,8 @@ namespace Jobs
                                 RadiusMax = TrunkConfig.RadiusMax,
                                 SquashFactor = TrunkConfig.SquashFactor,
                                 RadiusWaveCount = TrunkConfig.RadiusWaveCount,
+                                RadiusNoiseStrength = TrunkConfig.RadiusNoiseStrength,
+                                RadiusNoiseFrequency = TrunkConfig.RadiusNoiseFrequency,
                                 Waviness = TrunkConfig.Waviness,
                                 HorizontalBias = TrunkConfig.HorizontalBias,
                                 BranchChance = TrunkConfig.BranchChance,
@@ -230,6 +234,8 @@ namespace Jobs
                             RadiusMax = caveLayer.WormRadiusMax,
                             SquashFactor = caveLayer.WormSquashFactor,
                             RadiusWaveCount = caveLayer.WormRadiusWaveCount,
+                            RadiusNoiseStrength = caveLayer.WormRadiusNoiseStrength,
+                            RadiusNoiseFrequency = caveLayer.WormRadiusNoiseFrequency,
                             Waviness = caveLayer.WormWaviness,
                             HorizontalBias = caveLayer.WormHorizontalBias,
                             BranchChance = caveLayer.WormBranchChance,
@@ -307,7 +313,11 @@ namespace Jobs
                     // Modulate radius along the worm's length
                     float t = math.saturate((float)step / totalLength);
                     float wave = math.sin(t * math.PI * p.RadiusWaveCount) * 0.5f + 0.5f;
-                    float radius = math.lerp(p.RadiusMin, p.RadiusMax, wave);
+                    // TODO: Consider migrating from noise.snoise to FastNoiseLite for consistency with all other noise in the project.
+                    float radiusFactor = p.RadiusNoiseStrength > 0f
+                        ? math.lerp(wave, math.saturate(noise.snoise(pos * p.RadiusNoiseFrequency) * 0.5f + 0.5f), p.RadiusNoiseStrength)
+                        : wave;
+                    float radius = math.lerp(p.RadiusMin, p.RadiusMax, radiusFactor);
 
                     // Move position forward
                     float3 forward = new float3(
