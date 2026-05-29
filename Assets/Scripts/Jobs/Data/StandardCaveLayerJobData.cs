@@ -47,6 +47,7 @@ namespace Jobs.Data
         public readonly float WormBaseRadius;
         public readonly float WormRadiusMin;
         public readonly float WormRadiusMax;
+        public readonly float WormSquashFactor;
         public readonly int WormRadiusWaveCount;
         public readonly float WormWaviness;
         public readonly float WormHorizontalBias;
@@ -82,6 +83,7 @@ namespace Jobs.Data
             WormBaseRadius = layerConfig.wormBaseRadius;
             WormRadiusMin = layerConfig.wormRadiusMin;
             WormRadiusMax = layerConfig.wormRadiusMax;
+            WormSquashFactor = WormSquashAxisHelper.ToEffectiveSquash(layerConfig.wormSquashAxis, layerConfig.wormSquashFactor);
             WormRadiusWaveCount = layerConfig.wormRadiusWaveCount;
             WormWaviness = layerConfig.wormWaviness;
             WormHorizontalBias = layerConfig.wormHorizontalBias;
@@ -115,6 +117,7 @@ namespace Jobs.Data
 
         public readonly float RadiusMin;
         public readonly float RadiusMax;
+        public readonly float SquashFactor;
         public readonly int RadiusWaveCount;
         public readonly float Waviness;
         public readonly float HorizontalBias;
@@ -136,6 +139,7 @@ namespace Jobs.Data
             if (config == null)
             {
                 this = default;
+                SquashFactor = 1f;
                 return;
             }
 
@@ -144,6 +148,7 @@ namespace Jobs.Data
             MaxWormsPerCell = config.maxWormsPerCell;
             RadiusMin = config.radiusMin;
             RadiusMax = config.radiusMax;
+            SquashFactor = WormSquashAxisHelper.ToEffectiveSquash(config.squashAxis, config.squashFactor);
             RadiusWaveCount = config.radiusWaveCount;
             Waviness = config.waviness;
             HorizontalBias = config.horizontalBias;

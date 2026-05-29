@@ -210,6 +210,35 @@ namespace Data.WorldTypes
     }
 
     /// <summary>
+    /// Selects which axis is compressed by the worm squash factor.
+    /// </summary>
+    public enum WormSquashAxis : byte
+    {
+        /// <summary>Squash the vertical (Y) axis — caves are wider than tall (natural hallway profile).</summary>
+        Vertical,
+
+        /// <summary>Squash the horizontal (XZ) axes — caves are taller than wide (vertical fissure profile).</summary>
+        Horizontal,
+    }
+
+    /// <summary>
+    /// Converts a raw squash value + axis selection into the effective vertical squash factor
+    /// used by the worm carver job. Centralizes the axis-dependent inversion logic.
+    /// </summary>
+    public static class WormSquashAxisHelper
+    {
+        /// <summary>
+        /// Returns the effective vertical squash factor for the carving ellipsoid.
+        /// <see cref="WormSquashAxis.Vertical"/> passes the raw value through (values &lt; 1 compress Y).
+        /// <see cref="WormSquashAxis.Horizontal"/> inverts the value (1/raw), producing values &gt; 1 that stretch Y.
+        /// </summary>
+        public static float ToEffectiveSquash(WormSquashAxis axis, float rawSquash)
+        {
+            return axis == WormSquashAxis.Horizontal ? 1f / rawSquash : rawSquash;
+        }
+    }
+
+    /// <summary>
     /// Determines the noise evaluation strategy for a cave layer.
     /// </summary>
     public enum CaveMode : byte
@@ -334,6 +363,19 @@ namespace Data.WorldTypes
         [Range(2f, 12f)]
         [Tooltip("Maximum carving radius. Wide chambers along the tunnel.")]
         public float wormRadiusMax = 4f;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("Which axis the squash factor compresses. " +
+                 "Vertical = wider-than-tall hallways. Horizontal = taller-than-wide fissures.")]
+        public WormSquashAxis wormSquashAxis = WormSquashAxis.Vertical;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Range(0.3f, 1f)]
+        [Tooltip("How much to compress the selected axis. " +
+                 "1.0 = spherical (circular cross-section, no squash). " +
+                 "0.6 = 40% compression along the selected axis. " +
+                 "Only affects the carved shape, not the worm's navigation path.")]
+        public float wormSquashFactor = 1f;
 
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
         [Range(1, 8)]

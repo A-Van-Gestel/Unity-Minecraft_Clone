@@ -58,6 +58,7 @@ namespace Editor.WorldTools.Libraries
             ValidateCaveThresholds(biome, results);
             ValidateCaveHeightBounds(biome, results);
             ValidateWormRadiusBounds(biome, results);
+            ValidateWormSquashFactor(biome, results);
 
             return results;
         }
@@ -380,6 +381,82 @@ namespace Editor.WorldTools.Libraries
                                   "the radius wave is inverted (pinch points will be widest).",
                     });
                 }
+            }
+        }
+
+        /// <summary>
+        /// Checks for Worm Carver layers with extreme effective squash values.
+        /// Accounts for <see cref="WormSquashAxis"/> to validate the post-inversion value the job will use.
+        /// </summary>
+        private static void ValidateWormSquashFactor(StandardBiomeAttributes biome, List<BiomeValidationResult> results)
+        {
+            if (biome.caveLayers == null) return;
+
+            for (int i = 0; i < biome.caveLayers.Length; i++)
+            {
+                StandardCaveLayer cave = biome.caveLayers[i];
+                if (cave.mode != CaveMode.WormCarver) continue;
+
+                string name = string.IsNullOrEmpty(cave.layerName) ? $"Cave Layer {i}" : cave.layerName;
+                float effective = WormSquashAxisHelper.ToEffectiveSquash(cave.wormSquashAxis, cave.wormSquashFactor);
+
+                ValidateEffectiveSquash(effective, cave.wormSquashAxis, cave.wormSquashFactor, name, SUB_TAB_CAVES, results);
+            }
+        }
+
+        /// <summary>
+        /// Runs all validators against the given trunk worm configuration and returns any warnings.
+        /// Call from the World Type editor to validate world-level trunk worm settings.
+        /// </summary>
+        /// <param name="config">The trunk worm configuration to validate. Null is treated as disabled (no warnings).</param>
+        /// <returns>List of validation results, empty if no issues detected.</returns>
+        public static List<BiomeValidationResult> ValidateTrunkWormConfig(TrunkWormConfig config)
+        {
+            List<BiomeValidationResult> results = new List<BiomeValidationResult>();
+            if (config == null || !config.enabled) return results;
+
+            if (config.radiusMin > config.radiusMax)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = $"Trunk Worm: radiusMin ({config.radiusMin:F1}) > radiusMax ({config.radiusMax:F1}) — " +
+                              "the radius wave is inverted (pinch points will be widest).",
+                });
+            }
+
+            float effective = WormSquashAxisHelper.ToEffectiveSquash(config.squashAxis, config.squashFactor);
+            ValidateEffectiveSquash(effective, config.squashAxis, config.squashFactor, "Trunk Worm", SUB_TAB_CAVES, results);
+
+            return results;
+        }
+
+        /// <summary>
+        /// Shared validation for effective squash values, used by both per-biome and trunk worm validators.
+        /// </summary>
+        private static void ValidateEffectiveSquash(float effective, WormSquashAxis axis, float rawValue, string name,
+            int subTabIndex, List<BiomeValidationResult> results)
+        {
+            if (effective < 0.5f)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = subTabIndex,
+                    Message = $"\"{name}\": squash ({rawValue:F2}, axis={axis}) produces very flat, wide tunnels " +
+                              "(effective vertical squash {effective:F2}) — may cut through thin terrain layers or cave floors.",
+                });
+            }
+            else if (effective > 2f)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = subTabIndex,
+                    Message = $"\"{name}\": squash ({rawValue:F2}, axis={axis}) produces very tall, narrow fissures " +
+                              "(effective vertical squash {effective:F2}) — may punch through terrain ceilings.",
+                });
             }
         }
 

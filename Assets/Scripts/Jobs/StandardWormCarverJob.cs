@@ -67,6 +67,7 @@ namespace Jobs
         {
             public float RadiusMin;
             public float RadiusMax;
+            public float SquashFactor;
             public int RadiusWaveCount;
             public float Waviness;
             public float HorizontalBias;
@@ -162,6 +163,7 @@ namespace Jobs
                             {
                                 RadiusMin = TrunkConfig.RadiusMin,
                                 RadiusMax = TrunkConfig.RadiusMax,
+                                SquashFactor = TrunkConfig.SquashFactor,
                                 RadiusWaveCount = TrunkConfig.RadiusWaveCount,
                                 Waviness = TrunkConfig.Waviness,
                                 HorizontalBias = TrunkConfig.HorizontalBias,
@@ -226,6 +228,7 @@ namespace Jobs
                         {
                             RadiusMin = caveLayer.WormRadiusMin,
                             RadiusMax = caveLayer.WormRadiusMax,
+                            SquashFactor = caveLayer.WormSquashFactor,
                             RadiusWaveCount = caveLayer.WormRadiusWaveCount,
                             Waviness = caveLayer.WormWaviness,
                             HorizontalBias = caveLayer.WormHorizontalBias,
@@ -283,6 +286,9 @@ namespace Jobs
 
         private void SimulateWormStack(ref Random rand, NativeList<WormState> wormStack, WormParams p, float3 chunkMin, float3 chunkMax)
         {
+            float safeSquash = math.max(p.SquashFactor, 0.01f);
+            float invSquash = 1f / safeSquash;
+
             while (wormStack.Length > 0)
             {
                 int lastIdx = wormStack.Length - 1;
@@ -404,35 +410,33 @@ namespace Jobs
                     }
 
                     // Carving Phase
-                    CarveBlocksInChunk(pos, radius, chunkMin, chunkMax);
+                    CarveBlocksInChunk(pos, radius, safeSquash, invSquash, chunkMin, chunkMax);
                 }
             }
         }
 
-        private void CarveBlocksInChunk(float3 pos, float radius, float3 chunkMin, float3 chunkMax)
+        private void CarveBlocksInChunk(float3 pos, float radius, float squashFactor, float invSquash, float3 chunkMin, float3 chunkMax)
         {
+            float radSq = radius * radius;
+            float yRadius = radius * squashFactor;
+            float earlyOutSq = math.max(radSq, yRadius * yRadius);
             float3 closestPt = math.clamp(pos, chunkMin, chunkMax);
-            float distSq = math.distancesq(pos, closestPt);
-            if (distSq > radius * radius) return;
-
+            if (math.distancesq(pos, closestPt) > earlyOutSq) return;
             int minX = math.max(0, (int)math.floor(pos.x - radius) - ChunkPosition.x);
             int maxX = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.x + radius) - ChunkPosition.x);
-            int minY = math.max(1, (int)math.floor(pos.y - radius));
-            int maxY = math.min(VoxelData.ChunkHeight - 1, (int)math.ceil(pos.y + radius));
+            int minY = math.max(1, (int)math.floor(pos.y - yRadius));
+            int maxY = math.min(VoxelData.ChunkHeight - 1, (int)math.ceil(pos.y + yRadius));
             int minZ = math.max(0, (int)math.floor(pos.z - radius) - ChunkPosition.y);
             int maxZ = math.min(VoxelData.ChunkWidth - 1, (int)math.ceil(pos.z + radius) - ChunkPosition.y);
-
-            float radSq = radius * radius;
             for (int x = minX; x <= maxX; x++)
             {
                 for (int y = minY; y <= maxY; y++)
                 {
                     for (int z = minZ; z <= maxZ; z++)
                     {
-                        float3 blockPos = new float3(ChunkPosition.x + x, y, ChunkPosition.y + z);
-                        if (math.distancesq(pos, blockPos) <= radSq)
+                        float3 delta = new float3(ChunkPosition.x + x - pos.x, (y - pos.y) * invSquash, ChunkPosition.y + z - pos.z);
+                        if (math.lengthsq(delta) <= radSq)
                         {
-                            // Mark as carved
                             int flatIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
                             OutputWormMask.Set(flatIndex, true);
                         }

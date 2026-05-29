@@ -77,6 +77,17 @@ namespace Data.WorldTypes
         [Tooltip("Maximum carving radius. Wide chambers along the trunk tunnel.")]
         public float radiusMax = 5f;
 
+        [Tooltip("Which axis the squash factor compresses. " +
+                 "Vertical = wider-than-tall hallways. Horizontal = taller-than-wide fissures.")]
+        public WormSquashAxis squashAxis = WormSquashAxis.Vertical;
+
+        [Range(0.3f, 1f)]
+        [Tooltip("How much to compress the selected axis. " +
+                 "1.0 = spherical (circular cross-section, no squash). " +
+                 "0.6 = 40% compression along the selected axis. " +
+                 "Only affects the carved shape, not the worm's navigation path.")]
+        public float squashFactor = 1f;
+
         [Range(1, 8)]
         [Tooltip("How many wide/narrow cycles occur along the trunk worm's length.")]
         public int radiusWaveCount = 3;
