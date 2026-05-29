@@ -358,9 +358,70 @@ MonoBehaviour:
     normalizeToZeroOne: 0
   caveZoneAttenuation: 0.38
   minCavePocketSize: 12
-  trunkSpawnSuppression: 0
+  trunkSpawnSuppression: 0.5
   trunkVerticalBiasOverride: -1
   caveLayers:
+  - layerName: Local Sandstone Tunnels
+    previewColor: {r: 0.9, g: 0.7, b: 0.3, a: 1}
+    mode: 2
+    noiseConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    threshold: 0.5
+    enableWarp: 0
+    warpConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    zoneAttenuation: 0
+    isSeekableByTrunkWorms: 0
+    isSeekableByLocalWorms: 0
+    minHeight: 5
+    maxHeight: 50
+    depthFadeMargin: 10
+    wormSpawnChance: 0.02
+    maxWormsPerChunk: 1
+    wormBaseRadius: 3.5
+    wormRadiusMin: 2.5
+    wormRadiusMax: 4.5
+    wormRadiusWaveCount: 2
+    wormWaviness: 0.3
+    wormHorizontalBias: 0.65
+    wormMinLength: 30
+    wormMaxLength: 80
+    wormBranchChance: 0.02
+    maxBranchDepth: 1
+    wormNoiseSeeking:
+      checkInterval: 12
+      seekDistance: 12
+      seekChance: 0.4
   - layerName: Deep Chambers
     previewColor: {r: 1, g: 0.7232333, b: 0, a: 1}
     mode: 0

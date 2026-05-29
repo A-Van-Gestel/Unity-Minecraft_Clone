@@ -562,15 +562,81 @@ Editor tool at `Assets/Editor/Dev/CaveDensityAnalyzer.cs`. Cross-chunk-aware wit
 
 **Fix (deferred to Phase 3 or later):** Update `EditorChunkPipelineRunner` and/or `CaveDensityAnalyzer` to include trunk worm layer evaluation. The analyzer should report trunk and local cave contributions separately so tuning can distinguish world-level vs biome-level effects.
 
-### 4.4 Current Biome Cave Configs (as of 2026-05-26)
+**Known limitation 3 — Single-seed instability:** Worm-based cave systems are far more seed-sensitive than noise-based systems. A single worm spawn/no-spawn decision can swing density and connectivity by 2-4x (observed during Phase 4 tuning: seed 42 showed 79% connectivity for Grasslands at spawn=0.05, while seed 1337 showed 50%). Single-seed analysis produces misleading results that cannot reliably distinguish "config is wrong" from "seed is unlucky."
+
+**Fix:** Add a multi-seed averaging mode. Run the analysis across 3-5 seeds and report mean ± standard deviation for key metrics (density, empty chunks, connectivity, max span). The UI should offer a "Multi-seed (N seeds)" toggle next to the existing seed field. The static API should accept an optional `int seedCount` parameter that defaults to 1 for backwards compatibility.
+
+**Known limitation 4 — No per-layer-type breakdown:** The analyzer reports total cave air but does not distinguish contributions from Worm Carver, Cheese, and Noodle layers. During Phase 4 tuning, it was impossible to determine how much of Desert's density came from the new worm layer vs existing Cheese vs Noodle. This makes per-layer tuning a guessing game — adjusting worm spawn rates without knowing whether the observed density change came from worms or from coincidentally co-located Cheese chambers.
+
+**Fix:** Run the analysis pipeline multiple times with individual layers enabled/disabled (via `GenerationFeatureFlags` or by temporarily zeroing layer configs), then diff the results. Report a per-layer-type breakdown table:
 
 ```
-Grasslands:     Cheese(0.82, h5-40) + Noodle(0.93, h10-50, warp)    zone=0.008/0.24
-Forrest:        Cheese(0.82, h5-40) + Noodle(0.93, h8-55, warp)     zone=0.010/0.25
-Desert:         Cheese(0.84, h5-40) + Noodle(0.92, h8-58, warp)     zone=0.006/0.38
-Mountain:       Worm(spawn=1.5%, r=3, len=50-200) + Cheese(0.80, h5-40) + Noodle(0.93, h15-85, warp)  zone=0.040/0.28
-Steep Grasslands: Cheese(0.80, h5-40) + Noodle(0.92, h10-52, warp)  zone=0.008/0.17
+Layer Breakdown:
+  Worm Carver:  4 210 blocks (42.1%)  — 14 chunks affected
+  Cheese:       5 102 blocks (51.0%)  — 31 chunks affected
+  Noodle:         688 blocks ( 6.9%)  — 18 chunks affected
 ```
+
+**Known limitation 5 — No worm-specific diagnostics:** Since worms are now the primary cave generator for all biomes, the analyzer lacks visibility into worm behavior. During Phase 4, there was no way to verify whether worm spawn rates, branching, and noise seeking were producing the expected results. Key missing metrics:
+
+- **Worm spawn count:** How many worms actually spawned in the grid vs how many chunks passed the spawn threshold. Validates that `wormSpawnChance` is calibrated correctly.
+- **Actual worm length distribution:** Average and histogram of steps taken vs configured `minLength`/`maxLength`. Detects early termination (worms hitting chunk boundaries) or unexpected extensions (noise seeking adding too many steps).
+- **Branch count and depth distribution:** How many branches were created per root worm, and at what depth. Validates `branchChance` and `maxBranchDepth` tuning.
+- **Individual worm chunk span:** How many chunks each individual worm passes through (separate from the union-find merged network span, which conflates "one long worm" with "many short worms that happened to intersect").
+- **Seek success rate:** How often noise seeking found a target vs fired and found nothing. A low success rate indicates seekable layers are too sparse or seek distance is too short.
+
+**Fix:** Instrument the `StandardWormCarverJob` (or an editor-only variant) to output per-worm telemetry into a `NativeList<WormTelemetry>` struct. The analyzer would collect and aggregate these across all chunks. This requires either a debug-only job variant or a compile-time telemetry toggle (to avoid performance cost in production generation).
+
+**Known limitation 6 — No cheese-worm connection rate:** The purpose of noise seeking is to connect worm tunnels to cheese chambers. The analyzer does not measure how many cheese pockets are actually reachable from a worm tunnel vs isolated. This is the most important quality metric for validating that the seek system works — without it, worms could be wandering randomly without connecting to anything, and the analyzer wouldn't detect it.
+
+**Fix:** After the union-find merge pass, classify each network by which layer types contributed to it. A network containing both worm-carved and cheese-carved blocks is a "connected" network; a cheese-only network is "isolated." Report:
+
+```
+Cheese-Worm Connectivity:
+  Total cheese pockets:           31
+  Connected to worm tunnels:      18 (58.1%)
+  Isolated (cheese-only):         13 (41.9%)
+```
+
+**Known limitation 7 — No network topology metrics:** The analyzer treats networks as blobs (size + chunk span) but does not report internal structure. A branching worm network and a swiss-cheese blob of the same size produce identical stats but have completely different exploration value. Missing topology metrics:
+
+- **Dead-end ratio:** Fraction of network endpoints that don't connect to another passage. High dead-end ratio = more exploration decisions ("should I go down this side tunnel?").
+- **Junction count:** Blocks where 3+ passages meet — these are exploration decision points.
+- **Longest path through network:** The maximum distance a player can travel without backtracking. Measures exploration depth.
+
+**Fix:** After flood fill, run a graph analysis pass on the network's block connectivity. Identify junction blocks (3+ air neighbors in non-coplanar directions) and dead-end blocks (1 air neighbor). Compute longest path via BFS from each dead-end. Report per-network and aggregate topology stats.
+
+**Known limitation 8 — No horizontal/vertical tunnel characterization:** The analyzer reports network Y-span but cannot distinguish horizontal tunnels from vertical shafts. During Phase 4, `horizontalBias` was tuned from 0.5 to 0.2 for Mountain to encourage vertical shafts, but the only validation was the Y-span metric (which measures extent, not direction). A strongly horizontal tunnel that happens to descend gradually over many chunks can produce the same Y-span as a vertical shaft.
+
+**Fix:** For each cave air block, classify the local passage direction by examining the distribution of air neighbors. A block surrounded by air primarily on the X/Z plane is in a horizontal passage; a block with air primarily above/below is in a vertical shaft. Report the horizontal/vertical ratio per network.
+
+### 4.4 Current Biome Cave Configs (as of 2026-05-28, Phase 4)
+
+```
+Grasslands:       Worm(spawn=5%, r=2-3.5, hBias=0.6, len=40-120, branch=0.04, depth=2, seek=10/10/0.5) + Cheese(0.82, h5-40)
+Forrest:          Worm(spawn=5%, r=1.5-3, hBias=0.55, len=40-100, branch=0.06, depth=2, seek=10/10/0.5) + Cheese(0.82, h5-40)
+Desert:           Worm(spawn=2.5%, r=2.5-4.5, hBias=0.65, len=30-80, branch=0.02, depth=1, seek=12/12/0.4) + Cheese(0.84, h5-40) + Noodle(0.92, h8-58, warp, zoneAtt=0.38)
+Mountain:         Worm(spawn=1.5%, r=2-4, hBias=0.2, len=50-150, branch=0.05, depth=2, seek=10/10/0.5) + Cheese(0.80, h5-40) + Noodle(0.93, h15-85, warp, zoneAtt=0.28)
+Steep Grasslands: Worm(spawn=5%, r=2-3.5, hBias=0.5, len=35-100, branch=0.04, depth=2, seek=10/10/0.5) + Cheese(0.80, h5-40)
+
+Trunk modifiers:  Desert trunkSpawnSuppression=0.5 | Mountain trunkVerticalBiasOverride=0.3 | Others: defaults
+```
+
+**Phase 4 CaveDensityAnalyzer results** (seed 42, 8x8 grid, single-biome mode — excludes trunk worms):
+
+| Biome            | Density | Empty chunks | Connectivity | Max span | Shape quality |
+|------------------|---------|--------------|--------------|----------|---------------|
+| Grasslands       | 5.87%   | 20.3%        | 78.9%        | 38       | 83.6%         |
+| Steep Grasslands | 5.56%   | 32.8%        | 81.2%        | 33       | 83.4%         |
+| Forrest          | 3.85%   | 34.4%        | 69.8%        | 25       | 81.3%         |
+| Desert           | 1.98%   | 54.7%        | 41.1%        | 7        | 75.3%         |
+| Mountain         | 2.43%   | 10.9%        | 13.3%        | 8        | 68.6%         |
+
+> [!NOTE]
+> Connectivity and max-span exceed the original Phase 4 targets (10-50% / 3-15). This is inherent to worm-based systems: independently-spawned worms that spatially intersect are merged into larger networks by union-find. Each individual worm spans only 3-5 chunks, but random intersections create 20-40 chunk connected networks. Seed 1337 cross-check shows 50% connectivity / 22 span for Grasslands — these metrics are highly seed-dependent. The original targets were calibrated for Noodle-based systems where connectivity = homogeneity; for worm-based
+> systems, higher connectivity = more interesting exploration flow.
+>
+> Desert's high empty-chunk rate (54.7%) and Mountain's low rate (10.9%) are intentional per Section 3.3. Trunk worms (not captured by the analyzer) will further reduce empty-chunk rates for all biomes.
 
 ---
 

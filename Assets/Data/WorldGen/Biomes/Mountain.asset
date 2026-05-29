@@ -357,7 +357,7 @@ MonoBehaviour:
   caveZoneAttenuation: 0.28
   minCavePocketSize: 12
   trunkSpawnSuppression: 0
-  trunkVerticalBiasOverride: -1
+  trunkVerticalBiasOverride: 0.3
   caveLayers:
   - layerName: Worm Carver
     previewColor: {r: 1, g: 0, b: 0.7748437, a: 1}
@@ -411,9 +411,9 @@ MonoBehaviour:
     wormRadiusMax: 4
     wormRadiusWaveCount: 3
     wormWaviness: 0.33
-    wormHorizontalBias: 0.5
+    wormHorizontalBias: 0.2
     wormMinLength: 50
-    wormMaxLength: 200
+    wormMaxLength: 150
     wormBranchChance: 0.05
     maxBranchDepth: 2
     wormNoiseSeeking:
