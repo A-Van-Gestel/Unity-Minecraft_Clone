@@ -251,6 +251,7 @@ namespace Editor.Validation
                 Test_SeedSensitivity();
                 Test_NormalizeRange();
                 Test_BatchGridBitIdentical(configs);
+                Test_FactoryMethods();
             }
 
             /// <summary>
@@ -405,6 +406,90 @@ namespace Editor.Validation
                 {
                     gridOutput2D.Dispose();
                     gridOutput3D.Dispose();
+                }
+            }
+
+            /// <summary>
+            /// Factory methods must produce bit-identical output to equivalent manual configuration.
+            /// </summary>
+            private void Test_FactoryMethods()
+            {
+                // CreateSimple must match Create() + SetNoiseType(OpenSimplex2) + SetFrequency()
+                FastNoiseLite simple = FastNoiseLite.CreateSimple(SEED, FREQUENCY);
+
+                FastNoiseLite manualSimple = FastNoiseLite.Create(SEED);
+                manualSimple.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+                manualSimple.SetFrequency(FREQUENCY);
+
+                foreach (float2 c in s_coords2D)
+                    AssertEqual(simple.GetNoise(c.x, c.y), manualSimple.GetNoise(c.x, c.y),
+                        $"CreateSimple 2D ({c.x},{c.y})");
+
+                foreach (float3 c in s_coords3D)
+                    AssertEqual(simple.GetNoise(c.x, c.y, c.z), manualSimple.GetNoise(c.x, c.y, c.z),
+                        $"CreateSimple 3D ({c.x},{c.y},{c.z})");
+
+                // CreateFBm must match Create() + SetNoiseType + SetFrequency + SetFractalType(FBm)
+                // + SetFractalOctaves + SetFractalGain(0.5) + SetFractalLacunarity(2.0)
+                FastNoiseLite fbm = FastNoiseLite.CreateFBm(SEED, FREQUENCY, FRACTAL_OCTAVES);
+
+                FastNoiseLite manualFbm = FastNoiseLite.Create(SEED);
+                manualFbm.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+                manualFbm.SetFrequency(FREQUENCY);
+                manualFbm.SetFractalType(FastNoiseLite.FractalType.FBm);
+                manualFbm.SetFractalOctaves(FRACTAL_OCTAVES);
+                manualFbm.SetFractalGain(0.5f);
+                manualFbm.SetFractalLacunarity(2.0f);
+
+                foreach (float2 c in s_coords2D)
+                    AssertEqual(fbm.GetNoise(c.x, c.y), manualFbm.GetNoise(c.x, c.y),
+                        $"CreateFBm 2D ({c.x},{c.y})");
+
+                foreach (float3 c in s_coords3D)
+                    AssertEqual(fbm.GetNoise(c.x, c.y, c.z), manualFbm.GetNoise(c.x, c.y, c.z),
+                        $"CreateFBm 3D ({c.x},{c.y},{c.z})");
+
+                // CreateFBm default octaves (3) must work
+                FastNoiseLite fbmDefault = FastNoiseLite.CreateFBm(SEED, FREQUENCY);
+
+                FastNoiseLite manualFbmDefault = FastNoiseLite.Create(SEED);
+                manualFbmDefault.SetNoiseType(FastNoiseLite.NoiseType.OpenSimplex2);
+                manualFbmDefault.SetFrequency(FREQUENCY);
+                manualFbmDefault.SetFractalType(FastNoiseLite.FractalType.FBm);
+                manualFbmDefault.SetFractalOctaves(3);
+                manualFbmDefault.SetFractalGain(0.5f);
+                manualFbmDefault.SetFractalLacunarity(2.0f);
+
+                foreach (float3 c in s_coords3D)
+                    AssertEqual(fbmDefault.GetNoise(c.x, c.y, c.z), manualFbmDefault.GetNoise(c.x, c.y, c.z),
+                        $"CreateFBm default octaves 3D ({c.x},{c.y},{c.z})");
+
+                // Factory methods must be seed-sensitive
+                FastNoiseLite simpleA = FastNoiseLite.CreateSimple(SEED, FREQUENCY);
+                FastNoiseLite simpleB = FastNoiseLite.CreateSimple(SEED + 12345, FREQUENCY);
+
+                bool anyDifferent = false;
+                foreach (float3 c in s_coords3D)
+                {
+                    if (math.abs(simpleA.GetNoise(c.x, c.y, c.z) - simpleB.GetNoise(c.x, c.y, c.z)) > TOLERANCE)
+                    {
+                        anyDifferent = true;
+                        break;
+                    }
+                }
+
+                AssertTrue(anyDifferent, "CreateSimple seed sensitivity: different seeds must produce different output");
+
+                // Output range for factory-created instances
+                foreach (float3 c in s_coords3D)
+                {
+                    float v = simple.GetNoise(c.x, c.y, c.z);
+                    AssertTrue(v >= -1f - TOLERANCE && v <= 1f + TOLERANCE,
+                        $"CreateSimple range 3D ({c.x},{c.y},{c.z}): {v} not in [-1,1]");
+
+                    float vf = fbm.GetNoise(c.x, c.y, c.z);
+                    AssertTrue(vf >= -1f - TOLERANCE && vf <= 1f + TOLERANCE,
+                        $"CreateFBm range 3D ({c.x},{c.y},{c.z}): {vf} not in [-1,1]");
                 }
             }
 

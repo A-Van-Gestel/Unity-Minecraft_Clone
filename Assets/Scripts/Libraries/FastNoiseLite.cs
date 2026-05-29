@@ -20,6 +20,8 @@ namespace Libraries
     [SuppressMessage("ReSharper", "PrivateFieldCanBeConvertedToLocalVariable")]
     public struct FastNoiseLite
     {
+        #region Enums
+
         public enum NoiseType
         {
             OpenSimplex2,
@@ -81,7 +83,10 @@ namespace Libraries
             DefaultOpenSimplex2,
         }
 
-        // Fields
+        #endregion
+
+        #region Fields and Constants
+
         private int mSeed;
         private float mFrequency;
         private NoiseType mNoiseType;
@@ -107,10 +112,13 @@ namespace Libraries
         /// </summary>
         private bool mNormalizeToZeroOne;
 
-        // Constants
         private const int PrimeX = 501125321;
         private const int PrimeY = 1136930381;
         private const int PrimeZ = 1720413743;
+
+        #endregion
+
+        #region Factory Methods
 
         /// <summary>
         /// Create a new state with default values.
@@ -138,6 +146,45 @@ namespace Libraries
             fnl.mDomainWarpAmp = 1.0f;
             return fnl;
         }
+
+        /// <summary>
+        /// Creates a simple single-octave OpenSimplex2 noise with no fractal layering.
+        /// Use this instead of <c>Unity.Mathematics.noise.snoise</c> for seed-aware, consistent noise.
+        /// </summary>
+        /// <param name="seed">The noise seed (typically <c>baseSeed + salt</c>).</param>
+        /// <param name="frequency">Spatial frequency for noise evaluation.</param>
+        /// <returns>A configured <see cref="FastNoiseLite"/> instance ready for <c>GetNoise</c> calls.</returns>
+        public static FastNoiseLite CreateSimple(int seed, float frequency)
+        {
+            FastNoiseLite n = Create(seed);
+            n.SetNoiseType(NoiseType.OpenSimplex2);
+            n.SetFrequency(frequency);
+            return n;
+        }
+
+        /// <summary>
+        /// Creates an FBm (Fractal Brownian Motion) noise with sensible defaults (gain 0.5, lacunarity 2.0).
+        /// Use this for multi-octave noise without the full FastNoiseConfig pipeline.
+        /// </summary>
+        /// <param name="seed">The noise seed (typically <c>baseSeed + salt</c>).</param>
+        /// <param name="frequency">Base frequency for noise evaluation.</param>
+        /// <param name="octaves">Number of fractal octaves (default: 3).</param>
+        /// <returns>A configured <see cref="FastNoiseLite"/> instance ready for <c>GetNoise</c> calls.</returns>
+        public static FastNoiseLite CreateFBm(int seed, float frequency, int octaves = 3)
+        {
+            FastNoiseLite n = Create(seed);
+            n.SetNoiseType(NoiseType.OpenSimplex2);
+            n.SetFrequency(frequency);
+            n.SetFractalType(FractalType.FBm);
+            n.SetFractalOctaves(octaves);
+            n.SetFractalGain(0.5f);
+            n.SetFractalLacunarity(2.0f);
+            return n;
+        }
+
+        #endregion
+
+        #region Configuration
 
         public void SetSeed(int seed)
         {
@@ -229,6 +276,10 @@ namespace Libraries
             mNormalizeToZeroOne = normalize;
         }
 
+        #endregion
+
+        #region Public Noise API
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float GetNoise(float x, float y)
         {
@@ -279,9 +330,9 @@ namespace Libraries
             }
         }
 
-        // ========================================================================
-        // Batch Evaluation API
-        // ========================================================================
+        #endregion
+
+        #region Batch Evaluation API
 
         /// <summary>
         /// Evaluates 2D noise on a uniform integer grid, writing results to <paramref name="output"/>
@@ -467,9 +518,9 @@ namespace Libraries
                 output[i] = (output[i] + 1f) * 0.5f;
         }
 
-        // ========================================================================
-        // Internal Logic
-        // ========================================================================
+        #endregion
+
+        #region Internal Helpers
 
         private void CalculateFractalBounding()
         {
@@ -788,7 +839,9 @@ namespace Libraries
             };
         }
 
-        // Algorithms (Math implementation replaced with Unity.Mathematics)
+        #endregion
+
+        #region Fractal Generation
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int FastFloor(float f)
@@ -938,6 +991,10 @@ namespace Libraries
 
             return sum;
         }
+
+        #endregion
+
+        #region Noise Algorithms
 
         private static float SingleSimplex(int seed, float x, float y)
         {
@@ -1803,6 +1860,10 @@ namespace Libraries
             return math.lerp(yf0, yf1, zs);
         }
 
+        #endregion
+
+        #region Domain Warp
+
         private void DoSingleDomainWarp(int seed, float amp, float freq, float x, float y, ref float xr, ref float yr)
         {
             switch (mDomainWarpType)
@@ -2160,9 +2221,9 @@ namespace Libraries
             zr += vz * warpAmp;
         }
 
-        // ========================================================================
-        // Unmanaged Lookup Data Handling
-        // ========================================================================
+        #endregion
+
+        #region Lookup Tables
 
         /// <summary>
         /// Allocates unmanaged memory for the lookup tables. Must be called on the main thread
@@ -2424,5 +2485,7 @@ namespace Libraries
                 -0.9111505856f, 0.4047110257f, 0, 0.1399838409f, 0.7601631212f, -0.6344734459f, 0, 0.4484419361f, -0.845289248f, 0.2904925424f, 0,
             };
         }
+
+        #endregion
     }
 }

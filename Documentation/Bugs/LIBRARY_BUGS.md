@@ -6,10 +6,11 @@ This document outlines **open** bugs and architectural improvements related to t
 
 ---
 
-## TODO: FastNoiseLite Simplified API — Lightweight Config and Factory Methods
+## FastNoiseLite Simplified API — Lightweight Config and Factory Methods
 
 **Severity:** Architecture Improvement  
-**Files:** `Assets/Scripts/Jobs/Data/FastNoiseConfig.cs`, `Assets/Scripts/Jobs/Generators/FastNoiseFactory.cs`, `Assets/Scripts/Libraries/FastNoiseLite.cs`
+**Status:** Phase 1 Implemented  
+**Files:** `Assets/Scripts/Libraries/FastNoiseLite.cs`, `Assets/Scripts/Jobs/Generators/FastNoiseFactory.cs`, `Assets/Scripts/Jobs/Data/FastNoiseConfig.cs`
 
 ### Problem
 
@@ -19,56 +20,33 @@ This document outlines **open** bugs and architectural improvements related to t
 
 2. **Initialization overhead:** Each `FastNoiseConfig` requires a `FastNoiseLite` instance created via `FastNoiseFactory.CreateNoiseFromConfig()`, which must be called on the main thread during `StandardChunkGenerator.Initialize()`. The instance must then be stored in a `NativeArray<FastNoiseLite>` and passed to the job. For a feature that needs "just sample some noise at this position", this is a multi-file pipeline change spanning authoring → factory → job data → job.
 
-3. **Inconsistency pressure:** When the full pipeline is too heavy, developers reach for alternatives like `Unity.Mathematics.noise.snoise()` — a single function call with no setup. This works but introduces a second noise system with different characteristics (no seed control, no fractal, different gradient distribution). The worm radius noise feature (`StandardWormCarverJob`, line ~317) currently uses `noise.snoise` for this reason, with a TODO noting the inconsistency.
+3. **Inconsistency pressure:** When the full pipeline is too heavy, developers reach for `Unity.Mathematics.noise.snoise()` — a single function call with no setup. This works but introduces a second noise system with different characteristics (no seed control, no fractal, different gradient distribution). Several call sites still use `noise.snoise` (biome boundary dithering in `StandardChunkGenerationJob`, biome blending wiggle in `BiomeBlender` and `WorldBlendingPreviewJob`).
 
-### Proposed Solution: Lightweight Factory Methods + Optional Lite Config
+### Implemented: Static Factory Methods on FastNoiseLite
 
-#### Option A: Static Factory Methods on FastNoiseLite (Preferred)
-
-Add Burst-compatible static methods that create pre-configured `FastNoiseLite` instances in a single call:
+Two static factory methods have been added to `FastNoiseLite` for creating pre-configured instances in a single call:
 
 ```csharp
-// In FastNoiseLite.cs or a new FastNoiseLitePresets.cs
+// Simple single-octave OpenSimplex2 noise (replaces noise.snoise for seed-aware use cases)
+FastNoiseLite radiusNoise = FastNoiseLite.CreateSimple(seed, frequency);
 
-/// <summary>Creates a simple single-octave 3D simplex noise.</summary>
-public static FastNoiseLite CreateSimple(int seed, float frequency)
-{
-    FastNoiseLite n = Create(seed);
-    n.SetNoiseType(NoiseType.OpenSimplex2);
-    n.SetFrequency(frequency);
-    return n;
-}
-
-/// <summary>Creates a standard FBm noise with sensible defaults (3 octaves, gain 0.5, lacunarity 2.0).</summary>
-public static FastNoiseLite CreateFBm(int seed, float frequency, int octaves = 3)
-{
-    FastNoiseLite n = Create(seed);
-    n.SetNoiseType(NoiseType.OpenSimplex2);
-    n.SetFrequency(frequency);
-    n.SetFractalType(FractalType.FBm);
-    n.SetFractalOctaves(octaves);
-    n.SetFractalGain(0.5f);
-    n.SetFractalLacunarity(2.0f);
-    return n;
-}
+// FBm noise with sensible defaults (3 octaves, gain 0.5, lacunarity 2.0)
+FastNoiseLite terrainNoise = FastNoiseLite.CreateFBm(seed, frequency, octaves: 4);
 ```
 
-**Pros:**
+**Properties:**
 
 - Zero new types — uses the existing `FastNoiseLite` struct directly
 - Burst-compatible (struct construction, no managed types)
-- Can be called inline in job `Execute()` or precomputed in `Initialize()`
+- Can be called inline in job `Execute()` or precomputed before the hot loop
+- Seed-aware — participates in the world seed system (unlike `noise.snoise`)
 - No Inspector overhead — these are code-only noise sources
-- Seed-aware — unlike `noise.snoise`, these participate in the world seed system
 
-**Cons:**
+**First migration:** The worm radius noise in `StandardWormCarverJob.SimulateWormStack` now uses `FastNoiseLite.CreateSimple()` instead of `noise.snoise()`, created once per worm group rather than evaluating a stateless function per step.
 
-- No Inspector exposure — designers can't tweak the noise without code changes
-- Parameters are hardcoded at call site (but that's the point for simple use cases)
+### Future Improvement: FastNoiseConfigLite Struct
 
-#### Option B: FastNoiseConfigLite Struct
-
-A minimal config struct for simple noise use cases:
+For designer-facing noise that needs Inspector exposure but not full `FastNoiseConfig` complexity, a minimal config struct could complement the factory methods:
 
 ```csharp
 [Serializable]
@@ -91,7 +69,7 @@ public struct FastNoiseConfigLite
 }
 ```
 
-With a corresponding factory method:
+With a corresponding factory overload on `FastNoiseFactory`:
 
 ```csharp
 public static FastNoiseLite CreateNoiseFromConfig(FastNoiseConfigLite config, int baseSeed)
@@ -103,31 +81,30 @@ public static FastNoiseLite CreateNoiseFromConfig(FastNoiseConfigLite config, in
 }
 ```
 
-**Pros:**
+**When to introduce:** When a new feature needs simple noise exposed in the Inspector (e.g. ore distribution frequency, decoration density). If all future simple noise cases remain code-internal, the factory methods alone suffice and this struct is unnecessary.
+
+**Trade-offs:**
 
 - Inspector-friendly — designers see 3 fields instead of 16
 - Serializable — can live on ScriptableObjects alongside existing `FastNoiseConfig` fields
-- Clear intent — seeing `FastNoiseConfigLite` signals "this is simple noise, don't over-engineer it"
-
-**Cons:**
-
-- New type to maintain — must stay compatible with `FastNoiseLite` as the library evolves
 - Risk of scope creep — fields get added "just this once" until it becomes a second `FastNoiseConfig`
 
-#### Option C: Hybrid (Factory Methods + Lite Config)
+### Future Improvement: Remaining `noise.snoise` Migration
 
-Use factory methods (Option A) for code-only noise (job-internal use like radius modulation), and `FastNoiseConfigLite` (Option B) for designer-facing noise that needs Inspector exposure but not full config complexity.
+The following call sites still use `Unity.Mathematics.noise.snoise` instead of `FastNoiseLite`:
 
-### Migration Path
+| File                                            | Usage                     | Priority                                        |
+|-------------------------------------------------|---------------------------|-------------------------------------------------|
+| `StandardChunkGenerationJob.cs` (line ~234-235) | Biome boundary dithering  | Low — 2D noise, fixed frequency, no seed needed |
+| `BiomeBlender.cs` (line ~69)                    | Biome blend radius wiggle | Low — 2D noise, cosmetic, no seed needed        |
+| `WorldBlendingPreviewJob.cs` (line ~191)        | Editor preview wiggle     | Low — editor-only, mirrors `BiomeBlender`       |
 
-1. **Phase 1:** Add the static factory methods to `FastNoiseLite` (or a `FastNoiseLitePresets` utility class). Migrate the `noise.snoise` call in `StandardWormCarverJob` to use `FastNoiseLite.CreateSimple()` — created once per worm group in `SimulateWormStack`, not per step.
-2. **Phase 2:** Evaluate whether `FastNoiseConfigLite` adds value for any existing or upcoming designer-facing noise fields. If yes, introduce it; if all simple cases are code-internal, factory methods alone suffice.
-3. **Phase 3:** Audit all `noise.snoise` / `noise.cnoise` usage in the codebase (if any beyond the radius noise) and migrate to the unified `FastNoiseLite` API.
+These are all 2D `noise.snoise(float2)` calls with hardcoded offsets acting as ad-hoc seeds. Migration would replace them with `FastNoiseLite.CreateSimple()` for seed consistency, but the visual impact is negligible — they produce small cosmetic perturbations. Migrate opportunistically when touching these files, rather than as a dedicated effort.
 
 ### Impact on Existing Code
 
 - The full `FastNoiseConfig` remains unchanged — complex noise layers (terrain, caves, biome selection) continue to use it.
 - `FastNoiseFactory.CreateNoiseFromConfig(FastNoiseConfig, int)` remains the standard path for full configs.
-- The new API is additive — no breaking changes to existing code.
+- The factory methods are additive — no breaking changes to existing code.
 
 ---

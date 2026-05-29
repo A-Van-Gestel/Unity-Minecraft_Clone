@@ -53,6 +53,7 @@ namespace Jobs
         public NativeBitArray OutputWormMask;
 
         private const int TRUNK_SEED_SALT = 0x5472756E; // "Trun" as int — decorrelates trunk RNG from local worm RNG
+        private const int RADIUS_NOISE_SEED_SALT = 0x52614E6F; // "RaNo" as int — decorrelates radius noise from other noise sources
 
         private struct WormState
         {
@@ -295,6 +296,10 @@ namespace Jobs
             float safeSquash = math.max(p.SquashFactor, 0.01f);
             float invSquash = 1f / safeSquash;
 
+            FastNoiseLite radiusNoise = p.RadiusNoiseStrength > 0f
+                ? FastNoiseLite.CreateSimple(BaseSeed + RADIUS_NOISE_SEED_SALT, p.RadiusNoiseFrequency)
+                : default;
+
             while (wormStack.Length > 0)
             {
                 int lastIdx = wormStack.Length - 1;
@@ -313,9 +318,8 @@ namespace Jobs
                     // Modulate radius along the worm's length
                     float t = math.saturate((float)step / totalLength);
                     float wave = math.sin(t * math.PI * p.RadiusWaveCount) * 0.5f + 0.5f;
-                    // TODO: Consider migrating from noise.snoise to FastNoiseLite for consistency with all other noise in the project.
                     float radiusFactor = p.RadiusNoiseStrength > 0f
-                        ? math.lerp(wave, math.saturate(noise.snoise(pos * p.RadiusNoiseFrequency) * 0.5f + 0.5f), p.RadiusNoiseStrength)
+                        ? math.lerp(wave, math.saturate(radiusNoise.GetNoise(pos.x, pos.y, pos.z) * 0.5f + 0.5f), p.RadiusNoiseStrength)
                         : wave;
                     float radius = math.lerp(p.RadiusMin, p.RadiusMax, radiusFactor);
 

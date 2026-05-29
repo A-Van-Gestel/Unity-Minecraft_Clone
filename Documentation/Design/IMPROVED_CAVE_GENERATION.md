@@ -207,10 +207,10 @@ public int wormRadiusWaveCount = 3;
 
 The existing `wormBaseRadius` field would be deprecated in favor of `wormRadiusMin` / `wormRadiusMax` (with a migration that maps `baseRadius` to both min and max for backwards compatibility).
 
-**Noise-modulated radius (Implemented):** A hybrid blend mode replaces or augments the sine wave with 3D simplex noise (`Unity.Mathematics.noise.snoise(float3)`) sampled at the worm's world position. Two new fields control this: `wormRadiusNoiseStrength` (0 = pure sine wave, 1 = pure noise) and `wormRadiusNoiseFrequency` (spatial frequency of the noise). The blend formula is:
+**Noise-modulated radius (Implemented):** A hybrid blend mode replaces or augments the sine wave with 3D OpenSimplex2 noise (`FastNoiseLite.CreateSimple()`) sampled at the worm's world position. Two new fields control this: `wormRadiusNoiseStrength` (0 = pure sine wave, 1 = pure noise) and `wormRadiusNoiseFrequency` (spatial frequency of the noise). The blend formula is:
 
 ```
-radiusFactor = lerp(sineWave, saturate(snoise(pos * frequency) * 0.5 + 0.5), strength)
+radiusFactor = lerp(sineWave, saturate(radiusNoise.GetNoise(pos) * 0.5 + 0.5), strength)
 radius = lerp(radiusMin, radiusMax, radiusFactor)
 ```
 
