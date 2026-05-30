@@ -457,12 +457,26 @@ namespace Data.WorldTypes
         [Tooltip("Probability of performing a seek check when the interval fires.")]
         public float seekChance;
 
+        [Header("Worm Mask Seeking")]
+        [Range(0f, 1f)]
+        [Tooltip("Probability of steering toward already-carved worm tunnels " +
+                 "when a mask-seek check fires. 0 = disabled. " +
+                 "Only effective within the current chunk's worm mask.")]
+        public float maskSeekChance;
+
+        [Range(0, 100)]
+        [Tooltip("Minimum steps before mask seeking activates. Prevents worms " +
+                 "from immediately latching onto nearby tunnels at spawn.")]
+        public int maskSeekMinSteps;
+
         /// <summary>Default values matching the original separate field defaults.</summary>
         public static WormNoiseSeeking Default => new WormNoiseSeeking
         {
             checkInterval = 10,
             seekDistance = 10f,
             seekChance = 0.5f,
+            maskSeekChance = 0f,
+            maskSeekMinSteps = 30,
         };
     }
 

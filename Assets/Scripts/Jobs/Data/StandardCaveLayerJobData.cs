@@ -69,6 +69,8 @@ namespace Jobs.Data
         public readonly int WormSeekInterval;
         public readonly float WormSeekDistance;
         public readonly float WormSeekChance;
+        public readonly float WormMaskSeekChance;
+        public readonly int WormMaskSeekMinSteps;
 
         /// <summary>Whether domain warping is enabled for this cave layer. Only used by Cheese and Noodle modes.</summary>
         [MarshalAs(UnmanagedType.U1)]
@@ -108,6 +110,8 @@ namespace Jobs.Data
             WormSeekInterval = layerConfig.wormNoiseSeeking.checkInterval;
             WormSeekDistance = layerConfig.wormNoiseSeeking.seekDistance;
             WormSeekChance = layerConfig.wormNoiseSeeking.seekChance;
+            WormMaskSeekChance = layerConfig.wormNoiseSeeking.maskSeekChance;
+            WormMaskSeekMinSteps = layerConfig.wormNoiseSeeking.maskSeekMinSteps;
 
             EnableWarp = layerConfig.enableWarp;
         }
@@ -148,6 +152,8 @@ namespace Jobs.Data
         public readonly int SeekInterval;
         public readonly float SeekDistance;
         public readonly float SeekChance;
+        public readonly float MaskSeekChance;
+        public readonly int MaskSeekMinSteps;
 
         public TrunkWormConfigJobData(TrunkWormConfig config)
         {
@@ -182,6 +188,8 @@ namespace Jobs.Data
             SeekInterval = config.noiseSeeking.checkInterval;
             SeekDistance = config.noiseSeeking.seekDistance;
             SeekChance = config.noiseSeeking.seekChance;
+            MaskSeekChance = config.noiseSeeking.maskSeekChance;
+            MaskSeekMinSteps = config.noiseSeeking.maskSeekMinSteps;
         }
     }
 }

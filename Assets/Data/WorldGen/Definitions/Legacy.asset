@@ -47,3 +47,5 @@ MonoBehaviour:
       checkInterval: 10
       seekDistance: 10
       seekChance: 0.5
+      maskSeekChance: 0
+      maskSeekMinSteps: 30

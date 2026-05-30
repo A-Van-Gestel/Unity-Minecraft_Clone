@@ -347,7 +347,7 @@ Local worms don't need cross-biome coordination because they're short. A local w
 Trunk worms and local worms carve independently into the same worm mask. Their interaction is emergent:
 
 - **Indirect connections via shared noise targets:** Noise seeking steers worms toward high-value regions in noise-based cave layers (e.g., cheese chambers), not toward already-carved worm tunnels. When both a trunk and a local worm seek toward the same cheese chamber, they naturally converge on the same location, creating junction points without explicit coordination. The quality of these connections depends on cheese layer density and seek flag configuration (Section 3.4.4).
-- **Direct worm-to-worm seeking (future):** Section 3.5.3 explores allowing worms to optionally seek toward the worm mask itself, which would create more reliable connections between trunks and locals. This is deferred pending feasibility analysis.
+- **Direct worm-to-worm mask seeking (Implemented):** Worms can optionally seek toward the worm mask itself within the current chunk, creating more reliable connections between trunks and locals. See Section 3.5.3 for implementation details. Limited to same-chunk reads — cross-chunk mask connections still rely on indirect noise seeking.
 - **Redundant carving is acceptable:** When a local worm overlaps a trunk, the air volume doubles in the overlap zone. At the block level this is invisible (air is air). The only effect is slightly wider passages at junction points, which actually reads as a natural "intersection" or "chamber" where tunnels meet.
 - **Exploration flow:** The player discovers a local cave (biome-specific), follows it, and it connects to a trunk (via a shared cheese chamber or coincidental path overlap). The trunk leads them across biome boundaries into new territory, where they discover different local caves. This creates a natural exploration loop: local → trunk → local (new biome).
 
@@ -410,11 +410,11 @@ The key difference: trunk worms look up the biome at each look-ahead position (c
 
 **Recommended defaults:**
 
-| Layer type   | `isSeekableByTrunkWorms` | `isSeekableByLocalWorms` | Rationale                                                                                                                                                                                                            |
-|--------------|--------------------------|--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Cheese       | `true`                   | `true`                   | Chambers are natural destinations for all worms                                                                                                                                                                      |
-| Noodle       | `false`                  | `false`                  | Too thin and uniform to be meaningful seek targets                                                                                                                                                                   |
-| Worm (local) | N/A                      | N/A                      | Worm layers don't produce a noise field — seeking evaluates noise, not the worm mask. These flags should be hidden in the Biome Editor for Worm-type layers. See Section 3.5.3 for future worm-to-worm mask seeking. |
+| Layer type   | `isSeekableByTrunkWorms` | `isSeekableByLocalWorms` | Rationale                                                                                                                                                                                                                       |
+|--------------|--------------------------|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Cheese       | `true`                   | `true`                   | Chambers are natural destinations for all worms                                                                                                                                                                                 |
+| Noodle       | `false`                  | `false`                  | Too thin and uniform to be meaningful seek targets                                                                                                                                                                              |
+| Worm (local) | N/A                      | N/A                      | Worm layers don't produce a noise field — seeking evaluates noise, not the worm mask. These flags should be hidden in the Biome Editor for Worm-type layers. Worm-to-worm connections use mask seeking instead (Section 3.5.3). |
 
 #### 3.4.5 Implementation Considerations
 
@@ -501,18 +501,34 @@ for (int s = 0; s < biome.CaveLayerCount; s++)
 
 This is a **narrowing** of the current behavior: today all non-worm layers are sought, after the rework only explicitly flagged layers are sought. The migration is: set `isSeekableByLocalWorms = true` on all existing Cheese layers (matching current behavior for the dominant seek target) and `false` on Noodle layers (which were always seekable before but produced poor seek signals due to their thin, uniform zero-crossings).
 
-#### 3.5.3 Worm-to-Worm Seeking (Future Investigation)
+#### 3.5.3 Worm-to-Worm Mask Seeking (Implemented)
 
-**Idea:** Allow worms to optionally seek toward already-carved worm tunnels (the worm mask) in addition to noise-based cave layers. After a worm has carved for a minimum number of steps (e.g., 30+), it could sample the worm mask at look-ahead positions and steer toward existing tunnels. This would create natural junction points between independent worm systems, increasing network connectivity and exploration value — local worms would organically connect to trunk tunnels, and trunk worms could merge with other trunks.
+**Purpose:** Allow worms to optionally seek toward already-carved worm tunnels (the worm mask) in addition to noise-based cave layers. After a worm has carved for a minimum number of steps, it samples the worm mask at look-ahead positions and steers toward existing tunnels. This creates natural junction points between independent worm systems — local worms organically connect to trunk tunnels, and trunk worms can merge with other trunks.
 
-**Open questions requiring analysis before implementation:**
+**Scope: same-chunk only.** The worm mask is a per-chunk `NativeBitArray` — the job receives only the current chunk's mask. Cross-chunk mask reads would require passing neighbor masks (scheduling dependency complexity) or a multi-pass architecture, both disproportionate to the gain. Same-chunk seeking is sufficient because:
 
-- **Performance:** The worm mask is a `NativeBitArray` indexed by flattened voxel position. Sampling it at a look-ahead position requires converting world coordinates to local chunk coordinates and checking the correct bit. This is cheap per-query, but the look-ahead position may fall outside the current chunk's worm mask. Cross-chunk mask reads would require either expanding the mask data passed to the job or accepting that out-of-chunk seeks can't detect worms.
-- **Order dependence:** Worms within the same chunk are carved sequentially (stack-based DFS), so a later worm can see an earlier worm's mask. But worms in *different* chunks are carved by independent job invocations. A worm in chunk A cannot see chunk B's worm mask unless we add a multi-pass approach or expand the mask data.
-- **Interaction with trunk worms:** Should trunk worms seek other trunk worms? This could create mega-networks. Should local worms seek trunks? This is the most valuable case (natural side-passage connections) but requires the trunk mask to be available during local worm evaluation.
-- **Config:** Add `wormMaskSeekChance` (0-1) and `wormMaskSeekMinSteps` (int) to `WormNoiseSeeking`. The Biome Editor tool should hide these options for non-worm layers.
+1. Trunk worms are evaluated first (world-level scatter grid), then local worms (per-biome layers). By the time a local worm runs, any trunk that passed through this chunk has already written to the mask.
+2. Multiple local worms from different origin chunks can also see each other's carvings (earlier scatter loop entries write before later ones read).
+3. Cross-chunk connections continue to rely on indirect noise seeking toward shared cheese chambers (Section 3.4.3).
 
-**Verdict:** High exploration value, moderate implementation complexity. Defer to Phase 5 (optional enhancements) pending a prototype that measures cross-chunk mask availability and performance cost.
+**Implemented as:** Two fields on the `WormNoiseSeeking` struct: `maskSeekChance` (0-1, default 0 = disabled) and `maskSeekMinSteps` (0-100, default 30). `OutputWormMask` on `StandardWormCarverJob` changed from `[WriteOnly]` to read-write (safe because `IJob` is single-threaded). A helper method `IsWormMaskSetAtWorld(float3)` converts world positions to local chunk coordinates and returns `false` for out-of-chunk positions.
+
+**How it works at runtime:**
+
+1. Mask seeking fires on the same `SeekInterval` as noise seeking (typically every 10 steps), but with its own independent `maskSeekChance` roll. It only activates after `maskSeekMinSteps` have elapsed (prevents freshly spawned worms from immediately latching onto nearby tunnels).
+2. The algorithm probes 6 random directions within a ±90° yaw / ±54° pitch cone around the current heading. Each probe samples at 3 evenly spaced distances along the ray (up to `seekDistance`).
+3. Among all probes that hit a set mask bit, the direction most aligned with the worm's current heading is selected (dot product preference). This produces natural Y-junction merges rather than sharp U-turns.
+4. On a successful mask seek, the worm locks onto the target direction and extends its remaining length if needed to reach the target (same extension logic as noise seeking).
+5. Mask seeking is suppressed during traversal fade (dying worms should not chase new targets).
+
+**Performance:** 6 probes × 3 distance samples = 18 `NativeBitArray.IsSet` calls per check (bounds check + bit read). At `SeekInterval = 10` and `maskSeekChance = 0.4`, a typical 80-step local worm fires ~3 mask seek checks. Total cost per chunk with 1-3 local worms: ~10-15 mask seek checks — negligible compared to noise evaluation.
+
+**Recommended defaults:**
+
+- Local worms: `maskSeekChance = 0.4`, `maskSeekMinSteps = 30` — moderate chance to connect to trunks after establishing identity.
+- Trunk worms: `maskSeekChance = 0.1`, `maskSeekMinSteps = 50` — low chance; trunks should follow their own path and only occasionally merge.
+
+**Validation:** `BiomeConfigValidator` warns when `maskSeekMinSteps < 15` (immediate latching), when `maskSeekChance > 0` but `checkInterval == 0` (seeking cannot fire), and when `maskSeekChance > 0.8` (aggressive clustering).
 
 ### 3.6 Biome Editor UI Changes
 
@@ -536,7 +552,7 @@ The `WorldGenPreviewWindow.BiomeEditor.cs` "Caves & Lodes" sub-tab (`DrawBeCaves
     - A custom `PropertyDrawer` for `StandardCaveLayer` that checks `mode` before drawing seekability fields, or
     - Custom drawing logic in `DrawBeCavesLodesSubTab()` that replaces the default `PropertyField` for the `caveLayers` array with per-element conditional rendering.
     - Recommendation: custom `PropertyDrawer` is cleaner and works in both the BiomeEditor and the raw Inspector.
-- If worm-to-worm mask seeking (Section 3.5.3) is implemented later, the `wormMaskSeekChance` and `wormMaskSeekMinSteps` fields should only be visible for WormCarver-type layers (inverse of the seekability flag visibility).
+- The `maskSeekChance` and `maskSeekMinSteps` fields (Section 3.5.3) render automatically via the `WormNoiseSeeking` struct foldout in the array drawer. They are only meaningful for WormCarver-type layers; a custom `PropertyDrawer` should hide them for non-worm layers (inverse of the seekability flag visibility).
 
 ---
 
@@ -738,7 +754,7 @@ Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 —
 - **Spaghetti revival** --- if the 2D repetition problem can be solved (3D noise pairs, per-axis domain warp), Spaghetti could return as an alternative connectivity generator.
 - **CaveDensityAnalyzer fix** for non-WorldType biomes and trunk worm support (see Section 4.3 known limitations).
 - ~~**Trunk traversal blocking** --- `trunkTraversalAllowed` flag per biome to terminate trunks entering biomes where underground caves make no sense (e.g., ocean).~~ (Implemented --- see Section 3.4.6)
-- **Worm-to-worm mask seeking** --- Allow worms to seek toward already-carved worm tunnels for more reliable trunk-local connections. See Section 3.5.3 for full analysis.
+- ~~**Worm-to-worm mask seeking** --- Allow worms to seek toward already-carved worm tunnels for more reliable trunk-local connections.~~ (Implemented --- see Section 3.5.3)
 
 ---
 
@@ -752,8 +768,8 @@ Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 —
 
 4. **Cross-biome cave transitions.** Addressed by the Trunk + Local architecture (Section 3.4). Trunk worms use stable world-level config as they cross biomes. `trunkVerticalBiasOverride` is applied per-step as the worm crosses biome boundaries, providing natural vertical behavior transitions without explicit blending (see Section 3.4.2). Local worms are short enough that cross-biome bleed is minor. Remaining question: does per-step biome lookup for the override add meaningful cost to the trunk worm job? Profile during Phase 3 implementation.
 
-5. **Worm-to-worm interaction.** Partially addressed by the Trunk + Local architecture (Section 3.4). The two-tier separation reduces the coordination problem: trunk-to-trunk overlap is rare (sparse world-level spawn grid), and local-to-local overlap is acceptable (short worms, small overlap zones). Trunk-to-local connections happen indirectly when both worm tiers seek toward the same cheese chambers (Section 3.4.3), not by detecting each other's carved tunnels. For more reliable connections, worm-to-worm mask seeking is proposed as a future
-   enhancement (Section 3.5.3). Monitor merge amplification after Phase 4 biome reconfiguration. If trunk+local merging produces single supernetworks spanning >50 chunks, consider reducing trunk spawn chance or local noise-seeking distance.
+5. **Worm-to-worm interaction.** Addressed by the Trunk + Local architecture (Section 3.4) and same-chunk mask seeking (Section 3.5.3). The two-tier separation reduces the coordination problem: trunk-to-trunk overlap is rare (sparse world-level spawn grid), and local-to-local overlap is acceptable (short worms, small overlap zones). Trunk-to-local connections happen both indirectly (both worm tiers seek toward the same cheese chambers, Section 3.4.3) and directly (mask seeking steers local worms toward trunk carvings within the same chunk, Section
+   3.5.3). Cross-chunk connections remain indirect (noise seeking only). Monitor merge amplification after Phase 4 biome reconfiguration. If trunk+local merging produces single supernetworks spanning >50 chunks, consider reducing trunk spawn chance or local noise-seeking distance.
 
 6. **Fluid placement in worm tunnels.** Lava and water are placed based on Y-level thresholds in carved air. Worm carvers create long connected tunnels, so a single fluid source block can propagate much farther than in an isolated cheese pocket. A lava lake in a worm tunnel could flood hundreds of blocks along the tunnel's length. This may be desirable (dramatic lava rivers) or problematic (performance cost of fluid simulation over long distances, player frustration). Monitor fluid behavior in worm-heavy biomes after Phase 4 and consider whether fluid
    source placement should account for tunnel connectivity or length.

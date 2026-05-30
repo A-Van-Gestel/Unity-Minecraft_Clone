@@ -434,6 +434,8 @@ MonoBehaviour:
       checkInterval: 10
       seekDistance: 10
       seekChance: 0.5
+      maskSeekChance: 0
+      maskSeekMinSteps: 30
   - layerName: Deep Chambers
     previewColor: {r: 1, g: 0.72156864, b: 0, a: 1}
     mode: 0
@@ -505,6 +507,8 @@ MonoBehaviour:
       checkInterval: 10
       seekDistance: 10
       seekChance: 0.5
+      maskSeekChance: 0
+      maskSeekMinSteps: 30
   - layerName: Noodle Alpine Fissures
     previewColor: {r: 0.5, g: 0.5, b: 0.9, a: 1}
     mode: 3
@@ -576,3 +580,5 @@ MonoBehaviour:
       checkInterval: 10
       seekDistance: 10
       seekChance: 0.5
+      maskSeekChance: 0
+      maskSeekMinSteps: 30

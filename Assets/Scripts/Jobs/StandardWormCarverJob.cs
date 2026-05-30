@@ -49,7 +49,6 @@ namespace Jobs
         [ReadOnly]
         public TrunkWormConfigJobData TrunkConfig;
 
-        [WriteOnly]
         public NativeBitArray OutputWormMask;
 
         private const int TRUNK_SEED_SALT = 0x5472756E; // "Trun" as int — decorrelates trunk RNG from local worm RNG
@@ -84,6 +83,8 @@ namespace Jobs
             public int SeekInterval;
             public float SeekDistance;
             public float SeekChance;
+            public float MaskSeekChance;
+            public int MaskSeekMinSteps;
 
             [MarshalAs(UnmanagedType.U1)]
             public bool IsTrunk;
@@ -185,6 +186,8 @@ namespace Jobs
                                 SeekInterval = TrunkConfig.SeekInterval,
                                 SeekDistance = TrunkConfig.SeekDistance,
                                 SeekChance = TrunkConfig.SeekChance,
+                                MaskSeekChance = TrunkConfig.MaskSeekChance,
+                                MaskSeekMinSteps = TrunkConfig.MaskSeekMinSteps,
                                 IsTrunk = true,
                                 OriginBiomeIndex = biomeIndex,
                             };
@@ -255,6 +258,8 @@ namespace Jobs
                             SeekInterval = caveLayer.WormSeekInterval,
                             SeekDistance = caveLayer.WormSeekDistance,
                             SeekChance = caveLayer.WormSeekChance,
+                            MaskSeekChance = caveLayer.WormMaskSeekChance,
+                            MaskSeekMinSteps = caveLayer.WormMaskSeekMinSteps,
                             IsTrunk = false,
                             OriginBiomeIndex = biomeIndex,
                         };
@@ -298,6 +303,48 @@ namespace Jobs
             return CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
         }
 
+        private const int MASK_SEEK_PROBE_COUNT = 6;
+        private const int MASK_SEEK_DISTANCE_STEPS = 3;
+
+        private static float3 YawPitchToDirection(float yaw, float pitch)
+        {
+            return new float3(
+                math.cos(yaw) * math.cos(pitch),
+                math.sin(pitch),
+                math.sin(yaw) * math.cos(pitch));
+        }
+
+        private static void ExtendWormToReachSeekTarget(ref WormState worm, int step, float seekDistance,
+            float radiusMin, float radiusMax, ref int totalLength)
+        {
+            float avgRadius = (radiusMin + radiusMax) * 0.5f;
+            int neededSteps = (int)math.ceil(seekDistance / (avgRadius * 0.5f));
+            int remainingSteps = worm.LengthRemaining - step;
+            if (remainingSteps < neededSteps)
+            {
+                worm.LengthRemaining += neededSteps - remainingSteps;
+                totalLength = worm.LengthRemaining;
+            }
+        }
+
+        /// <summary>
+        /// Checks whether the worm mask has been set at the given world position.
+        /// Returns false for positions outside the current chunk.
+        /// </summary>
+        private bool IsWormMaskSetAtWorld(float3 worldPos)
+        {
+            int lx = (int)math.floor(worldPos.x) - ChunkPosition.x;
+            int ly = (int)math.floor(worldPos.y);
+            int lz = (int)math.floor(worldPos.z) - ChunkPosition.y;
+
+            if (lx < 0 || lx >= VoxelData.ChunkWidth ||
+                ly < 0 || ly >= VoxelData.ChunkHeight ||
+                lz < 0 || lz >= VoxelData.ChunkWidth)
+                return false;
+
+            return OutputWormMask.IsSet(ChunkMath.GetFlattenedIndexInChunk(lx, ly, lz));
+        }
+
         private const int BIOME_CACHE_INTERVAL = 16;
 
         private void SimulateWormStack(ref Random rand, NativeList<WormState> wormStack, WormParams p, float3 chunkMin, float3 chunkMax)
@@ -335,11 +382,7 @@ namespace Jobs
                     float radius = math.lerp(p.RadiusMin, p.RadiusMax, radiusFactor);
 
                     // Move position forward
-                    float3 forward = new float3(
-                        math.cos(yaw) * math.cos(pitch),
-                        math.sin(pitch),
-                        math.sin(yaw) * math.cos(pitch)
-                    );
+                    float3 forward = YawPitchToDirection(yaw, pitch);
 
                     // Advance position by half radius to ensure overlapping carving spheres
                     pos += forward * (radius * 0.5f);
@@ -411,17 +454,14 @@ namespace Jobs
                     }
 
                     // Seeking Phase (suppressed during traversal fade — dying worms should not chase new targets)
+                    bool seekSucceeded = false;
                     if (fadeRemaining == 0 && p.SeekInterval > 0 && step % p.SeekInterval == 0 && rand.NextFloat() < p.SeekChance)
                     {
                         // Generate a random "look" direction
                         float lookYaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
                         float lookPitch = pitch + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
 
-                        float3 seekForward = new float3(
-                            math.cos(lookYaw) * math.cos(lookPitch),
-                            math.sin(lookPitch),
-                            math.sin(lookYaw) * math.cos(lookPitch)
-                        );
+                        float3 seekForward = YawPitchToDirection(lookYaw, lookPitch);
                         float3 lookPos = pos + seekForward * p.SeekDistance;
 
                         // Trunk worms sample biome at look-ahead position (cross-biome aware);
@@ -454,16 +494,56 @@ namespace Jobs
                             // Lock onto the detected cave
                             yaw = lookYaw;
                             pitch = lookPitch;
+                            seekSucceeded = true;
+                            ExtendWormToReachSeekTarget(ref worm, step, p.SeekDistance, p.RadiusMin, p.RadiusMax, ref totalLength);
+                        }
+                    }
 
-                            // Ensure we live long enough to reach it (use average radius for stable step estimate)
-                            float avgRadius = (p.RadiusMin + p.RadiusMax) * 0.5f;
-                            int neededSteps = (int)math.ceil(p.SeekDistance / (avgRadius * 0.5f));
-                            int remainingSteps = worm.LengthRemaining - step;
-                            if (remainingSteps < neededSteps)
+                    // Worm Mask Seeking — steer toward already-carved worm tunnels in this chunk
+                    // Skipped when noise seeking already found a target on this step
+                    if (!seekSucceeded &&
+                        fadeRemaining == 0 &&
+                        p.MaskSeekChance > 0f &&
+                        step >= p.MaskSeekMinSteps &&
+                        p.SeekInterval > 0 &&
+                        step % p.SeekInterval == 0 &&
+                        rand.NextFloat() < p.MaskSeekChance)
+                    {
+                        float bestDot = -1f;
+                        float3 bestDir = default;
+                        bool foundMask = false;
+
+                        float3 curDir = YawPitchToDirection(yaw, pitch);
+
+                        for (int probe = 0; probe < MASK_SEEK_PROBE_COUNT; probe++)
+                        {
+                            float probeYaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
+                            float probePitch = pitch + rand.NextFloat(-math.PI * 0.3f, math.PI * 0.3f);
+                            float3 probeDir = YawPitchToDirection(probeYaw, probePitch);
+
+                            for (int di = 1; di <= MASK_SEEK_DISTANCE_STEPS; di++)
                             {
-                                worm.LengthRemaining += (neededSteps - remainingSteps);
-                                totalLength = worm.LengthRemaining;
+                                float d = p.SeekDistance * di / MASK_SEEK_DISTANCE_STEPS;
+                                if (IsWormMaskSetAtWorld(pos + probeDir * d))
+                                {
+                                    float dot = math.dot(curDir, probeDir);
+                                    if (dot > bestDot)
+                                    {
+                                        bestDot = dot;
+                                        bestDir = probeDir;
+                                        foundMask = true;
+                                    }
+
+                                    break;
+                                }
                             }
+                        }
+
+                        if (foundMask)
+                        {
+                            yaw = math.atan2(bestDir.z, bestDir.x);
+                            pitch = math.asin(math.clamp(bestDir.y, -1f, 1f));
+                            ExtendWormToReachSeekTarget(ref worm, step, p.SeekDistance, p.RadiusMin, p.RadiusMax, ref totalLength);
                         }
                     }
 

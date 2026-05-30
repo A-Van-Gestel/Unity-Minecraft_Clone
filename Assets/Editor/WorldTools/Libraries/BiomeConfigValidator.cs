@@ -62,6 +62,7 @@ namespace Editor.WorldTools.Libraries
             ValidateWormRadiusNoise(biome, results);
             ValidateWormYAttraction(biome, results);
             ValidateTrunkTraversal(biome, results);
+            ValidateWormMaskSeeking(biome, results);
 
             return results;
         }
@@ -495,6 +496,10 @@ namespace Editor.WorldTools.Libraries
             ValidateTrunkShapeRanges(config, results);
             ValidateTrunkBranchingRanges(config, results);
 
+            if (config.noiseSeeking.maskSeekChance > 0f)
+                ValidateMaskSeekParams(config.noiseSeeking.maskSeekChance, config.noiseSeeking.maskSeekMinSteps,
+                    config.noiseSeeking.checkInterval, "Trunk Worm", SUB_TAB_CAVES, results);
+
             return results;
         }
 
@@ -696,6 +701,66 @@ namespace Editor.WorldTools.Libraries
                     SubTabIndex = SUB_TAB_CAVES,
                     Message = "Trunk traversal is blocked but local worm layers are configured. " +
                               "Local (per-biome) worms are unaffected by trunk traversal blocking.",
+                });
+            }
+        }
+
+        /// <summary>
+        /// Checks for Worm Carver layers with mask-seeking misconfiguration.
+        /// </summary>
+        private static void ValidateWormMaskSeeking(StandardBiomeAttributes biome, List<BiomeValidationResult> results)
+        {
+            if (biome.caveLayers == null) return;
+
+            for (int i = 0; i < biome.caveLayers.Length; i++)
+            {
+                StandardCaveLayer cave = biome.caveLayers[i];
+                if (cave.mode != CaveMode.WormCarver) continue;
+                if (cave.wormNoiseSeeking.maskSeekChance <= 0f) continue;
+
+                string name = string.IsNullOrEmpty(cave.layerName) ? $"Cave Layer {i}" : cave.layerName;
+
+                ValidateMaskSeekParams(cave.wormNoiseSeeking.maskSeekChance, cave.wormNoiseSeeking.maskSeekMinSteps,
+                    cave.wormNoiseSeeking.checkInterval, name, SUB_TAB_CAVES, results);
+            }
+        }
+
+        /// <summary>
+        /// Shared validation for worm mask-seeking parameters, used by both per-biome and trunk worm validators.
+        /// </summary>
+        private static void ValidateMaskSeekParams(float maskSeekChance, int maskSeekMinSteps, int seekInterval,
+            string name, int subTabIndex, List<BiomeValidationResult> results)
+        {
+            if (maskSeekMinSteps < 15)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = subTabIndex,
+                    Message = $"\"{name}\": mask seek min steps ({maskSeekMinSteps}) is below 15 — " +
+                              "worms may latch onto nearby tunnels immediately after spawning instead of exploring.",
+                });
+            }
+
+            if (seekInterval <= 0)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = subTabIndex,
+                    Message = $"\"{name}\": mask seeking is enabled (chance {maskSeekChance:F2}) but seek interval is 0 — " +
+                              "mask seeking requires a non-zero check interval to fire.",
+                });
+            }
+
+            if (maskSeekChance > 0.8f)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Info,
+                    SubTabIndex = subTabIndex,
+                    Message = $"\"{name}\": mask seek chance ({maskSeekChance:F2}) is very high — " +
+                              "worms will aggressively cluster toward existing tunnels rather than exploring new areas.",
                 });
             }
         }
