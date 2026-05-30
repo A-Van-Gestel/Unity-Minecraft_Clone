@@ -358,9 +358,12 @@ MonoBehaviour:
     normalizeToZeroOne: 0
   caveZoneAttenuation: 0.38
   minCavePocketSize: 12
-  trunkSpawnSuppression: 0.5
-  trunkVerticalBiasOverride: -1
-  trunkYAttractionCenterOverride: -1
+  trunkWormModifiers:
+    spawnSuppression: 0.5
+    verticalBiasOverride: -1
+    yAttractionCenterOverride: -1
+    traversalAllowed: 1
+    traversalFadeSteps: 0
   caveLayers:
   - layerName: Local Sandstone Tunnels
     previewColor: {r: 0.9, g: 0.7, b: 0.3, a: 1}

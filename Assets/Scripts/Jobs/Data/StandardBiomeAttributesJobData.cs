@@ -95,6 +95,13 @@ namespace Jobs.Data
         /// <summary>Per-biome override of the trunk Y attraction band center. -1 = disabled (use global trunk config).</summary>
         public float TrunkYAttractionCenterOverride;
 
+        /// <summary>When false, trunk worms entering this biome are terminated (with optional fade-out).</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool TrunkTraversalAllowed;
+
+        /// <summary>Steps over which a blocked trunk worm tapers its radius to zero. 0 = hard cut.</summary>
+        public int TrunkTraversalFadeSteps;
+
         /// <summary>RGB color for editor previews and in-game terrain debug overlay.</summary>
         public float3 DebugPreviewColor;
     }

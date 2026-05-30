@@ -384,9 +384,12 @@ MonoBehaviour:
     normalizeToZeroOne: 0
   caveZoneAttenuation: 0.24
   minCavePocketSize: 12
-  trunkSpawnSuppression: 0
-  trunkVerticalBiasOverride: -1
-  trunkYAttractionCenterOverride: -1
+  trunkWormModifiers:
+    spawnSuppression: 0
+    verticalBiasOverride: -1
+    yAttractionCenterOverride: -1
+    traversalAllowed: 1
+    traversalFadeSteps: 0
   caveLayers:
   - layerName: Local Worm Tunnels
     previewColor: {r: 0.2, g: 0.8, b: 0.3, a: 1}

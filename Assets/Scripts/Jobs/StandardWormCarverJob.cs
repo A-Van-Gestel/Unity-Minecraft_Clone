@@ -320,6 +320,8 @@ namespace Jobs
                 float yaw = worm.Yaw;
                 float pitch = worm.Pitch;
                 int cachedStepBiomeIdx = p.OriginBiomeIndex;
+                int fadeRemaining = 0;
+                int fadeTotal = 0;
 
                 // Raymarch the worm
                 for (int step = 0; step < worm.LengthRemaining; step++)
@@ -349,13 +351,30 @@ namespace Jobs
 
                     // Horizontal bias (trunk worms may have per-biome override)
                     float effectiveBias = p.HorizontalBias;
-                    if (p.IsTrunk)
+                    if (p.IsTrunk && fadeRemaining == 0)
                     {
                         if (step % BIOME_CACHE_INTERVAL == 0)
+                        {
                             cachedStepBiomeIdx = GetBiomeIndex(pos.x, pos.z);
-                        float biomeOverride = Biomes[cachedStepBiomeIdx].TrunkVerticalBiasOverride;
-                        if (biomeOverride >= 0f)
-                            effectiveBias = biomeOverride;
+
+                            // Traversal blocking — trigger fade or hard termination
+                            if (!Biomes[cachedStepBiomeIdx].TrunkTraversalAllowed)
+                            {
+                                int fadeSteps = Biomes[cachedStepBiomeIdx].TrunkTraversalFadeSteps;
+                                if (fadeSteps <= 0)
+                                    break;
+                                fadeRemaining = fadeSteps;
+                                fadeTotal = fadeSteps;
+                            }
+                        }
+
+                        // Re-check: traversal detection above may have armed the fade
+                        if (fadeRemaining == 0)
+                        {
+                            float biomeOverride = Biomes[cachedStepBiomeIdx].TrunkVerticalBiasOverride;
+                            if (biomeOverride >= 0f)
+                                effectiveBias = biomeOverride;
+                        }
                     }
 
                     pitch = math.lerp(pitch, 0f, effectiveBias * 0.1f);
@@ -366,7 +385,7 @@ namespace Jobs
                         float yAttrMin = p.YAttractionMin;
                         float yAttrMax = p.YAttractionMax;
 
-                        if (p.IsTrunk)
+                        if (p.IsTrunk && fadeRemaining == 0)
                         {
                             float centerOverride = Biomes[cachedStepBiomeIdx].TrunkYAttractionCenterOverride;
                             if (centerOverride >= 0f)
@@ -391,8 +410,8 @@ namespace Jobs
                         }
                     }
 
-                    // Seeking Phase
-                    if (p.SeekInterval > 0 && step % p.SeekInterval == 0 && rand.NextFloat() < p.SeekChance)
+                    // Seeking Phase (suppressed during traversal fade — dying worms should not chase new targets)
+                    if (fadeRemaining == 0 && p.SeekInterval > 0 && step % p.SeekInterval == 0 && rand.NextFloat() < p.SeekChance)
                     {
                         // Generate a random "look" direction
                         float lookYaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
@@ -448,8 +467,8 @@ namespace Jobs
                         }
                     }
 
-                    // Branching Phase
-                    if (p.BranchChance > 0f && rand.NextFloat() < p.BranchChance && worm.BranchDepth < p.MaxBranchDepth)
+                    // Branching Phase (suppressed during traversal fade — prevents orphan tunnels in blocked biomes)
+                    if (fadeRemaining == 0 && p.BranchChance > 0f && rand.NextFloat() < p.BranchChance && worm.BranchDepth < p.MaxBranchDepth)
                     {
                         int branchMin = p.MinLength / 2;
                         int branchMax = math.max(branchMin + 1, p.MaxLength / 2);
@@ -463,8 +482,19 @@ namespace Jobs
                         });
                     }
 
+                    // Traversal fade — linearly taper radius from full to 1/fadeTotal over the fade duration
+                    if (fadeRemaining > 0)
+                    {
+                        radius *= (float)fadeRemaining / fadeTotal;
+                        fadeRemaining--;
+                    }
+
                     // Carving Phase
                     CarveBlocksInChunk(pos, radius, safeSquash, invSquash, chunkMin, chunkMax);
+
+                    // Terminate after the final fade carve (radius was 1/fadeTotal on this step)
+                    if (fadeTotal > 0 && fadeRemaining <= 0)
+                        break;
                 }
             }
         }

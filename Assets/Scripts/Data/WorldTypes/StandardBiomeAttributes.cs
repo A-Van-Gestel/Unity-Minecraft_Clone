@@ -147,23 +147,9 @@ namespace Data.WorldTypes
         public int minCavePocketSize;
 
         [Header("Trunk Worm Modifiers")]
-        [Range(0f, 1f)]
-        [Tooltip("Reduces the chance of a trunk worm originating in this biome. " +
-                 "0 = trunk spawns allowed normally. 1 = no trunk spawns originate here. " +
-                 "Trunks from neighboring biomes can still pass through regardless of this value.")]
-        public float trunkSpawnSuppression;
-
-        [Tooltip("Per-step override of the trunk worm's horizontal bias while it passes through this biome. " +
-                 "-1 = disabled (use the world-level trunk config value). " +
-                 "0-1 = override value (e.g., Mountain 0.3 makes trunks dip vertically through mountain rock).")]
-        [Range(-1f, 1f)]
-        public float trunkVerticalBiasOverride = -1f;
-
-        [Tooltip("Per-biome override of the trunk worm's Y attraction band center. " +
-                 "-1 = disabled (use the world-level trunk config band). " +
-                 "Shifts the band center while preserving the global band width. " +
-                 "E.g., Mountain sets 20 to attract trunks deeper; Desert sets 40 for shallower highways.")]
-        public float trunkYAttractionCenterOverride = -1f;
+        [Tooltip("Biome-local overrides for world-level trunk worms. Controls spawn suppression, " +
+                 "per-step parameter overrides, and traversal blocking.")]
+        public TrunkWormModifiers trunkWormModifiers = TrunkWormModifiers.Default;
 
         [Tooltip("Layered noise configurations for generating 3D caves (e.g., cheese and spaghetti networks).")]
         public StandardCaveLayer[] caveLayers;
@@ -402,6 +388,54 @@ namespace Data.WorldTypes
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
         [Tooltip("Noise seeking configuration controlling how worms detect and steer toward nearby cave features.")]
         public WormNoiseSeeking wormNoiseSeeking = WormNoiseSeeking.Default;
+    }
+
+    /// <summary>
+    /// Groups the per-biome trunk worm modifier fields.
+    /// These override or gate world-level trunk worm behavior within a specific biome.
+    /// </summary>
+    [Serializable]
+    public struct TrunkWormModifiers
+    {
+        [Range(0f, 1f)]
+        [Tooltip("Reduces the chance of a trunk worm originating in this biome. " +
+                 "0 = trunk spawns allowed normally. 1 = no trunk spawns originate here. " +
+                 "Trunks from neighboring biomes can still pass through regardless of this value.")]
+        public float spawnSuppression;
+
+        [Tooltip("Per-step override of the trunk worm's horizontal bias while it passes through this biome. " +
+                 "-1 = disabled (use the world-level trunk config value). " +
+                 "0-1 = override value (e.g., Mountain 0.3 makes trunks dip vertically through mountain rock).")]
+        [Range(-1f, 1f)]
+        public float verticalBiasOverride;
+
+        [Tooltip("Per-biome override of the trunk worm's Y attraction band center. " +
+                 "-1 = disabled (use the world-level trunk config band). " +
+                 "Shifts the band center while preserving the global band width. " +
+                 "E.g., Mountain sets 20 to attract trunks deeper; Desert sets 40 for shallower highways.")]
+        public float yAttractionCenterOverride;
+
+        [Tooltip("When disabled, trunk worms that enter this biome are terminated. " +
+                 "Trunks from neighboring biomes will not carve through. " +
+                 "Does not affect local (per-biome) worms. " +
+                 "Use Traversal Fade Steps to control how gradually the tunnel narrows before termination.")]
+        public bool traversalAllowed;
+
+        [Range(0, 30)]
+        [Tooltip("Steps over which a blocked trunk worm tapers its radius to zero before terminating. " +
+                 "0 = hard cut (immediate termination). 8-12 = natural-looking tunnel narrowing. " +
+                 "Only used when Traversal Allowed is false.")]
+        public int traversalFadeSteps;
+
+        /// <summary>Default values: no suppression, no overrides, traversal allowed.</summary>
+        public static TrunkWormModifiers Default => new TrunkWormModifiers
+        {
+            spawnSuppression = 0f,
+            verticalBiasOverride = -1f,
+            yAttractionCenterOverride = -1f,
+            traversalAllowed = true,
+            traversalFadeSteps = 0,
+        };
     }
 
     /// <summary>

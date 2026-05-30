@@ -424,8 +424,29 @@ The key difference: trunk worms look up the biome at each look-ahead position (c
 
 **Job integration:** The `StandardWormCarverJob` already processes multiple worm layers per chunk. Trunk worms are simply an additional layer evaluated before the per-biome local layers. The trunk layer's config comes from the world-level data rather than the biome data, but the carving mechanics are identical.
 
-**Per-biome opt-out for global layers:** A biome can fully opt out of a global trunk layer by setting `trunkSpawnSuppression = 1.0`. This prevents trunks from *originating* in that biome but does not block trunks from *passing through* --- a trunk that spawned in a neighboring biome will still carve through the suppressed biome. To block traversal entirely (e.g., an ocean biome where underground caves make no sense), a separate `trunkTraversalAllowed` flag could be added, which would terminate any trunk worm that enters the biome. This is a Phase 5
-consideration.
+**Per-biome opt-out for global layers:** A biome can fully opt out of a global trunk layer by setting `trunkSpawnSuppression = 1.0`. This prevents trunks from *originating* in that biome but does not block trunks from *passing through* --- a trunk that spawned in a neighboring biome will still carve through the suppressed biome. To block traversal entirely (e.g., an ocean biome where underground caves make no sense), use the `trunkTraversalAllowed` flag (see Section 3.4.6).
+
+#### 3.4.6 Trunk Traversal Blocking (Implemented)
+
+**Problem:** `trunkSpawnSuppression` only prevents trunk *origins*. A trunk worm that spawned in a neighboring biome can still carve through a biome where underground caves make no sense (e.g., ocean, frozen tundra). There is no mechanism to stop a trunk worm mid-traversal.
+
+**Solution:** Two fields on `StandardBiomeAttributes`:
+
+- `trunkTraversalAllowed` (bool, default `true`): When `false`, any trunk worm entering this biome is terminated.
+- `trunkTraversalFadeSteps` (int 0-30, default 0): Controls how the termination looks. `0` = hard cut (worm stops immediately). `> 0` = the worm's radius linearly tapers from full to `1/fadeSteps` over this many steps before terminating, producing a natural tunnel narrowing into a near-closed dead end.
+
+**How it works at runtime:** The trunk worm's biome cache (updated every 16 steps) checks `TrunkTraversalAllowed`. When `false`:
+
+- If `fadeSteps <= 0`: immediate `break` from the stepping loop (hard termination).
+- If `fadeSteps > 0`: the worm enters fade mode. Each step scales the carving radius by `fadeRemaining / fadeTotal` then decrements the counter (so the first fade step carves at full radius, the last at `1/fadeTotal`). When the counter reaches zero, the worm terminates. During fade, noise seeking, branching, biome cache updates, and per-biome overrides (vertical bias, Y-attraction center) are all suppressed --- the worm follows its natural trajectory while narrowing.
+
+**Fade state** is tracked per-worm via local variables `fadeRemaining` and `fadeTotal` inside `SimulateWormStack`. `fadeTotal` is captured once at fade start (from the blocking biome's config). The biome cache is frozen during fade, preventing the worm from picking up a different biome's overrides as it crosses boundaries while dying.
+
+**Branch handling:** Branches already on the stack are processed independently. Each branch checks traversal on its own biome cache cycle --- if it starts inside a blocked biome, it terminates/fades on its own schedule. Branches are not spawned during fade (suppressed to prevent orphan tunnels).
+
+**16-step leakage:** Because the biome cache updates every 16 steps, a worm may carve up to 15 steps into a blocked biome before detection. At biome boundaries this produces a natural-looking tunnel tapering into the coastline.
+
+**Validation:** `BiomeConfigValidator` warns when traversal is blocked but `trunkSpawnSuppression < 1.0` (trunks may spawn and immediately terminate), when `trunkTraversalFadeSteps > 20` (long tapers extend deep into the blocked biome), and when `traversalFadeSteps > 0` with traversal allowed (dead configuration).
 
 ### 3.5 Noise Seeking Rework
 
@@ -716,7 +737,7 @@ Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 —
 - ~~**Worm Y-level attraction** (tendency to carve toward specific Y bands, e.g., diamond-level in Minecraft terms).~~ (Implemented --- see Section 3.1.4)
 - **Spaghetti revival** --- if the 2D repetition problem can be solved (3D noise pairs, per-axis domain warp), Spaghetti could return as an alternative connectivity generator.
 - **CaveDensityAnalyzer fix** for non-WorldType biomes and trunk worm support (see Section 4.3 known limitations).
-- **Trunk traversal blocking** --- `trunkTraversalAllowed` flag per biome to terminate trunks entering biomes where underground caves make no sense (e.g., ocean).
+- ~~**Trunk traversal blocking** --- `trunkTraversalAllowed` flag per biome to terminate trunks entering biomes where underground caves make no sense (e.g., ocean).~~ (Implemented --- see Section 3.4.6)
 - **Worm-to-worm mask seeking** --- Allow worms to seek toward already-carved worm tunnels for more reliable trunk-local connections. See Section 3.5.3 for full analysis.
 
 ---

@@ -508,6 +508,8 @@ namespace Editor.WorldTools
             EditorUILayoutHelper.SubHeader("Trunk Worm Modifiers");
             EditorUILayoutHelper.SectionNote("Biome-local overrides for world-level trunk worms. " +
                                              "Trunk worm config is on the <b>WorldTypeDefinition</b> asset — these fields only modify trunk behavior within this biome.\n\n" +
+                                             "<b>Traversal Allowed</b> — When disabled, trunk worms entering this biome are terminated. " +
+                                             "Use Fade Steps to control how gradually the tunnel narrows before termination.\n" +
                                              "<b>Spawn Suppression</b> — Reduces the chance of trunks <i>originating</i> here (0 = normal, 1 = no trunk spawns). " +
                                              "Trunks from neighbors still pass through.\n" +
                                              "<b>Vertical Bias Override</b> — Per-step override of the trunk's horizontal bias while passing through this biome. " +
@@ -515,9 +517,19 @@ namespace Editor.WorldTools
                                              "<b>Y-Attraction Center Override</b> — Shifts the trunk's Y attraction band center for this biome, preserving the global band width. " +
                                              "-1 = disabled (use world-level value).");
             EditorUILayoutHelper.BeginGroup();
-            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("trunkSpawnSuppression"));
-            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("trunkVerticalBiasOverride"));
-            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("trunkYAttractionCenterOverride"));
+            SerializedProperty trunkMods = _biomeSerializedObject.FindProperty("trunkWormModifiers");
+            SerializedProperty traversalAllowed = trunkMods.FindPropertyRelative("traversalAllowed");
+            EditorGUILayout.PropertyField(traversalAllowed);
+            if (!traversalAllowed.boolValue)
+                EditorGUILayout.PropertyField(trunkMods.FindPropertyRelative("traversalFadeSteps"));
+
+            EditorGUILayout.PropertyField(trunkMods.FindPropertyRelative("spawnSuppression"));
+            using (new EditorGUI.DisabledGroupScope(!traversalAllowed.boolValue))
+            {
+                EditorGUILayout.PropertyField(trunkMods.FindPropertyRelative("verticalBiasOverride"));
+                EditorGUILayout.PropertyField(trunkMods.FindPropertyRelative("yAttractionCenterOverride"));
+            }
+
             EditorUILayoutHelper.EndGroup();
 
             EditorGUILayout.Space(8);

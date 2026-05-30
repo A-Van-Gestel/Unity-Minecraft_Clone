@@ -61,6 +61,7 @@ namespace Editor.WorldTools.Libraries
             ValidateWormSquashFactor(biome, results);
             ValidateWormRadiusNoise(biome, results);
             ValidateWormYAttraction(biome, results);
+            ValidateTrunkTraversal(biome, results);
 
             return results;
         }
@@ -78,6 +79,22 @@ namespace Editor.WorldTools.Libraries
             }
 
             return filtered;
+        }
+
+        /// <summary>
+        /// Returns true if the biome has at least one cave layer using <see cref="CaveMode.WormCarver"/>.
+        /// </summary>
+        private static bool HasWormCarverLayer(StandardBiomeAttributes biome)
+        {
+            if (biome.caveLayers == null) return false;
+
+            foreach (StandardCaveLayer caveLayer in biome.caveLayers)
+            {
+                if (caveLayer.mode == CaveMode.WormCarver)
+                    return true;
+            }
+
+            return false;
         }
 
         #region Validators
@@ -621,6 +638,64 @@ namespace Editor.WorldTools.Libraries
                     SubTabIndex = subTabIndex,
                     Message = $"\"{name}\": Y attraction strength ({strength:F2}) is very high — " +
                               "worms will be strongly channeled into the band, producing unnaturally flat cave systems.",
+                });
+            }
+        }
+
+        /// <summary>
+        /// Checks for trunk traversal blocking misconfigurations.
+        /// </summary>
+        private static void ValidateTrunkTraversal(StandardBiomeAttributes biome, List<BiomeValidationResult> results)
+        {
+            TrunkWormModifiers mods = biome.trunkWormModifiers;
+
+            if (mods.traversalAllowed)
+            {
+                if (mods.traversalFadeSteps > 0)
+                {
+                    results.Add(new BiomeValidationResult
+                    {
+                        Severity = ValidationSeverity.Info,
+                        SubTabIndex = SUB_TAB_CAVES,
+                        Message = $"Traversal Fade Steps ({mods.traversalFadeSteps}) has no effect while Traversal Allowed is true. " +
+                                  "Set Traversal Allowed to false for fade steps to take effect.",
+                    });
+                }
+
+                return;
+            }
+
+            if (mods.spawnSuppression < 1f)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = $"Trunk traversal is blocked but spawn suppression ({mods.spawnSuppression:F2}) is below 1.0 — " +
+                              "trunks may originate here and immediately terminate. Consider setting Spawn Suppression to 1.0.",
+                });
+            }
+
+            if (mods.traversalFadeSteps > 20)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = $"Trunk traversal fade steps ({mods.traversalFadeSteps}) is very high — " +
+                              $"the tunnel may extend up to ~{mods.traversalFadeSteps + 15} blocks " +
+                              $"({mods.traversalFadeSteps} fade + up to 15 detection lag) into the blocked biome before terminating.",
+                });
+            }
+
+            if (HasWormCarverLayer(biome))
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Info,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = "Trunk traversal is blocked but local worm layers are configured. " +
+                              "Local (per-biome) worms are unaffected by trunk traversal blocking.",
                 });
             }
         }

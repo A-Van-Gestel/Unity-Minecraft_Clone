@@ -356,9 +356,12 @@ MonoBehaviour:
     normalizeToZeroOne: 0
   caveZoneAttenuation: 0.28
   minCavePocketSize: 12
-  trunkSpawnSuppression: 0
-  trunkVerticalBiasOverride: 0.3
-  trunkYAttractionCenterOverride: -1
+  trunkWormModifiers:
+    spawnSuppression: 0
+    verticalBiasOverride: 0.3
+    yAttractionCenterOverride: -1
+    traversalAllowed: 1
+    traversalFadeSteps: 0
   caveLayers:
   - layerName: Worm Carver
     previewColor: {r: 1, g: 0, b: 0.7748437, a: 1}

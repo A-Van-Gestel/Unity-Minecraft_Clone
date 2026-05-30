@@ -222,9 +222,11 @@ namespace Jobs.Generators
                     DensityAmplitude = biome.densityAmplitude,
                     EnableDensityWarp = biome.enableDensityWarp,
                     MinCavePocketSize = biome.minCavePocketSize,
-                    TrunkSpawnSuppression = biome.trunkSpawnSuppression,
-                    TrunkVerticalBiasOverride = biome.trunkVerticalBiasOverride,
-                    TrunkYAttractionCenterOverride = biome.trunkYAttractionCenterOverride,
+                    TrunkSpawnSuppression = biome.trunkWormModifiers.spawnSuppression,
+                    TrunkVerticalBiasOverride = biome.trunkWormModifiers.verticalBiasOverride,
+                    TrunkYAttractionCenterOverride = biome.trunkWormModifiers.yAttractionCenterOverride,
+                    TrunkTraversalAllowed = biome.trunkWormModifiers.traversalAllowed,
+                    TrunkTraversalFadeSteps = biome.trunkWormModifiers.traversalFadeSteps,
                     DebugPreviewColor = new float3(biome.debugPreviewColor.r, biome.debugPreviewColor.g, biome.debugPreviewColor.b),
                 };
 
