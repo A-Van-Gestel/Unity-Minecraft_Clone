@@ -18,6 +18,15 @@ namespace Jobs.Data
         /// <summary>Smoothing offset subtracted after sqrt to preserve the same band width as abs().</summary>
         public const float NoodleSmoothOffset = NOODLE_SMOOTH_RADIUS;
 
+        /// <summary>Smoothing radius for the Spaghetti3D dual zero-crossing intersection tube.</summary>
+        private const float SPAGHETTI_3D_SMOOTH_RADIUS = 0.06f;
+
+        /// <summary>Squared smoothing radius for Spaghetti3D, pre-computed to avoid per-voxel multiply.</summary>
+        public const float Spaghetti3DSmoothRadiusSq = SPAGHETTI_3D_SMOOTH_RADIUS * SPAGHETTI_3D_SMOOTH_RADIUS;
+
+        /// <summary>Smoothing offset for Spaghetti3D, subtracted after sqrt to preserve tube band width.</summary>
+        public const float Spaghetti3DSmoothOffset = SPAGHETTI_3D_SMOOTH_RADIUS;
+
         /// <summary>Noise evaluation strategy.</summary>
         public readonly CaveMode Mode;
 
@@ -72,7 +81,7 @@ namespace Jobs.Data
         public readonly float WormMaskSeekChance;
         public readonly int WormMaskSeekMinSteps;
 
-        /// <summary>Whether domain warping is enabled for this cave layer. Only used by Cheese and Noodle modes.</summary>
+        /// <summary>Whether domain warping is enabled for this cave layer. Used by Cheese, Noodle, and Spaghetti3D modes.</summary>
         [MarshalAs(UnmanagedType.U1)]
         public readonly bool EnableWarp;
 

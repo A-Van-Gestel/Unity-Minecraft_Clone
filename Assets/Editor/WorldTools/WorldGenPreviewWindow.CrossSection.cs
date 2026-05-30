@@ -149,7 +149,7 @@ namespace Editor.WorldTools
 
             // Toggle row with tooltips
             EditorGUILayout.BeginHorizontal();
-            _csShowCaves = GUILayout.Toggle(_csShowCaves, new GUIContent("Caves", "Show cave carving (Cheese, Spaghetti, Noodle, WormCarver)."), EditorStyles.miniButton);
+            _csShowCaves = GUILayout.Toggle(_csShowCaves, new GUIContent("Caves", "Show cave carving (Cheese, Spaghetti2D, Spaghetti3D, Noodle, WormCarver)."), EditorStyles.miniButton);
             _csShowLodes = GUILayout.Toggle(_csShowLodes, new GUIContent("Lodes", "Show ore vein replacement in stone."), EditorStyles.miniButton);
             _csShowWater = GUILayout.Toggle(_csShowWater, new GUIContent("Water", "Tint water blocks with depth-based color."), EditorStyles.miniButton);
             _csShowMajorFlora = GUILayout.Toggle(_csShowMajorFlora, new GUIContent("Flora", "Show major flora spawn points (trees, cacti, boulders)."), EditorStyles.miniButton);
@@ -671,6 +671,7 @@ namespace Editor.WorldTools
                     AllCaveLayers = data.AllCaveLayers,
                     BiomeSelectionNoise = data.SelectionNoise,
                     CaveNoises = data.CaveNoises,
+                    CaveSpaghetti3DNoises = data.CaveSpaghetti3DNoises,
                     CaveZoneNoises = data.CaveZoneNoises,
                     IsSingleBiomeMode = forceBiomeIdx >= 0,
                     ForceBiomeIndex = math.max(0, forceBiomeIdx),
@@ -835,6 +836,7 @@ namespace Editor.WorldTools
             public NativeArray<StandardCaveLayerJobData> AllCaveLayers;
             public NativeArray<FastNoiseLite> CaveNoises;
             public NativeArray<FastNoiseLite> CaveWarpNoises;
+            public NativeArray<FastNoiseLite> CaveSpaghetti3DNoises;
             public NativeArray<FastNoiseLite> CaveZoneNoises;
             public NativeArray<StandardLodeJobData> AllLodes;
             public NativeArray<FastNoiseLite> LodeNoises;
@@ -894,6 +896,7 @@ namespace Editor.WorldTools
             data.AllCaveLayers = new NativeArray<StandardCaveLayerJobData>(totalCaves, Allocator.Persistent);
             data.CaveNoises = new NativeArray<FastNoiseLite>(totalCaves, Allocator.Persistent);
             data.CaveWarpNoises = new NativeArray<FastNoiseLite>(totalCaves, Allocator.Persistent);
+            data.CaveSpaghetti3DNoises = new NativeArray<FastNoiseLite>(totalCaves, Allocator.Persistent);
             data.CaveZoneNoises = new NativeArray<FastNoiseLite>(biomeCount, Allocator.Persistent);
             data.AllLodes = new NativeArray<StandardLodeJobData>(totalLodes, Allocator.Persistent);
             data.LodeNoises = new NativeArray<FastNoiseLite>(totalLodes, Allocator.Persistent);
@@ -954,6 +957,9 @@ namespace Editor.WorldTools
                     data.CaveNoises[caveIdx + j] = FastNoiseFactory.CreateNoiseFromConfig(biome.caveLayers[j].noiseConfig, _seed);
                     data.CaveWarpNoises[caveIdx + j] = biome.caveLayers[j].enableWarp
                         ? FastNoiseFactory.CreateNoiseFromConfig(biome.caveLayers[j].warpConfig, _seed)
+                        : FastNoiseLite.Create(0);
+                    data.CaveSpaghetti3DNoises[caveIdx + j] = biome.caveLayers[j].mode == CaveMode.Spaghetti3D
+                        ? FastNoiseFactory.CreateNoiseFromConfig(biome.caveLayers[j].secondaryNoiseConfig, _seed)
                         : FastNoiseLite.Create(0);
                 }
 
@@ -1041,6 +1047,7 @@ namespace Editor.WorldTools
             if (data.AllCaveLayers.IsCreated) data.AllCaveLayers.Dispose();
             if (data.CaveNoises.IsCreated) data.CaveNoises.Dispose();
             if (data.CaveWarpNoises.IsCreated) data.CaveWarpNoises.Dispose();
+            if (data.CaveSpaghetti3DNoises.IsCreated) data.CaveSpaghetti3DNoises.Dispose();
             if (data.CaveZoneNoises.IsCreated) data.CaveZoneNoises.Dispose();
             if (data.AllLodes.IsCreated) data.AllLodes.Dispose();
             if (data.LodeNoises.IsCreated) data.LodeNoises.Dispose();
@@ -1251,7 +1258,7 @@ namespace Editor.WorldTools
                                 break;
                             }
                         }
-                        else if (caveLayer.Mode == CaveMode.Spaghetti)
+                        else if (caveLayer.Mode == CaveMode.Spaghetti2D)
                         {
                             float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
                             if (bound < effectiveThreshold - 0.2f) continue;
@@ -1276,6 +1283,27 @@ namespace Editor.WorldTools
                             if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
                             float raw = caveNoise.GetNoise(cx, cy, cz);
                             float noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
+                            if (noiseVal > effectiveThreshold)
+                            {
+                                if (caveMask != null)
+                                {
+                                    caveMask[y] = 1;
+                                    preCaveBlockIDs[y] = voxelValue;
+                                }
+
+                                voxelValue = BlockIDs.Air;
+                                break;
+                            }
+                        }
+                        else if (caveLayer.Mode == CaveMode.Spaghetti3D)
+                        {
+                            float cx = globalX, cy = y, cz = globalZ;
+                            if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
+                            float rawA = caveNoise.GetNoise(cx, cy, cz);
+                            float rawB = data.CaveSpaghetti3DNoises[cIdx].GetNoise(cx, cy, cz);
+                            float noiseVal = 1.0f - (math.sqrt(rawA * rawA + rawB * rawB
+                                                                           + StandardCaveLayerJobData.Spaghetti3DSmoothRadiusSq)
+                                                     - StandardCaveLayerJobData.Spaghetti3DSmoothOffset);
                             if (noiseVal > effectiveThreshold)
                             {
                                 if (caveMask != null)

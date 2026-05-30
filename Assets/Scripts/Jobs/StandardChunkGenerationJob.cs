@@ -90,6 +90,10 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<FastNoiseLite> CaveWarpNoises;
 
+        /// <summary>Per-cave-layer secondary noise for Spaghetti3D mode. Indexed by caveIdx. Unused slots contain a default instance.</summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> CaveSpaghetti3DNoises;
+
         #endregion
 
         /// <summary>
@@ -397,7 +401,7 @@ namespace Jobs
                         float zoneBoostedThreshold = caveLayer.Threshold + zoneBoost;
                         float effectiveThreshold = zoneBoostedThreshold + (1f - depthFade) * (1f - zoneBoostedThreshold);
 
-                        // --- WormCarver (preserved) ---
+                        // --- WormCarver --- handled by pre-pass worm mask
                         if (caveLayer.Mode == CaveMode.WormCarver)
                         {
                             int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
@@ -430,9 +434,9 @@ namespace Jobs
                                 break;
                             }
                         }
-                        // --- Spaghetti (preserved) — legacy 6-way 2D axis-pair average ---
+                        // --- Spaghetti2D — 6-way 2D axis-pair average ---
                         // Domain warp is NOT applied: 2D noise pairs would lose the Z-axis warp shift.
-                        else if (caveLayer.Mode == CaveMode.Spaghetti)
+                        else if (caveLayer.Mode == CaveMode.Spaghetti2D)
                         {
                             float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
                             if (bound < effectiveThreshold - 0.2f) continue;
@@ -459,6 +463,28 @@ namespace Jobs
 
                             float raw = caveNoise.GetNoise(cx, cy, cz);
                             float noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
+
+                            if (noiseVal > effectiveThreshold)
+                            {
+                                int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                                OutputPreCaveBlockIDs[flatIdx] = voxelValue;
+                                OutputCaveMask[flatIdx] = 1;
+                                voxelValue = (byte)BlockIDs.Air;
+                                break;
+                            }
+                        }
+                        // --- Spaghetti3D — dual zero-crossing intersection tunnels ---
+                        else if (caveLayer.Mode == CaveMode.Spaghetti3D)
+                        {
+                            float cx = globalX, cy = y, cz = globalZ;
+                            if (caveLayer.EnableWarp)
+                                CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
+
+                            float rawA = caveNoise.GetNoise(cx, cy, cz);
+                            float rawB = CaveSpaghetti3DNoises[caveIdx].GetNoise(cx, cy, cz);
+                            float noiseVal = 1.0f - (math.sqrt(rawA * rawA + rawB * rawB
+                                                                           + StandardCaveLayerJobData.Spaghetti3DSmoothRadiusSq)
+                                                     - StandardCaveLayerJobData.Spaghetti3DSmoothOffset);
 
                             if (noiseVal > effectiveThreshold)
                             {

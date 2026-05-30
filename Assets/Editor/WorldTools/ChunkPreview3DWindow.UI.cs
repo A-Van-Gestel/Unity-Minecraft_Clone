@@ -91,7 +91,7 @@ namespace Editor.WorldTools
             EditorGUI.BeginChangeCheck();
             _enableCaves = GUILayout.Toggle(
                 _enableCaves,
-                new GUIContent("Caves", "Enable cave carving (Cheese, Spaghetti, Noodle, WormCarver)."),
+                new GUIContent("Caves", "Enable cave carving (Cheese, Spaghetti2D, Spaghetti3D, Noodle, WormCarver)."),
                 EditorStyles.toolbarButton, GUILayout.Width(46));
             _enableLodes = GUILayout.Toggle(
                 _enableLodes,

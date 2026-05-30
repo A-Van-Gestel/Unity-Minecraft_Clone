@@ -12,6 +12,7 @@ namespace Editor.Libraries
     {
         /// <summary>
         /// Evaluates a noise value at the specified coordinates, handling 3D sampling for cave/lode modes.
+        /// For Spaghetti3D mode, use the overload that accepts a secondary noise instance.
         /// </summary>
         /// <param name="noise">The noise instance to evaluate.</param>
         /// <param name="worldX">Global X coordinate.</param>
@@ -21,12 +22,30 @@ namespace Editor.Libraries
         /// <param name="caveMode">Cave evaluation mode. Only used when <paramref name="is3D"/> is true.</param>
         public static float EvaluateNoiseVal(FastNoiseLite noise, float worldX, float worldZ, float sliceY, bool is3D, CaveMode caveMode = CaveMode.Cheese)
         {
+            return EvaluateNoiseVal(noise, worldX, worldZ, sliceY, is3D, caveMode, false, default);
+        }
+
+        /// <summary>
+        /// Evaluates a noise value at the specified coordinates, handling 3D sampling for cave/lode modes.
+        /// Supports Spaghetti3D via a secondary noise instance.
+        /// </summary>
+        /// <param name="noise">The primary noise instance to evaluate.</param>
+        /// <param name="worldX">Global X coordinate.</param>
+        /// <param name="worldZ">Global Z coordinate.</param>
+        /// <param name="sliceY">Y slice height for 3D evaluation.</param>
+        /// <param name="is3D">If true, evaluates as a 3D noise slice (cave/lode). If false, evaluates as 2D terrain noise.</param>
+        /// <param name="caveMode">Cave evaluation mode. Only used when <paramref name="is3D"/> is true.</param>
+        /// <param name="hasSecondaryNoise">If true, <paramref name="secondaryNoise"/> is valid and used for Spaghetti3D evaluation.</param>
+        /// <param name="secondaryNoise">Secondary noise instance for Spaghetti3D dual zero-crossing evaluation.</param>
+        public static float EvaluateNoiseVal(FastNoiseLite noise, float worldX, float worldZ, float sliceY, bool is3D,
+            CaveMode caveMode, bool hasSecondaryNoise, FastNoiseLite secondaryNoise)
+        {
             if (!is3D)
             {
                 return noise.GetNoise(worldX, worldZ);
             }
 
-            if (caveMode == CaveMode.Spaghetti)
+            if (caveMode == CaveMode.Spaghetti2D)
             {
                 float ab = noise.GetNoise(worldX, sliceY);
                 float bc = noise.GetNoise(sliceY, worldZ);
@@ -41,6 +60,15 @@ namespace Editor.Libraries
             {
                 float raw = noise.GetNoise(worldX, sliceY, worldZ);
                 return 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
+            }
+
+            if (caveMode == CaveMode.Spaghetti3D && hasSecondaryNoise)
+            {
+                float rawA = noise.GetNoise(worldX, sliceY, worldZ);
+                float rawB = secondaryNoise.GetNoise(worldX, sliceY, worldZ);
+                return 1.0f - (math.sqrt(rawA * rawA + rawB * rawB
+                                                     + StandardCaveLayerJobData.Spaghetti3DSmoothRadiusSq)
+                               - StandardCaveLayerJobData.Spaghetti3DSmoothOffset);
             }
 
             // Cheese (default) and Lode — standard 3D evaluation

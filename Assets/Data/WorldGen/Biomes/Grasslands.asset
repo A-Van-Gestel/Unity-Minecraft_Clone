@@ -411,6 +411,23 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
+    secondaryNoiseConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
     threshold: 0.5
     enableWarp: 0
     warpConfig:
@@ -481,6 +498,23 @@ MonoBehaviour:
       cellularDistanceFunction: 0
       cellularReturnType: 0
       cellularJitter: 1
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    secondaryNoiseConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0

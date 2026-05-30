@@ -102,7 +102,7 @@ Note: The three noise-seeking fields (`wormSeekInterval`, `wormSeekDistance`, `w
 
 **Best used as:** Supporting layer. Cheese chambers are the *destinations* that worm tunnels lead to. Configure with moderate-to-high thresholds (0.80-0.85) to keep chambers from dominating.
 
-### 2.3 Spaghetti --- Legacy Interconnected Network
+### 2.3 Spaghetti 2D --- Interconnected Network (Axis-Pair Average)
 
 **Purpose:** Creates interconnected room networks via 6-axis 2D noise averaging. The only noise-based generator that produces natural connectivity.
 
@@ -114,11 +114,12 @@ Note: The three noise-seeking fields (`wormSeekInterval`, `wormSeekDistance`, `w
 
 **Weaknesses:**
 
-- 2D source creates visible grid-like repetition --- every cave looks the same
+- 2D source creates visible grid-like repetition at large scales
 - Computationally expensive: 6 noise evaluations per voxel (+ early-out bound check)
 - No directional flow --- the player wanders rather than explores
+- Domain warping not applicable (2D noise pairs lose the Z-axis warp shift)
 
-**Best used as:** Not recommended as primary. Could be revisited if the 2D repetition problem is solved (e.g., domain warping the 2D axes independently, or using 3D noise pairs instead of 2D).
+**Best used as:** Interconnected room networks where high connectivity is the goal. The grid repetition is most visible at large observation scales --- at room level the caves feel organic. Pairs well with Cheese chambers (as destinations) or Worm Carvers (as connective tissue). For biomes where axis-alignment artifacts are unacceptable, consider Spaghetti3D (Section 2.5) as an alternative.
 
 ### 2.4 Noodle (Isoband) --- Ravine / Fissure Generator
 
@@ -143,6 +144,37 @@ Note: The three noise-seeking fields (`wormSeekInterval`, `wormSeekDistance`, `w
 - Mountain fissures (vertical ravines through alpine terrain)
 - Desert sandstone channels (narrow, weathered passages)
 - **Not** as a primary tunnel generator for general biomes
+
+### 2.5 Spaghetti 3D --- Dual Zero-Crossing Tunnel Generator (Implemented)
+
+**Purpose:** Creates interconnected tunnel networks by finding the intersection of two independent 3D noise field zero-crossings. The intersection of two surfaces in 3D is a 1D curve, producing natural tube-like tunnels without the axis-alignment artifacts of Spaghetti 2D.
+
+**Algorithm:** Two independent 3D noises (A and B) are evaluated at each voxel. The tube value is computed as:
+
+```
+tubeValue = 1.0 - (sqrt(rawA² + rawB² + smoothRadiusSq) - smoothOffset)
+```
+
+When both rawA and rawB are near zero simultaneously, `tubeValue` approaches 1.0, carving a tunnel. The smoothing constants (same as Noodle: `smoothRadius = 0.06`) prevent sharp carving edges.
+
+**Strengths:**
+
+- True 3D tunnels with no axis-alignment artifacts (solves the core Spaghetti 2D problem)
+- Natural interconnection --- zero-crossing surfaces are topologically connected, so their intersections form connected curves
+- Domain warping compatible (both inputs are full 3D noise, unlike Spaghetti 2D)
+- Seekable by worm carvers --- produces meaningful 3D spatial features for noise seeking
+- Threshold controls tunnel width (same semantic as Noodle: higher = narrower)
+- Two independent `FastNoiseConfig` fields allow fine-grained control over tunnel character
+
+**Weaknesses:**
+
+- Two noise evaluations per voxel (compared to one for Cheese/Noodle, six for Spaghetti 2D)
+- No inherent spatial variation without zone gating (same as Noodle)
+- Tunnel width is uniform at a given threshold (use zone attenuation for spatial variation)
+
+**Best used as:** Replacement for Spaghetti 2D where interconnected tunnel networks are desired. Good for biomes that want organic tunnel connectivity without worm carver directionality. Can serve as a secondary network layer alongside worm carvers and cheese chambers.
+
+**Configuration:** Requires two `FastNoiseConfig` fields (`noiseConfig` for primary, `secondaryNoiseConfig` for secondary). The two configs should use different `seedOffset` values to ensure independent noise fields --- identical offsets degenerate the tube into a thin line. `BiomeConfigValidator` warns when secondary frequency is zero or seed offsets match.
 
 ---
 
@@ -478,7 +510,7 @@ Replace the three fields on `StandardCaveLayer` with a single `wormNoiseSeeking`
 
 #### 3.5.2 Seek Target Rework: From Hardcoded to Flag-Based
 
-**Current behavior:** The noise-seeking code in `StandardWormCarverJob` (lines 202-237) iterates *all* cave layers in the biome and seeks toward any layer whose mode is Cheese, Spaghetti, or Noodle. This is hardcoded — every non-worm layer is always a seek target with no opt-out.
+**Current behavior:** The noise-seeking code in `StandardWormCarverJob` (lines 202-237) iterates *all* cave layers in the biome and seeks toward any layer whose mode is Cheese, Spaghetti2D, Spaghetti3D, or Noodle. This is hardcoded — every non-worm layer is always a seek target with no opt-out.
 
 **Proposed behavior:** Replace the hardcoded mode check with the `isSeekableByTrunkWorms` / `isSeekableByLocalWorms` flags introduced in Section 3.4.4. The seek loop becomes:
 
@@ -570,7 +602,7 @@ Cave generation logic is evaluated in four independent code paths. Any formula c
 | **Worm Seek**            | `StandardWormCarverJob.cs`              | Noise-seeking evaluation for worm steering (Burst) |
 
 > [!NOTE]
-> The **Worm Seek** path only evaluates Spaghetti and Noodle noise for steering decisions — it does not carve voxels. A formula drift here won't produce incorrect terrain, but worms will seek toward phantom features (or miss real ones), leading to tunnels that dead-end into solid rock instead of connecting to open caves. See [WORLD_GENERATION_BUGS.md](../Bugs/WORLD_GENERATION_BUGS.md) for the tracking entry.
+> The **Worm Seek** path only evaluates Spaghetti2D, Spaghetti3D, and Noodle noise for steering decisions — it does not carve voxels. A formula drift here won't produce incorrect terrain, but worms will seek toward phantom features (or miss real ones), leading to tunnels that dead-end into solid rock instead of connecting to open caves. See [WORLD_GENERATION_BUGS.md](../Bugs/WORLD_GENERATION_BUGS.md) for the tracking entry.
 
 ### 4.2 Key Formulas
 
@@ -702,7 +734,7 @@ Trunk modifiers:  Desert trunkSpawnSuppression=0.5 | Mountain trunkVerticalBiasO
 4. Implement radius variation (sine wave modulation) in `StandardWormCarverJob`.
 5. Verify via `CaveDensityAnalyzer`: run Mountain biome before/after, compare network Y-span (should decrease with horizontal bias) and shape quality (should show more open blocks from wider sections).
 
-Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 — worm carving is handled entirely in the `StandardWormCarverJob` pre-pass. `GetVoxel()` only evaluates noise-based layers (Cheese, Spaghetti, Noodle).
+Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 — worm carving is handled entirely in the `StandardWormCarverJob` pre-pass. `GetVoxel()` only evaluates noise-based layers (Cheese, Spaghetti2D, Spaghetti3D, Noodle).
 
 ### Phase 2: Per-Layer Zone Attenuation
 
@@ -721,7 +753,7 @@ Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 —
 3. Add trunk config to `WorldTypeDefinition` (or a dedicated `WorldCaveConfig` asset).
 4. Add `trunkSpawnSuppression` and `trunkVerticalBiasOverride` fields to `StandardBiomeAttributes`.
 5. Add `isSeekableByTrunkWorms` and `isSeekableByLocalWorms` fields to `StandardCaveLayer` (both default `false`). Set both to `true` on Cheese layers for all biomes.
-6. Refactor local worm noise seeking in `StandardWormCarverJob`: replace the hardcoded `CaveMode.Cheese || Spaghetti || Noodle` filter with the `isSeekableByLocalWorms` flag. This narrows the current "seek everything" behavior to "seek only flagged layers" (Section 3.5.2).
+6. Refactor local worm noise seeking in `StandardWormCarverJob`: replace the hardcoded `CaveMode.Cheese || Spaghetti2D || Spaghetti3D || Noodle` filter with the `isSeekableByLocalWorms` flag. This narrows the current "seek everything" behavior to "seek only flagged layers" (Section 3.5.2).
 7. Implement world-level scatter grid for trunk worms in `StandardWormCarverJob` --- separate from the per-biome scatter grid, seeded from the world seed.
 8. Implement trunk noise seeking: at each look-ahead step, sample the biome at the look-ahead position, evaluate only `isSeekableByTrunkWorms == true` layers, steer toward the highest carve value.
 9. Evaluate trunk layer before per-biome local layers in the job, writing to the same worm mask.
@@ -751,7 +783,7 @@ Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 —
 - ~~**Ellipsoidal carving** for wider-than-tall worm profiles.~~ (Implemented --- see Section 3.1.3)
 - ~~**Worm radius noise** (Perlin-modulated radius instead of sine wave) for less predictable width variation.~~ (Implemented --- see Section 3.1.2)
 - ~~**Worm Y-level attraction** (tendency to carve toward specific Y bands, e.g., diamond-level in Minecraft terms).~~ (Implemented --- see Section 3.1.4)
-- **Spaghetti revival** --- if the 2D repetition problem can be solved (3D noise pairs, per-axis domain warp), Spaghetti could return as an alternative connectivity generator.
+- ~~**Spaghetti revival** --- if the 2D repetition problem can be solved (3D noise pairs, per-axis domain warp), Spaghetti could return as an alternative connectivity generator.~~ (Implemented --- see Section 2.5. `Spaghetti` renamed to `Spaghetti2D`; new `Spaghetti3D` mode uses dual 3D noise zero-crossing intersection.)
 - **CaveDensityAnalyzer fix** for non-WorldType biomes and trunk worm support (see Section 4.3 known limitations).
 - ~~**Trunk traversal blocking** --- `trunkTraversalAllowed` flag per biome to terminate trunks entering biomes where underground caves make no sense (e.g., ocean).~~ (Implemented --- see Section 3.4.6)
 - ~~**Worm-to-worm mask seeking** --- Allow worms to seek toward already-carved worm tunnels for more reliable trunk-local connections.~~ (Implemented --- see Section 3.5.3)
@@ -760,7 +792,7 @@ Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 —
 
 ## 6. Open Questions
 
-1. **Should Spaghetti be deprecated or kept dormant?** No biome currently uses it. Keeping the code has no runtime cost, and it could be revived if the repetition problem is solved. Recommend: keep but mark as experimental.
+1. **~~Should Spaghetti be deprecated or kept dormant?~~** Resolved. `Spaghetti` has been renamed to `Spaghetti2D`. The new `Spaghetti3D` mode (Section 2.5) offers an alternative without 2D axis-alignment artifacts. Both modes are actively supported --- `Spaghetti2D` produces uniquely interconnected networks that `Spaghetti3D` does not replicate, making them complementary rather than redundant.
 
 2. **Worm carver performance at scale.** The scatter approach checks `(2 * chunkSearchRadius + 1)^2` neighboring chunks. With `maxLength=200` and `radius=3`, that's a 13-chunk search radius per worm layer. This is already capped at 8. As worm length or radius increases, monitor the search radius and consider tighter caps or spatial hashing.
 

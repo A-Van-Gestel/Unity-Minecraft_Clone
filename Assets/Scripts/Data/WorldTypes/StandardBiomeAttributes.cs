@@ -238,14 +238,17 @@ namespace Data.WorldTypes
         /// <summary>Cheese (Single Noise) — Large open caverns via single 3D noise threshold. Renamed from Blob.</summary>
         Cheese,
 
-        /// <summary>Spaghetti (Axis-Pair Average) — Legacy-style 6-way 2D noise averaging. Produces interconnected tunnel networks.</summary>
-        Spaghetti,
+        /// <summary>Spaghetti 2D (Axis-Pair Average) — 6-way 2D noise averaging. Produces highly interconnected tunnel networks. Limitation: 2D source creates visible grid-like repetition at large scales.</summary>
+        Spaghetti2D,
 
-        /// <summary>Worm Carver (Random Walk) — Legacy-style recursive turtle generator for highly organic cave networks.</summary>
+        /// <summary>Worm Carver (Random Walk) — Recursive turtle generator for highly organic cave networks with branching and noise seeking.</summary>
         WormCarver,
 
         /// <summary>Noodle (Isoband) — Winding tubular corridors where |noise3D| is close to zero.</summary>
         Noodle,
+
+        /// <summary>Spaghetti 3D (Dual Zero-Crossing) — Interconnected tunnel networks formed at the intersection of two independent 3D noise field zero-crossings. No axis-alignment artifacts.</summary>
+        Spaghetti3D,
     }
 
     /// <summary>
@@ -277,20 +280,28 @@ namespace Data.WorldTypes
         [Tooltip("Editor Preview Color for Composite visualizer tool.")]
         public Color previewColor = Color.red;
 
-        [Tooltip("Blob (Single Noise) produces chambers. Spaghetti (Axis-Pair Average) produces interconnected tunnel networks.")]
+        [Tooltip("Cheese (Single Noise) produces chambers. Spaghetti 2D (Axis-Pair Average) produces interconnected tunnel networks (note: has grid repetition at large scales). " +
+                 "Spaghetti 3D (Dual Zero-Crossing) produces interconnected tunnels via two 3D noise fields without axis-alignment artifacts. " +
+                 "Noodle (Isoband) produces thin winding corridors.")]
         public CaveMode mode = CaveMode.Cheese;
 
-        [Tooltip("FastNoiseLite noise configuration for defining the cave shapes.")]
+        [Tooltip("Primary FastNoiseLite noise configuration for defining the cave shapes.")]
         [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
         public FastNoiseConfig noiseConfig;
 
-        [Tooltip("Cheese/Spaghetti: carves when noise > threshold (higher = rarer caves). " +
-                 "Noodle: carves when (1 - |noise|) > threshold, so higher = narrower tubes (e.g. 0.93 = tight corridors, 0.85 = wide tunnels).")]
+        [Tooltip("Secondary 3D noise for Spaghetti3D mode. " +
+                 "Tunnels form where both primary and secondary noise fields cross zero simultaneously. " +
+                 "Use a different seed offset from the primary noise to ensure independent fields.")]
+        [ConditionalField(nameof(mode), false, CaveMode.Spaghetti3D)]
+        public FastNoiseConfig secondaryNoiseConfig;
+
+        [Tooltip("Cheese/Spaghetti2D: carves when noise > threshold (higher = rarer caves). " +
+                 "Noodle/Spaghetti3D: carves when tube value > threshold, so higher = narrower tubes (e.g. 0.93 = tight corridors, 0.85 = wide tunnels).")]
         [ConditionalField(nameof(mode), true, CaveMode.WormCarver)]
         public float threshold = 0.5f;
 
         [Header("Cave Domain Warping")]
-        [Tooltip("Apply domain warping to this cave layer's noise coordinates. Only affects Cheese and Noodle modes (3D evaluation). Ignored for Spaghetti (2D legacy).")]
+        [Tooltip("Apply domain warping to this cave layer's noise coordinates. Affects Cheese, Noodle, and Spaghetti3D modes (3D evaluation). Not applicable to Spaghetti2D (uses 2D noise pairs).")]
         public bool enableWarp;
 
         [ConditionalField(nameof(enableWarp))]

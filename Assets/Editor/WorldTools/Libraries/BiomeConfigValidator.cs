@@ -337,6 +337,31 @@ namespace Editor.WorldTools.Libraries
                                   "this cave layer will produce very few or no caves.",
                     });
                 }
+
+                if (cave.mode == CaveMode.Spaghetti3D)
+                {
+                    if (cave.secondaryNoiseConfig.frequency == 0f)
+                    {
+                        results.Add(new BiomeValidationResult
+                        {
+                            Severity = ValidationSeverity.Warning,
+                            SubTabIndex = SUB_TAB_CAVES,
+                            Message = $"\"{name}\": Spaghetti3D secondary noise has zero frequency — " +
+                                      "no tunnels will be generated. Set a non-zero frequency.",
+                        });
+                    }
+
+                    if (cave.secondaryNoiseConfig.seedOffset == cave.noiseConfig.seedOffset)
+                    {
+                        results.Add(new BiomeValidationResult
+                        {
+                            Severity = ValidationSeverity.Warning,
+                            SubTabIndex = SUB_TAB_CAVES,
+                            Message = $"\"{name}\": Spaghetti3D primary and secondary noise share the same seed offset ({cave.noiseConfig.seedOffset}) — " +
+                                      "identical noise fields degenerate the tube into a thin line. Use different seed offsets.",
+                        });
+                    }
+                }
             }
         }
 

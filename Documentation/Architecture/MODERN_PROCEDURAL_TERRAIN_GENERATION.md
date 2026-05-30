@@ -17,9 +17,10 @@ The legacy procedural terrain system uses a strict 2D heightmap ($y = f(x,z)$). 
 3. **Domain Warping (Iñigo Quílez):** The input coordinates of the 3D density noise (and optionally cave noises) are distorted using a secondary noise field ($p' = p + Warp(p)$), breaking up artificial grid-like patterns and simulating geological folding.
 4. **Cave System Modernization:** All existing cave modes are preserved. New volumetric cave modes are added:
     - *Cheese (renamed from Blob):* Large open caverns — `noise3D > threshold`
-    - *Spaghetti (preserved):* Legacy 6-way 2D axis-pair average tunnel networks
+    - *Spaghetti2D:* 6-way 2D axis-pair average tunnel networks (highly interconnected; grid repetition at large scales)
+    - *Spaghetti3D (new):* Interconnected tunnels via dual 3D noise zero-crossing intersection — `1 - sqrt(rawA² + rawB²) > threshold`
     - *Noodle (new):* Winding tubular corridors — `1 - |noise3D| > threshold`
-    - *WormCarver (preserved):* Organic recursive random-walk tunnels via pre-baked bitmask
+    - *WormCarver:* Organic recursive random-walk tunnels via pre-baked bitmask
 
 ---
 
@@ -183,17 +184,18 @@ New fields mirroring the authoring class:
 
 ```csharp
 // Assets/Scripts/Data/WorldTypes/StandardCaveLayer.cs — new fields
-        [Tooltip("Apply domain warping to this cave layer's noise coordinates. Only affects Cheese and Noodle modes (3D evaluation). Ignored for Spaghetti (2D legacy).")]
+        [Tooltip("Apply domain warping to this cave layer's noise coordinates. Affects Cheese, Noodle, and Spaghetti3D modes (3D evaluation). Not applicable to Spaghetti2D (uses 2D noise pairs).")]
         public bool enableWarp;
         public FastNoiseConfig warpConfig;
 
-// Assets/Scripts/Data/WorldTypes/CaveMode.cs — add new enum value
+// Assets/Scripts/Data/WorldTypes/CaveMode.cs — enum values
 public enum CaveMode
 {
-    Cheese,      // Renamed from Blob — large open caverns (noise3D > threshold)
-    Spaghetti,   // Preserved — legacy 6-way 2D axis-pair average
-    WormCarver,  // Preserved — pre-baked bitmask
-    Noodle,      // NEW — winding tubular corridors (1 - |noise3D| > threshold)
+    Cheese,       // Renamed from Blob — large open caverns (noise3D > threshold)
+    Spaghetti2D,  // 6-way 2D axis-pair average (interconnected; grid repetition at scale)
+    WormCarver,   // Recursive random-walk tunnels via pre-baked bitmask
+    Noodle,       // Winding tubular corridors (1 - |noise3D| > threshold)
+    Spaghetti3D,  // Dual 3D noise zero-crossing intersection tunnels (1 - sqrt(rawA² + rawB²) > threshold)
 }
 
 // Assets/Scripts/Jobs/Data/StandardCaveLayerJobData.cs — add field
@@ -205,7 +207,7 @@ public enum CaveMode
 > **`Blob` → `Cheese` Rename Safety:** Unity serializes enum fields by their **integer value**, not by name. Since `Cheese` occupies position 0 (the same slot `Blob` occupied), existing biome assets deserialize correctly without any attribute. `[FormerlySerializedAs]` is a field-level attribute and cannot be applied to individual enum members — it is not needed here.
 
 > [!NOTE]
-> **Domain Warp and Spaghetti:** Cave domain warping (`EnableWarp`) only applies to `Cheese` and `Noodle` modes, which use full 3D noise evaluation. The legacy `Spaghetti` mode uses 2D noise pairs (`GetNoise(x, y)`, `GetNoise(y, z)`, etc.) — applying a 3D warp to coordinates consumed by 2D calls produces inconsistent distortion (the warped Z shift is lost in pairs that don't use Z). Spaghetti always evaluates with unwarped `globalX, y, globalZ` coordinates.
+> **Domain Warp and Spaghetti2D:** Cave domain warping (`EnableWarp`) applies to `Cheese`, `Noodle`, and `Spaghetti3D` modes, which all use full 3D noise evaluation. `Spaghetti2D` uses 2D noise pairs (`GetNoise(x, y)`, `GetNoise(y, z)`, etc.) — applying a 3D warp to coordinates consumed by 2D calls produces inconsistent distortion (the warped Z shift is lost in pairs that don't use Z). Spaghetti2D always evaluates with unwarped `globalX, y, globalZ` coordinates. `Spaghetti3D` uses two independent 3D noise fields and fully supports domain warping.
 
 ### 3.6. Updating `BiomeBlender`
 
@@ -444,7 +446,7 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
 
             float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
 
-            // --- WormCarver (preserved) ---
+            // --- WormCarver --- random-walk pre-baked bitmask
             if (caveLayer.Mode == CaveMode.WormCarver)
             {
                 if (WormMask.IsSet(ChunkMath.GetFlattenedIndexInChunk(x, y, z)))
@@ -476,9 +478,9 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
                     break;
                 }
             }
-            // --- Spaghetti (preserved) — legacy 6-way 2D axis-pair average ---
+            // --- Spaghetti2D — 6-way 2D axis-pair average ---
             // Domain warp is NOT applied: 2D noise pairs would lose the Z-axis warp shift.
-            else if (caveLayer.Mode == CaveMode.Spaghetti)
+            else if (caveLayer.Mode == CaveMode.Spaghetti2D)
             {
                 // Bounding volume early-out: evaluate low-frequency 3D noise first.
                 // If far below threshold, skip the expensive 6-way evaluation.

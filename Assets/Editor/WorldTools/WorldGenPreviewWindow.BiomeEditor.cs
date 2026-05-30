@@ -469,11 +469,12 @@ namespace Editor.WorldTools
         {
             EditorUILayoutHelper.SectionHeader("Cave Generation");
             EditorUILayoutHelper.SectionNote("<b>Cheese</b> — Large open caverns. Carves where <i>noise > threshold</i>. Higher threshold = smaller/rarer caverns.\n" +
-                                             "<b>Spaghetti</b> — Interconnected tunnel networks (6-way 2D noise average). Higher threshold = rarer tunnels.\n" +
+                                             "<b>Spaghetti 2D</b> — Interconnected tunnel networks (6-way 2D noise average). Higher threshold = rarer tunnels. Note: grid repetition at large scales.\n" +
+                                             "<b>Spaghetti 3D</b> — Interconnected tunnels via dual 3D noise zero-crossing intersection. Higher threshold = narrower tubes. Requires a secondary noise config.\n" +
                                              "<b>Noodle</b> — Winding tubular corridors. Carves where <i>(1 - |noise|) > threshold</i>, i.e. where noise is near zero. " +
                                              "<b>Higher threshold = narrower tubes</b> (0.95 = tight fissures, 0.85 = wide tunnels). Typical range: 0.85–0.96.\n" +
                                              "<b>Worm Carver</b> — Organic random-walk tunnels with branching. Threshold is not used.\n\n" +
-                                             "Cheese and Noodle support domain warping. Depth Fade attenuates carving near height bounds.\n\n" +
+                                             "Cheese, Noodle, and Spaghetti 3D support domain warping. Depth Fade attenuates carving near height bounds.\n\n" +
                                              "<b>Isolation Filter</b> — Volume-based post-carve cleanup pass. Finds connected cave air regions via flood fill and " +
                                              "restores pockets smaller than the threshold to their original terrain blocks. " +
                                              "4 = removes pockets of 1–3 blocks (recommended). 0 = disabled.");

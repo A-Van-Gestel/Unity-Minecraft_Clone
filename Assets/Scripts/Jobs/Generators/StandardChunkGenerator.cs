@@ -47,6 +47,7 @@ namespace Jobs.Generators
         private NativeArray<FastNoiseLite> _biomeDensityNoises;
         private NativeArray<FastNoiseLite> _biomeDensityWarpNoises;
         private NativeArray<FastNoiseLite> _caveWarpNoises;
+        private NativeArray<FastNoiseLite> _caveSpaghetti3DNoises;
         private StandardBiomeAttributes[] _standardBiomes;
 
         /// <summary>Flattened Burst-safe pool entry data for all biomes (major + minor).</summary>
@@ -154,6 +155,7 @@ namespace Jobs.Generators
             _biomeDensityNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _biomeDensityWarpNoises = new NativeArray<FastNoiseLite>(_standardBiomes.Length, Allocator.Persistent);
             _caveWarpNoises = new NativeArray<FastNoiseLite>(totalCaveLayerCount, Allocator.Persistent);
+            _caveSpaghetti3DNoises = new NativeArray<FastNoiseLite>(totalCaveLayerCount, Allocator.Persistent);
 
             int currentLodeIndex = 0;
             int currentCaveLayerIndex = 0;
@@ -191,6 +193,12 @@ namespace Jobs.Generators
                         _caveWarpNoises[currentCaveLayerIndex + j] = FastNoiseFactory.CreateNoiseFromConfig(biome.caveLayers[j].warpConfig, _seed);
                     else
                         _caveWarpNoises[currentCaveLayerIndex + j] = FastNoiseLite.Create(0);
+
+                    // Spaghetti3D secondary noise: populate for Spaghetti3D layers; unused slots get a default instance
+                    if (biome.caveLayers[j].mode == CaveMode.Spaghetti3D)
+                        _caveSpaghetti3DNoises[currentCaveLayerIndex + j] = FastNoiseFactory.CreateNoiseFromConfig(biome.caveLayers[j].secondaryNoiseConfig, _seed);
+                    else
+                        _caveSpaghetti3DNoises[currentCaveLayerIndex + j] = FastNoiseLite.Create(0);
                 }
 
                 // Build biome job data
@@ -341,6 +349,7 @@ namespace Jobs.Generators
                     AllCaveLayers = _allCaveLayersJobData,
                     BiomeSelectionNoise = _biomeSelectionNoise,
                     CaveNoises = _caveNoises,
+                    CaveSpaghetti3DNoises = _caveSpaghetti3DNoises,
                     CaveZoneNoises = _caveZoneNoises,
                     IsSingleBiomeMode = _isSingleBiomeMode,
                     ForceBiomeIndex = _forceBiomeIndex,
@@ -378,6 +387,7 @@ namespace Jobs.Generators
                 BiomeDensityNoises = _biomeDensityNoises,
                 BiomeDensityWarpNoises = _biomeDensityWarpNoises,
                 CaveWarpNoises = _caveWarpNoises,
+                CaveSpaghetti3DNoises = _caveSpaghetti3DNoises,
                 IsSingleBiomeMode = _isSingleBiomeMode,
                 ForceBiomeIndex = _forceBiomeIndex,
                 FeatureFlags = FeatureFlags,
@@ -525,7 +535,7 @@ namespace Jobs.Generators
 
                     if (caveLayer.Mode == CaveMode.WormCarver) continue;
 
-                    if (caveLayer.Mode == CaveMode.Spaghetti)
+                    if (caveLayer.Mode == CaveMode.Spaghetti2D)
                     {
                         float bound = caveNoise.GetNoise(globalPos.x * 0.25f, y * 0.25f, globalPos.z * 0.25f);
                         if (bound < effectiveThreshold - 0.2f) continue;
@@ -538,6 +548,14 @@ namespace Jobs.Generators
                     {
                         float raw = caveNoise.GetNoise(globalPos.x, y, globalPos.z);
                         noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
+                    }
+                    else if (caveLayer.Mode == CaveMode.Spaghetti3D)
+                    {
+                        float rawA = caveNoise.GetNoise(globalPos.x, y, globalPos.z);
+                        float rawB = _caveSpaghetti3DNoises[caveIdx].GetNoise(globalPos.x, y, globalPos.z);
+                        noiseVal = 1.0f - (math.sqrt(rawA * rawA + rawB * rawB
+                                                                 + StandardCaveLayerJobData.Spaghetti3DSmoothRadiusSq)
+                                           - StandardCaveLayerJobData.Spaghetti3DSmoothOffset);
                     }
                     else
                     {
@@ -885,6 +903,7 @@ namespace Jobs.Generators
             if (_biomeDensityNoises.IsCreated) _biomeDensityNoises.Dispose();
             if (_biomeDensityWarpNoises.IsCreated) _biomeDensityWarpNoises.Dispose();
             if (_caveWarpNoises.IsCreated) _caveWarpNoises.Dispose();
+            if (_caveSpaghetti3DNoises.IsCreated) _caveSpaghetti3DNoises.Dispose();
         }
 
         #endregion

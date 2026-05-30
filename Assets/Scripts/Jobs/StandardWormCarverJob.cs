@@ -36,6 +36,10 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<FastNoiseLite> CaveNoises;
 
+        /// <summary>Per-cave-layer secondary noise for Spaghetti3D mode. Indexed by caveIdx. Unused slots contain a default instance.</summary>
+        [ReadOnly]
+        public NativeArray<FastNoiseLite> CaveSpaghetti3DNoises;
+
         /// <summary>Per-biome cave zone gating noises. Worms only spawn in columns that pass the zone check.</summary>
         [ReadOnly]
         public NativeArray<FastNoiseLite> CaveZoneNoises;
@@ -283,7 +287,7 @@ namespace Jobs
 
         private float EvaluateLayerNoise(int noiseArrayIndex, CaveMode mode, float3 pos)
         {
-            if (mode == CaveMode.Spaghetti)
+            if (mode == CaveMode.Spaghetti2D)
             {
                 float ab = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y);
                 float bc = CaveNoises[noiseArrayIndex].GetNoise(pos.y, pos.z);
@@ -298,6 +302,15 @@ namespace Jobs
             {
                 float raw = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
                 return 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
+            }
+
+            if (mode == CaveMode.Spaghetti3D)
+            {
+                float rawA = CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
+                float rawB = CaveSpaghetti3DNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
+                return 1.0f - (math.sqrt(rawA * rawA + rawB * rawB
+                                                     + StandardCaveLayerJobData.Spaghetti3DSmoothRadiusSq)
+                               - StandardCaveLayerJobData.Spaghetti3DSmoothOffset);
             }
 
             return CaveNoises[noiseArrayIndex].GetNoise(pos.x, pos.y, pos.z);
