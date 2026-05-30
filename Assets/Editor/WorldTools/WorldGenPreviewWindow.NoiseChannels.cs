@@ -499,7 +499,6 @@ namespace Editor.WorldTools
                 DensityAmplitude = _biome.densityAmplitude,
                 ChunkHeight = VoxelData.ChunkHeight,
                 SliceY = _ncSliceY,
-                UseSpline = useSpline,
                 Enable3DDensity = _biome.enable3DDensity,
                 EnableDensityWarp = _biome.enableDensityWarp,
                 ChannelNoise = channelNoise,

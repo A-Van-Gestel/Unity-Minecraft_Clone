@@ -487,12 +487,6 @@ namespace Editor.WorldTools
 
             EditorUILayoutHelper.BeginGroup();
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("caveZoneNoiseConfig"), s_emptyLabel, true);
-            using (new EditorGUI.DisabledGroupScope(true))
-            {
-                EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("caveZoneAttenuation"),
-                    new GUIContent("Zone Attenuation (Legacy)"));
-            }
-
             EditorUILayoutHelper.EndGroup();
 
             EditorGUILayout.Space(4);

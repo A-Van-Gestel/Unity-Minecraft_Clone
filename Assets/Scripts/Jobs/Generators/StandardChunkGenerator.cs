@@ -229,7 +229,6 @@ namespace Jobs.Generators
                     Enable3DDensity = biome.enable3DDensity,
                     DensityAmplitude = biome.densityAmplitude,
                     EnableDensityWarp = biome.enableDensityWarp,
-                    MinCavePocketSize = biome.minCavePocketSize,
                     TrunkSpawnSuppression = biome.trunkWormModifiers.spawnSuppression,
                     TrunkVerticalBiasOverride = biome.trunkWormModifiers.verticalBiasOverride,
                     TrunkYAttractionCenterOverride = biome.trunkWormModifiers.yAttractionCenterOverride,

@@ -59,10 +59,6 @@ namespace Editor.Jobs
 
         [MarshalAs(UnmanagedType.U1)]
         [ReadOnly]
-        public bool UseSpline;
-
-        [MarshalAs(UnmanagedType.U1)]
-        [ReadOnly]
         public bool Enable3DDensity;
 
         [MarshalAs(UnmanagedType.U1)]

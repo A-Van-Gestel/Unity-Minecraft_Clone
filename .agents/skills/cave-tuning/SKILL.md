@@ -85,9 +85,9 @@ Cave config lives on `StandardBiomeAttributes` ScriptableObjects under `Assets/D
 ### Key parameters
 
 - **`caveZoneNoiseConfig.frequency`**: Controls spatial clustering of cave zones. Higher = more frequent cave/no-cave transitions.
-- **`caveZoneAttenuation`**: How strongly the zone noise suppresses caves. Range 0-1. Higher = more suppression in quiet zones.
 - **Cave layers** (array of `StandardCaveLayer`):
-    - **Type**: `Cheese` (3D blob carving) or `Noodle` (tunnel carving along noise zero-crossings)
+    - **Type**: `Cheese` (3D blob carving), `Spaghetti2D` (6-way 2D axis-pair average), `Spaghetti3D` (dual 3D noise zero-crossing), `Noodle` (tunnel carving along noise zero-crossings), or `WormCarver` (random-walk tunnels)
+    - **Zone Attenuation** (per-layer): How strongly the zone noise suppresses this layer. Range 0-1. Higher = more suppression in quiet zones. Typically used on Noodle layers only.
     - **Threshold**: Base carve threshold. Higher = less carving.
     - **Height range**: `minHeight` / `maxHeight` with `fadeHeight` for smooth vertical transitions.
     - **3D Density**: Optional density noise that modulates cave size.
@@ -163,10 +163,10 @@ var biome = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(
     AssetDatabase.GUIDToAssetPath(guids[0]));
 var so = new SerializedObject(biome);
 so.FindProperty("caveZoneNoiseConfig.frequency").floatValue = 0.008f;
-so.FindProperty("caveZoneAttenuation").floatValue = 0.20f;
-// For cave layer array elements:
+// Per-layer zone attenuation (set on individual cave layers, typically Noodle only):
 var layers = so.FindProperty("caveLayers");
 layers.GetArrayElementAtIndex(0).FindPropertyRelative("threshold").floatValue = 0.82f;
+layers.GetArrayElementAtIndex(0).FindPropertyRelative("zoneAttenuation").floatValue = 0.20f;
 so.ApplyModifiedProperties();
 AssetDatabase.SaveAssets();
 return "Done";

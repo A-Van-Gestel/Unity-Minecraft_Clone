@@ -79,13 +79,6 @@ namespace Jobs.Data
         [MarshalAs(UnmanagedType.U1)]
         public bool EnableDensityWarp;
 
-        /// <summary>
-        /// Minimum connected air volume (in blocks) for a cave pocket to survive filtering.
-        /// Pockets smaller than this are restored to their original terrain blocks by <see cref="CaveIsolationFilterJob"/>.
-        /// 0 = disabled.
-        /// </summary>
-        public int MinCavePocketSize;
-
         /// <summary>Reduces the chance of trunk worms originating in this biome. 0 = normal, 1 = fully suppressed.</summary>
         public float TrunkSpawnSuppression;
 

@@ -382,7 +382,6 @@ MonoBehaviour:
     domainWarpType: 0
     domainWarpAmp: 0
     normalizeToZeroOne: 0
-  caveZoneAttenuation: 0.24
   minCavePocketSize: 12
   trunkWormModifiers:
     spawnSuppression: 0
