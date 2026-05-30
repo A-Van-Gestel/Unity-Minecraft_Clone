@@ -188,33 +188,17 @@ float radius = math.lerp(radiusMin, radiusMax, wave);
 
 This creates alternating wide and narrow sections along the tunnel. The `radiusWaveCount` controls how many wide/narrow cycles occur per worm.
 
-**New fields on `StandardCaveLayer`:**
+**Implemented as** a `WormShape` struct on `StandardCaveLayer` (as `wormShape`) and `TrunkWormConfig` (as `shape`), grouping `radiusMin`, `radiusMax`, `squashAxis`, `squashFactor`, `radiusWaveCount`, `radiusNoiseStrength`, and `radiusNoiseFrequency` into a single collapsible inspector block. The struct provides `Default` (local worms: radius [2, 4]) and `TrunkDefault` (trunk worms: radius [3, 5]) static properties. The legacy `wormBaseRadius` field remains on `StandardCaveLayer` for backwards compatibility but is superseded by `radiusMin`/`radiusMax`.
+Job data fields remain flat for Burst compatibility — the `StandardCaveLayerJobData` and `TrunkWormConfigJobData` constructors read from the struct.
 
-```csharp
-[Range(1f, 8f)]
-[Tooltip("Minimum carving radius. Narrow squeezes.")]
-public float wormRadiusMin = 2f;
-
-[Range(2f, 12f)]
-[Tooltip("Maximum carving radius. Wide chambers along the tunnel.")]
-public float wormRadiusMax = 4f;
-
-[Range(1, 8)]
-[Tooltip("How many wide/narrow cycles occur along the worm's length. " +
-         "1 = one pinch point. 4 = alternating every ~50 steps.")]
-public int wormRadiusWaveCount = 3;
-```
-
-The existing `wormBaseRadius` field would be deprecated in favor of `wormRadiusMin` / `wormRadiusMax` (with a migration that maps `baseRadius` to both min and max for backwards compatibility).
-
-**Noise-modulated radius (Implemented):** A hybrid blend mode replaces or augments the sine wave with 3D OpenSimplex2 noise (`FastNoiseLite.CreateSimple()`) sampled at the worm's world position. Two new fields control this: `wormRadiusNoiseStrength` (0 = pure sine wave, 1 = pure noise) and `wormRadiusNoiseFrequency` (spatial frequency of the noise). The blend formula is:
+**Noise-modulated radius (Implemented):** A hybrid blend mode replaces or augments the sine wave with 3D OpenSimplex2 noise (`FastNoiseLite.CreateSimple()`) sampled at the worm's world position. Two fields on `WormShape` control this: `radiusNoiseStrength` (0 = pure sine wave, 1 = pure noise) and `radiusNoiseFrequency` (spatial frequency of the noise). The blend formula is:
 
 ```
 radiusFactor = lerp(sineWave, saturate(radiusNoise.GetNoise(pos) * 0.5 + 0.5), strength)
 radius = lerp(radiusMin, radiusMax, radiusFactor)
 ```
 
-Using the worm's 3D position as noise input makes each worm naturally unique (different paths sample different noise values) with spatially coherent variation (nearby steps produce smooth radius transitions). The sine wave remains available at strength 0 for structured rhythm. Trunk worms have equivalent `radiusNoiseStrength` / `radiusNoiseFrequency` fields on `TrunkWormConfig`. `BiomeConfigValidator` warns when noise is enabled but frequency is very low (< 0.02), which produces features too large to create visible variation.
+Using the worm's 3D position as noise input makes each worm naturally unique (different paths sample different noise values) with spatially coherent variation (nearby steps produce smooth radius transitions). The sine wave remains available at strength 0 for structured rhythm. Trunk worms share the same `WormShape` struct (via `TrunkWormConfig.shape`), so both tiers use identical radius noise fields. `BiomeConfigValidator` warns when noise is enabled but frequency is very low (< 0.02), which produces features too large to create visible variation.
 
 #### 3.1.3 Ellipsoidal Carving ~~(Optional, Lower Priority)~~ (Implemented)
 
@@ -230,7 +214,8 @@ if (math.lengthsq(delta) <= radSq) { /* carve */ }
 
 This is a simple change but significantly affects cave feel --- tunnels become wider hallways rather than circular tubes.
 
-**Implemented as:** `wormSquashFactor` + `wormSquashAxis` on `StandardCaveLayer` (per-biome local worms) and `squashFactor` + `squashAxis` on `TrunkWormConfig` (world-level trunk worms). Squash range `[0.3, 1.0]`, default `1.0` (sphere, backwards compatible). A `WormSquashAxis` enum (`Vertical` / `Horizontal`) selects the compressed axis: Vertical produces wider-than-tall hallways, Horizontal produces taller-than-wide fissures. The axis conversion is applied in the JobData constructors via `WormSquashAxisHelper.ToEffectiveSquash()` — `Horizontal` inverts
+**Implemented as:** `squashFactor` + `squashAxis` fields on the `WormShape` struct, shared by both `StandardCaveLayer.wormShape` (per-biome local worms) and `TrunkWormConfig.shape` (world-level trunk worms). Squash range `[0.3, 1.0]`, default `1.0` (sphere, backwards compatible). A `WormSquashAxis` enum (`Vertical` / `Horizontal`) selects the compressed axis: Vertical produces wider-than-tall hallways, Horizontal produces taller-than-wide fissures. The axis conversion is applied in the JobData constructors via `WormSquashAxisHelper.ToEffectiveSquash()` —
+`Horizontal` inverts
 the value (`1 / squash`) — so the Burst job always works with a single effective squash float. The Y bounding box of the carving loop is scaled to `radius * effectiveSquash`, and the chunk AABB early-out uses a bounding sphere that encloses the ellipsoid regardless of squash direction. `BiomeConfigValidator` warns when effective squash < 0.5 or > 2.0.
 
 #### 3.1.4 Y-Level Attraction (Implemented)
@@ -512,7 +497,7 @@ This is a **narrowing** of the current behavior: today all non-worm layers are s
 
 The `WorldGenPreviewWindow.BiomeEditor.cs` "Caves & Lodes" sub-tab (`DrawBeCavesLodesSubTab()`) currently renders cave zone config, the isolation filter, and the cave layers array via Unity's default `PropertyField`. Most new fields on `StandardCaveLayer` will appear automatically through the array drawer, but several changes require explicit UI work.
 
-**Phase 1 — No BiomeEditor changes needed.** New worm fields (`wormHorizontalBias`, `wormRadiusMin`, `wormRadiusMax`, `wormRadiusWaveCount`) are serialized on `StandardCaveLayer` and will render automatically via the default array property drawer.
+**Phase 1 — No BiomeEditor changes needed.** Worm shape fields are grouped in the `WormShape` struct on `StandardCaveLayer.wormShape` and render automatically as a foldout via the default array property drawer. `wormHorizontalBias` remains a standalone field.
 
 **Phase 2 — Per-layer zone attenuation UI:**
 
@@ -611,7 +596,7 @@ Layer Breakdown:
 
 - **Worm spawn count:** How many worms actually spawned in the grid vs how many chunks passed the spawn threshold. Validates that `wormSpawnChance` is calibrated correctly.
 - **Actual worm length distribution:** Average and histogram of steps taken vs configured `minLength`/`maxLength`. Detects early termination (worms hitting chunk boundaries) or unexpected extensions (noise seeking adding too many steps).
-- **Branch count and depth distribution:** How many branches were created per root worm, and at what depth. Validates `branchChance` and `maxBranchDepth` tuning.
+- **Branch count and depth distribution:** How many branches were created per root worm, and at what depth. Validates `WormBranching.branchChance` and `WormBranching.maxBranchDepth` tuning.
 - **Individual worm chunk span:** How many chunks each individual worm passes through (separate from the union-find merged network span, which conflates "one long worm" with "many short worms that happened to intersect").
 - **Seek success rate:** How often noise seeking found a target vs fired and found nothing. A low success rate indicates seekable layers are too sparse or seek distance is too short.
 
@@ -674,8 +659,8 @@ Trunk modifiers:  Desert trunkSpawnSuppression=0.5 | Mountain trunkVerticalBiasO
 
 ### Phase 1: Worm Carver Improvements
 
-1. Add `wormHorizontalBias`, `wormRadiusMin`, `wormRadiusMax`, `wormRadiusWaveCount` fields to `StandardCaveLayer`.
-2. Add corresponding fields to `StandardCaveLayerJobData`.
+1. Add `wormHorizontalBias` field and `WormShape wormShape` struct (containing `radiusMin`, `radiusMax`, `radiusWaveCount`, `squashAxis`, `squashFactor`, `radiusNoiseStrength`, `radiusNoiseFrequency`) to `StandardCaveLayer`.
+2. Add corresponding flat fields to `StandardCaveLayerJobData`.
 3. Implement horizontal bias (pitch lerp toward zero) in `StandardWormCarverJob`.
 4. Implement radius variation (sine wave modulation) in `StandardWormCarverJob`.
 5. Verify via `CaveDensityAnalyzer`: run Mountain biome before/after, compare network Y-span (should decrease with horizontal bias) and shape quality (should show more open blocks from wider sections).

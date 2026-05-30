@@ -356,52 +356,14 @@ namespace Data.WorldTypes
         public int maxWormsPerChunk = 3;
 
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Tooltip("The base radius of the worm cave in blocks. Superseded by wormRadiusMin/Max when radius variation is enabled.")]
+        [Tooltip("The base radius of the worm cave in blocks. Superseded by wormShape.radiusMin/radiusMax when radius variation is enabled.")]
         [Range(1f, 10f)]
         public float wormBaseRadius = 3f;
 
+        [Header("Worm Carver Shape")]
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Range(1f, 8f)]
-        [Tooltip("Minimum carving radius. Narrow squeezes along the tunnel.")]
-        public float wormRadiusMin = 2f;
-
-        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Range(2f, 12f)]
-        [Tooltip("Maximum carving radius. Wide chambers along the tunnel.")]
-        public float wormRadiusMax = 4f;
-
-        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Tooltip("Which axis the squash factor compresses. " +
-                 "Vertical = wider-than-tall hallways. Horizontal = taller-than-wide fissures.")]
-        public WormSquashAxis wormSquashAxis = WormSquashAxis.Vertical;
-
-        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Range(0.3f, 1f)]
-        [Tooltip("How much to compress the selected axis. " +
-                 "1.0 = spherical (circular cross-section, no squash). " +
-                 "0.6 = 40% compression along the selected axis. " +
-                 "Only affects the carved shape, not the worm's navigation path.")]
-        public float wormSquashFactor = 1f;
-
-        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Range(1, 8)]
-        [Tooltip("How many wide/narrow cycles occur along the worm's length. " +
-                 "1 = one pinch point. 4 = alternating every ~50 steps.")]
-        public int wormRadiusWaveCount = 3;
-
-        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Range(0f, 1f)]
-        [Tooltip("How much Perlin noise replaces the deterministic sine wave for radius variation. " +
-                 "0 = pure sine wave (current behavior). 0.5 = structured rhythm + organic variation. " +
-                 "1.0 = fully noise-driven (unpredictable width changes).")]
-        public float wormRadiusNoiseStrength;
-
-        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Range(0.01f, 0.5f)]
-        [Tooltip("Spatial frequency of the radius noise. Lower values produce long, gradual width changes. " +
-                 "Higher values produce more frequent, localized pinches and bulges. " +
-                 "Only used when wormRadiusNoiseStrength > 0.")]
-        public float wormRadiusNoiseFrequency = 0.1f;
+        [Tooltip("Cross-section shape configuration controlling radius variation, squash profile, and noise modulation.")]
+        public WormShape wormShape = WormShape.Default;
 
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
         [Tooltip("How strongly the worm perturbs its pitch/yaw angles per step.")]
@@ -433,14 +395,8 @@ namespace Data.WorldTypes
 
         [Header("Worm Carver Branching")]
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Tooltip("Probability [0, 1] per step that a worm will split and spawn a child worm.")]
-        [Range(0f, 0.2f)]
-        public float wormBranchChance = 0.05f;
-
-        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
-        [Tooltip("How many generations of children are allowed (e.g., 0 = single worm, 1 = children allowed, 2 = grandchildren allowed).")]
-        [Range(0, 5)]
-        public int maxBranchDepth = 2;
+        [Tooltip("Branching configuration controlling how worms split into child tunnels.")]
+        public WormBranching wormBranching = WormBranching.Default;
 
         [Header("Worm Carver Noise Seeking")]
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
@@ -473,6 +429,104 @@ namespace Data.WorldTypes
             checkInterval = 10,
             seekDistance = 10f,
             seekChance = 0.5f,
+        };
+    }
+
+    /// <summary>
+    /// Groups the cross-section shape parameters for worm carvers.
+    /// Controls radius variation, elliptical squash, and noise-modulated width along the tunnel.
+    /// </summary>
+    [Serializable]
+    public struct WormShape
+    {
+        [Range(1f, 8f)]
+        [Tooltip("Minimum carving radius. Narrow squeezes along the tunnel.")]
+        public float radiusMin;
+
+        [Range(2f, 12f)]
+        [Tooltip("Maximum carving radius. Wide chambers along the tunnel.")]
+        public float radiusMax;
+
+        [Tooltip("Which axis the squash factor compresses. " +
+                 "Vertical = wider-than-tall hallways. Horizontal = taller-than-wide fissures.")]
+        public WormSquashAxis squashAxis;
+
+        [Range(0.3f, 1f)]
+        [Tooltip("How much to compress the selected axis. " +
+                 "1.0 = spherical (circular cross-section, no squash). " +
+                 "0.6 = 40% compression along the selected axis. " +
+                 "Only affects the carved shape, not the worm's navigation path.")]
+        public float squashFactor;
+
+        [Range(1, 8)]
+        [Tooltip("How many wide/narrow cycles occur along the worm's length. " +
+                 "1 = one pinch point. 4 = alternating every ~50 steps.")]
+        public int radiusWaveCount;
+
+        [Range(0f, 1f)]
+        [Tooltip("How much Perlin noise replaces the deterministic sine wave for radius variation. " +
+                 "0 = pure sine wave. 0.5 = structured rhythm + organic variation. " +
+                 "1.0 = fully noise-driven (unpredictable width changes).")]
+        public float radiusNoiseStrength;
+
+        [Range(0.01f, 0.5f)]
+        [Tooltip("Spatial frequency of the radius noise. Lower values produce long, gradual width changes. " +
+                 "Higher values produce more frequent, localized pinches and bulges. " +
+                 "Only used when radiusNoiseStrength > 0.")]
+        public float radiusNoiseFrequency;
+
+        /// <summary>Default values for local (per-biome) worms: radius [2, 4], no squash, no noise.</summary>
+        public static WormShape Default => new WormShape
+        {
+            radiusMin = 2f,
+            radiusMax = 4f,
+            squashAxis = WormSquashAxis.Vertical,
+            squashFactor = 1f,
+            radiusWaveCount = 3,
+            radiusNoiseStrength = 0f,
+            radiusNoiseFrequency = 0.1f,
+        };
+
+        /// <summary>Default values for trunk worms: radius [3, 5], no squash, no noise.</summary>
+        public static WormShape TrunkDefault => new WormShape
+        {
+            radiusMin = 3f,
+            radiusMax = 5f,
+            squashAxis = WormSquashAxis.Vertical,
+            squashFactor = 1f,
+            radiusWaveCount = 3,
+            radiusNoiseStrength = 0f,
+            radiusNoiseFrequency = 0.1f,
+        };
+    }
+
+    /// <summary>
+    /// Groups the branching parameters for worm carvers.
+    /// Controls how worms split into child tunnels during their random walk.
+    /// </summary>
+    [Serializable]
+    public struct WormBranching
+    {
+        [Range(0f, 0.2f)]
+        [Tooltip("Probability [0, 1] per step that a worm will split and spawn a child worm.")]
+        public float branchChance;
+
+        [Range(0, 5)]
+        [Tooltip("How many generations of children are allowed (e.g., 0 = single worm, 1 = children allowed, 2 = grandchildren allowed).")]
+        public int maxBranchDepth;
+
+        /// <summary>Default values for local (per-biome) worms: 5% chance, depth 2.</summary>
+        public static WormBranching Default => new WormBranching
+        {
+            branchChance = 0.05f,
+            maxBranchDepth = 2,
+        };
+
+        /// <summary>Default values for trunk worms: 3% chance, depth 1.</summary>
+        public static WormBranching TrunkDefault => new WormBranching
+        {
+            branchChance = 0.03f,
+            maxBranchDepth = 1,
         };
     }
 

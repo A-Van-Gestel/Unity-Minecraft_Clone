@@ -86,12 +86,12 @@ namespace Jobs.Data
             DepthFadeMargin = layerConfig.depthFadeMargin;
 
             WormBaseRadius = layerConfig.wormBaseRadius;
-            WormRadiusMin = layerConfig.wormRadiusMin;
-            WormRadiusMax = layerConfig.wormRadiusMax;
-            WormSquashFactor = WormSquashAxisHelper.ToEffectiveSquash(layerConfig.wormSquashAxis, layerConfig.wormSquashFactor);
-            WormRadiusWaveCount = layerConfig.wormRadiusWaveCount;
-            WormRadiusNoiseStrength = layerConfig.wormRadiusNoiseStrength;
-            WormRadiusNoiseFrequency = layerConfig.wormRadiusNoiseFrequency;
+            WormRadiusMin = layerConfig.wormShape.radiusMin;
+            WormRadiusMax = layerConfig.wormShape.radiusMax;
+            WormSquashFactor = WormSquashAxisHelper.ToEffectiveSquash(layerConfig.wormShape.squashAxis, layerConfig.wormShape.squashFactor);
+            WormRadiusWaveCount = layerConfig.wormShape.radiusWaveCount;
+            WormRadiusNoiseStrength = layerConfig.wormShape.radiusNoiseStrength;
+            WormRadiusNoiseFrequency = layerConfig.wormShape.radiusNoiseFrequency;
             WormWaviness = layerConfig.wormWaviness;
             WormHorizontalBias = layerConfig.wormHorizontalBias;
             WormYAttractionStrength = layerConfig.wormYAttraction.strength;
@@ -102,8 +102,8 @@ namespace Jobs.Data
             WormSpawnChance = layerConfig.wormSpawnChance;
             MaxWormsPerChunk = layerConfig.maxWormsPerChunk;
 
-            WormBranchChance = layerConfig.wormBranchChance;
-            MaxBranchDepth = layerConfig.maxBranchDepth;
+            WormBranchChance = layerConfig.wormBranching.branchChance;
+            MaxBranchDepth = layerConfig.wormBranching.maxBranchDepth;
 
             WormSeekInterval = layerConfig.wormNoiseSeeking.checkInterval;
             WormSeekDistance = layerConfig.wormNoiseSeeking.seekDistance;
@@ -162,12 +162,12 @@ namespace Jobs.Data
             Enabled = config.enabled;
             SpawnChance = config.spawnChance;
             MaxWormsPerCell = config.maxWormsPerCell;
-            RadiusMin = config.radiusMin;
-            RadiusMax = config.radiusMax;
-            SquashFactor = WormSquashAxisHelper.ToEffectiveSquash(config.squashAxis, config.squashFactor);
-            RadiusWaveCount = config.radiusWaveCount;
-            RadiusNoiseStrength = config.radiusNoiseStrength;
-            RadiusNoiseFrequency = config.radiusNoiseFrequency;
+            RadiusMin = config.shape.radiusMin;
+            RadiusMax = config.shape.radiusMax;
+            SquashFactor = WormSquashAxisHelper.ToEffectiveSquash(config.shape.squashAxis, config.shape.squashFactor);
+            RadiusWaveCount = config.shape.radiusWaveCount;
+            RadiusNoiseStrength = config.shape.radiusNoiseStrength;
+            RadiusNoiseFrequency = config.shape.radiusNoiseFrequency;
             Waviness = config.waviness;
             HorizontalBias = config.horizontalBias;
             YAttractionStrength = config.yAttraction.strength;
@@ -177,8 +177,8 @@ namespace Jobs.Data
             MaxLength = config.maxLength;
             MinHeight = config.minHeight;
             MaxHeight = config.maxHeight;
-            BranchChance = config.branchChance;
-            MaxBranchDepth = config.maxBranchDepth;
+            BranchChance = config.branching.branchChance;
+            MaxBranchDepth = config.branching.maxBranchDepth;
             SeekInterval = config.noiseSeeking.checkInterval;
             SeekDistance = config.noiseSeeking.seekDistance;
             SeekChance = config.noiseSeeking.seekChance;

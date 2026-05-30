@@ -462,13 +462,14 @@ MonoBehaviour:
     wormSpawnChance: 0.04
     maxWormsPerChunk: 2
     wormBaseRadius: 2.5
-    wormRadiusMin: 1.5
-    wormRadiusMax: 3
-    wormSquashAxis: 0
-    wormSquashFactor: 1
-    wormRadiusWaveCount: 3
-    wormRadiusNoiseStrength: 0
-    wormRadiusNoiseFrequency: 0.1
+    wormShape:
+      radiusMin: 1.5
+      radiusMax: 3
+      squashAxis: 0
+      squashFactor: 1
+      radiusWaveCount: 3
+      radiusNoiseStrength: 0
+      radiusNoiseFrequency: 0.1
     wormWaviness: 0.5
     wormHorizontalBias: 0.55
     wormYAttraction:
@@ -477,8 +478,9 @@ MonoBehaviour:
       maxY: 40
     wormMinLength: 40
     wormMaxLength: 100
-    wormBranchChance: 0.06
-    maxBranchDepth: 2
+    wormBranching:
+      branchChance: 0.06
+      maxBranchDepth: 2
     wormNoiseSeeking:
       checkInterval: 10
       seekDistance: 10
@@ -531,13 +533,14 @@ MonoBehaviour:
     wormSpawnChance: 1
     maxWormsPerChunk: 3
     wormBaseRadius: 3
-    wormRadiusMin: 2
-    wormRadiusMax: 4
-    wormSquashAxis: 0
-    wormSquashFactor: 1
-    wormRadiusWaveCount: 3
-    wormRadiusNoiseStrength: 0
-    wormRadiusNoiseFrequency: 0.1
+    wormShape:
+      radiusMin: 2
+      radiusMax: 4
+      squashAxis: 0
+      squashFactor: 1
+      radiusWaveCount: 3
+      radiusNoiseStrength: 0
+      radiusNoiseFrequency: 0.1
     wormWaviness: 0.5
     wormHorizontalBias: 0.5
     wormYAttraction:
@@ -546,8 +549,9 @@ MonoBehaviour:
       maxY: 40
     wormMinLength: 50
     wormMaxLength: 200
-    wormBranchChance: 0.05
-    maxBranchDepth: 2
+    wormBranching:
+      branchChance: 0.05
+      maxBranchDepth: 2
     wormNoiseSeeking:
       checkInterval: 10
       seekDistance: 10

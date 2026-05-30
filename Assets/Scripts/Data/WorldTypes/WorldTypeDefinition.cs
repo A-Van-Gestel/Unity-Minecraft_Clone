@@ -69,37 +69,8 @@ namespace Data.WorldTypes
         public int maxWormsPerCell = 1;
 
         [Header("Shape")]
-        [Range(2f, 8f)]
-        [Tooltip("Minimum carving radius. Narrow squeezes along the trunk tunnel.")]
-        public float radiusMin = 3f;
-
-        [Range(3f, 12f)]
-        [Tooltip("Maximum carving radius. Wide chambers along the trunk tunnel.")]
-        public float radiusMax = 5f;
-
-        [Tooltip("Which axis the squash factor compresses. " +
-                 "Vertical = wider-than-tall hallways. Horizontal = taller-than-wide fissures.")]
-        public WormSquashAxis squashAxis = WormSquashAxis.Vertical;
-
-        [Range(0.3f, 1f)]
-        [Tooltip("How much to compress the selected axis. " +
-                 "1.0 = spherical (circular cross-section, no squash). " +
-                 "0.6 = 40% compression along the selected axis. " +
-                 "Only affects the carved shape, not the worm's navigation path.")]
-        public float squashFactor = 1f;
-
-        [Range(1, 8)]
-        [Tooltip("How many wide/narrow cycles occur along the trunk worm's length.")]
-        public int radiusWaveCount = 3;
-
-        [Range(0f, 1f)]
-        [Tooltip("How much Perlin noise replaces the deterministic sine wave for radius variation. " +
-                 "0 = pure sine wave. 1.0 = fully noise-driven.")]
-        public float radiusNoiseStrength;
-
-        [Range(0.01f, 0.5f)]
-        [Tooltip("Spatial frequency of the radius noise. Lower = gradual width changes, higher = frequent pinches.")]
-        public float radiusNoiseFrequency = 0.1f;
+        [Tooltip("Cross-section shape configuration controlling radius variation, squash profile, and noise modulation.")]
+        public WormShape shape = WormShape.TrunkDefault;
 
         [Range(0.1f, 1f)]
         [Tooltip("How strongly the trunk worm perturbs its pitch/yaw angles per step.")]
@@ -131,13 +102,8 @@ namespace Data.WorldTypes
         public WormYAttraction yAttraction = WormYAttraction.TrunkDefault;
 
         [Header("Branching")]
-        [Range(0f, 0.1f)]
-        [Tooltip("Probability per step that a trunk worm splits. Keep low (0.02-0.04) for occasional forks.")]
-        public float branchChance = 0.03f;
-
-        [Range(0, 3)]
-        [Tooltip("Maximum branch depth for trunk worms.")]
-        public int maxBranchDepth = 1;
+        [Tooltip("Branching configuration controlling how trunk worms split into child tunnels.")]
+        public WormBranching branching = WormBranching.TrunkDefault;
 
         [Header("Noise Seeking")]
         [Tooltip("Noise seeking configuration for trunk worms. Trunk worms seek layers flagged with isSeekableByTrunkWorms.")]

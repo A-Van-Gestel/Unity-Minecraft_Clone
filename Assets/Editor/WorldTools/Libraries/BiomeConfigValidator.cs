@@ -373,13 +373,13 @@ namespace Editor.WorldTools.Libraries
 
                 string name = string.IsNullOrEmpty(cave.layerName) ? $"Cave Layer {i}" : cave.layerName;
 
-                if (cave.wormRadiusMin > cave.wormRadiusMax)
+                if (cave.wormShape.radiusMin > cave.wormShape.radiusMax)
                 {
                     results.Add(new BiomeValidationResult
                     {
                         Severity = ValidationSeverity.Warning,
                         SubTabIndex = SUB_TAB_CAVES,
-                        Message = $"\"{name}\": wormRadiusMin ({cave.wormRadiusMin:F1}) > wormRadiusMax ({cave.wormRadiusMax:F1}) — " +
+                        Message = $"\"{name}\": radiusMin ({cave.wormShape.radiusMin:F1}) > radiusMax ({cave.wormShape.radiusMax:F1}) — " +
                                   "the radius wave is inverted (pinch points will be widest).",
                     });
                 }
@@ -397,10 +397,10 @@ namespace Editor.WorldTools.Libraries
             {
                 StandardCaveLayer cave = biome.caveLayers[i];
                 if (cave.mode != CaveMode.WormCarver) continue;
-                if (cave.wormRadiusNoiseStrength <= 0f) continue;
+                if (cave.wormShape.radiusNoiseStrength <= 0f) continue;
 
                 string name = string.IsNullOrEmpty(cave.layerName) ? $"Cave Layer {i}" : cave.layerName;
-                ValidateRadiusNoiseFrequency(cave.wormRadiusNoiseFrequency, name, SUB_TAB_CAVES, results);
+                ValidateRadiusNoiseFrequency(cave.wormShape.radiusNoiseFrequency, name, SUB_TAB_CAVES, results);
             }
         }
 
@@ -418,9 +418,9 @@ namespace Editor.WorldTools.Libraries
                 if (cave.mode != CaveMode.WormCarver) continue;
 
                 string name = string.IsNullOrEmpty(cave.layerName) ? $"Cave Layer {i}" : cave.layerName;
-                float effective = WormSquashAxisHelper.ToEffectiveSquash(cave.wormSquashAxis, cave.wormSquashFactor);
+                float effective = WormSquashAxisHelper.ToEffectiveSquash(cave.wormShape.squashAxis, cave.wormShape.squashFactor);
 
-                ValidateEffectiveSquash(effective, cave.wormSquashAxis, cave.wormSquashFactor, name, SUB_TAB_CAVES, results);
+                ValidateEffectiveSquash(effective, cave.wormShape.squashAxis, cave.wormShape.squashFactor, name, SUB_TAB_CAVES, results);
             }
         }
 
@@ -454,28 +454,89 @@ namespace Editor.WorldTools.Libraries
             List<BiomeValidationResult> results = new List<BiomeValidationResult>();
             if (config == null || !config.enabled) return results;
 
-            if (config.radiusMin > config.radiusMax)
+            if (config.shape.radiusMin > config.shape.radiusMax)
             {
                 results.Add(new BiomeValidationResult
                 {
                     Severity = ValidationSeverity.Warning,
                     SubTabIndex = SUB_TAB_CAVES,
-                    Message = $"Trunk Worm: radiusMin ({config.radiusMin:F1}) > radiusMax ({config.radiusMax:F1}) — " +
+                    Message = $"Trunk Worm: radiusMin ({config.shape.radiusMin:F1}) > radiusMax ({config.shape.radiusMax:F1}) — " +
                               "the radius wave is inverted (pinch points will be widest).",
                 });
             }
 
-            float effective = WormSquashAxisHelper.ToEffectiveSquash(config.squashAxis, config.squashFactor);
-            ValidateEffectiveSquash(effective, config.squashAxis, config.squashFactor, "Trunk Worm", SUB_TAB_CAVES, results);
+            float effective = WormSquashAxisHelper.ToEffectiveSquash(config.shape.squashAxis, config.shape.squashFactor);
+            ValidateEffectiveSquash(effective, config.shape.squashAxis, config.shape.squashFactor, "Trunk Worm", SUB_TAB_CAVES, results);
 
-            if (config.radiusNoiseStrength > 0f)
-                ValidateRadiusNoiseFrequency(config.radiusNoiseFrequency, "Trunk Worm", SUB_TAB_CAVES, results);
+            if (config.shape.radiusNoiseStrength > 0f)
+                ValidateRadiusNoiseFrequency(config.shape.radiusNoiseFrequency, "Trunk Worm", SUB_TAB_CAVES, results);
 
             if (config.yAttraction.strength > 0f)
                 ValidateYAttractionParams(config.yAttraction.minY, config.yAttraction.maxY, config.yAttraction.strength,
                     config.minHeight, config.maxHeight, "Trunk Worm", SUB_TAB_CAVES, results);
 
+            ValidateTrunkShapeRanges(config, results);
+            ValidateTrunkBranchingRanges(config, results);
+
             return results;
+        }
+
+        /// <summary>
+        /// Validates trunk-specific shape range constraints that are stricter than the shared <see cref="WormShape"/> attribute ranges.
+        /// Trunk worms need wider tunnels (radiusMin >= 2, radiusMax >= 3) to serve as cave highways.
+        /// </summary>
+        private static void ValidateTrunkShapeRanges(TrunkWormConfig config, List<BiomeValidationResult> results)
+        {
+            if (config.shape.radiusMin < 2f)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = $"Trunk Worm: radiusMin ({config.shape.radiusMin:F1}) is below 2 — " +
+                              "trunk worms should carve wide cave highways, not narrow passages.",
+                });
+            }
+
+            if (config.shape.radiusMax < 3f)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = $"Trunk Worm: radiusMax ({config.shape.radiusMax:F1}) is below 3 — " +
+                              "trunk wide chambers should be at least 3 blocks to distinguish from local worms.",
+                });
+            }
+        }
+
+        /// <summary>
+        /// Validates trunk-specific branching constraints that are stricter than the shared <see cref="WormBranching"/> attribute ranges.
+        /// Trunk worms are long (200-400 steps) so high branch chance or depth causes combinatorial explosion.
+        /// </summary>
+        private static void ValidateTrunkBranchingRanges(TrunkWormConfig config, List<BiomeValidationResult> results)
+        {
+            if (config.branching.branchChance > 0.1f)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = $"Trunk Worm: branchChance ({config.branching.branchChance:F2}) exceeds 0.1 — " +
+                              "trunk worms are long (200-400 steps), so high branch rates cause excessive sub-tunnel generation.",
+                });
+            }
+
+            if (config.branching.maxBranchDepth > 3)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = $"Trunk Worm: maxBranchDepth ({config.branching.maxBranchDepth}) exceeds 3 — " +
+                              "deep branching on long trunk worms causes exponential growth in worm walker count.",
+                });
+            }
         }
 
         /// <summary>
