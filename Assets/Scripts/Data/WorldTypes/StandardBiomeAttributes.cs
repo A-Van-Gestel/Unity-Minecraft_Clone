@@ -159,6 +159,12 @@ namespace Data.WorldTypes
         [Range(-1f, 1f)]
         public float trunkVerticalBiasOverride = -1f;
 
+        [Tooltip("Per-biome override of the trunk worm's Y attraction band center. " +
+                 "-1 = disabled (use the world-level trunk config band). " +
+                 "Shifts the band center while preserving the global band width. " +
+                 "E.g., Mountain sets 20 to attract trunks deeper; Desert sets 40 for shallower highways.")]
+        public float trunkYAttractionCenterOverride = -1f;
+
         [Tooltip("Layered noise configurations for generating 3D caves (e.g., cheese and spaghetti networks).")]
         public StandardCaveLayer[] caveLayers;
     }
@@ -410,6 +416,11 @@ namespace Data.WorldTypes
                  "1.0 = strongly horizontal with only brief vertical dips.")]
         public float wormHorizontalBias = 0.5f;
 
+        [Header("Worm Carver Y-Level Attraction")]
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Tooltip("Y-level attraction configuration controlling how worms are pulled toward a target depth band.")]
+        public WormYAttraction wormYAttraction = WormYAttraction.Default;
+
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
         [Tooltip("Minimum number of steps the worm will march.")]
         [Range(10, 200)]
@@ -462,6 +473,45 @@ namespace Data.WorldTypes
             checkInterval = 10,
             seekDistance = 10f,
             seekChance = 0.5f,
+        };
+    }
+
+    /// <summary>
+    /// Groups the Y-level attraction parameters for worm carvers.
+    /// These three fields always belong together: strength gates the feature, min/max define the target band.
+    /// </summary>
+    [Serializable]
+    public struct WormYAttraction
+    {
+        [Range(0f, 1f)]
+        [Tooltip("How strongly the worm is pulled toward the Y attraction band. " +
+                 "0 = disabled (default, no vertical preference). " +
+                 "0.3 = gentle drift toward band. " +
+                 "0.7 = strong channeling into band.")]
+        public float strength;
+
+        [Tooltip("Lower bound of the target Y band. No vertical force when inside [min, max]. " +
+                 "Set equal to max for single-level attraction.")]
+        public float minY;
+
+        [Tooltip("Upper bound of the target Y band. No vertical force when inside [min, max]. " +
+                 "Set equal to min for single-level attraction.")]
+        public float maxY;
+
+        /// <summary>Default values: disabled (strength 0), band [20, 40].</summary>
+        public static WormYAttraction Default => new WormYAttraction
+        {
+            strength = 0f,
+            minY = 20f,
+            maxY = 40f,
+        };
+
+        /// <summary>Default values for trunk worms: disabled (strength 0), band [15, 35].</summary>
+        public static WormYAttraction TrunkDefault => new WormYAttraction
+        {
+            strength = 0f,
+            minY = 15f,
+            maxY = 35f,
         };
     }
 }

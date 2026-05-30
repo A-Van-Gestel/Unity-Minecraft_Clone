@@ -233,6 +233,24 @@ This is a simple change but significantly affects cave feel --- tunnels become w
 **Implemented as:** `wormSquashFactor` + `wormSquashAxis` on `StandardCaveLayer` (per-biome local worms) and `squashFactor` + `squashAxis` on `TrunkWormConfig` (world-level trunk worms). Squash range `[0.3, 1.0]`, default `1.0` (sphere, backwards compatible). A `WormSquashAxis` enum (`Vertical` / `Horizontal`) selects the compressed axis: Vertical produces wider-than-tall hallways, Horizontal produces taller-than-wide fissures. The axis conversion is applied in the JobData constructors via `WormSquashAxisHelper.ToEffectiveSquash()` — `Horizontal` inverts
 the value (`1 / squash`) — so the Burst job always works with a single effective squash float. The Y bounding box of the carving loop is scaled to `radius * effectiveSquash`, and the chunk AABB early-out uses a bounding sphere that encloses the ellipsoid regardless of squash direction. `BiomeConfigValidator` warns when effective squash < 0.5 or > 2.0.
 
+#### 3.1.4 Y-Level Attraction (Implemented)
+
+**Problem:** Worms have no preference for which Y level they settle at after spawning. The horizontal bias (Section 3.1.1) keeps them level but doesn't steer toward a target depth. Over long worms (150+ steps), random-walk drift spreads caves uniformly across the height range instead of concentrating them at specific depth bands.
+
+**Solution:** A Y-band attraction system applies a per-step restoring force toward a configurable `[yAttractionMin, yAttractionMax]` band. Inside the band, no force is applied. Outside, the worm's pitch is nudged toward the nearest band edge proportionally to distance:
+
+```
+float yDelta = select(0, yAttrMax - pos.y, pos.y > yAttrMax);
+yDelta = select(yDelta, yAttrMin - pos.y, pos.y < yAttrMin);
+float desiredPitch = clamp(atan2(yDelta, 16f), -PI * 0.3, PI * 0.3);
+pitch = lerp(pitch, desiredPitch, yAttractionStrength * 0.1f);
+```
+
+The `16f` denominator models a virtual target 16 blocks ahead horizontally, producing gentle arcs. The `* 0.1f` scaling matches horizontal bias --- each step nudges pitch 5% at strength 0.5, accumulating over 40-50 steps into a smooth correction.
+
+**Implemented as:** A `WormYAttraction` serializable struct (matching the `WormNoiseSeeking` grouping pattern) with fields `strength` (0-1, default 0 = disabled), `minY`, and `maxY`. Used as `wormYAttraction` on `StandardCaveLayer` (per-biome local worms, default band [20, 40]) and `yAttraction` on `TrunkWormConfig` (world-level trunk worms, default band [15, 35]). Per-biome override via `trunkYAttractionCenterOverride` on `StandardBiomeAttributes` --- shifts the trunk band center while preserving the global band width (same pattern as
+`trunkVerticalBiasOverride`). Job data structs keep the fields flat (`WormYAttractionStrength`, `WormYAttractionMin`, `WormYAttractionMax`) for Burst blittability. Applied in `SimulateWormStack` after horizontal bias and before noise seeking. The runtime normalizes `min <= max` via `math.min`/`math.max` to guard against inverted config. `BiomeConfigValidator` warns when the attraction band is inverted, doesn't overlap the spawn height range, or strength exceeds 0.8.
+
 ### 3.2 Zone Attenuation: Per-Layer Opt-In
 
 **Problem:** Zone Attenuation currently applies globally to all cave layers in a biome. This makes sense for suppressing Noodle everywhere, but it also suppresses Worm Carvers and Cheese chambers that don't need it.
@@ -710,7 +728,7 @@ Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 —
 
 - ~~**Ellipsoidal carving** for wider-than-tall worm profiles.~~ (Implemented --- see Section 3.1.3)
 - ~~**Worm radius noise** (Perlin-modulated radius instead of sine wave) for less predictable width variation.~~ (Implemented --- see Section 3.1.2)
-- **Worm Y-level attraction** (tendency to carve toward specific Y bands, e.g., diamond-level in Minecraft terms).
+- ~~**Worm Y-level attraction** (tendency to carve toward specific Y bands, e.g., diamond-level in Minecraft terms).~~ (Implemented --- see Section 3.1.4)
 - **Spaghetti revival** --- if the 2D repetition problem can be solved (3D noise pairs, per-axis domain warp), Spaghetti could return as an alternative connectivity generator.
 - **CaveDensityAnalyzer fix** for non-WorldType biomes and trunk worm support (see Section 4.3 known limitations).
 - **Trunk traversal blocking** --- `trunkTraversalAllowed` flag per biome to terminate trunks entering biomes where underground caves make no sense (e.g., ocean).

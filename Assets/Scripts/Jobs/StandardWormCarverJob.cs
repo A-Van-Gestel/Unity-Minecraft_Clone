@@ -74,6 +74,9 @@ namespace Jobs
             public float RadiusNoiseFrequency;
             public float Waviness;
             public float HorizontalBias;
+            public float YAttractionStrength;
+            public float YAttractionMin;
+            public float YAttractionMax;
             public float BranchChance;
             public int MaxBranchDepth;
             public int MinLength;
@@ -172,6 +175,9 @@ namespace Jobs
                                 RadiusNoiseFrequency = TrunkConfig.RadiusNoiseFrequency,
                                 Waviness = TrunkConfig.Waviness,
                                 HorizontalBias = TrunkConfig.HorizontalBias,
+                                YAttractionStrength = TrunkConfig.YAttractionStrength,
+                                YAttractionMin = TrunkConfig.YAttractionMin,
+                                YAttractionMax = TrunkConfig.YAttractionMax,
                                 BranchChance = TrunkConfig.BranchChance,
                                 MaxBranchDepth = TrunkConfig.MaxBranchDepth,
                                 MinLength = TrunkConfig.MinLength,
@@ -239,6 +245,9 @@ namespace Jobs
                             RadiusNoiseFrequency = caveLayer.WormRadiusNoiseFrequency,
                             Waviness = caveLayer.WormWaviness,
                             HorizontalBias = caveLayer.WormHorizontalBias,
+                            YAttractionStrength = caveLayer.WormYAttractionStrength,
+                            YAttractionMin = caveLayer.WormYAttractionMin,
+                            YAttractionMax = caveLayer.WormYAttractionMax,
                             BranchChance = caveLayer.WormBranchChance,
                             MaxBranchDepth = caveLayer.MaxBranchDepth,
                             MinLength = caveLayer.WormMinLength,
@@ -350,6 +359,37 @@ namespace Jobs
                     }
 
                     pitch = math.lerp(pitch, 0f, effectiveBias * 0.1f);
+
+                    // Y-level attraction — pulls pitch toward a target depth band
+                    if (p.YAttractionStrength > 0f)
+                    {
+                        float yAttrMin = p.YAttractionMin;
+                        float yAttrMax = p.YAttractionMax;
+
+                        if (p.IsTrunk)
+                        {
+                            float centerOverride = Biomes[cachedStepBiomeIdx].TrunkYAttractionCenterOverride;
+                            if (centerOverride >= 0f)
+                            {
+                                float halfWidth = (yAttrMax - yAttrMin) * 0.5f;
+                                yAttrMin = centerOverride - halfWidth;
+                                yAttrMax = centerOverride + halfWidth;
+                            }
+                        }
+
+                        // Normalize so min <= max (guards against inverted config)
+                        float safeMin = math.min(yAttrMin, yAttrMax);
+                        float safeMax = math.max(yAttrMin, yAttrMax);
+
+                        float yDelta = math.select(0f, safeMax - pos.y, pos.y > safeMax);
+                        yDelta = math.select(yDelta, safeMin - pos.y, pos.y < safeMin);
+
+                        if (yDelta != 0f)
+                        {
+                            float desiredPitch = math.clamp(math.atan2(yDelta, 16f), -math.PI * 0.3f, math.PI * 0.3f);
+                            pitch = math.lerp(pitch, desiredPitch, p.YAttractionStrength * 0.1f);
+                        }
+                    }
 
                     // Seeking Phase
                     if (p.SeekInterval > 0 && step % p.SeekInterval == 0 && rand.NextFloat() < p.SeekChance)

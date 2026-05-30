@@ -511,10 +511,13 @@ namespace Editor.WorldTools
                                              "<b>Spawn Suppression</b> — Reduces the chance of trunks <i>originating</i> here (0 = normal, 1 = no trunk spawns). " +
                                              "Trunks from neighbors still pass through.\n" +
                                              "<b>Vertical Bias Override</b> — Per-step override of the trunk's horizontal bias while passing through this biome. " +
+                                             "-1 = disabled (use world-level value).\n" +
+                                             "<b>Y-Attraction Center Override</b> — Shifts the trunk's Y attraction band center for this biome, preserving the global band width. " +
                                              "-1 = disabled (use world-level value).");
             EditorUILayoutHelper.BeginGroup();
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("trunkSpawnSuppression"));
             EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("trunkVerticalBiasOverride"));
+            EditorGUILayout.PropertyField(_biomeSerializedObject.FindProperty("trunkYAttractionCenterOverride"));
             EditorUILayoutHelper.EndGroup();
 
             EditorGUILayout.Space(8);

@@ -53,6 +53,9 @@ namespace Jobs.Data
         public readonly float WormRadiusNoiseFrequency;
         public readonly float WormWaviness;
         public readonly float WormHorizontalBias;
+        public readonly float WormYAttractionStrength;
+        public readonly float WormYAttractionMin;
+        public readonly float WormYAttractionMax;
         public readonly int WormMinLength;
         public readonly int WormMaxLength;
         public readonly float WormSpawnChance;
@@ -91,6 +94,9 @@ namespace Jobs.Data
             WormRadiusNoiseFrequency = layerConfig.wormRadiusNoiseFrequency;
             WormWaviness = layerConfig.wormWaviness;
             WormHorizontalBias = layerConfig.wormHorizontalBias;
+            WormYAttractionStrength = layerConfig.wormYAttraction.strength;
+            WormYAttractionMin = layerConfig.wormYAttraction.minY;
+            WormYAttractionMax = layerConfig.wormYAttraction.maxY;
             WormMinLength = layerConfig.wormMinLength;
             WormMaxLength = layerConfig.wormMaxLength;
             WormSpawnChance = layerConfig.wormSpawnChance;
@@ -127,6 +133,9 @@ namespace Jobs.Data
         public readonly float RadiusNoiseFrequency;
         public readonly float Waviness;
         public readonly float HorizontalBias;
+        public readonly float YAttractionStrength;
+        public readonly float YAttractionMin;
+        public readonly float YAttractionMax;
 
         public readonly int MinLength;
         public readonly int MaxLength;
@@ -161,6 +170,9 @@ namespace Jobs.Data
             RadiusNoiseFrequency = config.radiusNoiseFrequency;
             Waviness = config.waviness;
             HorizontalBias = config.horizontalBias;
+            YAttractionStrength = config.yAttraction.strength;
+            YAttractionMin = config.yAttraction.minY;
+            YAttractionMax = config.yAttraction.maxY;
             MinLength = config.minLength;
             MaxLength = config.maxLength;
             MinHeight = config.minHeight;

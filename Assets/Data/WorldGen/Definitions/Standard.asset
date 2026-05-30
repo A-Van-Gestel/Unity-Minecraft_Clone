@@ -28,13 +28,21 @@ MonoBehaviour:
     maxWormsPerCell: 1
     radiusMin: 3
     radiusMax: 5
+    squashAxis: 0
+    squashFactor: 1
     radiusWaveCount: 3
+    radiusNoiseStrength: 0
+    radiusNoiseFrequency: 0.1
     waviness: 0.33
     horizontalBias: 0.7
     minLength: 200
     maxLength: 400
     minHeight: 10
     maxHeight: 50
+    yAttraction:
+      strength: 0
+      minY: 15
+      maxY: 35
     branchChance: 0.03
     maxBranchDepth: 1
     noiseSeeking:

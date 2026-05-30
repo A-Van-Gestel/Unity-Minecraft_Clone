@@ -358,6 +358,7 @@ MonoBehaviour:
   minCavePocketSize: 12
   trunkSpawnSuppression: 0
   trunkVerticalBiasOverride: 0.3
+  trunkYAttractionCenterOverride: -1
   caveLayers:
   - layerName: Worm Carver
     previewColor: {r: 1, g: 0, b: 0.7748437, a: 1}
@@ -409,9 +410,17 @@ MonoBehaviour:
     wormBaseRadius: 3
     wormRadiusMin: 2
     wormRadiusMax: 4
+    wormSquashAxis: 0
+    wormSquashFactor: 1
     wormRadiusWaveCount: 3
+    wormRadiusNoiseStrength: 0
+    wormRadiusNoiseFrequency: 0.1
     wormWaviness: 0.33
     wormHorizontalBias: 0.2
+    wormYAttraction:
+      strength: 0
+      minY: 20
+      maxY: 40
     wormMinLength: 50
     wormMaxLength: 150
     wormBranchChance: 0.05
@@ -470,9 +479,17 @@ MonoBehaviour:
     wormBaseRadius: 3
     wormRadiusMin: 2
     wormRadiusMax: 4
+    wormSquashAxis: 0
+    wormSquashFactor: 1
     wormRadiusWaveCount: 3
+    wormRadiusNoiseStrength: 0
+    wormRadiusNoiseFrequency: 0.1
     wormWaviness: 0.5
     wormHorizontalBias: 0.5
+    wormYAttraction:
+      strength: 0
+      minY: 20
+      maxY: 40
     wormMinLength: 50
     wormMaxLength: 200
     wormBranchChance: 0.05
@@ -531,9 +548,17 @@ MonoBehaviour:
     wormBaseRadius: 3
     wormRadiusMin: 2
     wormRadiusMax: 4
+    wormSquashAxis: 0
+    wormSquashFactor: 1
     wormRadiusWaveCount: 3
+    wormRadiusNoiseStrength: 0
+    wormRadiusNoiseFrequency: 0.1
     wormWaviness: 0.5
     wormHorizontalBias: 0.5
+    wormYAttraction:
+      strength: 0
+      minY: 20
+      maxY: 40
     wormMinLength: 50
     wormMaxLength: 200
     wormBranchChance: 0.05

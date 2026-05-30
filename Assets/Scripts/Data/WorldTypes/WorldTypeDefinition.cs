@@ -126,6 +126,10 @@ namespace Data.WorldTypes
         [Tooltip("Trunk worms will not spawn above this Y level.")]
         public int maxHeight = 50;
 
+        [Header("Y-Level Attraction")]
+        [Tooltip("Y-level attraction configuration controlling how trunk worms are pulled toward a target depth band.")]
+        public WormYAttraction yAttraction = WormYAttraction.TrunkDefault;
+
         [Header("Branching")]
         [Range(0f, 0.1f)]
         [Tooltip("Probability per step that a trunk worm splits. Keep low (0.02-0.04) for occasional forks.")]

@@ -386,6 +386,7 @@ MonoBehaviour:
   minCavePocketSize: 12
   trunkSpawnSuppression: 0
   trunkVerticalBiasOverride: -1
+  trunkYAttractionCenterOverride: -1
   caveLayers:
   - layerName: Local Worm Tunnels
     previewColor: {r: 0.2, g: 0.8, b: 0.3, a: 1}
@@ -437,9 +438,17 @@ MonoBehaviour:
     wormBaseRadius: 3
     wormRadiusMin: 2
     wormRadiusMax: 3.5
+    wormSquashAxis: 0
+    wormSquashFactor: 1
     wormRadiusWaveCount: 2
+    wormRadiusNoiseStrength: 0
+    wormRadiusNoiseFrequency: 0.1
     wormWaviness: 0.4
     wormHorizontalBias: 0.6
+    wormYAttraction:
+      strength: 0
+      minY: 20
+      maxY: 40
     wormMinLength: 40
     wormMaxLength: 120
     wormBranchChance: 0.04
@@ -498,9 +507,17 @@ MonoBehaviour:
     wormBaseRadius: 3
     wormRadiusMin: 2
     wormRadiusMax: 4
+    wormSquashAxis: 0
+    wormSquashFactor: 1
     wormRadiusWaveCount: 3
+    wormRadiusNoiseStrength: 0
+    wormRadiusNoiseFrequency: 0.1
     wormWaviness: 0.5
     wormHorizontalBias: 0.5
+    wormYAttraction:
+      strength: 0
+      minY: 20
+      maxY: 40
     wormMinLength: 50
     wormMaxLength: 200
     wormBranchChance: 0.05

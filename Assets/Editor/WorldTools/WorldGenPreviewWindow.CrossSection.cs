@@ -938,6 +938,7 @@ namespace Editor.WorldTools
                     EnableDensityWarp = biome.enableDensityWarp,
                     TrunkSpawnSuppression = biome.trunkSpawnSuppression,
                     TrunkVerticalBiasOverride = biome.trunkVerticalBiasOverride,
+                    TrunkYAttractionCenterOverride = biome.trunkYAttractionCenterOverride,
                     DebugPreviewColor = new float3(biome.debugPreviewColor.r, biome.debugPreviewColor.g, biome.debugPreviewColor.b),
                 };
 

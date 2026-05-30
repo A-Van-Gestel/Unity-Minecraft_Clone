@@ -60,6 +60,7 @@ namespace Editor.WorldTools.Libraries
             ValidateWormRadiusBounds(biome, results);
             ValidateWormSquashFactor(biome, results);
             ValidateWormRadiusNoise(biome, results);
+            ValidateWormYAttraction(biome, results);
 
             return results;
         }
@@ -424,6 +425,25 @@ namespace Editor.WorldTools.Libraries
         }
 
         /// <summary>
+        /// Checks for Worm Carver layers with Y-level attraction misconfiguration.
+        /// </summary>
+        private static void ValidateWormYAttraction(StandardBiomeAttributes biome, List<BiomeValidationResult> results)
+        {
+            if (biome.caveLayers == null) return;
+
+            for (int i = 0; i < biome.caveLayers.Length; i++)
+            {
+                StandardCaveLayer cave = biome.caveLayers[i];
+                if (cave.mode != CaveMode.WormCarver) continue;
+                if (cave.wormYAttraction.strength <= 0f) continue;
+
+                string name = string.IsNullOrEmpty(cave.layerName) ? $"Cave Layer {i}" : cave.layerName;
+                ValidateYAttractionParams(cave.wormYAttraction.minY, cave.wormYAttraction.maxY, cave.wormYAttraction.strength,
+                    cave.minHeight, cave.maxHeight, name, SUB_TAB_CAVES, results);
+            }
+        }
+
+        /// <summary>
         /// Runs all validators against the given trunk worm configuration and returns any warnings.
         /// Call from the World Type editor to validate world-level trunk worm settings.
         /// </summary>
@@ -450,6 +470,10 @@ namespace Editor.WorldTools.Libraries
 
             if (config.radiusNoiseStrength > 0f)
                 ValidateRadiusNoiseFrequency(config.radiusNoiseFrequency, "Trunk Worm", SUB_TAB_CAVES, results);
+
+            if (config.yAttraction.strength > 0f)
+                ValidateYAttractionParams(config.yAttraction.minY, config.yAttraction.maxY, config.yAttraction.strength,
+                    config.minHeight, config.maxHeight, "Trunk Worm", SUB_TAB_CAVES, results);
 
             return results;
         }
@@ -496,6 +520,46 @@ namespace Editor.WorldTools.Libraries
                     SubTabIndex = subTabIndex,
                     Message = $"\"{name}\": squash ({rawValue:F2}, axis={axis}) produces very tall, narrow fissures " +
                               "(effective vertical squash {effective:F2}) — may punch through terrain ceilings.",
+                });
+            }
+        }
+
+        /// <summary>
+        /// Shared validation for Y-level attraction parameters, used by both per-biome and trunk worm validators.
+        /// </summary>
+        private static void ValidateYAttractionParams(float yMin, float yMax, float strength,
+            int spawnMinHeight, int spawnMaxHeight, string name, int subTabIndex, List<BiomeValidationResult> results)
+        {
+            if (yMin > yMax)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = subTabIndex,
+                    Message = $"\"{name}\": Y attraction minY ({yMin:F0}) > maxY ({yMax:F0}) — " +
+                              "the attraction band is inverted.",
+                });
+            }
+
+            if (yMax < spawnMinHeight || yMin > spawnMaxHeight)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = subTabIndex,
+                    Message = $"\"{name}\": Y attraction band [{yMin:F0}, {yMax:F0}] does not overlap spawn height " +
+                              $"range [{spawnMinHeight}, {spawnMaxHeight}] — worms will immediately start correcting after spawning.",
+                });
+            }
+
+            if (strength > 0.8f)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Info,
+                    SubTabIndex = subTabIndex,
+                    Message = $"\"{name}\": Y attraction strength ({strength:F2}) is very high — " +
+                              "worms will be strongly channeled into the band, producing unnaturally flat cave systems.",
                 });
             }
         }

@@ -92,6 +92,9 @@ namespace Jobs.Data
         /// <summary>Per-step horizontal bias override for trunk worms passing through this biome. -1 = disabled.</summary>
         public float TrunkVerticalBiasOverride;
 
+        /// <summary>Per-biome override of the trunk Y attraction band center. -1 = disabled (use global trunk config).</summary>
+        public float TrunkYAttractionCenterOverride;
+
         /// <summary>RGB color for editor previews and in-game terrain debug overlay.</summary>
         public float3 DebugPreviewColor;
     }
