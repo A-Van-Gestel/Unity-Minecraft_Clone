@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Data;
 using Data.WorldTypes;
 using Helpers;
 using Jobs.Data;
@@ -53,7 +54,16 @@ namespace Jobs
         [ReadOnly]
         public TrunkWormConfigJobData TrunkConfig;
 
+        [ReadOnly]
+        public GenerationFeatureFlags FeatureFlags;
+
         public NativeBitArray OutputWormMask;
+
+        /// <summary>
+        /// Optional per-worm diagnostic output. When <c>IsCreated</c> is false (default),
+        /// telemetry is skipped at zero cost. Allocate to enable editor-time diagnostics.
+        /// </summary>
+        public NativeList<WormTelemetryEntry> Telemetry;
 
         private const int TRUNK_SEED_SALT = 0x5472756E; // "Trun" as int — decorrelates trunk RNG from local worm RNG
         private const int RADIUS_NOISE_SEED_SALT = 0x52614E6F; // "RaNo" as int — decorrelates radius noise from other noise sources
@@ -98,6 +108,8 @@ namespace Jobs
 
         public void Execute()
         {
+            if (!FeatureFlags.EnableWormCarver) return;
+
             // Calculate max search radius across both trunk and local worms
             int maxWormLength = TrunkConfig.Enabled ? TrunkConfig.MaxLength : 0;
             float maxWormRadius = TrunkConfig.Enabled ? TrunkConfig.RadiusMax : 0;
@@ -196,12 +208,14 @@ namespace Jobs
                                 OriginBiomeIndex = biomeIndex,
                             };
 
-                            SimulateWormStack(ref trunkRand, trunkStack, trunkParams, chunkMin, chunkMax);
+                            SimulateWormStack(ref trunkRand, trunkStack, trunkParams, chunkMin, chunkMax, cx, cz);
                             trunkStack.Dispose();
                         }
                     }
 
                     // --- Local worms (per-biome cave layers) ---
+                    if (!FeatureFlags.EnableLocalWormCarver) continue;
+
                     uint chunkHash = math.hash(new int3(cx, cz, BaseSeed));
                     Random rand = new Random(math.max(1u, chunkHash));
 
@@ -268,7 +282,7 @@ namespace Jobs
                             OriginBiomeIndex = biomeIndex,
                         };
 
-                        SimulateWormStack(ref rand, wormStack, localParams, chunkMin, chunkMax);
+                        SimulateWormStack(ref rand, wormStack, localParams, chunkMin, chunkMax, cx, cz);
                         wormStack.Dispose();
                     }
                 }
@@ -360,10 +374,13 @@ namespace Jobs
 
         private const int BIOME_CACHE_INTERVAL = 16;
 
-        private void SimulateWormStack(ref Random rand, NativeList<WormState> wormStack, WormParams p, float3 chunkMin, float3 chunkMax)
+        private void SimulateWormStack(ref Random rand, NativeList<WormState> wormStack, WormParams p,
+            float3 chunkMin, float3 chunkMax, int originCx, int originCz)
         {
             float safeSquash = math.max(p.SquashFactor, 0.01f);
             float invSquash = 1f / safeSquash;
+
+            bool emitTelemetry = Telemetry.IsCreated;
 
             FastNoiseLite radiusNoise = p.RadiusNoiseStrength > 0f
                 ? FastNoiseLite.CreateSimple(BaseSeed + RADIUS_NOISE_SEED_SALT, p.RadiusNoiseFrequency)
@@ -383,9 +400,20 @@ namespace Jobs
                 int fadeRemaining = 0;
                 int fadeTotal = 0;
 
+                // Telemetry counters
+                short configuredLength = (short)worm.LengthRemaining;
+                byte noiseSeekAttempts = 0;
+                byte noiseSeekSuccesses = 0;
+                byte maskSeekAttempts = 0;
+                byte maskSeekSuccesses = 0;
+                byte branchesSpawned = 0;
+                byte terminationReason = WormTelemetryEntry.TERMINATION_NATURAL;
+
                 // Raymarch the worm
+                int actualSteps = 0;
                 for (int step = 0; step < worm.LengthRemaining; step++)
                 {
+                    actualSteps++;
                     // Modulate radius along the worm's length
                     float t = math.saturate((float)step / totalLength);
                     float wave = math.sin(t * math.PI * p.RadiusWaveCount) * 0.5f + 0.5f;
@@ -418,7 +446,11 @@ namespace Jobs
                             {
                                 int fadeSteps = Biomes[cachedStepBiomeIdx].TrunkTraversalFadeSteps;
                                 if (fadeSteps <= 0)
+                                {
+                                    terminationReason = WormTelemetryEntry.TERMINATION_TRAVERSAL_BLOCKED;
                                     break;
+                                }
+
                                 fadeRemaining = fadeSteps;
                                 fadeTotal = fadeSteps;
                             }
@@ -470,6 +502,7 @@ namespace Jobs
                     bool seekSucceeded = false;
                     if (fadeRemaining == 0 && p.SeekInterval > 0 && step % p.SeekInterval == 0 && rand.NextFloat() < p.SeekChance)
                     {
+                        if (emitTelemetry && noiseSeekAttempts < 255) noiseSeekAttempts++;
                         // Generate a random "look" direction
                         float lookYaw = yaw + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
                         float lookPitch = pitch + rand.NextFloat(-math.PI * 0.5f, math.PI * 0.5f);
@@ -504,6 +537,8 @@ namespace Jobs
 
                         if (foundCave)
                         {
+                            if (emitTelemetry && noiseSeekSuccesses < 255) noiseSeekSuccesses++;
+
                             // Lock onto the detected cave
                             yaw = lookYaw;
                             pitch = lookPitch;
@@ -522,6 +557,7 @@ namespace Jobs
                         step % p.SeekInterval == 0 &&
                         rand.NextFloat() < p.MaskSeekChance)
                     {
+                        if (emitTelemetry && maskSeekAttempts < 255) maskSeekAttempts++;
                         float bestDot = -1f;
                         float3 bestDir = default;
                         bool foundMask = false;
@@ -554,6 +590,8 @@ namespace Jobs
 
                         if (foundMask)
                         {
+                            if (emitTelemetry && maskSeekSuccesses < 255) maskSeekSuccesses++;
+
                             yaw = math.atan2(bestDir.z, bestDir.x);
                             pitch = math.asin(math.clamp(bestDir.y, -1f, 1f));
                             ExtendWormToReachSeekTarget(ref worm, step, p.SeekDistance, p.RadiusMin, p.RadiusMax, ref totalLength);
@@ -563,6 +601,8 @@ namespace Jobs
                     // Branching Phase (suppressed during traversal fade — prevents orphan tunnels in blocked biomes)
                     if (fadeRemaining == 0 && p.BranchChance > 0f && rand.NextFloat() < p.BranchChance && worm.BranchDepth < p.MaxBranchDepth)
                     {
+                        if (emitTelemetry && branchesSpawned < 255) branchesSpawned++;
+
                         int branchMin = p.MinLength / 2;
                         int branchMax = math.max(branchMin + 1, p.MaxLength / 2);
                         wormStack.Add(new WormState
@@ -587,7 +627,29 @@ namespace Jobs
 
                     // Terminate after the final fade carve (radius was 1/fadeTotal on this step)
                     if (fadeTotal > 0 && fadeRemaining <= 0)
+                    {
+                        terminationReason = WormTelemetryEntry.TERMINATION_FADE_COMPLETE;
                         break;
+                    }
+                }
+
+                if (emitTelemetry)
+                {
+                    Telemetry.Add(new WormTelemetryEntry
+                    {
+                        OriginChunkX = originCx,
+                        OriginChunkZ = originCz,
+                        IsTrunk = p.IsTrunk,
+                        BranchDepth = (byte)worm.BranchDepth,
+                        ActualSteps = (short)math.min(actualSteps, short.MaxValue),
+                        ConfiguredLength = configuredLength,
+                        BranchesSpawned = branchesSpawned,
+                        NoiseSeekAttempts = noiseSeekAttempts,
+                        NoiseSeekSuccesses = noiseSeekSuccesses,
+                        MaskSeekAttempts = maskSeekAttempts,
+                        MaskSeekSuccesses = maskSeekSuccesses,
+                        TerminationReason = terminationReason,
+                    });
                 }
             }
         }

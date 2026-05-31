@@ -76,14 +76,13 @@ public class WorldJobManager : IDisposable
         _chunkGenerator.Initialize(VoxelData.Seed, activeWorldType, globalJobData);
 
         Settings settings = SettingsManager.LoadSettings();
-        _chunkGenerator.FeatureFlags = new GenerationFeatureFlags
-        {
-            EnableCaves = settings.enableCaves,
-            EnableLodes = settings.enableLodes,
-            EnableWater = settings.enableWater,
-            EnableMajorFlora = settings.enableMajorFloraPass,
-            EnableMinorFlora = settings.enableMinorFloraPass,
-        };
+        GenerationFeatureFlags flags = GenerationFeatureFlags.Default;
+        flags.EnableCaves = settings.enableCaves;
+        flags.EnableLodes = settings.enableLodes;
+        flags.EnableWater = settings.enableWater;
+        flags.EnableMajorFlora = settings.enableMajorFloraPass;
+        flags.EnableMinorFlora = settings.enableMinorFloraPass;
+        _chunkGenerator.FeatureFlags = flags;
     }
 
     #endregion

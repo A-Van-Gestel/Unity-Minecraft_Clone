@@ -14,6 +14,19 @@ using UnityEngine;
 
 namespace Editor.Dev
 {
+    /// <summary>Controls how trunk worms are handled during analysis.</summary>
+    public enum TrunkWormMode
+    {
+        /// <summary>Include trunk worms in the analysis (default behavior).</summary>
+        Include,
+
+        /// <summary>Exclude trunk worms — only per-biome local cave layers are evaluated.</summary>
+        Exclude,
+
+        /// <summary>Trunk worms only — disable all per-biome noise-based layers (Cheese, Noodle, Spaghetti).</summary>
+        TrunkOnly,
+    }
+
     /// <summary>
     /// Editor window that generates a grid of chunks and reports cave density, pocket distribution,
     /// and shape quality statistics. Provides both a UI for manual use and a static API for
@@ -38,6 +51,12 @@ namespace Editor.Dev
 
         [SerializeField]
         private int _selectedBiomeIndex;
+
+        [SerializeField]
+        private int _seedCount = 1;
+
+        [SerializeField]
+        private TrunkWormMode _trunkWormMode = TrunkWormMode.Include;
 
         private string[] _biomeNames;
         private StandardBiomeAttributes[] _biomeAssets;
@@ -69,12 +88,35 @@ namespace Editor.Dev
                 return;
             }
 
-            var standard = _worldType.biomes
-                .OfType<StandardBiomeAttributes>()
-                .ToArray();
+            // Collect biomes from the WorldType array
+            HashSet<StandardBiomeAttributes> seen = new HashSet<StandardBiomeAttributes>();
+            List<StandardBiomeAttributes> allBiomes = new List<StandardBiomeAttributes>();
+            List<string> allNames = new List<string>();
 
-            _biomeAssets = standard;
-            _biomeNames = standard.Select(b => b.biomeName).ToArray();
+            foreach (BiomeBase b in _worldType.biomes)
+            {
+                if (b is StandardBiomeAttributes sba && seen.Add(sba))
+                {
+                    allBiomes.Add(sba);
+                    allNames.Add(sba.biomeName);
+                }
+            }
+
+            // Discover standalone biome assets not in the WorldType array (L1)
+            string[] guids = AssetDatabase.FindAssets("t:StandardBiomeAttributes");
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                StandardBiomeAttributes sba = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(path);
+                if (sba != null && seen.Add(sba))
+                {
+                    allBiomes.Add(sba);
+                    allNames.Add($"{sba.biomeName} (standalone)");
+                }
+            }
+
+            _biomeAssets = allBiomes.ToArray();
+            _biomeNames = allNames.ToArray();
 
             if (_selectedBiomeIndex >= _biomeNames.Length)
                 _selectedBiomeIndex = 0;
@@ -88,6 +130,8 @@ namespace Editor.Dev
 
             _gridSize = EditorGUILayout.IntSlider("Grid Size", _gridSize, 2, 32);
             _seed = EditorGUILayout.IntField("Seed", _seed);
+            _seedCount = EditorGUILayout.IntSlider("Seed Count", _seedCount, 1, 5);
+            _trunkWormMode = (TrunkWormMode)EditorGUILayout.EnumPopup("Trunk Worms", _trunkWormMode);
 
             EditorGUILayout.Space(4);
             EditorGUILayout.LabelField("Origin (chunk coordinates)", EditorStyles.miniLabel);
@@ -112,7 +156,9 @@ namespace Editor.Dev
                     ? _biomeAssets[_selectedBiomeIndex]
                     : null;
 
-                _lastResult = RunAnalysis(_gridSize, _seed, _originX, _originZ, _singleBiomeMode, biome);
+                _lastResult = _seedCount > 1
+                    ? RunMultiSeedAnalysis(_gridSize, _seed, _seedCount, _originX, _originZ, _singleBiomeMode, biome, _trunkWormMode)
+                    : RunAnalysis(_gridSize, _seed, _originX, _originZ, _singleBiomeMode, biome, _trunkWormMode);
             }
 
             if (!string.IsNullOrEmpty(_lastResult))
@@ -146,8 +192,17 @@ namespace Editor.Dev
         /// <param name="biome">The biome to use when <paramref name="singleBiomeMode"/> is true.</param>
         /// <returns>Formatted analysis results string.</returns>
         public static string RunAnalysis(int gridSize, int seed, int originX = 0, int originZ = 0,
-            bool singleBiomeMode = false, StandardBiomeAttributes biome = null)
+            bool singleBiomeMode = false, StandardBiomeAttributes biome = null,
+            TrunkWormMode trunkMode = TrunkWormMode.Include)
         {
+            return RunAnalysisInternal(gridSize, seed, originX, originZ, singleBiomeMode, biome, trunkMode, out _);
+        }
+
+        private static string RunAnalysisInternal(int gridSize, int seed, int originX, int originZ,
+            bool singleBiomeMode, StandardBiomeAttributes biome, TrunkWormMode trunkMode,
+            out SeedMetrics metrics)
+        {
+            metrics = default;
             WorldTypeDefinition worldType = FindWorldType();
             if (worldType == null)
             {
@@ -169,7 +224,19 @@ namespace Editor.Dev
             try
             {
                 cavesOnRunner.Initialize(seed, worldType, db, singleBiomeMode, biome);
-                cavesOnRunner.FeatureFlags = GenerationFeatureFlags.Default;
+
+                GenerationFeatureFlags onFlags = GenerationFeatureFlags.Default;
+                if (trunkMode == TrunkWormMode.TrunkOnly)
+                {
+                    onFlags.EnableCheese = false;
+                    onFlags.EnableNoodle = false;
+                    onFlags.EnableSpaghetti = false;
+                    onFlags.EnableLocalWormCarver = false;
+                }
+
+                cavesOnRunner.FeatureFlags = onFlags;
+                cavesOnRunner.TrunkWormOverride = trunkMode == TrunkWormMode.Exclude ? false : null;
+                cavesOnRunner.EnableTelemetry = true;
 
                 GenerationFeatureFlags noCavesFlags = GenerationFeatureFlags.Default;
                 noCavesFlags.EnableCaves = false;
@@ -178,6 +245,7 @@ namespace Editor.Dev
 
                 int totalChunks = gridSize * gridSize;
                 ChunkAnalysisData[] allData = new ChunkAnalysisData[totalChunks];
+                List<WormTelemetryEntry> allTelemetry = new List<WormTelemetryEntry>();
 
                 int chunkIdx = 0;
                 for (int cx = 0; cx < gridSize; cx++)
@@ -197,6 +265,13 @@ namespace Editor.Dev
 
                         allData[chunkIdx] = AnalyzeChunk(cavesOn.Map, cavesOff.Map);
 
+                        // Collect worm telemetry (L5)
+                        if (cavesOn.WormTelemetry.IsCreated)
+                        {
+                            foreach (WormTelemetryEntry entry in cavesOn.WormTelemetry)
+                                allTelemetry.Add(entry);
+                        }
+
                         cavesOn.Dispose();
                         cavesOff.Dispose();
                         chunkIdx++;
@@ -215,6 +290,18 @@ namespace Editor.Dev
 
                 string biomeName = singleBiomeMode && biome != null ? biome.biomeName : "All (multi-biome)";
                 string result = FormatResults(allStats, gridSize, seed, originX, originZ, biomeName, worldType, networkStats);
+                metrics = ComputeMetrics(allStats, networkStats);
+
+                // Per-layer breakdown (L4): run additional passes with specific modes disabled
+                string layerBreakdown = RunLayerBreakdown(seed, worldType, db, singleBiomeMode, biome,
+                    gridSize, originX, originZ, totalChunks, cavesOffRunner, trunkMode);
+                if (!string.IsNullOrEmpty(layerBreakdown))
+                    result += layerBreakdown;
+
+                // Worm diagnostics (L5)
+                if (allTelemetry.Count > 0)
+                    result += FormatWormTelemetry(allTelemetry);
+
                 Debug.Log(result);
                 return result;
             }
@@ -261,7 +348,560 @@ namespace Editor.Dev
                 return err;
             }
 
-            return RunAnalysis(gridSize, seed, originX, originZ, true, match);
+            return RunAnalysis(gridSize, seed, originX, originZ, true, match, TrunkWormMode.Include);
+        }
+
+        /// <summary>
+        /// Runs the analysis across multiple seeds and returns a summary with mean +/- stddev
+        /// for key metrics, followed by individual seed results.
+        /// </summary>
+        /// <param name="gridSize">Width/depth of the chunk grid to generate.</param>
+        /// <param name="baseSeed">Starting seed. Seeds used: [baseSeed, baseSeed+1, ..., baseSeed+seedCount-1].</param>
+        /// <param name="seedCount">Number of seeds to average over (2-5).</param>
+        /// <param name="originX">Chunk X origin offset.</param>
+        /// <param name="originZ">Chunk Z origin offset.</param>
+        /// <param name="singleBiomeMode">If true, forces generation to use only the specified biome.</param>
+        /// <param name="biome">The biome to use when <paramref name="singleBiomeMode"/> is true.</param>
+        /// <returns>Formatted multi-seed analysis results string.</returns>
+        public static string RunMultiSeedAnalysis(int gridSize, int baseSeed, int seedCount,
+            int originX = 0, int originZ = 0,
+            bool singleBiomeMode = false, StandardBiomeAttributes biome = null,
+            TrunkWormMode trunkMode = TrunkWormMode.Include)
+        {
+            seedCount = Math.Clamp(seedCount, 2, 5);
+
+            SeedMetrics[] allMetrics = new SeedMetrics[seedCount];
+            StringBuilder perSeedResults = new StringBuilder();
+
+            for (int si = 0; si < seedCount; si++)
+            {
+                int seed = baseSeed + si;
+                string result = RunAnalysisInternal(gridSize, seed, originX, originZ,
+                    singleBiomeMode, biome, trunkMode, out SeedMetrics seedMetrics);
+                perSeedResults.AppendLine($"──── Seed {seed} ────");
+                perSeedResults.AppendLine(result);
+                allMetrics[si] = seedMetrics;
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("=== MULTI-SEED SUMMARY ===");
+            string biomeName = singleBiomeMode && biome != null ? biome.biomeName : "All (multi-biome)";
+            sb.AppendLine($"Biome: {biomeName} | Seeds: {baseSeed} to {baseSeed + seedCount - 1} ({seedCount} seeds)");
+            sb.AppendLine($"Grid: {gridSize}x{gridSize} | Origin: ({originX}, {originZ})");
+            sb.AppendLine();
+
+            sb.AppendLine($"{"Metric",-28} {"Mean",10} {"StdDev",10} {"Min",10} {"Max",10}");
+            sb.AppendLine(new string('-', 70));
+
+            AppendMetricRow(sb, "Density %", allMetrics, m => m.Density * 100f);
+            AppendMetricRow(sb, "Empty chunks %", allMetrics, m => m.EmptyChunkPct * 100f);
+            AppendMetricRow(sb, "Connectivity %", allMetrics, m => m.Connectivity * 100f);
+            AppendMetricRow(sb, "Max chunks spanned", allMetrics, m => m.MaxChunksSpanned);
+            AppendMetricRow(sb, "Open blocks %", allMetrics, m => m.OpenBlockPct * 100f);
+            AppendMetricRow(sb, "Dead-end %", allMetrics, m => m.DeadEndPct * 100f);
+            AppendMetricRow(sb, "Junction %", allMetrics, m => m.JunctionPct * 100f);
+            AppendMetricRow(sb, "Horizontal %", allMetrics, m => m.HorizontalPct * 100f);
+            AppendMetricRow(sb, "Vertical %", allMetrics, m => m.VerticalPct * 100f);
+
+            sb.AppendLine();
+            sb.AppendLine(perSeedResults.ToString());
+
+            string final = sb.ToString();
+            Debug.Log(final);
+            return final;
+        }
+
+        private struct SeedMetrics
+        {
+            public float Density;
+            public float EmptyChunkPct;
+            public float Connectivity;
+            public float MaxChunksSpanned;
+            public float OpenBlockPct;
+            public float DeadEndPct;
+            public float JunctionPct;
+            public float HorizontalPct;
+            public float VerticalPct;
+        }
+
+        /// <summary>
+        /// Aggregates raw totals from per-chunk stats. Shared between <see cref="ComputeMetrics"/> and <see cref="FormatResults"/>.
+        /// </summary>
+        private struct AggregatedTotals
+        {
+            public int TotalCaveAir;
+            public int TotalUnderground;
+            public int EmptyChunks;
+            public int TotalPockets;
+            public int TotalTipBlocks;
+            public int TotalThinBlocks;
+            public int TotalOpenBlocks;
+            public int TotalJunctionBlocks;
+            public int TotalHorizontalBlocks;
+            public int TotalVerticalBlocks;
+            public int TotalMixedBlocks;
+            public int GlobalLargestPocket;
+        }
+
+        /// <summary>
+        /// Single aggregation pass over <see cref="ChunkStats"/> array.
+        /// </summary>
+        private static AggregatedTotals AggregateTotals(ChunkStats[] stats)
+        {
+            AggregatedTotals t = default;
+            foreach (ChunkStats stat in stats)
+            {
+                t.TotalCaveAir += stat.CaveAirBlocks;
+                t.TotalUnderground += stat.TotalUnderground;
+                t.TotalPockets += stat.PocketCount;
+                t.TotalTipBlocks += stat.TipBlocks;
+                t.TotalThinBlocks += stat.ThinBlocks;
+                t.TotalOpenBlocks += stat.OpenBlocks;
+                t.TotalJunctionBlocks += stat.JunctionBlocks;
+                t.TotalHorizontalBlocks += stat.HorizontalBlocks;
+                t.TotalVerticalBlocks += stat.VerticalBlocks;
+                t.TotalMixedBlocks += stat.MixedBlocks;
+                if (stat.CaveAirBlocks == 0) t.EmptyChunks++;
+                if (stat.LargestPocket > t.GlobalLargestPocket) t.GlobalLargestPocket = stat.LargestPocket;
+            }
+
+            return t;
+        }
+
+        /// <summary>
+        /// Computes key metrics directly from analysis data without string parsing.
+        /// </summary>
+        private static SeedMetrics ComputeMetrics(ChunkStats[] stats, GlobalNetworkStats networkStats)
+        {
+            AggregatedTotals t = AggregateTotals(stats);
+
+            return new SeedMetrics
+            {
+                Density = t.TotalUnderground > 0 ? (float)t.TotalCaveAir / t.TotalUnderground : 0f,
+                EmptyChunkPct = stats.Length > 0 ? (float)t.EmptyChunks / stats.Length : 0f,
+                Connectivity = networkStats.GlobalConnectivityRatio,
+                MaxChunksSpanned = networkStats.MaxChunksSpanned,
+                OpenBlockPct = t.TotalCaveAir > 0 ? (float)t.TotalOpenBlocks / t.TotalCaveAir : 0f,
+                DeadEndPct = t.TotalCaveAir > 0 ? (float)t.TotalTipBlocks / t.TotalCaveAir : 0f,
+                JunctionPct = t.TotalCaveAir > 0 ? (float)t.TotalJunctionBlocks / t.TotalCaveAir : 0f,
+                HorizontalPct = t.TotalCaveAir > 0 ? (float)t.TotalHorizontalBlocks / t.TotalCaveAir : 0f,
+                VerticalPct = t.TotalCaveAir > 0 ? (float)t.TotalVerticalBlocks / t.TotalCaveAir : 0f,
+            };
+        }
+
+        private static void AppendMetricRow(StringBuilder sb, string name, SeedMetrics[] metrics,
+            Func<SeedMetrics, float> selector)
+        {
+            float[] values = new float[metrics.Length];
+            for (int i = 0; i < metrics.Length; i++)
+                values[i] = selector(metrics[i]);
+
+            float sum = 0f;
+            float min = float.MaxValue;
+            float max = float.MinValue;
+            foreach (float value in values)
+            {
+                sum += value;
+                if (value < min) min = value;
+                if (value > max) max = value;
+            }
+
+            float mean = sum / values.Length;
+
+            float varianceSum = 0f;
+            foreach (float value in values)
+            {
+                float diff = value - mean;
+                varianceSum += diff * diff;
+            }
+
+            float stddev = (float)Math.Sqrt(varianceSum / values.Length);
+
+            sb.AppendLine($"{name,-28} {mean,10:F2} {stddev,10:F2} {min,10:F2} {max,10:F2}");
+        }
+
+        // ── Worm telemetry formatting (L5) ──────────────────────────────────
+
+        /// <summary>
+        /// Formats aggregated worm telemetry into a diagnostic report section.
+        /// </summary>
+        private static string FormatWormTelemetry(List<WormTelemetryEntry> entries)
+        {
+            int localCount = 0, trunkCount = 0;
+            long localStepsSum = 0, trunkStepsSum = 0;
+            int localBranches = 0, trunkBranches = 0;
+            int noiseSeekAttempts = 0, noiseSeekSuccesses = 0;
+            int maskSeekAttempts = 0, maskSeekSuccesses = 0;
+            int termNatural = 0, termBlocked = 0, termFade = 0;
+
+            foreach (WormTelemetryEntry e in entries)
+            {
+                if (e.IsTrunk)
+                {
+                    trunkCount++;
+                    trunkStepsSum += e.ActualSteps;
+                    trunkBranches += e.BranchesSpawned;
+                }
+                else
+                {
+                    localCount++;
+                    localStepsSum += e.ActualSteps;
+                    localBranches += e.BranchesSpawned;
+                }
+
+                noiseSeekAttempts += e.NoiseSeekAttempts;
+                noiseSeekSuccesses += e.NoiseSeekSuccesses;
+                maskSeekAttempts += e.MaskSeekAttempts;
+                maskSeekSuccesses += e.MaskSeekSuccesses;
+
+                switch (e.TerminationReason)
+                {
+                    case WormTelemetryEntry.TERMINATION_NATURAL: termNatural++; break;
+                    case WormTelemetryEntry.TERMINATION_TRAVERSAL_BLOCKED: termBlocked++; break;
+                    case WormTelemetryEntry.TERMINATION_FADE_COMPLETE: termFade++; break;
+                }
+            }
+
+            float localAvgSteps = localCount > 0 ? (float)localStepsSum / localCount : 0f;
+            float trunkAvgSteps = trunkCount > 0 ? (float)trunkStepsSum / trunkCount : 0f;
+            float localAvgBranches = localCount > 0 ? (float)localBranches / localCount : 0f;
+            float trunkAvgBranches = trunkCount > 0 ? (float)trunkBranches / trunkCount : 0f;
+            float noiseSeekPct = noiseSeekAttempts > 0 ? (float)noiseSeekSuccesses / noiseSeekAttempts : 0f;
+            float maskSeekPct = maskSeekAttempts > 0 ? (float)maskSeekSuccesses / maskSeekAttempts : 0f;
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("--- WORM DIAGNOSTICS ---");
+            sb.AppendLine($"Worms spawned:       local={localCount}  trunk={trunkCount}");
+            sb.AppendLine($"Avg actual length:   local={localAvgSteps:F1}  trunk={trunkAvgSteps:F1}");
+            sb.AppendLine($"Avg branches/worm:   local={localAvgBranches:F1}  trunk={trunkAvgBranches:F1}");
+            sb.AppendLine($"Noise seek:          attempts={noiseSeekAttempts}  successes={noiseSeekSuccesses} ({noiseSeekPct:P1})");
+            sb.AppendLine($"Mask seek:           attempts={maskSeekAttempts}  successes={maskSeekSuccesses} ({maskSeekPct:P1})");
+            sb.AppendLine($"Termination:         natural={termNatural}  traversal-blocked={termBlocked}  fade={termFade}");
+            sb.AppendLine();
+            return sb.ToString();
+        }
+
+        // ── Per-layer breakdown (L4) ────────────────────────────────────────
+
+        /// <summary>
+        /// Runs generation passes with individual cave layer types disabled to compute
+        /// how much cave air each layer type (WormCarver, Cheese, Noodle/Spaghetti) contributes.
+        /// </summary>
+        private static string RunLayerBreakdown(int seed, WorldTypeDefinition worldType, BlockDatabase db,
+            bool singleBiomeMode, StandardBiomeAttributes biome,
+            int gridSize, int originX, int originZ, int totalChunks,
+            EditorChunkPipelineRunner cavesOffRunner, TrunkWormMode trunkMode)
+        {
+            bool? trunkOverride = trunkMode == TrunkWormMode.Exclude ? false : null;
+            bool includeLocalWorms = trunkMode != TrunkWormMode.TrunkOnly;
+
+            // Build per-layer passes that respect the trunk mode, capturing indices at insertion time
+            List<(string label, GenerationFeatureFlags flags)> passes = new List<(string, GenerationFeatureFlags)>();
+            int wormPassIndex = passes.Count;
+            passes.Add(("Worm Carver", MakeSingleModeFlags(worm: true, localWorm: includeLocalWorms)));
+            int cheesePassIndex = -1;
+            if (trunkMode != TrunkWormMode.TrunkOnly)
+            {
+                cheesePassIndex = passes.Count;
+                passes.Add(("Cheese", MakeSingleModeFlags(cheese: true)));
+                passes.Add(("Noodle/Spaghetti", MakeSingleModeFlags(noodle: true, spaghetti: true)));
+            }
+
+            int[] perLayerAir = new int[passes.Count];
+            int[] perLayerChunks = new int[passes.Count];
+
+            // Cache caves-off maps and their surface maps to avoid redundant recomputation
+            Dictionary<ChunkCoord, NativeArray<uint>> cavesOffCache = new Dictionary<ChunkCoord, NativeArray<uint>>();
+            Dictionary<ChunkCoord, int[]> surfaceMapCache = new Dictionary<ChunkCoord, int[]>();
+            Dictionary<ChunkCoord, NativeArray<uint>> wormMaps = new Dictionary<ChunkCoord, NativeArray<uint>>();
+            Dictionary<ChunkCoord, NativeArray<uint>> cheeseMaps = new Dictionary<ChunkCoord, NativeArray<uint>>();
+
+            // Single runner reused across layer passes (only FeatureFlags changes)
+            EditorChunkPipelineRunner runner = new EditorChunkPipelineRunner();
+            try
+            {
+                runner.Initialize(seed, worldType, db, singleBiomeMode, biome);
+
+                for (int pi = 0; pi < passes.Count; pi++)
+                {
+                    runner.FeatureFlags = passes[pi].flags;
+                    runner.TrunkWormOverride = trunkOverride;
+
+                    int chunkIdx = 0;
+                    for (int cx = 0; cx < gridSize; cx++)
+                    {
+                        for (int cz = 0; cz < gridSize; cz++)
+                        {
+                            EditorUtility.DisplayProgressBar("Cave Density Analyzer",
+                                $"Layer breakdown: {passes[pi].label} ({cx * gridSize + cz + 1}/{totalChunks})...",
+                                (float)chunkIdx / totalChunks);
+
+                            ChunkCoord coord = new ChunkCoord(originX + cx, originZ + cz);
+                            GenerationJobData layerOn = runner.ScheduleGeneration(coord);
+
+                            // Use cached caves-off map and surface map, or generate and cache
+                            if (!cavesOffCache.TryGetValue(coord, out NativeArray<uint> cavesOffMap))
+                            {
+                                GenerationJobData cavesOff = cavesOffRunner.ScheduleGeneration(coord);
+                                cavesOff.Handle.Complete();
+                                cavesOffMap = new NativeArray<uint>(cavesOff.Map, Allocator.Persistent);
+                                cavesOffCache[coord] = cavesOffMap;
+                                surfaceMapCache[coord] = BuildSurfaceMap(cavesOffMap);
+                                cavesOff.Dispose();
+                            }
+
+                            layerOn.Handle.Complete();
+
+                            int air = CountCaveAir(layerOn.Map, cavesOffMap, surfaceMapCache[coord]);
+                            perLayerAir[pi] += air;
+                            if (air > 0) perLayerChunks[pi]++;
+
+                            // Retain worm/cheese maps for L6 reuse
+                            if (pi == wormPassIndex)
+                                wormMaps[coord] = new NativeArray<uint>(layerOn.Map, Allocator.Persistent);
+                            else if (pi == cheesePassIndex)
+                                cheeseMaps[coord] = new NativeArray<uint>(layerOn.Map, Allocator.Persistent);
+
+                            layerOn.Dispose();
+                            chunkIdx++;
+                        }
+                    }
+                }
+
+                // Cheese-worm connectivity (L6): reuse retained worm/cheese maps from L4
+                int totalCheesePockets = 0;
+                int connectedCheesePockets = 0;
+
+                bool hasWormAndCheese = perLayerAir[wormPassIndex] > 0
+                                        && cheesePassIndex >= 0 && perLayerAir[cheesePassIndex] > 0;
+                if (hasWormAndCheese)
+                {
+                    for (int cx = 0; cx < gridSize; cx++)
+                    {
+                        for (int cz = 0; cz < gridSize; cz++)
+                        {
+                            int ci = cx * gridSize + cz;
+                            EditorUtility.DisplayProgressBar("Cave Density Analyzer",
+                                $"Cheese-worm connectivity ({ci + 1}/{totalChunks})...",
+                                (float)ci / totalChunks);
+
+                            ChunkCoord coord = new ChunkCoord(originX + cx, originZ + cz);
+
+                            AnalyzeCheeseWormConnectivity(
+                                cheeseMaps[coord], wormMaps[coord],
+                                cavesOffCache[coord], surfaceMapCache[coord],
+                                out int pockets, out int connected);
+                            totalCheesePockets += pockets;
+                            connectedCheesePockets += connected;
+                        }
+                    }
+                }
+
+                int totalLayerAir = 0;
+                foreach (int airCount in perLayerAir)
+                    totalLayerAir += airCount;
+
+                if (totalLayerAir == 0) return null;
+
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine("--- LAYER BREAKDOWN ---");
+                for (int i = 0; i < passes.Count; i++)
+                {
+                    float pct = (float)perLayerAir[i] / totalLayerAir;
+                    sb.AppendLine($"  {passes[i].label,-18} {perLayerAir[i],8:N0} blocks ({pct,6:P1}) — {perLayerChunks[i]} chunks affected");
+                }
+
+                sb.AppendLine();
+
+                // Cheese-worm connectivity output (L6)
+                if (hasWormAndCheese && totalCheesePockets > 0)
+                {
+                    int isolated = totalCheesePockets - connectedCheesePockets;
+                    float connPct = (float)connectedCheesePockets / totalCheesePockets;
+                    float isoPct = (float)isolated / totalCheesePockets;
+
+                    sb.AppendLine("--- CHEESE-WORM CONNECTIVITY ---");
+                    sb.AppendLine($"Total cheese pockets:           {totalCheesePockets}");
+                    sb.AppendLine($"Connected to worm tunnels:      {connectedCheesePockets} ({connPct:P1})");
+                    sb.AppendLine($"Isolated (cheese-only):         {isolated} ({isoPct:P1})");
+                    sb.AppendLine();
+                }
+
+                return sb.ToString();
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+                runner.Dispose();
+                foreach (NativeArray<uint> map in cavesOffCache.Values)
+                    if (map.IsCreated)
+                        map.Dispose();
+                foreach (NativeArray<uint> map in wormMaps.Values)
+                    if (map.IsCreated)
+                        map.Dispose();
+                foreach (NativeArray<uint> map in cheeseMaps.Values)
+                    if (map.IsCreated)
+                        map.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Flood fills cheese-only cave air and checks if each pocket overlaps with worm-only cave air.
+        /// </summary>
+        private static void AnalyzeCheeseWormConnectivity(
+            NativeArray<uint> cheeseOnMap, NativeArray<uint> wormOnMap,
+            NativeArray<uint> cavesOffMap, int[] surfaceY,
+            out int totalPockets, out int connectedPockets)
+        {
+            const int w = VoxelData.ChunkWidth;
+            const int h = VoxelData.ChunkHeight;
+
+            bool[] isCheeseAir = new bool[w * h * w];
+            bool[] isWormAir = new bool[w * h * w];
+
+            for (int x = 0; x < w; x++)
+            {
+                for (int z = 0; z < w; z++)
+                {
+                    int sy = surfaceY[x * w + z];
+                    for (int y = 1; y < sy; y++)
+                    {
+                        int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                        ushort offBlock = (ushort)(cavesOffMap[idx] & 0xFFFF);
+                        if (offBlock == BlockIDs.Air) continue;
+
+                        if ((ushort)(cheeseOnMap[idx] & 0xFFFF) == BlockIDs.Air)
+                            isCheeseAir[idx] = true;
+                        if ((ushort)(wormOnMap[idx] & 0xFFFF) == BlockIDs.Air)
+                            isWormAir[idx] = true;
+                    }
+                }
+            }
+
+            // Flood fill cheese pockets, check worm overlap per pocket
+            bool[] visited = new bool[w * h * w];
+            totalPockets = 0;
+            connectedPockets = 0;
+
+            for (int x = 0; x < w; x++)
+            {
+                for (int z = 0; z < w; z++)
+                {
+                    int sy = surfaceY[x * w + z];
+                    for (int y = 1; y < sy; y++)
+                    {
+                        int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                        if (!isCheeseAir[idx] || visited[idx]) continue;
+
+                        totalPockets++;
+                        bool hasWormOverlap = false;
+
+                        Queue<(int, int, int)> queue = new Queue<(int, int, int)>();
+                        visited[idx] = true;
+                        queue.Enqueue((x, y, z));
+
+                        while (queue.Count > 0)
+                        {
+                            (int fx, int fy, int fz) = queue.Dequeue();
+                            int fi = ChunkMath.GetFlattenedIndexInChunk(fx, fy, fz);
+                            if (isWormAir[fi]) hasWormOverlap = true;
+
+                            TryAdd(fx - 1, fy, fz);
+                            TryAdd(fx + 1, fy, fz);
+                            TryAdd(fx, fy - 1, fz);
+                            TryAdd(fx, fy + 1, fz);
+                            TryAdd(fx, fy, fz - 1);
+                            TryAdd(fx, fy, fz + 1);
+                        }
+
+                        if (hasWormOverlap) connectedPockets++;
+
+                        void TryAdd(int nx, int ny, int nz)
+                        {
+                            if (nx < 0 || nx >= w || nz < 0 || nz >= w || ny < 1 || ny >= h) return;
+                            int ni = ChunkMath.GetFlattenedIndexInChunk(nx, ny, nz);
+                            if (!isCheeseAir[ni] || visited[ni]) return;
+                            visited[ni] = true;
+                            queue.Enqueue((nx, ny, nz));
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Creates feature flags with caves enabled but only specific cave modes active.
+        /// </summary>
+        private static GenerationFeatureFlags MakeSingleModeFlags(
+            bool worm = false, bool cheese = false, bool noodle = false, bool spaghetti = false,
+            bool localWorm = true)
+        {
+            GenerationFeatureFlags flags = GenerationFeatureFlags.Default;
+            flags.EnableWormCarver = worm;
+            flags.EnableCheese = cheese;
+            flags.EnableNoodle = noodle;
+            flags.EnableSpaghetti = spaghetti;
+            flags.EnableLocalWormCarver = localWorm;
+            return flags;
+        }
+
+        /// <summary>
+        /// Builds per-column surface height from a caves-off (solid terrain) map.
+        /// Shared by AnalyzeChunk, CountCaveAir, and AnalyzeCheeseWormConnectivity.
+        /// </summary>
+        private static int[] BuildSurfaceMap(NativeArray<uint> cavesOffMap)
+        {
+            const int w = VoxelData.ChunkWidth;
+            const int h = VoxelData.ChunkHeight;
+
+            int[] surfaceY = new int[w * w];
+            for (int x = 0; x < w; x++)
+            {
+                for (int z = 0; z < w; z++)
+                {
+                    for (int y = h - 1; y >= 0; y--)
+                    {
+                        int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                        if ((ushort)(cavesOffMap[idx] & 0xFFFF) != BlockIDs.Air)
+                        {
+                            surfaceY[x * w + z] = y;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            return surfaceY;
+        }
+
+        /// <summary>
+        /// Counts cave air blocks by comparing caves-on vs caves-off maps (fast path without full analysis).
+        /// When <paramref name="precomputedSurfaceY"/> is provided, skips the surface map computation.
+        /// </summary>
+        private static int CountCaveAir(NativeArray<uint> cavesOnMap, NativeArray<uint> cavesOffMap,
+            int[] precomputedSurfaceY = null)
+        {
+            const int w = VoxelData.ChunkWidth;
+            int[] surfaceY = precomputedSurfaceY ?? BuildSurfaceMap(cavesOffMap);
+
+            int count = 0;
+            for (int x = 0; x < w; x++)
+            {
+                for (int z = 0; z < w; z++)
+                {
+                    int sy = surfaceY[x * w + z];
+                    for (int y = 1; y < sy; y++)
+                    {
+                        int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
+                        ushort onBlock = (ushort)(cavesOnMap[idx] & 0xFFFF);
+                        ushort offBlock = (ushort)(cavesOffMap[idx] & 0xFFFF);
+                        if (onBlock == BlockIDs.Air && offBlock != BlockIDs.Air)
+                            count++;
+                    }
+                }
+            }
+
+            return count;
         }
 
         // ── Data structures ─────────────────────────────────────────────────
@@ -282,6 +922,14 @@ namespace Editor.Dev
             public int ThinBlocks;
             public int TipBlocks;
             public int OpenBlocks;
+
+            // Network topology (L7) — DeadEnd == TipBlocks, Corridor == ThinBlocks (same thresholds)
+            public int JunctionBlocks;
+
+            // Tunnel direction (L8)
+            public int HorizontalBlocks;
+            public int VerticalBlocks;
+            public int MixedBlocks;
 
             // Y-level distribution
             public int[] CaveAirPerY;
@@ -332,6 +980,9 @@ namespace Editor.Dev
             public float MinIsolationDist;
             public float MedianIsolationDist;
             public float AvgIsolationDist;
+
+            // Network topology (L7) and tunnel direction (L8) are computed in FormatResults()
+            // from per-chunk ChunkStats accumulators — no struct fields needed here.
         }
 
         private class UnionFind
@@ -387,30 +1038,10 @@ namespace Editor.Dev
             const int w = VoxelData.ChunkWidth;
             const int h = VoxelData.ChunkHeight;
 
-            // Build per-column surface height from the caves-off (solid terrain) map
-            int[] surfaceY = new int[w * w];
+            int[] surfaceY = BuildSurfaceMap(cavesOffMap);
             long surfaceHeightSum = 0;
-
-            for (int x = 0; x < w; x++)
-            {
-                for (int z = 0; z < w; z++)
-                {
-                    int sy = 0;
-                    for (int y = h - 1; y >= 0; y--)
-                    {
-                        int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
-                        ushort blockId = (ushort)(cavesOffMap[idx] & 0xFFFF);
-                        if (blockId != BlockIDs.Air)
-                        {
-                            sy = y;
-                            break;
-                        }
-                    }
-
-                    surfaceY[x * w + z] = sy;
-                    surfaceHeightSum += sy;
-                }
-            }
+            foreach (int yCount in surfaceY)
+                surfaceHeightSum += yCount;
 
             // Identify cave blocks: solid in caves-off, air in caves-on, below surface
             bool[] isCaveAir = new bool[w * h * w];
@@ -462,10 +1093,14 @@ namespace Editor.Dev
                 }
             }
 
-            // Shape quality: classify each cave block by neighbor count
+            // Shape quality, topology, and tunnel direction: classify each cave block
             int tipBlocks = 0;
             int thinBlocks = 0;
             int openBlocks = 0;
+            int junctionBlocks = 0;
+            int horizontalBlocks = 0;
+            int verticalBlocks = 0;
+            int mixedBlocks = 0;
 
             for (int x = 0; x < w; x++)
             {
@@ -479,12 +1114,30 @@ namespace Editor.Dev
 
                         int airNeighbors = CountAirNeighbors(isCaveAir, x, y, z);
 
+                        // Shape quality
                         if (airNeighbors <= 1)
                             tipBlocks++;
                         else if (airNeighbors == 2)
                             thinBlocks++;
                         else if (airNeighbors >= 4)
                             openBlocks++;
+
+                        // Topology (L7) — only junctionBlocks is new; dead-end/corridor reuse tip/thin
+                        if (airNeighbors >= 3)
+                            junctionBlocks++;
+
+                        // Tunnel direction (L8) — normalize by axis count (4 horizontal vs 2 vertical)
+                        int hCount = CountHorizontalAirNeighbors(isCaveAir, x, y, z);
+                        int vCount = CountVerticalAirNeighbors(isCaveAir, x, y, z);
+                        // Compare hCount/4 vs vCount/2 → multiply through to avoid float: hCount*2 vs vCount*4
+                        int hNorm = hCount * 2;
+                        int vNorm = vCount * 4;
+                        if (hNorm > vNorm)
+                            horizontalBlocks++;
+                        else if (vNorm > hNorm)
+                            verticalBlocks++;
+                        else
+                            mixedBlocks++;
                     }
                 }
             }
@@ -536,6 +1189,10 @@ namespace Editor.Dev
                     ThinBlocks = thinBlocks,
                     TipBlocks = tipBlocks,
                     OpenBlocks = openBlocks,
+                    JunctionBlocks = junctionBlocks,
+                    HorizontalBlocks = horizontalBlocks,
+                    VerticalBlocks = verticalBlocks,
+                    MixedBlocks = mixedBlocks,
                     CaveAirPerY = caveAirPerY,
                 },
                 Pockets = pockets.ToArray(),
@@ -620,6 +1277,36 @@ namespace Editor.Dev
             if (y < h - 1 && isCaveAir[ChunkMath.GetFlattenedIndexInChunk(x, y + 1, z)]) count++;
             if (z > 0 && isCaveAir[ChunkMath.GetFlattenedIndexInChunk(x, y, z - 1)]) count++;
             if (z < w - 1 && isCaveAir[ChunkMath.GetFlattenedIndexInChunk(x, y, z + 1)]) count++;
+
+            return count;
+        }
+
+        /// <summary>
+        /// Counts horizontal (X/Z axis) air neighbors for tunnel direction classification.
+        /// </summary>
+        private static int CountHorizontalAirNeighbors(bool[] isCaveAir, int x, int y, int z)
+        {
+            const int w = VoxelData.ChunkWidth;
+            int count = 0;
+
+            if (x > 0 && isCaveAir[ChunkMath.GetFlattenedIndexInChunk(x - 1, y, z)]) count++;
+            if (x < w - 1 && isCaveAir[ChunkMath.GetFlattenedIndexInChunk(x + 1, y, z)]) count++;
+            if (z > 0 && isCaveAir[ChunkMath.GetFlattenedIndexInChunk(x, y, z - 1)]) count++;
+            if (z < w - 1 && isCaveAir[ChunkMath.GetFlattenedIndexInChunk(x, y, z + 1)]) count++;
+
+            return count;
+        }
+
+        /// <summary>
+        /// Counts vertical (Y axis) air neighbors for tunnel direction classification.
+        /// </summary>
+        private static int CountVerticalAirNeighbors(bool[] isCaveAir, int x, int y, int z)
+        {
+            const int h = VoxelData.ChunkHeight;
+            int count = 0;
+
+            if (y > 1 && isCaveAir[ChunkMath.GetFlattenedIndexInChunk(x, y - 1, z)]) count++;
+            if (y < h - 1 && isCaveAir[ChunkMath.GetFlattenedIndexInChunk(x, y + 1, z)]) count++;
 
             return count;
         }
@@ -843,43 +1530,26 @@ namespace Editor.Dev
             GlobalNetworkStats networkStats)
         {
             int totalChunks = stats.Length;
-            int chunksWithNoCaves = 0;
-            int totalCaveAir = 0;
-            int totalUnderground = 0;
+            AggregatedTotals agg = AggregateTotals(stats);
+
+            // Per-chunk density distribution (not covered by AggregateTotals)
             float maxDensity = 0f;
             float minDensity = float.MaxValue;
-
-            int totalPockets = 0;
-            int totalTipBlocks = 0;
-            int totalThinBlocks = 0;
-            int totalOpenBlocks = 0;
-            int globalLargestPocket = 0;
-
             int[] densityBuckets = new int[5];
             float[] perChunkDensities = new float[totalChunks];
             float[] spatialDensity = new float[gridSize * gridSize];
 
             for (int i = 0; i < totalChunks; i++)
             {
-                ChunkStats s = stats[i];
-                totalCaveAir += s.CaveAirBlocks;
-                totalUnderground += s.TotalUnderground;
-                totalPockets += s.PocketCount;
-                totalTipBlocks += s.TipBlocks;
-                totalThinBlocks += s.ThinBlocks;
-                totalOpenBlocks += s.OpenBlocks;
-
-                if (s.LargestPocket > globalLargestPocket)
-                    globalLargestPocket = s.LargestPocket;
-
-                float density = s.TotalUnderground > 0 ? (float)s.CaveAirBlocks / s.TotalUnderground : 0f;
+                float density = stats[i].TotalUnderground > 0
+                    ? (float)stats[i].CaveAirBlocks / stats[i].TotalUnderground
+                    : 0f;
                 perChunkDensities[i] = density;
 
                 int cx = i / gridSize;
                 int cz = i % gridSize;
                 spatialDensity[cx * gridSize + cz] = density;
 
-                if (s.CaveAirBlocks == 0) chunksWithNoCaves++;
                 if (density > maxDensity) maxDensity = density;
                 if (density < minDensity) minDensity = density;
 
@@ -894,16 +1564,16 @@ namespace Editor.Dev
                 densityBuckets[bucket]++;
             }
 
-            float avgDensity = totalUnderground > 0 ? (float)totalCaveAir / totalUnderground : 0f;
+            float avgDensity = agg.TotalUnderground > 0 ? (float)agg.TotalCaveAir / agg.TotalUnderground : 0f;
             float[] sortedDensities = (float[])perChunkDensities.Clone();
             Array.Sort(sortedDensities);
             float medianDensity = sortedDensities[totalChunks / 2];
-            float avgPocketsPerChunk = totalChunks > 0 ? (float)totalPockets / totalChunks : 0f;
+            float avgPocketsPerChunk = totalChunks > 0 ? (float)agg.TotalPockets / totalChunks : 0f;
 
             // Shape quality percentages (of total cave air)
-            float tipPct = totalCaveAir > 0 ? (float)totalTipBlocks / totalCaveAir : 0f;
-            float thinPct = totalCaveAir > 0 ? (float)totalThinBlocks / totalCaveAir : 0f;
-            float openPct = totalCaveAir > 0 ? (float)totalOpenBlocks / totalCaveAir : 0f;
+            float tipPct = agg.TotalCaveAir > 0 ? (float)agg.TotalTipBlocks / agg.TotalCaveAir : 0f;
+            float thinPct = agg.TotalCaveAir > 0 ? (float)agg.TotalThinBlocks / agg.TotalCaveAir : 0f;
+            float openPct = agg.TotalCaveAir > 0 ? (float)agg.TotalOpenBlocks / agg.TotalCaveAir : 0f;
 
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("=== CAVE DENSITY ANALYSIS ===");
@@ -913,13 +1583,13 @@ namespace Editor.Dev
 
             // --- OVERVIEW ---
             sb.AppendLine("--- OVERVIEW ---");
-            sb.AppendLine($"Total underground voxels: {totalUnderground:N0}");
-            sb.AppendLine($"Total cave air blocks:   {totalCaveAir:N0}");
+            sb.AppendLine($"Total underground voxels: {agg.TotalUnderground:N0}");
+            sb.AppendLine($"Total cave air blocks:   {agg.TotalCaveAir:N0}");
             sb.AppendLine($"Overall cave density:    {avgDensity:P2}");
             sb.AppendLine($"Median chunk density:    {medianDensity:P2}");
             sb.AppendLine($"Min chunk density:       {minDensity:P2}");
             sb.AppendLine($"Max chunk density:       {maxDensity:P2}");
-            sb.AppendLine($"Chunks with no caves:    {chunksWithNoCaves}/{totalChunks} ({(float)chunksWithNoCaves / totalChunks:P1})");
+            sb.AppendLine($"Chunks with no caves:    {agg.EmptyChunks}/{totalChunks} ({(float)agg.EmptyChunks / totalChunks:P1})");
             sb.AppendLine();
 
             // --- DENSITY DISTRIBUTION ---
@@ -953,7 +1623,7 @@ namespace Editor.Dev
 
             sb.AppendLine("--- POCKET ANALYSIS ---");
             sb.AppendLine($"Avg surface height:    {avgSurfaceHeight}");
-            sb.AppendLine($"Total pockets:         {totalPockets:N0}");
+            sb.AppendLine($"Total pockets:         {agg.TotalPockets:N0}");
             sb.AppendLine($"Avg pockets per chunk: {avgPocketsPerChunk:F1}");
             sb.AppendLine($"Smallest pocket:       {globalSmallestPocket:N0} blocks");
             sb.AppendLine($"Avg median pocket:     {avgMedianPocket:N0} blocks");
@@ -985,9 +1655,9 @@ namespace Editor.Dev
                 sb.AppendLine($"Max chunks spanned:      {networkStats.MaxChunksSpanned}");
                 sb.AppendLine($"Avg chunks spanned:      {networkStats.AvgChunksSpanned:F1}");
 
-                if (globalLargestPocket > 0)
+                if (agg.GlobalLargestPocket > 0)
                 {
-                    float mergeFactor = (float)networkStats.LargestNetwork / globalLargestPocket;
+                    float mergeFactor = (float)networkStats.LargestNetwork / agg.GlobalLargestPocket;
                     sb.AppendLine($"Merge amplification:     {mergeFactor:F1}x  [global largest vs per-chunk largest]");
                 }
 
@@ -1040,9 +1710,9 @@ namespace Editor.Dev
 
             // --- SHAPE QUALITY ---
             sb.AppendLine("--- SHAPE QUALITY ---");
-            sb.AppendLine($"Tip blocks (0-1 air neighbors):   {totalTipBlocks,6:N0}  ({tipPct:P1})  [artifact indicator]");
-            sb.AppendLine($"Thin blocks (2 air neighbors):    {totalThinBlocks,6:N0}  ({thinPct:P1})  [narrow tunnels]");
-            sb.AppendLine($"Open blocks (4+ air neighbors):   {totalOpenBlocks,6:N0}  ({openPct:P1})  [explorable caverns]");
+            sb.AppendLine($"Tip blocks (0-1 air neighbors):   {agg.TotalTipBlocks,6:N0}  ({tipPct:P1})  [artifact indicator]");
+            sb.AppendLine($"Thin blocks (2 air neighbors):    {agg.TotalThinBlocks,6:N0}  ({thinPct:P1})  [narrow tunnels]");
+            sb.AppendLine($"Open blocks (4+ air neighbors):   {agg.TotalOpenBlocks,6:N0}  ({openPct:P1})  [explorable caverns]");
 
             string quality;
             if (tipPct > 0.3f)
@@ -1056,6 +1726,65 @@ namespace Editor.Dev
 
             sb.AppendLine($"Assessment: {quality}");
             sb.AppendLine();
+
+            // --- NETWORK TOPOLOGY ---
+            if (agg.TotalCaveAir > 0)
+            {
+                // Dead-end == tip blocks (0-1 neighbors), corridor == thin blocks (2 neighbors)
+                float deadEndPct = tipPct;
+                float corridorPct = thinPct;
+                float junctionPct = (float)agg.TotalJunctionBlocks / agg.TotalCaveAir;
+
+                sb.AppendLine("--- NETWORK TOPOLOGY ---");
+                sb.AppendLine($"Dead-end blocks (0-1 neighbors):  {agg.TotalTipBlocks,6:N0}  ({deadEndPct:P1})  [passage termini]");
+                sb.AppendLine($"Corridor blocks (2 neighbors):    {agg.TotalThinBlocks,6:N0}  ({corridorPct:P1})  [linear passages]");
+                sb.AppendLine($"Junction blocks (3+ neighbors):   {agg.TotalJunctionBlocks,6:N0}  ({junctionPct:P1})  [decision points]");
+
+                string topoAssessment;
+                if (junctionPct > 0.4f)
+                    topoAssessment = "OPEN — many decision points, cavern-dominant";
+                else if (junctionPct > 0.15f)
+                    topoAssessment = "BRANCHING — good mix of tunnels and intersections";
+                else if (corridorPct > 0.4f)
+                    topoAssessment = "LINEAR — mostly corridors with few branches";
+                else if (deadEndPct > 0.3f)
+                    topoAssessment = "FRAGMENTED — many dead-ends, exploration feels choppy";
+                else
+                    topoAssessment = "MIXED — balanced topology";
+
+                sb.AppendLine($"Assessment: {topoAssessment}");
+                sb.AppendLine();
+            }
+
+            // --- TUNNEL DIRECTION ---
+            if (agg.TotalCaveAir > 0)
+            {
+                float hPct = (float)agg.TotalHorizontalBlocks / agg.TotalCaveAir;
+                float vPct = (float)agg.TotalVerticalBlocks / agg.TotalCaveAir;
+                float mPct = (float)agg.TotalMixedBlocks / agg.TotalCaveAir;
+
+                sb.AppendLine("--- TUNNEL DIRECTION ---");
+                sb.AppendLine($"Horizontal blocks (H > V neighbors): {agg.TotalHorizontalBlocks,6:N0}  ({hPct:P1})");
+                sb.AppendLine($"Vertical blocks (V > H neighbors):   {agg.TotalVerticalBlocks,6:N0}  ({vPct:P1})");
+                sb.AppendLine($"Mixed blocks (H == V neighbors):     {agg.TotalMixedBlocks,6:N0}  ({mPct:P1})");
+
+                float hvRatio = agg.TotalVerticalBlocks > 0 ? (float)agg.TotalHorizontalBlocks / agg.TotalVerticalBlocks : float.PositiveInfinity;
+
+                string dirAssessment;
+                if (hvRatio > 5f)
+                    dirAssessment = $"STRONGLY HORIZONTAL — H:V ratio {hvRatio:F1}:1, flat cave network";
+                else if (hvRatio > 2f)
+                    dirAssessment = $"MOSTLY HORIZONTAL — H:V ratio {hvRatio:F1}:1, occasional vertical sections";
+                else if (hvRatio > 0.5f)
+                    dirAssessment = $"BALANCED — H:V ratio {hvRatio:F1}:1, multi-level cave systems";
+                else if (hvRatio > 0.2f)
+                    dirAssessment = $"MOSTLY VERTICAL — H:V ratio {hvRatio:F1}:1, shaft-dominant";
+                else
+                    dirAssessment = $"STRONGLY VERTICAL — H:V ratio {hvRatio:F1}:1, vertical fissures";
+
+                sb.AppendLine($"Assessment: {dirAssessment}");
+                sb.AppendLine();
+            }
 
             // --- Y-LEVEL HISTOGRAM ---
             const int chunkHeight = VoxelData.ChunkHeight;
@@ -1087,7 +1816,7 @@ namespace Editor.Dev
                     if (count == 0 && y > avgSurfaceHeight + 2) continue;
 
                     int barLen = (int)((float)count / peakYCount * BAR_WIDTH);
-                    float pct = totalCaveAir > 0 ? (float)count / totalCaveAir * 100f : 0f;
+                    float pct = agg.TotalCaveAir > 0 ? (float)count / agg.TotalCaveAir * 100f : 0f;
                     sb.Append($"y={y,3} | ");
                     sb.Append(new string('#', barLen).PadRight(BAR_WIDTH));
                     sb.AppendLine($" {count,6:N0} ({pct,5:F1}%)");

@@ -78,6 +78,18 @@ namespace Jobs.Generators
         public GenerationFeatureFlags FeatureFlags { get; set; } = GenerationFeatureFlags.Default;
 
         /// <summary>
+        /// When set, overrides the trunk worm enabled state from the <see cref="TrunkWormConfig"/>.
+        /// <c>null</c> = use config value (default), <c>false</c> = force disabled.
+        /// </summary>
+        public bool? TrunkWormEnabledOverride { get; set; }
+
+        /// <summary>
+        /// When true, the worm carver job emits per-worm telemetry data into
+        /// <see cref="GenerationJobData.WormTelemetry"/>. Editor-only — leave false in production.
+        /// </summary>
+        public bool EnableTelemetry { get; set; }
+
+        /// <summary>
         /// Overrides the sea level after <see cref="Initialize"/> has been called.
         /// Used by editor preview tools to experiment with different water levels
         /// without modifying the <see cref="WorldTypeDefinition"/> asset.
@@ -105,13 +117,23 @@ namespace Jobs.Generators
 
             // Cast BiomeBase[] → StandardBiomeAttributes[]
             _standardBiomes = new StandardBiomeAttributes[worldType.biomes.Length];
+            bool foundSelectedBiome = false;
             for (int i = 0; i < worldType.biomes.Length; i++)
             {
                 _standardBiomes[i] = (StandardBiomeAttributes)worldType.biomes[i];
                 if (isSingleBiomeMode && selectedBiome != null && _standardBiomes[i] == selectedBiome)
                 {
                     _forceBiomeIndex = i;
+                    foundSelectedBiome = true;
                 }
+            }
+
+            // Standalone biome support: if the selected biome is not in the WorldType array,
+            // substitute it at index 0 so generation can proceed
+            if (isSingleBiomeMode && selectedBiome != null && !foundSelectedBiome)
+            {
+                _standardBiomes[0] = selectedBiome;
+                _forceBiomeIndex = 0;
             }
 
             // --- Flatten biomes + lodes + caves + structure pools into NativeArrays ---
@@ -332,6 +354,8 @@ namespace Jobs.Generators
             const int totalVoxels = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
 
             NativeBitArray wormMask = new NativeBitArray(totalVoxels, Allocator.Persistent);
+            NativeList<WormTelemetryEntry> wormTelemetry = new NativeList<WormTelemetryEntry>(
+                EnableTelemetry ? 64 : 0, Allocator.Persistent);
 
             bool needCaveMask = FeatureFlags.EnableCaves;
             NativeArray<byte> caveMask = new NativeArray<byte>(needCaveMask ? totalVoxels : 0, Allocator.Persistent);
@@ -352,8 +376,10 @@ namespace Jobs.Generators
                     CaveZoneNoises = _caveZoneNoises,
                     IsSingleBiomeMode = _isSingleBiomeMode,
                     ForceBiomeIndex = _forceBiomeIndex,
-                    TrunkConfig = _trunkWormConfigJobData,
+                    TrunkConfig = GetEffectiveTrunkConfig(),
+                    FeatureFlags = FeatureFlags,
                     OutputWormMask = wormMask,
+                    Telemetry = wormTelemetry,
                 };
 
                 wormHandle = wormJob.Schedule(default);
@@ -429,6 +455,7 @@ namespace Jobs.Generators
                 HeightMap = outputHeightMap,
                 Mods = modificationsQueue,
                 StructureSpawns = structureSpawnsQueue,
+                WormTelemetry = wormTelemetry,
             };
         }
 
@@ -877,6 +904,14 @@ namespace Jobs.Generators
                 case 3: return new Vector3Int(-pos.z, pos.y, pos.x); // 270 CW
                 default: return pos; // 0
             }
+        }
+
+        private TrunkWormConfigJobData GetEffectiveTrunkConfig()
+        {
+            if (TrunkWormEnabledOverride.HasValue && !TrunkWormEnabledOverride.Value)
+                return default; // default struct has Enabled = false
+
+            return _trunkWormConfigJobData;
         }
 
         /// <inheritdoc />

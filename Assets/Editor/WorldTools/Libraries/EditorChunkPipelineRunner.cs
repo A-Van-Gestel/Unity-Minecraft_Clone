@@ -41,6 +41,18 @@ namespace Editor.WorldTools.Libraries
         public int? SeaLevelOverride { get; set; }
 
         /// <summary>
+        /// When set, overrides the trunk worm enabled state from the <see cref="WorldTypeDefinition"/>.
+        /// <c>true</c> = force trunk worms on, <c>false</c> = force trunk worms off, <c>null</c> = use asset value.
+        /// </summary>
+        public bool? TrunkWormOverride { get; set; }
+
+        /// <summary>
+        /// When true, the worm carver job emits per-worm telemetry data into
+        /// <see cref="GenerationJobData.WormTelemetry"/>. Editor-only.
+        /// </summary>
+        public bool EnableTelemetry { get; set; }
+
+        /// <summary>
         /// The job data manager containing block types and custom mesh data.
         /// </summary>
         public JobDataManager JobDataManager => _jobDataManager;
@@ -79,6 +91,8 @@ namespace Editor.WorldTools.Libraries
             _generator.FeatureFlags = FeatureFlags;
             if (SeaLevelOverride.HasValue)
                 _generator.SeaLevel = SeaLevelOverride.Value;
+            _generator.TrunkWormEnabledOverride = TrunkWormOverride;
+            _generator.EnableTelemetry = EnableTelemetry;
             return _generator.ScheduleGeneration(coord);
         }
 

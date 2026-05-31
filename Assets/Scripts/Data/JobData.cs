@@ -343,6 +343,26 @@ namespace Data
         [MarshalAs(UnmanagedType.U1)]
         public bool EnableMinorFlora;
 
+        /// <summary>When false, WormCarver cave layers (both trunk and local) are skipped. Only effective when <see cref="EnableCaves"/> is true.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableWormCarver;
+
+        /// <summary>When false, Cheese (blob) cave layers are skipped. Only effective when <see cref="EnableCaves"/> is true.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableCheese;
+
+        /// <summary>When false, Noodle (isoband) cave layers are skipped. Only effective when <see cref="EnableCaves"/> is true.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableNoodle;
+
+        /// <summary>When false, Spaghetti2D and Spaghetti3D cave layers are skipped. Only effective when <see cref="EnableCaves"/> is true.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableSpaghetti;
+
+        /// <summary>When false, per-biome local worm carver layers are skipped (trunk worms are controlled separately via TrunkWormConfig). Only effective when <see cref="EnableCaves"/> and <see cref="EnableWormCarver"/> are true.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool EnableLocalWormCarver;
+
         /// <summary>
         /// Returns feature flags with all passes enabled.
         /// </summary>
@@ -353,6 +373,11 @@ namespace Data
             EnableWater = true,
             EnableMajorFlora = true,
             EnableMinorFlora = true,
+            EnableWormCarver = true,
+            EnableCheese = true,
+            EnableNoodle = true,
+            EnableSpaghetti = true,
+            EnableLocalWormCarver = true,
         };
     }
 

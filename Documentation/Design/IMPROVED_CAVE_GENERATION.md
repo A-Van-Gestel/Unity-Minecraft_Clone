@@ -784,7 +784,7 @@ Note: `StandardChunkGenerator.GetVoxel()` does not need updating for Phase 1 —
 - ~~**Worm radius noise** (Perlin-modulated radius instead of sine wave) for less predictable width variation.~~ (Implemented --- see Section 3.1.2)
 - ~~**Worm Y-level attraction** (tendency to carve toward specific Y bands, e.g., diamond-level in Minecraft terms).~~ (Implemented --- see Section 3.1.4)
 - ~~**Spaghetti revival** --- if the 2D repetition problem can be solved (3D noise pairs, per-axis domain warp), Spaghetti could return as an alternative connectivity generator.~~ (Implemented --- see Section 2.5. `Spaghetti` renamed to `Spaghetti2D`; new `Spaghetti3D` mode uses dual 3D noise zero-crossing intersection.)
-- **CaveDensityAnalyzer fix** for non-WorldType biomes and trunk worm support (see Section 4.3 known limitations).
+- ~~**CaveDensityAnalyzer fix** for non-WorldType biomes and trunk worm support (see Section 4.3 known limitations).~~ (Implemented --- all 8 known limitations addressed: standalone biome support (L1), trunk worm toggle (L2), multi-seed averaging (L3), per-layer-type breakdown via `GenerationFeatureFlags` per-mode flags (L4), worm telemetry instrumentation (L5), cheese-worm connectivity analysis (L6), network topology metrics (L7), horizontal/vertical tunnel characterization (L8).)
 - ~~**Trunk traversal blocking** --- `trunkTraversalAllowed` flag per biome to terminate trunks entering biomes where underground caves make no sense (e.g., ocean).~~ (Implemented --- see Section 3.4.6)
 - ~~**Worm-to-worm mask seeking** --- Allow worms to seek toward already-carved worm tunnels for more reliable trunk-local connections.~~ (Implemented --- see Section 3.5.3)
 

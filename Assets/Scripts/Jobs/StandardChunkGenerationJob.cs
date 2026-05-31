@@ -404,6 +404,8 @@ namespace Jobs
                         // --- WormCarver --- handled by pre-pass worm mask
                         if (caveLayer.Mode == CaveMode.WormCarver)
                         {
+                            if (!FeatureFlags.EnableWormCarver) continue;
+
                             int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
                             if (WormMask.IsSet(flatIdx))
                             {
@@ -421,6 +423,7 @@ namespace Jobs
                         // --- Cheese Caves (renamed from Blob) — large open caverns ---
                         if (caveLayer.Mode == CaveMode.Cheese)
                         {
+                            if (!FeatureFlags.EnableCheese) continue;
                             float cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
@@ -438,6 +441,8 @@ namespace Jobs
                         // Domain warp is NOT applied: 2D noise pairs would lose the Z-axis warp shift.
                         else if (caveLayer.Mode == CaveMode.Spaghetti2D)
                         {
+                            if (!FeatureFlags.EnableSpaghetti) continue;
+
                             float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
                             if (bound < effectiveThreshold - 0.2f) continue;
 
@@ -457,6 +462,8 @@ namespace Jobs
                         // --- Noodle (new) — winding tubular corridors via isoband ---
                         else if (caveLayer.Mode == CaveMode.Noodle)
                         {
+                            if (!FeatureFlags.EnableNoodle) continue;
+
                             float cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
@@ -476,6 +483,8 @@ namespace Jobs
                         // --- Spaghetti3D — dual zero-crossing intersection tunnels ---
                         else if (caveLayer.Mode == CaveMode.Spaghetti3D)
                         {
+                            if (!FeatureFlags.EnableSpaghetti) continue;
+
                             float cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);

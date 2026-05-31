@@ -453,14 +453,13 @@ namespace Editor.WorldTools
 
             _pipelineRunner = new EditorChunkPipelineRunner();
             _pipelineRunner.Initialize(_seed, _worldType, db, _isSingleBiomeMode, _selectedBiome);
-            _pipelineRunner.FeatureFlags = new GenerationFeatureFlags
-            {
-                EnableCaves = _enableCaves,
-                EnableLodes = _enableLodes,
-                EnableWater = _enableWater,
-                EnableMajorFlora = _enableMajorFlora,
-                EnableMinorFlora = _enableMinorFlora,
-            };
+            GenerationFeatureFlags flags = GenerationFeatureFlags.Default;
+            flags.EnableCaves = _enableCaves;
+            flags.EnableLodes = _enableLodes;
+            flags.EnableWater = _enableWater;
+            flags.EnableMajorFlora = _enableMajorFlora;
+            flags.EnableMinorFlora = _enableMinorFlora;
+            _pipelineRunner.FeatureFlags = flags;
             _pipelineRunner.SeaLevelOverride = _seaLevel;
 
             ScheduleAllGeneration();

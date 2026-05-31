@@ -19,6 +19,11 @@ namespace Jobs.Data
         /// </summary>
         public NativeQueue<StructureSpawnMarker> StructureSpawns;
 
+        /// <summary>
+        /// Optional per-worm telemetry data. Only allocated when <see cref="Jobs.Generators.StandardChunkGenerator.EnableTelemetry"/> is true.
+        /// </summary>
+        public NativeList<WormTelemetryEntry> WormTelemetry;
+
         /// A helper to dispose all the containers at once
         public void Dispose()
         {
@@ -26,6 +31,7 @@ namespace Jobs.Data
             if (HeightMap.IsCreated) HeightMap.Dispose();
             if (Mods.IsCreated) Mods.Dispose();
             if (StructureSpawns.IsCreated) StructureSpawns.Dispose();
+            if (WormTelemetry.IsCreated) WormTelemetry.Dispose();
         }
     }
 }

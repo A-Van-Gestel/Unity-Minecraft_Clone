@@ -676,6 +676,7 @@ namespace Editor.WorldTools
                     IsSingleBiomeMode = forceBiomeIdx >= 0,
                     ForceBiomeIndex = math.max(0, forceBiomeIdx),
                     TrunkConfig = data.TrunkConfig,
+                    FeatureFlags = GenerationFeatureFlags.Default,
                     OutputWormMask = wormMask,
                 };
                 wormJob.Execute();
