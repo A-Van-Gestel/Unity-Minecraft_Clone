@@ -357,12 +357,12 @@ MonoBehaviour:
   minCavePocketSize: 12
   trunkWormModifiers:
     spawnSuppression: 0
-    verticalBiasOverride: 0.3
-    yAttractionCenterOverride: -1
+    verticalBiasOverride: 0.25
+    yAttractionCenterOverride: 55
     traversalAllowed: 1
     traversalFadeSteps: 0
   caveLayers:
-  - layerName: Worm Carver
+  - layerName: Mountain Shafts
     previewColor: {r: 1, g: 0, b: 0.7748437, a: 1}
     mode: 2
     noiseConfig:
@@ -422,42 +422,42 @@ MonoBehaviour:
     isSeekableByTrunkWorms: 0
     isSeekableByLocalWorms: 0
     minHeight: 5
-    maxHeight: 120
+    maxHeight: 130
     depthFadeMargin: 32
-    wormSpawnChance: 0.015
+    wormSpawnChance: 0.014
     maxWormsPerChunk: 1
     wormBaseRadius: 3
     wormShape:
-      radiusMin: 2
-      radiusMax: 4
-      squashAxis: 0
-      squashFactor: 1
-      radiusWaveCount: 3
-      radiusNoiseStrength: 0
-      radiusNoiseFrequency: 0.1
-    wormWaviness: 0.33
+      radiusMin: 3
+      radiusMax: 5
+      squashAxis: 1
+      squashFactor: 0.8
+      radiusWaveCount: 2
+      radiusNoiseStrength: 0.2
+      radiusNoiseFrequency: 0.08
+    wormWaviness: 0.35
     wormHorizontalBias: 0.2
     wormYAttraction:
-      strength: 0
-      minY: 20
-      maxY: 40
-    wormMinLength: 50
-    wormMaxLength: 150
+      strength: 0.15
+      minY: 30
+      maxY: 90
+    wormMinLength: 55
+    wormMaxLength: 160
     wormBranching:
-      branchChance: 0.05
+      branchChance: 0.04
       maxBranchDepth: 2
     wormNoiseSeeking:
       checkInterval: 10
-      seekDistance: 10
-      seekChance: 0.5
+      seekDistance: 14
+      seekChance: 0.55
       maskSeekChance: 0
       maskSeekMinSteps: 30
-  - layerName: Deep Chambers
+  - layerName: Mountain Vaults
     previewColor: {r: 1, g: 0.72156864, b: 0, a: 1}
     mode: 0
     noiseConfig:
       seedOffset: 91234
-      frequency: 0.015
+      frequency: 0.012
       noiseType: 0
       rotationType3D: 0
       fractalType: 0
@@ -489,7 +489,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    threshold: 0.8
+    threshold: 0.78
     enableWarp: 0
     warpConfig:
       seedOffset: 0
@@ -508,12 +508,12 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    zoneAttenuation: 0
+    zoneAttenuation: 0.35
     isSeekableByTrunkWorms: 1
     isSeekableByLocalWorms: 1
     minHeight: 5
-    maxHeight: 40
-    depthFadeMargin: 8
+    maxHeight: 65
+    depthFadeMargin: 12
     wormSpawnChance: 1
     maxWormsPerChunk: 3
     wormBaseRadius: 3
@@ -542,12 +542,12 @@ MonoBehaviour:
       seekChance: 0.5
       maskSeekChance: 0
       maskSeekMinSteps: 30
-  - layerName: Noodle Alpine Fissures
+  - layerName: Alpine Fissures
     previewColor: {r: 0.5, g: 0.5, b: 0.9, a: 1}
     mode: 3
     noiseConfig:
       seedOffset: 67890
-      frequency: 0.025
+      frequency: 0.02
       noiseType: 0
       rotationType3D: 2
       fractalType: 1
@@ -579,7 +579,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    threshold: 0.93
+    threshold: 0.952
     enableWarp: 1
     warpConfig:
       seedOffset: 0
@@ -598,11 +598,11 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 8
       normalizeToZeroOne: 0
-    zoneAttenuation: 0.28
+    zoneAttenuation: 0.58
     isSeekableByTrunkWorms: 0
     isSeekableByLocalWorms: 0
-    minHeight: 15
-    maxHeight: 85
+    minHeight: 25
+    maxHeight: 90
     depthFadeMargin: 16
     wormSpawnChance: 1
     maxWormsPerChunk: 3

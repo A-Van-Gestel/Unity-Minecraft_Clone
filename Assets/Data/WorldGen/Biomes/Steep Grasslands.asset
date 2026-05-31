@@ -390,7 +390,7 @@ MonoBehaviour:
     traversalAllowed: 1
     traversalFadeSteps: 0
   caveLayers:
-  - layerName: Local Worm Tunnels
+  - layerName: Hillside Tunnels
     previewColor: {r: 0.4, g: 0.7, b: 0.2, a: 1}
     mode: 2
     noiseConfig:
@@ -450,9 +450,9 @@ MonoBehaviour:
     isSeekableByTrunkWorms: 0
     isSeekableByLocalWorms: 0
     minHeight: 5
-    maxHeight: 55
-    depthFadeMargin: 12
-    wormSpawnChance: 0.04
+    maxHeight: 80
+    depthFadeMargin: 20
+    wormSpawnChance: 0.025
     maxWormsPerChunk: 2
     wormBaseRadius: 3
     wormShape:
@@ -460,27 +460,27 @@ MonoBehaviour:
       radiusMax: 3.5
       squashAxis: 0
       squashFactor: 1
-      radiusWaveCount: 2
-      radiusNoiseStrength: 0
+      radiusWaveCount: 3
+      radiusNoiseStrength: 0.3
       radiusNoiseFrequency: 0.1
-    wormWaviness: 0.4
-    wormHorizontalBias: 0.5
+    wormWaviness: 0.45
+    wormHorizontalBias: 0.45
     wormYAttraction:
-      strength: 0
-      minY: 20
-      maxY: 40
-    wormMinLength: 35
-    wormMaxLength: 100
+      strength: 0.2
+      minY: 18
+      maxY: 52
+    wormMinLength: 40
+    wormMaxLength: 120
     wormBranching:
-      branchChance: 0.04
+      branchChance: 0.05
       maxBranchDepth: 2
     wormNoiseSeeking:
       checkInterval: 10
-      seekDistance: 10
-      seekChance: 0.5
+      seekDistance: 12
+      seekChance: 0.55
       maskSeekChance: 0
       maskSeekMinSteps: 30
-  - layerName: Deep Chambers
+  - layerName: Hillside Chambers
     previewColor: {r: 1, g: 0.7232333, b: 0, a: 1}
     mode: 0
     noiseConfig:
@@ -517,7 +517,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    threshold: 0.8
+    threshold: 0.83
     enableWarp: 0
     warpConfig:
       seedOffset: 0
@@ -536,7 +536,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    zoneAttenuation: 0
+    zoneAttenuation: 0.26
     isSeekableByTrunkWorms: 1
     isSeekableByLocalWorms: 1
     minHeight: 5

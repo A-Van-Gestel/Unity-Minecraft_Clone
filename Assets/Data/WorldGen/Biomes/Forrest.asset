@@ -416,7 +416,7 @@ MonoBehaviour:
     traversalAllowed: 1
     traversalFadeSteps: 0
   caveLayers:
-  - layerName: Local Root Tunnels
+  - layerName: Root Tunnels
     previewColor: {r: 0.5, g: 0.3, b: 0.1, a: 1}
     mode: 2
     noiseConfig:
@@ -476,42 +476,42 @@ MonoBehaviour:
     isSeekableByTrunkWorms: 0
     isSeekableByLocalWorms: 0
     minHeight: 5
-    maxHeight: 45
-    depthFadeMargin: 10
-    wormSpawnChance: 0.04
+    maxHeight: 80
+    depthFadeMargin: 18
+    wormSpawnChance: 0.022
     maxWormsPerChunk: 2
     wormBaseRadius: 2.5
     wormShape:
       radiusMin: 1.5
-      radiusMax: 3
+      radiusMax: 3.5
       squashAxis: 0
       squashFactor: 1
-      radiusWaveCount: 3
-      radiusNoiseStrength: 0
-      radiusNoiseFrequency: 0.1
-    wormWaviness: 0.5
-    wormHorizontalBias: 0.55
+      radiusWaveCount: 4
+      radiusNoiseStrength: 0.5
+      radiusNoiseFrequency: 0.12
+    wormWaviness: 0.6
+    wormHorizontalBias: 0.5
     wormYAttraction:
-      strength: 0
-      minY: 20
-      maxY: 40
+      strength: 0.18
+      minY: 12
+      maxY: 56
     wormMinLength: 40
-    wormMaxLength: 100
+    wormMaxLength: 110
     wormBranching:
-      branchChance: 0.06
+      branchChance: 0.05
       maxBranchDepth: 2
     wormNoiseSeeking:
       checkInterval: 10
-      seekDistance: 10
-      seekChance: 0.5
+      seekDistance: 12
+      seekChance: 0.55
       maskSeekChance: 0
       maskSeekMinSteps: 30
-  - layerName: Deep Chambers
+  - layerName: Forest Chambers
     previewColor: {r: 1, g: 0.72156864, b: 0, a: 1}
     mode: 0
     noiseConfig:
       seedOffset: 91234
-      frequency: 0.015
+      frequency: 0.016
       noiseType: 0
       rotationType3D: 0
       fractalType: 0
@@ -543,7 +543,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    threshold: 0.82
+    threshold: 0.83
     enableWarp: 0
     warpConfig:
       seedOffset: 0
@@ -562,11 +562,11 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    zoneAttenuation: 0
+    zoneAttenuation: 0.26
     isSeekableByTrunkWorms: 1
     isSeekableByLocalWorms: 1
     minHeight: 5
-    maxHeight: 40
+    maxHeight: 38
     depthFadeMargin: 8
     wormSpawnChance: 1
     maxWormsPerChunk: 3
