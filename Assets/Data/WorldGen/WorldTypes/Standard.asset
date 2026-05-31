@@ -23,7 +23,7 @@ MonoBehaviour:
   seaLevel: 54
   solidGroundHeight: 52
   trunkWormConfig:
-    enabled: 0
+    enabled: 1
     spawnChance: 0.008
     maxWormsPerCell: 1
     shape:

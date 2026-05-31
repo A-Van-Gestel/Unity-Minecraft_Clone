@@ -69,6 +69,7 @@ namespace Editor.WorldTools
         private void OnEnable()
         {
             AutoDetectWorldType();
+            RefreshWorldTypeList();
             RefreshBiomeList();
             OnEnableBlendingTab();
 
@@ -93,6 +94,7 @@ namespace Editor.WorldTools
             if (_worldType != WorldGenPreviewSettings.WorldType)
             {
                 _worldType = WorldGenPreviewSettings.WorldType;
+                _selectedWtIndex = _wtAssets?.IndexOf(_worldType) ?? -1;
                 changed = true;
             }
 
@@ -280,6 +282,8 @@ namespace Editor.WorldTools
             if (EditorGUI.EndChangeCheck() && _worldType != null)
             {
                 _seaLevel = _worldType.seaLevel;
+                _selectedWtIndex = _wtAssets?.IndexOf(_worldType) ?? -1;
+                RebuildWorldTypeBiomeList();
             }
 
             if (_worldType != null)
