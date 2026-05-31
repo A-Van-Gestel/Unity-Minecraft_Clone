@@ -32,6 +32,7 @@ namespace Editor.WorldTools
         private static readonly string[] s_tabLabels = { "Cross-Section", "Noise Channels", "Biome Editing", "World Type", "World Blending" };
 
         // --- Shared World Type & Biome Selection ---
+        private bool IsLegacyWorldType => _worldType != null && _worldType.typeID == WorldTypeID.Legacy;
         private WorldTypeDefinition _worldType;
         private int _seaLevel = 45;
         private const string BIOME_SAVE_DIR = "Assets/Data/WorldGen/Biomes";
@@ -223,11 +224,14 @@ namespace Editor.WorldTools
         /// </summary>
         private void RegenerateActivePreview()
         {
-            switch (_lastPreviewTabIndex)
+            if (!IsLegacyWorldType)
             {
-                case 0: GenerateCrossSectionPreview(); break;
-                case 1: GenerateNoiseChannelsPreview(); break;
-                case 4: GenerateBlendingPreview(); break;
+                switch (_lastPreviewTabIndex)
+                {
+                    case 0: GenerateCrossSectionPreview(); break;
+                    case 1: GenerateNoiseChannelsPreview(); break;
+                    case 4: GenerateBlendingPreview(); break;
+                }
             }
 
             WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome, _seaLevel);
@@ -246,24 +250,62 @@ namespace Editor.WorldTools
             switch (_selectedTabIndex)
             {
                 case 0:
+                    if (IsLegacyWorldType)
+                    {
+                        DrawLegacyUnsupportedMessage();
+                        break;
+                    }
+
                     DrawCrossSectionTab();
                     break;
                 case 1:
+                    if (IsLegacyWorldType)
+                    {
+                        DrawLegacyUnsupportedMessage();
+                        break;
+                    }
+
                     DrawNoiseChannelsTab();
                     break;
                 case 2:
+                    if (IsLegacyWorldType)
+                    {
+                        DrawLegacyUnsupportedMessage();
+                        break;
+                    }
+
                     DrawBiomeEditorTab();
                     break;
                 case 3:
                     DrawWorldTypeTab();
                     break;
                 case 4:
+                    if (IsLegacyWorldType)
+                    {
+                        DrawLegacyUnsupportedMessage();
+                        break;
+                    }
+
                     DrawWorldBlendingTab();
                     break;
             }
 
             if (_debounceTimer.IsPending)
                 Repaint();
+        }
+
+        /// <summary>
+        /// Draws a full-tab message indicating the current tab is not supported for Legacy world types.
+        /// </summary>
+        private static void DrawLegacyUnsupportedMessage()
+        {
+            EditorGUILayout.Space(20);
+            EditorGUILayout.HelpBox(
+                "This tab is not supported for Legacy world types.\n\n" +
+                "The Cross-Section, Noise Channels, Biome Editing, and World Blending preview tools " +
+                "are designed for the Standard generation pipeline (FastNoiseLite / multi-noise terrain).\n\n" +
+                "Switch to a Standard world type in the World Type tab to use these tools.",
+                MessageType.Warning);
         }
 
         #region Shared Biome List

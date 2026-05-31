@@ -34,6 +34,7 @@ namespace Editor.WorldTools
         private Vector2 _wtListScrollPos;
 
         private static readonly string[] s_wtSubTabLabels = { "General", "Biomes", "Trunk Worms" };
+        private static readonly string[] s_wtSubTabLabelsLegacy = { "General", "Biomes", "Trunk Worms (N/A)" };
 
         /// <summary>
         /// Rebuilds the <see cref="ReorderableList"/> when the <see cref="WorldTypeDefinition"/> changes.
@@ -149,17 +150,31 @@ namespace Editor.WorldTools
             _wtSerializedObject.Update();
 
             // --- Sub-tab toolbar ---
-            _wtSubTabIndex = GUILayout.Toolbar(_wtSubTabIndex, s_wtSubTabLabels, GUILayout.Height(22));
+            bool isLegacy = _worldType.typeID == WorldTypeID.Legacy;
+            string[] tabLabels = isLegacy ? s_wtSubTabLabelsLegacy : s_wtSubTabLabels;
+
+            _wtSubTabIndex = GUILayout.Toolbar(_wtSubTabIndex, tabLabels, GUILayout.Height(22));
             EditorGUILayout.Space(6);
 
             // --- Scrollable content ---
             _wtScrollPos = EditorGUILayout.BeginScrollView(_wtScrollPos);
 
-            switch (_wtSubTabIndex)
+            if (isLegacy && _wtSubTabIndex == 2)
             {
-                case 0: DrawWtGeneralSubTab(); break;
-                case 1: DrawWtBiomesSubTab(); break;
-                case 2: DrawWtTrunkWormsSubTab(); break;
+                EditorGUILayout.HelpBox(
+                    "Trunk Worms are not available for Legacy world types.\n\n" +
+                    "The Legacy generation pipeline uses a different cave system (Mathf.PerlinNoise-based lodes only). " +
+                    "Trunk worm configuration requires a Standard world type.",
+                    MessageType.Warning);
+            }
+            else
+            {
+                switch (_wtSubTabIndex)
+                {
+                    case 0: DrawWtGeneralSubTab(); break;
+                    case 1: DrawWtBiomesSubTab(); break;
+                    case 2: DrawWtTrunkWormsSubTab(); break;
+                }
             }
 
             EditorGUILayout.EndScrollView();
