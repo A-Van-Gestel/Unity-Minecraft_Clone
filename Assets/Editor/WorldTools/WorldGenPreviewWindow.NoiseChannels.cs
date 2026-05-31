@@ -413,7 +413,6 @@ namespace Editor.WorldTools
             // --- Build noise + spline data for the job ---
             FastNoiseLite channelNoise = default;
             BurstSpline channelSpline = default;
-            bool useSpline = false;
             NoisePreviewMode jobMode;
 
             // Multi-noise (always built — needed for Combined Height and Density Slice)
@@ -450,7 +449,6 @@ namespace Editor.WorldTools
                 case NoiseChannelMode.ContinentalnessSpline:
                     channelNoise = contNoise;
                     channelSpline = contSpline;
-                    useSpline = true;
                     jobMode = NoisePreviewMode.SplineNoise;
                     break;
                 case NoiseChannelMode.ErosionRaw:
@@ -460,7 +458,6 @@ namespace Editor.WorldTools
                 case NoiseChannelMode.ErosionSpline:
                     channelNoise = erosionNoise;
                     channelSpline = erosionSpline;
-                    useSpline = true;
                     jobMode = NoisePreviewMode.SplineNoise;
                     break;
                 case NoiseChannelMode.PeaksValleysRaw:
@@ -470,7 +467,6 @@ namespace Editor.WorldTools
                 case NoiseChannelMode.PeaksValleysSpline:
                     channelNoise = pvNoise;
                     channelSpline = pvSpline;
-                    useSpline = true;
                     jobMode = NoisePreviewMode.SplineNoise;
                     break;
                 case NoiseChannelMode.CombinedHeight:
