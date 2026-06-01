@@ -97,6 +97,14 @@ namespace Data.WorldTypes
         [Tooltip("Trunk worms will not spawn above this Y level.")]
         public int maxHeight = 50;
 
+        [Range(0, 32)]
+        [Tooltip("Number of blocks over which trunk worm carving fades in near the MinHeight (bottom) bound. 0 = hard cutoff.")]
+        public int depthFadeMarginBottom = 16;
+
+        [Range(0, 32)]
+        [Tooltip("Number of blocks over which trunk worm carving fades out near the MaxHeight (top) bound. 0 = hard cutoff.")]
+        public int depthFadeMarginTop = 16;
+
         [Header("Y-Level Attraction")]
         [Tooltip("Y-level attraction configuration controlling how trunk worms are pulled toward a target depth band.")]
         public WormYAttraction yAttraction = WormYAttraction.TrunkDefault;

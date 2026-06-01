@@ -389,14 +389,14 @@ namespace Editor.WorldTools.Libraries
                 }
 
                 int range = cave.maxHeight - cave.minHeight;
-                if (cave.depthFadeMargin > 0 && cave.depthFadeMargin * 2 >= range)
+                if (cave.depthFadeMarginBottom + cave.depthFadeMarginTop >= range)
                 {
                     results.Add(new BiomeValidationResult
                     {
                         Severity = ValidationSeverity.Warning,
                         SubTabIndex = SUB_TAB_CAVES,
-                        Message = $"\"{name}\": depthFadeMargin ({cave.depthFadeMargin}) covers the entire height range ({range} blocks). " +
-                                  "The cave will be fully faded everywhere — effectively disabled.",
+                        Message = $"\"{name}\": depthFadeMarginBottom ({cave.depthFadeMarginBottom}) + depthFadeMarginTop ({cave.depthFadeMarginTop}) " +
+                                  $"covers the entire height range ({range} blocks). The cave will be fully faded everywhere — effectively disabled.",
                     });
                 }
             }
@@ -517,6 +517,18 @@ namespace Editor.WorldTools.Libraries
             if (config.yAttraction.strength > 0f)
                 ValidateYAttractionParams(config.yAttraction.minY, config.yAttraction.maxY, config.yAttraction.strength,
                     config.minHeight, config.maxHeight, "Trunk Worm", SUB_TAB_CAVES, results);
+
+            int trunkRange = config.maxHeight - config.minHeight;
+            if (config.depthFadeMarginBottom + config.depthFadeMarginTop >= trunkRange)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Warning,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = $"Trunk Worm: depthFadeMarginBottom ({config.depthFadeMarginBottom}) + depthFadeMarginTop ({config.depthFadeMarginTop}) " +
+                              $"covers the entire height range ({trunkRange} blocks). The carving will be fully faded everywhere — effectively disabled.",
+                });
+            }
 
             ValidateTrunkShapeRanges(config, results);
             ValidateTrunkBranchingRanges(config, results);

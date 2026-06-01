@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Data.WorldTypes;
+using Unity.Mathematics;
 
 namespace Jobs.Data
 {
@@ -50,8 +51,25 @@ namespace Jobs.Data
         /// <summary>Caves will not generate above this Y level.</summary>
         public readonly int MaxHeight;
 
-        /// <summary>Number of blocks over which carving fades in/out near depth bounds. 0 = hard cutoff.</summary>
-        public readonly int DepthFadeMargin;
+        /// <summary>Number of blocks over which carving fades in near the MinHeight (bottom) bound. 0 = hard cutoff.</summary>
+        public readonly int DepthFadeMarginBottom;
+
+        /// <summary>Number of blocks over which carving fades out near the MaxHeight (top) bound. 0 = hard cutoff.</summary>
+        public readonly int DepthFadeMarginTop;
+
+        /// <summary>
+        /// Computes the depth fade factor for a given Y level within this layer's height bounds.
+        /// Returns 1 inside the full-carving zone and tapers to 0 near MinHeight/MaxHeight.
+        /// </summary>
+        public static float CalculateDepthFade(int y, int minHeight, int maxHeight, int fadeMarginBottom, int fadeMarginTop)
+        {
+            float depthFade = 1f;
+            if (fadeMarginBottom > 0)
+                depthFade = math.min(depthFade, math.saturate((float)(y - minHeight) / fadeMarginBottom));
+            if (fadeMarginTop > 0)
+                depthFade = math.min(depthFade, math.saturate((float)(maxHeight - y) / fadeMarginTop));
+            return depthFade;
+        }
 
         public readonly float WormBaseRadius;
         public readonly float WormRadiusMin;
@@ -94,7 +112,8 @@ namespace Jobs.Data
             IsSeekableByLocalWorms = layerConfig.isSeekableByLocalWorms;
             MinHeight = layerConfig.minHeight;
             MaxHeight = layerConfig.maxHeight;
-            DepthFadeMargin = layerConfig.depthFadeMargin;
+            DepthFadeMarginBottom = layerConfig.depthFadeMarginBottom;
+            DepthFadeMarginTop = layerConfig.depthFadeMarginTop;
 
             WormBaseRadius = layerConfig.wormBaseRadius;
             WormRadiusMin = layerConfig.wormShape.radiusMin;
@@ -154,6 +173,8 @@ namespace Jobs.Data
         public readonly int MaxLength;
         public readonly int MinHeight;
         public readonly int MaxHeight;
+        public readonly int DepthFadeMarginBottom;
+        public readonly int DepthFadeMarginTop;
 
         public readonly float BranchChance;
         public readonly int MaxBranchDepth;
@@ -192,6 +213,8 @@ namespace Jobs.Data
             MaxLength = config.maxLength;
             MinHeight = config.minHeight;
             MaxHeight = config.maxHeight;
+            DepthFadeMarginBottom = config.depthFadeMarginBottom;
+            DepthFadeMarginTop = config.depthFadeMarginTop;
             BranchChance = config.branching.branchChance;
             MaxBranchDepth = config.branching.maxBranchDepth;
             SeekInterval = config.noiseSeeking.checkInterval;

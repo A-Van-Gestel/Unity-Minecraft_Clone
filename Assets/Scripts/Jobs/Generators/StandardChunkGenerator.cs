@@ -541,14 +541,9 @@ namespace Jobs.Generators
 
                     if (y < caveLayer.MinHeight || y > caveLayer.MaxHeight) continue;
 
-                    float depthFade = 1f;
-                    if (caveLayer.DepthFadeMargin > 0)
-                    {
-                        int distFromMin = y - caveLayer.MinHeight;
-                        int distFromMax = caveLayer.MaxHeight - y;
-                        int distFromEdge = math.min(distFromMin, distFromMax);
-                        depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
-                    }
+                    float depthFade = StandardCaveLayerJobData.CalculateDepthFade(
+                        y, caveLayer.MinHeight, caveLayer.MaxHeight,
+                        caveLayer.DepthFadeMarginBottom, caveLayer.DepthFadeMarginTop);
 
                     FastNoiseLite caveNoise = _caveNoises[caveIdx];
                     float noiseVal;

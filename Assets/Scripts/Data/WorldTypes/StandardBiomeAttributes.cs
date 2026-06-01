@@ -333,9 +333,13 @@ namespace Data.WorldTypes
         [Tooltip("Caves will not generate above this Y level.")]
         public int maxHeight = 60;
 
-        [Tooltip("Number of blocks over which the carving fades in/out near MinHeight and MaxHeight bounds. 0 = hard cutoff.")]
+        [Tooltip("Number of blocks over which carving fades in near the MinHeight (bottom) bound. 0 = hard cutoff.")]
         [Range(0, 32)]
-        public int depthFadeMargin = 8;
+        public int depthFadeMarginBottom = 8;
+
+        [Tooltip("Number of blocks over which carving fades out near the MaxHeight (top) bound. 0 = hard cutoff.")]
+        [Range(0, 32)]
+        public int depthFadeMarginTop = 8;
 
         [Header("Worm Carver Settings")]
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]

@@ -423,9 +423,10 @@ MonoBehaviour:
     zoneAttenuation: 0.25
     isSeekableByTrunkWorms: 0
     isSeekableByLocalWorms: 0
-    minHeight: 5
+    minHeight: 0
     maxHeight: 78
-    depthFadeMargin: 18
+    depthFadeMarginBottom: 5
+    depthFadeMarginTop: 18
     wormSpawnChance: 0.015
     maxWormsPerChunk: 1
     wormBaseRadius: 3.5
@@ -513,9 +514,10 @@ MonoBehaviour:
     zoneAttenuation: 0.22
     isSeekableByTrunkWorms: 1
     isSeekableByLocalWorms: 1
-    minHeight: 5
+    minHeight: 0
     maxHeight: 42
-    depthFadeMargin: 8
+    depthFadeMarginBottom: 18
+    depthFadeMarginTop: 18
     wormSpawnChance: 1
     maxWormsPerChunk: 3
     wormBaseRadius: 3
@@ -605,7 +607,8 @@ MonoBehaviour:
     isSeekableByLocalWorms: 0
     minHeight: 10
     maxHeight: 50
-    depthFadeMargin: 12
+    depthFadeMarginBottom: 18
+    depthFadeMarginTop: 18
     wormSpawnChance: 1
     maxWormsPerChunk: 3
     wormBaseRadius: 3

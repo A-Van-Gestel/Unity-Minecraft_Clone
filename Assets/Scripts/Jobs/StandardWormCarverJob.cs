@@ -67,6 +67,7 @@ namespace Jobs
 
         private const int TRUNK_SEED_SALT = 0x5472756E; // "Trun" as int — decorrelates trunk RNG from local worm RNG
         private const int RADIUS_NOISE_SEED_SALT = 0x52614E6F; // "RaNo" as int — decorrelates radius noise from other noise sources
+        private const float MIN_CARVE_RADIUS = 0.01f;
 
         private struct WormState
         {
@@ -104,6 +105,11 @@ namespace Jobs
             public bool IsTrunk;
 
             public int OriginBiomeIndex;
+
+            public int MinHeight;
+            public int MaxHeight;
+            public int DepthFadeMarginBottom;
+            public int DepthFadeMarginTop;
         }
 
         public void Execute()
@@ -206,6 +212,10 @@ namespace Jobs
                                 MaskSeekMinSteps = TrunkConfig.MaskSeekMinSteps,
                                 IsTrunk = true,
                                 OriginBiomeIndex = biomeIndex,
+                                MinHeight = TrunkConfig.MinHeight,
+                                MaxHeight = TrunkConfig.MaxHeight,
+                                DepthFadeMarginBottom = TrunkConfig.DepthFadeMarginBottom,
+                                DepthFadeMarginTop = TrunkConfig.DepthFadeMarginTop,
                             };
 
                             SimulateWormStack(ref trunkRand, trunkStack, trunkParams, chunkMin, chunkMax, cx, cz);
@@ -280,6 +290,10 @@ namespace Jobs
                             MaskSeekMinSteps = caveLayer.WormMaskSeekMinSteps,
                             IsTrunk = false,
                             OriginBiomeIndex = biomeIndex,
+                            MinHeight = caveLayer.MinHeight,
+                            MaxHeight = caveLayer.MaxHeight,
+                            DepthFadeMarginBottom = caveLayer.DepthFadeMarginBottom,
+                            DepthFadeMarginTop = caveLayer.DepthFadeMarginTop,
                         };
 
                         SimulateWormStack(ref rand, wormStack, localParams, chunkMin, chunkMax, cx, cz);
@@ -615,6 +629,34 @@ namespace Jobs
                         });
                     }
 
+                    // Depth fade — taper radius near MinHeight/MaxHeight bounds.
+                    // Unlike the noise paths which use an early `continue`, the worm sim cannot skip
+                    // out-of-bounds steps because the traversal fade decrement and termination check below must still execute.
+                    {
+                        float depthFade = 1f;
+                        if (p.DepthFadeMarginBottom > 0)
+                        {
+                            float distFromMin = pos.y - p.MinHeight;
+                            depthFade = math.min(depthFade, math.saturate(distFromMin / p.DepthFadeMarginBottom));
+                        }
+                        else if (pos.y < p.MinHeight)
+                        {
+                            depthFade = 0f;
+                        }
+
+                        if (p.DepthFadeMarginTop > 0)
+                        {
+                            float distFromMax = p.MaxHeight - pos.y;
+                            depthFade = math.min(depthFade, math.saturate(distFromMax / p.DepthFadeMarginTop));
+                        }
+                        else if (pos.y > p.MaxHeight)
+                        {
+                            depthFade = 0f;
+                        }
+
+                        radius *= depthFade;
+                    }
+
                     // Traversal fade — linearly taper radius from full to 1/fadeTotal over the fade duration
                     if (fadeRemaining > 0)
                     {
@@ -622,8 +664,9 @@ namespace Jobs
                         fadeRemaining--;
                     }
 
-                    // Carving Phase
-                    CarveBlocksInChunk(pos, radius, safeSquash, invSquash, chunkMin, chunkMax);
+                    // Carving Phase — skip if radius was fully suppressed by depth or traversal fade
+                    if (radius > MIN_CARVE_RADIUS)
+                        CarveBlocksInChunk(pos, radius, safeSquash, invSquash, chunkMin, chunkMax);
 
                     // Terminate after the final fade carve (radius was 1/fadeTotal on this step)
                     if (fadeTotal > 0 && fadeRemaining <= 0)

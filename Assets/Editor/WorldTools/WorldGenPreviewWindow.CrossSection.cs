@@ -1228,12 +1228,9 @@ namespace Editor.WorldTools
                             continue;
                         }
 
-                        float depthFade = 1f;
-                        if (caveLayer.DepthFadeMargin > 0)
-                        {
-                            int distFromEdge = math.min(y - caveLayer.MinHeight, caveLayer.MaxHeight - y);
-                            depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
-                        }
+                        float depthFade = StandardCaveLayerJobData.CalculateDepthFade(
+                            y, caveLayer.MinHeight, caveLayer.MaxHeight,
+                            caveLayer.DepthFadeMarginBottom, caveLayer.DepthFadeMarginTop);
 
                         float zoneBoost = caveLayer.ZoneAttenuation > 0f
                             ? (1f - caveZoneNoise) * 0.5f * caveLayer.ZoneAttenuation

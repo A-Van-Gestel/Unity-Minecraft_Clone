@@ -436,13 +436,10 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
             if (y < caveLayer.MinHeight || y > caveLayer.MaxHeight) continue;
 
             float depthFade = 1f;
-            if (caveLayer.DepthFadeMargin > 0)
-            {
-                int distFromMin = y - caveLayer.MinHeight;
-                int distFromMax = caveLayer.MaxHeight - y;
-                int distFromEdge = math.min(distFromMin, distFromMax);
-                depthFade = math.saturate((float)distFromEdge / caveLayer.DepthFadeMargin);
-            }
+            if (caveLayer.DepthFadeMarginBottom > 0)
+                depthFade = math.min(depthFade, math.saturate((float)(y - caveLayer.MinHeight) / caveLayer.DepthFadeMarginBottom));
+            if (caveLayer.DepthFadeMarginTop > 0)
+                depthFade = math.min(depthFade, math.saturate((float)(caveLayer.MaxHeight - y) / caveLayer.DepthFadeMarginTop));
 
             float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
 
