@@ -227,7 +227,7 @@ MonoBehaviour:
   subSurfaceBlockID: 3
   terrainLayers:
   - blockID: 3
-    depth: 3
+    depth: 4
   strataDepthNoiseConfig:
     seedOffset: 0
     frequency: 0.05
@@ -244,7 +244,7 @@ MonoBehaviour:
     cellularJitter: 0
     domainWarpType: 0
     domainWarpAmp: 0
-    normalizeToZeroOne: 0
+    normalizeToZeroOne: 1
   underwaterSurfaceBlockID: 3
   floraZoneNoiseConfig:
     seedOffset: -99823
