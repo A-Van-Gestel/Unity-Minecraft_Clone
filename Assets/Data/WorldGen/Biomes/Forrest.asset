@@ -472,7 +472,7 @@ MonoBehaviour:
       domainWarpType: 0
       domainWarpAmp: 0
       normalizeToZeroOne: 0
-    zoneAttenuation: 0
+    zoneAttenuation: 0.42
     isSeekableByTrunkWorms: 0
     isSeekableByLocalWorms: 0
     minHeight: 5

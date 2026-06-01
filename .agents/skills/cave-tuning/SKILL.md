@@ -25,6 +25,13 @@ Use `Unity_RunCommand` to invoke the static API:
 using Editor.Dev;
 return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands");
 
+// With forceRefresh — use immediately after a SerializedObject config change
+// to guarantee the analysis reads the updated asset data.
+return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", forceRefresh: true);
+
+// With trunkMode override — e.g. exclude trunk worms to isolate local-only density
+return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", TrunkWormMode.Exclude);
+
 // Single biome NOT in WorldTypeDefinition (e.g. Steep Grasslands)
 using Editor.Dev;
 using Data.WorldTypes;
@@ -37,16 +44,18 @@ return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, true, biome);
 
 Parameters: `RunAnalysis(gridSize, seed, originX, originZ, singleBiomeMode, biome)`
 
-### Analyzer caching — always use a fresh origin after config changes
+### Stale results after config changes — use `forceRefresh`
 
-The analyzer caches results keyed on biome + seed + origin. If you change config and re-run at the same origin, you may see stale numbers. After any config change, increment originX or originZ by at least 200 (or use a different seed) to force a fresh analysis:
+After modifying a biome via `SerializedObject.ApplyModifiedProperties()` + `AssetDatabase.SaveAssets()`, a subsequent analysis call at the same seed/origin has occasionally returned stale numbers. No explicit static cache was found in the analyzer code; the cause appears to be an in-flight asset state mismatch. The public API now exposes a `forceRefresh` bool (default `false`) that calls `AssetDatabase.Refresh()` before running:
 
 ```csharp
-// Fresh analysis after a config change
-return CaveDensityAnalyzer.RunAnalysis(8, 42, 200, 200, "Grasslands");
+// Guarantee freshness immediately after a config change
+return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", forceRefresh: true);
 ```
 
-Also compare against **the same seed/origin used for the baseline** when checking whether a change improved or regressed density.
+Leave `forceRefresh: false` in normal tuning loops — `AssetDatabase.Refresh()` adds a measurable delay. Only pass `true` when you're verifying a config change at the exact same seed/origin you used for the baseline.
+
+As a secondary practice: compare results at **the same seed/origin used for the baseline** — density varies naturally by location (observed swings of 6–9% between different origins for the same config), so same-origin comparison is the only clean regression check.
 
 ### What it reports
 
@@ -99,7 +108,9 @@ Cave config lives on `StandardBiomeAttributes` ScriptableObjects under `Assets/D
 - **`caveZoneNoiseConfig.frequency`**: Controls spatial clustering of cave zones. Higher = more frequent cave/no-cave transitions.
 - **Cave layers** (array of `StandardCaveLayer`):
     - **Type** (`mode` field): `Cheese` (3D blob carving), `Spaghetti2D` (6-way 2D axis-pair average), `Spaghetti3D` (dual 3D noise zero-crossing), `Noodle` (tunnel carving along noise zero-crossings), or `WormCarver` (random-walk tunnels)
-    - **Zone Attenuation** (per-layer): How strongly the zone noise suppresses this layer. Range 0-1. Higher = more suppression in quiet zones. Threshold-based layers only (Cheese, Noodle, Spaghetti). **WormCarver spawn probability is NOT modulated by zone attenuation.**
+    - **Zone Attenuation** (per-layer): How strongly the zone noise suppresses this layer. Range 0-1. Higher = more suppression in quiet zones. Works for all modes:
+    - **Noodle/Spaghetti/Cheese**: boosts the noise threshold (`threshold += (1 - zoneNoise) * 0.5 * attn`). Full suppression when `threshold + 0.5*attn >= 1.0`.
+    - **WormCarver**: multiplies spawn probability (`effectiveSpawn = spawnChance * (1 - (1 - zoneNoise) * 0.5 * attn)`). This only affects *local* worms — trunk worms are not modulated. The impact on overall density is therefore modest in worlds where trunks dominate. Useful for adding biome-specific local clustering on top of the trunk-worm baseline.
     - **Threshold**: Base carve threshold. Higher = less carving.
     - **Height range**: `minHeight` / `maxHeight` with `depthFadeMargin` for smooth vertical transitions.
     - **3D Density**: Optional density noise that modulates cave size.
@@ -220,6 +231,20 @@ return result;
 | `shape.radiusNoiseStrength` | Bulge spikes at max radius | Keep 0; add ≤ 0.15 for mild organic variation |
 | `maxLength` | Linearly inflates coverage | 300–400 is sufficient for cross-biome traversal |
 | `yAttraction.strength` | Packs all trunks into one depth band, stacking volume | Keep 0 or use very weak (≤ 0.15); let trunks wander |
+
+## WormCarver zone attenuation — scope and expectations
+
+WormCarver `zoneAttenuation` (implemented in `StandardWormCarverJob.cs:229-236`) modulates the **local worm spawn probability** per chunk using:
+
+```
+effectiveSpawnChance = wormSpawnChance * (1 - (1 - zoneNoise) * 0.5 * attn)
+```
+
+At zoneNoise=-1 (minimum): spawn factor = `1 - attn`
+At zoneNoise=0 (neutral): spawn factor = `1 - 0.5*attn`
+At zoneNoise=+1 (maximum): spawn factor = 1.0 (always full spawn)
+
+**Important limitation**: this only modulates *local* worms. Trunk worms traverse all biomes uniformly and are not affected by per-biome `zoneAttenuation`. In worlds where trunk worms generate the majority of cave density (as they do by default), WormCarver attenuation produces modest spatial variation in local worms layered on top of the flat trunk baseline. It will not significantly move the "chunks with no caves" metric if trunks blanket every chunk. Use the `TrunkWormMode.Exclude` analysis to measure the local-only effect before tuning.
 
 ## Cheese-Worm connectivity
 

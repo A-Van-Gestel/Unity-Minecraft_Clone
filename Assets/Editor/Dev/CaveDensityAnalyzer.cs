@@ -190,11 +190,20 @@ namespace Editor.Dev
         /// <param name="originZ">Chunk Z origin offset.</param>
         /// <param name="singleBiomeMode">If true, forces generation to use only the specified biome.</param>
         /// <param name="biome">The biome to use when <paramref name="singleBiomeMode"/> is true.</param>
+        /// <param name="forceRefresh">
+        /// When true, calls <see cref="AssetDatabase.Refresh"/> before analysis to flush any pending
+        /// asset imports. Use this when a biome config was just modified via <c>SerializedObject</c>
+        /// and a subsequent analysis call returned stale data at the same seed/origin.
+        /// Defaults to false — the refresh adds a measurable delay and is unnecessary in most runs.
+        /// </param>
         /// <returns>Formatted analysis results string.</returns>
         public static string RunAnalysis(int gridSize, int seed, int originX = 0, int originZ = 0,
             bool singleBiomeMode = false, StandardBiomeAttributes biome = null,
-            TrunkWormMode trunkMode = TrunkWormMode.Include)
+            TrunkWormMode trunkMode = TrunkWormMode.Include, bool forceRefresh = false)
         {
+            if (forceRefresh)
+                AssetDatabase.Refresh();
+
             return RunAnalysisInternal(gridSize, seed, originX, originZ, singleBiomeMode, biome, trunkMode, out _);
         }
 
@@ -316,11 +325,18 @@ namespace Editor.Dev
         /// <summary>
         /// Convenience overload accepting a biome name string for programmatic use.
         /// </summary>
+        /// <param name="forceRefresh">
+        /// When true, calls <see cref="AssetDatabase.Refresh"/> before analysis.
+        /// See the main <see cref="RunAnalysis"/> overload for details.
+        /// </param>
         public static string RunAnalysis(int gridSize, int seed, int originX, int originZ,
-            string biomeName)
+            string biomeName, TrunkWormMode trunkMode = TrunkWormMode.Include, bool forceRefresh = false)
         {
+            if (forceRefresh)
+                AssetDatabase.Refresh();
+
             if (string.IsNullOrEmpty(biomeName))
-                return RunAnalysis(gridSize, seed, originX, originZ);
+                return RunAnalysis(gridSize, seed, originX, originZ, trunkMode: trunkMode);
 
             WorldTypeDefinition worldType = FindWorldType();
             if (worldType?.biomes == null)
@@ -348,7 +364,7 @@ namespace Editor.Dev
                 return err;
             }
 
-            return RunAnalysis(gridSize, seed, originX, originZ, true, match, TrunkWormMode.Include);
+            return RunAnalysis(gridSize, seed, originX, originZ, true, match, trunkMode);
         }
 
         /// <summary>
@@ -362,13 +378,21 @@ namespace Editor.Dev
         /// <param name="originZ">Chunk Z origin offset.</param>
         /// <param name="singleBiomeMode">If true, forces generation to use only the specified biome.</param>
         /// <param name="biome">The biome to use when <paramref name="singleBiomeMode"/> is true.</param>
+        /// <param name="forceRefresh">
+        /// When true, calls <see cref="AssetDatabase.Refresh"/> once before the first seed's analysis.
+        /// See <see cref="RunAnalysis(int,int,int,int,bool,StandardBiomeAttributes,TrunkWormMode,bool)"/> for details.
+        /// </param>
         /// <returns>Formatted multi-seed analysis results string.</returns>
         public static string RunMultiSeedAnalysis(int gridSize, int baseSeed, int seedCount,
             int originX = 0, int originZ = 0,
             bool singleBiomeMode = false, StandardBiomeAttributes biome = null,
-            TrunkWormMode trunkMode = TrunkWormMode.Include)
+            TrunkWormMode trunkMode = TrunkWormMode.Include, bool forceRefresh = false)
         {
             seedCount = Math.Clamp(seedCount, 2, 5);
+
+            // Refresh once before all seeds — assets don't change between iterations.
+            if (forceRefresh)
+                AssetDatabase.Refresh();
 
             SeedMetrics[] allMetrics = new SeedMetrics[seedCount];
             StringBuilder perSeedResults = new StringBuilder();

@@ -306,8 +306,11 @@ namespace Data.WorldTypes
         [Tooltip("Per-layer cave zone attenuation strength. " +
                  "How much the biome's cave zone noise suppresses this layer in low-noise regions. " +
                  "0 = no zone effect (uniform density). " +
-                 "Higher values create more spatial variation. " +
-                 "Typically used on Noodle layers; Worm and Cheese layers usually leave this at 0.")]
+                 "Higher values create more spatial variation — clusters caves into denser/sparser regions. " +
+                 "Noodle/Spaghetti: boost threshold toward 1.0 to suppress carving (need attn > 1-threshold for full suppression). " +
+                 "WormCarver: multiplies spawn probability (formula: spawnChance * (1 - (1-zoneNoise) * 0.5 * attn)). " +
+                 "Cheese: same threshold boost as Noodle — keep attn <= 0.26 to prevent seed-specific vanishing. " +
+                 "Recommended ranges: Noodle 0.4-0.6, WormCarver 0.25-0.5, Cheese 0.20-0.26.")]
         public float zoneAttenuation;
 
         [Header("Noise Seekability")]
