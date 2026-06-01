@@ -390,6 +390,13 @@ namespace Jobs
                             y, caveLayer.MinHeight, caveLayer.MaxHeight,
                             caveLayer.DepthFadeMarginBottom, caveLayer.DepthFadeMarginTop);
 
+                        if (caveLayer.SurfaceFadeMargin > 0)
+                        {
+                            float surfaceFade = StandardCaveLayerJobData.CalculateSurfaceFade(
+                                y, terrainHeightFloat, caveLayer.SurfaceFadeMargin);
+                            depthFade = math.min(depthFade, surfaceFade);
+                        }
+
                         float zoneBoost = caveLayer.ZoneAttenuation > 0f
                             ? (1f - caveZoneNoise) * 0.5f * caveLayer.ZoneAttenuation
                             : 0f;

@@ -57,6 +57,12 @@ namespace Jobs.Data
         /// <summary>Number of blocks over which carving fades out near the MaxHeight (top) bound. 0 = hard cutoff.</summary>
         public readonly int DepthFadeMarginTop;
 
+        /// <summary>Number of blocks below terrain surface over which carving fades. 0 = disabled.</summary>
+        public readonly int SurfaceFadeMargin;
+
+        /// <summary>How aggressively worm carvers deflect away from the terrain surface. 0-1.</summary>
+        public readonly float SurfaceDeflectionStrength;
+
         /// <summary>
         /// Computes the depth fade factor for a given Y level within this layer's height bounds.
         /// Returns 1 inside the full-carving zone and tapers to 0 near MinHeight/MaxHeight.
@@ -69,6 +75,19 @@ namespace Jobs.Data
             if (fadeMarginTop > 0)
                 depthFade = math.min(depthFade, math.saturate((float)(maxHeight - y) / fadeMarginTop));
             return depthFade;
+        }
+
+        /// <summary>
+        /// Computes the surface-relative fade factor. Returns 1.0 when deep underground
+        /// (full carving), tapering to 0.0 at the terrain surface.
+        /// </summary>
+        /// <param name="y">Current voxel Y level.</param>
+        /// <param name="surfaceHeight">Terrain height at this (x,z) column from BiomeBlender (structure-free).</param>
+        /// <param name="surfaceFadeMargin">Fade distance in blocks below surface. 0 = disabled (returns 1).</param>
+        public static float CalculateSurfaceFade(int y, float surfaceHeight, int surfaceFadeMargin)
+        {
+            if (surfaceFadeMargin <= 0) return 1f;
+            return math.saturate((surfaceHeight - y) / surfaceFadeMargin);
         }
 
         public readonly float WormBaseRadius;
@@ -114,6 +133,8 @@ namespace Jobs.Data
             MaxHeight = layerConfig.maxHeight;
             DepthFadeMarginBottom = layerConfig.depthFadeMarginBottom;
             DepthFadeMarginTop = layerConfig.depthFadeMarginTop;
+            SurfaceFadeMargin = layerConfig.surfaceFadeMargin;
+            SurfaceDeflectionStrength = layerConfig.surfaceDeflectionStrength;
 
             WormBaseRadius = layerConfig.wormBaseRadius;
             WormRadiusMin = layerConfig.wormShape.radiusMin;
@@ -175,6 +196,8 @@ namespace Jobs.Data
         public readonly int MaxHeight;
         public readonly int DepthFadeMarginBottom;
         public readonly int DepthFadeMarginTop;
+        public readonly int SurfaceFadeMargin;
+        public readonly float SurfaceDeflectionStrength;
 
         public readonly float BranchChance;
         public readonly int MaxBranchDepth;
@@ -215,6 +238,8 @@ namespace Jobs.Data
             MaxHeight = config.maxHeight;
             DepthFadeMarginBottom = config.depthFadeMarginBottom;
             DepthFadeMarginTop = config.depthFadeMarginTop;
+            SurfaceFadeMargin = config.surfaceFadeMargin;
+            SurfaceDeflectionStrength = config.surfaceDeflectionStrength;
             BranchChance = config.branching.branchChance;
             MaxBranchDepth = config.branching.maxBranchDepth;
             SeekInterval = config.noiseSeeking.checkInterval;

@@ -105,6 +105,18 @@ namespace Data.WorldTypes
         [Tooltip("Number of blocks over which trunk worm carving fades out near the MaxHeight (top) bound. 0 = hard cutoff.")]
         public int depthFadeMarginTop = 16;
 
+        [Header("Surface-Relative Fade")]
+        [Range(0, 32)]
+        [Tooltip("Number of blocks below the terrain surface over which trunk worm carving fades to zero. " +
+                 "Uses the pure terrain heightmap (no structures). 0 = disabled.")]
+        public int surfaceFadeMargin;
+
+        [Range(0f, 1f)]
+        [Tooltip("How aggressively trunk worms steer away from the terrain surface. " +
+                 "0 = no deflection (radius suppression only). " +
+                 "0.5 = moderate downward push. Only active when surfaceFadeMargin > 0.")]
+        public float surfaceDeflectionStrength;
+
         [Header("Y-Level Attraction")]
         [Tooltip("Y-level attraction configuration controlling how trunk worms are pulled toward a target depth band.")]
         public WormYAttraction yAttraction = WormYAttraction.TrunkDefault;

@@ -376,6 +376,15 @@ namespace Jobs.Generators
                     CaveZoneNoises = _caveZoneNoises,
                     IsSingleBiomeMode = _isSingleBiomeMode,
                     ForceBiomeIndex = _forceBiomeIndex,
+                    MultiNoise = new MultiNoiseData
+                    {
+                        ContinentalnessNoises = _biomeContinentalnessNoises,
+                        ErosionNoises = _biomeErosionNoises,
+                        PeaksValleysNoises = _biomePeaksValleysNoises,
+                        ContinentalnessSplines = _biomeContinentalnessSplines,
+                        ErosionSplines = _biomeErosionSplines,
+                        PeaksValleysSplines = _biomePVSplines,
+                    },
                     TrunkConfig = GetEffectiveTrunkConfig(),
                     FeatureFlags = FeatureFlags,
                     OutputWormMask = wormMask,
@@ -497,8 +506,9 @@ namespace Jobs.Generators
                 ErosionSplines = _biomeErosionSplines,
                 PeaksValleysSplines = _biomePVSplines,
             };
-            int terrainHeight = (int)math.floor(BiomeBlender.CalculateBlendedTerrainHeight(
-                globalPos.x, globalPos.z, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, _isSingleBiomeMode, _forceBiomeIndex, out _));
+            float terrainHeightFloat = BiomeBlender.CalculateBlendedTerrainHeight(
+                globalPos.x, globalPos.z, ref _biomeSelectionNoise, ref _biomesJobData, ref multiNoise, _isSingleBiomeMode, _forceBiomeIndex, out _);
+            int terrainHeight = (int)math.floor(terrainHeightFloat);
 
             byte voxelValue;
             if (y == terrainHeight)
@@ -544,6 +554,13 @@ namespace Jobs.Generators
                     float depthFade = StandardCaveLayerJobData.CalculateDepthFade(
                         y, caveLayer.MinHeight, caveLayer.MaxHeight,
                         caveLayer.DepthFadeMarginBottom, caveLayer.DepthFadeMarginTop);
+
+                    if (caveLayer.SurfaceFadeMargin > 0)
+                    {
+                        float surfaceFade = StandardCaveLayerJobData.CalculateSurfaceFade(
+                            y, terrainHeightFloat, caveLayer.SurfaceFadeMargin);
+                        depthFade = math.min(depthFade, surfaceFade);
+                    }
 
                     FastNoiseLite caveNoise = _caveNoises[caveIdx];
                     float noiseVal;

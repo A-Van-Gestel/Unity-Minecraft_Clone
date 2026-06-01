@@ -42,6 +42,8 @@ MonoBehaviour:
     maxHeight: 50
     depthFadeMarginBottom: 5
     depthFadeMarginTop: 16
+    surfaceFadeMargin: 0
+    surfaceDeflectionStrength: 0
     yAttraction:
       strength: 0
       minY: 20

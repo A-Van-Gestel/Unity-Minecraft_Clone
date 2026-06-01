@@ -675,6 +675,7 @@ namespace Editor.WorldTools
                     CaveZoneNoises = data.CaveZoneNoises,
                     IsSingleBiomeMode = forceBiomeIdx >= 0,
                     ForceBiomeIndex = math.max(0, forceBiomeIdx),
+                    MultiNoise = data.MultiNoise,
                     TrunkConfig = data.TrunkConfig,
                     FeatureFlags = GenerationFeatureFlags.Default,
                     OutputWormMask = wormMask,
@@ -1231,6 +1232,13 @@ namespace Editor.WorldTools
                         float depthFade = StandardCaveLayerJobData.CalculateDepthFade(
                             y, caveLayer.MinHeight, caveLayer.MaxHeight,
                             caveLayer.DepthFadeMarginBottom, caveLayer.DepthFadeMarginTop);
+
+                        if (caveLayer.SurfaceFadeMargin > 0)
+                        {
+                            float surfaceFade = StandardCaveLayerJobData.CalculateSurfaceFade(
+                                y, terrainHeightFloat, caveLayer.SurfaceFadeMargin);
+                            depthFade = math.min(depthFade, surfaceFade);
+                        }
 
                         float zoneBoost = caveLayer.ZoneAttenuation > 0f
                             ? (1f - caveZoneNoise) * 0.5f * caveLayer.ZoneAttenuation

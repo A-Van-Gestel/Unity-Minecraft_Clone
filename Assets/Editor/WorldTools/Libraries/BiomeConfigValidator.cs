@@ -399,6 +399,28 @@ namespace Editor.WorldTools.Libraries
                                   $"covers the entire height range ({range} blocks). The cave will be fully faded everywhere — effectively disabled.",
                     });
                 }
+
+                if (cave.surfaceFadeMargin > 0 && cave.maxHeight < 40)
+                {
+                    results.Add(new BiomeValidationResult
+                    {
+                        Severity = ValidationSeverity.Info,
+                        SubTabIndex = SUB_TAB_CAVES,
+                        Message = $"\"{name}\": surfaceFadeMargin is {cave.surfaceFadeMargin} but maxHeight is only {cave.maxHeight}. " +
+                                  "If terrain is typically above maxHeight, surface fade will never activate.",
+                    });
+                }
+
+                if (cave.surfaceDeflectionStrength > 0f && cave.mode != CaveMode.WormCarver)
+                {
+                    results.Add(new BiomeValidationResult
+                    {
+                        Severity = ValidationSeverity.Info,
+                        SubTabIndex = SUB_TAB_CAVES,
+                        Message = $"\"{name}\": surfaceDeflectionStrength is set but mode is {cave.mode}. " +
+                                  "Deflection only applies to WormCarver mode.",
+                    });
+                }
             }
         }
 
@@ -527,6 +549,17 @@ namespace Editor.WorldTools.Libraries
                     SubTabIndex = SUB_TAB_CAVES,
                     Message = $"Trunk Worm: depthFadeMarginBottom ({config.depthFadeMarginBottom}) + depthFadeMarginTop ({config.depthFadeMarginTop}) " +
                               $"covers the entire height range ({trunkRange} blocks). The carving will be fully faded everywhere — effectively disabled.",
+                });
+            }
+
+            if (config.surfaceFadeMargin > 0 && config.maxHeight < 40)
+            {
+                results.Add(new BiomeValidationResult
+                {
+                    Severity = ValidationSeverity.Info,
+                    SubTabIndex = SUB_TAB_CAVES,
+                    Message = $"Trunk Worm: surfaceFadeMargin is {config.surfaceFadeMargin} but maxHeight is only {config.maxHeight}. " +
+                              "If terrain is typically above maxHeight, surface fade will never activate.",
                 });
             }
 

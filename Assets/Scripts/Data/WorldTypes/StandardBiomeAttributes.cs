@@ -341,6 +341,22 @@ namespace Data.WorldTypes
         [Range(0, 32)]
         public int depthFadeMarginTop = 8;
 
+        [Header("Surface-Relative Fade")]
+        [Tooltip("Number of blocks below the terrain surface over which carving fades to zero. " +
+                 "Uses the pure terrain heightmap (no structures). " +
+                 "0 = disabled (no surface-relative suppression). " +
+                 "Higher values prevent surface breakthroughs more aggressively.")]
+        [Range(0, 32)]
+        public int surfaceFadeMargin;
+
+        [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
+        [Range(0f, 1f)]
+        [Tooltip("How aggressively worm carvers steer away from the terrain surface. " +
+                 "0 = no deflection (radius suppression only). " +
+                 "0.5 = moderate downward push. " +
+                 "1.0 = strong avoidance. Only active when surfaceFadeMargin > 0.")]
+        public float surfaceDeflectionStrength;
+
         [Header("Worm Carver Settings")]
         [ConditionalField(nameof(mode), false, CaveMode.WormCarver)]
         [Tooltip("Probability [0, 1] that this chunk will spawn a worm system.")]

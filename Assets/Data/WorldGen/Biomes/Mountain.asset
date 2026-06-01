@@ -425,6 +425,8 @@ MonoBehaviour:
     maxHeight: 130
     depthFadeMarginBottom: 12
     depthFadeMarginTop: 32
+    surfaceFadeMargin: 8
+    surfaceDeflectionStrength: 0.8
     wormSpawnChance: 0.014
     maxWormsPerChunk: 1
     wormBaseRadius: 3
@@ -516,6 +518,8 @@ MonoBehaviour:
     maxHeight: 65
     depthFadeMarginBottom: 5
     depthFadeMarginTop: 5
+    surfaceFadeMargin: 0
+    surfaceDeflectionStrength: 0
     wormSpawnChance: 1
     maxWormsPerChunk: 3
     wormBaseRadius: 3
@@ -607,6 +611,8 @@ MonoBehaviour:
     maxHeight: 90
     depthFadeMarginBottom: 12
     depthFadeMarginTop: 16
+    surfaceFadeMargin: 0
+    surfaceDeflectionStrength: 0
     wormSpawnChance: 1
     maxWormsPerChunk: 3
     wormBaseRadius: 3

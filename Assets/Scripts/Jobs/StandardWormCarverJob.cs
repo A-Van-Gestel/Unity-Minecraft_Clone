@@ -3,6 +3,7 @@ using Data;
 using Data.WorldTypes;
 using Helpers;
 using Jobs.Data;
+using Jobs.Helpers;
 using Libraries;
 using Unity.Burst;
 using Unity.Collections;
@@ -51,6 +52,10 @@ namespace Jobs
         [ReadOnly]
         public int ForceBiomeIndex;
 
+        /// <summary>Multi-noise terrain height data for surface-relative fade. Passed through for <see cref="BiomeBlender.CalculateBlendedTerrainHeight"/>.</summary>
+        [ReadOnly]
+        public MultiNoiseData MultiNoise;
+
         [ReadOnly]
         public TrunkWormConfigJobData TrunkConfig;
 
@@ -66,6 +71,7 @@ namespace Jobs
         public NativeList<WormTelemetryEntry> Telemetry;
 
         private const int TRUNK_SEED_SALT = 0x5472756E; // "Trun" as int — decorrelates trunk RNG from local worm RNG
+        private const float PITCH_STEER_HORIZON = 16f; // virtual horizontal lookahead (blocks) for atan2-based pitch steering
         private const int RADIUS_NOISE_SEED_SALT = 0x52614E6F; // "RaNo" as int — decorrelates radius noise from other noise sources
         private const float MIN_CARVE_RADIUS = 0.01f;
 
@@ -110,6 +116,8 @@ namespace Jobs
             public int MaxHeight;
             public int DepthFadeMarginBottom;
             public int DepthFadeMarginTop;
+            public int SurfaceFadeMargin;
+            public float SurfaceDeflectionStrength;
         }
 
         public void Execute()
@@ -216,6 +224,8 @@ namespace Jobs
                                 MaxHeight = TrunkConfig.MaxHeight,
                                 DepthFadeMarginBottom = TrunkConfig.DepthFadeMarginBottom,
                                 DepthFadeMarginTop = TrunkConfig.DepthFadeMarginTop,
+                                SurfaceFadeMargin = TrunkConfig.SurfaceFadeMargin,
+                                SurfaceDeflectionStrength = TrunkConfig.SurfaceDeflectionStrength,
                             };
 
                             SimulateWormStack(ref trunkRand, trunkStack, trunkParams, chunkMin, chunkMax, cx, cz);
@@ -294,6 +304,8 @@ namespace Jobs
                             MaxHeight = caveLayer.MaxHeight,
                             DepthFadeMarginBottom = caveLayer.DepthFadeMarginBottom,
                             DepthFadeMarginTop = caveLayer.DepthFadeMarginTop,
+                            SurfaceFadeMargin = caveLayer.SurfaceFadeMargin,
+                            SurfaceDeflectionStrength = caveLayer.SurfaceDeflectionStrength,
                         };
 
                         SimulateWormStack(ref rand, wormStack, localParams, chunkMin, chunkMax, cx, cz);
@@ -311,6 +323,14 @@ namespace Jobs
             float biomeNoise = BiomeSelectionNoise.GetNoise(worldX, worldZ);
             int idx = (int)math.floor(biomeNoise * Biomes.Length);
             return math.clamp(idx, 0, Biomes.Length - 1);
+        }
+
+        private float GetTerrainHeight(float worldX, float worldZ)
+        {
+            return BiomeBlender.CalculateBlendedTerrainHeight(
+                (int)math.floor(worldX), (int)math.floor(worldZ),
+                ref BiomeSelectionNoise, ref Biomes, ref MultiNoise,
+                IsSingleBiomeMode, ForceBiomeIndex, out _);
         }
 
         private float EvaluateLayerNoise(int noiseArrayIndex, CaveMode mode, float3 pos)
@@ -413,6 +433,9 @@ namespace Jobs
                 int cachedStepBiomeIdx = p.OriginBiomeIndex;
                 int fadeRemaining = 0;
                 int fadeTotal = 0;
+                int cachedSurfaceX = int.MinValue;
+                int cachedSurfaceZ = int.MinValue;
+                float cachedSurfaceHeightValue = 0f;
 
                 // Telemetry counters
                 short configuredLength = (short)worm.LengthRemaining;
@@ -441,6 +464,20 @@ namespace Jobs
 
                     // Advance position by half radius to ensure overlapping carving spheres
                     pos += forward * (radius * 0.5f);
+
+                    // Cache terrain height by integer XZ column — skip recomputation when the worm stays in the same column
+                    if (p.SurfaceFadeMargin > 0)
+                    {
+                        int floorX = (int)math.floor(pos.x);
+                        int floorZ = (int)math.floor(pos.z);
+                        if (floorX != cachedSurfaceX || floorZ != cachedSurfaceZ)
+                        {
+                            cachedSurfaceX = floorX;
+                            cachedSurfaceZ = floorZ;
+                            cachedSurfaceHeightValue = GetTerrainHeight(pos.x, pos.z);
+                        }
+                    }
+                    float cachedSurfaceHeight = cachedSurfaceHeightValue;
 
                     // Perturb angles
                     yaw += rand.NextFloat(-p.Waviness, p.Waviness);
@@ -507,8 +544,20 @@ namespace Jobs
 
                         if (yDelta != 0f)
                         {
-                            float desiredPitch = math.clamp(math.atan2(yDelta, 16f), -math.PI * 0.3f, math.PI * 0.3f);
+                            float desiredPitch = math.clamp(math.atan2(yDelta, PITCH_STEER_HORIZON), -math.PI * 0.3f, math.PI * 0.3f);
                             pitch = math.lerp(pitch, desiredPitch, p.YAttractionStrength * 0.1f);
+                        }
+                    }
+
+                    // Surface-relative deflection — push worm downward when approaching terrain surface
+                    if (p.SurfaceFadeMargin > 0 && p.SurfaceDeflectionStrength > 0f)
+                    {
+                        float surfaceDistance = cachedSurfaceHeight - pos.y;
+                        if (surfaceDistance > 0f && surfaceDistance < p.SurfaceFadeMargin)
+                        {
+                            float proximity = 1f - math.saturate(surfaceDistance / p.SurfaceFadeMargin);
+                            float desiredPitch = math.clamp(math.atan2(-surfaceDistance, PITCH_STEER_HORIZON), -math.PI * 0.4f, 0f);
+                            pitch = math.lerp(pitch, desiredPitch, proximity * p.SurfaceDeflectionStrength * 0.1f);
                         }
                     }
 
@@ -652,6 +701,14 @@ namespace Jobs
                         else if (pos.y > p.MaxHeight)
                         {
                             depthFade = 0f;
+                        }
+
+                        // Surface-relative fade — taper radius near terrain surface
+                        if (p.SurfaceFadeMargin > 0)
+                        {
+                            float surfaceFade = StandardCaveLayerJobData.CalculateSurfaceFade(
+                                (int)math.floor(pos.y), cachedSurfaceHeight, p.SurfaceFadeMargin);
+                            depthFade = math.min(depthFade, surfaceFade);
                         }
 
                         radius *= depthFade;

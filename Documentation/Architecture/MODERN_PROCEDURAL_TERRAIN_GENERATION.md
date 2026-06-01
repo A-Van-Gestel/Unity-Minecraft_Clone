@@ -435,11 +435,17 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
 
             if (y < caveLayer.MinHeight || y > caveLayer.MaxHeight) continue;
 
-            float depthFade = 1f;
-            if (caveLayer.DepthFadeMarginBottom > 0)
-                depthFade = math.min(depthFade, math.saturate((float)(y - caveLayer.MinHeight) / caveLayer.DepthFadeMarginBottom));
-            if (caveLayer.DepthFadeMarginTop > 0)
-                depthFade = math.min(depthFade, math.saturate((float)(caveLayer.MaxHeight - y) / caveLayer.DepthFadeMarginTop));
+            float depthFade = StandardCaveLayerJobData.CalculateDepthFade(
+                y, caveLayer.MinHeight, caveLayer.MaxHeight,
+                caveLayer.DepthFadeMarginBottom, caveLayer.DepthFadeMarginTop);
+
+            // Surface-relative fade — suppress carving near the actual terrain surface
+            if (caveLayer.SurfaceFadeMargin > 0)
+            {
+                float surfaceFade = StandardCaveLayerJobData.CalculateSurfaceFade(
+                    y, terrainHeightFloat, caveLayer.SurfaceFadeMargin);
+                depthFade = math.min(depthFade, surfaceFade);
+            }
 
             float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
 
