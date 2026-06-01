@@ -169,8 +169,10 @@ public class PlayerInteraction : MonoBehaviour
     /// Uses mathematical fractional offsets to accurately determine the placed block face.
     /// </summary>
     /// <param name="overrideInteractWithFluids">If set, overrides the component's interactWithFluids toggle.</param>
+    /// <param name="skipTags">Block tags the ray should pass through (derived from the held block's canReplaceTags).</param>
     /// <returns>A VoxelRaycastResult struct containing information about the hit.</returns>
-    public VoxelRaycastResult RaycastForVoxel(bool? overrideInteractWithFluids = null)
+    public VoxelRaycastResult RaycastForVoxel(bool? overrideInteractWithFluids = null,
+        BlockTags skipTags = BlockTags.NONE)
     {
         float step = checkIncrement;
 
@@ -181,7 +183,7 @@ public class PlayerInteraction : MonoBehaviour
         {
             Vector3 pos = _playerCamera.position + _playerCamera.forward * step;
 
-            if (_world.CheckForVoxel(pos, checkFluids, includeNonSolid: true))
+            if (_world.CheckForVoxel(pos, checkFluids, includeNonSolid: true, skipTags: skipTags))
             {
                 VoxelRaycastResult result = new VoxelRaycastResult { DidHit = true };
                 result.HitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
@@ -222,7 +224,17 @@ public class PlayerInteraction : MonoBehaviour
 
     private void PlaceCursorBlocks()
     {
-        VoxelRaycastResult result = RaycastForVoxel();
+        // When holding a block, let the ray pass through blocks it can replace,
+        // so the player can target the solid surface behind them (e.g. ocean floor through water).
+        // When holding nothing, skipTags stays NONE so all blocks are targetable for punching.
+        BlockTags skipTags = BlockTags.NONE;
+        if (toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem)
+        {
+            ushort heldBlockId = toolbar.slots[toolbar.slotIndex].ItemSlot.Stack.ID;
+            skipTags = _world.BlockTypes[heldBlockId].canReplaceTags;
+        }
+
+        VoxelRaycastResult result = RaycastForVoxel(skipTags: skipTags);
         _lastRaycastResult = result;
 
         if (result.DidHit)

@@ -2703,7 +2703,8 @@ public class World : MonoBehaviour
     /// <param name="includeNonSolid">If true, non-solid interactable blocks (excluding Air and
     /// blocks with <see cref="BlockTags.IGNORE_RAYCAST"/>) will also count as a hit.</param>
     /// <returns>True if the voxel should be treated as a hit; otherwise, false.</returns>
-    public bool CheckForVoxel(Vector3 worldPos, bool includeFluids = false, bool includeNonSolid = false)
+    public bool CheckForVoxel(Vector3 worldPos, bool includeFluids = false, bool includeNonSolid = false,
+        BlockTags skipTags = BlockTags.NONE)
     {
         VoxelState? voxel = worldData.GetVoxelState(worldPos);
         if (!voxel.HasValue) return false;
@@ -2712,6 +2713,11 @@ public class World : MonoBehaviour
 
         // Skip Air (ID 0) — never a hit
         if (voxel.Value.ID == BlockIDs.Air) return false;
+
+        // Skip blocks whose tags overlap with the held block's canReplaceTags,
+        // so the ray passes through them (e.g. fluids when holding a block that can replace fluids).
+        if (skipTags != BlockTags.NONE && (props.tags & skipTags) != 0)
+            return false;
 
         // Fluid targeting (e.g. for buckets)
         if (includeFluids && props.fluidType != FluidType.None)
