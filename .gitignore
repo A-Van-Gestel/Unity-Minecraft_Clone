@@ -99,3 +99,6 @@ crashlytics-build.properties
 /Tools/Python/output/
 __pycache__/
 *.pyc
+
+# MCP
+.mcp.json
