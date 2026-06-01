@@ -798,3 +798,513 @@ MonoBehaviour:
     bottomFaceTexture: 255
     leftFaceTexture: 255
     rightFaceTexture: 255
+  - blockName: Debug Lamp 01
+    icon: {fileID: 21300000, guid: 3684b75c48945704787a0d47a88c25fe, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 1
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 225
+    frontFaceTexture: 225
+    topFaceTexture: 225
+    bottomFaceTexture: 225
+    leftFaceTexture: 225
+    rightFaceTexture: 225
+  - blockName: Debug Lamp 02
+    icon: {fileID: 21300000, guid: d1695ff6f8228154981fa844cc1e2010, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 2
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 226
+    frontFaceTexture: 226
+    topFaceTexture: 226
+    bottomFaceTexture: 226
+    leftFaceTexture: 226
+    rightFaceTexture: 226
+  - blockName: Debug Lamp 03
+    icon: {fileID: 21300000, guid: 8559dea71da74c448887eef74648cc11, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 3
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 227
+    frontFaceTexture: 227
+    topFaceTexture: 227
+    bottomFaceTexture: 227
+    leftFaceTexture: 227
+    rightFaceTexture: 227
+  - blockName: Debug Lamp 04
+    icon: {fileID: 21300000, guid: ef1b448d7d1cc214ea9d03c7bcadba22, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 4
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 228
+    frontFaceTexture: 228
+    topFaceTexture: 228
+    bottomFaceTexture: 228
+    leftFaceTexture: 228
+    rightFaceTexture: 228
+  - blockName: Debug Lamp 05
+    icon: {fileID: 21300000, guid: 9a16d1885636a6643a93032883d9d027, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 5
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 229
+    frontFaceTexture: 229
+    topFaceTexture: 229
+    bottomFaceTexture: 229
+    leftFaceTexture: 229
+    rightFaceTexture: 229
+  - blockName: Debug Lamp 06
+    icon: {fileID: 21300000, guid: f255691b2d5d6cd42afb7465acd59ccb, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 6
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 230
+    frontFaceTexture: 230
+    topFaceTexture: 230
+    bottomFaceTexture: 230
+    leftFaceTexture: 230
+    rightFaceTexture: 230
+  - blockName: Debug Lamp 07
+    icon: {fileID: 21300000, guid: 3b87ebc2b83c02f45bd4500be0a1b60f, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 7
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 231
+    frontFaceTexture: 231
+    topFaceTexture: 231
+    bottomFaceTexture: 231
+    leftFaceTexture: 231
+    rightFaceTexture: 231
+  - blockName: Debug Lamp 08
+    icon: {fileID: 21300000, guid: 6478f73956624ae49ba0be2285f9302d, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 8
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 232
+    frontFaceTexture: 232
+    topFaceTexture: 232
+    bottomFaceTexture: 232
+    leftFaceTexture: 232
+    rightFaceTexture: 232
+  - blockName: Debug Lamp 09
+    icon: {fileID: 21300000, guid: 3ca998b1cdcc09948be803a0e6730d9a, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 9
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 233
+    frontFaceTexture: 233
+    topFaceTexture: 233
+    bottomFaceTexture: 233
+    leftFaceTexture: 233
+    rightFaceTexture: 233
+  - blockName: Debug Lamp 10
+    icon: {fileID: 21300000, guid: e7b7ae3768ad7854094e55172833f792, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 10
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 234
+    frontFaceTexture: 234
+    topFaceTexture: 234
+    bottomFaceTexture: 234
+    leftFaceTexture: 234
+    rightFaceTexture: 234
+  - blockName: Debug Lamp 11
+    icon: {fileID: 21300000, guid: bb8f57261dc811e4d9a9e357af56025e, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 11
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 235
+    frontFaceTexture: 235
+    topFaceTexture: 235
+    bottomFaceTexture: 235
+    leftFaceTexture: 235
+    rightFaceTexture: 235
+  - blockName: Debug Lamp 12
+    icon: {fileID: 21300000, guid: a4df8d46f74dd37428486de9220d573c, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 12
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 236
+    frontFaceTexture: 236
+    topFaceTexture: 236
+    bottomFaceTexture: 236
+    leftFaceTexture: 236
+    rightFaceTexture: 236
+  - blockName: Debug Lamp 13
+    icon: {fileID: 21300000, guid: 761df4a0c1287b245ae1ffba82998e2b, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 13
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 237
+    frontFaceTexture: 237
+    topFaceTexture: 237
+    bottomFaceTexture: 237
+    leftFaceTexture: 237
+    rightFaceTexture: 237
+  - blockName: Debug Lamp 14
+    icon: {fileID: 21300000, guid: 3330b9de37db55f4f8b669d90edf7a33, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 14
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 238
+    frontFaceTexture: 238
+    topFaceTexture: 238
+    bottomFaceTexture: 238
+    leftFaceTexture: 238
+    rightFaceTexture: 238
+  - blockName: Debug Lamp 15
+    icon: {fileID: 21300000, guid: a88c49276a2385542950593027b0416f, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 15
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 239
+    frontFaceTexture: 239
+    topFaceTexture: 239
+    bottomFaceTexture: 239
+    leftFaceTexture: 239
+    rightFaceTexture: 239
