@@ -122,10 +122,20 @@ public class Settings
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
+    /// Camera field of view in degrees, applied to the main camera.
+    /// </summary>
+    [Header("General")]
+    [SettingField(SettingsTab.Graphics, Label = "Field of View", Format = "f0", Order = 0)]
+    [Range(30, 120)]
+    [Tooltip("Camera field of view in degrees.\n\n" +
+             TooltipTags.DefaultColorStart + "70" + TooltipTags.DefaultColorEnd)]
+    public int fieldOfView = 70;
+
+    /// <summary>
     /// The radius of chunks (in chunks) around the player that will be visible and rendered.
     /// </summary>
-    [Header("Chunk Loading")]
-    [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 0)]
+    [Header("Rendering")]
+    [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 1)]
     [Range(1, 32)]
     [Tooltip("The radius of chunks around the player that will be visible and rendered.\n\n" +
              TooltipTags.Performance + "Higher values significantly impact memory and rendering times.\n" +
@@ -135,12 +145,46 @@ public class Settings
     /// <summary>
     /// The visual style of clouds in the sky.
     /// </summary>
-    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 1)]
+    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 2)]
     [Tooltip("The visual style of the cloud mesh system.\n\n" +
              TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "Disables cloud rendering.\n" +
              TooltipTags.BulletOptionStart + "Fast" + TooltipTags.BulletOptionEnd + "2D flat clouds.\n" +
              TooltipTags.BulletOptionStart + "Fancy" + TooltipTags.BulletOptionEnd + "Full 3D clouds.")]
     public CloudStyle clouds = CloudStyle.Fancy;
+
+    /// <summary>
+    /// Vertical synchronization mode. Maps directly to <see cref="QualitySettings.vSyncCount"/>.
+    /// </summary>
+    [Header("Frame Rate")]
+    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 3)]
+    [Tooltip("Controls vertical synchronization.\n\n" +
+             TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "No VSync. Lowest input latency.\n" +
+             TooltipTags.BulletOptionStart + "On" + TooltipTags.BulletOptionEnd + "Eliminates tearing. +1 frame latency. FPS halves if GPU can't keep up.\n" +
+             TooltipTags.BulletOptionStart + "Half Refresh Rate" + TooltipTags.BulletOptionEnd + "Caps at half refresh rate. +2 frames latency.\n\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public VSyncMode vSync = VSyncMode.On;
+
+    /// <summary>
+    /// If true, the frame rate is uncapped (renders as fast as possible) when VSync is off.
+    /// Overrides <see cref="maxFps"/> when enabled.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 4)]
+    [Tooltip("Removes the frame rate cap entirely when VSync is off.\n" +
+             "The application renders as fast as possible.\n\n" +
+             TooltipTags.Note + "Ignored when VSync is enabled.\n" +
+             TooltipTags.Warning + "May cause excessive heat and power consumption.")]
+    public bool unlimitedFps = false;
+
+    /// <summary>
+    /// Maximum frame rate cap when VSync is disabled and <see cref="unlimitedFps"/> is false.
+    /// Ignored when VSync is active or Unlimited FPS is enabled.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 5)]
+    [Range(30, 480)]
+    [Tooltip("Caps the maximum frame rate when VSync is disabled.\n\n" +
+             TooltipTags.Note + "Ignored when VSync is enabled or Unlimited FPS is on.\n" +
+             TooltipTags.DefaultColorStart + "120" + TooltipTags.DefaultColorEnd)]
+    public int maxFps = 120;
 
     #endregion
 

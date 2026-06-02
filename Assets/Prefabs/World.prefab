@@ -50,8 +50,12 @@ MonoBehaviour:
     itemTooltipDetail: 0
     enableChunkLoadAnimations: 0
     lookSensitivity: 1.2
+    fieldOfView: 70
     viewDistance: 5
     clouds: 2
+    vSync: 1
+    unlimitedFps: 0
+    maxFps: 120
     enableLighting: 1
     enableCaves: 1
     enableLodes: 1
