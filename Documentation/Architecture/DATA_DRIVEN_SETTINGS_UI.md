@@ -92,14 +92,15 @@ The system uses a combination of Unity's built-in attributes and a single consol
 
 ### Built-in Attributes (Reused)
 
-| Attribute                | UI Effect                                                                                                                                                                                                                                                                            |
-|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `[Header("...")]`        | Generates a header text element above the field in the current tab.                                                                                                                                                                                                                  |
-| `[Tooltip("...")]`       | Drives hover tooltip text on the generated UI element.                                                                                                                                                                                                                               |
-| `[Range(min, max)]`      | Maps numeric fields to a Slider element. Without this, bare `int`/`float` fields map to an InputField.                                                                                                                                                                               |
-| `[InspectorName("...")]` | *(On enum values)* Overrides the display name of individual enum values in dropdowns. This is a built-in Unity attribute (`UnityEngine.InspectorNameAttribute`) that is general-purpose — the same labels are used in the Unity Inspector and any other UI that reads enum metadata. |
-| `[InitializationField]`  | *(From MyBox)* Marks the field as read-only when the settings menu is opened from in-game (Pause Menu). These fields can only be changed from the Main Menu before a world is loaded.                                                                                                |
-| **Field Type**           | Dictates the UI element type (see [Type Mapping Table](#type-mapping-table)).                                                                                                                                                                                                        |
+| Attribute                | UI Effect                                                                                                                                                                                                                                                                             |
+|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `[Header("...")]`        | Generates a header text element above the field in the current tab.                                                                                                                                                                                                                   |
+| `[Tooltip("...")]`       | Drives hover tooltip text on the generated UI element.                                                                                                                                                                                                                                |
+| `[Range(min, max)]`      | Maps numeric fields to a Slider element. Without this, bare `int`/`float` fields map to an InputField.                                                                                                                                                                                |
+| `[InspectorName("...")]` | *(On enum values)* Overrides the display name of individual enum values in dropdowns. This is a built-in Unity attribute (`UnityEngine.InspectorNameAttribute`) that is general-purpose — the same labels are used in the Unity Inspector and any other UI that reads enum metadata.  |
+| `[InitializationField]`  | *(From MyBox)* Marks the field as read-only when the settings menu is opened from in-game (Pause Menu). These fields can only be changed from the Main Menu before a world is loaded.                                                                                                 |
+| `[DisabledWhen(...)]`    | Conditionally disables a control based on another field's runtime value. Takes `(string fieldName, ComparisonOp op, object value)`. Multiple attributes stack with OR logic (disabled if *any* condition is true). The generator re-evaluates conditions live via `OnSettingChanged`. |
+| **Field Type**           | Dictates the UI element type (see [Type Mapping Table](#type-mapping-table)).                                                                                                                                                                                                         |
 
 *Note: Integer-based settings that represent bounded modes (like `uiScale`) should be refactored into strongly-typed Enums to automatically map to Dropdown UI components.*
 
@@ -171,6 +172,13 @@ public bool simulateMigrationCorruption = false;
 [SettingField(SettingsTab.World, Label = "Lighting", Order = 0)]
 [InitializationField]
 public bool enableLighting = true;
+
+// Conditionally disabled — locked when vSync is not Off, OR when unlimitedFps is true
+[SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 5)]
+[DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
+[DisabledWhen(nameof(unlimitedFps), ComparisonOp.Equal, true)]
+[Range(30, 480)]
+public int maxFps = 120;
 ```
 
 ### Type Mapping Table
@@ -318,7 +326,10 @@ A separate MonoBehaviour on the same GameObject (or a child). Responsibilities:
 
 1. Load the `Settings` singleton.
 2. For each generated UI element, call `SetValueWithoutNotify()` with the current field value (via `FieldInfo.GetValue()`).
-3. Re-evaluate `[InitializationField]` interactability: if `isInGame` is true, set `interactable = false` on those elements. Otherwise, set `interactable = true`.
+3. Re-evaluate lock state for each control. A control is locked (non-interactable, dimmed to 50% alpha) if **either** of these conditions is true:
+    - It has `[InitializationField]` and `isInGame` is true.
+    - It has `[DisabledWhen]` and any condition evaluates to true against the current settings values.
+4. Subscribe to `OnSettingChanged` so that `[DisabledWhen]` conditions are re-evaluated live while the menu is open (e.g., toggling VSync immediately dims the Max FPS slider).
 
 ---
 
@@ -527,12 +538,29 @@ public class Settings
     public float lookSensitivity = 1.2f;
 
     // --- Graphics ---
-    [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 0)]
+    [SettingField(SettingsTab.Graphics, Label = "Field of View", Format = "f0", Order = 0)]
+    [Range(30, 120)]
+    public int fieldOfView = 70;
+
+    [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 1)]
     [Range(1, 32)]
     public int viewDistance = 5;
 
-    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 1)]
+    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 2)]
     public CloudStyle clouds = CloudStyle.Fancy;
+
+    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 3)]
+    public VSyncMode vSync = VSyncMode.On;
+
+    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 4)]
+    [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
+    public bool unlimitedFps = false;
+
+    [SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 5)]
+    [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
+    [DisabledWhen(nameof(unlimitedFps), ComparisonOp.Equal, true)]
+    [Range(30, 480)]
+    public int maxFps = 120;
 
     // --- World Generation (Read-only during play via [InitializationField]) ---
     [SettingField(SettingsTab.World, Label = "Lighting", Order = 0)]

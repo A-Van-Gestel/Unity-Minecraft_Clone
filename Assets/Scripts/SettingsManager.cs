@@ -169,9 +169,10 @@ public class Settings
     /// Overrides <see cref="maxFps"/> when enabled.
     /// </summary>
     [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 4)]
+    [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     [Tooltip("Removes the frame rate cap entirely when VSync is off.\n" +
              "The application renders as fast as possible.\n\n" +
-             TooltipTags.Note + "Ignored when VSync is enabled.\n" +
+             TooltipTags.Note + "Disabled when VSync is enabled.\n" +
              TooltipTags.Warning + "May cause excessive heat and power consumption.")]
     public bool unlimitedFps = false;
 
@@ -180,9 +181,11 @@ public class Settings
     /// Ignored when VSync is active or Unlimited FPS is enabled.
     /// </summary>
     [SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 5)]
+    [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
+    [DisabledWhen(nameof(unlimitedFps), ComparisonOp.Equal, true)]
     [Range(30, 480)]
     [Tooltip("Caps the maximum frame rate when VSync is disabled.\n\n" +
-             TooltipTags.Note + "Ignored when VSync is enabled or Unlimited FPS is on.\n" +
+             TooltipTags.Note + "Disabled when VSync is enabled or Unlimited FPS is on.\n" +
              TooltipTags.DefaultColorStart + "120" + TooltipTags.DefaultColorEnd)]
     public int maxFps = 120;
 

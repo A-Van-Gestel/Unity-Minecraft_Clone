@@ -77,6 +77,7 @@ namespace UI
         #region Runtime State
 
         private bool _isGenerated;
+        private bool _isInGame;
         private Settings _settings;
 
         /// <summary>
@@ -131,6 +132,12 @@ namespace UI
 
             /// <summary>Direct reference to the label TMP component for efficient rebinding.</summary>
             public TextMeshProUGUI LabelText;
+
+            /// <summary>
+            /// Conditional disable rules from <see cref="DisabledWhenAttribute"/>.
+            /// Null if the field has no conditions.
+            /// </summary>
+            public DisabledWhenAttribute[] DisabledConditions;
         }
 
         /// <summary>
@@ -170,6 +177,15 @@ namespace UI
             public int Index;
             public int Order;
             public int DeclarationIndex;
+        }
+
+        #endregion
+
+        #region Lifecycle
+
+        private void OnDisable()
+        {
+            SettingsManager.OnSettingChanged -= HandleSettingChangedForConditions;
         }
 
         #endregion
@@ -304,42 +320,111 @@ namespace UI
 
         /// <summary>
         /// Rebinds all generated UI controls to the current Settings values.
-        /// Also manages <see cref="InitializationFieldAttribute"/> interactability.
+        /// Also manages <see cref="InitializationFieldAttribute"/> and
+        /// <see cref="DisabledWhenAttribute"/> interactability.
         /// </summary>
         /// <param name="isInGame">If true, fields marked with [InitializationField] become non-interactable.</param>
         public void RebindValues(bool isInGame)
         {
+            _isInGame = isInGame;
             _settings = SettingsManager.LoadSettings();
 
             foreach (ControlBinding binding in _controlBindings)
             {
                 object value = binding.Field.GetValue(binding.Owner);
                 SetControlValue(binding, value);
+                ApplyLockState(binding);
+            }
 
-                bool locked = binding.IsInitializationField && isInGame;
+            SettingsManager.OnSettingChanged -= HandleSettingChangedForConditions;
+            SettingsManager.OnSettingChanged += HandleSettingChangedForConditions;
+        }
 
-                // Lock [InitializationField] controls during gameplay
-                if (binding.Selectable != null)
+        /// <summary>
+        /// Re-evaluates <see cref="DisabledWhenAttribute"/> conditions when a watched field changes,
+        /// updating interactability of dependent controls in real time.
+        /// </summary>
+        private void HandleSettingChangedForConditions(string fieldName)
+        {
+            foreach (ControlBinding binding in _controlBindings)
+            {
+                if (binding.DisabledConditions == null) continue;
+
+                foreach (DisabledWhenAttribute condition in binding.DisabledConditions)
                 {
-                    binding.Selectable.interactable = !locked;
-                }
-
-                // Dim locked controls via CanvasGroup alpha
-                if (binding.IsInitializationField)
-                {
-                    CanvasGroup group = binding.ControlRoot.GetComponent<CanvasGroup>();
-                    if (group == null) group = binding.ControlRoot.AddComponent<CanvasGroup>();
-                    group.alpha = locked ? LOCKED_CONTROL_ALPHA : 1f;
-                }
-
-                // Append/remove suffix on the label to explain why the control is locked
-                if (binding.IsInitializationField && binding.LabelText != null && binding.Label != null)
-                {
-                    binding.LabelText.text = locked
-                        ? binding.Label + LOCKED_LABEL_SUFFIX
-                        : binding.Label;
+                    if (condition.FieldName == fieldName)
+                    {
+                        ApplyLockState(binding);
+                        break;
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// Applies the combined lock state from <see cref="InitializationFieldAttribute"/>
+        /// and <see cref="DisabledWhenAttribute"/> to a control's interactability and alpha.
+        /// </summary>
+        private void ApplyLockState(ControlBinding binding)
+        {
+            bool initLocked = binding.IsInitializationField && _isInGame;
+            bool conditionLocked = EvaluateDisabledConditions(binding);
+            bool locked = initLocked || conditionLocked;
+
+            if (binding.Selectable != null)
+                binding.Selectable.interactable = !locked;
+
+            if (binding.IsInitializationField || binding.DisabledConditions != null)
+            {
+                CanvasGroup group = binding.ControlRoot.GetComponent<CanvasGroup>();
+                if (group == null) group = binding.ControlRoot.AddComponent<CanvasGroup>();
+                group.alpha = locked ? LOCKED_CONTROL_ALPHA : 1f;
+            }
+
+            if (binding.IsInitializationField && binding.LabelText != null && binding.Label != null)
+            {
+                binding.LabelText.text = initLocked
+                    ? binding.Label + LOCKED_LABEL_SUFFIX
+                    : binding.Label;
+            }
+        }
+
+        /// <summary>
+        /// Evaluates all <see cref="DisabledWhenAttribute"/> conditions on a binding.
+        /// Returns true if <b>any</b> condition matches (OR logic).
+        /// </summary>
+        private bool EvaluateDisabledConditions(ControlBinding binding)
+        {
+            if (binding.DisabledConditions == null) return false;
+
+            foreach (DisabledWhenAttribute condition in binding.DisabledConditions)
+            {
+                object watchedValue = GetWatchedFieldValue(condition.FieldName, binding.Owner);
+                if (watchedValue == null) continue;
+
+                bool matches = Equals(watchedValue, condition.Value);
+                bool disabled = condition.Op == ComparisonOp.Equal ? matches : !matches;
+                if (disabled) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Resolves the current value of a watched field by name.
+        /// Searches both the <see cref="Settings"/> and <see cref="DevSettings"/> instances.
+        /// </summary>
+        private object GetWatchedFieldValue(string fieldName, object owner)
+        {
+            FieldInfo field = owner.GetType().GetField(fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null) return field.GetValue(owner);
+
+            // Fall back to searching the other settings class
+            object altOwner = owner is Settings ? _settings.Dev : _settings;
+            field = altOwner.GetType().GetField(fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            return field?.GetValue(altOwner);
         }
 
         /// <summary>
@@ -554,6 +639,12 @@ namespace UI
             }
 
             binding.IsInitializationField = isInitField;
+
+            DisabledWhenAttribute[] conditions =
+                (DisabledWhenAttribute[])Attribute.GetCustomAttributes(entry.Field, typeof(DisabledWhenAttribute));
+            if (conditions.Length > 0)
+                binding.DisabledConditions = conditions;
+
             _controlBindings.Add(binding);
         }
 
