@@ -507,16 +507,15 @@ public static class SettingsManager
             try
             {
                 string jsonImport = File.ReadAllText(s_settingsFilePath);
-                Settings loadedSettings = JsonUtility.FromJson<Settings>(jsonImport);
-                if (loadedSettings != null)
-                {
-                    loadedSettings.Dev = Debug.isDebugBuild
-                        ? ReadHiddenSection<DevSettingsLoader, DevSettings>(jsonImport, KEY_DEV, w => w.dev)
-                        : new DevSettings();
+                Settings loadedSettings = new Settings();
+                JsonUtility.FromJsonOverwrite(jsonImport, loadedSettings);
 
-                    s_cachedSettings = loadedSettings;
-                    return s_cachedSettings;
-                }
+                loadedSettings.Dev = Debug.isDebugBuild
+                    ? ReadHiddenSection<DevSettingsLoader, DevSettings>(jsonImport, KEY_DEV, w => w.dev)
+                    : new DevSettings();
+
+                s_cachedSettings = loadedSettings;
+                return s_cachedSettings;
             }
             catch (Exception e)
             {
