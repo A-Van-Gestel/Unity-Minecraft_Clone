@@ -21,7 +21,7 @@ Shader "Minecraft/UberLiquidShader"
         _Speed("Flow Speed", Range(0, 2)) = 0.3
         _CrackBrightness("Crack Brightness", Range(0, 3)) = 1.5
         _PulseSpeed("Pulse Speed", Range(0, 5)) = 1.5
-        _HeatDistortionAmount("Heat Distortion", Range(0, 0.1)) = 0.015
+        _HeatDistortionAmount("Heat Distortion", Range(0, 0.1)) = 0.015 // Default mirrored in GraphicsSettingsController.BASE_LAVA_DISTORTION
 
         [Header(Lava Shores and Flow)]
         _LavaShoreWidth("Shore Width", Range(0.01, 1.0)) = 0.4
@@ -39,7 +39,7 @@ Shader "Minecraft/UberLiquidShader"
         _RippleScale("Ripple Scale", Range(1, 20)) = 15.0
         _RippleSpeed("Ripple Speed", Range(0, 5)) = 1.2
         _FoamThreshold("Wave Foam Threshold", Range(0.5, 1.0)) = 0.8
-        _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.02
+        _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.02 // Default mirrored in GraphicsSettingsController.BASE_WATER_DISTORTION
 
         [Header(Water Shores and Flow)]
         _WaterShoreWidth("Shore Width", Range(0.01, 1.0)) = 0.15
@@ -67,6 +67,7 @@ Shader "Minecraft/UberLiquidShader"
             #pragma fragment fragFunction
             #pragma target 3.0
             #pragma multi_compile _ _FLUID_QUALITY_LOW _FLUID_QUALITY_MED
+            #pragma multi_compile _ _FLUID_REFRACTION_OFF
 
             // Shared liquid logic (structs, vertex, noise, shore, evaluate)
             #include "Includes/LiquidCore.hlsl"

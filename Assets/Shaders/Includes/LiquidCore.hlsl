@@ -24,20 +24,26 @@
     #define FLUID_ENABLE_DUAL_PHASE 0
     #define FLUID_ENABLE_SHORE_FOAM 0
     #define FLUID_ENABLE_STREAM_FOAM 0
-    #define FLUID_ENABLE_REFRACTION 0
 #elif defined(_FLUID_QUALITY_MED)
     #define FLUID_FBM_OCTAVES 3
     #define LAVA_FBM_OCTAVES 4
     #define FLUID_ENABLE_DUAL_PHASE 1
     #define FLUID_ENABLE_SHORE_FOAM 1
     #define FLUID_ENABLE_STREAM_FOAM 0
-    #define FLUID_ENABLE_REFRACTION 1
 #else // High (default)
     #define FLUID_FBM_OCTAVES 4
     #define LAVA_FBM_OCTAVES 5
     #define FLUID_ENABLE_DUAL_PHASE 1
     #define FLUID_ENABLE_SHORE_FOAM 1
     #define FLUID_ENABLE_STREAM_FOAM 1
+#endif
+
+// Refraction is controlled independently via a dedicated keyword / settings slider.
+// _FLUID_REFRACTION_OFF is the opt-out keyword so that the default (no keyword) = ON,
+// which is correct for both the game shader at startup and the editor preview shader.
+#if defined(_FLUID_REFRACTION_OFF)
+    #define FLUID_ENABLE_REFRACTION 0
+#else
     #define FLUID_ENABLE_REFRACTION 1
 #endif
 

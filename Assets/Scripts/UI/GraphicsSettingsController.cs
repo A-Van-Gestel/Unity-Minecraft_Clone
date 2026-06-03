@@ -4,7 +4,7 @@ using UnityEngine;
 namespace UI
 {
     /// <summary>
-    /// Applies window mode, resolution, FOV, VSync, Max FPS, and fluid quality settings at startup and whenever they change.
+    /// Applies window mode, resolution, FOV, VSync, Max FPS, fluid quality, and fluid refraction settings at startup and whenever they change.
     /// Subscribes to <see cref="SettingsManager.OnSettingChanged"/> for live updates.
     /// </summary>
     public class GraphicsSettingsController : MonoBehaviour
@@ -12,6 +12,18 @@ namespace UI
         // Must match the keywords in UberLiquidShader.shader: #pragma multi_compile _ _FLUID_QUALITY_LOW _FLUID_QUALITY_MED
         private const string KEYWORD_FLUID_QUALITY_LOW = "_FLUID_QUALITY_LOW";
         private const string KEYWORD_FLUID_QUALITY_MED = "_FLUID_QUALITY_MED";
+
+        // Must match the keyword in UberLiquidShader.shader: #pragma multi_compile _ _FLUID_REFRACTION_OFF
+        private const string KEYWORD_FLUID_REFRACTION_OFF = "_FLUID_REFRACTION_OFF";
+
+        // Base distortion values must match the shader Property defaults in UberLiquidShader.shader:
+        // _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.02
+        // _HeatDistortionAmount("Heat Distortion", Range(0, 0.1)) = 0.015
+        private const float BASE_WATER_DISTORTION = 0.02f;
+        private const float BASE_LAVA_DISTORTION = 0.015f;
+
+        private static readonly int s_distortionAmountId = Shader.PropertyToID("_DistortionAmount");
+        private static readonly int s_heatDistortionAmountId = Shader.PropertyToID("_HeatDistortionAmount");
 
         private void Start()
         {
@@ -21,6 +33,7 @@ namespace UI
             ApplyFieldOfView(settings.fieldOfView);
             ApplyFrameRate(settings);
             ApplyFluidQuality(settings.fluidQuality);
+            ApplyFluidRefraction(settings.fluidRefraction);
         }
 
         private void OnEnable()
@@ -57,6 +70,9 @@ namespace UI
                     break;
                 case nameof(Settings.fluidQuality):
                     ApplyFluidQuality(settings.fluidQuality);
+                    break;
+                case nameof(Settings.fluidRefraction):
+                    ApplyFluidRefraction(settings.fluidRefraction);
                     break;
             }
         }
@@ -118,6 +134,36 @@ namespace UI
                 case FluidQuality.High:
                 default:
                     break; // No keyword = shader default (High)
+            }
+        }
+
+        /// <summary>
+        /// Applies fluid refraction strength to the shared liquid material.
+        /// At 0 the <c>_FLUID_REFRACTION_OFF</c> keyword is enabled, skipping the refraction FBM entirely.
+        /// Above 0 the keyword is disabled and <c>_DistortionAmount</c> / <c>_HeatDistortionAmount</c>
+        /// are scaled proportionally from the base values.
+        /// Also called by <see cref="World.Start"/> to guarantee the value is applied
+        /// even if this controller's <c>Start()</c> ran before <see cref="World"/> was available.
+        /// </summary>
+        /// <param name="refraction">Refraction strength from 0 (off) to 100 (full).</param>
+        public static void ApplyFluidRefraction(int refraction)
+        {
+            Material liquidMat = World.Instance != null ? World.Instance.LiquidMaterial : null;
+            if (liquidMat == null)
+                return;
+
+            refraction = Mathf.Clamp(refraction, 0, 100);
+
+            if (refraction <= 0)
+            {
+                liquidMat.EnableKeyword(KEYWORD_FLUID_REFRACTION_OFF);
+            }
+            else
+            {
+                liquidMat.DisableKeyword(KEYWORD_FLUID_REFRACTION_OFF);
+                float scale = refraction / 100f;
+                liquidMat.SetFloat(s_distortionAmountId, BASE_WATER_DISTORTION * scale);
+                liquidMat.SetFloat(s_heatDistortionAmountId, BASE_LAVA_DISTORTION * scale);
             }
         }
 

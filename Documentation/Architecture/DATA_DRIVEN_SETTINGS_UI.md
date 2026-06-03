@@ -549,17 +549,21 @@ public class Settings
     [SettingField(SettingsTab.Graphics, Label = "Fluid Quality", Order = 2)]
     public FluidQuality fluidQuality = FluidQuality.High;
 
-    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 3)]
+    [SettingField(SettingsTab.Graphics, Label = "Fluid Refraction", Format = "f0", Order = 3)]
+    [Range(0, 100)]
+    public int fluidRefraction = 100;
+
+    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 4)]
     public CloudStyle clouds = CloudStyle.Fancy;
 
-    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 4)]
+    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 5)]
     public VSyncMode vSync = VSyncMode.On;
 
-    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 5)]
+    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 6)]
     [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     public bool unlimitedFps = false;
 
-    [SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 6)]
+    [SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 7)]
     [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     [DisabledWhen(nameof(unlimitedFps), ComparisonOp.Equal, true)]
     [Range(30, 480)]
