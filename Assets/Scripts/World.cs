@@ -334,6 +334,10 @@ public class World : MonoBehaviour
         // Initialize Pool Settings
         ChunkPool.SetTargetViewDistance(settings.viewDistance);
 
+        // Apply fluid quality keywords now that Instance and LiquidMaterial are available.
+        // Use SettingsManager directly — the local `settings` field isn't loaded until StartWorld().
+        GraphicsSettingsController.ApplyFluidQuality(SettingsManager.LoadSettings().fluidQuality);
+
         // Initialize World
         StartCoroutine(StartWorld());
     }

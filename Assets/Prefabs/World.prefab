@@ -46,6 +46,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   settings:
+    windowMode: 0
     resolution: 
     uiScale: 1
     itemTooltipDetail: 0
@@ -53,6 +54,7 @@ MonoBehaviour:
     lookSensitivity: 1.2
     fieldOfView: 70
     viewDistance: 5
+    fluidQuality: 2
     clouds: 2
     vSync: 1
     unlimitedFps: 0

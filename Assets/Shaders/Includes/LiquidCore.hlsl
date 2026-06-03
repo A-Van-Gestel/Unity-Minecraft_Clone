@@ -13,6 +13,35 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
 // =============================================================================
+// Fluid Quality Tier Macros
+// =============================================================================
+// Keywords are set from C# via Material.EnableKeyword / DisableKeyword.
+// No keyword defined = High (default / editor preview).
+
+#if defined(_FLUID_QUALITY_LOW)
+    #define FLUID_FBM_OCTAVES 2
+    #define LAVA_FBM_OCTAVES 3
+    #define FLUID_ENABLE_DUAL_PHASE 0
+    #define FLUID_ENABLE_SHORE_FOAM 0
+    #define FLUID_ENABLE_STREAM_FOAM 0
+    #define FLUID_ENABLE_REFRACTION 0
+#elif defined(_FLUID_QUALITY_MED)
+    #define FLUID_FBM_OCTAVES 3
+    #define LAVA_FBM_OCTAVES 4
+    #define FLUID_ENABLE_DUAL_PHASE 1
+    #define FLUID_ENABLE_SHORE_FOAM 1
+    #define FLUID_ENABLE_STREAM_FOAM 0
+    #define FLUID_ENABLE_REFRACTION 1
+#else // High (default)
+    #define FLUID_FBM_OCTAVES 4
+    #define LAVA_FBM_OCTAVES 5
+    #define FLUID_ENABLE_DUAL_PHASE 1
+    #define FLUID_ENABLE_SHORE_FOAM 1
+    #define FLUID_ENABLE_STREAM_FOAM 1
+    #define FLUID_ENABLE_REFRACTION 1
+#endif
+
+// =============================================================================
 // Structs
 // =============================================================================
 
@@ -254,13 +283,6 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     // Combine C# macro flow with Shader micro shore repulsion
     float2 totalFlow = i.localFlowVector + shore_push * dynamicPush;
 
-    float rawSpeed = length(totalFlow);
-
-    // Turbulence is 1.0 near shores/waterfalls and drops to 0.0 in still lava
-    float turbulence = smoothstep(0.1, 0.8, rawSpeed);
-    // Idle is 1.0 when perfectly still, 0.0 when rushing
-    float idle = 1.0 - turbulence;
-
     float2 flow = totalFlow * phaseTime * _LavaFlowMultiplier;
 
     // Route 2D flow to 3D based on surface normal
@@ -270,11 +292,11 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     float3 p1 = i.worldPos * _NoiseScale + flow3D + float3(0, t_boil, 0);
     float3 p2 = i.worldPos * _NoiseScale - flow3D * 0.8 + float3(0, -t_boil * 0.8, 0);
 
-    float base_fbm = fbm(p1, 5);
+    float base_fbm = fbm(p1, LAVA_FBM_OCTAVES);
     float base_noise = (base_fbm + 1.0) * 0.5;
 
-    float noise1 = fbm(p1 * _CellDensity, 5);
-    float noise2 = fbm(p2 * _CellDensity, 5);
+    float noise1 = fbm(p1 * _CellDensity, LAVA_FBM_OCTAVES);
+    float noise2 = fbm(p2 * _CellDensity, LAVA_FBM_OCTAVES);
     float crack_pattern = pow(abs(noise1 - noise2), 2.0) * _CrackBrightness;
 
     half3 col = lerp(_DarkColor.rgb, _MidColor.rgb, smoothstep(0.3, 0.7, base_noise));
@@ -282,26 +304,39 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
 
     // --- FLOW & SHORE EFFECTS ---
 
+#if FLUID_ENABLE_SHORE_FOAM
+    float rawSpeed = length(totalFlow);
+    float idle = 1.0 - smoothstep(0.1, 0.8, rawSpeed);
+
     // 1. Cooling Crust (Idle Shorelines)
     float3 crust_p = i.worldPos * _NoiseScale * 2.0 - flow3D + float3(0, t_boil * 0.5, 0);
-    float crust_noise = (fbm(crust_p, 3) + 1.0) * 0.5;
+    float crust_noise = (fbm(crust_p, max(LAVA_FBM_OCTAVES - 2, 2)) + 1.0) * 0.5;
 
     // Multiply by 'idle' so fast-flowing lava rivers don't crust over, even at the shores!
     float crust_mask = smoothstep(0.4, 0.8, crust_noise) * shore_gradient * idle;
     lavaCol = lerp(lavaCol, _CrustColor.rgb, saturate(crust_mask * _LavaShoreCrust));
+#endif
+
+#if FLUID_ENABLE_STREAM_FOAM
+    float turbulence = smoothstep(0.1, 0.8, length(totalFlow));
 
     // 2. Bright Sparks where flow is strong (Turbulence)
     float3 flow_mask_p = i.worldPos * _NoiseScale * 2.5 + flow3D * 2.0;
 
-    float flow_mask = (fbm(flow_mask_p, 4) + 1.0) * 0.5;
+    float flow_mask = (fbm(flow_mask_p, LAVA_FBM_OCTAVES - 1) + 1.0) * 0.5;
     lavaCol += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * turbulence * _FlowHighlight;
+#endif
 
     // Distortion Normal
+#if FLUID_ENABLE_REFRACTION
     float2 offset = float2(0.01, 0.0);
-    float normal_dx = fbm(p1 + offset.xyy, 4) - base_fbm;
-    float normal_dz = fbm(p1 + offset.yxy, 4) - base_fbm;
+    float normal_dx = fbm(p1 + offset.xyy, LAVA_FBM_OCTAVES - 1) - base_fbm;
+    float normal_dz = fbm(p1 + offset.yxy, LAVA_FBM_OCTAVES - 1) - base_fbm;
     float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
     heatNormal = normal.xz * _HeatDistortionAmount;
+#else
+    heatNormal = float2(0, 0);
+#endif
 }
 
 // =============================================================================
@@ -325,9 +360,6 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
     // Combine C# macro flow with Shader micro shore repulsion
     float2 totalFlow = i.localFlowVector + shore_push * dynamicPush;
 
-    float rawSpeed = length(totalFlow);
-    float turbulence = smoothstep(0.1, 0.8, rawSpeed);
-
     float2 flow = totalFlow * phaseTime * _WaterFlowMultiplier * _Speed;
 
     // Route 2D flow to 3D based on surface normal
@@ -337,8 +369,8 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
     float3 wave_p = i.worldPos * _WaveScale + flow3D + float3(0, _Time.y * _WaveSpeed, 0);
     float3 ripple_p = i.worldPos * _RippleScale - flow3D + float3(0, _Time.y * _RippleSpeed, 0);
 
-    float wave_fbm = fbm(wave_p, 4);
-    float ripple_noise = fbm(ripple_p, 4);
+    float wave_fbm = fbm(wave_p, FLUID_FBM_OCTAVES);
+    float ripple_noise = fbm(ripple_p, FLUID_FBM_OCTAVES);
 
     half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
 
@@ -350,24 +382,38 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
 
     // --- SHORE & STREAM EFFECTS ---
 
+    // Combined guard: both features share the stream_noise FBM. The || is intentional so that
+    // a future tier enabling stream foam without shore foam still compiles the shared setup.
+#if FLUID_ENABLE_SHORE_FOAM || FLUID_ENABLE_STREAM_FOAM
     float3 stream_p = i.worldPos * _WaveScale * 2.0 + flow3D * 3.0;
-    float stream_noise = (fbm(stream_p, 3) + 1.0) * 0.5;
+    float stream_noise = (fbm(stream_p, max(FLUID_FBM_OCTAVES - 1, 2)) + 1.0) * 0.5;
+#endif
+
+#if FLUID_ENABLE_STREAM_FOAM
+    float turbulence = smoothstep(0.1, 0.8, length(totalFlow));
 
     // 1. Stream Foam (Turbulence-based)
     // Create isolated streaks that only appear where turbulence is high (at drops/fast flow)
     float stream_foam = smoothstep(0.55, 0.75, stream_noise) * turbulence * _StreamEffect;
+    foamAmt = saturate(foamAmt + stream_foam);
+#endif
 
+#if FLUID_ENABLE_SHORE_FOAM
     // 2. Shore Foam (Mask Distance-based)
     float shore_foam = smoothstep(0.4, 0.75, stream_noise) * shore_gradient * _WaterShoreFoam;
-
-    foamAmt = saturate(foamAmt + stream_foam + shore_foam);
+    foamAmt = saturate(foamAmt + shore_foam);
+#endif
 
     // Distortion Normal
+#if FLUID_ENABLE_REFRACTION
     float2 offset = float2(0.01, 0.0);
-    float normal_dx = fbm(wave_p + offset.xyy, 3) - wave_fbm;
-    float normal_dz = fbm(wave_p + offset.yxy, 3) - wave_fbm;
+    float normal_dx = fbm(wave_p + offset.xyy, max(FLUID_FBM_OCTAVES - 1, 2)) - wave_fbm;
+    float normal_dz = fbm(wave_p + offset.yxy, max(FLUID_FBM_OCTAVES - 1, 2)) - wave_fbm;
     float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
     waterNormal = normal.xz * _DistortionAmount;
+#else
+    waterNormal = float2(0, 0);
+#endif
 }
 
 // =============================================================================

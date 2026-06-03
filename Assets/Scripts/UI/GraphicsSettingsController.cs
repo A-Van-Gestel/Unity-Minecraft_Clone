@@ -4,11 +4,15 @@ using UnityEngine;
 namespace UI
 {
     /// <summary>
-    /// Applies window mode, resolution, FOV, VSync, and Max FPS settings at startup and whenever they change.
+    /// Applies window mode, resolution, FOV, VSync, Max FPS, and fluid quality settings at startup and whenever they change.
     /// Subscribes to <see cref="SettingsManager.OnSettingChanged"/> for live updates.
     /// </summary>
     public class GraphicsSettingsController : MonoBehaviour
     {
+        // Must match the keywords in UberLiquidShader.shader: #pragma multi_compile _ _FLUID_QUALITY_LOW _FLUID_QUALITY_MED
+        private const string KEYWORD_FLUID_QUALITY_LOW = "_FLUID_QUALITY_LOW";
+        private const string KEYWORD_FLUID_QUALITY_MED = "_FLUID_QUALITY_MED";
+
         private void Start()
         {
             Settings settings = SettingsManager.LoadSettings();
@@ -16,6 +20,7 @@ namespace UI
             ApplyResolution(settings.resolution);
             ApplyFieldOfView(settings.fieldOfView);
             ApplyFrameRate(settings);
+            ApplyFluidQuality(settings.fluidQuality);
         }
 
         private void OnEnable()
@@ -50,6 +55,9 @@ namespace UI
                 case nameof(Settings.vSync) or nameof(Settings.unlimitedFps) or nameof(Settings.maxFps):
                     ApplyFrameRate(settings);
                     break;
+                case nameof(Settings.fluidQuality):
+                    ApplyFluidQuality(settings.fluidQuality);
+                    break;
             }
         }
 
@@ -80,6 +88,37 @@ namespace UI
             Camera cam = Camera.main;
             if (cam != null)
                 cam.fieldOfView = fov;
+        }
+
+        /// <summary>
+        /// Applies fluid quality shader keywords to the shared liquid material.
+        /// Enables the appropriate <c>multi_compile</c> keyword on <see cref="World.LiquidMaterial"/>
+        /// so the GPU compiles only the instructions needed for the selected tier.
+        /// Also called by <see cref="World.Start"/> to guarantee keywords are set
+        /// even if this controller's <c>Start()</c> ran before <see cref="World"/> was available.
+        /// </summary>
+        /// <param name="quality">The desired fluid quality tier.</param>
+        public static void ApplyFluidQuality(FluidQuality quality)
+        {
+            Material liquidMat = World.Instance != null ? World.Instance.LiquidMaterial : null;
+            if (liquidMat == null)
+                return;
+
+            liquidMat.DisableKeyword(KEYWORD_FLUID_QUALITY_LOW);
+            liquidMat.DisableKeyword(KEYWORD_FLUID_QUALITY_MED);
+
+            switch (quality)
+            {
+                case FluidQuality.Low:
+                    liquidMat.EnableKeyword(KEYWORD_FLUID_QUALITY_LOW);
+                    break;
+                case FluidQuality.Medium:
+                    liquidMat.EnableKeyword(KEYWORD_FLUID_QUALITY_MED);
+                    break;
+                case FluidQuality.High:
+                default:
+                    break; // No keyword = shader default (High)
+            }
         }
 
         /// <summary>

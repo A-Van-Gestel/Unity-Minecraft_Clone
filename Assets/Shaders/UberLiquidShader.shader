@@ -66,6 +66,7 @@ Shader "Minecraft/UberLiquidShader"
             #pragma vertex vertFunction
             #pragma fragment fragFunction
             #pragma target 3.0
+            #pragma multi_compile _ _FLUID_QUALITY_LOW _FLUID_QUALITY_MED
 
             // Shared liquid logic (structs, vertex, noise, shore, evaluate)
             #include "Includes/LiquidCore.hlsl"
@@ -99,16 +100,26 @@ Shader "Minecraft/UberLiquidShader"
 
                 if (finalLiquidType > 0.5) // Lava
                 {
-                    float3 col0, col1;
-                    float2 norm0, norm1;
-
+                    float3 col0;
+                    float2 norm0;
                     EvaluateLava(i, time0, col0, norm0);
-                    EvaluateLava(i, time1, col1, norm1);
 
+                    #if FLUID_ENABLE_DUAL_PHASE
+                    float3 col1;
+                    float2 norm1;
+                    EvaluateLava(i, time1, col1, norm1);
                     half3 lava_col = col0 * weight0 + col1 * weight1;
                     float2 final_normal = norm0 * weight0 + norm1 * weight1;
+                    #else
+                    half3 lava_col = col0;
+                    float2 final_normal = norm0;
+                    #endif
 
+                    #if FLUID_ENABLE_REFRACTION
                     float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
+                    #else
+                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w);
+                    #endif
                     half4 background = half4(SampleSceneColor(distortedUV), 1.0);
 
                     float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
@@ -122,22 +133,32 @@ Shader "Minecraft/UberLiquidShader"
                 }
                 else // Water
                 {
-                    float3 col0, col1;
-                    float foam0, foam1;
-                    float2 norm0, norm1;
-
+                    float3 col0;
+                    float foam0;
+                    float2 norm0;
                     EvaluateWater(i, time0, col0, foam0, norm0);
+
+                    #if FLUID_ENABLE_DUAL_PHASE
+                    float3 col1;
+                    float foam1;
+                    float2 norm1;
                     EvaluateWater(i, time1, col1, foam1, norm1);
-
                     half3 water_surface_color = col0 * weight0 + col1 * weight1;
-
                     // Because foam0 and foam1 are phase-blended here, the shore effect
                     // seamlessly fades and loops along with the flow!
                     float total_foam = foam0 * weight0 + foam1 * weight1;
-
                     float2 final_normal = norm0 * weight0 + norm1 * weight1;
+                    #else
+                    half3 water_surface_color = col0;
+                    float total_foam = foam0;
+                    float2 final_normal = norm0;
+                    #endif
 
+                    #if FLUID_ENABLE_REFRACTION
                     float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
+                    #else
+                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w);
+                    #endif
                     half4 background = half4(SampleSceneColor(distortedUV), 1.0);
 
                     half3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);

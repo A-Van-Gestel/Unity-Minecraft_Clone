@@ -546,17 +546,20 @@ public class Settings
     [Range(1, 32)]
     public int viewDistance = 5;
 
-    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 2)]
+    [SettingField(SettingsTab.Graphics, Label = "Fluid Quality", Order = 2)]
+    public FluidQuality fluidQuality = FluidQuality.High;
+
+    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 3)]
     public CloudStyle clouds = CloudStyle.Fancy;
 
-    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 3)]
+    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 4)]
     public VSyncMode vSync = VSyncMode.On;
 
-    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 4)]
+    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 5)]
     [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     public bool unlimitedFps = false;
 
-    [SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 5)]
+    [SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 6)]
     [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     [DisabledWhen(nameof(unlimitedFps), ComparisonOp.Equal, true)]
     [Range(30, 480)]
