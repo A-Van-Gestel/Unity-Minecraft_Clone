@@ -138,6 +138,12 @@ namespace UI
             /// Null if the field has no conditions.
             /// </summary>
             public DisabledWhenAttribute[] DisabledConditions;
+
+            /// <summary>
+            /// Dynamic dropdown provider for fields with <see cref="DynamicDropdownAttribute"/>.
+            /// Null for static enum dropdowns and non-dropdown controls.
+            /// </summary>
+            public IDropdownProvider DynamicProvider;
         }
 
         /// <summary>
@@ -590,12 +596,17 @@ namespace UI
         {
             Type fieldType = entry.Field.FieldType;
             RangeAttribute range = entry.Field.GetCustomAttribute<RangeAttribute>();
+            DynamicDropdownAttribute dynDropdown = entry.Field.GetCustomAttribute<DynamicDropdownAttribute>();
             string label = entry.Attribute.Label ?? ConvertCamelCaseToTitleCase(entry.Field.Name);
             bool isInitField = entry.Field.GetCustomAttribute<InitializationFieldAttribute>() != null;
 
             ControlBinding binding;
 
-            if (fieldType == typeof(bool))
+            if (dynDropdown != null)
+            {
+                binding = CreateDynamicDropdown(entry, parent, label, dynDropdown);
+            }
+            else if (fieldType == typeof(bool))
             {
                 binding = CreateToggle(entry, parent, label);
             }
@@ -858,6 +869,97 @@ namespace UI
         }
 
         /// <summary>
+        /// Creates a Dropdown control populated by an <see cref="IDropdownProvider"/>.
+        /// Used for fields annotated with <see cref="DynamicDropdownAttribute"/>.
+        /// </summary>
+        private ControlBinding CreateDynamicDropdown(FieldEntry entry, Transform parent, string label,
+            DynamicDropdownAttribute dynAttr)
+        {
+            IDropdownProvider provider;
+            try
+            {
+                provider = (IDropdownProvider)Activator.CreateInstance(dynAttr.ProviderType);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[SettingsUIGenerator] Failed to create IDropdownProvider " +
+                               $"'{dynAttr.ProviderType.Name}' for field '{entry.Field.Name}': {e.Message}");
+                return null;
+            }
+
+            SettingsUIPrefabLibrary.ControlEntry config = _library.dropdownPrefab;
+            if (config?.prefab == null) return null;
+
+            GameObject obj = Instantiate(config.prefab, parent);
+            obj.name = $"DynDropdown_{entry.Field.Name}";
+            ApplyLayout(obj, config);
+
+            TMP_Dropdown dropdown = obj.GetComponentInChildren<TMP_Dropdown>();
+
+            TextMeshProUGUI labelTarget = null;
+            if (dropdown != null)
+            {
+                Transform template = dropdown.template;
+                TextMeshProUGUI[] texts = obj.GetComponentsInChildren<TextMeshProUGUI>();
+                foreach (TextMeshProUGUI t in texts)
+                {
+                    if (t == dropdown.captionText) continue;
+                    if (template != null && t.transform.IsChildOf(template)) continue;
+                    labelTarget = t;
+                    break;
+                }
+
+                if (labelTarget == null && dropdown.captionText != null)
+                    labelTarget = dropdown.captionText as TextMeshProUGUI;
+            }
+
+            if (dropdown != null)
+            {
+                string[] labels = provider.GetOptionLabels();
+                dropdown.ClearOptions();
+                dropdown.AddOptions(new List<string>(labels));
+
+                object currentValue = entry.Field.GetValue(entry.Owner);
+                int currentIndex = provider.GetIndexFromValue(currentValue);
+                if (currentIndex < 0) currentIndex = 0;
+                dropdown.SetValueWithoutNotify(currentIndex);
+
+                if (labelTarget != null && currentIndex < dropdown.options.Count)
+                    labelTarget.text = FormatLabelValue(label, dropdown.options[currentIndex].text);
+
+                FieldInfo field = entry.Field;
+                object owner = entry.Owner;
+                IDropdownProvider capturedProvider = provider;
+                TextMeshProUGUI captureLabelTarget = labelTarget;
+                dropdown.onValueChanged.AddListener(val =>
+                {
+                    object newValue = capturedProvider.GetValueFromIndex(val);
+                    field.SetValue(owner, newValue);
+
+                    if (captureLabelTarget != null)
+                        captureLabelTarget.text = FormatLabelValue(label, dropdown.options[val].text);
+
+                    SettingsManager.NotifySettingChanged(field.Name);
+                });
+            }
+            else if (labelTarget != null)
+            {
+                labelTarget.text = label;
+            }
+
+            return new ControlBinding
+            {
+                Field = entry.Field,
+                Owner = entry.Owner,
+                ControlRoot = obj,
+                Selectable = dropdown,
+                Label = label,
+                LabelText = labelTarget,
+                DynamicProvider = provider,
+            };
+        }
+
+        /// <summary>
         /// Creates an InputField control for a bare int, float, or string field.
         /// </summary>
         private ControlBinding CreateInputField(FieldEntry entry, Transform parent, string label, Type fieldType)
@@ -1007,7 +1109,22 @@ namespace UI
             }
             else if (binding.Selectable is TMP_Dropdown dropdown)
             {
-                int intValue = Convert.ToInt32(value);
+                int intValue;
+                if (binding.DynamicProvider != null)
+                {
+                    // Repopulate from the provider's cached option list
+                    string[] labels = binding.DynamicProvider.GetOptionLabels();
+                    dropdown.ClearOptions();
+                    dropdown.AddOptions(new List<string>(labels));
+
+                    intValue = binding.DynamicProvider.GetIndexFromValue(value);
+                    if (intValue < 0) intValue = 0;
+                }
+                else
+                {
+                    intValue = Convert.ToInt32(value);
+                }
+
                 dropdown.SetValueWithoutNotify(intValue);
 
                 // Update combined "Label: SelectedOption" text

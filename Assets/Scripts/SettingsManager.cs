@@ -4,6 +4,7 @@ using Data;
 using Data.Enums;
 using MyBox;
 using Serialization;
+using UI;
 using UI.Attributes;
 using UI.Enums;
 using UnityEngine;
@@ -66,8 +67,19 @@ public class Settings
     // GENERAL TAB
     // ═══════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// Screen resolution as "WIDTHxHEIGHT" (e.g., "1920x1080").
+    /// An empty string means "use current resolution".
+    /// </summary>
+    [Header("Display")]
+    [SettingField(SettingsTab.General, Label = "Resolution", Order = 0)]
+    [DynamicDropdown(typeof(ResolutionDropdownProvider))]
+    [Tooltip("Sets the screen resolution.\n\n" +
+             TooltipTags.Note + "Available options depend on your display.")]
+    public string resolution = "";
+
     [Header("Interface")]
-    [SettingField(SettingsTab.General, Label = "UI Scale", Order = 0)]
+    [SettingField(SettingsTab.General, Label = "UI Scale", Order = 1)]
     [Tooltip("Adjusts the global scale multiplier for all in-game menus and HUD elements.\n\n" +
              TooltipTags.Experimental + "Large scale mode is experimental and may cause overlapping elements.\n" +
              TooltipTags.DefaultColorStart + "Standard" + TooltipTags.DefaultColorEnd)]
@@ -76,7 +88,7 @@ public class Settings
     /// <summary>
     /// Controls how much information is displayed in inventory item tooltips.
     /// </summary>
-    [SettingField(SettingsTab.General, Label = "Item Tooltip Detail", Order = 1)]
+    [SettingField(SettingsTab.General, Label = "Item Tooltip Detail", Order = 2)]
     [Tooltip("Controls how much information is displayed in inventory item tooltips.\n\n" +
              TooltipTags.BulletOptionStart + "Name Only" + TooltipTags.BulletOptionEnd +
              "Shows only the block name (default).\n" +

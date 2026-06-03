@@ -46,6 +46,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   settings:
+    resolution: 
     uiScale: 1
     itemTooltipDetail: 0
     enableChunkLoadAnimations: 0

@@ -629,7 +629,7 @@ The reflection used in this system is limited to basic `System.Reflection` opera
 * `FieldInfo.GetValue(object)` / `FieldInfo.SetValue(object, value)` — read/write values
 * `Enum.GetValues(Type)` — populate dropdowns
 
-These operations are fully supported by IL2CPP in Unity 6. No `MakeGenericMethod`, `MakeGenericType`, or `Activator.CreateInstance<T>` is used in hot paths.
+Additionally, `Activator.CreateInstance(Type)` is used once per `[DynamicDropdown]` field at generation time to instantiate the provider. All of these operations are fully supported by IL2CPP in Unity 6. No `MakeGenericMethod` or `MakeGenericType` is used.
 
 **Validation requirement:** The IL2CPP reflection path must be tested in an actual IL2CPP Development Build early in the implementation phase to catch any edge cases before they become blockers.
 
@@ -638,6 +638,10 @@ These operations are fully supported by IL2CPP in Unity 6. No `MakeGenericMethod
 ---
 
 ## 10. Future Considerations
+
+### Manual Control Registration
+
+> **Future option:** For truly exotic controls that don't fit the attribute-driven pattern (e.g., compound controls, custom visualizations), a `RegisterExternalControl(SettingsTab, int order, GameObject)` API could allow code to inject a pre-built control into a specific tab at a specific sort position. This would complement — not replace — the reflection-based system. The attribute-driven approach should always be preferred; manual registration is a last resort for controls that cannot be expressed as a field + attribute.
 
 ### Settings Migration System
 

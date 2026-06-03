@@ -4,7 +4,7 @@ using UnityEngine;
 namespace UI
 {
     /// <summary>
-    /// Applies FOV, VSync, and Max FPS settings at startup and whenever they change.
+    /// Applies resolution, FOV, VSync, and Max FPS settings at startup and whenever they change.
     /// Subscribes to <see cref="SettingsManager.OnSettingChanged"/> for live updates.
     /// </summary>
     public class GraphicsSettingsController : MonoBehaviour
@@ -12,6 +12,7 @@ namespace UI
         private void Start()
         {
             Settings settings = SettingsManager.LoadSettings();
+            ApplyResolution(settings.resolution);
             ApplyFieldOfView(settings.fieldOfView);
             ApplyFrameRate(settings);
         }
@@ -36,6 +37,9 @@ namespace UI
 
             switch (fieldName)
             {
+                case nameof(Settings.resolution):
+                    ApplyResolution(settings.resolution);
+                    break;
                 case nameof(Settings.fieldOfView):
                     ApplyFieldOfView(settings.fieldOfView);
                     break;
@@ -43,6 +47,15 @@ namespace UI
                     ApplyFrameRate(settings);
                     break;
             }
+        }
+
+        /// <summary>
+        /// Applies the screen resolution. Delegates parsing to <see cref="ResolutionDropdownProvider"/>.
+        /// </summary>
+        /// <param name="resolution">Resolution string in "WIDTHxHEIGHT" format, or empty for current.</param>
+        private static void ApplyResolution(string resolution)
+        {
+            ResolutionDropdownProvider.ApplyResolution(resolution);
         }
 
         /// <summary>
