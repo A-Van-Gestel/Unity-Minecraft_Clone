@@ -4,7 +4,7 @@ using UnityEngine;
 namespace UI
 {
     /// <summary>
-    /// Applies resolution, FOV, VSync, and Max FPS settings at startup and whenever they change.
+    /// Applies window mode, resolution, FOV, VSync, and Max FPS settings at startup and whenever they change.
     /// Subscribes to <see cref="SettingsManager.OnSettingChanged"/> for live updates.
     /// </summary>
     public class GraphicsSettingsController : MonoBehaviour
@@ -12,6 +12,7 @@ namespace UI
         private void Start()
         {
             Settings settings = SettingsManager.LoadSettings();
+            ApplyWindowMode(settings.windowMode);
             ApplyResolution(settings.resolution);
             ApplyFieldOfView(settings.fieldOfView);
             ApplyFrameRate(settings);
@@ -37,6 +38,9 @@ namespace UI
 
             switch (fieldName)
             {
+                case nameof(Settings.windowMode):
+                    ApplyWindowMode(settings.windowMode);
+                    break;
                 case nameof(Settings.resolution):
                     ApplyResolution(settings.resolution);
                     break;
@@ -47,6 +51,15 @@ namespace UI
                     ApplyFrameRate(settings);
                     break;
             }
+        }
+
+        /// <summary>
+        /// Applies the window/fullscreen display mode.
+        /// </summary>
+        /// <param name="mode">The desired window mode.</param>
+        private static void ApplyWindowMode(WindowMode mode)
+        {
+            Screen.fullScreenMode = mode.ToFullScreenMode();
         }
 
         /// <summary>

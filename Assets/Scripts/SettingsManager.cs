@@ -68,11 +68,22 @@ public class Settings
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
+    /// The window/fullscreen display mode.
+    /// </summary>
+    [Header("Display")]
+    [SettingField(SettingsTab.General, Label = "Window Mode", Order = 0)]
+    [Tooltip("Controls how the application window is displayed.\n\n" +
+             TooltipTags.BulletOptionStart + "Windowed" + TooltipTags.BulletOptionEnd + "Standard movable window.\n" +
+             TooltipTags.BulletOptionStart + "Borderless Windowed" + TooltipTags.BulletOptionEnd + "Covers the full screen without exclusive access.\n" +
+             TooltipTags.BulletOptionStart + "Fullscreen" + TooltipTags.BulletOptionEnd + "Exclusive fullscreen with sole display access.\n\n" +
+             TooltipTags.DefaultColorStart + "Windowed" + TooltipTags.DefaultColorEnd)]
+    public WindowMode windowMode = WindowMode.Windowed;
+
+    /// <summary>
     /// Screen resolution as "WIDTHxHEIGHT" (e.g., "1920x1080").
     /// An empty string means "use current resolution".
     /// </summary>
-    [Header("Display")]
-    [SettingField(SettingsTab.General, Label = "Resolution", Order = 0)]
+    [SettingField(SettingsTab.General, Label = "Resolution", Order = 1)]
     [DynamicDropdown(typeof(ResolutionDropdownProvider))]
     [Tooltip("Sets the screen resolution.\n\n" +
              TooltipTags.Note + "Available options depend on your display.")]
