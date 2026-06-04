@@ -14,6 +14,9 @@ namespace UI.ScriptableObjects
         [Tooltip("The heading text prefab (e.g., InterfaceHeading TMP).")]
         public GameObject headerTextPrefab;
 
+        [Tooltip("The sub-heading text prefab. Visually smaller than the main header, used for secondary sections within a tab.")]
+        public GameObject subHeaderTextPrefab;
+
         [Tooltip("The tab button prefab and its layout configuration.")]
         public ControlEntry tabButtonPrefab;
 

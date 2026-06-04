@@ -305,6 +305,13 @@ namespace UI
                             InstantiateHeader(header.header, contentTransform);
                         }
 
+                        // Instantiate [SubHeader] if present (rendered below the main header)
+                        SubHeaderAttribute subHeader = entry.Field.GetCustomAttribute<SubHeaderAttribute>();
+                        if (subHeader != null)
+                        {
+                            InstantiateSubHeader(subHeader.Text, contentTransform);
+                        }
+
                         CreateAndBindControl(entry, contentTransform);
                     }
                     else
@@ -1183,6 +1190,25 @@ namespace UI
 
             TextMeshProUGUI text = obj.GetComponentInChildren<TextMeshProUGUI>();
             if (text != null) text.text = headerText;
+        }
+
+        /// <summary>
+        /// Instantiates a sub-header text element into the given parent.
+        /// Falls back to the main header prefab if no sub-header prefab is assigned.
+        /// </summary>
+        private void InstantiateSubHeader(string subHeaderText, Transform parent)
+        {
+            GameObject prefab = _library.subHeaderTextPrefab != null
+                ? _library.subHeaderTextPrefab
+                : _library.headerTextPrefab;
+
+            if (prefab == null) return;
+
+            GameObject obj = Instantiate(prefab, parent);
+            obj.name = $"SubHeader_{subHeaderText.Replace(" ", "")}";
+
+            TextMeshProUGUI text = obj.GetComponentInChildren<TextMeshProUGUI>();
+            if (text != null) text.text = subHeaderText;
         }
 
         /// <summary>

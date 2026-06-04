@@ -13,6 +13,7 @@ MonoBehaviour:
   m_Name: SettingsUIPrefabLibrary
   m_EditorClassIdentifier: Assembly-CSharp::UI.ScriptableObjects.SettingsUIPrefabLibrary
   headerTextPrefab: {fileID: 2727689385047579958, guid: 2e4b584347604c34caf59dd1ef2d0668, type: 3}
+  subHeaderTextPrefab: {fileID: 2727689385047579958, guid: 97cde0a641c53744fa9979d7df057fd0, type: 3}
   tabButtonPrefab:
     prefab: {fileID: 1817907604769527979, guid: 937709453fe398e4fa274ada98bddd26, type: 3}
     preferredHeight: 60

@@ -100,6 +100,7 @@ The system uses a combination of Unity's built-in attributes and a single consol
 | `[InspectorName("...")]` | *(On enum values)* Overrides the display name of individual enum values in dropdowns. This is a built-in Unity attribute (`UnityEngine.InspectorNameAttribute`) that is general-purpose — the same labels are used in the Unity Inspector and any other UI that reads enum metadata.  |
 | `[InitializationField]`  | *(From MyBox)* Marks the field as read-only when the settings menu is opened from in-game (Pause Menu). These fields can only be changed from the Main Menu before a world is loaded.                                                                                                 |
 | `[DisabledWhen(...)]`    | Conditionally disables a control based on another field's runtime value. Takes `(string fieldName, ComparisonOp op, object value)`. Multiple attributes stack with OR logic (disabled if *any* condition is true). The generator re-evaluates conditions live via `OnSettingChanged`. |
+| `[SubHeader("...")]`     | Generates a secondary, smaller heading below any `[Header]` and above the field's control. Used to create visual sub-sections within a tab (e.g., "Fluids" under "Rendering"). Falls back to the main header prefab if no sub-header prefab is assigned in the library.              |
 | **Field Type**           | Dictates the UI element type (see [Type Mapping Table](#type-mapping-table)).                                                                                                                                                                                                         |
 
 *Note: Integer-based settings that represent bounded modes (like `uiScale`) should be refactored into strongly-typed Enums to automatically map to Dropdown UI components.*
@@ -312,6 +313,7 @@ A separate MonoBehaviour on the same GameObject (or a child). Responsibilities:
 7. Sort fields within each tab by `Order` value (ascending), then by declaration order for fields with `Order = int.MaxValue`.
 8. For each field:
    a. If the field has a `[Header("...")]` attribute, instantiate a **Header Text** element first.
+   a2. If the field has a `[SubHeader("...")]` attribute, instantiate a **Sub-Header Text** element (below any header, above the control).
    b. Instantiate the correct UI Component Prefab based on the [Type Mapping Table](#type-mapping-table).
    c. Apply `LayoutElement` values from the prefab library entry (each prefab type defines its own `preferredHeight`, `flexibleWidth`, etc.).
    d. Set the display label from `Label` if specified, otherwise auto-convert the field name (`camelCase` → `"Title Case"`).
@@ -404,6 +406,7 @@ public class SettingsUIPrefabLibrary : ScriptableObject
 {
     [Header("Structural Prefabs")]
     public GameObject headerTextPrefab;     // InterfaceHeading (TMP)
+    public GameObject subHeaderTextPrefab;  // Sub-heading (smaller TMP, optional)
     public GameObject tabButtonPrefab;      // Button
     public GameObject tabContentPrefab;     // SettingsTabContent
 
@@ -546,6 +549,7 @@ public class Settings
     [Range(1, 32)]
     public int viewDistance = 5;
 
+    [SubHeader("Fluids")]
     [SettingField(SettingsTab.Graphics, Label = "Fluid Quality", Order = 2)]
     public FluidQuality fluidQuality = FluidQuality.High;
 

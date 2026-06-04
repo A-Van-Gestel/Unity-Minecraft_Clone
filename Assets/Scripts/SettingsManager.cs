@@ -158,6 +158,7 @@ public class Settings
     /// The radius of chunks (in chunks) around the player that will be visible and rendered.
     /// </summary>
     [Header("Rendering")]
+    [SubHeader("Chunks")]
     [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 1)]
     [Range(1, 32)]
     [Tooltip("The radius of chunks around the player that will be visible and rendered.\n\n" +
@@ -169,6 +170,7 @@ public class Settings
     /// Controls the visual fidelity of liquid (water and lava) rendering.
     /// Higher tiers enable more expensive shader effects.
     /// </summary>
+    [SubHeader("Fluids")]
     [SettingField(SettingsTab.Graphics, Label = "Fluid Quality", Order = 2)]
     [Tooltip("Controls the visual fidelity of liquid (water and lava) rendering.\n\n" +
              TooltipTags.BulletOptionStart + "Low" + TooltipTags.BulletOptionEnd +
@@ -202,6 +204,7 @@ public class Settings
     /// <summary>
     /// The visual style of clouds in the sky.
     /// </summary>
+    [SubHeader("Effects")]
     [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 4)]
     [Tooltip("The visual style of the cloud mesh system.\n\n" +
              TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "Disables cloud rendering.\n" +
