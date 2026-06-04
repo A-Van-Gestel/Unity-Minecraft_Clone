@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Data;
 using Helpers;
 using Jobs.BurstData;
@@ -207,6 +208,17 @@ namespace Jobs
             }
         }
 
+        /// <summary>
+        /// Calculates the attenuated light level after passing through a block.
+        /// Uses the Starlight/Moonrise formula: attenuation = max(1, opacity).
+        /// Air (opacity 0) costs 1 level; semi-transparent blocks cost their opacity.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static byte AttenuateLight(int sourceLight, byte opacity)
+        {
+            return (byte)Mathf.Max(0, sourceLight - Mathf.Max(1, opacity));
+        }
+
         private void PropagateLight(Vector3Int pos, LightChannel channel, NativeQueue<Vector3Int> pQueue, ref NativeHashMap<long, uint> cache)
         {
             uint sourcePacked = GetPackedData(pos, ref cache);
@@ -247,8 +259,7 @@ namespace Jobs
                 // If the neighbor is transparent, it both receives and propagates light.
                 else
                 {
-                    // The light value is reduced by 1 for distance, plus the opacity of the block it's entering.
-                    lightToPropagate = (byte)Mathf.Max(0, sourceLight - 1 - neighborProps.Opacity);
+                    lightToPropagate = AttenuateLight(sourceLight, neighborProps.Opacity);
 
                     if (isVerticalSunlight)
                     {
@@ -344,7 +355,7 @@ namespace Jobs
                 if (lightFromSky == 0) continue;
 
                 // Attenuate light for the next block down in the column.
-                lightFromSky = (byte)Mathf.Max(0, lightFromSky - props.Opacity);
+                lightFromSky = AttenuateLight(lightFromSky, props.Opacity);
             }
         }
 
@@ -430,7 +441,7 @@ namespace Jobs
             // Opaque blocks cannot receive light through propagation.
             if (centerProps.IsOpaque) return;
 
-            byte expectedFromNeighbor = (byte)Mathf.Max(0, neighborLight - 1 - centerProps.Opacity);
+            byte expectedFromNeighbor = AttenuateLight(neighborLight, centerProps.Opacity);
 
             // Center voxel should have MORE light — catches black spots at borders.
             if (expectedFromNeighbor > centerLight)

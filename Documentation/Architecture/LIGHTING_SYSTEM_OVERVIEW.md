@@ -48,7 +48,7 @@ The core of the system is a Breadth-First Search (BFS) flood-fill. When a voxel'
 **Phase 2 — Light Spreading (`PropagateLight`):**
 
 1. Dequeue a position, read its current light level.
-2. For each of 6 neighbors: calculate `targetLevel = sourceLight - 1 - neighborOpacity`.
+2. For each of 6 neighbors: calculate `targetLevel = sourceLight - max(1, neighborOpacity)`.
 3. If `targetLevel > neighborCurrentLight`, update the neighbor and enqueue it for further spreading.
 4. **Special rule:** Sunlight at level 15 traveling straight *down* through fully transparent blocks does not attenuate (remains 15). This creates the fast vertical sunlight columns.
 5. **Opaque surface lighting:** Opaque blocks receive light on their surface (`sourceLight - 1`) but are never enqueued for further propagation. Light stops at opaque surfaces.
@@ -66,7 +66,7 @@ The neighbor's own lighting job handles propagation within its borders after the
 
 ### 2.1 Blocklight
 
-Simple: originates from blocks with `lightEmission > 0` and propagates outward in all 6 directions using the standard BFS. Light decreases by `1 + opacity` per step.
+Simple: originates from blocks with `lightEmission > 0` and propagates outward in all 6 directions using the standard BFS. Light decreases by `max(1, opacity)` per step.
 
 ### 2.2 Sunlight
 
@@ -217,11 +217,9 @@ This section documents how our lighting engine compares to the Starlight referen
 #### Opacity-Based Light Attenuation
 
 **Starlight:** `targetLevel = propagatedLevel - max(1, opacity)`.
-**Our system:** `targetLevel = sourceLight - 1 - neighborOpacity`.
-**Note:** These differ for semi-transparent blocks. Starlight uses `max(1, opacity)` while we use `1 + opacity`. For air (opacity=0) both give `sourceLight - 1`. For water (opacity=2), Starlight gives `sourceLight - 2` while ours gives `sourceLight - 3`.
-This means our BFS attenuates semi-transparent blocks more aggressively than the column recalculation (which uses just `opacity`), causing a 1-level shadow line at chunk borders underwater.
-Aligning with Starlight's `max(1, opacity)` formula would fix this, but requires careful testing with all semi-transparent block types.
-**Status:** Known discrepancy — see Section 5 for the proposed fix.
+**Our system:** `targetLevel = sourceLight - max(1, neighborOpacity)`.
+Both the BFS (`PropagateLight`) and column recalculation (`RecalculateSunlightForColumn`) use the same `max(1, opacity)` formula, ensuring consistent attenuation for semi-transparent blocks (e.g., water). The edge check (`CheckEdgeVoxel`) also uses this formula.
+**Status:** Implemented correctly.
 
 #### Edge Checking on Chunk Load
 
@@ -376,17 +374,9 @@ This eliminates the write loop and reduces memory bandwidth.
 
 **Proposed:** Use the existing `SectionJobData.IsEmpty` flags to skip entire 16-block vertical ranges in the BFS. If a section is empty and the section above is also empty, sunlight is implicitly 15 (virtual skylight) and no propagation is needed.
 
-### 5.5 Align BFS Attenuation with Starlight Formula
+### ~~5.5 Align BFS Attenuation with Starlight Formula~~ (Fixed)
 
-**Priority: Medium** | **Complexity: Low** | **Known Bug**
-
-**Current:** `PropagateLight` uses `sourceLight - 1 - opacity` (i.e., `1 + opacity` attenuation per step).
-**Starlight:** Uses `sourceLight - max(1, opacity)`.
-
-For air (opacity=0) both give `-1`. For water (opacity=2): ours gives `-3`, Starlight gives `-2`. The column recalculation (`RecalculateSunlightForColumn`) attenuates by just `opacity` per block.
-This means the BFS and column recalculation produce different values for semi-transparent blocks, causing a **1-level shadow line at chunk borders under water**.
-
-**Fix:** Change the BFS formula to `Mathf.Max(0, sourceLight - Mathf.Max(1, neighborProps.Opacity))`. This requires updating the column recalculation to also use `max(1, opacity)` for consistency, and testing with all semi-transparent block types.
+All three attenuation sites (`PropagateLight`, `RecalculateSunlightForColumn`, `CheckEdgeVoxel`) now use the Starlight-aligned `max(1, opacity)` formula. The previous `1 + opacity` formula over-attenuated semi-transparent blocks (e.g., water) by 1 level compared to column recalculation, causing a 1-level shadow line at chunk borders underwater. See Section 4.2 "Opacity-Based Light Attenuation" for the current comparison.
 
 ### 5.6 Column Aggregation for Burst Updates
 

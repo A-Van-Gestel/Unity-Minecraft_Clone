@@ -444,9 +444,9 @@ This is modest. Using `Float32 x4` instead would be +16 bytes/vertex (+28.6%), a
 
 #### 2.9.3 Underwater Gradient Quality
 
-With water opacity = 2, the current BFS formula (`sourceLight - 1 - opacity`) attenuates light by 3 per step: 15 → 12 → 9 → 6 → 3 → 0. Adjacent blocks differ by 3 light levels. After corner averaging with 4 neighbors, the gradient smooths to approximately 1.5-level differences between adjacent vertices — still somewhat visible as soft bands, but significantly better than the hard 3-level jumps.
+With water opacity = 2, the BFS formula (`sourceLight - max(1, opacity)`) attenuates light by 2 per step: 15 → 13 → 11 → 9 → 7 → 5 → 3 → 1 → 0. Adjacent blocks differ by 2 light levels. After corner averaging with 4 neighbors, the gradient smooths to approximately 1-level differences between adjacent vertices — producing a gentle, natural-looking underwater falloff.
 
-> **Note:** Fixing the BFS attenuation formula to align with Starlight (`max(1, opacity)` instead of `1 + opacity`) — documented in `LIGHTING_SYSTEM_OVERVIEW.md` Section 5.5 — would reduce underwater attenuation from 3 to 2 per step. This is an independent fix that would further improve smooth lighting quality underwater. **Recommended: apply this fix before or alongside Phase 1** so that visual tuning and evaluation of smooth lighting gradients is based on correct underlying attenuation values, not the current over-aggressive formula.
+> **Prerequisite completed:** The BFS attenuation formula was aligned with the Starlight/Moonrise `max(1, opacity)` formula (see `LIGHTING_SYSTEM_OVERVIEW.md` Section 4.2). All three attenuation sites (`PropagateLight`, `RecalculateSunlightForColumn`, `CheckEdgeVoxel`) now use the consistent formula, eliminating the previous 1-level shadow line artifact at chunk borders underwater.
 
 ### 2.10 Scope
 
