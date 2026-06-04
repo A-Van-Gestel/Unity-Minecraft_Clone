@@ -190,12 +190,14 @@ public class Settings
     /// At 100 the full distortion strength is applied.
     /// </summary>
     [SettingField(SettingsTab.Graphics, Label = "Fluid Refraction", Format = "f0", Order = 3)]
-    [Range(0, 100)]
+    [Range(0, 200)]
     [Tooltip("Controls the strength of the refraction distortion wobble on water and lava surfaces.\n\n" +
              TooltipTags.BulletOptionStart + "0" + TooltipTags.BulletOptionEnd +
              "Fully disabled. The refraction FBM computation is skipped entirely.\n" +
              TooltipTags.BulletOptionStart + "1–100" + TooltipTags.BulletOptionEnd +
-             "Scales the distortion strength from barely visible to full effect.\n\n" +
+             "Scales the distortion strength from barely visible to the default.\n" +
+             TooltipTags.BulletOptionStart + "101–200" + TooltipTags.BulletOptionEnd +
+             "Amplifies distortion beyond the default for a stronger effect.\n\n" +
              TooltipTags.Performance + "Refraction is the most expensive fluid effect. " +
              "Disabling it (set to 0) can nearly double frame rate in liquid-heavy scenes.\n" +
              TooltipTags.DefaultColorStart + "100" + TooltipTags.DefaultColorEnd)]

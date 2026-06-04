@@ -109,7 +109,7 @@ Material:
     - _DetailSaturation: 0
     - _DetailSource: 0
     - _DetailSpecularIntensity: 0.2
-    - _DistortionAmount: 0.02
+    - _DistortionAmount: 0.007
     - _DstBlend: 0
     - _EditorPreviewType: 0
     - _EmissionIntensity: 1

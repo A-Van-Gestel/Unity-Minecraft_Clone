@@ -19,7 +19,7 @@ namespace UI
         // Base distortion values must match the shader Property defaults in UberLiquidShader.shader:
         // _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.02
         // _HeatDistortionAmount("Heat Distortion", Range(0, 0.1)) = 0.015
-        private const float BASE_WATER_DISTORTION = 0.02f;
+        private const float BASE_WATER_DISTORTION = 0.007f;
         private const float BASE_LAVA_DISTORTION = 0.015f;
 
         private static readonly int s_distortionAmountId = Shader.PropertyToID("_DistortionAmount");
@@ -152,7 +152,7 @@ namespace UI
             if (liquidMat == null)
                 return;
 
-            refraction = Mathf.Clamp(refraction, 0, 100);
+            refraction = Mathf.Clamp(refraction, 0, 200);
 
             if (refraction <= 0)
             {
