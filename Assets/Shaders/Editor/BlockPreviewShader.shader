@@ -40,7 +40,10 @@ Shader "Hidden/Editor/BlockPreview"
 
             VoxelV2F vertFunction(VoxelAppdata v)
             {
-                return VoxelVert(v);
+                VoxelV2F o = VoxelVert(v);
+                // Editor meshes don't provide TEXCOORD1 — force full brightness.
+                o.lightData = half4(1, 1, 1, 1);
+                return o;
             }
 
             half4 fragFunction(VoxelV2F i) : SV_Target
@@ -52,10 +55,10 @@ Shader "Hidden/Editor/BlockPreview"
 
                 // Apply voxel lighting with hardcoded editor daylight defaults
                 // (VoxelData.MinLightLevel = 0.15, MaxLightLevel = 1.0, full daylight = 1.0)
-                col.rgb = ApplyVoxelLighting(col.rgb, i.color.a,
-                                             1.0, // globalLight  — full daylight
-                                             0.15, // minLight     — VoxelData.MinLightLevel
-                                             1.0); // maxLight     — VoxelData.MaxLightLevel
+                col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.rgb, i.lightData.a,
+                                                1.0, // globalLight  — full daylight
+                                                0.15, // minLight     — VoxelData.MinLightLevel
+                                                1.0); // maxLight     — VoxelData.MaxLightLevel
 
                 // Multiply by vertex RGB (supports BlockIconGenerator isometric shadows)
                 col.rgb *= i.color.rgb;

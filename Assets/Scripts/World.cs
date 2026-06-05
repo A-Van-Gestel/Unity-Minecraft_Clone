@@ -219,6 +219,7 @@ public class World : MonoBehaviour
     private void OnEnable()
     {
         _shutdownTokenSource = new CancellationTokenSource();
+        SettingsManager.OnSettingChanged += HandleSettingChanged;
     }
 
 
@@ -264,6 +265,11 @@ public class World : MonoBehaviour
     #endregion
 
     // Cleanup for NativeArrays
+    private void OnDisable()
+    {
+        SettingsManager.OnSettingChanged -= HandleSettingChanged;
+    }
+
     private void OnDestroy()
     {
         if (Instance == this) Instance = null;
@@ -2179,8 +2185,15 @@ public class World : MonoBehaviour
         {
             voxelVisualizer.ClearAll(); // Clear any previous visualization.
 
-            // If the new mode is not 'None', request an update for all currently active chunks.
-            if (visualizationMode != DebugVisualizationMode.None)
+            // Toggle the smooth lighting debug shader keyword based on mode transition.
+            if (_lastVisualizationMode == DebugVisualizationMode.SmoothLightingData)
+                Shader.DisableKeyword("DEBUG_LIGHTDATA");
+            if (visualizationMode == DebugVisualizationMode.SmoothLightingData)
+                Shader.EnableKeyword("DEBUG_LIGHTDATA");
+
+            // If the new mode is not 'None' and not shader-only, request an update for all currently active chunks.
+            if (visualizationMode != DebugVisualizationMode.None &&
+                visualizationMode != DebugVisualizationMode.SmoothLightingData)
             {
                 foreach (ChunkCoord coord in _activeChunks)
                 {
@@ -3103,6 +3116,21 @@ public class World : MonoBehaviour
         _playerLastChunkCoord = new ChunkCoord(int.MinValue, int.MinValue);
 
         Debug.Log("[World] ForceUnloadAllChunks complete. All chunks removed from memory.");
+    }
+
+    /// <summary>
+    /// Handles live setting changes that require world-level reactions (e.g., mesh rebuilds).
+    /// </summary>
+    private void HandleSettingChanged(string fieldName)
+    {
+        if (fieldName == nameof(Settings.smoothLighting))
+        {
+            foreach (ChunkCoord coord in _activeChunks)
+            {
+                if (_chunkMap.TryGetValue(coord, out Chunk chunk))
+                    RequestChunkMeshRebuild(chunk);
+            }
+        }
     }
 
     /// <summary>

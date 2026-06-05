@@ -56,6 +56,7 @@ MonoBehaviour:
     viewDistance: 5
     fluidQuality: 2
     fluidRefraction: 100
+    smoothLighting: 1
     clouds: 2
     vSync: 1
     unlimitedFps: 0

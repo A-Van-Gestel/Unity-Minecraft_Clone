@@ -68,6 +68,7 @@ namespace Editor.BlockEditor.Helpers
             NativeList<Vector4> nativeUvs = new NativeList<Vector4>(Allocator.Temp);
             NativeList<Color> nativeColors = new NativeList<Color>(Allocator.Temp);
             NativeList<Vector3> nativeNormals = new NativeList<Vector3>(Allocator.Temp);
+            NativeList<Color32> nativeLightData = new NativeList<Color32>(Allocator.Temp);
             int vertexIndex = 0;
 
 
@@ -92,7 +93,8 @@ namespace Editor.BlockEditor.Helpers
                 NativeArray<BlockTypeJobData> blockTypesJobData = new NativeArray<BlockTypeJobData>(allBlockTypes.Select(bt => new BlockTypeJobData(bt)).ToArray(), Allocator.Temp);
 
                 VoxelMeshHelper.GenerateFluidMeshData(Vector3Int.zero, mockPackedData, mockProps, in templates, in blockTypesJobData, mockNeighbors,
-                    ref vertexIndex, ref nativeVertices, ref nativeFluidTris, ref nativeUvs, ref nativeColors, ref nativeNormals);
+                    ref vertexIndex, ref nativeVertices, ref nativeFluidTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
+                    ref nativeLightData);
 
                 // Dispose all temporary native arrays.
                 mockNeighbors.Dispose();
@@ -103,8 +105,9 @@ namespace Editor.BlockEditor.Helpers
             else if (blockType.renderShape == RenderShape.CrossMesh)
             {
                 int textureID = blockType.backFaceTexture; // CrossMesh uses a single texture synced across all faces
-                VoxelMeshHelper.GenerateCrossMesh(textureID, 1.0f, Vector3Int.zero,
-                    ref vertexIndex, ref nativeVertices, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals);
+                VoxelMeshHelper.GenerateCrossMesh(textureID, new Color32(255, 255, 255, 255), Vector3Int.zero,
+                    ref vertexIndex, ref nativeVertices, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
+                    ref nativeLightData);
             }
             // Case 3: Custom Mesh
             else if (blockType.renderShape == RenderShape.CustomMesh && blockType.meshData != null)
@@ -187,7 +190,7 @@ namespace Editor.BlockEditor.Helpers
                             VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
                                 ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
                                 ref nativeUvs, ref nativeColors, ref nativeNormals,
-                                blockType.renderNeighborFaces);
+                                ref nativeLightData, blockType.renderNeighborFaces);
                         }
 
                         break;
@@ -207,7 +210,7 @@ namespace Editor.BlockEditor.Helpers
                             VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
                                 ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
                                 ref nativeUvs, ref nativeColors, ref nativeNormals,
-                                blockType.renderNeighborFaces);
+                                ref nativeLightData, blockType.renderNeighborFaces);
                         }
 
                         break;
@@ -227,7 +230,7 @@ namespace Editor.BlockEditor.Helpers
                             VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f, uvQuarterTurnsCW,
                                 ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
                                 ref nativeUvs, ref nativeColors, ref nativeNormals,
-                                blockType.renderNeighborFaces);
+                                ref nativeLightData, blockType.renderNeighborFaces);
                         }
 
                         break;
@@ -260,7 +263,7 @@ namespace Editor.BlockEditor.Helpers
                             VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, 1.0f, Vector3Int.zero, rotation,
                                 ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
                                 ref nativeUvs, ref nativeColors, ref nativeNormals,
-                                blockType.renderNeighborFaces);
+                                ref nativeLightData, blockType.renderNeighborFaces);
                         }
 
                         break;
@@ -276,7 +279,7 @@ namespace Editor.BlockEditor.Helpers
                             VoxelMeshHelper.GenerateStandardCubeFace(p, textureID, 1.0f, Vector3Int.zero, 0f,
                                 ref vertexIndex, ref nativeVertices, ref nativeOpaqueTris, ref nativeTransparentTris,
                                 ref nativeUvs, ref nativeColors, ref nativeNormals,
-                                blockType.renderNeighborFaces);
+                                ref nativeLightData, blockType.renderNeighborFaces);
                         }
 
                         break;
@@ -306,6 +309,7 @@ namespace Editor.BlockEditor.Helpers
             nativeUvs.Dispose();
             nativeColors.Dispose();
             nativeNormals.Dispose();
+            nativeLightData.Dispose();
 
             // --- Final Mesh Assembly ---
             // Apply center offset to ALL vertices before creating the mesh

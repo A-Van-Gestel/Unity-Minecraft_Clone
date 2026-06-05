@@ -224,6 +224,7 @@ public class WorldJobManager : IDisposable
             CustomTris = _world.JobDataManager.CustomTrisJobData,
             WaterVertexTemplates = _world.FluidVertexTemplates.WaterVertexTemplates,
             LavaVertexTemplates = _world.FluidVertexTemplates.LavaVertexTemplates,
+            SmoothLighting = _world.settings.smoothLighting,
             ClipBounds = MeshClipBounds.Disabled,
             Output = meshOutput,
         };

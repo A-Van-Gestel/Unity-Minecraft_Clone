@@ -56,7 +56,8 @@ struct LiquidAppdata
     float4 vertex : POSITION;
     float3 normal : NORMAL;
     float4 uv : TEXCOORD0; // xy = localFlowVector, zw = shorePush (normalized direction)
-    half4 color : COLOR; // r=LiquidType, g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier, a=LightLevel
+    half4 color : COLOR; // r=LiquidType, g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier, a=unused
+    half4 lightData : TEXCOORD1; // UNorm8: (sunlight, reserved, reserved, blocklight)
 };
 
 struct LiquidV2F
@@ -107,7 +108,7 @@ LiquidV2F LiquidVert(LiquidAppdata v)
     o.screenPos = ComputeScreenPos(o.vertex);
     o.worldNormal = TransformObjectToWorldNormal(v.normal);
     o.liquidType = v.color.r;
-    o.lightLevel = v.color.a;
+    o.lightLevel = max(v.lightData.r, v.lightData.a);
     o.shadowMultiplier = v.color.b;
     o.localFlowVector = v.uv.xy; // flow XZ
     o.shorePush = v.uv.zw; // shore push direction (normalized)

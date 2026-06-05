@@ -7,6 +7,18 @@ using UnityEngine;
 namespace Data
 {
     /// <summary>
+    /// Interleaved struct for mesh stream 3: Normal (12 bytes) + LightData (4 bytes) = 16 bytes.
+    /// Packs both attributes into a single stream to stay within Unity's 4-stream limit.
+    /// Built by <see cref="Chunk.PostProcessMeshJob"/> (Burst-compiled) to avoid main-thread interleaving.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct NormalLightVertex
+    {
+        public Vector3 Normal;
+        public Color32 LightData;
+    }
+
+    /// <summary>
     /// A job-safe representation of a nullable VoxelState.
     /// </summary>
     public struct OptionalVoxelState
@@ -276,6 +288,8 @@ namespace Data
         public NativeList<Vector4> Uvs; // xy = flow/atlas UV, zw = shore push (fluid top face) or (0,0)
         public NativeList<Color> Colors;
         public NativeList<Vector3> Normals;
+        public NativeList<Color32> LightData; // TexCoord1 UNorm8: (sunlight, reserved, reserved, blocklight)
+        public NativeList<NormalLightVertex> InterleavedStream3; // Normals + LightData interleaved for GPU upload
 
         // Track stats per section (Index 0 = Section 0, Index 1 = Section 1, etc.)
         public NativeArray<MeshSectionStats> SectionStats;
@@ -289,6 +303,8 @@ namespace Data
             Uvs = new NativeList<Vector4>(allocator);
             Colors = new NativeList<Color>(allocator);
             Normals = new NativeList<Vector3>(allocator);
+            LightData = new NativeList<Color32>(allocator);
+            InterleavedStream3 = new NativeList<NormalLightVertex>(allocator);
 
             // 8 Sections per chunk (128 / 16).
             SectionStats = new NativeArray<MeshSectionStats>(VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE, allocator);
@@ -303,6 +319,8 @@ namespace Data
             Uvs.Dispose();
             Colors.Dispose();
             Normals.Dispose();
+            LightData.Dispose();
+            InterleavedStream3.Dispose();
             if (SectionStats.IsCreated) SectionStats.Dispose();
         }
     }

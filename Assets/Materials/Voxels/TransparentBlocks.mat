@@ -87,6 +87,7 @@ Material:
     - _ContrastDetailMap: 0
     - _Cull: 0
     - _Cutoff: 0.5
+    - _DebugLightData: 0
     - _DetailBrightness: 1
     - _DetailGlossiness: 0.5
     - _DetailNormalMapScale: 1

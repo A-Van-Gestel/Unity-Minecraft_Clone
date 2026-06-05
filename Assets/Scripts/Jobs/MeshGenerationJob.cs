@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Data;
 using Helpers;
 using Jobs.BurstData;
@@ -79,6 +80,10 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<float> LavaVertexTemplates;
 
+        // --- SETTINGS ---
+        [MarshalAs(UnmanagedType.U1)]
+        public bool SmoothLighting;
+
         // --- OUTPUT ---
         public MeshDataJobOutput Output;
 
@@ -153,7 +158,7 @@ namespace Jobs
                 int endY = math.min(startY + sectionHeight, _clipMaxY);
                 bool isSectionFullyVisible = endY == startY + sectionHeight;
                 bool isXZFullyVisible = _clipLocalMaxX >= VoxelData.ChunkWidth
-                                     && _clipLocalMaxZ >= VoxelData.ChunkWidth;
+                                        && _clipLocalMaxZ >= VoxelData.ChunkWidth;
 
                 // OPTIMIZATION: "Shell" Iteration for fully solid sections.
                 // Only valid when the full section is visible on all axes — any clip
@@ -294,7 +299,8 @@ namespace Jobs
                 }
 
                 VoxelMeshHelper.GenerateFluidMeshData(in pos, packedData, in voxelProps, in templates, in BlockTypes, in neighbors,
-                    ref _vertexIndex, ref Output.Vertices, ref Output.FluidTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals);
+                    ref _vertexIndex, ref Output.Vertices, ref Output.FluidTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                    ref Output.LightData);
 
                 // Dispose the temporary native array.
                 neighbors.Dispose();
@@ -305,10 +311,13 @@ namespace Jobs
             if (voxelProps.RenderShape == RenderShape.CrossMesh)
             {
                 VoxelState? centerVoxel = GetVoxelStateFromLocalPos(pos);
-                float lightLevel = centerVoxel?.LightAsFloat ?? 1.0f;
+                Color32 flatLight = centerVoxel.HasValue
+                    ? VoxelMeshHelper.BuildFlatLight(centerVoxel.Value.Sunlight, centerVoxel.Value.Blocklight)
+                    : new Color32(255, 255, 255, 0);
                 int textureID = voxelProps.SideFaceTexture;
 
-                VoxelMeshHelper.GenerateCrossMesh(textureID, lightLevel, pos, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals);
+                VoxelMeshHelper.GenerateCrossMesh(textureID, flatLight, pos, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                    ref Output.LightData);
                 return;
             }
 
@@ -383,12 +392,12 @@ namespace Jobs
                 {
                     int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                     int textureID = GetTextureID(id, translatedP);
-                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+                    Color32 flatLight = BuildFlatLightData(neighborVoxel);
 
-                    VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, lightLevel, pos, rotation,
+                    VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, flatLight, pos, rotation,
                         voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                         ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
-                        ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
+                        ref Output.Colors, ref Output.Normals, ref Output.LightData, voxelProps.RenderNeighborFaces);
                 }
             }
         }
@@ -428,12 +437,12 @@ namespace Jobs
                 if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
                     int textureID = GetTextureID(id, p);
-                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
+                    Color32 flatLight = BuildFlatLightData(neighborVoxel);
 
-                    VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, lightLevel, pos, in matrix,
+                    VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, flatLight, pos, in matrix,
                         voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                         ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                        ref Output.Uvs, ref Output.Colors, ref Output.Normals, voxelProps.RenderNeighborFaces);
+                        ref Output.Uvs, ref Output.Colors, ref Output.Normals, ref Output.LightData, voxelProps.RenderNeighborFaces);
                 }
             }
         }
@@ -517,12 +526,25 @@ namespace Jobs
                 {
                     int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                     int textureID = GetTextureID(id, translatedP);
-                    float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 
-                    VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, lightLevel, in pos, rotation,
-                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                        ref Output.Uvs, ref Output.Colors, ref Output.Normals,
-                        voxelProps.RenderNeighborFaces);
+                    if (SmoothLighting)
+                    {
+                        CalculateCornerLights(p, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                        VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, in pos, rotation,
+                            0, l0, l1, l2, l3,
+                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                            ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                            ref Output.LightData, voxelProps.RenderNeighborFaces);
+                    }
+                    else
+                    {
+                        Color32 flat = BuildFlatLightData(neighborVoxel);
+                        VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, in pos, rotation,
+                            0, flat, flat, flat, flat,
+                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                            ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                            ref Output.LightData, voxelProps.RenderNeighborFaces);
+                    }
                 }
             }
         }
@@ -546,12 +568,25 @@ namespace Jobs
             if (!ShouldDrawFace(voxelProps, neighborVoxel)) return;
 
             int textureID = GetTextureID(id, effectiveFace);
-            float lightLevel = neighborVoxel?.LightAsFloat ?? 1.0f;
 
-            VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, lightLevel, in pos, rotation: 0f, uvQuarterTurnsCW,
-                ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                ref Output.Uvs, ref Output.Colors, ref Output.Normals,
-                voxelProps.RenderNeighborFaces);
+            if (SmoothLighting)
+            {
+                CalculateCornerLights(worldFace, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, in pos, rotation: 0f, uvQuarterTurnsCW,
+                    l0, l1, l2, l3,
+                    ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                    ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                    ref Output.LightData, voxelProps.RenderNeighborFaces);
+            }
+            else
+            {
+                Color32 flat = BuildFlatLightData(neighborVoxel);
+                VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, in pos, rotation: 0f, uvQuarterTurnsCW,
+                    flat, flat, flat, flat,
+                    ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                    ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                    ref Output.LightData, voxelProps.RenderNeighborFaces);
+            }
         }
 
         /// <summary>
@@ -652,6 +687,118 @@ namespace Jobs
 
             // If we are opaque, we draw if the neighbor is transparent or not solid.
             return neighborProps.RenderNeighborFaces || !neighborProps.IsSolid;
+        }
+
+        /// <summary>
+        /// Builds a flat (uniform) light Color32 from a neighbor voxel state with separate
+        /// sun and block channels. Used by the flat lighting fallback paths.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private Color32 BuildFlatLightData(VoxelState? neighborVoxel)
+        {
+            if (!neighborVoxel.HasValue)
+            {
+                byte fullSun = 15 * 17; // 255
+                return new Color32(fullSun, fullSun, fullSun, 0);
+            }
+
+            VoxelState vs = neighborVoxel.Value;
+            byte sun = (byte)(vs.Sunlight * 17);
+            byte block = (byte)(vs.Blocklight * 17);
+            return new Color32(sun, sun, sun, block);
+        }
+
+        /// <summary>
+        /// Computes per-vertex corner-averaged light values for smooth lighting.
+        /// Samples 4 neighboring blocks per corner (direct + sideA + sideB + diagonal)
+        /// and averages sunlight and blocklight channels independently.
+        /// </summary>
+        private void CalculateCornerLights(int faceIndex, Vector3Int blockPos,
+            VoxelState? directNeighbor,
+            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3)
+        {
+            // Extract light from the pre-fetched direct neighbor (same for all 4 corners).
+            byte directSun, directBlock;
+            if (!directNeighbor.HasValue)
+            {
+                directSun = 15;
+                directBlock = 0;
+            }
+            else
+            {
+                VoxelState ds = directNeighbor.Value;
+                bool directOpaque = BlockTypes[ds.ID].IsOpaque;
+                directSun = directOpaque ? (byte)0 : ds.Sunlight;
+                directBlock = directOpaque ? (byte)0 : ds.Blocklight;
+            }
+
+            // Process each of the 4 corners.
+            // Unrolled to avoid stackalloc / array allocation in Burst.
+            l0 = SampleCorner(faceIndex, 0, blockPos, directSun, directBlock);
+            l1 = SampleCorner(faceIndex, 1, blockPos, directSun, directBlock);
+            l2 = SampleCorner(faceIndex, 2, blockPos, directSun, directBlock);
+            l3 = SampleCorner(faceIndex, 3, blockPos, directSun, directBlock);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private Color32 SampleCorner(int faceIndex, int cornerIndex, Vector3Int blockPos,
+            byte directSun, byte directBlock)
+        {
+            int lutBase = faceIndex * 12 + cornerIndex * 3;
+            int3 sideAOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 0];
+            int3 sideBOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 1];
+            int3 diagOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 2];
+
+            // Sample Side A
+            SampleNeighborLight(blockPos + new Vector3Int(sideAOffset.x, sideAOffset.y, sideAOffset.z),
+                out byte sideASun, out byte sideABlock, out bool sideAOpaque);
+
+            // Sample Side B
+            SampleNeighborLight(blockPos + new Vector3Int(sideBOffset.x, sideBOffset.y, sideBOffset.z),
+                out byte sideBSun, out byte sideBBlock, out bool sideBOpaque);
+
+            // Diagonal occlusion rule: if both sides are opaque, skip the diagonal read
+            byte diagSun = 0, diagBlock = 0;
+            if (!(sideAOpaque && sideBOpaque))
+            {
+                SampleNeighborLight(blockPos + new Vector3Int(diagOffset.x, diagOffset.y, diagOffset.z),
+                    out diagSun, out diagBlock, out _);
+            }
+
+            // Average sunlight and blocklight independently (always divide by 4).
+            // Encode to UNorm8: value * 17 maps 0-15 → 0-255 (with rounding: (sum * 17 + 2) / 4).
+            int sunSum = directSun + sideASun + sideBSun + diagSun;
+            int blockSum = directBlock + sideABlock + sideBBlock + diagBlock;
+            byte sunEncoded = (byte)((sunSum * 17 + 2) / 4);
+            byte blockEncoded = (byte)((blockSum * 17 + 2) / 4);
+
+            return new Color32(sunEncoded, sunEncoded, sunEncoded, blockEncoded);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SampleNeighborLight(Vector3Int pos, out byte sun, out byte block, out bool isOpaque)
+        {
+            VoxelState? state = GetVoxelStateFromLocalPos(pos);
+            if (!state.HasValue)
+            {
+                sun = 15;
+                block = 0;
+                isOpaque = false;
+                return;
+            }
+
+            VoxelState s = state.Value;
+            isOpaque = BlockTypes[s.ID].IsOpaque;
+            if (isOpaque)
+            {
+                sun = 0;
+                block = 0;
+            }
+            else
+            {
+                sun = s.Sunlight;
+                block = s.Blocklight;
+            }
         }
 
         /// <summary>

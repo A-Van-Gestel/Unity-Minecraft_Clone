@@ -283,5 +283,12 @@ namespace DebugVisualizations
         /// Shows runtime collision AABBs for solid blocks in visible chunks.
         /// </summary>
         CollisionBounds,
+
+        /// <summary>
+        /// Shader-based debug mode: replaces block colors with raw TexCoord1 (smooth lighting)
+        /// data as false-color. Red = sunlight, Green = blocklight. Smooth lighting produces
+        /// per-vertex gradients; flat lighting renders uniform per face.
+        /// </summary>
+        SmoothLightingData,
     }
 }

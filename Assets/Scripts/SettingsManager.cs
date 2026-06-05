@@ -204,10 +204,20 @@ public class Settings
     public int fluidRefraction = 100;
 
     /// <summary>
+    /// Enables per-vertex light averaging for smooth light gradients instead of flat per-face lighting.
+    /// </summary>
+    [SubHeader("Lighting")]
+    [SettingField(SettingsTab.Graphics, Label = "Smooth Lighting", Order = 4)]
+    [Tooltip("Averages light across block corners for smooth gradients.\n" +
+             "Disable for the classic blocky lighting look or to improve performance on low-end hardware.\n\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool smoothLighting = true;
+
+    /// <summary>
     /// The visual style of clouds in the sky.
     /// </summary>
     [SubHeader("Effects")]
-    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 4)]
+    [SettingField(SettingsTab.Graphics, Label = "Cloud Style", Order = 5)]
     [Tooltip("The visual style of the cloud mesh system.\n\n" +
              TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "Disables cloud rendering.\n" +
              TooltipTags.BulletOptionStart + "Fast" + TooltipTags.BulletOptionEnd + "2D flat clouds.\n" +
@@ -218,7 +228,7 @@ public class Settings
     /// Vertical synchronization mode. Maps directly to <see cref="QualitySettings.vSyncCount"/>.
     /// </summary>
     [Header("Frame Rate")]
-    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 5)]
+    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 6)]
     [Tooltip("Controls vertical synchronization.\n\n" +
              TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "No VSync. Lowest input latency.\n" +
              TooltipTags.BulletOptionStart + "On" + TooltipTags.BulletOptionEnd + "Eliminates tearing. +1 frame latency. FPS halves if GPU can't keep up.\n" +
@@ -230,7 +240,7 @@ public class Settings
     /// If true, the frame rate is uncapped (renders as fast as possible) when VSync is off.
     /// Overrides <see cref="maxFps"/> when enabled.
     /// </summary>
-    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 6)]
+    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 7)]
     [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     [Tooltip("Removes the frame rate cap entirely when VSync is off.\n" +
              "The application renders as fast as possible.\n\n" +
@@ -242,7 +252,7 @@ public class Settings
     /// Maximum frame rate cap when VSync is disabled and <see cref="unlimitedFps"/> is false.
     /// Ignored when VSync is active or Unlimited FPS is enabled.
     /// </summary>
-    [SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 7)]
+    [SettingField(SettingsTab.Graphics, Label = "Max FPS", Format = "f0", Order = 8)]
     [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     [DisabledWhen(nameof(unlimitedFps), ComparisonOp.Equal, true)]
     [Range(30, 480)]

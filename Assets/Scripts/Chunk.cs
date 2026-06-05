@@ -321,10 +321,31 @@ public class Chunk
         [ReadOnly]
         public NativeArray<MeshSectionStats> Stats;
 
+        [ReadOnly]
+        public NativeList<Vector3> Normals;
+
+        [ReadOnly]
+        public NativeList<Color32> LightData;
+
+        public NativeList<NormalLightVertex> InterleavedStream3;
+
         public int SectionHeight;
 
         public void Execute()
         {
+            // Build interleaved Normal + LightData for GPU stream 3 upload.
+            // Done here (Burst-compiled) instead of on the main thread.
+            int totalVerts = Vertices.Length;
+            InterleavedStream3.ResizeUninitialized(totalVerts);
+            for (int v = 0; v < totalVerts; v++)
+            {
+                InterleavedStream3[v] = new NormalLightVertex
+                {
+                    Normal = Normals[v],
+                    LightData = LightData[v],
+                };
+            }
+
             // We iterate sections inside the job to avoid overhead of scheduling many tiny jobs
             for (int i = 0; i < Stats.Length; i++)
             {
@@ -379,6 +400,9 @@ public class Chunk
             TransparentTris = meshData.TransparentTriangles,
             FluidTris = meshData.FluidTriangles,
             Stats = meshData.SectionStats,
+            Normals = meshData.Normals,
+            LightData = meshData.LightData,
+            InterleavedStream3 = meshData.InterleavedStream3,
             SectionHeight = ChunkMath.SECTION_SIZE,
         };
 
@@ -391,7 +415,7 @@ public class Chunk
         NativeArray<Vector3> allVerts = meshData.Vertices.AsArray();
         NativeArray<Vector4> allUvs = meshData.Uvs.AsArray(); // Vector4: xy=flow/atlas, zw=shorePush
         NativeArray<Color> allColors = meshData.Colors.AsArray();
-        NativeArray<Vector3> allNormals = meshData.Normals.AsArray();
+        NativeArray<NormalLightVertex> allStream3 = meshData.InterleavedStream3.AsArray();
         NativeArray<int> allOpaqueTris = meshData.Triangles.AsArray();
         NativeArray<int> allTransTris = meshData.TransparentTriangles.AsArray();
         NativeArray<int> allFluidTris = meshData.FluidTriangles.AsArray();
@@ -413,7 +437,7 @@ public class Chunk
             }
 
             _sectionRenderers[i].UpdateMeshNative(
-                allVerts, allUvs, allColors, allNormals, s.VertexStartIndex, s.VertexCount,
+                allVerts, allUvs, allColors, allStream3, s.VertexStartIndex, s.VertexCount,
                 allOpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount,
                 allTransTris, s.TransparentTriStartIndex, s.TransparentTriCount,
                 allFluidTris, s.FluidTriStartIndex, s.FluidTriCount

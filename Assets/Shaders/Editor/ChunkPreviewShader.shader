@@ -34,15 +34,15 @@ Shader "Hidden/Editor/ChunkPreview"
             struct Attributes
             {
                 float3 positionOS : POSITION;
-                float4 color      : COLOR;
-                float3 normal     : NORMAL;
+                float4 color : COLOR;
+                float3 normal : NORMAL;
             };
 
             struct Varyings
             {
                 float4 positionCS : SV_POSITION;
-                half4  color      : COLOR;
-                half   lighting   : TEXCOORD0;
+                half4 color : COLOR;
+                half lighting : TEXCOORD0;
             };
 
             Varyings vert(Attributes v)
@@ -60,9 +60,9 @@ Shader "Hidden/Editor/ChunkPreview"
 
             half4 frag(Varyings i) : SV_Target
             {
-                // Vertex color alpha encodes voxel light level (sunlight/blocklight)
-                // RGB channels carry ambient occlusion or tint
-                half lightLevel = saturate(i.color.a * 1.2);
+                // ChunkPreview meshes don't provide TEXCOORD1 (lightData) and
+                // Color.a no longer carries light — use full brightness for the preview.
+                half lightLevel = 1.0;
                 half3 col = lightLevel * i.lighting * _Color.rgb;
                 return half4(col, 1.0);
             }

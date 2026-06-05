@@ -1,4 +1,5 @@
 using System;
+using Data;
 using Helpers;
 using Unity.Collections;
 using UnityEngine;
@@ -11,13 +12,13 @@ public class SectionRenderer
     private readonly MeshRenderer _meshRenderer;
     private readonly Mesh _mesh;
 
-    // Define the vertex layout once to ensure consistency and avoid allocation.
     private static readonly VertexAttributeDescriptor[] s_layout =
     {
         new VertexAttributeDescriptor(VertexAttribute.Position),
         new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 4, stream: 1),
         new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, stream: 2),
-        new VertexAttributeDescriptor(VertexAttribute.Normal, stream: 3),
+        new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 3),
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.UNorm8, 4, stream: 3),
     };
 
     public SectionRenderer(Transform parent, int sectionIndex)
@@ -49,7 +50,8 @@ public class SectionRenderer
     /// </para>
     /// </summary>
     public void UpdateMeshNative(
-        NativeArray<Vector3> verts, NativeArray<Vector4> uvs, NativeArray<Color> colors, NativeArray<Vector3> normals, int vertexStart, int vertexCount,
+        NativeArray<Vector3> verts, NativeArray<Vector4> uvs, NativeArray<Color> colors,
+        NativeArray<NormalLightVertex> stream3, int vertexStart, int vertexCount,
         NativeArray<int> opaqueTris, int opaqueStart, int opaqueCount,
         NativeArray<int> transparentTris, int transparentStart, int transparentCount,
         NativeArray<int> fluidTris, int fluidStart, int fluidCount)
@@ -71,7 +73,7 @@ public class SectionRenderer
         _mesh.SetVertexBufferData(verts, vertexStart, 0, vertexCount, 0, flags);
         _mesh.SetVertexBufferData(uvs, vertexStart, 0, vertexCount, 1, flags);
         _mesh.SetVertexBufferData(colors, vertexStart, 0, vertexCount, 2, flags);
-        _mesh.SetVertexBufferData(normals, vertexStart, 0, vertexCount, 3, flags);
+        _mesh.SetVertexBufferData(stream3, vertexStart, 0, vertexCount, 3, flags);
 
         // --- 2. Setup Index Buffer ---
         int totalIndices = opaqueCount + transparentCount + fluidCount;
