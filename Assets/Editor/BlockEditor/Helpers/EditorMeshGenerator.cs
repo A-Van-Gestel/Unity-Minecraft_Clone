@@ -92,7 +92,9 @@ namespace Editor.BlockEditor.Helpers
                 // Create temporary BlockTypeJobData from the editor's list.
                 NativeArray<BlockTypeJobData> blockTypesJobData = new NativeArray<BlockTypeJobData>(allBlockTypes.Select(bt => new BlockTypeJobData(bt)).ToArray(), Allocator.Temp);
 
+                FluidCornerLights noCornerLights = default;
                 VoxelMeshHelper.GenerateFluidMeshData(Vector3Int.zero, mockPackedData, mockProps, in templates, in blockTypesJobData, mockNeighbors,
+                    false, in noCornerLights,
                     ref vertexIndex, ref nativeVertices, ref nativeFluidTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
                     ref nativeLightData);
 

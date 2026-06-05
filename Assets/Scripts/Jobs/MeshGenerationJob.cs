@@ -298,7 +298,21 @@ namespace Jobs
                     if (neighborState.HasValue) neighbors[i] = new OptionalVoxelState(neighborState.Value);
                 }
 
+                FluidCornerLights cornerLights = default;
+                if (SmoothLighting)
+                {
+                    for (int face = 0; face < 6; face++)
+                    {
+                        Vector3Int faceOffset = BurstVoxelData.FaceChecks.Data[face];
+                        VoxelState? directNeighbor = GetVoxelStateFromLocalPos(pos + faceOffset);
+                        CalculateCornerLights(face, pos, directNeighbor,
+                            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                        cornerLights.SetFace(face, l0, l1, l2, l3);
+                    }
+                }
+
                 VoxelMeshHelper.GenerateFluidMeshData(in pos, packedData, in voxelProps, in templates, in BlockTypes, in neighbors,
+                    SmoothLighting, in cornerLights,
                     ref _vertexIndex, ref Output.Vertices, ref Output.FluidTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                     ref Output.LightData);
 

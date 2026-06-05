@@ -595,6 +595,9 @@ namespace Helpers
         /// <summary>
         /// Generates a custom mesh for a fluid voxel, creating a sloped surface based on its fluid level
         /// and the levels of its neighbors. This method uses pre-computed vertex height templates for high performance.
+        /// When <paramref name="smoothLighting"/> is enabled, per-vertex corner-averaged light values from
+        /// <paramref name="cornerLights"/> are used with direct assignment (top/bottom) or bilinear
+        /// interpolation (sides). Otherwise, flat lighting with separate sun/block channels is applied.
         /// </summary>
         [SkipLocalsInit] // Optimization: Fluid generation uses many local floats/vectors. Skipping init saves cycles.
         public static void GenerateFluidMeshData(
@@ -604,6 +607,8 @@ namespace Helpers
             in NativeArray<float> templates,
             in NativeArray<BlockTypeJobData> blockTypes,
             [ReadOnly] in NativeArray<OptionalVoxelState> neighbors, // 14 neighbors: N, E, S, W, NE, SE, SW, NW, Above, Below, Above_N, Above_E, Above_S, Above_W
+            bool smoothLighting,
+            in FluidCornerLights cornerLights,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> fluidTriangles,
             ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
@@ -666,9 +671,22 @@ namespace Helpers
                 vertices.Add(pos + new Vector3(1, height_br, 0)); // Back-Right
                 vertices.Add(pos + new Vector3(1, height_tr, 1)); // Front-Right
 
-                Color32 fluidLight = above.HasValue
-                    ? BuildFlatLight(above.State.Sunlight, above.State.Blocklight)
-                    : new Color32(255, 255, 255, 0);
+                // --- Top face lighting ---
+                // Smooth: direct corner assignment (vertices sit at XZ block corners).
+                // Flat: single value from the block above, with separate sun/block channels.
+                Color32 topLight0, topLight1, topLight2, topLight3;
+                if (smoothLighting)
+                {
+                    // Corner mapping: BL=(0,0)→L0, TL=(0,1)→L1, BR=(1,0)→L2, TR=(1,1)→L3
+                    cornerLights.GetFace(2, out topLight0, out topLight1, out topLight2, out topLight3);
+                }
+                else
+                {
+                    Color32 flat = above.HasValue
+                        ? BuildFlatLight(above.State.Sunlight, above.State.Blocklight)
+                        : new Color32(255, 255, 255, 0);
+                    topLight0 = topLight1 = topLight2 = topLight3 = flat;
+                }
 
                 // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
                 // v.color.r = liquidType
@@ -698,30 +716,47 @@ namespace Helpers
 
                 Color c = new Color(liquidType, packedShoreMask, 1.0f, 0f);
 
-                // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
                 normals.Add(Vector3.up);
                 colors.Add(c);
-                lightData.Add(fluidLight);
+                lightData.Add(topLight0);
                 uvs.Add(new Vector4(flow_bl.x, flow_bl.y, shore_push_bl.x, shore_push_bl.y));
                 normals.Add(Vector3.up);
                 colors.Add(c);
-                lightData.Add(fluidLight);
+                lightData.Add(topLight1);
                 uvs.Add(new Vector4(flow_tl.x, flow_tl.y, shore_push_tl.x, shore_push_tl.y));
                 normals.Add(Vector3.up);
                 colors.Add(c);
-                lightData.Add(fluidLight);
+                lightData.Add(topLight2);
                 uvs.Add(new Vector4(flow_br.x, flow_br.y, shore_push_br.x, shore_push_br.y));
                 normals.Add(Vector3.up);
                 colors.Add(c);
-                lightData.Add(fluidLight);
+                lightData.Add(topLight3);
                 uvs.Add(new Vector4(flow_tr.x, flow_tr.y, shore_push_tr.x, shore_push_tr.y));
 
-                fluidTriangles.Add(vertexIndex);
-                fluidTriangles.Add(vertexIndex + 1);
-                fluidTriangles.Add(vertexIndex + 2);
-                fluidTriangles.Add(vertexIndex + 2);
-                fluidTriangles.Add(vertexIndex + 1);
-                fluidTriangles.Add(vertexIndex + 3);
+                // Anisotropy fix: flip quad diagonal to minimize interpolation artifacts.
+                int lum0 = math.max(topLight0.r, (int)topLight0.a);
+                int lum1 = math.max(topLight1.r, (int)topLight1.a);
+                int lum2 = math.max(topLight2.r, (int)topLight2.a);
+                int lum3 = math.max(topLight3.r, (int)topLight3.a);
+                if (lum0 + lum3 > lum1 + lum2)
+                {
+                    fluidTriangles.Add(vertexIndex);
+                    fluidTriangles.Add(vertexIndex + 1);
+                    fluidTriangles.Add(vertexIndex + 3);
+                    fluidTriangles.Add(vertexIndex);
+                    fluidTriangles.Add(vertexIndex + 3);
+                    fluidTriangles.Add(vertexIndex + 2);
+                }
+                else
+                {
+                    fluidTriangles.Add(vertexIndex);
+                    fluidTriangles.Add(vertexIndex + 1);
+                    fluidTriangles.Add(vertexIndex + 2);
+                    fluidTriangles.Add(vertexIndex + 2);
+                    fluidTriangles.Add(vertexIndex + 1);
+                    fluidTriangles.Add(vertexIndex + 3);
+                }
+
                 vertexIndex += 4;
             }
 
@@ -824,11 +859,32 @@ namespace Helpers
                 vertices.Add(pos + p3);
                 vertices.Add(pos + p4);
 
+                // --- Side face lighting ---
+                // Smooth: bilinear interpolation — vertices have sub-block Y from height override.
+                // Flat: single value from the side neighbor, with separate sun/block channels.
+                Color32 sideLight1, sideLight2, sideLight3, sideLight4;
+                if (smoothLighting)
+                {
+                    cornerLights.GetFace(faceIndex, out Color32 sl0, out Color32 sl1, out Color32 sl2, out Color32 sl3);
+                    GetCornerUV(faceIndex, new float3(p1.x, p1.y, p1.z), out float lu1, out float lv1);
+                    GetCornerUV(faceIndex, new float3(p2.x, p2.y, p2.z), out float lu2, out float lv2);
+                    GetCornerUV(faceIndex, new float3(p3.x, p3.y, p3.z), out float lu3, out float lv3);
+                    GetCornerUV(faceIndex, new float3(p4.x, p4.y, p4.z), out float lu4, out float lv4);
+                    sideLight1 = BilinearLerpLight(sl0, sl1, sl2, sl3, lu1, lv1);
+                    sideLight2 = BilinearLerpLight(sl0, sl1, sl2, sl3, lu2, lv2);
+                    sideLight3 = BilinearLerpLight(sl0, sl1, sl2, sl3, lu3, lv3);
+                    sideLight4 = BilinearLerpLight(sl0, sl1, sl2, sl3, lu4, lv4);
+                }
+                else
+                {
+                    Color32 flat = sideNeighbor.HasValue
+                        ? BuildFlatLight(sideNeighbor.State.Sunlight, sideNeighbor.State.Blocklight)
+                        : new Color32(255, 255, 255, 0);
+                    sideLight1 = sideLight2 = sideLight3 = sideLight4 = flat;
+                }
+
                 // Side faces carry no shore data — g=0 (no walls), zw = 0
                 Color sideColor = new Color(liquidType, 0.0f, 1.0f, 0f);
-                Color32 sideFlatLight = sideNeighbor.HasValue
-                    ? BuildFlatLight(sideNeighbor.State.Sunlight, sideNeighbor.State.Blocklight)
-                    : new Color32(255, 255, 255, 0);
 
                 Vector4 uv1, uv2, uv3, uv4;
 
@@ -859,27 +915,45 @@ namespace Helpers
 
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
                 colors.Add(sideColor);
-                lightData.Add(sideFlatLight);
+                lightData.Add(sideLight1);
                 uvs.Add(uv1);
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
                 colors.Add(sideColor);
-                lightData.Add(sideFlatLight);
+                lightData.Add(sideLight2);
                 uvs.Add(uv2);
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
                 colors.Add(sideColor);
-                lightData.Add(sideFlatLight);
+                lightData.Add(sideLight3);
                 uvs.Add(uv3);
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
                 colors.Add(sideColor);
-                lightData.Add(sideFlatLight);
+                lightData.Add(sideLight4);
                 uvs.Add(uv4);
 
-                fluidTriangles.Add(vertexIndex);
-                fluidTriangles.Add(vertexIndex + 1);
-                fluidTriangles.Add(vertexIndex + 2);
-                fluidTriangles.Add(vertexIndex + 2);
-                fluidTriangles.Add(vertexIndex + 1);
-                fluidTriangles.Add(vertexIndex + 3);
+                // Anisotropy fix: flip quad diagonal to minimize interpolation artifacts.
+                int sideLum1 = math.max(sideLight1.r, (int)sideLight1.a);
+                int sideLum2 = math.max(sideLight2.r, (int)sideLight2.a);
+                int sideLum3 = math.max(sideLight3.r, (int)sideLight3.a);
+                int sideLum4 = math.max(sideLight4.r, (int)sideLight4.a);
+                if (sideLum1 + sideLum4 > sideLum2 + sideLum3)
+                {
+                    fluidTriangles.Add(vertexIndex);
+                    fluidTriangles.Add(vertexIndex + 1);
+                    fluidTriangles.Add(vertexIndex + 3);
+                    fluidTriangles.Add(vertexIndex);
+                    fluidTriangles.Add(vertexIndex + 3);
+                    fluidTriangles.Add(vertexIndex + 2);
+                }
+                else
+                {
+                    fluidTriangles.Add(vertexIndex);
+                    fluidTriangles.Add(vertexIndex + 1);
+                    fluidTriangles.Add(vertexIndex + 2);
+                    fluidTriangles.Add(vertexIndex + 2);
+                    fluidTriangles.Add(vertexIndex + 1);
+                    fluidTriangles.Add(vertexIndex + 3);
+                }
+
                 vertexIndex += 4;
             }
 
@@ -892,38 +966,78 @@ namespace Helpers
                 vertices.Add(pos + new Vector3(1, 0, 0)); // Back-Right  (2)
                 vertices.Add(pos + new Vector3(1, 0, 1)); // Front-Right (3)
 
+                // --- Bottom face lighting ---
+                // Smooth: direct corner assignment (vertices sit at XZ block corners at y=0).
+                // Flat: single value from the block below, with separate sun/block channels.
+                // Bottom face LUT corners are X-mirrored vs the vertex emission order:
+                //   LUT corner 0 = (1,0,0)=BR, 1 = (1,0,1)=TR, 2 = (0,0,0)=BL, 3 = (0,0,1)=TL
+                //   Vertices emitted: BL, TL, BR, TR
+                // So remap: BL←corner2, TL←corner3, BR←corner0, TR←corner1.
+                Color32 botLight0, botLight1, botLight2, botLight3;
+                if (smoothLighting)
+                {
+                    cornerLights.GetFace(3, out Color32 bc0, out Color32 bc1, out Color32 bc2, out Color32 bc3);
+                    botLight0 = bc2; // BL vertex ← LUT corner 2 (0,0,0)
+                    botLight1 = bc3; // TL vertex ← LUT corner 3 (0,0,1)
+                    botLight2 = bc0; // BR vertex ← LUT corner 0 (1,0,0)
+                    botLight3 = bc1; // TR vertex ← LUT corner 1 (1,0,1)
+                }
+                else
+                {
+                    Color32 flat = below.HasValue
+                        ? BuildFlatLight(below.State.Sunlight, below.State.Blocklight)
+                        : new Color32(255, 255, 255, 0);
+                    botLight0 = botLight1 = botLight2 = botLight3 = flat;
+                }
+
                 // Bottom faces are internal. Hardcode shore mask (g) to 0.0f (no walls).
                 // Use 1.0f for the b-channel so bottom faces default to full brightness (unshadowed) in game
                 Color bottomColor = new Color(liquidType, 0.0f, 1.0f, 0f);
-                Color32 bottomFlatLight = below.HasValue
-                    ? BuildFlatLight(below.State.Sunlight, below.State.Blocklight)
-                    : new Color32(255, 255, 255, 0);
 
                 // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
                 normals.Add(Vector3.down);
                 colors.Add(bottomColor);
-                lightData.Add(bottomFlatLight);
+                lightData.Add(botLight0);
                 uvs.Add(new Vector4(flow_bl.x, flow_bl.y, 0f, 0f));
                 normals.Add(Vector3.down);
                 colors.Add(bottomColor);
-                lightData.Add(bottomFlatLight);
+                lightData.Add(botLight1);
                 uvs.Add(new Vector4(flow_tl.x, flow_tl.y, 0f, 0f));
                 normals.Add(Vector3.down);
                 colors.Add(bottomColor);
-                lightData.Add(bottomFlatLight);
+                lightData.Add(botLight2);
                 uvs.Add(new Vector4(flow_br.x, flow_br.y, 0f, 0f));
                 normals.Add(Vector3.down);
                 colors.Add(bottomColor);
-                lightData.Add(bottomFlatLight);
+                lightData.Add(botLight3);
                 uvs.Add(new Vector4(flow_tr.x, flow_tr.y, 0f, 0f));
 
-                // Clockwise winding order when viewed from below.
-                fluidTriangles.Add(vertexIndex); // Triangle 1: 0, 2, 1
-                fluidTriangles.Add(vertexIndex + 2);
-                fluidTriangles.Add(vertexIndex + 1);
-                fluidTriangles.Add(vertexIndex + 1); // Triangle 2: 1, 2, 3
-                fluidTriangles.Add(vertexIndex + 2);
-                fluidTriangles.Add(vertexIndex + 3);
+                // Anisotropy fix + clockwise winding order when viewed from below.
+                int botLum0 = math.max(botLight0.r, (int)botLight0.a);
+                int botLum1 = math.max(botLight1.r, (int)botLight1.a);
+                int botLum2 = math.max(botLight2.r, (int)botLight2.a);
+                int botLum3 = math.max(botLight3.r, (int)botLight3.a);
+                if (botLum0 + botLum3 > botLum1 + botLum2)
+                {
+                    // Flipped diagonal (reversed winding for bottom face)
+                    fluidTriangles.Add(vertexIndex);
+                    fluidTriangles.Add(vertexIndex + 3);
+                    fluidTriangles.Add(vertexIndex + 1);
+                    fluidTriangles.Add(vertexIndex);
+                    fluidTriangles.Add(vertexIndex + 2);
+                    fluidTriangles.Add(vertexIndex + 3);
+                }
+                else
+                {
+                    // Default diagonal (reversed winding for bottom face)
+                    fluidTriangles.Add(vertexIndex);
+                    fluidTriangles.Add(vertexIndex + 2);
+                    fluidTriangles.Add(vertexIndex + 1);
+                    fluidTriangles.Add(vertexIndex + 1);
+                    fluidTriangles.Add(vertexIndex + 2);
+                    fluidTriangles.Add(vertexIndex + 3);
+                }
+
                 vertexIndex += 4;
             }
         }

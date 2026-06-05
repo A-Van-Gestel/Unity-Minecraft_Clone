@@ -19,6 +19,120 @@ namespace Data
     }
 
     /// <summary>
+    /// Precomputed corner-averaged light values for all 6 faces of a fluid block.
+    /// Built by <see cref="MeshGenerationJob"/> via <c>CalculateCornerLights</c> and passed
+    /// into <see cref="VoxelMeshHelper.GenerateFluidMeshData"/> for smooth lighting.
+    /// 6 faces × 4 corners × 4 bytes = 96 bytes (stack-friendly, Burst-safe).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct FluidCornerLights
+    {
+        // Face index order: 0=Back, 1=Front, 2=Top, 3=Bottom, 4=Left, 5=Right.
+        // Within each face, (L0, L1, L2, L3) match CalculateCornerLights output order.
+        public Color32 BackL0, BackL1, BackL2, BackL3;
+        public Color32 FrontL0, FrontL1, FrontL2, FrontL3;
+        public Color32 TopL0, TopL1, TopL2, TopL3;
+        public Color32 BottomL0, BottomL1, BottomL2, BottomL3;
+        public Color32 LeftL0, LeftL1, LeftL2, LeftL3;
+        public Color32 RightL0, RightL1, RightL2, RightL3;
+
+        /// <summary>
+        /// Returns the 4 corner lights for the given face index (0-5).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public readonly void GetFace(int faceIndex,
+            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3)
+        {
+            switch (faceIndex)
+            {
+                case 0: // -Z
+                    l0 = BackL0;
+                    l1 = BackL1;
+                    l2 = BackL2;
+                    l3 = BackL3;
+                    return;
+                case 1: // +Z
+                    l0 = FrontL0;
+                    l1 = FrontL1;
+                    l2 = FrontL2;
+                    l3 = FrontL3;
+                    return;
+                case 2: // +Y
+                    l0 = TopL0;
+                    l1 = TopL1;
+                    l2 = TopL2;
+                    l3 = TopL3;
+                    return;
+                case 3: // -Y
+                    l0 = BottomL0;
+                    l1 = BottomL1;
+                    l2 = BottomL2;
+                    l3 = BottomL3;
+                    return;
+                case 4: // -X
+                    l0 = LeftL0;
+                    l1 = LeftL1;
+                    l2 = LeftL2;
+                    l3 = LeftL3;
+                    return;
+                default: // +X
+                    l0 = RightL0;
+                    l1 = RightL1;
+                    l2 = RightL2;
+                    l3 = RightL3;
+                    return;
+            }
+        }
+
+        /// <summary>
+        /// Stores the 4 corner lights for the given face index (0-5).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SetFace(int faceIndex, Color32 l0, Color32 l1, Color32 l2, Color32 l3)
+        {
+            switch (faceIndex)
+            {
+                case 0: // -Z
+                    BackL0 = l0;
+                    BackL1 = l1;
+                    BackL2 = l2;
+                    BackL3 = l3;
+                    return;
+                case 1: // +Z
+                    FrontL0 = l0;
+                    FrontL1 = l1;
+                    FrontL2 = l2;
+                    FrontL3 = l3;
+                    return;
+                case 2: // +Y
+                    TopL0 = l0;
+                    TopL1 = l1;
+                    TopL2 = l2;
+                    TopL3 = l3;
+                    return;
+                case 3: // -Y
+                    BottomL0 = l0;
+                    BottomL1 = l1;
+                    BottomL2 = l2;
+                    BottomL3 = l3;
+                    return;
+                case 4: // -X
+                    LeftL0 = l0;
+                    LeftL1 = l1;
+                    LeftL2 = l2;
+                    LeftL3 = l3;
+                    return;
+                default: // +X
+                    RightL0 = l0;
+                    RightL1 = l1;
+                    RightL2 = l2;
+                    RightL3 = l3;
+                    return;
+            }
+        }
+    }
+
+    /// <summary>
     /// A job-safe representation of a nullable VoxelState.
     /// </summary>
     public struct OptionalVoxelState
