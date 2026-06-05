@@ -107,7 +107,13 @@ namespace Editor.BlockEditor.Helpers
             else if (blockType.renderShape == RenderShape.CrossMesh)
             {
                 int textureID = blockType.backFaceTexture; // CrossMesh uses a single texture synced across all faces
-                VoxelMeshHelper.GenerateCrossMesh(textureID, new Color32(255, 255, 255, 255), Vector3Int.zero,
+                Color32 fullBright = new Color32(255, 255, 255, 255);
+                CrossMeshCornerLights crossLights = new CrossMeshCornerLights
+                {
+                    TopL0 = fullBright, TopL1 = fullBright, TopL2 = fullBright, TopL3 = fullBright,
+                    BotL0 = fullBright, BotL1 = fullBright, BotL2 = fullBright, BotL3 = fullBright,
+                };
+                VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights, Vector3Int.zero,
                     ref vertexIndex, ref nativeVertices, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
                     ref nativeLightData);
             }

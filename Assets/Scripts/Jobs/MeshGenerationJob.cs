@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Data;
+using Data.Enums;
 using Helpers;
 using Jobs.BurstData;
 using Unity.Burst;
@@ -81,8 +81,7 @@ namespace Jobs
         public NativeArray<float> LavaVertexTemplates;
 
         // --- SETTINGS ---
-        [MarshalAs(UnmanagedType.U1)]
-        public bool SmoothLighting;
+        public SmoothLightingQuality SmoothLighting;
 
         // --- OUTPUT ---
         public MeshDataJobOutput Output;
@@ -299,12 +298,15 @@ namespace Jobs
                 }
 
                 FluidCornerLights cornerLights = default;
-                if (SmoothLighting)
+                if (SmoothLighting >= SmoothLightingQuality.Standard)
                 {
                     for (int face = 0; face < 6; face++)
                     {
-                        Vector3Int faceOffset = BurstVoxelData.FaceChecks.Data[face];
-                        VoxelState? directNeighbor = GetVoxelStateFromLocalPos(pos + faceOffset);
+                        // Reuse the already-fetched 14-neighbor array instead of re-calling GetVoxelStateFromLocalPos.
+                        // Mapping: Back(-Z)→2(S), Front(+Z)→0(N), Top(+Y)→8(Above), Bottom(-Y)→9(Below), Left(-X)→3(W), Right(+X)→1(E)
+                        int neighborIdx = face switch { 0 => 2, 1 => 0, 2 => 8, 3 => 9, 4 => 3, 5 => 1, _ => 0 };
+                        OptionalVoxelState cached = neighbors[neighborIdx];
+                        VoxelState? directNeighbor = cached.HasValue ? new VoxelState?(cached.State) : null;
                         CalculateCornerLights(face, pos, directNeighbor,
                             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         cornerLights.SetFace(face, l0, l1, l2, l3);
@@ -312,7 +314,7 @@ namespace Jobs
                 }
 
                 VoxelMeshHelper.GenerateFluidMeshData(in pos, packedData, in voxelProps, in templates, in BlockTypes, in neighbors,
-                    SmoothLighting, in cornerLights,
+                    SmoothLighting >= SmoothLightingQuality.Standard, in cornerLights,
                     ref _vertexIndex, ref Output.Vertices, ref Output.FluidTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                     ref Output.LightData);
 
@@ -324,13 +326,47 @@ namespace Jobs
             // --- CASE 2: CROSS MESH ---
             if (voxelProps.RenderShape == RenderShape.CrossMesh)
             {
-                VoxelState? centerVoxel = GetVoxelStateFromLocalPos(pos);
-                Color32 flatLight = centerVoxel.HasValue
-                    ? VoxelMeshHelper.BuildFlatLight(centerVoxel.Value.Sunlight, centerVoxel.Value.Blocklight)
-                    : new Color32(255, 255, 255, 0);
                 int textureID = voxelProps.SideFaceTexture;
+                CrossMeshCornerLights crossLights = default;
 
-                VoxelMeshHelper.GenerateCrossMesh(textureID, flatLight, pos, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                if (SmoothLighting >= SmoothLightingQuality.Standard)
+                {
+                    // Top-level corners: sample the block above the flora (Top face at pos).
+                    VoxelState? aboveNeighbor = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[2]);
+                    CalculateCornerLights(2, pos, aboveNeighbor,
+                        out crossLights.TopL0, out crossLights.TopL1, out crossLights.TopL2, out crossLights.TopL3);
+
+                    if (SmoothLighting >= SmoothLightingQuality.High)
+                    {
+                        // Bottom-level corners: sample Top face of the block below (light at ground level).
+                        // The direct neighbor for this shifted sample is the flora block itself.
+                        VoxelState? centerVoxel = GetVoxelStateFromLocalPos(pos);
+                        Vector3Int belowPos = pos + BurstVoxelData.FaceChecks.Data[3];
+                        CalculateCornerLights(2, belowPos, centerVoxel,
+                            out crossLights.BotL0, out crossLights.BotL1, out crossLights.BotL2, out crossLights.BotL3);
+                    }
+                    else
+                    {
+                        // Standard: bottom vertices use the same light as top (no vertical gradient).
+                        crossLights.BotL0 = crossLights.TopL0;
+                        crossLights.BotL1 = crossLights.TopL1;
+                        crossLights.BotL2 = crossLights.TopL2;
+                        crossLights.BotL3 = crossLights.TopL3;
+                    }
+                }
+                else
+                {
+                    // Off: flat lighting from the flora block's own light level.
+                    // Extract directly from packedData — no spatial lookup needed.
+                    Color32 flat = VoxelMeshHelper.BuildFlatLight(
+                        BurstVoxelDataBitMapping.GetSunLight(packedData),
+                        BurstVoxelDataBitMapping.GetBlockLight(packedData));
+                    crossLights.TopL0 = crossLights.TopL1 = crossLights.TopL2 = crossLights.TopL3 = flat;
+                    crossLights.BotL0 = crossLights.BotL1 = crossLights.BotL2 = crossLights.BotL3 = flat;
+                }
+
+                VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights,
+                    pos, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                     ref Output.LightData);
                 return;
             }
@@ -407,7 +443,7 @@ namespace Jobs
                     int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                     int textureID = GetTextureID(id, translatedP);
 
-                    if (SmoothLighting)
+                    if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
                         CalculateCornerLights(p, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, pos, rotation,
@@ -464,7 +500,7 @@ namespace Jobs
                 {
                     int textureID = GetTextureID(id, p);
 
-                    if (SmoothLighting)
+                    if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
                         int worldFace = DirectionToFaceIndex(rotatedOffset);
                         CalculateCornerLights(worldFace, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
@@ -566,7 +602,7 @@ namespace Jobs
                     int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                     int textureID = GetTextureID(id, translatedP);
 
-                    if (SmoothLighting)
+                    if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
                         CalculateCornerLights(p, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         PermuteCornerLightsForYRotation(p, rotation, ref l0, ref l1, ref l2, ref l3);
@@ -609,7 +645,7 @@ namespace Jobs
 
             int textureID = GetTextureID(id, effectiveFace);
 
-            if (SmoothLighting)
+            if (SmoothLighting >= SmoothLightingQuality.Standard)
             {
                 CalculateCornerLights(worldFace, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                 VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, in pos, rotation: 0f, uvQuarterTurnsCW,
@@ -738,7 +774,7 @@ namespace Jobs
         {
             if (!neighborVoxel.HasValue)
             {
-                byte fullSun = 15 * 17; // 255
+                const byte fullSun = 15 * 17; // 255
                 return new Color32(fullSun, fullSun, fullSun, 0);
             }
 

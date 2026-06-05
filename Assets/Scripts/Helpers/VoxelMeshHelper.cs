@@ -213,37 +213,76 @@ namespace Helpers
             lightData.Add(light2);
             lightData.Add(light3);
 
-            // Anisotropy fix: compare diagonal luminance sums and flip the quad diagonal
-            // when needed to avoid visual artifacts on checkerboard light patterns.
-            // Use the brightest channel per corner (max of sunlight R and blocklight A) so the
-            // fix works both on the surface (sun-dominant) and underground (block-dominant).
             NativeList<int> targetTris = isTransparent ? ref transparentTriangles : ref triangles;
-            int lum0 = math.max(light0.r, (int)light0.a);
-            int lum1 = math.max(light1.r, (int)light1.a);
-            int lum2 = math.max(light2.r, (int)light2.a);
-            int lum3 = math.max(light3.r, (int)light3.a);
-            if (lum0 + lum3 > lum1 + lum2)
+            EmitQuadTriangles(light0, light1, light2, light3, vertexIndex, ref targetTris);
+
+            vertexIndex += 4;
+        }
+
+        /// <summary>
+        /// Emits 6 triangle indices for a quad, flipping the diagonal when the luminance
+        /// sum of corners 0+3 exceeds 1+2 to minimize smooth-lighting interpolation artifacts.
+        /// </summary>
+        /// <param name="l0">Light value at vertex 0 (BL).</param>
+        /// <param name="l1">Light value at vertex 1 (TL).</param>
+        /// <param name="l2">Light value at vertex 2 (BR).</param>
+        /// <param name="l3">Light value at vertex 3 (TR).</param>
+        /// <param name="vertexIndex">Base vertex index for this quad.</param>
+        /// <param name="triangles">Triangle index list to append to.</param>
+        /// <param name="reverseWinding">True for downward-facing quads (bottom face) that need CW winding when viewed from below.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void EmitQuadTriangles(
+            Color32 l0, Color32 l1, Color32 l2, Color32 l3,
+            int vertexIndex, ref NativeList<int> triangles, bool reverseWinding = false)
+        {
+            int lum0 = math.max(l0.r, (int)l0.a);
+            int lum1 = math.max(l1.r, (int)l1.a);
+            int lum2 = math.max(l2.r, (int)l2.a);
+            int lum3 = math.max(l3.r, (int)l3.a);
+            bool flip = lum0 + lum3 > lum1 + lum2;
+
+            if (reverseWinding)
             {
-                // Flipped diagonal: (0,1,3), (0,3,2)
-                targetTris.Add(vertexIndex);
-                targetTris.Add(vertexIndex + 1);
-                targetTris.Add(vertexIndex + 3);
-                targetTris.Add(vertexIndex);
-                targetTris.Add(vertexIndex + 3);
-                targetTris.Add(vertexIndex + 2);
+                if (flip)
+                {
+                    triangles.Add(vertexIndex);
+                    triangles.Add(vertexIndex + 3);
+                    triangles.Add(vertexIndex + 1);
+                    triangles.Add(vertexIndex);
+                    triangles.Add(vertexIndex + 2);
+                    triangles.Add(vertexIndex + 3);
+                }
+                else
+                {
+                    triangles.Add(vertexIndex);
+                    triangles.Add(vertexIndex + 2);
+                    triangles.Add(vertexIndex + 1);
+                    triangles.Add(vertexIndex + 1);
+                    triangles.Add(vertexIndex + 2);
+                    triangles.Add(vertexIndex + 3);
+                }
             }
             else
             {
-                // Default diagonal: (0,1,2), (2,1,3)
-                targetTris.Add(vertexIndex);
-                targetTris.Add(vertexIndex + 1);
-                targetTris.Add(vertexIndex + 2);
-                targetTris.Add(vertexIndex + 2);
-                targetTris.Add(vertexIndex + 1);
-                targetTris.Add(vertexIndex + 3);
+                if (flip)
+                {
+                    triangles.Add(vertexIndex);
+                    triangles.Add(vertexIndex + 1);
+                    triangles.Add(vertexIndex + 3);
+                    triangles.Add(vertexIndex);
+                    triangles.Add(vertexIndex + 3);
+                    triangles.Add(vertexIndex + 2);
+                }
+                else
+                {
+                    triangles.Add(vertexIndex);
+                    triangles.Add(vertexIndex + 1);
+                    triangles.Add(vertexIndex + 2);
+                    triangles.Add(vertexIndex + 2);
+                    triangles.Add(vertexIndex + 1);
+                    triangles.Add(vertexIndex + 3);
+                }
             }
-
-            vertexIndex += 4;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -514,7 +553,7 @@ namespace Helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddCrossQuad(
             Vector3 bl, Vector3 tl, Vector3 br, Vector3 tr, Vector3 normal, int textureID, Color vertexColor,
-            Color32 lightValue, in Vector3Int position,
+            Color32 lightBL, Color32 lightTL, Color32 lightBR, Color32 lightTR, in Vector3Int position,
             ref int vertexIndex, ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
             ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
@@ -534,22 +573,17 @@ namespace Helpers
             colors.Add(vertexColor);
             colors.Add(vertexColor);
 
-            lightData.Add(lightValue);
-            lightData.Add(lightValue);
-            lightData.Add(lightValue);
-            lightData.Add(lightValue);
+            lightData.Add(lightBL);
+            lightData.Add(lightTL);
+            lightData.Add(lightBR);
+            lightData.Add(lightTR);
 
             AddTexture(textureID, new Vector2(0, 0), ref uvs); // BL
             AddTexture(textureID, new Vector2(0, 1), ref uvs); // TL
             AddTexture(textureID, new Vector2(1, 0), ref uvs); // BR
             AddTexture(textureID, new Vector2(1, 1), ref uvs); // TR
 
-            transparentTriangles.Add(vertexIndex);
-            transparentTriangles.Add(vertexIndex + 1);
-            transparentTriangles.Add(vertexIndex + 2);
-            transparentTriangles.Add(vertexIndex + 2);
-            transparentTriangles.Add(vertexIndex + 1);
-            transparentTriangles.Add(vertexIndex + 3);
+            EmitQuadTriangles(lightBL, lightTL, lightBR, lightTR, vertexIndex, ref transparentTriangles);
 
             vertexIndex += 4;
         }
@@ -557,17 +591,32 @@ namespace Helpers
         /// <summary>
         /// Generates a cross mesh for minor flora (two intersecting diagonal planes).
         /// Bypasses standard neighbor culling and uses diagonal normals.
+        /// Per-vertex light values are read from <paramref name="cornerLights"/>, which is pre-populated
+        /// by the caller with either smooth corner-averaged values or uniform flat values.
         /// </summary>
         [BurstCompile]
         [SkipLocalsInit]
         public static void GenerateCrossMesh(
-            int textureID, Color32 flatLight, in Vector3Int position,
+            int textureID, in CrossMeshCornerLights cornerLights,
+            in Vector3Int position,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
             ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
         {
             Color vertexColor = new Color(1f, 1f, 1f, 1f);
+
+            // Resolve per-vertex light values from the precomputed struct.
+            // Corner layout: L0=(x=0,z=0), L1=(x=0,z=1), L2=(x=1,z=0), L3=(x=1,z=1).
+            // Top-level for y=1 vertices, bottom-level for y=0 vertices.
+            Color32 light_0_0_0 = cornerLights.BotL0;
+            Color32 light_0_1_0 = cornerLights.TopL0;
+            Color32 light_1_0_0 = cornerLights.BotL2;
+            Color32 light_1_1_0 = cornerLights.TopL2;
+            Color32 light_0_0_1 = cornerLights.BotL1;
+            Color32 light_0_1_1 = cornerLights.TopL1;
+            Color32 light_1_0_1 = cornerLights.BotL3;
+            Color32 light_1_1_1 = cornerLights.TopL3;
 
             // Plane 1: (0,0,0) to (1,1,1)
             Vector3 p1_bl = new Vector3(0, 0, 0);
@@ -585,10 +634,25 @@ namespace Helpers
             Vector3 normal2_front = new Vector3(0.7071f, 0f, 0.7071f);
             Vector3 normal2_back = new Vector3(-0.7071f, 0f, -0.7071f);
 
-            AddCrossQuad(p1_bl, p1_tl, p1_br, p1_tr, normal1_front, textureID, vertexColor, flatLight, in position, ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
-            AddCrossQuad(p1_br, p1_tr, p1_bl, p1_tl, normal1_back, textureID, vertexColor, flatLight, in position, ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
-            AddCrossQuad(p2_bl, p2_tl, p2_br, p2_tr, normal2_front, textureID, vertexColor, flatLight, in position, ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
-            AddCrossQuad(p2_br, p2_tr, p2_bl, p2_tl, normal2_back, textureID, vertexColor, flatLight, in position, ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
+            // Plane 1 front: bl=(0,0,0), tl=(0,1,0), br=(1,0,1), tr=(1,1,1)
+            AddCrossQuad(p1_bl, p1_tl, p1_br, p1_tr, normal1_front, textureID, vertexColor,
+                light_0_0_0, light_0_1_0, light_1_0_1, light_1_1_1, in position,
+                ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
+
+            // Plane 1 back: bl=(1,0,1), tl=(1,1,1), br=(0,0,0), tr=(0,1,0)
+            AddCrossQuad(p1_br, p1_tr, p1_bl, p1_tl, normal1_back, textureID, vertexColor,
+                light_1_0_1, light_1_1_1, light_0_0_0, light_0_1_0, in position,
+                ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
+
+            // Plane 2 front: bl=(1,0,0), tl=(1,1,0), br=(0,0,1), tr=(0,1,1)
+            AddCrossQuad(p2_bl, p2_tl, p2_br, p2_tr, normal2_front, textureID, vertexColor,
+                light_1_0_0, light_1_1_0, light_0_0_1, light_0_1_1, in position,
+                ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
+
+            // Plane 2 back: bl=(0,0,1), tl=(0,1,1), br=(1,0,0), tr=(1,1,0)
+            AddCrossQuad(p2_br, p2_tr, p2_bl, p2_tl, normal2_back, textureID, vertexColor,
+                light_0_0_1, light_0_1_1, light_1_0_0, light_1_1_0, in position,
+                ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
         }
 
 
@@ -733,29 +797,7 @@ namespace Helpers
                 lightData.Add(topLight3);
                 uvs.Add(new Vector4(flow_tr.x, flow_tr.y, shore_push_tr.x, shore_push_tr.y));
 
-                // Anisotropy fix: flip quad diagonal to minimize interpolation artifacts.
-                int lum0 = math.max(topLight0.r, (int)topLight0.a);
-                int lum1 = math.max(topLight1.r, (int)topLight1.a);
-                int lum2 = math.max(topLight2.r, (int)topLight2.a);
-                int lum3 = math.max(topLight3.r, (int)topLight3.a);
-                if (lum0 + lum3 > lum1 + lum2)
-                {
-                    fluidTriangles.Add(vertexIndex);
-                    fluidTriangles.Add(vertexIndex + 1);
-                    fluidTriangles.Add(vertexIndex + 3);
-                    fluidTriangles.Add(vertexIndex);
-                    fluidTriangles.Add(vertexIndex + 3);
-                    fluidTriangles.Add(vertexIndex + 2);
-                }
-                else
-                {
-                    fluidTriangles.Add(vertexIndex);
-                    fluidTriangles.Add(vertexIndex + 1);
-                    fluidTriangles.Add(vertexIndex + 2);
-                    fluidTriangles.Add(vertexIndex + 2);
-                    fluidTriangles.Add(vertexIndex + 1);
-                    fluidTriangles.Add(vertexIndex + 3);
-                }
+                EmitQuadTriangles(topLight0, topLight1, topLight2, topLight3, vertexIndex, ref fluidTriangles);
 
                 vertexIndex += 4;
             }
@@ -930,29 +972,7 @@ namespace Helpers
                 lightData.Add(sideLight4);
                 uvs.Add(uv4);
 
-                // Anisotropy fix: flip quad diagonal to minimize interpolation artifacts.
-                int sideLum1 = math.max(sideLight1.r, (int)sideLight1.a);
-                int sideLum2 = math.max(sideLight2.r, (int)sideLight2.a);
-                int sideLum3 = math.max(sideLight3.r, (int)sideLight3.a);
-                int sideLum4 = math.max(sideLight4.r, (int)sideLight4.a);
-                if (sideLum1 + sideLum4 > sideLum2 + sideLum3)
-                {
-                    fluidTriangles.Add(vertexIndex);
-                    fluidTriangles.Add(vertexIndex + 1);
-                    fluidTriangles.Add(vertexIndex + 3);
-                    fluidTriangles.Add(vertexIndex);
-                    fluidTriangles.Add(vertexIndex + 3);
-                    fluidTriangles.Add(vertexIndex + 2);
-                }
-                else
-                {
-                    fluidTriangles.Add(vertexIndex);
-                    fluidTriangles.Add(vertexIndex + 1);
-                    fluidTriangles.Add(vertexIndex + 2);
-                    fluidTriangles.Add(vertexIndex + 2);
-                    fluidTriangles.Add(vertexIndex + 1);
-                    fluidTriangles.Add(vertexIndex + 3);
-                }
+                EmitQuadTriangles(sideLight1, sideLight2, sideLight3, sideLight4, vertexIndex, ref fluidTriangles);
 
                 vertexIndex += 4;
             }
@@ -1012,31 +1032,7 @@ namespace Helpers
                 lightData.Add(botLight3);
                 uvs.Add(new Vector4(flow_tr.x, flow_tr.y, 0f, 0f));
 
-                // Anisotropy fix + clockwise winding order when viewed from below.
-                int botLum0 = math.max(botLight0.r, (int)botLight0.a);
-                int botLum1 = math.max(botLight1.r, (int)botLight1.a);
-                int botLum2 = math.max(botLight2.r, (int)botLight2.a);
-                int botLum3 = math.max(botLight3.r, (int)botLight3.a);
-                if (botLum0 + botLum3 > botLum1 + botLum2)
-                {
-                    // Flipped diagonal (reversed winding for bottom face)
-                    fluidTriangles.Add(vertexIndex);
-                    fluidTriangles.Add(vertexIndex + 3);
-                    fluidTriangles.Add(vertexIndex + 1);
-                    fluidTriangles.Add(vertexIndex);
-                    fluidTriangles.Add(vertexIndex + 2);
-                    fluidTriangles.Add(vertexIndex + 3);
-                }
-                else
-                {
-                    // Default diagonal (reversed winding for bottom face)
-                    fluidTriangles.Add(vertexIndex);
-                    fluidTriangles.Add(vertexIndex + 2);
-                    fluidTriangles.Add(vertexIndex + 1);
-                    fluidTriangles.Add(vertexIndex + 1);
-                    fluidTriangles.Add(vertexIndex + 2);
-                    fluidTriangles.Add(vertexIndex + 3);
-                }
+                EmitQuadTriangles(botLight0, botLight1, botLight2, botLight3, vertexIndex, ref fluidTriangles, reverseWinding: true);
 
                 vertexIndex += 4;
             }

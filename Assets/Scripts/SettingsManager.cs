@@ -204,14 +204,17 @@ public class Settings
     public int fluidRefraction = 100;
 
     /// <summary>
-    /// Enables per-vertex light averaging for smooth light gradients instead of flat per-face lighting.
+    /// Controls the quality level of per-vertex smooth lighting.
     /// </summary>
     [SubHeader("Lighting")]
     [SettingField(SettingsTab.Graphics, Label = "Smooth Lighting", Order = 4)]
-    [Tooltip("Averages light across block corners for smooth gradients.\n" +
-             "Disable for the classic blocky lighting look or to improve performance on low-end hardware.\n\n" +
-             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
-    public bool smoothLighting = true;
+    [Tooltip("Controls the quality of per-vertex light averaging.\n\n" +
+             TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "Flat per-block lighting. Classic blocky look.\n" +
+             TooltipTags.BulletOptionStart + "Standard" + TooltipTags.BulletOptionEnd + "Corner-averaged smooth gradients and ambient occlusion.\n" +
+             TooltipTags.BulletOptionStart + "High" + TooltipTags.BulletOptionEnd + "Standard plus vertical gradients on flora (cross meshes).\n\n" +
+             TooltipTags.Performance + "Each level adds more per-vertex light sampling during mesh generation.\n" +
+             TooltipTags.DefaultColorStart + "High" + TooltipTags.DefaultColorEnd)]
+    public SmoothLightingQuality smoothLighting = SmoothLightingQuality.High;
 
     /// <summary>
     /// The visual style of clouds in the sky.

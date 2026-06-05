@@ -133,6 +133,26 @@ namespace Data
     }
 
     /// <summary>
+    /// Precomputed corner-averaged light values for a cross mesh block at two Y levels.
+    /// Top corners sample <c>CalculateCornerLights(Top, pos)</c> (light above the flora).
+    /// Bottom corners sample <c>CalculateCornerLights(Top, pos + down)</c> (light at ground level)
+    /// at <see cref="SmoothLightingQuality.High"/>; at <see cref="SmoothLightingQuality.Standard"/>
+    /// they are copies of the top corners (no vertical gradient). At <see cref="SmoothLightingQuality.Off"/>
+    /// all 8 fields carry the same flat light value.
+    /// 2 levels × 4 corners × 4 bytes = 32 bytes (stack-friendly, Burst-safe).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CrossMeshCornerLights
+    {
+        // Top-level corners: sampled at pos (flora's head height).
+        // Corner layout matches CalculateCornerLights output: L0=(0,0), L1=(0,1), L2=(1,0), L3=(1,1).
+        public Color32 TopL0, TopL1, TopL2, TopL3;
+
+        // Bottom-level corners: sampled at pos+down (ground level) at High quality; copies of top at Standard.
+        public Color32 BotL0, BotL1, BotL2, BotL3;
+    }
+
+    /// <summary>
     /// A job-safe representation of a nullable VoxelState.
     /// </summary>
     public struct OptionalVoxelState

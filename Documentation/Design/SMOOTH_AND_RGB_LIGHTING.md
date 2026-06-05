@@ -164,22 +164,23 @@ The direct neighbor (the face-adjacent block) is the same for all 4 corners and 
 
 When the 4 corner lights of a quad have a "checkerboard" pattern (e.g., corners 00 and 11 are bright, corners 01 and 10 are dark), the visual result depends on which diagonal the quad is split along for triangulation. One split produces a bright X shape, the other a dark X shape.
 
-**Fix:** Before emitting the quad's triangle indices, compare the two possible diagonal splits and choose the one with lower contrast:
+**Fix:** Before emitting the quad's triangle indices, compare the two possible diagonal splits and choose the one with lower contrast. All quad-emitting paths (standard cube faces, fluid top/side/bottom) share a single helper — `VoxelMeshHelper.EmitQuadTriangles` — so the luminance comparison logic is defined once:
 
 ```csharp
-// If the 00↔11 diagonal has more contrast than the 01↔10 diagonal, flip the split.
-// Use the luminance (x component = sunlight in Phase 1) for the comparison.
-if (light00.x + light11.x > light01.x + light10.x)
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+private static void EmitQuadTriangles(
+    Color32 l0, Color32 l1, Color32 l2, Color32 l3,
+    int vertexIndex, ref NativeList<int> triangles, bool reverseWinding = false)
 {
-    // Emit triangles as: (0,1,2), (2,1,3)  — default winding
-}
-else
-{
-    // Emit triangles as: (0,1,3), (0,3,2)  — flipped diagonal
+    int lum0 = math.max(l0.r, (int)l0.a);
+    int lum1 = math.max(l1.r, (int)l1.a);
+    // If the 0↔3 diagonal has more luminance than 1↔2, flip the split.
+    bool flip = lum0 + lum3 > lum1 + lum2;
+    // Emit 6 indices with the chosen diagonal; reverseWinding flips CW↔CCW for bottom faces.
 }
 ```
 
-This applies to all quad-emitting paths: standard cube faces, custom mesh faces, and fluid top/bottom faces. Cross meshes are handled separately (see Section 2.5).
+The `reverseWinding` parameter handles downward-facing quads (fluid bottom face) that need reversed CW winding when viewed from below. Cross meshes are handled separately (see Section 2.5).
 
 ### 2.4 Vertex Data Layout (Full RGB)
 
@@ -215,11 +216,15 @@ In Phase 1, sunlight luminance is replicated across all three RGB channels (`Col
 
 #### 2.5.1 Cross Meshes (Flora)
 
-Cross meshes (flowers, tall grass) consist of two intersecting diagonal quads within a single block space. Their vertices do not sit on block grid intersections, so the standard corner-averaging algorithm (designed for axis-aligned face vertices at block corners) does not directly apply.
+Cross meshes (flowers, tall grass) consist of two intersecting diagonal quads within a single block space. All 8 unique vertex positions sit exactly at block corners (all coordinates are 0 or 1), so no bilinear interpolation is needed — each vertex maps directly to a corner light value.
 
-**Phase 1 implementation:** Cross meshes use **flat lighting** — all vertices receive the same `Color32` derived from the owning block's merged light level via `LightFloatToUNorm8`. This is a known Phase 1 limitation. The flat path still encodes sun and block into the same merged scalar (via `VoxelState.LightAsFloat` which returns `max(sun, block) / 16`), rather than separating channels.
+**Phase 1 implementation:** Cross meshes use **smooth lighting** via a precomputed `CrossMeshCornerLights` struct (32 bytes, 2 levels × 4 corners). The quality depends on the `SmoothLightingQuality` setting:
 
-**Future improvement:** Use the `CalculateCornerLights` function with `faceIndex = Top` and the 4 corner indices. Each cross mesh vertex maps to the nearest block corner, picking up smooth gradients and AO darkening. Since `CalculateCornerLights` takes a face index and corner index, no special-case code would be needed — the mesh job would call it with `faceIndex = Top` and assign each cross mesh vertex the light of its nearest top-face corner.
+- **Off:** Flat lighting — all vertices receive the same `Color32` from the flora block's own light level via `BuildFlatLight`. The struct is uniformly populated by the caller.
+- **Standard:** Top-face corner assignment — `CalculateCornerLights(faceIndex=Top, pos)` computes 4 corner lights sampling the horizontal ring around the flora block. Top and bottom vertices share the same values (no vertical gradient).
+- **High:** Two-level sampling — top vertices use `CalculateCornerLights(faceIndex=Top, pos)` (light at flora head height), bottom vertices use `CalculateCornerLights(faceIndex=Top, pos + down)` (light at ground level, where the direct neighbor is the flora block itself). This produces vertical gradients visible in caves and near directional light sources.
+
+The vertex-to-corner mapping uses the XZ position: `L0=(0,0)`, `L1=(0,1)`, `L2=(1,0)`, `L3=(1,1)`, combined with Top-level for `y=1` vertices and Bot-level for `y=0` vertices. `AddCrossQuad` uses `EmitQuadTriangles` for anisotropy-aware triangle splitting, preventing checkerboard artifacts at light boundaries.
 
 #### 2.5.2 Custom Meshes
 
@@ -269,11 +274,13 @@ public struct FluidCornerLights
 FluidCornerLights cornerLights = default;
 if (SmoothLighting)
 {
-    // Precompute all 6 faces. CalculateCornerLights handles cross-chunk lookups.
+    // Reuse the already-fetched 14-neighbor array instead of re-calling GetVoxelStateFromLocalPos.
+    // Mapping: Back(-Z)→2(S), Front(+Z)→0(N), Top(+Y)→8(Above), Bottom(-Y)→9(Below), Left(-X)→3(W), Right(+X)→1(E)
     for (int face = 0; face < 6; face++)
     {
-        Vector3Int faceOffset = BurstVoxelData.FaceChecks.Data[face];
-        VoxelState? directNeighbor = GetVoxelStateFromLocalPos(pos + faceOffset);
+        int neighborIdx = face switch { 0 => 2, 1 => 0, 2 => 8, 3 => 9, 4 => 3, 5 => 1, _ => 0 };
+        OptionalVoxelState cached = neighbors[neighborIdx];
+        VoxelState? directNeighbor = cached.HasValue ? new VoxelState?(cached.State) : null;
         CalculateCornerLights(face, pos, directNeighbor,
             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
         cornerLights.SetFace(face, l0, l1, l2, l3);
@@ -281,7 +288,10 @@ if (SmoothLighting)
 }
 ```
 
-**Trade-off:** All 6 face sets are computed upfront (72 neighbor lookups) even though a typical fluid block renders only 1–3 visible faces after culling. This wastes ~2–6 `CalculateCornerLights` calls per fluid block. The waste is bounded and small — these are cache-local reads within a 1-block radius in Burst-compiled code. At a few hundred fluid blocks per section, this is negligible compared to total mesh job cost. The architectural benefit (keeping all culling logic in `GenerateFluidMeshData`, clean struct boundary, testable in isolation) outweighs
+The 6 direct face neighbors are already present in the 14-element `neighbors` array (fetched for fluid height smoothing and face culling). The switch maps `BurstVoxelData.FaceChecks` face indices to `s_fluidNeighborOffsets` array indices, avoiding 6 redundant `GetVoxelStateFromLocalPos` calls per fluid block — each of which involves bounds checks and potential cross-chunk lookups.
+
+**Trade-off:** All 6 face sets are computed upfront (72 neighbor lookups via `CalculateCornerLights`) even though a typical fluid block renders only 1–3 visible faces after culling. This wastes ~2–6 `CalculateCornerLights` calls per fluid block. The waste is bounded and small — these are cache-local reads within a 1-block radius in Burst-compiled code. At a few hundred fluid blocks per section, this is negligible compared to total mesh job cost. The architectural benefit (keeping all culling logic in `GenerateFluidMeshData`, clean struct boundary,
+testable in isolation) outweighs
 the bounded redundancy. If profiling later shows this is hot, the caller could precompute only the faces that survive a fast visibility pre-pass.
 
 ##### 2.5.3.2 Top Face — Direct Corner Assignment
@@ -379,16 +389,16 @@ values regardless of per-block rotation.
 
 Side faces do not need permutation because `GetTranslatedFaceIndex` remaps to a face whose vertex ordering, after rotation, naturally aligns with the world corner positions. Top and bottom faces (`translatedP == p`) do require permutation: `PermuteCornerLightsForYRotation` swaps `(l0, l1, l2, l3)` based on the Y rotation step count (0°/90°/180°/270°) so the anisotropy fix compares correct diagonal pairs. See [Bug 06 (fixed)](../Bugs/LIGHTING_BUGS.md#bug-06-diagonal-shadow-artifacts-on-smooth-lit-legacy-rotated-blocks).
 
-#### 2.5.5 Known Phase 1 Limitations Summary
+#### 2.5.5 Phase 1 Mesh Type Coverage
 
-| Mesh Type       | Smooth Lighting | Separate Sun/Block | Notes                                                                      |
-|-----------------|-----------------|--------------------|----------------------------------------------------------------------------|
-| Standard cubes  | Yes             | Yes                | Full corner averaging + anisotropy fix                                     |
-| Axis3 / Facing6 | Yes             | Yes                | Via `EmitStandardCubeFaceIfVisible`                                        |
-| Legacy rotated  | Yes             | Yes                | Corner permutation via `PermuteCornerLightsForYRotation`                   |
-| Cross meshes    | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8`                                 |
-| Custom meshes   | Yes             | Yes                | Bilinear interpolation via `GetCornerUV` + `BilinearLerpLight`             |
-| Fluids          | Yes             | Yes                | Precomputed `FluidCornerLights`; top/bottom direct, sides bilinear interp. |
+| Mesh Type       | Smooth Lighting | Separate Sun/Block | Notes                                                                                            |
+|-----------------|-----------------|--------------------|--------------------------------------------------------------------------------------------------|
+| Standard cubes  | Yes             | Yes                | Full corner averaging + anisotropy fix                                                           |
+| Axis3 / Facing6 | Yes             | Yes                | Via `EmitStandardCubeFaceIfVisible`                                                              |
+| Legacy rotated  | Yes             | Yes                | Corner permutation via `PermuteCornerLightsForYRotation`                                         |
+| Cross meshes    | Yes             | Yes                | Precomputed `CrossMeshCornerLights`; direct corner assignment, vertical gradient at High quality |
+| Custom meshes   | Yes             | Yes                | Bilinear interpolation via `GetCornerUV` + `BilinearLerpLight`                                   |
+| Fluids          | Yes             | Yes                | Precomputed `FluidCornerLights`; top/bottom direct, sides bilinear interp.                       |
 
 ### 2.6 Mesh Pipeline Changes
 
@@ -616,16 +626,22 @@ Two editor preview shaders were updated to handle the new `TexCoord1` attribute:
 
 - **`DebugVoxelShader.shader`:** Not updated — continues to use `Color` only for its debug visualization. Does not read `TexCoord1`.
 
-### 2.8 Settings Toggle
+### 2.8 Settings Quality Level
 
-Add a **Smooth Lighting** toggle to the Graphics settings tab via the existing data-driven settings UI:
+A **Smooth Lighting** quality dropdown in the Graphics settings tab controls per-vertex light averaging via `SmoothLightingQuality`:
 
 ```csharp
-[SettingField("Smooth Lighting", SettingsTab.Graphics)]
-public bool smoothLighting = true;
+[SettingField(SettingsTab.Graphics, Label = "Smooth Lighting")]
+public SmoothLightingQuality smoothLighting = SmoothLightingQuality.High;
 ```
 
-When disabled, the mesh job skips corner averaging and emits the current flat per-face light value to all 4 vertices (identical to today's behavior). The shader, vertex layout, and data format remain unchanged — the toggle only controls whether the CPU-side averaging runs. This provides:
+| Level        | Behavior                                                                                                        |
+|--------------|-----------------------------------------------------------------------------------------------------------------|
+| **Off**      | Flat per-face lighting (classic blocky look). Mesh job skips corner averaging entirely.                         |
+| **Standard** | Corner-averaged AO with horizontal gradients for all mesh types. Cross meshes sample 1 Y-level (top face only). |
+| **High**     | Standard plus vertical gradients on cross meshes (flora). Samples 2 Y-levels — head height and ground level.    |
+
+The shader, vertex layout, and data format are unchanged across all levels — the setting only controls how much CPU-side averaging the mesh job performs. This provides:
 
 - A fallback for lower-end hardware where the extra mesh job work is noticeable.
 - A debugging aid to isolate smooth-lighting-related visual issues.
@@ -670,25 +686,26 @@ With water opacity = 2, the BFS formula (`sourceLight - max(1, opacity)`) attenu
 
 **Files modified:**
 
-| File                                                | Change                                                                                                                                                                                                                                                     |
-|-----------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Data/JobData.cs`                                   | Add `NormalLightVertex` struct, `LightData` + `InterleavedStream3` to `MeshDataJobOutput`                                                                                                                                                                  |
-| `Jobs/BurstData/BurstVoxelData.cs`                  | Add `CornerOffsets` SharedStatic LUT (72 × `int3`) with `BuildCornerOffsetLUT`                                                                                                                                                                             |
-| `Data/FluidCornerLights.cs`                         | New `FluidCornerLights` struct (96 bytes, 6 faces × 4 corners) with `GetFace`/`SetFace` accessors                                                                                                                                                          |
-| `Helpers/VoxelMeshHelper.cs`                        | Add `ref lightData` param to all vertex-emitting methods, `LightFloatToUNorm8` helper, anisotropy-aware winding; fluid smooth lighting via `FluidCornerLights` + `GetCornerUV`/`BilinearLerpLight` for side faces, direct corner assignment for top/bottom |
-| `Jobs/MeshGenerationJob.cs`                         | Add `CalculateCornerLights`/`SampleCorner`/`SampleNeighborLight`/`BuildFlatLightData`, `SmoothLighting` flag; precompute `FluidCornerLights` for 6 faces before fluid dispatch                                                                             |
-| `SectionRenderer.cs`                                | Interleave Normal + TexCoord1 (UNorm8x4) in stream 3, accept `NativeArray<NormalLightVertex>`                                                                                                                                                              |
-| `Chunk.cs`                                          | Add `PostProcessMeshJob` (Burst) for Normal/LightData interleaving, thread `InterleavedStream3` through `ApplyMeshData`                                                                                                                                    |
-| `WorldJobManager.cs`                                | Pass `settings.smoothLighting` to `MeshGenerationJob.SmoothLighting`                                                                                                                                                                                       |
-| `SettingsManager.cs`                                | Add `smoothLighting` toggle under Graphics → Lighting subheader                                                                                                                                                                                            |
-| `Shaders/Includes/VoxelCommon.hlsl`                 | Add `lightData` to `VoxelAppdata` + `VoxelV2F`, pass through in `VoxelVert`                                                                                                                                                                                |
-| `Shaders/Includes/VoxelLighting.hlsl`               | Add `ApplyVoxelLightingRGB` + `VoxelLightToShadow` (existing `ApplyVoxelLighting` preserved for compatibility)                                                                                                                                             |
-| `Shaders/StandardBlockShader.shader`                | Fragment uses `ApplyVoxelLightingRGB(col.rgb, i.lightData.rgb, i.lightData.a, ...)`                                                                                                                                                                        |
-| `Shaders/TransparentBlockShader.shader`             | Same as StandardBlockShader                                                                                                                                                                                                                                |
-| `Shaders/Includes/LiquidCore.hlsl`                  | Add `lightData` to `LiquidAppdata`, scalar fallback: `o.lightLevel = max(v.lightData.r, v.lightData.a)`                                                                                                                                                    |
-| `Shaders/Editor/BlockPreviewShader.shader`          | Override `o.lightData = half4(1,1,1,1)`, use `ApplyVoxelLightingRGB` with hardcoded daylight                                                                                                                                                               |
-| `Shaders/Editor/ChunkPreviewShader.shader`          | Hardcode `lightLevel = 1.0`, does not read `TexCoord1`                                                                                                                                                                                                     |
-| `Editor/BlockEditor/Helpers/EditorMeshGenerator.cs` | Thread `NativeList<Color32> nativeLightData` through all `VoxelMeshHelper` calls                                                                                                                                                                           |
+| File                                                | Change                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+|-----------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Data/Enums/SmoothLightingQuality.cs`               | Add `SmoothLightingQuality` enum (`Off`, `Standard`, `High`) — byte-backed for Burst compatibility                                                                                                                                                                                                                                                                                                                                       |
+| `Data/JobData.cs`                                   | Add `NormalLightVertex` struct, `LightData` + `InterleavedStream3` to `MeshDataJobOutput`; add `FluidCornerLights` (96 bytes), `CrossMeshCornerLights` (32 bytes, 2 levels × 4 corners)                                                                                                                                                                                                                                                  |
+| `Jobs/BurstData/BurstVoxelData.cs`                  | Add `CornerOffsets` SharedStatic LUT (72 × `int3`) with `BuildCornerOffsetLUT`                                                                                                                                                                                                                                                                                                                                                           |
+| `Data/JobData.cs`                                   | (see above — `FluidCornerLights` + `CrossMeshCornerLights` structs)                                                                                                                                                                                                                                                                                                                                                                      |
+| `Helpers/VoxelMeshHelper.cs`                        | Add `ref lightData` param to all vertex-emitting methods, `LightFloatToUNorm8` helper, shared `EmitQuadTriangles` for anisotropy-aware winding (used by standard cubes, all 3 fluid face types, and cross meshes); fluid smooth lighting via `FluidCornerLights` + `GetCornerUV`/`BilinearLerpLight` for side faces; cross mesh smooth lighting via `CrossMeshCornerLights` with direct corner assignment and per-vertex Y-level mapping |
+| `Jobs/MeshGenerationJob.cs`                         | Add `CalculateCornerLights`/`SampleCorner`/`SampleNeighborLight`/`BuildFlatLightData`; `SmoothLightingQuality` enum field (replaces `bool`); precompute `FluidCornerLights` for 6 faces before fluid dispatch; precompute `CrossMeshCornerLights` (1 or 2 `CalculateCornerLights` calls depending on quality level)                                                                                                                      |
+| `SectionRenderer.cs`                                | Interleave Normal + TexCoord1 (UNorm8x4) in stream 3, accept `NativeArray<NormalLightVertex>`                                                                                                                                                                                                                                                                                                                                            |
+| `Chunk.cs`                                          | Add `PostProcessMeshJob` (Burst) for Normal/LightData interleaving, thread `InterleavedStream3` through `ApplyMeshData`                                                                                                                                                                                                                                                                                                                  |
+| `WorldJobManager.cs`                                | Pass `settings.smoothLighting` to `MeshGenerationJob.SmoothLighting`                                                                                                                                                                                                                                                                                                                                                                     |
+| `SettingsManager.cs`                                | `smoothLighting` field changed from `bool` to `SmoothLightingQuality` enum (Off/Standard/High) under Graphics → Lighting subheader                                                                                                                                                                                                                                                                                                       |
+| `Shaders/Includes/VoxelCommon.hlsl`                 | Add `lightData` to `VoxelAppdata` + `VoxelV2F`, pass through in `VoxelVert`                                                                                                                                                                                                                                                                                                                                                              |
+| `Shaders/Includes/VoxelLighting.hlsl`               | Add `ApplyVoxelLightingRGB` + `VoxelLightToShadow` (existing `ApplyVoxelLighting` preserved for compatibility)                                                                                                                                                                                                                                                                                                                           |
+| `Shaders/StandardBlockShader.shader`                | Fragment uses `ApplyVoxelLightingRGB(col.rgb, i.lightData.rgb, i.lightData.a, ...)`                                                                                                                                                                                                                                                                                                                                                      |
+| `Shaders/TransparentBlockShader.shader`             | Same as StandardBlockShader                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `Shaders/Includes/LiquidCore.hlsl`                  | Add `lightData` to `LiquidAppdata`, scalar fallback: `o.lightLevel = max(v.lightData.r, v.lightData.a)`                                                                                                                                                                                                                                                                                                                                  |
+| `Shaders/Editor/BlockPreviewShader.shader`          | Override `o.lightData = half4(1,1,1,1)`, use `ApplyVoxelLightingRGB` with hardcoded daylight                                                                                                                                                                                                                                                                                                                                             |
+| `Shaders/Editor/ChunkPreviewShader.shader`          | Hardcode `lightLevel = 1.0`, does not read `TexCoord1`                                                                                                                                                                                                                                                                                                                                                                                   |
+| `Editor/BlockEditor/Helpers/EditorMeshGenerator.cs` | Thread `NativeList<Color32> nativeLightData` through all `VoxelMeshHelper` calls                                                                                                                                                                                                                                                                                                                                                         |
 
 **Files NOT modified:** `NeighborhoodLightingJob.cs` (only the BFS attenuation fix, which is a prerequisite), `BurstVoxelDataBitMapping.cs`, `ChunkData.cs` — the lighting BFS propagation logic and voxel data format are unchanged in Phase 1.
 
