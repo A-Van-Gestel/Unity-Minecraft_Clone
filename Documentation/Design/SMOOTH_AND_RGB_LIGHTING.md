@@ -225,9 +225,10 @@ Cross meshes (flowers, tall grass) consist of two intersecting diagonal quads wi
 
 Custom meshes use axis-aligned face culling identical to standard cubes (each custom mesh face maps to one of 6 face directions).
 
-**Phase 1 implementation:** Custom meshes use **flat lighting** with the same `LightFloatToUNorm8` approach as cross meshes. All vertices on a given face receive the same light value from the face's neighbor block. This is a known Phase 1 limitation. Like cross meshes, the flat path uses merged sun/block rather than separate channels.
-
-**Future improvement:** Corner averaging applies identically to standard cube faces — `CalculateCornerLights` would be called with the same face index and corner indices. Custom mesh vertices may not sit exactly at block corners, but the light values are assigned per-face-corner and interpolated by the GPU, which produces correct results for any vertex position within the face.
+**Phase 1 implementation:** Custom meshes use **smooth lighting** via `CalculateCornerLights` when the setting is enabled, with per-vertex **bilinear interpolation** of the 4 corner light values. Unlike standard cubes (whose 4 vertices sit exactly at block corners), custom mesh vertices may occupy arbitrary positions within the face plane (e.g., a half-slab's top face vertices sit at y=0.5 instead of y=1.0).
+The bilinear approach maps each vertex's rotated block-local position to (u, v) on the world face's perpendicular axes via `GetCornerUV`, then blends the 4 corner lights with `BilinearLerpLight`. This correctly handles sub-block geometry (half slabs, fences, stairs) — narrow meshes receive position-weighted gradients rather than hard corner snaps.
+For standard-cube-shaped vertices at exact block corners, the bilinear result degenerates to the pure corner value, matching standard cube smooth lighting exactly. Both the legacy (`Quaternion.Euler`) and schema-aware (`float3x3` matrix) rotation paths are supported, with the world face index used to select the correct perpendicular axes for UV mapping.
+No corner permutation is needed (unlike standard cubes) because the bilinear interpolation uses the vertex's actual rotated world position rather than a fixed index-based assignment. With smooth lighting disabled, the flat lighting fallback path with separate sun/block channels (`BuildFlatLightData`) remains unchanged.
 
 #### 2.5.3 Fluids
 
@@ -242,14 +243,14 @@ Side faces do not need permutation because `GetTranslatedFaceIndex` remaps to a 
 
 #### 2.5.5 Known Phase 1 Limitations Summary
 
-| Mesh Type       | Smooth Lighting | Separate Sun/Block | Notes                                                    |
-|-----------------|-----------------|--------------------|----------------------------------------------------------|
-| Standard cubes  | Yes             | Yes                | Full corner averaging + anisotropy fix                   |
-| Axis3 / Facing6 | Yes             | Yes                | Via `EmitStandardCubeFaceIfVisible`                      |
-| Legacy rotated  | Yes             | Yes                | Corner permutation via `PermuteCornerLightsForYRotation` |
-| Cross meshes    | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8`               |
-| Custom meshes   | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8`               |
-| Fluids          | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8`               |
+| Mesh Type       | Smooth Lighting | Separate Sun/Block | Notes                                                          |
+|-----------------|-----------------|--------------------|----------------------------------------------------------------|
+| Standard cubes  | Yes             | Yes                | Full corner averaging + anisotropy fix                         |
+| Axis3 / Facing6 | Yes             | Yes                | Via `EmitStandardCubeFaceIfVisible`                            |
+| Legacy rotated  | Yes             | Yes                | Corner permutation via `PermuteCornerLightsForYRotation`       |
+| Cross meshes    | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8`                     |
+| Custom meshes   | Yes             | Yes                | Bilinear interpolation via `GetCornerUV` + `BilinearLerpLight` |
+| Fluids          | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8`                     |
 
 ### 2.6 Mesh Pipeline Changes
 
@@ -330,7 +331,7 @@ The encoding uses rounded integer arithmetic for Burst efficiency: `(byte)((sunS
 
 `GenerateStandardCubeWithLegacyOrientation` (used by `HorizontalOnly` and `Legacy` schema blocks) follows the same `SmoothLighting` branching pattern, calling `CalculateCornerLights` on the world face `p` for correct neighbor sampling, then `PermuteCornerLightsForYRotation` to align corner lights with the rotated vertex positions on top/bottom faces.
 
-Cross meshes, custom meshes, and fluids use flat lighting in Phase 1 (see Section 2.5.5).
+Custom meshes use smooth lighting with bilinear interpolation (see Section 2.5.2). Cross meshes and fluids use flat lighting in Phase 1 (see Section 2.5.5).
 
 #### 2.6.5 `Chunk.cs` — PostProcessMeshJob
 

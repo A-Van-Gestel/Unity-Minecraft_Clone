@@ -392,12 +392,24 @@ namespace Jobs
                 {
                     int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                     int textureID = GetTextureID(id, translatedP);
-                    Color32 flatLight = BuildFlatLightData(neighborVoxel);
 
-                    VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, flatLight, pos, rotation,
-                        voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
-                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
-                        ref Output.Colors, ref Output.Normals, ref Output.LightData, voxelProps.RenderNeighborFaces);
+                    if (SmoothLighting)
+                    {
+                        CalculateCornerLights(p, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                        VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, pos, rotation,
+                            p, l0, l1, l2, l3,
+                            voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
+                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
+                            ref Output.Colors, ref Output.Normals, ref Output.LightData, voxelProps.RenderNeighborFaces);
+                    }
+                    else
+                    {
+                        Color32 flatLight = BuildFlatLightData(neighborVoxel);
+                        VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, flatLight, pos, rotation,
+                            voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
+                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
+                            ref Output.Colors, ref Output.Normals, ref Output.LightData, voxelProps.RenderNeighborFaces);
+                    }
                 }
             }
         }
@@ -437,12 +449,25 @@ namespace Jobs
                 if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
                     int textureID = GetTextureID(id, p);
-                    Color32 flatLight = BuildFlatLightData(neighborVoxel);
 
-                    VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, flatLight, pos, in matrix,
-                        voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
-                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
-                        ref Output.Uvs, ref Output.Colors, ref Output.Normals, ref Output.LightData, voxelProps.RenderNeighborFaces);
+                    if (SmoothLighting)
+                    {
+                        int worldFace = DirectionToFaceIndex(rotatedOffset);
+                        CalculateCornerLights(worldFace, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                        VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, pos, in matrix,
+                            worldFace, l0, l1, l2, l3,
+                            voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
+                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                            ref Output.Uvs, ref Output.Colors, ref Output.Normals, ref Output.LightData, voxelProps.RenderNeighborFaces);
+                    }
+                    else
+                    {
+                        Color32 flatLight = BuildFlatLightData(neighborVoxel);
+                        VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, flatLight, pos, in matrix,
+                            voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
+                            ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
+                            ref Output.Uvs, ref Output.Colors, ref Output.Normals, ref Output.LightData, voxelProps.RenderNeighborFaces);
+                    }
                 }
             }
         }
@@ -707,6 +732,21 @@ namespace Jobs
             byte sun = (byte)(vs.Sunlight * 17);
             byte block = (byte)(vs.Blocklight * 17);
             return new Color32(sun, sun, sun, block);
+        }
+
+        /// <summary>
+        /// Maps a cardinal direction <see cref="Vector3Int"/> to the corresponding face index (0–5).
+        /// Only valid for exact axis-aligned unit vectors (the 6 entries in <c>FaceChecks</c>).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int DirectionToFaceIndex(Vector3Int dir)
+        {
+            if (dir.z == -1) return 0; // Back
+            if (dir.z == 1) return 1; // Front
+            if (dir.y == 1) return 2; // Top
+            if (dir.y == -1) return 3; // Bottom
+            if (dir.x == -1) return 4; // Left
+            return 5; // Right
         }
 
         /// <summary>

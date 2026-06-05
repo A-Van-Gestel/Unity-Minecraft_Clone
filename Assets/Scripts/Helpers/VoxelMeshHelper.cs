@@ -36,6 +36,71 @@ namespace Helpers
         }
 
         /// <summary>
+        /// Bilinearly interpolates 4 corner light values based on a vertex's (u, v) position
+        /// within a face plane. Used by custom mesh smooth lighting where vertices may sit at
+        /// arbitrary positions, not just block corners.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Color32 BilinearLerpLight(Color32 l0, Color32 l1, Color32 l2, Color32 l3,
+            float u, float v)
+        {
+            float oneMinusU = 1f - u;
+            float oneMinusV = 1f - v;
+            float w00 = oneMinusU * oneMinusV;
+            float w01 = oneMinusU * v;
+            float w10 = u * oneMinusV;
+            float w11 = u * v;
+
+            return new Color32(
+                (byte)(l0.r * w00 + l1.r * w01 + l2.r * w10 + l3.r * w11 + 0.5f),
+                (byte)(l0.g * w00 + l1.g * w01 + l2.g * w10 + l3.g * w11 + 0.5f),
+                (byte)(l0.b * w00 + l1.b * w01 + l2.b * w10 + l3.b * w11 + 0.5f),
+                (byte)(l0.a * w00 + l1.a * w01 + l2.a * w10 + l3.a * w11 + 0.5f)
+            );
+        }
+
+        /// <summary>
+        /// Maps a block-local vertex position to (u, v) coordinates on the perpendicular plane
+        /// of the given world face. The mapping matches the corner light layout from
+        /// <c>CalculateCornerLights</c>: l0 ↔ (0,0), l1 ↔ (0,1), l2 ↔ (1,0), l3 ↔ (1,1).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void GetCornerUV(int worldFaceIndex, float3 blockLocalPos,
+            out float u, out float v)
+        {
+            switch (worldFaceIndex)
+            {
+                case 0: // Back  (-Z)
+                    u = blockLocalPos.x;
+                    v = blockLocalPos.y;
+                    break;
+                case 1: // Front (+Z)
+                    u = 1f - blockLocalPos.x;
+                    v = blockLocalPos.y;
+                    break;
+                case 2: // Top   (+Y)
+                    u = blockLocalPos.x;
+                    v = blockLocalPos.z;
+                    break;
+                case 3: // Bottom(-Y)
+                    u = 1f - blockLocalPos.x;
+                    v = blockLocalPos.z;
+                    break;
+                case 4: // Left  (-X)
+                    u = 1f - blockLocalPos.z;
+                    v = blockLocalPos.y;
+                    break;
+                default: // Right (+X)
+                    u = blockLocalPos.z;
+                    v = blockLocalPos.y;
+                    break;
+            }
+
+            u = math.saturate(u);
+            v = math.saturate(v);
+        }
+
+        /// <summary>
         /// Calculates and appends the precise UV coordinates for a given texture ID to the UV list.
         /// Accounts for the normalized texture atlas size and origin alignment.
         /// The ZW components are zeroed; they are only meaningful for fluid top faces (shore push).
@@ -153,10 +218,10 @@ namespace Helpers
             // Use the brightest channel per corner (max of sunlight R and blocklight A) so the
             // fix works both on the surface (sun-dominant) and underground (block-dominant).
             NativeList<int> targetTris = isTransparent ? ref transparentTriangles : ref triangles;
-            int lum0 = math.max((int)light0.r, (int)light0.a);
-            int lum1 = math.max((int)light1.r, (int)light1.a);
-            int lum2 = math.max((int)light2.r, (int)light2.a);
-            int lum3 = math.max((int)light3.r, (int)light3.a);
+            int lum0 = math.max(light0.r, (int)light0.a);
+            int lum1 = math.max(light1.r, (int)light1.a);
+            int lum2 = math.max(light2.r, (int)light2.a);
+            int lum3 = math.max(light3.r, (int)light3.a);
             if (lum0 + lum3 > lum1 + lum2)
             {
                 // Flipped diagonal: (0,1,3), (0,3,2)
@@ -219,16 +284,16 @@ namespace Helpers
 
             int startVertCount = vertexIndex;
 
+            // Hoist constant face data out of the vertex loop.
+            Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
+            Quaternion rot = Quaternion.Euler(0, rotation, 0);
+
             // Add vertices and their data
             for (int i = 0; i < faceData.VertCount; i++)
             {
                 CustomVertData vertData = customVerts[faceData.VertStartIndex + i];
-                Vector3 vertPos = vertData.Position;
-
-                // Rotate the vertex around the block's center (0.5, 0.5, 0.5)
-                Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
-                Vector3 direction = vertPos - center;
-                direction = Quaternion.Euler(0, rotation, 0) * direction;
+                Vector3 direction = vertData.Position - center;
+                direction = rot * direction;
 
                 vertices.Add(position + direction + center);
 
@@ -252,6 +317,66 @@ namespace Helpers
                 {
                     triangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
                 }
+            }
+
+            vertexIndex += faceData.VertCount;
+        }
+
+        /// <summary>
+        /// Generates a single face of a custom mesh voxel with per-vertex smooth lighting via
+        /// bilinear interpolation of 4 corner light values. Y-axis rotation via
+        /// <c>Quaternion.Euler</c> (legacy path).
+        /// </summary>
+        [BurstCompile]
+        [SkipLocalsInit]
+        public static void GenerateCustomMeshFace(
+            int faceIndex, int textureID, in Vector3Int position, float rotation,
+            int worldFaceIndex, Color32 l0, Color32 l1, Color32 l2, Color32 l3,
+            int customMeshIndex,
+            [ReadOnly] in NativeArray<CustomMeshData> customMeshes,
+            [ReadOnly] in NativeArray<CustomFaceData> customFaces,
+            [ReadOnly] in NativeArray<CustomVertData> customVerts,
+            [ReadOnly] in NativeArray<int> customTris,
+            ref int vertexIndex,
+            ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
+            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<Color32> lightData, bool isTransparent)
+        {
+            CustomMeshData meshData = customMeshes[customMeshIndex];
+            CustomFaceData faceData = customFaces[meshData.FaceStartIndex + faceIndex];
+
+            int startVertCount = vertexIndex;
+
+            // Hoist constant face data out of the vertex loop.
+            Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
+            Quaternion rot = Quaternion.Euler(0, rotation, 0);
+
+            for (int i = 0; i < faceData.VertCount; i++)
+            {
+                CustomVertData vertData = customVerts[faceData.VertStartIndex + i];
+                Vector3 direction = vertData.Position - center;
+                direction = rot * direction;
+                float3 blockLocal = direction + center;
+
+                vertices.Add(position + direction + center);
+                normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
+                colors.Add(new Color(1f, 1f, 1f, 1f));
+
+                GetCornerUV(worldFaceIndex, blockLocal, out float u, out float v);
+                lightData.Add(BilinearLerpLight(l0, l1, l2, l3, u, v));
+
+                AddTexture(textureID, vertData.UV, ref uvs);
+            }
+
+            if (isTransparent)
+            {
+                for (int i = 0; i < faceData.TriCount; i++)
+                    transparentTriangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
+            }
+            else
+            {
+                for (int i = 0; i < faceData.TriCount; i++)
+                    triangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
             }
 
             vertexIndex += faceData.VertCount;
@@ -322,6 +447,65 @@ namespace Helpers
                 {
                     triangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
                 }
+            }
+
+            vertexIndex += faceData.VertCount;
+        }
+
+        /// <summary>
+        /// Generates a single face of a custom mesh voxel with per-vertex smooth lighting via
+        /// bilinear interpolation and full 3D rotation via a <see cref="float3x3"/> matrix.
+        /// </summary>
+        [BurstCompile]
+        [SkipLocalsInit]
+        public static void GenerateCustomMeshFace(
+            int faceIndex, int textureID, in Vector3Int position,
+            in float3x3 rotationMatrix,
+            int worldFaceIndex, Color32 l0, Color32 l1, Color32 l2, Color32 l3,
+            int customMeshIndex,
+            [ReadOnly] in NativeArray<CustomMeshData> customMeshes,
+            [ReadOnly] in NativeArray<CustomFaceData> customFaces,
+            [ReadOnly] in NativeArray<CustomVertData> customVerts,
+            [ReadOnly] in NativeArray<int> customTris,
+            ref int vertexIndex,
+            ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
+            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<Color32> lightData, bool isTransparent)
+        {
+            CustomMeshData meshData = customMeshes[customMeshIndex];
+            CustomFaceData faceData = customFaces[meshData.FaceStartIndex + faceIndex];
+
+            int startVertCount = vertexIndex;
+            float3 center = new float3(0.5f, 0.5f, 0.5f);
+
+            Vector3Int fc = BurstVoxelData.FaceChecks.Data[faceIndex];
+            float3 rotatedNormal = math.normalize(math.mul(rotationMatrix, new float3(fc.x, fc.y, fc.z)));
+
+            for (int i = 0; i < faceData.VertCount; i++)
+            {
+                CustomVertData vertData = customVerts[faceData.VertStartIndex + i];
+
+                float3 rotated = math.mul(rotationMatrix, (float3)vertData.Position - center) + center;
+                vertices.Add(position + (Vector3)rotated);
+
+                normals.Add(rotatedNormal);
+                colors.Add(new Color(1f, 1f, 1f, 1f));
+
+                GetCornerUV(worldFaceIndex, rotated, out float u, out float v);
+                lightData.Add(BilinearLerpLight(l0, l1, l2, l3, u, v));
+
+                AddTexture(textureID, vertData.UV, ref uvs);
+            }
+
+            if (isTransparent)
+            {
+                for (int i = 0; i < faceData.TriCount; i++)
+                    transparentTriangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
+            }
+            else
+            {
+                for (int i = 0; i < faceData.TriCount; i++)
+                    triangles.Add(startVertCount + customTris[faceData.TriStartIndex + i]);
             }
 
             vertexIndex += faceData.VertCount;
