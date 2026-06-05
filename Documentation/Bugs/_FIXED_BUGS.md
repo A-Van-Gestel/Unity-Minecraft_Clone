@@ -117,6 +117,23 @@ cross-chunk BFS modifications that evaluate a non-zero sunlight level *must neve
 
 ---
 
+### ~~09. Diagonal Shadow Artifacts on Smooth-Lit Legacy Rotated Blocks~~
+
+**Severity:** Low (cosmetic)
+**Fixed:** June 2026
+**Status:** Resolved
+
+**Description:**
+With smooth lighting enabled, flat terrain surfaces (especially visible on sand/desert biomes) exhibit diagonal shadow lines forming a subtle zigzag or checkerboard pattern. The artifacts follow the quad triangulation diagonal and are most visible on large, uniformly lit horizontal surfaces viewed at a shallow angle.
+
+**Root Cause:**
+`GenerateStandardCubeWithLegacyOrientation` computes corner-averaged light values using the world face index `p` but emits vertices using the translated face index `translatedP` (which accounts for the block's Y-axis texture rotation). For side faces this is inherently correct because `GetTranslatedFaceIndex` remaps to a face whose vertex ordering, after rotation, aligns with the world corner positions. But for top/bottom faces (`translatedP == p`), the vertices are rotated while the corner light values are not, assigning lights to wrong vertex positions and causing the anisotropy fix to choose wrong triangulation diagonals.
+
+**Fix:**
+Added `PermuteCornerLightsForYRotation` in `MeshGenerationJob.cs` which permutes `(l0, l1, l2, l3)` for top/bottom faces based on the Y rotation step count (0°/90°/180°/270°). The permutation was derived by tracing each vertex's post-rotation world position back to the corner offset LUT index it corresponds to. Called immediately after `CalculateCornerLights` and before `GenerateStandardCubeFace` in the `GenerateStandardCubeWithLegacyOrientation` smooth-lighting branch. See also: [Design doc Section 2.5.4](../Design/SMOOTH_AND_RGB_LIGHTING.md#254-legacy-rotated-blocks).
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

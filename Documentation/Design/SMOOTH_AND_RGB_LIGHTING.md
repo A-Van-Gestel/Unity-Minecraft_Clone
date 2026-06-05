@@ -235,23 +235,21 @@ Custom meshes use axis-aligned face culling identical to standard cubes (each cu
 
 #### 2.5.4 Legacy Rotated Blocks
 
-Blocks using `GenerateStandardCubeWithLegacyOrientation` (the pre-Axis3 rotation path with `Quaternion.Euler`) — including `HorizontalOnly` (stone, dirt, and most terrain blocks) and `Legacy` schema blocks — use **smooth lighting** via `CalculateCornerLights` when the setting is enabled. Corner averaging is performed on the world face `p` (correct neighbor sampling), and the results are passed to the rotated vertex emission. Shared vertices between adjacent blocks produce identical light values regardless of per-block rotation.
+Blocks using `GenerateStandardCubeWithLegacyOrientation` (the pre-Axis3 rotation path with `Quaternion.Euler`) — including `HorizontalOnly` (stone, dirt, and most terrain blocks) and `Legacy` schema blocks — use **smooth lighting** via `CalculateCornerLights` when the setting is enabled. Corner averaging is performed on the world face `p` (correct neighbor sampling), and the results are permuted to match the rotated vertex positions via `PermuteCornerLightsForYRotation` before emission. Shared vertices between adjacent blocks produce identical light
+values regardless of per-block rotation.
 
-> **Known shortcoming — diagonal shadow artifacts:** Because corner lights are computed for world face `p` but assigned to the vertex order of `translatedP`, the anisotropy fix (quad diagonal flip) in `GenerateStandardCubeFace` compares mismatched diagonal pairs for rotated blocks. This produces subtle diagonal shadow lines on flat surfaces (most visible on large horizontal desert/plains terrain at shallow viewing angles). The fix requires permuting `(l0, l1, l2, l3)` to match the rotated vertex positions before emission. See [
-`LIGHTING_BUGS.md` Bug 06](../Bugs/LIGHTING_BUGS.md#bug-06-diagonal-shadow-artifacts-on-smooth-lit-legacy-rotated-blocks).
+Side faces do not need permutation because `GetTranslatedFaceIndex` remaps to a face whose vertex ordering, after rotation, naturally aligns with the world corner positions. Top and bottom faces (`translatedP == p`) do require permutation: `PermuteCornerLightsForYRotation` swaps `(l0, l1, l2, l3)` based on the Y rotation step count (0°/90°/180°/270°) so the anisotropy fix compares correct diagonal pairs. See [Bug 06 (fixed)](../Bugs/LIGHTING_BUGS.md#bug-06-diagonal-shadow-artifacts-on-smooth-lit-legacy-rotated-blocks).
 
 #### 2.5.5 Known Phase 1 Limitations Summary
 
-| Mesh Type       | Smooth Lighting | Separate Sun/Block | Notes                                      |
-|-----------------|-----------------|--------------------|--------------------------------------------|
-| Standard cubes  | Yes             | Yes                | Full corner averaging + anisotropy fix     |
-| Axis3 / Facing6 | Yes             | Yes                | Via `EmitStandardCubeFaceIfVisible`        |
-| Legacy rotated  | Yes (see note)  | Yes                | Diagonal artifacts from corner mismatch¹   |
-| Cross meshes    | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8` |
-| Custom meshes   | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8` |
-| Fluids          | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8` |
-
-¹ Corner lights are sampled for world face `p` but assigned to vertex order of `translatedP`, causing the anisotropy fix to pick wrong diagonals on rotated blocks. Produces subtle zigzag shadows on flat terrain. Fix: permute corners to match rotation. See [Bug 06](../Bugs/LIGHTING_BUGS.md#bug-06-diagonal-shadow-artifacts-on-smooth-lit-legacy-rotated-blocks).
+| Mesh Type       | Smooth Lighting | Separate Sun/Block | Notes                                                    |
+|-----------------|-----------------|--------------------|----------------------------------------------------------|
+| Standard cubes  | Yes             | Yes                | Full corner averaging + anisotropy fix                   |
+| Axis3 / Facing6 | Yes             | Yes                | Via `EmitStandardCubeFaceIfVisible`                      |
+| Legacy rotated  | Yes             | Yes                | Corner permutation via `PermuteCornerLightsForYRotation` |
+| Cross meshes    | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8`               |
+| Custom meshes   | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8`               |
+| Fluids          | No (flat)       | No (merged)        | Uses `LightAsFloat` → `LightFloatToUNorm8`               |
 
 ### 2.6 Mesh Pipeline Changes
 
@@ -330,7 +328,7 @@ The encoding uses rounded integer arithmetic for Burst efficiency: `(byte)((sunS
 
 `BuildFlatLightData` reads the direct neighbor's `Sunlight` and `Blocklight` properties independently (not the merged `LightAsFloat`), encoding as `Color32(sun*17, sun*17, sun*17, block*17)`. This ensures correct day/night modulation even with smooth lighting disabled.
 
-`GenerateStandardCubeWithLegacyOrientation` (used by `HorizontalOnly` and `Legacy` schema blocks) follows the same `SmoothLighting` branching pattern, calling `CalculateCornerLights` on the world face `p` for correct neighbor sampling.
+`GenerateStandardCubeWithLegacyOrientation` (used by `HorizontalOnly` and `Legacy` schema blocks) follows the same `SmoothLighting` branching pattern, calling `CalculateCornerLights` on the world face `p` for correct neighbor sampling, then `PermuteCornerLightsForYRotation` to align corner lights with the rotated vertex positions on top/bottom faces.
 
 Cross meshes, custom meshes, and fluids use flat lighting in Phase 1 (see Section 2.5.5).
 

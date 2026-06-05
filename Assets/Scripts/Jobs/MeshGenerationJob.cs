@@ -530,6 +530,7 @@ namespace Jobs
                     if (SmoothLighting)
                     {
                         CalculateCornerLights(p, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                        PermuteCornerLightsForYRotation(p, rotation, ref l0, ref l1, ref l2, ref l3);
                         VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, in pos, rotation,
                             0, l0, l1, l2, l3,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
@@ -706,6 +707,73 @@ namespace Jobs
             byte sun = (byte)(vs.Sunlight * 17);
             byte block = (byte)(vs.Blocklight * 17);
             return new Color32(sun, sun, sun, block);
+        }
+
+        /// <summary>
+        /// Permutes smooth-light corner values to compensate for Y-axis rotation on horizontal
+        /// faces (Top/Bottom). Side faces do not need permutation because
+        /// <see cref="VoxelHelper.GetTranslatedFaceIndex"/> remaps the face index so the rotated
+        /// vertex ordering already matches the world corner positions.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void PermuteCornerLightsForYRotation(int worldFaceIndex, float rotation,
+            ref Color32 l0, ref Color32 l1, ref Color32 l2, ref Color32 l3)
+        {
+            if (worldFaceIndex != 2 && worldFaceIndex != 3) return;
+
+            int steps = (int)math.round(rotation / 90f) & 3;
+            if (steps == 0) return;
+
+            Color32 t0 = l0, t1 = l1, t2 = l2, t3 = l3;
+
+            if (worldFaceIndex == 2) // Top face
+            {
+                switch (steps)
+                {
+                    case 1: // 90° CW
+                        l0 = t1;
+                        l1 = t3;
+                        l2 = t0;
+                        l3 = t2;
+                        break;
+                    case 2: // 180°
+                        l0 = t3;
+                        l1 = t2;
+                        l2 = t1;
+                        l3 = t0;
+                        break;
+                    case 3: // 270° CW
+                        l0 = t2;
+                        l1 = t0;
+                        l2 = t3;
+                        l3 = t1;
+                        break;
+                }
+            }
+            else // Bottom face
+            {
+                switch (steps)
+                {
+                    case 1: // 90° CW
+                        l0 = t2;
+                        l1 = t0;
+                        l2 = t3;
+                        l3 = t1;
+                        break;
+                    case 2: // 180°
+                        l0 = t3;
+                        l1 = t2;
+                        l2 = t1;
+                        l3 = t0;
+                        break;
+                    case 3: // 270° CW
+                        l0 = t1;
+                        l1 = t3;
+                        l2 = t0;
+                        l3 = t2;
+                        break;
+                }
+            }
         }
 
         /// <summary>
