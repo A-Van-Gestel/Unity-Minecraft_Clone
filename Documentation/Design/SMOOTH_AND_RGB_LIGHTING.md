@@ -618,11 +618,13 @@ This takes the per-channel max of sunlight (R) and blocklight (A) to produce a s
 
 #### 2.7.6 Editor Preview Shaders
 
-Two editor preview shaders were updated to handle the new `TexCoord1` attribute:
+Editor preview shaders read `TexCoord1` directly — all editor mesh generators populate the attribute with valid light data:
 
-- **`BlockPreviewShader.shader`:** The vertex shader overrides `o.lightData = half4(1, 1, 1, 1)` (full brightness) since editor-generated meshes don't populate `TexCoord1`. The fragment shader uses `ApplyVoxelLightingRGB` with hardcoded daylight globals, maintaining correct lighting appearance in the block editor preview.
+- **`BlockPreviewShader.shader`:** The vertex shader passes `lightData` through via `VoxelVert` unchanged. The fragment shader uses `ApplyVoxelLightingRGB` with hardcoded daylight globals. `EditorMeshGenerator` populates `TexCoord1` with full brightness `(1,1,1,1)` for block editor icons; `ChunkPreview3DWindow` provides actual per-vertex smooth lighting data via `MeshPostProcessJob`.
 
-- **`ChunkPreviewShader.shader`:** Reverted to **not** reading `TexCoord1`. Uses a hardcoded `lightLevel = 1.0` since chunk preview meshes don't provide light data. This avoids reading garbage from the unpopulated attribute.
+- **`FluidPreviewShader.shader`:** Same as `BlockPreviewShader` — reads `lightData` from `TexCoord1` directly. Fluid meshes from `EditorMeshGenerator` receive full brightness; meshes from `ChunkPreview3DWindow` receive smooth-lit values.
+
+- **`ChunkPreviewShader.shader`:** Does **not** read `TexCoord1`. Uses a hardcoded `lightLevel = 1.0` as a minimal fallback shader. Only used when `BlockDatabase` is unavailable (the `ChunkPreview3DWindow` normally uses `BlockPreviewShader` and `FluidPreviewShader` via `EditorPreviewMaterialUtility`).
 
 - **`DebugVoxelShader.shader`:** Not updated — continues to use `Color` only for its debug visualization. Does not read `TexCoord1`.
 

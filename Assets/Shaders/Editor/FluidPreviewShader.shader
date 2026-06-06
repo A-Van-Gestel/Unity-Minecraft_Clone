@@ -85,7 +85,6 @@ Shader "Hidden/Editor/FluidPreview"
 
             LiquidV2F vertFunction(LiquidAppdata v)
             {
-                v.lightData = half4(1, 1, 1, 1);
                 return LiquidVert(v);
             }
 

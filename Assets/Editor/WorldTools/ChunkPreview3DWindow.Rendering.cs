@@ -1,7 +1,6 @@
 using Data;
-using Editor.Libraries;
 using Helpers;
-using Unity.Burst;
+using Jobs;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -16,7 +15,8 @@ namespace Editor.WorldTools
             new VertexAttributeDescriptor(VertexAttribute.Position),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 4, stream: 1),
             new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, stream: 2),
-            new VertexAttributeDescriptor(VertexAttribute.Normal, stream: 3),
+            new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 3),
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.UNorm8, 4, stream: 3),
         };
 
         /// <summary>
@@ -25,15 +25,18 @@ namespace Editor.WorldTools
         /// </summary>
         private void ConvertMeshOutput(ChunkCoord chunkCoord, MeshDataJobOutput output)
         {
-            // Run a fast Burst job to adjust coordinate spaces from Chunk-Space to Section-Space.
-            // This modifies the data in-place efficiently.
-            PostProcessMeshJob postProcessJob = new PostProcessMeshJob
+            // Run a fast Burst job to adjust coordinate spaces from Chunk-Space to Section-Space
+            // and interleave Normal + LightData into stream 3.
+            MeshPostProcessJob postProcessJob = new MeshPostProcessJob
             {
                 Vertices = output.Vertices,
                 OpaqueTris = output.Triangles,
                 TransparentTris = output.TransparentTriangles,
                 FluidTris = output.FluidTriangles,
                 Stats = output.SectionStats,
+                Normals = output.Normals,
+                LightData = output.LightData,
+                InterleavedStream3 = output.InterleavedStream3,
                 SectionHeight = ChunkMath.SECTION_SIZE,
             };
             postProcessJob.Schedule().Complete();
@@ -69,7 +72,7 @@ namespace Editor.WorldTools
                     stats.VertexCount, 1, flags);
                 mesh.SetVertexBufferData(output.Colors.AsArray(), stats.VertexStartIndex, 0,
                     stats.VertexCount, 2, flags);
-                mesh.SetVertexBufferData(output.Normals.AsArray(), stats.VertexStartIndex, 0,
+                mesh.SetVertexBufferData(output.InterleavedStream3.AsArray(), stats.VertexStartIndex, 0,
                     stats.VertexCount, 3, flags);
 
                 // --- Index buffer with submeshes ---
@@ -203,56 +206,6 @@ namespace Editor.WorldTools
                 if (entry.HasFluid)
                 {
                     _meshPreviewWidget.DrawMeshDirect(entry.Mesh, localToWorld, _editorFluidMaterial, sub);
-                }
-            }
-        }
-
-        [BurstCompile]
-        private struct PostProcessMeshJob : IJob
-        {
-            public NativeList<Vector3> Vertices;
-            public NativeList<int> OpaqueTris;
-            public NativeList<int> TransparentTris;
-            public NativeList<int> FluidTris;
-
-            [ReadOnly]
-            public NativeArray<MeshSectionStats> Stats;
-
-            public int SectionHeight;
-
-            public void Execute()
-            {
-                // We iterate sections inside the job to avoid overhead of scheduling many tiny jobs
-                for (int i = 0; i < Stats.Length; i++)
-                {
-                    MeshSectionStats s = Stats[i];
-                    if (s.VertexCount == 0) continue;
-
-                    float yOffset = i * SectionHeight;
-                    int vertStart = s.VertexStartIndex;
-
-                    // 1. Adjust Vertices: Subtract section Y offset so they are local to the Section GameObject
-                    for (int v = 0; v < s.VertexCount; v++)
-                    {
-                        int index = vertStart + v;
-                        Vector3 pos = Vertices[index];
-                        pos.y -= yOffset;
-                        Vertices[index] = pos;
-                    }
-
-                    // 2. Adjust Indices: Relativize indices to start at 0 for this section
-                    int offset = -vertStart;
-                    AdjustIndices(OpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount, offset);
-                    AdjustIndices(TransparentTris, s.TransparentTriStartIndex, s.TransparentTriCount, offset);
-                    AdjustIndices(FluidTris, s.FluidTriStartIndex, s.FluidTriCount, offset);
-                }
-            }
-
-            private static void AdjustIndices(NativeList<int> indices, int start, int count, int offset)
-            {
-                for (int k = 0; k < count; k++)
-                {
-                    indices[start + k] += offset;
                 }
             }
         }

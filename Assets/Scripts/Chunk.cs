@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using Data;
 using Helpers;
+using Jobs;
 using Jobs.BurstData;
-using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -309,81 +309,6 @@ public class Chunk
 
     #region Mesh Generation
 
-    // Burst Job to adjust vertex positions (Global Y -> Local Section Y) and triangle indices (Global Index -> Local Index)
-    [BurstCompile]
-    private struct PostProcessMeshJob : IJob
-    {
-        public NativeList<Vector3> Vertices;
-        public NativeList<int> OpaqueTris;
-        public NativeList<int> TransparentTris;
-        public NativeList<int> FluidTris;
-
-        [ReadOnly]
-        public NativeArray<MeshSectionStats> Stats;
-
-        [ReadOnly]
-        public NativeList<Vector3> Normals;
-
-        [ReadOnly]
-        public NativeList<Color32> LightData;
-
-        public NativeList<NormalLightVertex> InterleavedStream3;
-
-        public int SectionHeight;
-
-        public void Execute()
-        {
-            // Build interleaved Normal + LightData for GPU stream 3 upload.
-            // Done here (Burst-compiled) instead of on the main thread.
-            int totalVerts = Vertices.Length;
-            InterleavedStream3.ResizeUninitialized(totalVerts);
-            for (int v = 0; v < totalVerts; v++)
-            {
-                InterleavedStream3[v] = new NormalLightVertex
-                {
-                    Normal = Normals[v],
-                    LightData = LightData[v],
-                };
-            }
-
-            // We iterate sections inside the job to avoid overhead of scheduling many tiny jobs
-            for (int i = 0; i < Stats.Length; i++)
-            {
-                MeshSectionStats s = Stats[i];
-                if (s.VertexCount == 0) continue;
-
-                float yOffset = i * SectionHeight;
-                int vertStart = s.VertexStartIndex;
-
-                // 1. Adjust Vertices: Subtract section Y offset so they are local to the Section GameObject
-                for (int v = 0; v < s.VertexCount; v++)
-                {
-                    int index = vertStart + v;
-                    Vector3 pos = Vertices[index];
-                    pos.y -= yOffset;
-                    Vertices[index] = pos;
-                }
-
-                // 2. Adjust Indices: Relativize indices to start at 0 for this section
-                // The indices currently point to the 'allVerts' array.
-                // We need them to point to the start of the section slice.
-                int offset = -vertStart;
-
-                AdjustIndices(OpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount, offset);
-                AdjustIndices(TransparentTris, s.TransparentTriStartIndex, s.TransparentTriCount, offset);
-                AdjustIndices(FluidTris, s.FluidTriStartIndex, s.FluidTriCount, offset);
-            }
-        }
-
-        private static void AdjustIndices(NativeList<int> indices, int start, int count, int offset)
-        {
-            for (int k = 0; k < count; k++)
-            {
-                indices[start + k] += offset;
-            }
-        }
-    }
-
     /// <summary>
     /// Applies the completed mesh data output from the Burst Job System to the chunk's internal section renderers.
     /// Uses the advanced native mesh API to apply data seamlessly without GC allocations.
@@ -393,7 +318,7 @@ public class Chunk
     {
         // 1. Run a fast Burst job on the main thread to adjust coordinate spaces from Chunk-Space to Section-Space.
         // This modifies the data in-place efficiently.
-        PostProcessMeshJob postProcessJob = new PostProcessMeshJob
+        MeshPostProcessJob postProcessJob = new MeshPostProcessJob
         {
             Vertices = meshData.Vertices,
             OpaqueTris = meshData.Triangles,

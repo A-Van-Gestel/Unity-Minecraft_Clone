@@ -9,7 +9,7 @@ namespace Data
     /// <summary>
     /// Interleaved struct for mesh stream 3: Normal (12 bytes) + LightData (4 bytes) = 16 bytes.
     /// Packs both attributes into a single stream to stay within Unity's 4-stream limit.
-    /// Built by <see cref="Chunk.PostProcessMeshJob"/> (Burst-compiled) to avoid main-thread interleaving.
+    /// Built by <see cref="Jobs.MeshPostProcessJob"/> (Burst-compiled) to avoid main-thread interleaving.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct NormalLightVertex

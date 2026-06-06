@@ -40,10 +40,7 @@ Shader "Hidden/Editor/BlockPreview"
 
             VoxelV2F vertFunction(VoxelAppdata v)
             {
-                VoxelV2F o = VoxelVert(v);
-                // Editor meshes don't provide TEXCOORD1 — force full brightness.
-                o.lightData = half4(1, 1, 1, 1);
-                return o;
+                return VoxelVert(v);
             }
 
             half4 fragFunction(VoxelV2F i) : SV_Target

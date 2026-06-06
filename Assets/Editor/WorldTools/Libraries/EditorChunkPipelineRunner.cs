@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Data;
+using Data.Enums;
 using Data.JobData;
 using Data.NativeData;
 using Data.WorldTypes;
@@ -204,12 +205,14 @@ namespace Editor.WorldTools.Libraries
         /// <param name="chunkVoxelPos">The voxel-space origin of the chunk.</param>
         /// <param name="maps">Dictionary of all chunk maps keyed by voxel origin.</param>
         /// <param name="clipBounds">Axis-aligned clip bounds. Use <see cref="MeshClipBounds.Disabled"/> for no clipping.</param>
+        /// <param name="smoothLighting">Smooth lighting quality level for the mesh job.</param>
         /// <returns>A tuple of the combined job handle and mesh output, or null if neighbors are missing.</returns>
         public (JobHandle handle, MeshDataJobOutput output)? ScheduleMeshing(
             ChunkCoord chunkCoord,
             Vector2Int chunkVoxelPos,
             Dictionary<Vector2Int, NativeArray<uint>> maps,
-            MeshClipBounds clipBounds)
+            MeshClipBounds clipBounds,
+            SmoothLightingQuality smoothLighting = SmoothLightingQuality.High)
         {
             if (!maps.TryGetValue(chunkVoxelPos, out NativeArray<uint> centerMap))
                 return null;
@@ -265,6 +268,7 @@ namespace Editor.WorldTools.Libraries
                 WaterVertexTemplates = _fluidTemplates.WaterVertexTemplates,
                 LavaVertexTemplates = _fluidTemplates.LavaVertexTemplates,
                 ClipBounds = clipBounds,
+                SmoothLighting = smoothLighting,
                 Output = meshOutput,
             };
 

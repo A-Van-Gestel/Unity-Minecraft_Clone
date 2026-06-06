@@ -331,6 +331,13 @@ namespace Editor.BlockEditor.Helpers
             mesh.colors = colors.ToArray();
             mesh.normals = normals.ToArray();
 
+            // Populate TexCoord1 with full brightness so BlockPreviewShader and
+            // FluidPreviewShader read valid light data without needing a toggle.
+            Vector4 fullBrightLight = new Vector4(1f, 1f, 1f, 1f);
+            Vector4[] lightUvs = new Vector4[vertices.Count];
+            for (int i = 0; i < lightUvs.Length; i++) lightUvs[i] = fullBrightLight;
+            mesh.SetUVs(1, lightUvs);
+
             mesh.subMeshCount = 2;
             mesh.SetTriangles(opaqueTriangles.ToArray(), 0);
             mesh.SetTriangles(transparentTriangles.ToArray(), 1);
