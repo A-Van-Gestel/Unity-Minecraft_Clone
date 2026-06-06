@@ -1394,10 +1394,11 @@ MonoBehaviour:
   _benchMarkEnabled: 0
   _runFullComparison: 1
   _benchmarkRuns: 50
-  _jobsToRun: 512
+  _jobsToRun: 256
   _scenario: 1
   _useBlockingWait: 1
   _runOnStart: 0
+  _writeReportToFile: 1
   _triggerKey: 26
 --- !u!1 &415598806
 GameObject:
