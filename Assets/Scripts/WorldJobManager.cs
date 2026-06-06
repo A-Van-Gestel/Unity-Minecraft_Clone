@@ -165,8 +165,11 @@ public class WorldJobManager : IDisposable
         // the voxel data. If lighting is in-flight, the mesh uses valid data from the previous
         // pass and gets rebuilt when the lighting job completes and triggers RequestChunkMeshRebuild.
         // This prevents perpetual deadlocks from cross-chunk BFS ping-pong.
-        if (chunk.ChunkData.HasLightChangesToProcess ||
-            chunk.ChunkData.NeedsInitialLighting)
+        // When lighting is disabled, skip this gate entirely — no lighting job will ever run
+        // to clear these flags, and the sunlight fill ensures all voxels are at max brightness.
+        if (_world.settings.enableLighting &&
+            (chunk.ChunkData.HasLightChangesToProcess ||
+             chunk.ChunkData.NeedsInitialLighting))
         {
             return false;
         }
@@ -424,8 +427,11 @@ public class WorldJobManager : IDisposable
                     }
                 }
 
-                // Check for pending lighting updates
-                if (_world.LightingStateManager.TryGetAndRemove(jobEntry.Key, out HashSet<Vector2Int> localLightCols))
+                // Check for pending lighting updates — only relevant when the lighting engine is active.
+                // When lighting is disabled, these entries would be orphaned (no BFS job to consume them)
+                // and HasLightChangesToProcess would be set without any job to clear it.
+                if (_world.settings.enableLighting &&
+                    _world.LightingStateManager.TryGetAndRemove(jobEntry.Key, out HashSet<Vector2Int> localLightCols))
                 {
                     HashSet<Vector2Int> globalLightCols = HashSetPool<Vector2Int>.Get();
                     foreach (Vector2Int lCol in localLightCols)
@@ -457,6 +463,10 @@ public class WorldJobManager : IDisposable
                 {
                     for (int y = 0; y < VoxelData.ChunkHeight; y++)
                     {
+                        // Skip null sections — writing sunlight=15 to air-only sections would
+                        // allocate a ChunkSection (~16 KB) that is never read by meshing (IsEmpty=true).
+                        if (chunkData.sections[y / ChunkMath.SECTION_SIZE] == null) continue;
+
                         for (int x = 0; x < VoxelData.ChunkWidth; x++)
                         {
                             for (int z = 0; z < VoxelData.ChunkWidth; z++)

@@ -386,7 +386,64 @@ When multiple blocks change in the same vertical column (e.g., explosions, falli
 
 ---
 
-## 6. Key File Reference
+## 6. Lighting-Disabled Mode (`enableLighting = false`)
+
+The `enableLighting` setting (`SettingsManager.enableLighting`) is an `[InitializationField]` — it can only be changed from the main menu and requires a world reload to take effect. When disabled, the entire lighting engine is bypassed and every block renders at full brightness (sunlight = 15). This section documents where and how the disabled path diverges from the normal pipeline.
+
+### 6.1 Design Intent
+
+The setting exists to fully disable the lighting engine for debugging, performance testing, or aesthetic preference. The goal is simple: **every block, including underground caves, appears at full light level.** No BFS jobs run, no edge checks fire, and no cross-chunk light modifications are processed.
+
+### 6.2 Pipeline Bypass Points
+
+The disabled-lighting path is implemented via guards at specific pipeline entry points, not via a single top-level switch. Each guard prevents work from being enqueued that no job will ever consume:
+
+| Location                                | Guard                                                                        | Purpose                                                                                       |
+|-----------------------------------------|------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| `ChunkData.AddToSunLightQueue`          | `enableLighting` check                                                       | Prevents BFS queue entries + `HasLightChangesToProcess` flag                                  |
+| `ChunkData.AddToBlockLightQueue`        | `enableLighting` check                                                       | Same, for blocklight channel                                                                  |
+| `ChunkData.ModifyVoxel`                 | `lightingEnabled` local                                                      | Sets `initialSunlight = 15` (not 0); gates `QueueSunlightRecalculation`                       |
+| `WorldJobManager.ProcessGenerationJobs` | Stage 2: gates `LightingStateManager` recovery                               | Prevents orphaned recalculation queue entries and stale `HasLightChangesToProcess`            |
+| `WorldJobManager.ProcessGenerationJobs` | Stage 3: sunlight fill loop (else branch)                                    | Sets sunlight = 15 on all non-null sections; skips null sections to avoid wasteful allocation |
+| `WorldJobManager.ScheduleMeshing`       | `enableLighting` gate on `HasLightChangesToProcess` / `NeedsInitialLighting` | Bypasses lighting-readiness check — meshing proceeds without waiting for lighting             |
+| `World.AreNeighborsMeshReady`           | `enableLighting` gate on `NeedsInitialLighting`                              | Same bypass for neighbor readiness                                                            |
+| `World.ForceCompleteDataJobsCoroutine`  | Wraps entire Phase 2 lighting loop                                           | Skips all BFS jobs during initial world load; clears stale flags from disk-loaded chunks      |
+| `World.Update` lighting scheduler       | `enableLighting` wraps entire block                                          | Skips dirty-set drain, watchdog scan, and job scheduling                                      |
+
+### 6.3 Sunlight Fill (Generation Path)
+
+When a chunk completes terrain generation with lighting disabled, `ProcessGenerationJobs` runs a fill loop instead of setting `NeedsInitialLighting`:
+
+```
+for each Y in [0, ChunkHeight):
+    if section is null → skip (avoids allocating ~16 KB for air-only sections)
+    for each (X, Z):
+        packed = GetVoxel(x, y, z)
+        packed = SetSunLight(packed, 15)
+        SetVoxel(x, y, z, packed)
+```
+
+The null-section skip is critical: without it, writing `sunlight = 15` to an air voxel produces a non-zero packed value (`0x000F0000`), causing `SetVoxel` to allocate a `ChunkSection` that meshing never reads (`IsEmpty = true`). At ~4 null sections per chunk above terrain, this would waste ~66 KB per chunk.
+
+### 6.4 Block Modification Path
+
+`ModifyVoxel` packs the new block with `sunlight = 15` (instead of the normal `0`) so every placed block starts at full brightness. The `QueueSunlightRecalculation` call is skipped entirely — without a running BFS engine, queued columns would set `HasLightChangesToProcess = true` with no job to clear it.
+
+The heightmap is still maintained unconditionally (it is cheap and has no downstream consumers when lighting is disabled).
+
+### 6.5 Initial World Load (Coroutine Path)
+
+`ForceCompleteDataJobsCoroutine` Phase 2 is wrapped in `if (settings.enableLighting)`. The `else` branch clears stale lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) on all chunks in the initial load area. These flags may have been serialized as `true` from a previous session where lighting was enabled.
+
+### 6.6 Key Invariants
+
+1. **No path may set `HasLightChangesToProcess = true` when lighting is disabled** without a corresponding clear before meshing. The `ScheduleMeshing` gate bypass is a safety net, not a substitute for preventing the flag from being set.
+2. **Null sections must remain null.** The sunlight fill must skip them to avoid a memory explosion above terrain.
+3. **`enableLighting` is `[InitializationField]`** — it cannot be toggled at runtime. All disabled-path logic assumes a consistent value for the entire world session. `ChunkData.Reset()` clears all transient flags on pool recycling, so a world reload with a different setting starts clean.
+
+---
+
+## 7. Key File Reference
 
 | File                                         | Role                                                                                |
 |----------------------------------------------|-------------------------------------------------------------------------------------|

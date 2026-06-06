@@ -791,71 +791,85 @@ public class World : MonoBehaviour
 
         int lightingLoopIterations = 0;
 
-        // This logic is a synchronous version of what the Update() loop does asynchronously.
-        while (HasPendingInitialLighting(chunksInLoadArea) || HasPendingLightChangesOnMainThread(chunksInLoadArea) ||
-               HasPendingEdgeChecks(chunksInLoadArea) || JobManager.LightingJobs.Count > 0)
+        if (settings.enableLighting)
         {
-            lightingLoopIterations++;
-
-            // --- Step 2a: Trigger Initial Lighting Requests ---
-            lightingSchedulingWatch.Start();
-            // Iterate through a copy to prevent modification-during-iteration issues.
-            foreach (ChunkData chunkData in chunksInLoadArea)
+            // This logic is a synchronous version of what the Update() loop does asynchronously.
+            while (HasPendingInitialLighting(chunksInLoadArea) || HasPendingLightChangesOnMainThread(chunksInLoadArea) ||
+                   HasPendingEdgeChecks(chunksInLoadArea) || JobManager.LightingJobs.Count > 0)
             {
-                if (chunkData.IsPopulated && chunkData.NeedsInitialLighting)
-                {
-                    // We must still ensure neighbors have their terrain data ready before lighting.
-                    if (AreNeighborsDataReady(ChunkCoord.FromVoxelOrigin(chunkData.Position)))
-                    {
-                        // This chunk is ready. Trigger its full sunlight recalculation, which sets `HasLightChangesToProcess = true` and populates the light queues.
-                        chunkData.RecalculateSunLightLight();
+                lightingLoopIterations++;
 
-                        // The request for an *initial* light pass has now been fulfilled.
-                        chunkData.NeedsInitialLighting = false;
+                // --- Step 2a: Trigger Initial Lighting Requests ---
+                lightingSchedulingWatch.Start();
+                // Iterate through a copy to prevent modification-during-iteration issues.
+                foreach (ChunkData chunkData in chunksInLoadArea)
+                {
+                    if (chunkData.IsPopulated && chunkData.NeedsInitialLighting)
+                    {
+                        // We must still ensure neighbors have their terrain data ready before lighting.
+                        if (AreNeighborsDataReady(ChunkCoord.FromVoxelOrigin(chunkData.Position)))
+                        {
+                            // This chunk is ready. Trigger its full sunlight recalculation, which sets `HasLightChangesToProcess = true` and populates the light queues.
+                            chunkData.RecalculateSunLightLight();
+
+                            // The request for an *initial* light pass has now been fulfilled.
+                            chunkData.NeedsInitialLighting = false;
+                        }
                     }
                 }
-            }
 
-            // --- Step 2b: Schedule Lighting Jobs (including edge checks) ---
-            // Now that the initial light requests have been processed, the regular lighting scheduler can pick them up in the same coroutine iteration.
+                // --- Step 2b: Schedule Lighting Jobs (including edge checks) ---
+                // Now that the initial light requests have been processed, the regular lighting scheduler can pick them up in the same coroutine iteration.
+                foreach (ChunkData chunkData in chunksInLoadArea)
+                {
+                    ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
+                    if (!chunkData.IsPopulated || JobManager.LightingJobs.ContainsKey(chunkCoord)) continue;
+
+                    bool scheduled = false;
+
+                    if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
+                    {
+                        chunkData.HasLightChangesToProcess = true;
+                        scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                    }
+
+                    if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
+                    {
+                        // OPTIMIZATION: Use TempJob allocator.
+                        // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
+                        JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                    }
+                }
+
+                lightingSchedulingWatch.Stop();
+
+                // --- Step 2c: Force-complete and process all scheduled jobs ---
+                lightingCompletionWatch.Start();
+                CompleteAndProcessLightingJobs();
+                lightingCompletionWatch.Stop();
+
+                // --- Safety Break ---
+                safetyBreak++;
+                if (safetyBreak > maxIterations)
+                {
+                    Debug.LogError($"ForceCompleteDataJobsCoroutine exceeded max iterations ({maxIterations}) during Lighting Phase. Forcing exit.");
+                    Debug.LogError($"Remaining jobs: Lighting({JobManager.LightingJobs.Count}). Pending chunks: InitialLight({chunksInLoadArea.Count(c => c.NeedsInitialLighting)}), LightChanges({chunksInLoadArea.Count(c => c.HasLightChangesToProcess)}), EdgeChecks({chunksInLoadArea.Count(c => c.NeedsEdgeCheck)})");
+                    yield break; // Exit the coroutine
+                }
+
+                yield return null; // Wait a frame
+            }
+        }
+        else
+        {
+            // With lighting disabled, no BFS jobs run. Clear stale lighting flags from
+            // disk-loaded chunks so they don't block meshing or confuse other readers.
             foreach (ChunkData chunkData in chunksInLoadArea)
             {
-                ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
-                if (!chunkData.IsPopulated || JobManager.LightingJobs.ContainsKey(chunkCoord)) continue;
-
-                bool scheduled = false;
-
-                if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
-                {
-                    chunkData.HasLightChangesToProcess = true;
-                    scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
-                }
-
-                if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
-                {
-                    // OPTIMIZATION: Use TempJob allocator.
-                    // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
-                    JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
-                }
+                chunkData.NeedsInitialLighting = false;
+                chunkData.HasLightChangesToProcess = false;
+                chunkData.NeedsEdgeCheck = false;
             }
-
-            lightingSchedulingWatch.Stop();
-
-            // --- Step 2c: Force-complete and process all scheduled jobs ---
-            lightingCompletionWatch.Start();
-            CompleteAndProcessLightingJobs();
-            lightingCompletionWatch.Stop();
-
-            // --- Safety Break ---
-            safetyBreak++;
-            if (safetyBreak > maxIterations)
-            {
-                Debug.LogError($"ForceCompleteDataJobsCoroutine exceeded max iterations ({maxIterations}) during Lighting Phase. Forcing exit.");
-                Debug.LogError($"Remaining jobs: Lighting({JobManager.LightingJobs.Count}). Pending chunks: InitialLight({chunksInLoadArea.Count(c => c.NeedsInitialLighting)}), LightChanges({chunksInLoadArea.Count(c => c.HasLightChangesToProcess)}), EdgeChecks({chunksInLoadArea.Count(c => c.NeedsEdgeCheck)})");
-                yield break; // Exit the coroutine
-            }
-
-            yield return null; // Wait a frame
         }
 
         totalStopwatch.Stop();
@@ -1523,7 +1537,8 @@ public class World : MonoBehaviour
             // Initial lighting must have been completed at least once.
             // Without initial lighting, the neighbor's light data is all zeros,
             // which would produce incorrect face culling and ambient occlusion.
-            if (neighborData.NeedsInitialLighting) return false;
+            // When lighting is disabled, the sunlight fill handles brightness, so skip this gate.
+            if (settings.enableLighting && neighborData.NeedsInitialLighting) return false;
         }
 
         return true;
