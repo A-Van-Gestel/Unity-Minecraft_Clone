@@ -409,6 +409,7 @@ The disabled-lighting path is implemented via guards at specific pipeline entry 
 | `World.AreNeighborsMeshReady`           | `enableLighting` gate on `NeedsInitialLighting`                              | Same bypass for neighbor readiness                                                            |
 | `World.ForceCompleteDataJobsCoroutine`  | Wraps entire Phase 2 lighting loop                                           | Skips all BFS jobs during initial world load; clears stale flags from disk-loaded chunks      |
 | `World.Update` lighting scheduler       | `enableLighting` wraps entire block                                          | Skips dirty-set drain, watchdog scan, and job scheduling                                      |
+| `GetChunkMapForJob` / `GetMapForJob`    | Post-copy sunlight stamp when `enableLighting = false`                       | Stamps sunlight=15 on every voxel in the snapshot, covering null sections and post-fill mods  |
 
 ### 6.3 Sunlight Fill (Generation Path)
 
@@ -424,6 +425,9 @@ for each Y in [0, ChunkHeight):
 ```
 
 The null-section skip is critical: without it, writing `sunlight = 15` to an air voxel produces a non-zero packed value (`0x000F0000`), causing `SetVoxel` to allocate a `ChunkSection` that meshing never reads (`IsEmpty = true`). At ~4 null sections per chunk above terrain, this would waste ~66 KB per chunk.
+
+**Job snapshot sunlight stamp:** The sunlight fill only covers sections that are non-null at the time it runs. Sections allocated *after* the fill — by structure placement via `ApplyModifications` — have their air voxels initialized to sunlight=0 by the section pool. Null sections also contribute sunlight=0 in the flattened snapshot. Rather than patching individual cases, both `GetChunkMapForJob` and `GetMapForJob` apply a full-array sunlight stamp when lighting is disabled: after copying all section data, every voxel in the snapshot has its sunlight
+bits set to 15 via `SetSunLight(packed, 15)`. This is a single post-copy sweep over the 32,768-voxel array that catches all three sources of stale sunlight=0 (null sections, post-fill structure sections, and any other edge case) without allocating physical `ChunkSection` objects.
 
 ### 6.4 Block Modification Path
 

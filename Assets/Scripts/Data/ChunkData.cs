@@ -699,7 +699,17 @@ namespace Data
                     // Copy managed section array to native job array at correct offset
                     NativeArray<uint>.Copy(sections[i].voxels, 0, jobArray, i * sectionVoxelCount, sectionVoxelCount);
                 }
-                // If section is null, the jobArray already contains 0 (Air) from initialization
+                // If null, the jobArray already contains 0 (Air) from initialization.
+                // The lighting BFS (when enabled) will fill correct values.
+            }
+
+            // With lighting disabled, stamp sunlight=15 on every voxel in the snapshot.
+            // Covers null sections (air), post-generation structure sections, and any voxel
+            // whose sunlight wasn't set by the ProcessGenerationJobs fill.
+            if (World.Instance != null && !World.Instance.settings.enableLighting)
+            {
+                for (int v = 0; v < totalVoxels; v++)
+                    jobArray[v] = BurstVoxelDataBitMapping.SetSunLight(jobArray[v], 15);
             }
 
             return jobArray;
