@@ -141,6 +141,7 @@ namespace Editor.WorldTools
                 }
                 else
                 {
+                    StampFullBrightOnAllMaps();
                     ScheduleAllMeshing();
                 }
             }
@@ -397,6 +398,21 @@ namespace Editor.WorldTools
             }
 
             return packed;
+        }
+
+        /// <summary>
+        /// Stamps sunlight=15 on every voxel in every stored chunk map.
+        /// Called when lighting is disabled to ensure the mesh job reads full
+        /// brightness everywhere — matching the runtime snapshot stamp approach.
+        /// </summary>
+        private void StampFullBrightOnAllMaps()
+        {
+            foreach (KeyValuePair<Vector2Int, NativeArray<uint>> kvp in _chunkMaps)
+            {
+                NativeArray<uint> map = kvp.Value;
+                for (int v = 0; v < map.Length; v++)
+                    map[v] = BurstVoxelDataBitMapping.SetSunLight(map[v], 15);
+            }
         }
 
         private void ScheduleAllMeshing()
