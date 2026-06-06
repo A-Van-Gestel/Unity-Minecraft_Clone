@@ -40,7 +40,7 @@ Generic rename/move tools miss these. Check each before `apply_refactor_tool`:
 
 - `apply_refactor_tool` with the refactor_id from step 1.
 - `detect_changes` after — confirm the refactor did what you expected and nothing else.
-- Run `dotnet build "Assembly-CSharp.csproj"`. If the build fails, fix the errors before reporting the refactor done.
+- Run `dotnet build "Assembly-CSharp.csproj"`. If the refactor touches any file under `Assets/Editor/`, also run `dotnet build "Assembly-CSharp-Editor.csproj"`. If either build fails, fix the errors before reporting the refactor done.
 - If `.cs` files moved, confirm `.meta` files moved with them — `git status` should show renames, not delete + add.
 - If public serialized fields were renamed, confirm either `[FormerlySerializedAs]` was added or the user has accepted the data-break.
 - **Unity MCP verification (unity-mcp):** After the refactor compiles:
