@@ -1,11 +1,18 @@
 # Smooth Lighting & Full RGB Light Engine
 
-- **Status:** Phase 1 Implemented (awaiting visual verification & performance profiling)
+- **Status:** Phase 1 Implemented — Phase 2 architecture finalized (2026-06-06)
 - **Current Implementation:** Per-vertex smooth lighting with separate sunlight/blocklight channels
-- **Phase 1 Target:** Smooth (ambient-occlusion-style) vertex-averaged lighting with full RGB data layout
-- **Phase 2 Target:** Full RGB propagation for both sunlight and blocklight
+- **Phase 1 Target:** Smooth (ambient-occlusion-style) vertex-averaged lighting with full RGB data layout — **Implemented**
+- **Phase 2 Target:** RGB blocklight propagation (per-channel independent BFS) + shader-only sunlight sky tinting
 - **Depends On:** None (can be implemented on the current codebase)
 - **Prerequisites Completed:** BFS attenuation formula fix (`max(1, opacity)`) across all three call sites in `NeighborhoodLightingJob.cs`
+- **Key Decisions (2026-06-06):**
+    - Storage: Separate `NativeArray<ushort>` per section (Option A) — not widened `ulong` voxels
+    - Sunlight: Shader-only sky tinting (monochrome BFS, tinted via `SkyLightColor` uniform) — not full BFS RGB
+    - Blocklight: Per-channel independent propagation (3×4 bits) — not single emission + tint
+    - Legacy `uint` light bits: Dual-write during Phase 2, deprecated in post-cleanup step
+    - Queue serialization: Upgraded to RGB format with AOT migration — not reconstructed at runtime
+    - Emission UI: Color picker with synced RGB sliders (0-15 per channel)
 
 ---
 
@@ -717,114 +724,157 @@ With water opacity = 2, the BFS formula (`sourceLight - max(1, opacity)`) attenu
 
 ### 3.1 Overview
 
-Phase 2 makes **both** sunlight and blocklight fully RGB-aware in the lighting engine itself. This means:
+Phase 2 makes **blocklight** fully RGB-aware in the lighting engine and adds **shader-only sky tinting** for sunlight. This means:
 
-- **Sunlight RGB:** `World.cs` sets a sunlight color that varies with time of day. Dawn = warm orange, noon = white, dusk = orange/red, night = cool blue (moonlight), blood moon = deep red. The BFS propagates RGB sunlight instead of a single scalar.
-- **Blocklight RGB:** Each light-emitting block defines an emission color (torches = warm orange, soul lanterns = cyan, redstone = red). The BFS propagates three independent color channels.
+- **Sunlight:** Remains a monochrome scalar (0-15) in the BFS, identical to Phase 1. Time-of-day color (blue moonlight, red blood moon, warm dawn) is applied as a shader uniform (`SkyLightColor`) that tints the scalar value at render time. This achieves the same visual result as full BFS RGB sunlight with zero lighting engine cost, because the sky is a uniform color — there is no per-region sky gradient to model.
+- **Blocklight RGB:** Each light-emitting block defines an emission color via a color picker with synced RGB sliders (each channel 0-15). The BFS propagates three independent color channels using per-channel max at each destination voxel.
 
-The smooth-lighting vertex averaging from Phase 1 already produces `Color32` light data per vertex. Phase 2 replaces the monochrome sunlight (replicated across R=G=B) and scalar blocklight (A) with real RGB values. **No vertex format, mesh upload, or stream layout changes are needed** — only the encoding in `SampleCorner`/`BuildFlatLightData` and the shader's `ApplyVoxelLightingRGB` function update.
+The smooth-lighting vertex averaging from Phase 1 already produces `Color32` light data per vertex. Phase 2 replaces the duplicated sunlight channels (R=G=B) and scalar blocklight (A) with `(sunLuminance, blockR, blockG, blockB)`. **No vertex format, mesh upload, or stream layout changes are needed** — only the encoding in `SampleCorner`/`BuildFlatLightData` and the shader's `ApplyVoxelLightingRGB` function update.
+
+### 3.1.1 Design Rationale: Per-Channel Propagation vs Single Emission + Tint
+
+An alternative approach was considered: propagate a single scalar emission through the BFS and store a separate color "tint" per voxel. This was rejected because it cannot handle multi-source color mixing correctly.
+
+**The fundamental problem:** When two differently-colored light sources illuminate the same voxel (e.g., a red torch and a blue lantern both contributing intensity 12), the tint approach must pick or blend a single color. Picking one loses the other source entirely; blending produces an average `(0.5, 0, 0.5)` rather than the physically correct additive result `(1, 0, 1)`. The BFS processes neighbors in non-deterministic order, so the "winner" would be unstable.
+
+**Per-channel propagation solves this naturally:** Each channel propagates and attenuates independently. At overlap zones, per-channel `max()` produces the correct additive color mixing — both sources contribute at full strength. No provenance tracking, no blending ambiguity, no order dependence.
+
+The sky tinting approach works for sunlight specifically because all sunlight comes from one source (the sky), so there is never a color mixing problem — every sun-lit voxel has the same color, just different scalar intensity.
 
 ### 3.2 Voxel Data Changes
 
 #### 3.2.1 The Storage Problem
 
-The current 32-bit `uint` allocates 4 bits each for sunlight and blocklight (8 bits total). Full RGB for both channels needs:
+The current 32-bit `uint` allocates 4 bits each for sunlight and blocklight (8 bits total). RGB blocklight needs 12 additional bits:
 
-- Sunlight: 3 channels × 4 bits = 12 bits
+- Sunlight: 1 channel × 4 bits = 4 bits (monochrome, tinted in shader)
 - Blocklight: 3 channels × 4 bits = 12 bits
-- Total: 24 bits (up from 8), requiring 16 additional bits
+- Total: 16 bits (up from 8), requiring 8 additional bits
 
 ```
 Current:  [ID: 16][Sun: 4][Block: 4][Meta: 8] = 32 bits — fully used
-RGB need: [ID: 16][SunR:4][SunG:4][SunB:4][BlockR:4][BlockG:4][BlockB:4][Meta: 8] = 56 bits
+RGB need: [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits — separate array
 ```
 
-#### 3.2.2 Proposed Solutions
+#### 3.2.2 Chosen Solution: Separate `NativeArray<ushort>` Light Storage
 
-**Option A: Separate light storage array (`NativeArray<uint>` per chunk).**
+> **Decision (2026-06-06):** Option A (separate light array) selected over Option B (64-bit voxel) without benchmarking. Option A is architecturally superior — it avoids the enormous blast radius of widening the primary voxel `uint` (serialization migration, generation, fluid logic, all bit-mapping helpers), enables future optimizations (lazy allocation for empty sections, section-level light culling), and provides better cache behavior for the BFS (smaller, contiguous light-only working set). Option B's only advantage (single source of truth) does not
+> justify doubling the voxel data memory footprint and touching every system in the pipeline.
 
-Keep the existing `uint` voxel data for ID + metadata. Add a parallel `uint` per voxel for all light channels:
-
-```
-Existing uint: [ID: 16][Sun(legacy): 4][Block(legacy): 4][Meta: 8]
-New uint:      [SunR: 4][SunG: 4][SunB: 4][Unused: 4][BlockR: 4][BlockG: 4][BlockB: 4][Unused: 4]
-               — 24 bits of light data packed into 32
-```
-
-- **Pros:** No change to the existing `uint` layout — ID, metadata, serialization, fluid logic, and all non-lighting systems are untouched. Memory increase is 32,768 × 4 bytes = 128 KB per chunk. Can be allocated lazily per section. Clean separation of concerns: one array for block identity, one for light state.
-- **Cons:** Two arrays to keep in sync. The lighting BFS reads/writes both arrays per neighbor. The mesh job needs both arrays. Cache coherence suffers from touching two memory regions in tight loops.
-
-**Mitigating factor:** Light data is accessed in a different phase than block data in most hot paths. The BFS loop primarily reads block types (from `BlockTypes[]` via the ID) and light values. With a separate light array, the BFS can operate on a contiguous light-only buffer without polluting the cache with ID/metadata bits it doesn't need. This may actually *improve* cache utilization for the BFS compared to the current interleaved layout.
-
-**Legacy scalar fields:** The sunlight (bits 16-19) and blocklight (bits 20-23) in the existing `uint` become **derived values**. After the BFS writes RGB to the light array, it also writes `max(R,G,B)` to the legacy bits. This maintains compatibility with systems that only need scalar light (mob spawning, face culling heuristics). If this dual-write cost is unacceptable, the legacy bits can be deprecated and `GetLight()` can read from the light array instead.
-
-**Option B: Move to a 64-bit voxel (`ulong`).**
+Keep the existing `uint` voxel data for ID + metadata. Add a parallel `ushort` per voxel for all light channels:
 
 ```
-[ID: 16][SunR:4][SunG:4][SunB:4][BlockR:4][BlockG:4][BlockB:4][Meta: 8][Reserved: 16] = 64 bits
+Existing uint:  [ID: 16][Sun(legacy): 4][Block(legacy): 4][Meta: 8] = 32 bits
+New ushort:     [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits
 ```
 
-- **Pros:** Single source of truth — one array, one read/write per voxel. 16 reserved bits for future features (biome tint, damage state, etc.). Simpler code with no sync issues.
-- **Cons:** Doubles memory per voxel (128 KB → 256 KB per chunk). Doubles memory bandwidth for the entire pipeline. Requires updating `NativeArray<uint>` to `NativeArray<ulong>` across every system — wide blast radius touching serialization, generation, meshing, fluid logic, and all helper functions. Impacts cache performance for systems that only need ID or metadata but must fetch 8 bytes regardless.
+**Why `ushort` (16-bit) instead of `uint` (32-bit):** Exactly 16 bits of light data are needed (4 channels × 4 bits). Using `ushort` halves the memory cost compared to `uint` (64 KB vs 128 KB per chunk, or 32,768 × 2 bytes) and improves cache density for the BFS inner loop. The tradeoff — `ushort` bit manipulation in Burst requires casting — is trivial to wrap in helper methods.
 
-#### 3.2.3 Recommendation: Benchmark Both
+**Memory impact:**
 
-Neither option is clearly superior on theoretical grounds alone. Option A has better cache behavior for the BFS (smaller light-only working set) but worse code complexity. Option B has a simpler programming model but larger memory footprint.
+- Per section (16×16×16): 4,096 × 2 bytes = 8 KB
+- Per chunk (16 sections): 65,536 × 2 bytes = 128 KB *(but only 32,768 voxels per chunk with current height — sections can be allocated lazily)*
+- At 2,000 loaded chunks: ~128 MB worst-case *(significantly less with lazy allocation for empty/air-only sections)*
 
-**Before committing to either, benchmark both approaches** against the current baseline:
+**No change to the existing `uint` layout:** ID, metadata, serialization, fluid logic, and all non-lighting systems are untouched. Clean separation of concerns: one array for block identity, one for light state. The BFS can operate on a contiguous light-only buffer without polluting the cache with ID/metadata bits.
 
-1. **Baseline:** Profile the current `NeighborhoodLightingJob` and `MeshGenerationJob` execution times. Record frame time, job duration (via Unity Profiler markers), and memory usage.
-2. **Option A prototype:** Add a parallel `NativeArray<uint>` for light data. Modify the lighting BFS to write to both arrays. Measure BFS job duration vs baseline.
-3. **Option B prototype:** Change the voxel array to `NativeArray<ulong>`. Update the BFS and measure. Compare against Option A.
-4. **Decision criteria:** If BFS performance differs by <10%, prefer Option B for simplicity. If Option A is measurably faster (better cache utilization), accept the complexity.
+#### 3.2.3 `ushort` Light Array Bit Packing
 
-### 3.3 Sunlight RGB: Time-of-Day Tinting
+```
+Bit layout (16 bits total):
+  [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4]
+
+  Bits 0-3:   Sunlight scalar    (0-15)
+  Bits 4-7:   Blocklight Red     (0-15)
+  Bits 8-11:  Blocklight Green   (0-15)
+  Bits 12-15: Blocklight Blue    (0-15)
+```
+
+Helper methods (in a new `LightBitMapping` static class or extension of `BurstVoxelDataBitMapping`):
+
+```csharp
+private const int SUN_SHIFT = 0;
+private const int BLOCK_R_SHIFT = 4;
+private const int BLOCK_G_SHIFT = 8;
+private const int BLOCK_B_SHIFT = 12;
+private const int CHANNEL_MASK = 0xF;
+
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+public static byte GetSunLight(ushort lightData) => (byte)((lightData >> SUN_SHIFT) & CHANNEL_MASK);
+
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+public static byte GetBlocklightR(ushort lightData) => (byte)((lightData >> BLOCK_R_SHIFT) & CHANNEL_MASK);
+
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+public static byte GetBlocklightG(ushort lightData) => (byte)((lightData >> BLOCK_G_SHIFT) & CHANNEL_MASK);
+
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+public static byte GetBlocklightB(ushort lightData) => (byte)((lightData >> BLOCK_B_SHIFT) & CHANNEL_MASK);
+
+[MethodImpl(MethodImplOptions.AggressiveInlining)]
+public static ushort PackLightData(byte sun, byte blockR, byte blockG, byte blockB)
+    => (ushort)((sun & CHANNEL_MASK) | ((blockR & CHANNEL_MASK) << BLOCK_R_SHIFT)
+        | ((blockG & CHANNEL_MASK) << BLOCK_G_SHIFT) | ((blockB & CHANNEL_MASK) << BLOCK_B_SHIFT));
+```
+
+#### 3.2.4 Legacy Scalar Light Bits (Dual-Write Strategy)
+
+The sunlight (bits 16-19) and blocklight (bits 20-23) in the existing `uint` become **derived values** during Phase 2 implementation. After the BFS writes to the `ushort` light array, it also writes `max(R,G,B)` to the legacy blocklight bits and the sunlight scalar to the legacy sunlight bits. This maintains compatibility with all existing scalar light readers:
+
+- `ChunkData.ModifyVoxel` — reads `GetSunLight()`/`GetBlockLight()` for queue seeding
+- `MeshGenerationJob.SampleNeighborLight` — reads scalar light for smooth lighting
+- Mob spawning checks — uses `max(sun, block) >= threshold`
+- Face culling heuristics
+
+**Post-cleanup step (after Phase 2 is stable):** Migrate all scalar light readers to the new `ushort` array, stop dual-writing, and free the 8 bits in the `uint` for future metadata expansion (biome tint, damage state, block variant, etc.). This is a separate refactor, not part of the Phase 2 implementation.
+
+### 3.3 Sunlight: Shader-Only Sky Tinting
+
+> **Decision (2026-06-06):** Shader-only tinting confirmed. The sunlight BFS remains monochrome (scalar 0-15, unchanged from Phase 1). The sky color is applied as a per-frame shader uniform. This delivers the visual goal (blue moonlight, red blood moon, warm dawn) with zero lighting engine cost. Full BFS RGB sunlight could be added later if per-region sky coloring becomes a requirement, but is not planned.
 
 #### 3.3.1 Sky Color Uniform
 
-`World.cs` already sets `GlobalLightLevel` (0-1) as a day/night cycle uniform. Phase 2 extends this to a color:
+`World.cs` already sets `GlobalLightLevel` (0-1) as a day/night cycle uniform. Phase 2 adds a `SkyLightColor` uniform (RGB) that varies with time of day:
 
 ```csharp
 // World.cs
-private Color _skyLightColor = Color.white;  // Updated per frame based on time of day
+[SerializeField] private Gradient _skyLightGradient;  // Configurable in inspector
+private Color _skyLightColor = Color.white;            // Updated per frame from gradient
 
-// Example curve (configurable via AnimationCurve or gradient):
-// Dawn:       (1.0, 0.85, 0.6)   — warm orange
-// Noon:       (1.0, 1.0, 1.0)    — pure white
-// Dusk:       (1.0, 0.7, 0.4)    — deep orange
-// Night:      (0.6, 0.7, 1.0)    — cool blue (moonlight)
-// Blood moon: (1.0, 0.2, 0.15)   — deep red
+// Example gradient stops:
+// Dawn  (0.25): (1.0, 0.85, 0.6)   — warm orange
+// Noon  (0.50): (1.0, 1.0, 1.0)    — pure white
+// Dusk  (0.75): (1.0, 0.7, 0.4)    — deep orange
+// Night (0.00): (0.6, 0.7, 1.0)    — cool blue (moonlight)
+// Blood moon:   (1.0, 0.2, 0.15)   — deep red (event-driven override)
 ```
 
-#### 3.3.2 Sunlight BFS Changes
+The shader multiplies the monochrome sunlight scalar by this color:
 
-Currently, the sunlight BFS propagates a single value (0-15). With RGB, it propagates three independent channels. The sky color from `World.cs` seeds the sunlight columns:
-
-```
-Initial sunlight above heightmap:
-    sunR = (byte)(15 * skyColor.r)
-    sunG = (byte)(15 * skyColor.g)
-    sunB = (byte)(15 * skyColor.b)
+```hlsl
+half3 sunContrib = baseColor * sunShadow * SkyLightColor;
 ```
 
-The BFS attenuates each channel independently through opacity. Opacity is still a single scalar per block type — it reduces all three channels equally:
+#### 3.3.2 Sunlight BFS — Unchanged
 
+The sunlight BFS continues to propagate a single scalar value (0-15), identical to Phase 1. The `ushort` light array stores the sunlight scalar in bits 0-3. No changes to `RecalculateSunlightForColumn`, `PropagateLight` (sun channel), or `PropagateDarkness` (sun channel) are needed.
+
+#### 3.3.3 Sun/Block Interaction at Boundaries
+
+The shader-only approach produces correct sun/block blending because the final compositing uses per-channel `max()` after both contributions are fully computed:
+
+```hlsl
+// Sunlight: scalar × shade curve × sky color → RGB contribution
+half3 sunContrib = baseColor * sunShadow * SkyLightColor;
+
+// Blocklight: RGB channels × shade curve (always full intensity) → RGB contribution
+half3 blockContrib = baseColor * half3(blockR_shadow, blockG_shadow, blockB_shadow);
+
+// Per-channel max: brighter source wins per RGB channel
+return max(sunContrib, blockContrib);
 ```
-targetR = sourceR - max(1, opacity)
-targetG = sourceG - max(1, opacity)
-targetB = sourceB - max(1, opacity)
-```
 
-A neighbor is enqueued if **any** channel increased.
-
-#### 3.3.3 Time-of-Day Update Strategy
-
-When the sky color changes (every few seconds, not every frame), all sunlight must be recalculated. This is expensive but can be amortized:
-
-- **Option 1: Shader-only tinting (recommended for Phase 2 launch).** Keep the sunlight BFS monochrome (propagate scalar 0-15 as today). Apply the sky color as a per-frame shader uniform that tints the monochrome sunlight. This is zero-cost in the BFS and achieves the same visual result for uniform sky lighting. The `lightData.rgb` carries `(sunLuminance, 0, 0)` and the shader multiplies by `_SkyLightColor`.
-- **Option 2: Full BFS RGB.** Propagate RGB in the BFS. When sky color changes, mark all chunks as needing re-lighting. Process progressively (N chunks per frame). More physically correct but much more expensive — primarily useful if different *regions* of the sky have different colors (e.g., sunset gradient), which our engine doesn't currently model.
-
-**Recommendation:** Option 1 for launch. It delivers the visual goal (blue moonlight, red blood moons) with zero lighting engine cost. Option 2 can be added later if per-region sky coloring becomes a requirement.
+At a doorway at dusk: outside has high sun luminance tinted warm orange, inside has high blocklight RGB from torches. The smooth lighting vertex averaging produces a gradient of sun luminance (high→low) and blocklight RGB (low→high). The per-channel `max()` picks the dominant source at each point, creating a natural crossfade between warm outdoor sunset light and warm indoor torch light.
 
 ### 3.4 Blocklight RGB Changes
 
@@ -834,7 +884,14 @@ Add an emission color to `BlockType` / `BlockTypeJobData`:
 
 ```csharp
 // In BlockType (ScriptableObject / inspector-editable)
-public Color32 lightEmissionColor;  // RGB emission color (alpha ignored)
+[ColorUsage(false)]  // No alpha needed
+public Color lightEmissionColor = Color.white;  // RGB emission tint
+
+[Range(0, 15)]
+public byte lightEmission;  // Peak emission intensity (existing field)
+// Inspector UI: color picker sets the ratio, intensity slider sets the peak channel value.
+// A torch defined as color #FF9944 at intensity 15 maps to (15, 9, 4).
+// Synced RGB sliders (0-15 per channel) provide a fallback for precise control.
 
 // In BlockTypeJobData (Burst-safe job copy)
 public readonly byte EmissionR;  // 0-15
@@ -842,7 +899,18 @@ public readonly byte EmissionG;  // 0-15
 public readonly byte EmissionB;  // 0-15
 ```
 
-The existing `lightEmission` scalar (byte, 0-15) is derived as `max(EmissionR, EmissionG, EmissionB)` and kept for backwards compatibility with systems that only need scalar luminance (mob spawning, etc.). Or it can be deprecated entirely, with callers reading `max(R,G,B)` on demand.
+**Emission derivation:** The inspector color picker and intensity slider are combined to produce the 3 emission channels:
+
+```csharp
+// In BlockTypeJobData constructor:
+float maxComponent = Mathf.Max(color.r, color.g, color.b);
+float scale = maxComponent > 0 ? lightEmission / maxComponent : 0;
+EmissionR = (byte)Mathf.Clamp(Mathf.RoundToInt(color.r * scale), 0, 15);
+EmissionG = (byte)Mathf.Clamp(Mathf.RoundToInt(color.g * scale), 0, 15);
+EmissionB = (byte)Mathf.Clamp(Mathf.RoundToInt(color.b * scale), 0, 15);
+```
+
+The existing `lightEmission` scalar is derived as `max(EmissionR, EmissionG, EmissionB)` and kept for backwards compatibility with systems that only need scalar luminance (mob spawning, legacy dual-write to `uint` blocklight bits). Existing blocks with `lightEmission > 0` and no `lightEmissionColor` set default to white `(1, 1, 1)`, producing `(15, 15, 15)` — identical to the current scalar behavior.
 
 #### 3.4.2 BFS Propagation Changes
 
@@ -858,14 +926,38 @@ A neighbor is enqueued if **any** channel increased. At the destination voxel, e
 
 #### 3.4.3 Queue Entry Format
 
-The current BFS queue entries carry a position and a single light level. With RGB, each entry needs position + 3 channel levels. Options:
+The current BFS queue entries use `LightQueueNode { Vector3Int Position; byte OldLightLevel }` (13 bytes) for the managed-side queue and `LightRemovalNode { Vector3Int Pos; byte LightLevel }` (13 bytes) inside the job. With RGB blocklight, the blocklight queue entries must carry 3 channel levels.
 
-- **Pack into `ulong`:** Position (20 bits) + R (4) + G (4) + B (4) = 32 bits. Fits in a `uint`, or use `ulong` for additional flags / direction bitmask.
-- **Struct queue:** `NativeQueue<BlocklightRGBEntry>` where `BlocklightRGBEntry` is a small blittable struct `(int3 pos, byte r, byte g, byte b)`. Cleaner, slightly more memory per entry.
+**Managed-side queue (`ChunkData.cs`):**
+
+```csharp
+public struct LightQueueNode : IEquatable<LightQueueNode>
+{
+    public Vector3Int Position;
+    public byte OldLightLevel;   // Sunlight queue: scalar (unchanged)
+    public byte OldBlockR;       // Blocklight queue: RGB channels
+    public byte OldBlockG;
+    public byte OldBlockB;
+}
+```
+
+The sunlight queue continues to use `OldLightLevel` only. The blocklight queue uses `OldBlockR/G/B`. Adding 3 bytes to the struct is acceptable — queue sizes are bounded (typically <1000 entries per chunk) and the struct is not in a hot loop.
+
+**Job-side queue (`NeighborhoodLightingJob.cs`):**
+
+```csharp
+public struct LightRemovalNode
+{
+    public Vector3Int Pos;
+    public byte LightR;   // Old light values for per-channel darkness removal
+    public byte LightG;
+    public byte LightB;
+}
+```
 
 For the darkness removal BFS, entries carry the **old** RGB values so the removal phase can correctly identify which channels were dependent on the removed source.
 
-**Recommended:** Bitpack queue entries to keep them at 32 bits. A chunk-local position fits in 16 bits (X: 4, Z: 4, Y: 8). The remaining 16 bits hold RGB + flags: `[Pos: 16][R: 4][G: 4][B: 4][Flags: 4]`. This matches the current `uint` queue entry size, avoiding any increase in queue memory or cache pressure.
+**Serialization:** The light queue is serialized to disk (pending light work survives save/load). The queue entry format change requires an AOT migration step that expands each serialized entry from `(Vector3Int + byte)` to `(Vector3Int + byte + byte + byte + byte)`. See Section 3.7.
 
 #### 3.4.3.1 Per-Channel Darkness Removal (Worked Example)
 
@@ -884,64 +976,87 @@ This follows the same dual-phase pattern as the current scalar BFS (Phase 1: dar
 
 #### 3.4.4 Cross-Chunk Light Modifications
 
-`LightModification` structs in `CrossChunkLightMods` grow to carry RGB values instead of a single scalar. The write-through cache (`NativeHashMap<long, uint>`) needs its value type expanded to hold the RGB light state (either the full light `uint` from the separate array, or a packed representation).
+`LightModification` expands to carry RGB blocklight values:
+
+```csharp
+public struct LightModification
+{
+    public Vector3Int GlobalPosition;
+    public byte LightLevel;    // Sunlight: scalar (unchanged)
+    public byte BlockR;        // Blocklight: RGB channels
+    public byte BlockG;
+    public byte BlockB;
+    public LightChannel Channel;
+}
+```
+
+When `Channel == LightChannel.Block`, the RGB fields are used. When `Channel == LightChannel.Sun`, `LightLevel` is used (scalar, unchanged).
+
+**Write-through cache:** The current `NativeHashMap<long, uint>` caches the full packed `uint` voxel data for neighbor positions modified during the job. With the separate `ushort` light array, the cache must also track light modifications. Options:
+
+- **Expand value to `ulong`:** Pack both the voxel `uint` and the light `ushort` into a single `ulong` cache entry: `(uint voxelData << 16) | lightData`. Simple, no extra hash map.
+- **Separate cache:** Add a second `NativeHashMap<long, ushort>` for light data. Cleaner separation, two lookups per read.
+
+The `ulong` packing approach is preferred for cache coherence — a single hash map lookup returns both voxel and light data.
 
 ### 3.5 Mesh Job Changes (Minimal)
 
-The `CalculateCornerLight` function from Phase 1 already returns `Color32`. In Phase 1, it reads scalar sunlight and blocklight and encodes them as `(sunLuminance, 0, 0, blockLuminance)`. In Phase 2, it reads the RGB channels:
-
-**If using shader-only sky tinting (Section 3.3.3 Option 1):**
+The `CalculateCornerLights` function from Phase 1 already returns `Color32`. In Phase 1, it reads scalar sunlight and blocklight and encodes them as `Color32(sun, sun, sun, block)`. In Phase 2, `SampleNeighborLight` reads from both the voxel `uint` (for sunlight scalar and block type opacity) and the `ushort` light array (for RGB blocklight):
 
 ```csharp
-// Sunlight is still scalar, tinted in the shader
-byte sun = BurstVoxelDataBitMapping.GetSunLight(packedData);
+// Sunlight is still scalar from the uint (or from ushort bits 0-3)
+byte sun = LightBitMapping.GetSunLight(lightData);
 
-// Blocklight is now RGB from the separate light array
+// Blocklight is now RGB from the ushort light array
 byte blockR = LightBitMapping.GetBlocklightR(lightData);
 byte blockG = LightBitMapping.GetBlocklightG(lightData);
 byte blockB = LightBitMapping.GetBlocklightB(lightData);
 
 // Encode into Color32 for TexCoord1
-// R = sunlight luminance (shader tints this via SkyLightColor)
-// G, B, A = RGB blocklight
 Color32 result = new Color32(
-    (byte)(sun * 17),                            // R: sun (shader tints this)
-    (byte)(blockR * 17),                         // G: block red
-    (byte)(blockG * 17),                         // B: block green
-    (byte)(blockB * 17)                          // A: block blue
+    (byte)(sun * 17),      // R: sun luminance (shader tints via SkyLightColor)
+    (byte)(blockR * 17),   // G: block red
+    (byte)(blockG * 17),   // B: block green
+    (byte)(blockB * 17)    // A: block blue
 );
 ```
 
-> **Open question for Phase 2:** With RGB blocklight, the shader needs the full RGB breakdown, not just the luminance in `A`. The `UNorm8 x4` layout may need to be revisited — options include packing blocklight RGB into a second UV channel (`TexCoord2`), using `UNorm8 x8` (not supported as a single attribute — would need two x4 attributes), or upgrading to `Float16 x4` with packed channels. This is a Phase 2 design decision that depends on whether shader-only sky tinting (Section 3.3.3 Option 1) is adopted, which would free up the RGB slots for
-> blocklight instead.
+The `SampleCorner` function averages each of the 4 channels independently across the 4 corner neighbors, using the same rounded integer arithmetic as Phase 1: `(byte)((channelSum * 17 + 2) / 4)`.
 
-**If sky tinting is shader-only (recommended):**
+`BuildFlatLightData` (smooth lighting disabled) follows the same encoding: `Color32(sun*17, blockR*17, blockG*17, blockB*17)`.
 
-The `TexCoord1` layout becomes:
+#### 3.5.1 TexCoord1 Layout (Phase 2)
 
-| Component | Value                                                    |
-|-----------|----------------------------------------------------------|
-| `R`       | Sunlight luminance (0-255, monochrome — shader tints it) |
-| `G`       | Blocklight Red (0-255)                                   |
-| `B`       | Blocklight Green (0-255)                                 |
-| `A`       | Blocklight Blue (0-255)                                  |
+| Component | Phase 1 (current)                      | Phase 2                                     |
+|-----------|----------------------------------------|---------------------------------------------|
+| `R`       | Sun luminance × 17 (0-255)             | Sun luminance × 17 (0-255, shader tints it) |
+| `G`       | Sun luminance × 17 (duplicate, wasted) | Blocklight Red × 17 (0-255)                 |
+| `B`       | Sun luminance × 17 (duplicate, wasted) | Blocklight Green × 17 (0-255)               |
+| `A`       | Block luminance × 17 (scalar)          | Blocklight Blue × 17 (0-255)                |
 
-This fits cleanly into `UNorm8 x4` with no additional channels needed. The shader reads `lightData.r` for sunlight (applies `_SkyLightColor` tint) and `lightData.gba` for RGB blocklight.
+This fits cleanly into the existing `UNorm8 x4` format with **no vertex layout changes**. The G and B channels, currently wasted as duplicates of R, become blocklight color channels. No changes to `SectionRenderer.cs`, `NormalLightVertex`, or stream layout are needed.
 
 ### 3.6 Shader Changes (Phase 2)
 
-With shader-only sky tinting and RGB blocklight in `lightData.gba`:
+#### 3.6.1 New Uniform
 
 ```hlsl
-// New global uniform from World.cs
-half3 SkyLightColor;  // Updated per frame based on time of day
+half3 SkyLightColor;  // Set by World.cs per frame from the sky light gradient
+```
 
+Added to `StandardBlockShader.shader`, `TransparentBlockShader.shader`, and `UberLiquidShader.shader` properties blocks.
+
+#### 3.6.2 Updated `ApplyVoxelLightingRGB`
+
+The Phase 1 function signature changes to accept the sky color tint and read blocklight as RGB:
+
+```hlsl
 half3 ApplyVoxelLightingRGB(half3 color,
                             float sunLuminance, half3 blockRGB,
                             half3 skyColor,
                             float globalLight, float minLight, float maxLight)
 {
-    // Sunlight: scalar luminance × sky color tint × day/night modulation
+    // Sunlight: scalar luminance × shade curve × sky color tint
     float sunShadow = VoxelLightToShadow(sunLuminance, globalLight, minLight, maxLight);
     half3 sunContrib = color * sunShadow * skyColor;
 
@@ -955,40 +1070,98 @@ half3 ApplyVoxelLightingRGB(half3 color,
 }
 ```
 
-> **Note on blocklight shade curve at zero:** Each blocklight channel goes through `VoxelLightToShadow` independently. A channel at 0.0 produces shadow ≈ 0.006 (near-zero). A channel at 1.0 produces shadow = 1.0 (full brightness). Channels at intermediate values follow the same gamma curve as sunlight — ensuring a red torch `(0.8, 0.1, 0.0)` has the same perceived brightness falloff as sunlight at the same numeric level.
+**Call sites change from:**
+
+```hlsl
+col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.rgb, i.lightData.a, ...);
+```
+
+**To:**
+
+```hlsl
+col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba, SkyLightColor, ...);
+```
+
+#### 3.6.3 Liquid Shader Scalar Fallback
+
+`LiquidCore.hlsl` updates its scalar fallback to take the per-channel max across all 4 light components:
+
+```hlsl
+o.lightLevel = max(v.lightData.r, max(v.lightData.g, max(v.lightData.b, v.lightData.a)));
+```
+
+A proper RGB-aware liquid lighting path is deferred — the liquid fragment shader uses a custom deep/shallow water color blending that requires separate design work for RGB integration.
+
+#### 3.6.4 Notes on Shade Curve at Zero
+
+Each blocklight channel goes through `VoxelLightToShadow` independently. A channel at 0.0 produces shadow ~= 0.006 (near-zero). A channel at 1.0 produces shadow = 1.0 (full brightness). Channels at intermediate values follow the same gamma curve as sunlight — ensuring a red torch `(0.8, 0.1, 0.0)` has the same perceived brightness falloff as sunlight at the same numeric level.
+
+When all 3 blocklight channels are 0.0, the blocklight contribution is uniformly ~0.006 across all RGB channels — effectively invisible and always losing the `max()` against any non-trivial sunlight contribution. No light is "invented" where none exists.
 
 ### 3.7 Serialization Impact
 
-The RGB light data (both sun and block) is **runtime-only** and does **not** need to be saved to disk. Light is fully reconstructed from block placements and sky exposure during chunk loading (the BFS recomputes all values from emitting blocks and heightmap). This means:
+#### 3.7.1 Light Array — Runtime-Only
 
-- No changes to the region file format.
-- No world migration needed.
-- The RGB light array is allocated during chunk generation and freed on unload.
+The `ushort` light array is **runtime-only** and does **not** need to be saved to disk. Light is fully reconstructed from block placements and sky exposure during chunk loading (the BFS recomputes all values from emitting blocks and heightmap). This means:
 
-The existing scalar sunlight/blocklight bits in the `uint` can be kept for non-rendering uses (mob spawning rule: `max(sun, block) >= threshold`) or deprecated.
+- No changes to the section serialization format for voxel data.
+- The `ushort` light array is allocated during chunk generation and freed on unload.
+- The existing scalar sunlight/blocklight bits in the `uint` continue to be written to disk as part of the voxel data (they are derived values during Phase 2, deprecated in the post-cleanup step).
+
+#### 3.7.2 Light Queue Serialization — Upgraded to RGB
+
+> **Decision (2026-06-06):** The light queue serialization is upgraded to carry RGB blocklight values (not reconstructed at runtime). This matches the existing architecture where pending light work survives save/load cycles, and avoids edge cases where partially-propagated light values persist in voxel data but the queue that would finish them is lost.
+
+The current `WriteLightQueue`/`ReadLightQueue` in `ChunkSerializer.cs` serializes `LightQueueNode` entries as `(Vector3Int + byte)` = 13 bytes per entry. Phase 2 expands this to `(Vector3Int + byte + byte + byte + byte)` = 16 bytes per entry (sunlight scalar + 3 blocklight RGB channels).
+
+**Migration step required:** This is a chunk format change. A new AOT migration step (`Migration_v{N}_to_v{N+1}_RGBLightQueues.cs`) must:
+
+1. Bump `SaveSystem.CURRENT_VERSION`.
+2. Read old-format queue entries `(pos, oldLightLevel)`.
+3. Write new-format entries `(pos, oldLightLevel, oldBlockR=oldLightLevel, oldBlockG=oldLightLevel, oldBlockB=oldLightLevel)` — mapping the old scalar blocklight to white `(L, L, L)` preserves the original behavior for in-flight light operations.
+
+**Backwards compatibility:** Old worlds with pending scalar blocklight operations will have their queue entries expanded to white RGB. This is correct — all existing light sources emit white light (scalar 0-15 maps to `(L, L, L)`) until block definitions are updated with emission colors.
 
 ### 3.8 Scope
 
 **Files modified (beyond Phase 1):**
 
-| File                                         | Change                                                                                  |
-|----------------------------------------------|-----------------------------------------------------------------------------------------|
-| `Data/BlockType.cs`                          | Add `lightEmissionColor` field                                                          |
-| `Data/JobData.cs` (`BlockTypeJobData`)       | Add `EmissionR`, `EmissionG`, `EmissionB`                                               |
-| `Data/ChunkSection.cs`                       | Add `NativeArray<uint>` for RGB light storage (Option A) or widen to `ulong` (Option B) |
-| `Jobs/BurstData/BurstVoxelDataBitMapping.cs` | Add RGB pack/unpack for the light data                                                  |
-| `Jobs/NeighborhoodLightingJob.cs`            | Triple-channel BFS for blocklight propagation                                           |
-| `Data/ChunkData.cs`                          | RGB-aware blocklight queues, cross-chunk mod handling                                   |
-| `WorldJobManager.cs`                         | Pass RGB light arrays into/out of lighting jobs, sky color propagation                  |
-| `World.cs`                                   | Add `SkyLightColor` uniform, time-of-day color curve                                    |
-| `Jobs/MeshGenerationJob.cs`                  | Read RGB blocklight channels (minor — `CalculateCornerLight` updates)                   |
-| `Helpers/VoxelMeshHelper.cs`                 | Populate `lightData.gba` from RGB blocklight values                                     |
-| `Shaders/Includes/VoxelLighting.hlsl`        | Update `ApplyVoxelLightingRGB` for per-channel blocklight + sky tint                    |
-| `Shaders/StandardBlockShader.shader`         | Add `SkyLightColor` uniform                                                             |
-| `Shaders/TransparentBlockShader.shader`      | Add `SkyLightColor` uniform                                                             |
-| `Shaders/UberLiquidShader.shader`            | Add `SkyLightColor` uniform                                                             |
+| File                                                 | Change                                                                                                                                                                     |
+|------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Data/BlockType.cs`                                  | Add `lightEmissionColor` field (Color, inspector color picker)                                                                                                             |
+| `Data/JobData.cs` (`BlockTypeJobData`)               | Add `EmissionR`, `EmissionG`, `EmissionB` bytes; derive from color + intensity                                                                                             |
+| `Data/JobData.cs` (`LightQueueNode`)                 | Add `OldBlockR`, `OldBlockG`, `OldBlockB` bytes for RGB queue entries                                                                                                      |
+| `Data/ChunkSection.cs`                               | Add `ushort[]` light array (managed side); pool reset via `Array.Clear`                                                                                                    |
+| `Data/ChunkData.cs`                                  | RGB-aware `ModifyVoxel` light queuing; `AddToBlockLightQueue` carries RGB values                                                                                           |
+| `Jobs/BurstData/BurstVoxelDataBitMapping.cs`         | Add `LightBitMapping` helper (or extend existing) for `ushort` light pack/unpack                                                                                           |
+| `Jobs/NeighborhoodLightingJob.cs`                    | Triple-channel blocklight BFS; per-channel darkness removal; RGB `SetLight`/`GetLight`; expanded `LightModification` and `LightRemovalNode`; write-through cache expansion |
+| `Jobs/Data/LightingJobData.cs`                       | Pass `NativeArray<ushort>` light arrays (center + 8 neighbors) into job                                                                                                    |
+| `WorldJobManager.cs`                                 | Pass `ushort` light arrays to/from lighting and meshing jobs; handle RGB `LightModification` cross-chunk mods                                                              |
+| `World.cs`                                           | Add `SkyLightColor` shader uniform + `Gradient` for time-of-day color                                                                                                      |
+| `Jobs/MeshGenerationJob.cs`                          | `SampleNeighborLight` reads RGB from `ushort` array; `SampleCorner`/`BuildFlatLightData` encode `(sun, blockR, blockG, blockB)`                                            |
+| `Chunk.cs`                                           | Thread `ushort` light arrays through `ApplyMeshData` pipeline                                                                                                              |
+| `Shaders/Includes/VoxelLighting.hlsl`                | Update `ApplyVoxelLightingRGB` signature: `(sun scalar, block RGB, sky color, ...)`                                                                                        |
+| `Shaders/StandardBlockShader.shader`                 | Add `SkyLightColor` uniform; update frag call to `ApplyVoxelLightingRGB(col, lightData.r, lightData.gba, ...)`                                                             |
+| `Shaders/TransparentBlockShader.shader`              | Same as StandardBlockShader                                                                                                                                                |
+| `Shaders/Includes/LiquidCore.hlsl`                   | Update scalar fallback: `max(r, max(g, max(b, a)))`                                                                                                                        |
+| `Shaders/UberLiquidShader.shader`                    | Add `SkyLightColor` uniform                                                                                                                                                |
+| `Serialization/ChunkSerializer.cs`                   | Expand `WriteLightQueue`/`ReadLightQueue` for RGB entries                                                                                                                  |
+| `Serialization/Migration/Steps/Migration_v*_RGB*.cs` | AOT migration step for light queue format change                                                                                                                           |
+| `Benchmarks/LightingJobBenchmark.cs`                 | Add RGB-specific scenarios; fix existing broken scenarios                                                                                                                  |
+| `Editor/BlockEditor/` (inspector)                    | Add emission color picker + synced RGB sliders to block editor UI                                                                                                          |
 
-**Files NOT changed from Phase 1 state:** `SectionRenderer.cs`, `Chunk.cs`, vertex layout, `VoxelCommon.hlsl` — the rendering pipeline is fully prepared by Phase 1.
+**Files NOT changed from Phase 1 state:** `SectionRenderer.cs` (vertex layout unchanged), `VoxelCommon.hlsl` (vertex structs unchanged), `Helpers/VoxelMeshHelper.cs` (already works with `Color32`) — the rendering pipeline is fully prepared by Phase 1.
+
+### 3.8.1 Post-Cleanup Step (After Phase 2 Stabilizes)
+
+A separate refactor after Phase 2 is stable and verified:
+
+1. Migrate all scalar light readers (`GetSunLight()`, `GetBlockLight()` on the `uint`) to read from the `ushort` light array.
+2. Remove the dual-write from the BFS (stop writing to legacy `uint` light bits).
+3. Free the 8 bits (sunlight 4 + blocklight 4) in the `uint` for future metadata expansion.
+4. Update `PackVoxelData` to no longer accept sunlight/blocklight parameters.
+
+This is tracked as a separate work item, not part of the Phase 2 implementation.
 
 ### 3.9 Visual Examples
 
@@ -1010,56 +1183,81 @@ The existing scalar sunlight/blocklight bits in the `uint` can be kept for non-r
 
 ### 4.1 Phased Rollout
 
-| Step         | Change                                                                  | Risk                                                            | Rollback                                              |
-|--------------|-------------------------------------------------------------------------|-----------------------------------------------------------------|-------------------------------------------------------|
-| **Phase 1a** | Interleave `TexCoord1` (UNorm8x4) with Normal in stream 3 + all shaders | Low — additive change, revert stream 3 to Normal-only to undo   | Revert stream 3 layout + remove `NormalLightVertex`   |
-| **Phase 1b** | Implement corner averaging + diagonal occlusion + LUT in mesh job       | Medium — affects every visible face, ~24 extra reads per face   | Set `smoothLighting = false` (flat per-face fallback) |
-| **Phase 1c** | Add anisotropy fix (quad diagonal flip)                                 | Low — only changes triangle winding order when needed           | Revert to default winding                             |
-| **Phase 1d** | Add smooth lighting settings toggle                                     | Low — UI-only                                                   | Remove setting field                                  |
-| **Phase 1e** | Fluid smooth lighting via precomputed `FluidCornerLights` struct        | Low — isolated to fluid path, flat fallback via settings toggle | Set `smoothLighting = false` (flat per-face fallback) |
-| **Phase 2a** | Add RGB light storage (benchmark Option A vs B first)                   | Medium — new allocation per chunk, pool reset rules apply       | Remove array, fall back to scalar                     |
-| **Phase 2b** | Triple-channel blocklight BFS                                           | High — core lighting engine change                              | Feature flag to use scalar BFS                        |
-| **Phase 2c** | Add `SkyLightColor` shader uniform + time-of-day curve                  | Low — shader-only, no BFS change                                | Set `SkyLightColor = white`                           |
-| **Phase 2d** | Populate `lightData.gba` with RGB blocklight in mesh job                | Low — just reading new data                                     | Write zeros (Phase 1 behavior)                        |
+| Step         | Change                                                                   | Risk                                                            | Rollback                                              |
+|--------------|--------------------------------------------------------------------------|-----------------------------------------------------------------|-------------------------------------------------------|
+| **Phase 1a** | Interleave `TexCoord1` (UNorm8x4) with Normal in stream 3 + all shaders  | Low — additive change, revert stream 3 to Normal-only to undo   | Revert stream 3 layout + remove `NormalLightVertex`   |
+| **Phase 1b** | Implement corner averaging + diagonal occlusion + LUT in mesh job        | Medium — affects every visible face, ~24 extra reads per face   | Set `smoothLighting = false` (flat per-face fallback) |
+| **Phase 1c** | Add anisotropy fix (quad diagonal flip)                                  | Low — only changes triangle winding order when needed           | Revert to default winding                             |
+| **Phase 1d** | Add smooth lighting settings toggle                                      | Low — UI-only                                                   | Remove setting field                                  |
+| **Phase 1e** | Fluid smooth lighting via precomputed `FluidCornerLights` struct         | Low — isolated to fluid path, flat fallback via settings toggle | Set `smoothLighting = false` (flat per-face fallback) |
+| **Phase 2a** | Baseline benchmarks + fix broken benchmark scenarios                     | Low — no code changes, establishes performance reference        | N/A                                                   |
+| **Phase 2b** | Add `ushort` light array + `LightBitMapping` helpers + pool reset        | Medium — new allocation per section, pool reset rules apply     | Remove array, fall back to scalar-only path           |
+| **Phase 2c** | Block emission color (BlockType + BlockTypeJobData + editor UI)          | Low — additive data fields, existing blocks default to white    | Remove color fields, fall back to scalar emission     |
+| **Phase 2d** | Triple-channel blocklight BFS + per-channel darkness removal             | **High** — core lighting engine change                          | Feature flag to use scalar BFS                        |
+| **Phase 2e** | Light queue serialization upgrade + AOT migration step                   | Medium — serialization format change                            | Revert migration, fall back to scalar queue format    |
+| **Phase 2f** | Mesh job: `SampleCorner`/`BuildFlatLightData` encode `(sun, bR, bG, bB)` | Low — just reading new data from the `ushort` array             | Write Phase 1 encoding (sun, sun, sun, block)         |
+| **Phase 2g** | Shaders: `SkyLightColor` uniform + `ApplyVoxelLightingRGB` update        | Low — shader-only, no BFS change                                | Set `SkyLightColor = white`, revert to Phase 1 call   |
+| **Post**     | Deprecate legacy `uint` light bits (separate refactor)                   | Low — mechanical migration of readers                           | Re-enable dual-write                                  |
 
 ### 4.2 Key Risks
 
 - **Phase 1 performance:** ~24 memory accesses per face (12 voxel reads + 12 block type lookups) in Burst. Should be profiled against the baseline. The precomputed LUT and diagonal occlusion early-out reduce constant factors. The settings toggle provides a user-facing fallback if performance impact is unacceptable on target hardware.
 
-- **Phase 2 BFS complexity:** Three-channel blocklight propagation roughly triples the comparison work per neighbor in the BFS inner loop (3 channel comparisons instead of 1). However, the memory access pattern is similar — the main cost is the voxel read, not the comparison. Darkness removal is more nuanced: removing a red source `(12, 0, 0)` should clear only the red channel, not blue light `(0, 0, 15)` at the same voxel from a different source. This requires the removal BFS to track per-channel old values.
+- **Phase 2 BFS complexity:** Three-channel blocklight propagation roughly triples the comparison work per neighbor in the BFS inner loop (3 channel comparisons instead of 1). However, the memory access pattern is similar — the main cost is the voxel read, not the comparison. The `ushort` light array (16 bits, cache-friendly) mitigates the additional read cost.
 
-- **Phase 2 cross-chunk mods:** The `LightModification` struct grows to carry RGB values. The write-through cache value type expands. Memory impact is proportional to the number of cross-chunk border voxels with blocklight — typically small but should be monitored.
+- **Per-channel darkness removal correctness:** Removing a red source `(12, 0, 0)` must clear only the red channel, not blue light `(0, 0, 15)` at the same voxel from a different source. The removal BFS tracks per-channel old values in `LightRemovalNode`. Edge cases to test: 3+ overlapping colored sources, removal at chunk boundary, rapid place/break cycling of colored sources.
 
-- **UNorm8 quantization:** 256 levels per channel for 16 discrete light values is more than sufficient. However, if the corner averaging produces fractional results (e.g., average of 12 and 15 = 13.5), the UNorm8 encoding rounds to the nearest integer: `(byte)(13.5 * 17) = 229`, which decodes to `229/255 ≈ 0.898`. The true value `13.5/15 = 0.900` differs by 0.2% — imperceptible.
+- **Write-through cache with two arrays:** The current `NativeHashMap<long, uint>` must expand to cache both voxel and light data. The `ulong` packing approach `(uint voxelData << 16) | lightData` keeps this to a single hash map. Incorrect cache handling would cause the BFS to read stale light values from ReadOnly neighbor arrays, producing ghost light after source removal.
+
+- **Phase 2 cross-chunk mods:** The `LightModification` struct grows by 3 bytes (RGB channels). Memory impact is proportional to the number of cross-chunk border voxels with blocklight — typically small but should be monitored.
+
+- **Pool reset for light array:** The `ushort[]` light array in `ChunkSection` must be cleared in `ChunkSection.Reset()` per pool-reset-safety rules. A recycled section with stale light data from its previous lifecycle would produce visible light artifacts until the BFS overwrites it.
+
+- **Serialization migration:** The light queue format change requires an AOT migration step. Old worlds with pending scalar blocklight operations have their queue entries expanded to white `(L, L, L)`. This is safe because all existing light sources emit white light.
+
+- **UNorm8 quantization:** 256 levels per channel for 16 discrete light values is more than sufficient. The corner averaging with rounded integer arithmetic — `(byte)((channelSum * 17 + 2) / 4)` — introduces at most 0.2% error, which is imperceptible.
 
 ### 4.3 Benchmarking Plan
 
-**Baseline (before any changes):**
+#### 4.3.1 Pre-Phase 2 Baseline (Step 2a)
 
-1. Profile `MeshGenerationJob` duration via Profiler markers across a representative world (surface, caves, underwater, torch-lit areas).
-2. Profile `NeighborhoodLightingJob` duration for the same world.
+Establish baseline performance metrics using the existing `LightingJobBenchmark.cs` tool (after fixing broken scenarios):
+
+1. Profile `NeighborhoodLightingJob` duration across all existing scenarios (`SunlightVerticalFlat`, `SunlightComplexCaves`, `BlocklightSimple`, `BlocklightStressTest`, `SunlightRemovalCovered`, `BlocklightRemovalSingle`).
+2. Profile `MeshGenerationJob` duration with smooth lighting enabled vs disabled.
 3. Record GPU frame time and vertex buffer memory usage.
 
-**Phase 1 (smooth lighting):**
+#### 4.3.2 Phase 2 RGB BFS Benchmarks
 
-4. Profile `MeshGenerationJob` with smooth lighting enabled vs disabled (settings toggle).
-5. Target: < 20% increase in mesh job duration with smooth lighting enabled.
-6. Measure vertex buffer memory increase (should be ~7.1% with UNorm8x4).
+After implementing the triple-channel blocklight BFS (Step 2d):
 
-**Phase 2 (RGB storage — Option A vs B):**
-
-7. Prototype Option A (separate `uint` array): measure `NeighborhoodLightingJob` with triple-channel BFS.
-8. Prototype Option B (`ulong` voxels): measure the same job.
-9. Compare BFS duration, memory usage, and cache miss rates (via CPU profiler if available).
-10. Decision: if difference < 10%, prefer Option B for simplicity. Otherwise, prefer Option A.
+4. Re-run all existing lighting benchmark scenarios with the RGB BFS. Compare against baseline.
+5. **New scenario: `BlocklightRGBOverlap`** — Multiple colored light sources (red, green, blue, white) in a confined space with overlapping propagation zones. Measures per-channel max and 3× comparison overhead.
+6. **New scenario: `BlocklightRGBRemoval`** — Place and remove colored light sources in sequence. Measures per-channel darkness removal correctness and performance.
+7. Target: < 30% increase in `NeighborhoodLightingJob` duration for blocklight scenarios (the 3× comparison work is offset by the `ushort` array's better cache density vs the current interleaved `uint`).
+8. Measure `ushort` light array memory overhead (should be ~64 KB per chunk with lazy section allocation).
 
 ### 4.4 Testing Strategy
+
+#### 4.4.1 Phase 1 Tests (Completed)
 
 - **Visual regression:** Capture screenshots of known scenes (cave with torches, surface day/night, underwater, chunk borders) before and after Phase 1. Smooth lighting should only improve gradients — never change the average brightness of a face.
 - **Boundary correctness:** Place torches at section boundaries and chunk boundaries. Verify no light seams or discontinuities at the 16-block section edges and the chunk edges (all 8 diagonal neighbors are sampled correctly).
 - **Diagonal occlusion:** Build an L-shaped wall with a torch behind it. Verify that the inner corner is dark (AO effect) and no light leaks through the diagonal.
 - **Anisotropy:** Build a 2×2 checkerboard of torch/dark blocks. Verify no visual "pinwheel" artifacts — the quad diagonal flip should produce a symmetric diamond pattern.
 - **Settings toggle:** Toggle smooth lighting off and verify the rendering matches the pre-Phase-1 flat lighting exactly.
-- **Phase 2 color mixing:** Place red and blue light sources near each other. Verify additive per-channel blending and correct attenuation with distance.
-- **Phase 2 sky tinting:** Set time to night, verify blue moonlight tint outdoors. Enter a torch-lit room, verify warm indoor light is unaffected by sky color. Stand in a doorway, verify smooth gradient between blue outdoor and warm indoor.
+
+#### 4.4.2 Phase 2 Tests
+
+- **White light backwards compatibility:** Existing torch blocks (scalar emission 15, no color set → white default) must produce identical visual output to Phase 1. Emission `(15, 15, 15)` through the RGB BFS should match the scalar BFS result exactly.
+- **Color mixing:** Place red `(15, 0, 0)` and blue `(0, 0, 15)` light sources 5 blocks apart. Verify: red-dominant near red source, magenta overlap zone (per-channel max), blue-dominant near blue source. No order-dependent flickering.
+- **Per-channel darkness removal:** Place a red torch and blue lantern near the same block. Remove the red torch. Verify: red light disappears, blue light remains at full intensity. The voxel should show only blue, not purple or dark.
+- **3+ source overlap:** Place red, green, and blue sources around a single voxel. Verify the center receives near-white `(~15, ~15, ~15)` light. Remove one source and verify only that channel dims.
+- **Chunk boundary colored light:** Place a colored light source at a chunk boundary. Verify the color propagates correctly across the boundary via `LightModification` RGB fields. No color desync at chunk edges.
+- **Sky tinting:** Set time to night, verify blue moonlight tint outdoors. Enter a torch-lit room, verify warm indoor light is unaffected by sky color. Stand in a doorway, verify smooth gradient between blue outdoor and warm indoor.
+- **Blood moon event:** Override `SkyLightColor = (1.0, 0.2, 0.15)`. Verify all outdoor surfaces take on a deep red hue. Indoor torch-lit areas remain unaffected.
+- **Smooth lighting + RGB:** Verify that corner averaging works correctly with colored light. A smooth lighting gradient from a red torch should produce smooth red falloff, not banded color shifts.
+- **enableLighting = false:** Verify the engine functions correctly with lighting disabled. The `ushort` light array should be zeroed or max-filled as appropriate. No crashes from null/unallocated arrays.
+- **Save/load round-trip:** Place colored light sources, save the world, reload. Verify pending RGB light queue entries are correctly deserialized and the BFS completes propagation after load.
+- **World migration:** Load a pre-Phase-2 world save. Verify the AOT migration correctly expands scalar queue entries to white RGB. No light artifacts or corruption.
 - **Performance:** Compare profiler snapshots against baseline. Document results in this section after benchmarking.
