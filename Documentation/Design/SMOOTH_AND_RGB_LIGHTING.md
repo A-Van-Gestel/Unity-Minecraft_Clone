@@ -836,7 +836,7 @@ The sunlight (bits 16-19) and blocklight (bits 20-23) in the existing `uint` bec
 - Mob spawning checks — uses `max(sun, block) >= threshold`
 - Face culling heuristics
 
-**Post-cleanup step (after Phase 2 is stable):** Migrate all scalar light readers to the new `ushort` array, stop dual-writing, and free the 8 bits in the `uint` for future metadata expansion (biome tint, damage state, block variant, etc.). This is a separate refactor, not part of the Phase 2 implementation.
+**Post-cleanup step (Phase B, §3.8.2):** Migrate all scalar light readers to the new `ushort` array, stop dual-writing, rename "SunLight" → "SkyLight", redesign section flags with uniform-sky optimization, and free the 8 bits in the `uint` for future metadata expansion. Save version 9 → 10, chunk format v6 → v7.
 
 ### 3.3 Sunlight: Shader-Only Sky Tinting
 
@@ -1170,17 +1170,125 @@ The current `WriteLightQueue`/`ReadLightQueue` in `ChunkSerializer.cs` serialize
 
 LightData is now persisted to disk using a flag-based section format (save version 9, chunk format v6). See §3.2.2 for the format details. Migration step: `Migration_v8_to_v9_LightDataSerialization.cs`.
 
-### 3.8.2 Phase B: Legacy Light Bit Removal (After Phase 2 Stabilizes)
+### 3.8.2 Phase B: Legacy Light Bit Removal & SkyLight Rename (v9 → v10)
 
-A separate refactor after Phase 2 is stable and verified:
+- **Status:** Design spec (not yet implemented)
+- **Prerequisites:** Phase A (v9) confirmed working, Phase 2 stable
+- **Save version:** 9 → 10, chunk format v6 → v7
 
-1. Migrate all scalar light readers (`GetSunLight()`, `GetBlockLight()` on the `uint`) to read from the `ushort` light array.
-2. Remove the dual-write from the BFS (stop writing to legacy `uint` light bits).
-3. Free the 8 bits (sunlight 4 + blocklight 4) in the `uint` for future metadata expansion.
-4. Update `PackVoxelData` to no longer accept sunlight/blocklight parameters.
-5. Strip the zeroed light bits from the serialized `uint` on disk (new migration step v9→v10).
+#### 3.8.2.1 Goals
 
-This is tracked as a separate work item, not part of the Phase 2 implementation.
+1. Migrate all scalar light readers (`GetSunLight()`, `GetBlockLight()` on the `uint`) to read from the `ushort LightData[]` array via `LightBitMapping`.
+2. Rename "SunLight" → "SkyLight" across the codebase. The value represents sky light (tinted by `SkyLightColor` in the shader per time-of-day), not literal sunlight.
+3. Remove the dual-write from the BFS (stop writing to legacy `uint` light bits).
+4. Reclaim the 8 freed bits (sunlight 4 + blocklight 4) in the `uint` for future metadata expansion (biome tint, damage state, block variant, etc.).
+5. Redesign section flags (v7) with a uniform-sky-level optimization for faster world loading and smaller save files.
+
+#### 3.8.2.2 Terminology Rename: SunLight → SkyLight
+
+The `ushort` light array's first channel has always represented "light from the sky" — a monochrome scalar propagated by the BFS and tinted per-frame by `SkyLightColor` in the shader. The name "SunLight" is a historical artifact from when no tinting existed.
+
+**Renamed:**
+
+- `LightBitMapping`: `SUN_SHIFT` → `SKY_SHIFT`, `GetSunLight()` → `GetSkyLight()`, `SetSunLight()` → `SetSkyLight()`, `PackLightData(byte sun, ...)` → `PackLightData(byte sky, ...)`
+- `LightChannel.Sun` → `LightChannel.Sky`
+- `SunlightBfsQueue` → `SkylightBfsQueue`
+- `RecalculateSunlightForColumn` → `RecalculateSkylightForColumn`
+- `DebugVisualizationMode.Sunlight` → `DebugVisualizationMode.Skylight`
+- All local variables: `sunlight`, `sun`, `currentSunlight`, etc. → `skyLight`, `sky`, `currentSkyLight`, etc.
+
+**Not renamed:**
+
+- `LightQueueNode.OldLightLevel` — generic name, applies to both sky and block queues
+- `NeedsInitialLighting` — gates all lighting types, not just sky
+- `SkyLightColor` shader uniform — already correctly named
+
+#### 3.8.2.3 VoxelState Light Property Removal
+
+`VoxelState` currently wraps a single `uint _packedData` and exposes `.Light`, `.Sunlight`, `.Blocklight` properties that read from the uint's light bits. Phase B **removes these properties entirely**.
+
+**Rationale:** Keeping light data separate from voxel identity (ID + meta) enables future optimizations:
+
+- Nullable `voxels[]` for air-only sections (only LightData allocated)
+- Nullable `LightData[]` for fully-solid underground sections (no light present)
+- Independent lifecycle management of voxel and light arrays
+
+The 6 callers that previously read `state.Sunlight` / `state.Blocklight` will look up light from the section's `LightData[]` directly, or receive it as a separate parameter (for Burst job call sites).
+
+#### 3.8.2.4 New uint Bit Layout
+
+```
+Before (v6):  [ID: 16][Sun: 4][Block: 4][Meta: 8] = 32 bits (all used)
+After  (v7):  [ID: 16][Free: 8][Meta: 8] = 32 bits (8 bits freed)
+```
+
+`PackVoxelData` will change from `(ushort id, byte sunLight, byte blockLight, byte meta)` to `(ushort id, byte meta)`. The freed bits 16-23 are zeroed and reserved for future use.
+
+#### 3.8.2.5 Section Flag Redesign (Chunk Format v7)
+
+The v6 flags assumed uint light bits were available for reconstruction via `InitLightDataFromPacked`. v7 replaces this with a uniform-sky-level optimization that avoids BFS re-lighting on load:
+
+```
+Flag 0x00 — Voxels + uniform sky light
+  [1B flag] [1B uniformSkyLevel] [2B nonAirCount] [16384B voxels]
+  Total: 16,388 bytes
+  On load: bulk-fill LightData with PackLightData(uniformSkyLevel, 0, 0, 0)
+  Covers: surface sections (sky=15), underground sections (sky=0)
+
+Flag 0x01 — Voxels + full LightData (unchanged from v6)
+  [1B flag] [2B nonAirCount] [16384B voxels] [8192B LightData]
+  Total: 24,579 bytes
+  On load: bulk-read both arrays
+  Covers: sections with non-zero blocklight
+
+Flag 0x02 — Light-only + uniform sky light
+  [1B flag] [1B uniformSkyLevel]
+  Total: 2 bytes
+  On load: allocate section, bulk-fill LightData
+  Covers: air sections above terrain (typically sky=15)
+
+Flag 0x03 — Light-only + full LightData
+  [1B flag] [8192B LightData]
+  Total: 8,193 bytes
+  On load: allocate section, bulk-read LightData
+  Covers: air sections with non-uniform blocklight propagation
+```
+
+**Write-time classification:**
+
+1. Section is null → bitmask bit = 0, skip
+2. Section has blocks (`nonAirCount > 0`):
+    - Scan LightData for non-zero blocklight RGB (mask `0xFFF0`) → any found: flag `0x01`
+    - Else: check if all sky values are uniform → flag `0x00` + `uniformSkyLevel` byte
+3. Section has no blocks but has non-zero LightData:
+    - All entries have equal sky level and zero blocklight → flag `0x02` + `uniformSkyLevel`
+    - Else: flag `0x03`
+4. Section has no blocks and all-zero LightData → bitmask bit = 0, skip
+
+**Performance impact:** The common case (flag 0x00) replaces `InitLightDataFromPacked`'s per-voxel bit extraction (4096 iterations with shifts/masks) with a single `Array.Fill` call. Air sections (flag 0x02) shrink from 8,193 bytes to 2 bytes on disk.
+
+#### 3.8.2.6 Migration Step (v9 → v10)
+
+File: `Migration_v9_to_v10_StripLightBitsAndNewFlags.cs`
+
+For each section in old v6 format:
+
+- **v6 Flag 0x00 (voxels only):** Read voxels, extract uniform sky level from uint light bits, zero bits 16-23 in voxels, write as v7 flag 0x00 + uniformSkyLevel + voxels.
+- **v6 Flag 0x01 (voxels + LightData):** Read both, zero uint light bits, check if LightData can be compressed to uniform sky (blocklight all zero + uniform sky). Downgrade to v7 flag 0x00 if possible, else write as v7 flag 0x01.
+- **v6 Flag 0x02 (light-only):** Read LightData, check if uniform sky. Write as v7 flag 0x02 (uniform) or 0x03 (full).
+
+HeightMap, state flags, and light queues pass through unchanged.
+
+#### 3.8.2.7 Implementation Order
+
+1. Update design doc (this section) as spec
+2. Rename `LightBitMapping` methods (SunLight → SkyLight)
+3. Migrate all readers + rename variables (dual-write still active = safe)
+4. Remove dual-writes from BFS and mod-application paths
+5. Strip `PackVoxelData` signature (remove light args), delete light getters/setters from `BurstVoxelDataBitMapping`
+6. Implement new v7 flag design in serialization reader/writer
+7. Write migration step (v9 → v10)
+8. Final documentation pass (reword as implemented)
 
 ### 3.9 Visual Examples
 
