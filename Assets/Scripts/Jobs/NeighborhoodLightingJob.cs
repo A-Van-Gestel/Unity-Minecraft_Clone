@@ -890,7 +890,7 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Sets sunlight level. Writes to both legacy uint bits and the ushort light array.
+        /// Sets sunlight level in the ushort light array.
         /// For blocklight, use <see cref="SetBlocklightRGB"/> instead.
         /// </summary>
         private void SetSunlight(Vector3Int localPos, byte lightLevel, ref NativeHashMap<long, ulong> cache)
@@ -900,8 +900,6 @@ namespace Jobs
             if (localPos.x is >= 0 and < VoxelData.ChunkWidth && localPos.z is >= 0 and < VoxelData.ChunkWidth)
             {
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
-
-                Map[mapIndex] = BurstVoxelDataBitMapping.SetSunLight(Map[mapIndex], lightLevel);
                 LightMap[mapIndex] = LightBitMapping.SetSkyLight(LightMap[mapIndex], lightLevel);
             }
             else
@@ -926,36 +924,26 @@ namespace Jobs
                     currentLight = GetLightData(localPos, ref cache);
                 }
 
-                uint updatedPacked = BurstVoxelDataBitMapping.SetSunLight(currentPacked, lightLevel);
                 ushort updatedLight = LightBitMapping.SetSkyLight(currentLight, lightLevel);
-
-                cache[cacheKey] = ((ulong)updatedPacked << 16) | updatedLight;
+                cache[cacheKey] = ((ulong)currentPacked << 16) | updatedLight;
             }
         }
 
         /// <summary>
-        /// Sets per-channel RGB blocklight. Writes to both the ushort light array and the legacy uint bits (max(R,G,B)).
+        /// Sets per-channel RGB blocklight in the ushort light array.
         /// </summary>
         private void SetBlocklightRGB(Vector3Int localPos, byte r, byte g, byte b, ref NativeHashMap<long, ulong> cache)
         {
             if (localPos.y is < 0 or >= VoxelData.ChunkHeight) return;
 
-            byte legacyScalar = (byte)Mathf.Max(r, Mathf.Max(g, b));
-
             if (localPos.x is >= 0 and < VoxelData.ChunkWidth && localPos.z is >= 0 and < VoxelData.ChunkWidth)
             {
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
-
-                // Write RGB to ushort light array
-                ushort lightData = LightMap[mapIndex];
-                LightMap[mapIndex] = LightBitMapping.SetBlocklightRGB(lightData, r, g, b);
-
-                // Dual-write max(R,G,B) to legacy uint blocklight bits
-                uint packedData = Map[mapIndex];
-                Map[mapIndex] = BurstVoxelDataBitMapping.SetBlockLight(packedData, legacyScalar);
+                LightMap[mapIndex] = LightBitMapping.SetBlocklightRGB(LightMap[mapIndex], r, g, b);
             }
             else
             {
+                byte legacyScalar = (byte)Mathf.Max(r, Mathf.Max(g, b));
                 Vector3Int globalPos = new Vector3Int(localPos.x + ChunkPosition.x, localPos.y, localPos.z + ChunkPosition.y);
                 CrossChunkLightMods.Add(new LightModification
                 {
@@ -977,9 +965,8 @@ namespace Jobs
                     currentLight = GetLightData(localPos, ref cache);
                 }
 
-                uint updatedPacked = BurstVoxelDataBitMapping.SetBlockLight(currentPacked, legacyScalar);
                 ushort updatedLight = LightBitMapping.SetBlocklightRGB(currentLight, r, g, b);
-                cache[cacheKey] = ((ulong)updatedPacked << 16) | updatedLight;
+                cache[cacheKey] = ((ulong)currentPacked << 16) | updatedLight;
             }
         }
 

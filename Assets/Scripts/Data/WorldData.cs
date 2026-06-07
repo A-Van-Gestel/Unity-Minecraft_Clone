@@ -255,15 +255,6 @@ namespace Data
                     // If null, the jobArray already contains 0 (Air) from initialization.
                     // The lighting BFS (when enabled) will fill correct values.
                 }
-
-                // With lighting disabled, stamp sunlight=15 on every voxel in the snapshot.
-                // This covers three cases that would otherwise produce sunlight=0:
-                //  1. Null sections (air above terrain — never allocated to save memory)
-                //  2. Sections allocated by post-generation modifications (structures/trees)
-                //     whose air voxels were initialized to 0 by the section pool
-                //  3. Any voxel whose sunlight wasn't set by the ProcessGenerationJobs fill
-                if (World.Instance != null && !World.Instance.settings.enableLighting)
-                    LightingHelper.StampFullBrightSunlight(jobArray);
             }
 
             return jobArray;

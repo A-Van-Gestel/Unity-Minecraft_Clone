@@ -386,7 +386,6 @@ namespace Editor.WorldTools
                 int flatIndex = ChunkMath.GetFlattenedIndexInChunk(localX, localY, localZ);
                 if (flatIndex < 0 || flatIndex >= targetMap.Length) continue;
 
-                uint packed = targetMap[flatIndex];
                 ushort light = 0;
                 bool hasLightMap = _chunkLightMaps.TryGetValue(targetOrigin, out NativeArray<ushort> targetLightMap);
                 if (hasLightMap) light = targetLightMap[flatIndex];
@@ -400,7 +399,6 @@ namespace Editor.WorldTools
                     if (lightMod.LightLevel > 0 && lightMod.LightLevel < currentSkyLight)
                         continue;
 
-                    targetMap[flatIndex] = BurstVoxelDataBitMapping.SetSunLight(packed, lightMod.LightLevel);
                     if (hasLightMap)
                         targetLightMap[flatIndex] = LightBitMapping.SetSkyLight(light, lightMod.LightLevel);
                 }
@@ -416,8 +414,6 @@ namespace Editor.WorldTools
                     byte applyG = lightMod.BlockG == 0 ? (byte)0 : (byte)Mathf.Max(oldG, lightMod.BlockG);
                     byte applyB = lightMod.BlockB == 0 ? (byte)0 : (byte)Mathf.Max(oldB, lightMod.BlockB);
 
-                    byte newScalar = (byte)Mathf.Max(applyR, Mathf.Max(applyG, applyB));
-                    targetMap[flatIndex] = BurstVoxelDataBitMapping.SetBlockLight(packed, newScalar);
                     if (hasLightMap)
                         targetLightMap[flatIndex] = LightBitMapping.SetBlocklightRGB(light, applyR, applyG, applyB);
                 }
@@ -435,8 +431,6 @@ namespace Editor.WorldTools
 
             foreach (KeyValuePair<Vector2Int, NativeArray<uint>> kvp in _chunkMaps)
             {
-                LightingHelper.StampFullBrightSunlight(kvp.Value);
-
                 if (!_chunkLightMaps.TryGetValue(kvp.Key, out NativeArray<ushort> lightMap))
                 {
                     lightMap = new NativeArray<ushort>(chunkVolume, Allocator.Persistent);

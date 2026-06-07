@@ -645,9 +645,7 @@ public class WorldJobManager : IDisposable
 
                         Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
-                        uint oldPackedData = neighborChunk.GetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
                         byte oldLightLevel;
-                        uint newPackedData;
 
                         if (mod.Channel == LightChannel.Sun)
                         {
@@ -669,7 +667,6 @@ public class WorldJobManager : IDisposable
                             }
 
                             oldLightLevel = currentSunlight;
-                            newPackedData = BurstVoxelDataBitMapping.SetSunLight(oldPackedData, mod.LightLevel);
                         }
                         else
                         {
@@ -686,12 +683,8 @@ public class WorldJobManager : IDisposable
                             byte applyG = mod.BlockG == 0 ? (byte)0 : (byte)Mathf.Max(oldG, mod.BlockG);
                             byte applyB = mod.BlockB == 0 ? (byte)0 : (byte)Mathf.Max(oldB, mod.BlockB);
 
-                            byte newScalar = (byte)Mathf.Max(applyR, Mathf.Max(applyG, applyB));
-                            newPackedData = BurstVoxelDataBitMapping.SetBlockLight(oldPackedData, newScalar);
-
-                            if (newScalar != oldLightLevel || applyR != oldR || applyG != oldG || applyB != oldB)
+                            if (applyR != oldR || applyG != oldG || applyB != oldB)
                             {
-                                neighborChunk.SetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z, newPackedData);
                                 neighborChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z,
                                     LightBitMapping.SetBlocklightRGB(oldLight, applyR, applyG, applyB));
                                 neighborChunk.AddToBlockLightQueue(localVoxelPos, oldLightLevel, oldR, oldG, oldB);
@@ -702,9 +695,6 @@ public class WorldJobManager : IDisposable
 
                         if (oldLightLevel != mod.LightLevel)
                         {
-                            neighborChunk.SetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z, newPackedData);
-
-                            // Sunlight: write to ushort light array
                             ushort oldSunLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
                             neighborChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z,
                                 LightBitMapping.SetSkyLight(oldSunLight, mod.LightLevel));
@@ -838,24 +828,13 @@ public class WorldJobManager : IDisposable
             {
                 for (int i = 0; i < sectionVolume; i++)
                 {
-                    uint liveData = section.voxels[i];
-                    uint jobVoxel = jobMap[indexOffset + i];
-
-                    byte jobSunlight = BurstVoxelDataBitMapping.GetSunLight(jobVoxel);
-                    byte jobBlocklight = BurstVoxelDataBitMapping.GetBlockLight(jobVoxel);
-
-                    liveData = BurstVoxelDataBitMapping.SetSunLight(liveData, jobSunlight);
-                    liveData = BurstVoxelDataBitMapping.SetBlockLight(liveData, jobBlocklight);
-
-                    section.voxels[i] = liveData;
-
                     // Overwrite ushort light array with the job's computed values.
-                    // Matches the uint merge strategy — cross-chunk mods that were applied
-                    // to the live data during the job may be temporarily lost, but the edge
-                    // check convergence rounds will detect and correct border inconsistencies.
+                    // Cross-chunk mods that were applied to the live data during the job
+                    // may be temporarily lost, but the edge check convergence rounds will
+                    // detect and correct border inconsistencies.
                     section.LightData[i] = jobLightMap[indexOffset + i];
 
-                    if (liveData != 0) sectionHasData = true;
+                    if (section.voxels[i] != 0) sectionHasData = true;
                 }
 
                 if (!sectionHasData)

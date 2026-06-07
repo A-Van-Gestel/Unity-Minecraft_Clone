@@ -10,17 +10,7 @@ namespace Helpers
     public static class LightingHelper
     {
         /// <summary>
-        /// Stamps sunlight=15 on every voxel in a uint packed data array.
-        /// Used when lighting is disabled to ensure full brightness.
-        /// </summary>
-        public static void StampFullBrightSunlight(NativeArray<uint> map)
-        {
-            for (int v = 0; v < map.Length; v++)
-                map[v] = BurstVoxelDataBitMapping.SetSunLight(map[v], 15);
-        }
-
-        /// <summary>
-        /// Stamps sunlight=15 on every voxel in a ushort light data array.
+        /// Stamps sky light=15 on every entry in a ushort light data array.
         /// Used when lighting is disabled to ensure full brightness.
         /// </summary>
         public static void StampFullBrightSunlight(NativeArray<ushort> lightMap)

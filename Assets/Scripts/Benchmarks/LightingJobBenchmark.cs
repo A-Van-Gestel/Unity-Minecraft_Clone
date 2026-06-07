@@ -534,7 +534,6 @@ namespace Benchmarks
 
             int localX = gx;
             int localZ = gz;
-            NativeArray<uint> target;
             NativeArray<ushort> lightTarget;
 
             if (gx < 0)
@@ -543,18 +542,15 @@ namespace Benchmarks
                 if (gz < 0)
                 {
                     localZ = gz + VoxelData.ChunkWidth;
-                    target = sourceData.NeighborSW;
                     lightTarget = sourceData.LightSW;
                 }
                 else if (gz >= VoxelData.ChunkWidth)
                 {
                     localZ = gz - VoxelData.ChunkWidth;
-                    target = sourceData.NeighborNW;
                     lightTarget = sourceData.LightNW;
                 }
                 else
                 {
-                    target = sourceData.NeighborW;
                     lightTarget = sourceData.LightW;
                 }
             }
@@ -564,31 +560,26 @@ namespace Benchmarks
                 if (gz < 0)
                 {
                     localZ = gz + VoxelData.ChunkWidth;
-                    target = sourceData.NeighborSE;
                     lightTarget = sourceData.LightSE;
                 }
                 else if (gz >= VoxelData.ChunkWidth)
                 {
                     localZ = gz - VoxelData.ChunkWidth;
-                    target = sourceData.NeighborNE;
                     lightTarget = sourceData.LightNE;
                 }
                 else
                 {
-                    target = sourceData.NeighborE;
                     lightTarget = sourceData.LightE;
                 }
             }
             else if (gz < 0)
             {
                 localZ = gz + VoxelData.ChunkWidth;
-                target = sourceData.NeighborS;
                 lightTarget = sourceData.LightS;
             }
             else if (gz >= VoxelData.ChunkWidth)
             {
                 localZ = gz - VoxelData.ChunkWidth;
-                target = sourceData.NeighborN;
                 lightTarget = sourceData.LightN;
             }
             else
@@ -596,16 +587,11 @@ namespace Benchmarks
                 return;
             }
 
-            if (!target.IsCreated || target.Length == 0) return;
+            if (!lightTarget.IsCreated || lightTarget.Length == 0) return;
 
             int idx = ChunkMath.GetFlattenedIndexInChunk(localX, gy, localZ);
-            uint packed = target[idx];
-            uint updated = mod.Channel == LightChannel.Sun
-                ? BurstVoxelDataBitMapping.SetSunLight(packed, mod.LightLevel)
-                : BurstVoxelDataBitMapping.SetBlockLight(packed, mod.LightLevel);
-            target[idx] = updated;
 
-            // Also update the parallel ushort light array so the BFS job reads correct values
+            // Update the ushort light array (authoritative light source)
             ushort light = lightTarget[idx];
             if (mod.Channel == LightChannel.Sun)
                 lightTarget[idx] = LightBitMapping.SetSkyLight(light, mod.LightLevel);
