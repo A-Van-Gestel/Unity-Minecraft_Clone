@@ -21,11 +21,16 @@ namespace Serialization
         //          FluidLevel4 for Water/Lava, None for Air/Facade/Cactus/GrassBlades; deferred
         //          for StoneHalfSlab and DirectionalBlock). Chunk binary layout is unchanged —
         //          only meta-byte semantics differ. See Migration_v5_to_v6_LegacyToSchemaBased.cs.
-        private const byte CURRENT_CHUNK_VERSION = 5;
+        // v5 → v6: Section version byte replaced by flag-based section type (0x00 voxels-only,
+        //          0x01 voxels+LightData, 0x02 light-only). Persists ushort[] LightData per section.
+        //          See Migration_v8_to_v9_LightDataSerialization.cs.
+        private const byte CURRENT_CHUNK_VERSION = 6;
 
-        // FUTURE-PROOFING: Version header for individual sections.
-        // Allows upgrading section format (e.g. adding Palettes) without breaking the chunk header.
-        private const byte CURRENT_SECTION_VERSION = 1;
+        // Section type flags (replaces the old CURRENT_SECTION_VERSION byte).
+        // The first byte of each section now encodes both version and content type.
+        private const byte SECTION_FLAG_VOXELS_ONLY = 0x00;
+        private const byte SECTION_FLAG_VOXELS_AND_LIGHT = 0x01;
+        private const byte SECTION_FLAG_LIGHT_ONLY = 0x02;
 
         /// <summary>
         /// Serializes a ChunkData object into a byte array buffer using the specified compression algorithm.
@@ -126,7 +131,7 @@ namespace Serialization
                 // our local 'sec' variable still safely points  to the object in memory, preventing NREs.
                 ChunkSection sec = data.sections[i];
 
-                if (sec != null)
+                if (sec != null && SectionHasData(sec))
                 {
                     sectionBitmask |= 1 << i;
                     safeSections[i] = sec;
@@ -261,56 +266,139 @@ namespace Serialization
 
         private static void WriteSection(BinaryWriter writer, ChunkSection section)
         {
-            // 1. Write Section Version
-            writer.Write(CURRENT_SECTION_VERSION);
+            bool hasBlocks = section.nonAirCount > 0;
+            ClassifyLightData(section.LightData, out bool hasBlocklight, out bool hasAnyLight);
 
-            // 2. Write Data (Version 1 Format)
-            writer.Write((ushort)section.nonAirCount);
-
-            // Validate size
-            if (section.voxels.Length != ChunkMath.SECTION_VOLUME)
+            if (hasBlocks)
             {
-                throw new InvalidDataException($"Section voxel array corrupted. Size: {section.voxels.Length.ToString()}");
+                // Validate array sizes
+                if (section.voxels.Length != ChunkMath.SECTION_VOLUME)
+                    throw new InvalidDataException($"Section voxel array corrupted. Size: {section.voxels.Length.ToString()}");
+                if (section.LightData.Length != ChunkMath.SECTION_VOLUME)
+                    throw new InvalidDataException($"Section LightData array corrupted. Size: {section.LightData.Length.ToString()}");
+
+                if (hasBlocklight)
+                {
+                    // Flag 0x01: Voxels + LightData
+                    writer.Write(SECTION_FLAG_VOXELS_AND_LIGHT);
+                    writer.Write((ushort)section.nonAirCount);
+                    writer.Write(MemoryMarshal.AsBytes(section.voxels.AsSpan()));
+                    writer.Write(MemoryMarshal.AsBytes(section.LightData.AsSpan()));
+                }
+                else
+                {
+                    // Flag 0x00: Voxels only
+                    writer.Write(SECTION_FLAG_VOXELS_ONLY);
+                    writer.Write((ushort)section.nonAirCount);
+                    writer.Write(MemoryMarshal.AsBytes(section.voxels.AsSpan()));
+                }
+            }
+            else if (hasBlocklight || hasAnyLight)
+            {
+                if (section.LightData.Length != ChunkMath.SECTION_VOLUME)
+                    throw new InvalidDataException($"Section LightData array corrupted. Size: {section.LightData.Length.ToString()}");
+
+                // Flag 0x02: Light-only (empty air section carrying propagated light)
+                writer.Write(SECTION_FLAG_LIGHT_ONLY);
+                writer.Write(MemoryMarshal.AsBytes(section.LightData.AsSpan()));
+            }
+            // else: section has no blocks and no light — excluded from bitmask, never reaches here.
+        }
+
+        /// <summary>
+        /// Returns true if the section carries any data worth persisting (blocks or light).
+        /// Sections with no blocks and all-zero LightData are excluded from the bitmask.
+        /// </summary>
+        private static bool SectionHasData(ChunkSection section)
+        {
+            if (section.nonAirCount > 0) return true;
+
+            foreach (ushort t in section.LightData)
+            {
+                if (t != 0) return true;
             }
 
-            // Fast unsafe write
-            ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(section.voxels.AsSpan());
-            writer.Write(bytes);
+            return false;
+        }
+
+        /// <summary>
+        /// Single-pass scan of <paramref name="lightData"/> to determine whether any blocklight RGB
+        /// or any light at all (including sunlight) is present.
+        /// </summary>
+        private static void ClassifyLightData(ushort[] lightData, out bool hasBlocklight, out bool hasAnyLight)
+        {
+            const ushort BLOCKLIGHT_RGB_MASK = 0xFFF0;
+            hasBlocklight = false;
+            hasAnyLight = false;
+
+            foreach (ushort t in lightData)
+            {
+                if ((t & BLOCKLIGHT_RGB_MASK) != 0)
+                {
+                    hasBlocklight = true;
+                    hasAnyLight = true;
+                    return;
+                }
+
+                if (t != 0) hasAnyLight = true;
+            }
         }
 
         private static ChunkSection ReadSection(BinaryReader reader)
         {
-            // Read Section Version
-            byte version = reader.ReadByte();
-            if (version == 1)
+            byte flag = reader.ReadByte();
+            if (flag > SECTION_FLAG_LIGHT_ONLY)
+                throw new InvalidDataException($"Unknown section flag: {flag}");
+
+            ChunkSection section = World.Instance.ChunkPool.GetChunkSection();
+            try
             {
-                ChunkSection section = World.Instance.ChunkPool.GetChunkSection(); // Get from POOL
-                section.nonAirCount = reader.ReadUInt16();
-
-                // Robust read for large data blocks
-                Span<byte> bytes = MemoryMarshal.AsBytes(section.voxels.AsSpan());
-                int totalBytesToRead = bytes.Length;
-                int bytesReadTotal = 0;
-
-                while (bytesReadTotal < totalBytesToRead)
+                switch (flag)
                 {
-                    int bytesRead = reader.Read(bytes[bytesReadTotal..]);
-                    if (bytesRead == 0)
-                        throw new EndOfStreamException($"Section data truncated. Read {bytesReadTotal} of {totalBytesToRead} bytes.");
+                    case SECTION_FLAG_VOXELS_ONLY:
+                        section.nonAirCount = reader.ReadUInt16();
+                        ReadBulkData(reader, MemoryMarshal.AsBytes(section.voxels.AsSpan()));
+                        InitLightDataFromPacked(section);
+                        break;
 
-                    bytesReadTotal += bytesRead;
+                    case SECTION_FLAG_VOXELS_AND_LIGHT:
+                        section.nonAirCount = reader.ReadUInt16();
+                        ReadBulkData(reader, MemoryMarshal.AsBytes(section.voxels.AsSpan()));
+                        ReadBulkData(reader, MemoryMarshal.AsBytes(section.LightData.AsSpan()));
+                        break;
+
+                    case SECTION_FLAG_LIGHT_ONLY:
+                        section.nonAirCount = 0;
+                        ReadBulkData(reader, MemoryMarshal.AsBytes(section.LightData.AsSpan()));
+                        break;
                 }
-
-                // Derive the runtime ushort light array from the uint packed data.
-                // The ushort array is not serialized — it must be reconstructed on every load.
-                // Sunlight is copied directly; scalar blocklight maps to white RGB (L, L, L).
-                InitLightDataFromPacked(section);
 
                 return section;
             }
+            catch
+            {
+                section.Reset();
+                World.Instance.ChunkPool.ReturnChunkSection(section);
+                throw;
+            }
+        }
 
-            // Fallback / Error for unknown versions
-            throw new InvalidDataException($"Unknown Section Version: {version}");
+        /// <summary>
+        /// Reads exactly <paramref name="destination"/>.Length bytes from the reader, handling partial reads.
+        /// </summary>
+        private static void ReadBulkData(BinaryReader reader, Span<byte> destination)
+        {
+            int totalBytesToRead = destination.Length;
+            int bytesReadTotal = 0;
+
+            while (bytesReadTotal < totalBytesToRead)
+            {
+                int bytesRead = reader.Read(destination[bytesReadTotal..]);
+                if (bytesRead == 0)
+                    throw new EndOfStreamException($"Section data truncated. Read {bytesReadTotal} of {totalBytesToRead} bytes.");
+
+                bytesReadTotal += bytesRead;
+            }
         }
 
         /// <summary>

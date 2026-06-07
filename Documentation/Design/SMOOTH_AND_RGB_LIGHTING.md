@@ -778,7 +778,15 @@ New ushort:     [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits
 - Per chunk (16 sections): 65,536 × 2 bytes = 128 KB *(but only 32,768 voxels per chunk with current height — sections can be allocated lazily)*
 - At 2,000 loaded chunks: ~128 MB worst-case *(significantly less with lazy allocation for empty/air-only sections)*
 
-**No change to the existing `uint` layout:** ID, metadata, serialization, fluid logic, and all non-lighting systems are untouched. Clean separation of concerns: one array for block identity, one for light state. The BFS can operate on a contiguous light-only buffer without polluting the cache with ID/metadata bits.
+**No change to the existing `uint` layout:** ID, metadata, fluid logic, and all non-lighting systems are untouched. Clean separation of concerns: one array for block identity, one for light state. The BFS can operate on a contiguous light-only buffer without polluting the cache with ID/metadata bits.
+
+**Serialization (v9+):** The `ushort[] LightData` array is persisted to disk using a flag-based section format introduced in save version 9 (chunk format v6). Each section is written with a type flag:
+
+- `0x00` — Voxels only: no RGB blocklight present; LightData reconstructed from legacy `uint` light bits on load.
+- `0x01` — Voxels + LightData: section has RGB blocklight; `ushort[]` bulk-read on load.
+- `0x02` — Light-only: fully-air section carrying propagated light (sunlight/blocklight from neighbors); only LightData is stored, no voxel array.
+
+This eliminates the lossy `InitLightDataFromPacked` reconstruction for sections with blocklight and enables light-only air sections to persist their propagated light across save/load without requiring BFS re-propagation.
 
 #### 3.2.3 `ushort` Light Array Bit Packing
 
@@ -1158,7 +1166,11 @@ The current `WriteLightQueue`/`ReadLightQueue` in `ChunkSerializer.cs` serialize
 
 **Files NOT changed from Phase 1 state:** `SectionRenderer.cs` (vertex layout unchanged), `VoxelCommon.hlsl` (vertex structs unchanged), `Helpers/VoxelMeshHelper.cs` (already works with `Color32`) — the rendering pipeline is fully prepared by Phase 1.
 
-### 3.8.1 Post-Cleanup Step (After Phase 2 Stabilizes)
+### 3.8.1 Phase A: LightData Serialization (Implemented — v9)
+
+LightData is now persisted to disk using a flag-based section format (save version 9, chunk format v6). See §3.2.2 for the format details. Migration step: `Migration_v8_to_v9_LightDataSerialization.cs`.
+
+### 3.8.2 Phase B: Legacy Light Bit Removal (After Phase 2 Stabilizes)
 
 A separate refactor after Phase 2 is stable and verified:
 
@@ -1166,6 +1178,7 @@ A separate refactor after Phase 2 is stable and verified:
 2. Remove the dual-write from the BFS (stop writing to legacy `uint` light bits).
 3. Free the 8 bits (sunlight 4 + blocklight 4) in the `uint` for future metadata expansion.
 4. Update `PackVoxelData` to no longer accept sunlight/blocklight parameters.
+5. Strip the zeroed light bits from the serialized `uint` on disk (new migration step v9→v10).
 
 This is tracked as a separate work item, not part of the Phase 2 implementation.
 

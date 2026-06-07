@@ -29,7 +29,9 @@ public static class SaveSystem
     //          pending_lighting.bin file. See Migration_v6_to_v7_SaveFormatExtensibility.cs.
     // v8 (RGB): Expanded light queue entries from 13 to 16 bytes per entry (added OldBlockR/G/B).
     //           See Migration_v7_to_v8_RGBLightQueues.cs.
-    public const int CURRENT_VERSION = 8;
+    // v9 (RGB): Persists ushort[] LightData per section with flag-based format (0x00 voxels-only,
+    //           0x01 voxels+light, 0x02 light-only). See Migration_v8_to_v9_LightDataSerialization.cs.
+    public const int CURRENT_VERSION = 9;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.

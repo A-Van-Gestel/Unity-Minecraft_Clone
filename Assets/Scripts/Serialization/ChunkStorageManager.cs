@@ -229,8 +229,9 @@ namespace Serialization
                     ChunkSection snapSec = World.Instance.ChunkPool.GetChunkSection();
                     snapSec.nonAirCount = source.sections[i].nonAirCount;
 
-                    // Copy voxels
-                    Array.Copy(source.sections[i].voxels, snapSec.voxels, 4096);
+                    // Copy voxels and light data
+                    Array.Copy(source.sections[i].voxels, snapSec.voxels, ChunkMath.SECTION_VOLUME);
+                    Array.Copy(source.sections[i].LightData, snapSec.LightData, ChunkMath.SECTION_VOLUME);
 
                     // Assign to snapshot array
                     snapshot.sections[i] = snapSec;

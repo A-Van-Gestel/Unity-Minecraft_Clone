@@ -31,6 +31,7 @@ namespace Serialization.Migration
             new MigrationV5ToV6LegacyToSchemaBased(),
             new MigrationV6ToV7SaveFormatExtensibility(),
             new MigrationV7ToV8RGBLightQueues(),
+            new MigrationV8ToV9LightDataSerialization(),
         };
 
         // Track the path of the backup we create so we can roll it back if needed.

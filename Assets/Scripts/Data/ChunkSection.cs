@@ -13,9 +13,9 @@ namespace Data
         /// <summary>
         /// Parallel light array storing per-voxel RGB light data (Phase 2).
         /// Layout: <c>[Sun:4][BlockR:4][BlockG:4][BlockB:4]</c> = 16 bits.
-        /// Runtime-only — not serialized to disk. Reconstructed by BFS on chunk load.
+        /// Persisted to disk via flag-based section format (v9+). Bulk-read on load
+        /// when present; reconstructed from legacy <c>uint</c> light bits for older saves.
         /// </summary>
-        [NonSerialized]
         public ushort[] LightData;
 
         // Optimization: Track non-air blocks.
