@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Data;
 using Helpers;
+using Jobs.BurstData;
 using UnityEngine;
 
 namespace Serialization
@@ -20,7 +21,7 @@ namespace Serialization
         //          FluidLevel4 for Water/Lava, None for Air/Facade/Cactus/GrassBlades; deferred
         //          for StoneHalfSlab and DirectionalBlock). Chunk binary layout is unchanged —
         //          only meta-byte semantics differ. See Migration_v5_to_v6_LegacyToSchemaBased.cs.
-        private const byte CURRENT_CHUNK_VERSION = 4;
+        private const byte CURRENT_CHUNK_VERSION = 5;
 
         // FUTURE-PROOFING: Version header for individual sections.
         // Allows upgrading section format (e.g. adding Palettes) without breaking the chunk header.
@@ -224,6 +225,9 @@ namespace Serialization
                 writer.Write(node.Position.y);
                 writer.Write(node.Position.z);
                 writer.Write(node.OldLightLevel);
+                writer.Write(node.OldBlockR);
+                writer.Write(node.OldBlockG);
+                writer.Write(node.OldBlockB);
             }
         }
 
@@ -240,11 +244,17 @@ namespace Serialization
                 int y = reader.ReadInt32();
                 int z = reader.ReadInt32();
                 byte level = reader.ReadByte();
+                byte blockR = reader.ReadByte();
+                byte blockG = reader.ReadByte();
+                byte blockB = reader.ReadByte();
 
                 queue.Enqueue(new LightQueueNode
                 {
                     Position = new Vector3Int(x, y, z),
                     OldLightLevel = level,
+                    OldBlockR = blockR,
+                    OldBlockG = blockG,
+                    OldBlockB = blockB,
                 });
             }
         }
@@ -291,11 +301,34 @@ namespace Serialization
                     bytesReadTotal += bytesRead;
                 }
 
+                // Derive the runtime ushort light array from the uint packed data.
+                // The ushort array is not serialized — it must be reconstructed on every load.
+                // Sunlight is copied directly; scalar blocklight maps to white RGB (L, L, L).
+                InitLightDataFromPacked(section);
+
                 return section;
             }
 
             // Fallback / Error for unknown versions
             throw new InvalidDataException($"Unknown Section Version: {version}");
+        }
+
+        /// <summary>
+        /// Initializes the runtime ushort light array from the uint packed voxel data.
+        /// Copies sunlight directly and maps scalar blocklight to white RGB (L, L, L).
+        /// </summary>
+        private static void InitLightDataFromPacked(ChunkSection section)
+        {
+            uint[] voxels = section.voxels;
+            ushort[] lightData = section.LightData;
+
+            for (int i = 0; i < voxels.Length; i++)
+            {
+                uint packed = voxels[i];
+                byte sun = BurstVoxelDataBitMapping.GetSunLight(packed);
+                byte block = BurstVoxelDataBitMapping.GetBlockLight(packed);
+                lightData[i] = LightBitMapping.PackLightData(sun, block, block, block);
+            }
         }
     }
 }

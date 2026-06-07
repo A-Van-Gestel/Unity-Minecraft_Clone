@@ -52,6 +52,10 @@ public class World : MonoBehaviour
     public Color day;
     public Color night;
 
+    [Tooltip("Sky light color gradient over the day/night cycle. Evaluated at globalLightLevel (0=midnight, 1=noon).")]
+    [SerializeField]
+    private Gradient _skyLightGradient;
+
     [Header("Player")]
     public Player player;
 
@@ -141,6 +145,7 @@ public class World : MonoBehaviour
     private static readonly int s_shaderGlobalLightLevel = Shader.PropertyToID("GlobalLightLevel");
     private static readonly int s_shaderMinGlobalLightLevel = Shader.PropertyToID("minGlobalLightLevel");
     private static readonly int s_shaderMaxGlobalLightLevel = Shader.PropertyToID("maxGlobalLightLevel");
+    private static readonly int s_shaderSkyLightColor = Shader.PropertyToID("SkyLightColor");
 
     // --- Fluid Vertex Data ---
     public FluidVertexTemplatesNativeData FluidVertexTemplates;
@@ -994,6 +999,9 @@ public class World : MonoBehaviour
     {
         Shader.SetGlobalFloat(s_shaderGlobalLightLevel, globalLightLevel);
         _playerCamera.backgroundColor = Color.Lerp(night, day, globalLightLevel);
+
+        Color skyColor = _skyLightGradient?.Evaluate(globalLightLevel) ?? Color.white;
+        Shader.SetGlobalColor(s_shaderSkyLightColor, skyColor);
     }
 
     /// <summary>

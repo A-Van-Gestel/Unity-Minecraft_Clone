@@ -30,6 +30,7 @@ namespace Serialization.Migration
             new MigrationV4ToV5VoxelModMeta(),
             new MigrationV5ToV6LegacyToSchemaBased(),
             new MigrationV6ToV7SaveFormatExtensibility(),
+            new MigrationV7ToV8RGBLightQueues(),
         };
 
         // Track the path of the backup we create so we can roll it back if needed.

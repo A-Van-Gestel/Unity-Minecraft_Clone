@@ -163,6 +163,7 @@ namespace Editor.BlockEditor
                     spreadChance = blockType.spreadChance,
                     opacity = blockType.opacity,
                     lightEmission = blockType.lightEmission,
+                    lightEmissionColor = blockType.lightEmissionColor,
                     tagPreset = blockType.tagPreset,
                     tags = blockType.tags,
                     canReplaceTags = blockType.canReplaceTags,

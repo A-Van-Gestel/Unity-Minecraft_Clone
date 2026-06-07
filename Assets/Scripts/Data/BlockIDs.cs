@@ -69,13 +69,13 @@ namespace Data
         public const ushort DebugLamp10 = 32;
         /// <summary>Original name: "Debug Lamp 11"</summary>
         public const ushort DebugLamp11 = 33;
-        /// <summary>Original name: "Debug Lamp 12"</summary>
-        public const ushort DebugLamp12 = 34;
-        /// <summary>Original name: "Debug Lamp 13"</summary>
-        public const ushort DebugLamp13 = 35;
-        /// <summary>Original name: "Debug Lamp 14"</summary>
-        public const ushort DebugLamp14 = 36;
-        /// <summary>Original name: "Debug Lamp 15"</summary>
-        public const ushort DebugLamp15 = 37;
+        /// <summary>Original name: "Debug Lamp 12 - Green"</summary>
+        public const ushort DebugLamp12Green = 34;
+        /// <summary>Original name: "Debug Lamp 13 - Blue"</summary>
+        public const ushort DebugLamp13Blue = 35;
+        /// <summary>Original name: "Debug Lamp 14 - Red"</summary>
+        public const ushort DebugLamp14Red = 36;
+        /// <summary>Original name: "Debug Lamp 15 - White"</summary>
+        public const ushort DebugLamp15White = 37;
     }
 }

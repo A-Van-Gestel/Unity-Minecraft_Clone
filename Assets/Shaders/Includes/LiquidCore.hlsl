@@ -108,7 +108,7 @@ LiquidV2F LiquidVert(LiquidAppdata v)
     o.screenPos = ComputeScreenPos(o.vertex);
     o.worldNormal = TransformObjectToWorldNormal(v.normal);
     o.liquidType = v.color.r;
-    o.lightLevel = max(v.lightData.r, v.lightData.a);
+    o.lightLevel = max(v.lightData.r, max(v.lightData.g, max(v.lightData.b, v.lightData.a)));
     o.shadowMultiplier = v.color.b;
     o.localFlowVector = v.uv.xy; // flow XZ
     o.shorePush = v.uv.zw; // shore push direction (normalized)

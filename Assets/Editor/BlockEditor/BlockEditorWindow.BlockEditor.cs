@@ -446,6 +446,12 @@ namespace Editor.BlockEditor
                 EditorUILayoutHelper.SubHeader("Lighting Properties");
                 _selectedBlock.opacity = (byte)EditorGUILayout.IntSlider(new GUIContent("Opacity", "How many light levels will be blocked by this block."), _selectedBlock.opacity, 0, 15);
                 _selectedBlock.lightEmission = (byte)EditorGUILayout.IntSlider(new GUIContent("Light Emission", "How many light levels will be emitted by this block."), _selectedBlock.lightEmission, 0, 15);
+                if (_selectedBlock.lightEmission > 0)
+                {
+                    _selectedBlock.lightEmissionColor = EditorGUILayout.ColorField(
+                        new GUIContent("Emission Color", "The color of light emitted by this block. Combined with intensity to produce per-channel RGB values."),
+                        _selectedBlock.lightEmissionColor, showEyedropper: true, showAlpha: false, hdr: false);
+                }
 
                 EditorGUILayout.Space();
                 EditorUILayoutHelper.SubHeader("Placement Rules & Tags");
@@ -709,6 +715,7 @@ namespace Editor.BlockEditor
                 waterfallsMaxSpread = _selectedBlock.waterfallsMaxSpread,
                 opacity = _selectedBlock.opacity,
                 lightEmission = _selectedBlock.lightEmission,
+                lightEmissionColor = _selectedBlock.lightEmissionColor,
                 tagPreset = _selectedBlock.tagPreset,
                 tags = _selectedBlock.tags,
                 canReplaceTags = _selectedBlock.canReplaceTags,

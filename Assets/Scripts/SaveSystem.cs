@@ -27,7 +27,9 @@ public static class SaveSystem
     // v6 → v7: Added global structural dimensions (chunkHeight, chunkWidth, worldSizeInChunks)
     //          to level.dat for future extensibility, and standardized the naming of the
     //          pending_lighting.bin file. See Migration_v6_to_v7_SaveFormatExtensibility.cs.
-    public const int CURRENT_VERSION = 7;
+    // v8 (RGB): Expanded light queue entries from 13 to 16 bytes per entry (added OldBlockR/G/B).
+    //           See Migration_v7_to_v8_RGBLightQueues.cs.
+    public const int CURRENT_VERSION = 8;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.

@@ -73,6 +73,34 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<uint> NeighborFrontLeft; // North-West
 
+        // --- LIGHT MAPS (Phase 2 RGB) ---
+        [ReadOnly]
+        public NativeArray<ushort> LightMap;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightBack;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightFront;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightLeft;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightRight;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightFrontRight;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightBackRight;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightBackLeft;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightFrontLeft;
+
         // --- FLUID TEMPLATES ---
         [ReadOnly]
         public NativeArray<float> WaterVertexTemplates;
@@ -357,10 +385,12 @@ namespace Jobs
                 else
                 {
                     // Off: flat lighting from the flora block's own light level.
-                    // Extract directly from packedData — no spatial lookup needed.
-                    Color32 flat = VoxelMeshHelper.BuildFlatLight(
-                        BurstVoxelDataBitMapping.GetSunLight(packedData),
-                        BurstVoxelDataBitMapping.GetBlockLight(packedData));
+                    ushort blockLightData = GetLightDataFromLocalPos(pos);
+                    Color32 flat = new Color32(
+                        (byte)(LightBitMapping.GetSunLight(blockLightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightR(blockLightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightG(blockLightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightB(blockLightData) * 17));
                     crossLights.TopL0 = crossLights.TopL1 = crossLights.TopL2 = crossLights.TopL3 = flat;
                     crossLights.BotL0 = crossLights.BotL1 = crossLights.BotL2 = crossLights.BotL3 = flat;
                 }
@@ -436,7 +466,8 @@ namespace Jobs
                 // Skip faces not defined in the custom mesh
                 if (p >= meshData.FaceCount) continue;
 
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+                Vector3Int neighborPos = pos + BurstVoxelData.FaceChecks.Data[p];
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(neighborPos);
 
                 if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
@@ -454,7 +485,7 @@ namespace Jobs
                     }
                     else
                     {
-                        Color32 flatLight = BuildFlatLightData(neighborVoxel);
+                        Color32 flatLight = BuildFlatLightData(neighborVoxel, neighborPos);
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, flatLight, pos, rotation,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
@@ -494,7 +525,8 @@ namespace Jobs
                 Vector3Int faceCheck = BurstVoxelData.FaceChecks.Data[p];
                 float3 rotatedCheck = math.round(math.mul(matrix, new float3(faceCheck.x, faceCheck.y, faceCheck.z)));
                 Vector3Int rotatedOffset = new Vector3Int((int)rotatedCheck.x, (int)rotatedCheck.y, (int)rotatedCheck.z);
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + rotatedOffset);
+                Vector3Int neighborPos2 = pos + rotatedOffset;
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(neighborPos2);
 
                 if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
@@ -512,7 +544,7 @@ namespace Jobs
                     }
                     else
                     {
-                        Color32 flatLight = BuildFlatLightData(neighborVoxel);
+                        Color32 flatLight = BuildFlatLightData(neighborVoxel, neighborPos2);
                         VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, flatLight, pos, in matrix,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
@@ -595,7 +627,8 @@ namespace Jobs
 
             for (int p = 0; p < 6; p++)
             {
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[p]);
+                Vector3Int neighborPos = pos + BurstVoxelData.FaceChecks.Data[p];
+                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(neighborPos);
 
                 if (ShouldDrawFace(voxelProps, neighborVoxel))
                 {
@@ -614,7 +647,7 @@ namespace Jobs
                     }
                     else
                     {
-                        Color32 flat = BuildFlatLightData(neighborVoxel);
+                        Color32 flat = BuildFlatLightData(neighborVoxel, neighborPos);
                         VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, in pos, rotation,
                             0, flat, flat, flat, flat,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
@@ -640,7 +673,8 @@ namespace Jobs
             Vector3Int pos, ushort id, BlockTypeJobData voxelProps,
             int worldFace, int effectiveFace, int uvQuarterTurnsCW)
         {
-            VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[worldFace]);
+            Vector3Int neighborPos = pos + BurstVoxelData.FaceChecks.Data[worldFace];
+            VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(neighborPos);
             if (!ShouldDrawFace(voxelProps, neighborVoxel)) return;
 
             int textureID = GetTextureID(id, effectiveFace);
@@ -656,7 +690,7 @@ namespace Jobs
             }
             else
             {
-                Color32 flat = BuildFlatLightData(neighborVoxel);
+                Color32 flat = BuildFlatLightData(neighborVoxel, neighborPos);
                 VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, in pos, rotation: 0f, uvQuarterTurnsCW,
                     flat, flat, flat, flat,
                     ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
@@ -770,18 +804,20 @@ namespace Jobs
         /// sun and block channels. Used by the flat lighting fallback paths.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private Color32 BuildFlatLightData(VoxelState? neighborVoxel)
+        private Color32 BuildFlatLightData(VoxelState? neighborVoxel, Vector3Int neighborPos)
         {
             if (!neighborVoxel.HasValue)
             {
                 const byte fullSun = 15 * 17; // 255
-                return new Color32(fullSun, fullSun, fullSun, 0);
+                return new Color32(fullSun, 0, 0, 0);
             }
 
-            VoxelState vs = neighborVoxel.Value;
-            byte sun = (byte)(vs.Sunlight * 17);
-            byte block = (byte)(vs.Blocklight * 17);
-            return new Color32(sun, sun, sun, block);
+            ushort lightData = GetLightDataFromLocalPos(neighborPos);
+            byte sun = (byte)(LightBitMapping.GetSunLight(lightData) * 17);
+            byte blockR = (byte)(LightBitMapping.GetBlocklightR(lightData) * 17);
+            byte blockG = (byte)(LightBitMapping.GetBlocklightG(lightData) * 17);
+            byte blockB = (byte)(LightBitMapping.GetBlocklightB(lightData) * 17);
+            return new Color32(sun, blockR, blockG, blockB);
         }
 
         /// <summary>
@@ -876,71 +912,90 @@ namespace Jobs
             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3)
         {
             // Extract light from the pre-fetched direct neighbor (same for all 4 corners).
-            byte directSun, directBlock;
+            byte directSun, directR, directG, directB;
             if (!directNeighbor.HasValue)
             {
                 directSun = 15;
-                directBlock = 0;
+                directR = 0;
+                directG = 0;
+                directB = 0;
             }
             else
             {
                 VoxelState ds = directNeighbor.Value;
                 bool directOpaque = BlockTypes[ds.ID].IsOpaque;
-                directSun = directOpaque ? (byte)0 : ds.Sunlight;
-                directBlock = directOpaque ? (byte)0 : ds.Blocklight;
+                if (directOpaque)
+                {
+                    directSun = 0;
+                    directR = 0;
+                    directG = 0;
+                    directB = 0;
+                }
+                else
+                {
+                    // Read RGB from the ushort light array via the face neighbor position
+                    Vector3Int neighborPos = blockPos + BurstVoxelData.FaceChecks.Data[faceIndex];
+                    ushort lightData = GetLightDataFromLocalPos(neighborPos);
+                    directSun = LightBitMapping.GetSunLight(lightData);
+                    directR = LightBitMapping.GetBlocklightR(lightData);
+                    directG = LightBitMapping.GetBlocklightG(lightData);
+                    directB = LightBitMapping.GetBlocklightB(lightData);
+                }
             }
 
-            // Process each of the 4 corners.
-            // Unrolled to avoid stackalloc / array allocation in Burst.
-            l0 = SampleCorner(faceIndex, 0, blockPos, directSun, directBlock);
-            l1 = SampleCorner(faceIndex, 1, blockPos, directSun, directBlock);
-            l2 = SampleCorner(faceIndex, 2, blockPos, directSun, directBlock);
-            l3 = SampleCorner(faceIndex, 3, blockPos, directSun, directBlock);
+            l0 = SampleCorner(faceIndex, 0, blockPos, directSun, directR, directG, directB);
+            l1 = SampleCorner(faceIndex, 1, blockPos, directSun, directR, directG, directB);
+            l2 = SampleCorner(faceIndex, 2, blockPos, directSun, directR, directG, directB);
+            l3 = SampleCorner(faceIndex, 3, blockPos, directSun, directR, directG, directB);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private Color32 SampleCorner(int faceIndex, int cornerIndex, Vector3Int blockPos,
-            byte directSun, byte directBlock)
+            byte directSun, byte directR, byte directG, byte directB)
         {
             int lutBase = faceIndex * 12 + cornerIndex * 3;
             int3 sideAOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 0];
             int3 sideBOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 1];
             int3 diagOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 2];
 
-            // Sample Side A
             SampleNeighborLight(blockPos + new Vector3Int(sideAOffset.x, sideAOffset.y, sideAOffset.z),
-                out byte sideASun, out byte sideABlock, out bool sideAOpaque);
+                out byte sideASun, out byte sideAR, out byte sideAG, out byte sideAB, out bool sideAOpaque);
 
-            // Sample Side B
             SampleNeighborLight(blockPos + new Vector3Int(sideBOffset.x, sideBOffset.y, sideBOffset.z),
-                out byte sideBSun, out byte sideBBlock, out bool sideBOpaque);
+                out byte sideBSun, out byte sideBR, out byte sideBG, out byte sideBB, out bool sideBOpaque);
 
-            // Diagonal occlusion rule: if both sides are opaque, skip the diagonal read
-            byte diagSun = 0, diagBlock = 0;
+            byte diagSun = 0, diagR = 0, diagG = 0, diagB = 0;
             if (!(sideAOpaque && sideBOpaque))
             {
                 SampleNeighborLight(blockPos + new Vector3Int(diagOffset.x, diagOffset.y, diagOffset.z),
-                    out diagSun, out diagBlock, out _);
+                    out diagSun, out diagR, out diagG, out diagB, out _);
             }
 
-            // Average sunlight and blocklight independently (always divide by 4).
+            // Average all 4 channels independently (always divide by 4).
             // Encode to UNorm8: value * 17 maps 0-15 → 0-255 (with rounding: (sum * 17 + 2) / 4).
             int sunSum = directSun + sideASun + sideBSun + diagSun;
-            int blockSum = directBlock + sideABlock + sideBBlock + diagBlock;
-            byte sunEncoded = (byte)((sunSum * 17 + 2) / 4);
-            byte blockEncoded = (byte)((blockSum * 17 + 2) / 4);
+            int rSum = directR + sideAR + sideBR + diagR;
+            int gSum = directG + sideAG + sideBG + diagG;
+            int bSum = directB + sideAB + sideBB + diagB;
 
-            return new Color32(sunEncoded, sunEncoded, sunEncoded, blockEncoded);
+            return new Color32(
+                (byte)((sunSum * 17 + 2) / 4),
+                (byte)((rSum * 17 + 2) / 4),
+                (byte)((gSum * 17 + 2) / 4),
+                (byte)((bSum * 17 + 2) / 4)
+            );
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SampleNeighborLight(Vector3Int pos, out byte sun, out byte block, out bool isOpaque)
+        private void SampleNeighborLight(Vector3Int pos, out byte sun, out byte blockR, out byte blockG, out byte blockB, out bool isOpaque)
         {
             VoxelState? state = GetVoxelStateFromLocalPos(pos);
             if (!state.HasValue)
             {
                 sun = 15;
-                block = 0;
+                blockR = 0;
+                blockG = 0;
+                blockB = 0;
                 isOpaque = false;
                 return;
             }
@@ -950,13 +1005,97 @@ namespace Jobs
             if (isOpaque)
             {
                 sun = 0;
-                block = 0;
+                blockR = 0;
+                blockG = 0;
+                blockB = 0;
             }
             else
             {
-                sun = s.Sunlight;
-                block = s.Blocklight;
+                ushort lightData = GetLightDataFromLocalPos(pos);
+                sun = LightBitMapping.GetSunLight(lightData);
+                blockR = LightBitMapping.GetBlocklightR(lightData);
+                blockG = LightBitMapping.GetBlocklightG(lightData);
+                blockB = LightBitMapping.GetBlocklightB(lightData);
             }
+        }
+
+        /// <summary>
+        /// Retrieves the packed ushort light data for any position relative to the current chunk.
+        /// Mirrors the coordinate routing of <see cref="GetVoxelStateFromLocalPos"/>.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private ushort GetLightDataFromLocalPos(Vector3Int pos)
+        {
+            if (pos.y < 0 || pos.y >= _clipMaxY) return 0;
+
+            if (pos.x >= 0 && pos.x < VoxelData.ChunkWidth &&
+                pos.z >= 0 && pos.z < VoxelData.ChunkWidth)
+            {
+                int idx = ChunkMath.GetFlattenedIndexInChunk(pos.x, pos.y, pos.z);
+                return LightMap.IsCreated ? LightMap[idx] : (ushort)0;
+            }
+
+            NativeArray<ushort> targetLight = default;
+            Vector3Int localPos = pos;
+
+            if (pos.x < 0)
+            {
+                localPos.x += VoxelData.ChunkWidth;
+                if (pos.z < 0)
+                {
+                    localPos.z += VoxelData.ChunkWidth;
+                    targetLight = LightBackLeft;
+                }
+                else if (pos.z >= VoxelData.ChunkWidth)
+                {
+                    localPos.z -= VoxelData.ChunkWidth;
+                    targetLight = LightFrontLeft;
+                }
+                else
+                {
+                    targetLight = LightLeft;
+                }
+            }
+            else if (pos.x >= VoxelData.ChunkWidth)
+            {
+                localPos.x -= VoxelData.ChunkWidth;
+                if (pos.z < 0)
+                {
+                    localPos.z += VoxelData.ChunkWidth;
+                    targetLight = LightBackRight;
+                }
+                else if (pos.z >= VoxelData.ChunkWidth)
+                {
+                    localPos.z -= VoxelData.ChunkWidth;
+                    targetLight = LightFrontRight;
+                }
+                else
+                {
+                    targetLight = LightRight;
+                }
+            }
+            else
+            {
+                if (pos.z < 0)
+                {
+                    localPos.z += VoxelData.ChunkWidth;
+                    targetLight = LightBack;
+                }
+                else if (pos.z >= VoxelData.ChunkWidth)
+                {
+                    localPos.z -= VoxelData.ChunkWidth;
+                    targetLight = LightFront;
+                }
+            }
+
+            if (!targetLight.IsCreated || targetLight.Length == 0) return 0;
+
+            if (localPos.x < 0 || localPos.x >= VoxelData.ChunkWidth ||
+                localPos.z < 0 || localPos.z >= VoxelData.ChunkWidth)
+                return 0;
+
+            int mapIdx = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
+            return targetLight[mapIdx];
         }
 
         /// <summary>

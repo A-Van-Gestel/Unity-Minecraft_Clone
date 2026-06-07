@@ -52,7 +52,8 @@ Shader "Hidden/Editor/BlockPreview"
 
                 // Apply voxel lighting with hardcoded editor daylight defaults
                 // (VoxelData.MinLightLevel = 0.15, MaxLightLevel = 1.0, full daylight = 1.0)
-                col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.rgb, i.lightData.a,
+                col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba,
+                                                half3(1, 1, 1), // skyColor — white in editor
                                                 1.0, // globalLight  — full daylight
                                                 0.15, // minLight     — VoxelData.MinLightLevel
                                                 1.0); // maxLight     — VoxelData.MaxLightLevel

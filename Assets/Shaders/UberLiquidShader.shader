@@ -78,6 +78,7 @@ Shader "Minecraft/UberLiquidShader"
 
             // Game-only: global light uniforms from World.cs
             float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
+            half3 SkyLightColor;
 
             LiquidV2F vertFunction(LiquidAppdata v)
             {

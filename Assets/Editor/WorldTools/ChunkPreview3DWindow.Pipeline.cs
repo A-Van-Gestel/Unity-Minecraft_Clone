@@ -284,7 +284,7 @@ namespace Editor.WorldTools
                 for (int z = 0; z < totalSize; z++)
                 {
                     ChunkCoord coord = new ChunkCoord(_gridStartX + x, _gridStartZ + z);
-                    LightingJobData? jobData = _pipelineRunner.ScheduleLighting(coord, _chunkMaps, _heightMaps);
+                    LightingJobData? jobData = _pipelineRunner.ScheduleLighting(coord, _chunkMaps, _heightMaps, _chunkLightMaps);
                     if (jobData.HasValue)
                     {
                         _lightingJobs.Add(coord, jobData.Value);
@@ -321,6 +321,14 @@ namespace Editor.WorldTools
                 }
 
                 _chunkMaps[voxelOrigin] = new NativeArray<uint>(data.Map, Allocator.Persistent);
+
+                // Copy lit ushort light map back into persistent storage
+                if (_chunkLightMaps.TryGetValue(voxelOrigin, out NativeArray<ushort> oldLightMap))
+                {
+                    if (oldLightMap.IsCreated) oldLightMap.Dispose();
+                }
+
+                _chunkLightMaps[voxelOrigin] = new NativeArray<ushort>(data.LightMap, Allocator.Persistent);
 
                 if (!data.IsStable[0])
                     anyUnstable = true;
@@ -379,25 +387,41 @@ namespace Editor.WorldTools
                 if (flatIndex < 0 || flatIndex >= targetMap.Length) continue;
 
                 uint packed = targetMap[flatIndex];
-                packed = ApplyLightModToPacked(packed, lightMod);
-                targetMap[flatIndex] = packed;
-            }
-        }
+                ushort light = 0;
+                bool hasLightMap = _chunkLightMaps.TryGetValue(targetOrigin, out NativeArray<ushort> targetLightMap);
+                if (hasLightMap) light = targetLightMap[flatIndex];
 
-        private static uint ApplyLightModToPacked(uint packed, LightModification mod)
-        {
-            if (mod.Channel == LightChannel.Sun)
-            {
-                packed = (packed & ~BurstVoxelDataBitMapping.SUNLIGHT_MASK) |
-                         ((uint)mod.LightLevel << BurstVoxelDataBitMapping.SUNLIGHT_SHIFT);
-            }
-            else
-            {
-                packed = (packed & ~BurstVoxelDataBitMapping.BLOCKLIGHT_MASK) |
-                         ((uint)mod.LightLevel << BurstVoxelDataBitMapping.BLOCKLIGHT_SHIFT);
-            }
+                if (lightMod.Channel == LightChannel.Sun)
+                {
+                    byte currentSunlight = BurstVoxelDataBitMapping.GetSunLight(packed);
 
-            return packed;
+                    // Stale-snapshot guard: non-zero sunlight mods may only INCREASE light.
+                    // Zero mods (darkness removal) always apply.
+                    if (lightMod.LightLevel > 0 && lightMod.LightLevel < currentSunlight)
+                        continue;
+
+                    targetMap[flatIndex] = BurstVoxelDataBitMapping.SetSunLight(packed, lightMod.LightLevel);
+                    if (hasLightMap)
+                        targetLightMap[flatIndex] = LightBitMapping.SetSunLight(light, lightMod.LightLevel);
+                }
+                else
+                {
+                    // Per-channel MAX guard: non-zero mod channels use MAX to prevent
+                    // stale-snapshot mods from reducing values set by independent sources.
+                    // Zero channels pass through for darkness removal.
+                    byte oldR = LightBitMapping.GetBlocklightR(light);
+                    byte oldG = LightBitMapping.GetBlocklightG(light);
+                    byte oldB = LightBitMapping.GetBlocklightB(light);
+                    byte applyR = lightMod.BlockR == 0 ? (byte)0 : (byte)Mathf.Max(oldR, lightMod.BlockR);
+                    byte applyG = lightMod.BlockG == 0 ? (byte)0 : (byte)Mathf.Max(oldG, lightMod.BlockG);
+                    byte applyB = lightMod.BlockB == 0 ? (byte)0 : (byte)Mathf.Max(oldB, lightMod.BlockB);
+
+                    byte newScalar = (byte)Mathf.Max(applyR, Mathf.Max(applyG, applyB));
+                    targetMap[flatIndex] = BurstVoxelDataBitMapping.SetBlockLight(packed, newScalar);
+                    if (hasLightMap)
+                        targetLightMap[flatIndex] = LightBitMapping.SetBlocklightRGB(light, applyR, applyG, applyB);
+                }
+            }
         }
 
         /// <summary>
@@ -407,11 +431,23 @@ namespace Editor.WorldTools
         /// </summary>
         private void StampFullBrightOnAllMaps()
         {
+            const int chunkVolume = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
+
             foreach (KeyValuePair<Vector2Int, NativeArray<uint>> kvp in _chunkMaps)
             {
                 NativeArray<uint> map = kvp.Value;
                 for (int v = 0; v < map.Length; v++)
                     map[v] = BurstVoxelDataBitMapping.SetSunLight(map[v], 15);
+
+                // Create a matching ushort light map with sunlight=15
+                if (!_chunkLightMaps.TryGetValue(kvp.Key, out NativeArray<ushort> lightMap))
+                {
+                    lightMap = new NativeArray<ushort>(chunkVolume, Allocator.Persistent);
+                    _chunkLightMaps[kvp.Key] = lightMap;
+                }
+
+                for (int v = 0; v < lightMap.Length; v++)
+                    lightMap[v] = LightBitMapping.SetSunLight(lightMap[v], 15);
             }
         }
 
@@ -430,7 +466,7 @@ namespace Editor.WorldTools
                     ChunkCoord coord = new ChunkCoord(_gridStartX + x, _gridStartZ + z);
                     Vector2Int voxelOrigin = coord.ToVoxelOrigin();
 
-                    var result = _pipelineRunner.ScheduleMeshing(coord, voxelOrigin, _chunkMaps, clip);
+                    var result = _pipelineRunner.ScheduleMeshing(coord, voxelOrigin, _chunkMaps, _chunkLightMaps, clip);
                     if (result.HasValue)
                     {
                         _meshJobs.Add(coord, result.Value);

@@ -220,6 +220,9 @@ namespace Data
         // Lighting properties
         public readonly byte Opacity;
         public readonly byte LightEmission;
+        public readonly byte EmissionR;
+        public readonly byte EmissionG;
+        public readonly byte EmissionB;
 
         // Block behavior
         [MarshalAs(UnmanagedType.U1)]
@@ -261,7 +264,13 @@ namespace Data
 
             // Lighting properties
             Opacity = blockType.opacity;
-            LightEmission = blockType.lightEmission;
+            Color emColor = blockType.lightEmissionColor;
+            float maxComponent = Mathf.Max(emColor.r, Mathf.Max(emColor.g, emColor.b));
+            float scale = maxComponent > 0 ? blockType.lightEmission / maxComponent : 0;
+            EmissionR = (byte)Mathf.Clamp(Mathf.RoundToInt(emColor.r * scale), 0, 15);
+            EmissionG = (byte)Mathf.Clamp(Mathf.RoundToInt(emColor.g * scale), 0, 15);
+            EmissionB = (byte)Mathf.Clamp(Mathf.RoundToInt(emColor.b * scale), 0, 15);
+            LightEmission = (byte)Mathf.Max(EmissionR, Mathf.Max(EmissionG, EmissionB));
 
             // Block behavior
             IsActive = blockType.isActive;

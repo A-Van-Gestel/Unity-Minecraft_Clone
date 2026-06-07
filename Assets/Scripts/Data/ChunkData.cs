@@ -346,7 +346,7 @@ namespace Data
             // Copy Queues
             // We move the queues from the loaded object (temp) to this object (live)
             foreach (LightQueueNode node in loadedData.SunlightBfsQueue) AddToSunLightQueue(node.Position, node.OldLightLevel);
-            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel);
+            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
 
             // If loaded data had flags, transfer them
             if (loadedData.HasLightChangesToProcess) HasLightChangesToProcess = true;
@@ -412,10 +412,20 @@ namespace Data
             ushort oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
             byte oldBlocklight = BurstVoxelDataBitMapping.GetBlockLight(oldPackedData);
             byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
+            ushort oldLightData = GetLightData(localPos.x, localPos.y, localPos.z);
+            byte oldBlockR = LightBitMapping.GetBlocklightR(oldLightData);
+            byte oldBlockG = LightBitMapping.GetBlocklightG(oldLightData);
+            byte oldBlockB = LightBitMapping.GetBlocklightB(oldLightData);
             BlockType oldProps = World.Instance.BlockTypes[oldId];
 
             // --- Update The Map (Sections) ---
             SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData, newProps, oldProps);
+
+            // Keep the ushort light array in sync when lighting is disabled.
+            // The uint packed data already has sunlight=15 from PackVoxelData above,
+            // but the mesh job reads from the ushort array — it must match.
+            if (!lightingEnabled)
+                SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSunLight(0, 15));
 
             // --- MAINTAIN HEIGHTMAP ---
             int heightmapIndex = localPos.x + VoxelData.ChunkWidth * localPos.z;
@@ -450,7 +460,7 @@ namespace Data
 
             // 1. Queue the modified block itself for light REMOVAL.
             AddToSunLightQueue(localPos, oldSunlight);
-            AddToBlockLightQueue(localPos, oldBlocklight);
+            AddToBlockLightQueue(localPos, oldBlocklight, oldBlockR, oldBlockG, oldBlockB);
 
             // 2. "WAKE UP" NEIGHBORS to fill any new empty space with their light.
             for (int i = 0; i < 6; i++)
@@ -466,7 +476,7 @@ namespace Data
 
                     byte neighborBlocklight = BurstVoxelDataBitMapping.GetBlockLight(neighborPacked);
                     if (neighborBlocklight > 0)
-                        AddToBlockLightQueue(neighborPos, 0);
+                        AddToBlockLightQueue(neighborPos, 0, 0, 0, 0);
                 }
             }
 
@@ -583,6 +593,34 @@ namespace Data
             return sections[sectionY].voxels[index];
         }
 
+        /// <summary>
+        /// Gets the packed <c>ushort</c> light data for a voxel at the given local position.
+        /// Returns 0 if the section is null (unallocated air).
+        /// </summary>
+        public ushort GetLightData(int x, int y, int z)
+        {
+            int sectionY = y / ChunkMath.SECTION_SIZE;
+            if (sections[sectionY] == null) return 0;
+
+            int localY = y % ChunkMath.SECTION_SIZE;
+            int index = x + localY * ChunkMath.SECTION_SIZE + z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+            return sections[sectionY].LightData[index];
+        }
+
+        /// <summary>
+        /// Sets the packed <c>ushort</c> light data for a voxel at the given local position.
+        /// Allocates the section if it is null.
+        /// </summary>
+        public void SetLightData(int x, int y, int z, ushort value)
+        {
+            int sectionY = y / ChunkMath.SECTION_SIZE;
+            sections[sectionY] ??= GetNewSection();
+
+            int localY = y % ChunkMath.SECTION_SIZE;
+            int index = x + localY * ChunkMath.SECTION_SIZE + z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+            sections[sectionY].LightData[index] = value;
+        }
+
         #endregion
 
         // --- Lighting Methods ---
@@ -593,12 +631,19 @@ namespace Data
         /// Adds a block light update request to the internal queue for the next lighting pass.
         /// </summary>
         /// <param name="localPos">The local position of the modified voxel.</param>
-        /// <param name="oldLightLevel">The light level the voxel had before modification (needed for darkness propagation).</param>
-        public void AddToBlockLightQueue(Vector3Int localPos, byte oldLightLevel)
+        /// <param name="oldLightLevel">The scalar blocklight level the voxel had before modification.</param>
+        /// <param name="oldR">The old red blocklight channel (0-15).</param>
+        /// <param name="oldG">The old green blocklight channel (0-15).</param>
+        /// <param name="oldB">The old blue blocklight channel (0-15).</param>
+        public void AddToBlockLightQueue(Vector3Int localPos, byte oldLightLevel, byte oldR, byte oldG, byte oldB)
         {
             if (World.Instance.settings.enableLighting)
             {
-                _blocklightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
+                _blocklightBfsQueue.Enqueue(new LightQueueNode
+                {
+                    Position = localPos, OldLightLevel = oldLightLevel,
+                    OldBlockR = oldR, OldBlockG = oldG, OldBlockB = oldB,
+                });
                 HasLightChangesToProcess = true;
             }
         }
@@ -814,6 +859,9 @@ namespace Data
     {
         public Vector3Int Position;
         public byte OldLightLevel;
+        public byte OldBlockR;
+        public byte OldBlockG;
+        public byte OldBlockB;
 
         // --- Operator Overloads for comparison ---
 
@@ -821,17 +869,18 @@ namespace Data
 
         public static bool operator ==(LightQueueNode a, LightQueueNode b)
         {
-            return a.Position == b.Position && a.OldLightLevel == b.OldLightLevel;
+            return a.Position == b.Position && a.OldLightLevel == b.OldLightLevel &&
+                   a.OldBlockR == b.OldBlockR && a.OldBlockG == b.OldBlockG && a.OldBlockB == b.OldBlockB;
         }
 
         public static bool operator !=(LightQueueNode a, LightQueueNode b)
         {
-            return a.Position != b.Position || a.OldLightLevel != b.OldLightLevel;
+            return !(a == b);
         }
 
         public bool Equals(LightQueueNode other)
         {
-            return Position == other.Position && OldLightLevel == other.OldLightLevel;
+            return this == other;
         }
 
         public override bool Equals(object obj)
@@ -841,7 +890,7 @@ namespace Data
 
         public override int GetHashCode()
         {
-            return Position.GetHashCode() ^ OldLightLevel.GetHashCode();
+            return Position.GetHashCode() ^ OldLightLevel ^ (OldBlockR << 8) ^ (OldBlockG << 16) ^ (OldBlockB << 24);
         }
 
         public override string ToString()

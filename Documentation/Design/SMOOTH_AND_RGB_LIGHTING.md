@@ -1,9 +1,9 @@
 # Smooth Lighting & Full RGB Light Engine
 
-- **Status:** Phase 1 Implemented — Phase 2 architecture finalized (2026-06-06)
-- **Current Implementation:** Per-vertex smooth lighting with separate sunlight/blocklight channels
+- **Status:** Phase 1 & Phase 2 Implemented (2026-06-07)
+- **Current Implementation:** Per-vertex smooth lighting with per-channel RGB blocklight BFS + shader-only sky tinting
 - **Phase 1 Target:** Smooth (ambient-occlusion-style) vertex-averaged lighting with full RGB data layout — **Implemented**
-- **Phase 2 Target:** RGB blocklight propagation (per-channel independent BFS) + shader-only sunlight sky tinting
+- **Phase 2 Target:** RGB blocklight propagation (per-channel independent BFS) + shader-only sunlight sky tinting — **Implemented**
 - **Depends On:** None (can be implemented on the current codebase)
 - **Prerequisites Completed:** BFS attenuation formula fix (`max(1, opacity)`) across all three call sites in `NeighborhoodLightingJob.cs`
 - **Key Decisions (2026-06-06):**
@@ -463,14 +463,16 @@ private void CalculateCornerLights(int faceIndex, Vector3Int blockPos,
 
 /// Samples the 3 LUT neighbors for one corner, applies diagonal occlusion,
 /// averages with the direct neighbor, and encodes to UNorm8.
+/// Phase 2: averages all 4 channels (sun, blockR, blockG, blockB) independently.
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 private Color32 SampleCorner(int faceIndex, int cornerIndex, Vector3Int blockPos,
-    byte directSun, byte directBlock)
+    byte directSun, byte directR, byte directG, byte directB)
 
 /// Reads a neighbor's sun/block light values and opacity.
+/// Phase 2: reads RGB blocklight from ushort light array via GetLightDataFromLocalPos.
 [MethodImpl(MethodImplOptions.AggressiveInlining)]
 private void SampleNeighborLight(Vector3Int pos,
-    out byte sun, out byte block, out bool isOpaque)
+    out byte sun, out byte blockR, out byte blockG, out byte blockB, out bool isOpaque)
 ```
 
 The encoding uses rounded integer arithmetic for Burst efficiency: `(byte)((sunSum * 17 + 2) / 4)` — the `+ 2` provides correct rounding for the divide-by-4 average.
@@ -790,7 +792,7 @@ Bit layout (16 bits total):
   Bits 12-15: Blocklight Blue    (0-15)
 ```
 
-Helper methods (in a new `LightBitMapping` static class or extension of `BurstVoxelDataBitMapping`):
+Helper methods (in a separate `LightBitMapping` static class at `Jobs/BurstData/LightBitMapping.cs`):
 
 ```csharp
 private const int SUN_SHIFT = 0;
@@ -1102,11 +1104,13 @@ When all 3 blocklight channels are 0.0, the blocklight contribution is uniformly
 
 #### 3.7.1 Light Array — Runtime-Only
 
-The `ushort` light array is **runtime-only** and does **not** need to be saved to disk. Light is fully reconstructed from block placements and sky exposure during chunk loading (the BFS recomputes all values from emitting blocks and heightmap). This means:
+The `ushort` light array is **runtime-only** and does **not** need to be saved to disk. On chunk load, the light array is initialized from the `uint` packed voxel data via `ChunkSerializer.InitLightDataFromPacked`: sunlight is copied directly, and scalar blocklight is mapped to white RGB `(L, L, L)`. This provides a correct baseline for chunks that skip the lighting pipeline (already fully lit, no pending changes). Chunks that do go through the lighting pipeline (initial lighting, pending queue entries, edge checks) will overwrite these values with
+proper BFS-computed RGB data. This means:
 
 - No changes to the section serialization format for voxel data.
 - The `ushort` light array is allocated during chunk generation and freed on unload.
 - The existing scalar sunlight/blocklight bits in the `uint` continue to be written to disk as part of the voxel data (they are derived values during Phase 2, deprecated in the post-cleanup step).
+- On every load, `InitLightDataFromPacked` derives the ushort from the uint, ensuring the mesh job always has valid light data even without a BFS pass.
 
 #### 3.7.2 Light Queue Serialization — Upgraded to RGB
 
@@ -1126,29 +1130,31 @@ The current `WriteLightQueue`/`ReadLightQueue` in `ChunkSerializer.cs` serialize
 
 **Files modified (beyond Phase 1):**
 
-| File                                                 | Change                                                                                                                                                                     |
-|------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Data/BlockType.cs`                                  | Add `lightEmissionColor` field (Color, inspector color picker)                                                                                                             |
-| `Data/JobData.cs` (`BlockTypeJobData`)               | Add `EmissionR`, `EmissionG`, `EmissionB` bytes; derive from color + intensity                                                                                             |
-| `Data/JobData.cs` (`LightQueueNode`)                 | Add `OldBlockR`, `OldBlockG`, `OldBlockB` bytes for RGB queue entries                                                                                                      |
-| `Data/ChunkSection.cs`                               | Add `ushort[]` light array (managed side); pool reset via `Array.Clear`                                                                                                    |
-| `Data/ChunkData.cs`                                  | RGB-aware `ModifyVoxel` light queuing; `AddToBlockLightQueue` carries RGB values                                                                                           |
-| `Jobs/BurstData/BurstVoxelDataBitMapping.cs`         | Add `LightBitMapping` helper (or extend existing) for `ushort` light pack/unpack                                                                                           |
-| `Jobs/NeighborhoodLightingJob.cs`                    | Triple-channel blocklight BFS; per-channel darkness removal; RGB `SetLight`/`GetLight`; expanded `LightModification` and `LightRemovalNode`; write-through cache expansion |
-| `Jobs/Data/LightingJobData.cs`                       | Pass `NativeArray<ushort>` light arrays (center + 8 neighbors) into job                                                                                                    |
-| `WorldJobManager.cs`                                 | Pass `ushort` light arrays to/from lighting and meshing jobs; handle RGB `LightModification` cross-chunk mods                                                              |
-| `World.cs`                                           | Add `SkyLightColor` shader uniform + `Gradient` for time-of-day color                                                                                                      |
-| `Jobs/MeshGenerationJob.cs`                          | `SampleNeighborLight` reads RGB from `ushort` array; `SampleCorner`/`BuildFlatLightData` encode `(sun, blockR, blockG, blockB)`                                            |
-| `Chunk.cs`                                           | Thread `ushort` light arrays through `ApplyMeshData` pipeline                                                                                                              |
-| `Shaders/Includes/VoxelLighting.hlsl`                | Update `ApplyVoxelLightingRGB` signature: `(sun scalar, block RGB, sky color, ...)`                                                                                        |
-| `Shaders/StandardBlockShader.shader`                 | Add `SkyLightColor` uniform; update frag call to `ApplyVoxelLightingRGB(col, lightData.r, lightData.gba, ...)`                                                             |
-| `Shaders/TransparentBlockShader.shader`              | Same as StandardBlockShader                                                                                                                                                |
-| `Shaders/Includes/LiquidCore.hlsl`                   | Update scalar fallback: `max(r, max(g, max(b, a)))`                                                                                                                        |
-| `Shaders/UberLiquidShader.shader`                    | Add `SkyLightColor` uniform                                                                                                                                                |
-| `Serialization/ChunkSerializer.cs`                   | Expand `WriteLightQueue`/`ReadLightQueue` for RGB entries                                                                                                                  |
-| `Serialization/Migration/Steps/Migration_v*_RGB*.cs` | AOT migration step for light queue format change                                                                                                                           |
-| `Benchmarks/LightingJobBenchmark.cs`                 | Add RGB-specific scenarios; fix existing broken scenarios                                                                                                                  |
-| `Editor/BlockEditor/` (inspector)                    | Add emission color picker + synced RGB sliders to block editor UI                                                                                                          |
+| File                                                             | Change                                                                                                                                                                     |
+|------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Data/BlockType.cs`                                              | Add `lightEmissionColor` field (Color, inspector color picker)                                                                                                             |
+| `Data/JobData.cs` (`BlockTypeJobData`)                           | Add `EmissionR`, `EmissionG`, `EmissionB` bytes; derive from color + intensity                                                                                             |
+| `Data/JobData.cs` (`LightQueueNode`)                             | Add `OldBlockR`, `OldBlockG`, `OldBlockB` bytes for RGB queue entries                                                                                                      |
+| `Data/ChunkSection.cs`                                           | Add `ushort[]` light array (managed side); pool reset via `Array.Clear`                                                                                                    |
+| `Data/ChunkData.cs`                                              | RGB-aware `ModifyVoxel` light queuing; `AddToBlockLightQueue` carries RGB values                                                                                           |
+| `Jobs/BurstData/BurstVoxelDataBitMapping.cs`                     | Add `LightBitMapping` helper (or extend existing) for `ushort` light pack/unpack                                                                                           |
+| `Jobs/NeighborhoodLightingJob.cs`                                | Triple-channel blocklight BFS; per-channel darkness removal; RGB `SetLight`/`GetLight`; expanded `LightModification` and `LightRemovalNode`; write-through cache expansion |
+| `Jobs/Data/LightingJobData.cs`                                   | Pass `NativeArray<ushort>` light arrays (center + 8 neighbors) into job                                                                                                    |
+| `WorldJobManager.cs`                                             | Pass `ushort` light arrays to/from lighting and meshing jobs; handle RGB `LightModification` cross-chunk mods                                                              |
+| `World.cs`                                                       | Add `SkyLightColor` shader uniform + `Gradient` for time-of-day color                                                                                                      |
+| `Jobs/MeshGenerationJob.cs`                                      | `SampleNeighborLight` reads RGB from `ushort` array; `SampleCorner`/`BuildFlatLightData` encode `(sun, blockR, blockG, blockB)`                                            |
+| `Chunk.cs`                                                       | Thread `ushort` light arrays through `ApplyMeshData` pipeline                                                                                                              |
+| `Shaders/Includes/VoxelLighting.hlsl`                            | Update `ApplyVoxelLightingRGB` signature: `(sun scalar, block RGB, sky color, ...)`                                                                                        |
+| `Shaders/StandardBlockShader.shader`                             | Add `SkyLightColor` uniform; update frag call to `ApplyVoxelLightingRGB(col, lightData.r, lightData.gba, ...)`                                                             |
+| `Shaders/TransparentBlockShader.shader`                          | Same as StandardBlockShader                                                                                                                                                |
+| `Shaders/Includes/LiquidCore.hlsl`                               | Update scalar fallback: `max(r, max(g, max(b, a)))`                                                                                                                        |
+| `Shaders/UberLiquidShader.shader`                                | Add `SkyLightColor` uniform                                                                                                                                                |
+| `Serialization/ChunkSerializer.cs`                               | Expand `WriteLightQueue`/`ReadLightQueue` for RGB entries; add `InitLightDataFromPacked` to reconstruct ushort light array from uint packed data on every chunk load       |
+| `Serialization/Migration/Steps/MigrationV7ToV8RGBLightQueues.cs` | AOT migration step (world v7→v8, chunk format v4→v5) for light queue format change                                                                                         |
+| `Benchmarks/LightingJobBenchmark.cs`                             | Add RGB-specific scenarios; fix existing broken scenarios                                                                                                                  |
+| `Editor/BlockEditor/` (inspector)                                | Add emission color picker + synced RGB sliders to block editor UI                                                                                                          |
+| `Editor/WorldTools/Libraries/EditorChunkPipelineRunner.cs`       | Thread `ushort` light arrays through `ScheduleLighting` and `ScheduleMeshing` for the 3D chunk preview pipeline                                                            |
+| `Editor/WorldTools/ChunkPreview3DWindow.Pipeline.cs`             | Store/pass `_chunkLightMaps` dictionary; cross-chunk mod MAX guard; full-bright stamp for disabled lighting                                                                |
 
 **Files NOT changed from Phase 1 state:** `SectionRenderer.cs` (vertex layout unchanged), `VoxelCommon.hlsl` (vertex structs unchanged), `Helpers/VoxelMeshHelper.cs` (already works with `Color32`) — the rendering pipeline is fully prepared by Phase 1.
 
