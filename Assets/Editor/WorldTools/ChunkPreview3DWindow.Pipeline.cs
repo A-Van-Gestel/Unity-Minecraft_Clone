@@ -402,7 +402,7 @@ namespace Editor.WorldTools
 
                     targetMap[flatIndex] = BurstVoxelDataBitMapping.SetSunLight(packed, lightMod.LightLevel);
                     if (hasLightMap)
-                        targetLightMap[flatIndex] = LightBitMapping.SetSunLight(light, lightMod.LightLevel);
+                        targetLightMap[flatIndex] = LightBitMapping.SetSkyLight(light, lightMod.LightLevel);
                 }
                 else
                 {

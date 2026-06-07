@@ -716,7 +716,7 @@ public class WorldJobManager : IDisposable
                             // Sunlight: write to ushort light array
                             ushort oldSunLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
                             neighborChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z,
-                                LightBitMapping.SetSunLight(oldSunLight, mod.LightLevel));
+                                LightBitMapping.SetSkyLight(oldSunLight, mod.LightLevel));
                             neighborChunk.AddToSunLightQueue(localVoxelPos, oldLightLevel);
                         }
                     }

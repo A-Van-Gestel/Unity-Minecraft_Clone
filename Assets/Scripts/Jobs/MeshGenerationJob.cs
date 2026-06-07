@@ -387,7 +387,7 @@ namespace Jobs
                     // Off: flat lighting from the flora block's own light level.
                     ushort blockLightData = GetLightDataFromLocalPos(pos);
                     Color32 flat = new Color32(
-                        (byte)(LightBitMapping.GetSunLight(blockLightData) * 17),
+                        (byte)(LightBitMapping.GetSkyLight(blockLightData) * 17),
                         (byte)(LightBitMapping.GetBlocklightR(blockLightData) * 17),
                         (byte)(LightBitMapping.GetBlocklightG(blockLightData) * 17),
                         (byte)(LightBitMapping.GetBlocklightB(blockLightData) * 17));
@@ -813,7 +813,7 @@ namespace Jobs
             }
 
             ushort lightData = GetLightDataFromLocalPos(neighborPos);
-            byte sun = (byte)(LightBitMapping.GetSunLight(lightData) * 17);
+            byte sun = (byte)(LightBitMapping.GetSkyLight(lightData) * 17);
             byte blockR = (byte)(LightBitMapping.GetBlocklightR(lightData) * 17);
             byte blockG = (byte)(LightBitMapping.GetBlocklightG(lightData) * 17);
             byte blockB = (byte)(LightBitMapping.GetBlocklightB(lightData) * 17);
@@ -936,7 +936,7 @@ namespace Jobs
                     // Read RGB from the ushort light array via the face neighbor position
                     Vector3Int neighborPos = blockPos + BurstVoxelData.FaceChecks.Data[faceIndex];
                     ushort lightData = GetLightDataFromLocalPos(neighborPos);
-                    directSun = LightBitMapping.GetSunLight(lightData);
+                    directSun = LightBitMapping.GetSkyLight(lightData);
                     directR = LightBitMapping.GetBlocklightR(lightData);
                     directG = LightBitMapping.GetBlocklightG(lightData);
                     directB = LightBitMapping.GetBlocklightB(lightData);
@@ -1012,7 +1012,7 @@ namespace Jobs
             else
             {
                 ushort lightData = GetLightDataFromLocalPos(pos);
-                sun = LightBitMapping.GetSunLight(lightData);
+                sun = LightBitMapping.GetSkyLight(lightData);
                 blockR = LightBitMapping.GetBlocklightR(lightData);
                 blockG = LightBitMapping.GetBlocklightG(lightData);
                 blockB = LightBitMapping.GetBlocklightB(lightData);

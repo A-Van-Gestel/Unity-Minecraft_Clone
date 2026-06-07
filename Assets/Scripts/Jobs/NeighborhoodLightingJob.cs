@@ -245,7 +245,7 @@ namespace Jobs
 
                 byte sun = BurstVoxelDataBitMapping.GetSunLight(packed);
                 ushort currentLight = LightMap[i];
-                byte currentSun = LightBitMapping.GetSunLight(currentLight);
+                byte currentSun = LightBitMapping.GetSkyLight(currentLight);
 
                 BlockTypeJobData props = BlockTypes[id];
                 byte emR = props.EmissionR;
@@ -271,7 +271,7 @@ namespace Jobs
                 }
                 else if (needsUpdate)
                 {
-                    LightMap[i] = LightBitMapping.SetSunLight(currentLight, sun);
+                    LightMap[i] = LightBitMapping.SetSkyLight(currentLight, sun);
                 }
             }
         }
@@ -907,7 +907,7 @@ namespace Jobs
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
 
                 Map[mapIndex] = BurstVoxelDataBitMapping.SetSunLight(Map[mapIndex], lightLevel);
-                LightMap[mapIndex] = LightBitMapping.SetSunLight(LightMap[mapIndex], lightLevel);
+                LightMap[mapIndex] = LightBitMapping.SetSkyLight(LightMap[mapIndex], lightLevel);
             }
             else
             {
@@ -932,7 +932,7 @@ namespace Jobs
                 }
 
                 uint updatedPacked = BurstVoxelDataBitMapping.SetSunLight(currentPacked, lightLevel);
-                ushort updatedLight = LightBitMapping.SetSunLight(currentLight, lightLevel);
+                ushort updatedLight = LightBitMapping.SetSkyLight(currentLight, lightLevel);
 
                 cache[cacheKey] = ((ulong)updatedPacked << 16) | updatedLight;
             }

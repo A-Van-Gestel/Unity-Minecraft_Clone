@@ -425,7 +425,7 @@ namespace Data
             // The uint packed data already has sunlight=15 from PackVoxelData above,
             // but the mesh job reads from the ushort array — it must match.
             if (!lightingEnabled)
-                SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSunLight(0, 15));
+                SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkyLight(0, 15));
 
             // --- MAINTAIN HEIGHTMAP ---
             int heightmapIndex = localPos.x + VoxelData.ChunkWidth * localPos.z;

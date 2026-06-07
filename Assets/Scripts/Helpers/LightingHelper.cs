@@ -26,7 +26,7 @@ namespace Helpers
         public static void StampFullBrightSunlight(NativeArray<ushort> lightMap)
         {
             for (int v = 0; v < lightMap.Length; v++)
-                lightMap[v] = LightBitMapping.SetSunLight(lightMap[v], 15);
+                lightMap[v] = LightBitMapping.SetSkyLight(lightMap[v], 15);
         }
     }
 }

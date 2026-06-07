@@ -6,13 +6,13 @@ namespace Jobs.BurstData
 {
     /// <summary>
     /// Bit-packing helpers for the <c>ushort</c> per-voxel light array introduced in Phase 2.
-    /// Layout: <c>[Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4]</c> = 16 bits total.
+    /// Layout: <c>[Sky: 4][BlockR: 4][BlockG: 4][BlockB: 4]</c> = 16 bits total.
     /// </summary>
     [BurstCompile]
     public static class LightBitMapping
     {
         // --- Bit Layout Constants ---
-        private const int SUN_SHIFT = 0;
+        private const int SKY_SHIFT = 0;
         private const int BLOCK_R_SHIFT = 4;
         private const int BLOCK_G_SHIFT = 8;
         private const int BLOCK_B_SHIFT = 12;
@@ -26,12 +26,12 @@ namespace Jobs.BurstData
         // --- Getters ---
 
         /// <summary>
-        /// Extracts the sunlight level (0-15) from the packed light data.
+        /// Extracts the sky light level (0-15) from the packed light data.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static byte GetSunLight(ushort lightData)
+        public static byte GetSkyLight(ushort lightData)
         {
-            return (byte)((lightData >> SUN_SHIFT) & CHANNEL_MASK);
+            return (byte)((lightData >> SKY_SHIFT) & CHANNEL_MASK);
         }
 
         /// <summary>
@@ -63,7 +63,7 @@ namespace Jobs.BurstData
 
         /// <summary>
         /// Returns the maximum of the three blocklight RGB channels (0-15).
-        /// Used for legacy scalar compatibility and mob spawning checks.
+        /// Used for scalar compatibility and mob spawning checks.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static byte GetMaxBlocklight(ushort lightData)
@@ -77,13 +77,13 @@ namespace Jobs.BurstData
         // --- Setters ---
 
         /// <summary>
-        /// Updates the sunlight level within the packed light data.
+        /// Updates the sky light level within the packed light data.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ushort SetSunLight(ushort lightData, byte level)
+        public static ushort SetSkyLight(ushort lightData, byte level)
         {
-            return (ushort)((lightData & ~(CHANNEL_MASK << SUN_SHIFT)) |
-                            ((level & CHANNEL_MASK) << SUN_SHIFT));
+            return (ushort)((lightData & ~(CHANNEL_MASK << SKY_SHIFT)) |
+                            ((level & CHANNEL_MASK) << SKY_SHIFT));
         }
 
         /// <summary>
@@ -134,9 +134,9 @@ namespace Jobs.BurstData
         /// Packs all four light channels into a single <c>ushort</c>.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static ushort PackLightData(byte sun, byte blockR, byte blockG, byte blockB)
+        public static ushort PackLightData(byte sky, byte blockR, byte blockG, byte blockB)
         {
-            return (ushort)(((sun & CHANNEL_MASK) << SUN_SHIFT) |
+            return (ushort)(((sky & CHANNEL_MASK) << SKY_SHIFT) |
                             ((blockR & CHANNEL_MASK) << BLOCK_R_SHIFT) |
                             ((blockG & CHANNEL_MASK) << BLOCK_G_SHIFT) |
                             ((blockB & CHANNEL_MASK) << BLOCK_B_SHIFT));
