@@ -501,20 +501,25 @@ public class DebugScreen : MonoBehaviour
             Vector3Int voxelPos = posNullable.Value;
             BlockType props = state.Properties;
 
-            // Determine if the voxel is active.
+            // Determine if the voxel is active and read light data from the section.
             Chunk targetChunk = _world.GetChunkFromVector3(voxelPos);
             bool isVoxelActive = false;
+            byte skyLight = 0;
+            byte blockLight = 0;
             if (targetChunk != null)
             {
                 Vector3Int localPos = targetChunk.GetVoxelPositionInChunkFromGlobalVector3(voxelPos);
                 isVoxelActive = targetChunk.IsVoxelActive(localPos);
+                ushort lightData = targetChunk.ChunkData.GetLightData(localPos.x, localPos.y, localPos.z);
+                skyLight = LightBitMapping.GetSkyLight(lightData);
+                blockLight = LightBitMapping.GetMaxBlocklight(lightData);
             }
 
             // --- Always-on Information ---
             builder.Append("Name: ").AppendLine(props.blockName);
             builder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
             builder.Append("Is Active: ").AppendLine(BoolToYesNoString(isVoxelActive));
-            builder.Append("Light (Sun/Block/Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.Light).AppendLine();
+            builder.Append("Light (Sky/Block/Max): ").Append(skyLight).Append(" / ").Append(blockLight).Append(" / ").Append(Math.Max(skyLight, blockLight)).AppendLine();
             builder.Append("Meta: 0x").Append(state.Meta.ToString("X2")).AppendLine();
 
             // --- Context-Specific Information ---

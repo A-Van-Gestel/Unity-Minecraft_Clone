@@ -147,7 +147,8 @@ namespace Jobs
             {
                 uint currentPacked = GetPackedData(node.Position, ref neighborWriteCache);
                 if (currentPacked == uint.MaxValue) continue;
-                byte currentLight = BurstVoxelDataBitMapping.GetSunLight(currentPacked);
+                ushort currentLightData = GetLightData(node.Position, ref neighborWriteCache);
+                byte currentLight = LightBitMapping.GetSkyLight(currentLightData);
                 if (currentLight < node.OldLightLevel)
                     sunlightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.Position, LightLevel = node.OldLightLevel });
                 else if (currentLight > node.OldLightLevel)
@@ -243,17 +244,16 @@ namespace Jobs
                 ushort id = BurstVoxelDataBitMapping.GetId(packed);
                 if (id == 0) continue;
 
-                byte sun = BurstVoxelDataBitMapping.GetSunLight(packed);
                 ushort currentLight = LightMap[i];
-                byte currentSun = LightBitMapping.GetSkyLight(currentLight);
+                byte sun = LightBitMapping.GetSkyLight(currentLight);
 
                 BlockTypeJobData props = BlockTypes[id];
                 byte emR = props.EmissionR;
                 byte emG = props.EmissionG;
                 byte emB = props.EmissionB;
 
-                // Only update if the ushort is stale relative to what the uint/emission says
-                bool needsUpdate = sun != currentSun;
+                // Seed emission values into LightMap if the block emits light
+                bool needsUpdate = false;
                 if (emR > 0 || emG > 0 || emB > 0)
                 {
                     byte curR = LightBitMapping.GetBlocklightR(currentLight);
@@ -302,7 +302,7 @@ namespace Jobs
                 uint neighborPacked = GetPackedData(neighborPos, ref cache);
                 if (neighborPacked == uint.MaxValue) continue;
 
-                byte neighborLight = BurstVoxelDataBitMapping.GetSunLight(neighborPacked);
+                byte neighborLight = LightBitMapping.GetSkyLight(GetLightData(neighborPos, ref cache));
 
                 if (neighborLight > 0)
                 {
@@ -404,7 +404,7 @@ namespace Jobs
             uint sourcePacked = GetPackedData(pos, ref cache);
             if (sourcePacked == uint.MaxValue) return;
 
-            byte sourceLight = BurstVoxelDataBitMapping.GetSunLight(sourcePacked);
+            byte sourceLight = LightBitMapping.GetSkyLight(GetLightData(pos, ref cache));
             BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
 
             // An opaque block cannot propagate sunlight to its neighbors.
@@ -416,7 +416,7 @@ namespace Jobs
                 uint neighborPacked = GetPackedData(neighborPos, ref cache);
                 if (neighborPacked == uint.MaxValue) continue;
 
-                byte neighborLight = BurstVoxelDataBitMapping.GetSunLight(neighborPacked);
+                byte neighborLight = LightBitMapping.GetSkyLight(GetLightData(neighborPos, ref cache));
                 BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
 
                 bool isVerticalSunlight = sourceLight == 15 && sourceProps.IsFullyTransparentToLight && VoxelData.FaceChecks[i].y == -1 && neighborProps.IsFullyTransparentToLight;
@@ -530,8 +530,7 @@ namespace Jobs
             for (int y = VoxelData.ChunkHeight - 1; y > highestBlockY; y--)
             {
                 Vector3Int currentPos = new Vector3Int(x, y, z);
-                uint currentPacked = GetPackedData(currentPos, ref cache);
-                byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(currentPacked);
+                byte oldSunlight = LightBitMapping.GetSkyLight(GetLightData(currentPos, ref cache));
 
                 // Update the current block in the column to be fully lit.
                 if (oldSunlight != 15)
@@ -558,7 +557,7 @@ namespace Jobs
                     uint neighborPacked = GetPackedData(neighborPos, ref cache);
                     if (neighborPacked == uint.MaxValue) continue;
 
-                    byte neighborSunlight = BurstVoxelDataBitMapping.GetSunLight(neighborPacked);
+                    byte neighborSunlight = LightBitMapping.GetSkyLight(GetLightData(neighborPos, ref cache));
 
                     // If the neighbor has sunlight BUT NOT FULL SUNLIGHT, it needs to be re-evaluated.
                     // A neighbor with level 15 has its own direct sky access and should be ignored.
@@ -580,7 +579,7 @@ namespace Jobs
             {
                 Vector3Int currentPos = new Vector3Int(x, y, z);
                 uint currentPacked = GetPackedData(currentPos, ref cache);
-                byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(currentPacked);
+                byte oldSunlight = LightBitMapping.GetSkyLight(GetLightData(currentPos, ref cache));
                 BlockTypeJobData props = BlockTypes[BurstVoxelDataBitMapping.GetId(currentPacked)];
 
                 // Update the current block in the column based on the light from above.
@@ -652,7 +651,7 @@ namespace Jobs
                         uint neighborPacked = GetPackedData(neighborPos, ref cache);
                         if (neighborPacked == uint.MaxValue) continue;
 
-                        CheckEdgeVoxel(pos, centerPacked, neighborPacked,
+                        CheckEdgeVoxel(pos, centerPacked, neighborPos,
                             sunPlacement, ref cache);
                         CheckEdgeVoxelRGB(pos, centerPacked, neighborPos,
                             blockPlacement, ref cache);
@@ -666,11 +665,11 @@ namespace Jobs
         /// Detects missing light (black spots) where the neighbor has light that should propagate here.
         /// </summary>
         private void CheckEdgeVoxel(
-            Vector3Int centerPos, uint centerPacked, uint neighborPacked,
+            Vector3Int centerPos, uint centerPacked, Vector3Int neighborPos,
             NativeQueue<Vector3Int> placementQueue, ref NativeHashMap<long, ulong> cache)
         {
-            byte centerLight = BurstVoxelDataBitMapping.GetSunLight(centerPacked);
-            byte neighborLight = BurstVoxelDataBitMapping.GetSunLight(neighborPacked);
+            byte centerLight = LightBitMapping.GetSkyLight(GetLightData(centerPos, ref cache));
+            byte neighborLight = LightBitMapping.GetSkyLight(GetLightData(neighborPos, ref cache));
 
             BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
             if (centerProps.IsOpaque) return;

@@ -504,21 +504,12 @@ public class WorldJobManager : IDisposable
                 }
                 else
                 {
-                    for (int y = 0; y < VoxelData.ChunkHeight; y++)
+                    // Lighting disabled: stamp sky=15 on every section's LightData
+                    ushort fullBrightSky = LightBitMapping.PackLightData(15, 0, 0, 0);
+                    foreach (ChunkSection section in chunkData.sections)
                     {
-                        // Skip null sections — writing sunlight=15 to air-only sections would
-                        // allocate a ChunkSection (~16 KB) that is never read by meshing (IsEmpty=true).
-                        if (chunkData.sections[y / ChunkMath.SECTION_SIZE] == null) continue;
-
-                        for (int x = 0; x < VoxelData.ChunkWidth; x++)
-                        {
-                            for (int z = 0; z < VoxelData.ChunkWidth; z++)
-                            {
-                                uint packed = chunkData.GetVoxel(x, y, z);
-                                packed = BurstVoxelDataBitMapping.SetSunLight(packed, 15);
-                                chunkData.SetVoxel(x, y, z, packed);
-                            }
-                        }
+                        if (section == null) continue;
+                        Array.Fill(section.LightData, fullBrightSky);
                     }
                 }
 
@@ -660,7 +651,8 @@ public class WorldJobManager : IDisposable
 
                         if (mod.Channel == LightChannel.Sun)
                         {
-                            byte currentSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
+                            ushort currentLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
+                            byte currentSunlight = LightBitMapping.GetSkyLight(currentLight);
 
                             // Guard: Cross-chunk BFS mods are computed against a STALE snapshot of
                             // the neighbor's data (taken before the neighbor's own lighting pass).
@@ -681,13 +673,12 @@ public class WorldJobManager : IDisposable
                         }
                         else
                         {
-                            oldLightLevel = BurstVoxelDataBitMapping.GetBlockLight(oldPackedData);
-
                             // Per-channel MAX guard (mirrors the sunlight guard above):
                             // Non-zero mod channels use MAX to prevent stale-snapshot mods
                             // from reducing values set by independent light sources.
                             // Zero channels pass through for darkness removal.
                             ushort oldLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
+                            oldLightLevel = LightBitMapping.GetMaxBlocklight(oldLight);
                             byte oldR = LightBitMapping.GetBlocklightR(oldLight);
                             byte oldG = LightBitMapping.GetBlocklightG(oldLight);
                             byte oldB = LightBitMapping.GetBlocklightB(oldLight);

@@ -2541,13 +2541,17 @@ public class World : MonoBehaviour
                         VoxelState state = new VoxelState(packedData);
                         Color? color = null;
 
-                        if (visualizationMode == DebugVisualizationMode.Sunlight && state.Sunlight > 0)
+                        ushort lightData = section.LightData[i];
+                        byte skyLight = LightBitMapping.GetSkyLight(lightData);
+                        byte blockLight = LightBitMapping.GetMaxBlocklight(lightData);
+
+                        if (visualizationMode == DebugVisualizationMode.Sunlight && skyLight > 0)
                         {
-                            color = new Color(1f, 1f, 0f, state.Sunlight / 15f * 0.8f); // Yellow
+                            color = new Color(1f, 1f, 0f, skyLight / 15f * 0.8f); // Yellow
                         }
-                        else if (visualizationMode == DebugVisualizationMode.Blocklight && state.Blocklight > 0)
+                        else if (visualizationMode == DebugVisualizationMode.Blocklight && blockLight > 0)
                         {
-                            color = new Color(1f, 0.5f, 0f, state.Blocklight / 15f * 0.8f); // Orange
+                            color = new Color(1f, 0.5f, 0f, blockLight / 15f * 0.8f); // Orange
                         }
                         else if (visualizationMode == DebugVisualizationMode.FluidLevel &&
                                  state.Properties.fluidType != FluidType.None)
@@ -2609,7 +2613,7 @@ public class World : MonoBehaviour
 
                                 VoxelState state = new VoxelState(packedData);
                                 Vector3Int localPos = new Vector3Int(x, localY, z);
-                                byte sunlight = state.Sunlight;
+                                byte sunlight = LightBitMapping.GetSkyLight(section.LightData[sectionIndex]);
                                 bool isOpaque = state.Properties.IsOpaque;
 
                                 Color color;
@@ -2626,12 +2630,12 @@ public class World : MonoBehaviour
                                     if (localY + 1 < VoxelData.ChunkHeight)
                                     {
                                         uint abovePacked = chunk.ChunkData.GetVoxel(x, localY + 1, z);
-                                        byte aboveSunlight = BurstVoxelDataBitMapping.GetSunLight(abovePacked);
+                                        byte aboveSkyLight = LightBitMapping.GetSkyLight(chunk.ChunkData.GetLightData(x, localY + 1, z));
                                         ushort aboveId = BurstVoxelDataBitMapping.GetId(abovePacked);
                                         bool aboveIsOpaque = Instance.BlockTypes[aboveId].IsOpaque;
 
                                         // Flag anomaly: ≥2 level drop from non-opaque voxel above
-                                        if (!aboveIsOpaque && aboveSunlight >= sunlight + 2)
+                                        if (!aboveIsOpaque && aboveSkyLight >= sunlight + 2)
                                         {
                                             isAnomaly = true;
                                         }

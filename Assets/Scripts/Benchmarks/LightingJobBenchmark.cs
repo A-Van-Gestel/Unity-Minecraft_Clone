@@ -404,8 +404,17 @@ namespace Benchmarks
                     NeighborSE = new NativeArray<uint>(sourceData.NeighborSE, allocator),
                     NeighborSW = new NativeArray<uint>(sourceData.NeighborSW, allocator),
                     NeighborNW = new NativeArray<uint>(sourceData.NeighborNW, allocator),
+                    LightN = new NativeArray<ushort>(sourceData.LightN, allocator),
+                    LightE = new NativeArray<ushort>(sourceData.LightE, allocator),
+                    LightS = new NativeArray<ushort>(sourceData.LightS, allocator),
+                    LightW = new NativeArray<ushort>(sourceData.LightW, allocator),
+                    LightNE = new NativeArray<ushort>(sourceData.LightNE, allocator),
+                    LightSE = new NativeArray<ushort>(sourceData.LightSE, allocator),
+                    LightSW = new NativeArray<ushort>(sourceData.LightSW, allocator),
+                    LightNW = new NativeArray<ushort>(sourceData.LightNW, allocator),
                 },
                 Map = new NativeArray<uint>(sourceData.Center, allocator),
+                LightMap = new NativeArray<ushort>(sourceData.CenterLight, allocator),
 
                 SunLightQueue = new NativeQueue<LightQueueNode>(allocator),
                 BlockLightQueue = new NativeQueue<LightQueueNode>(allocator),
@@ -437,6 +446,7 @@ namespace Benchmarks
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 Map = data.Map,
+                LightMap = data.LightMap,
                 ChunkPosition = new Vector2Int(0, 0),
                 SunlightBfsQueue = data.SunLightQueue,
                 BlocklightBfsQueue = data.BlockLightQueue,
@@ -451,6 +461,14 @@ namespace Benchmarks
                 NeighborSE = data.Input.NeighborSE,
                 NeighborSW = data.Input.NeighborSW,
                 NeighborNW = data.Input.NeighborNW,
+                LightN = data.Input.LightN,
+                LightE = data.Input.LightE,
+                LightS = data.Input.LightS,
+                LightW = data.Input.LightW,
+                LightNE = data.Input.LightNE,
+                LightSE = data.Input.LightSE,
+                LightSW = data.Input.LightSW,
+                LightNW = data.Input.LightNW,
 
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = data.Mods,
@@ -478,8 +496,9 @@ namespace Benchmarks
                 JobHandle handle = ScheduleJob(preLight);
                 handle.Complete();
 
-                // Copy the now-lit center map back into the source data.
+                // Copy the now-lit center map and light map back into the source data.
                 NativeArray<uint>.Copy(preLight.Map, sourceData.Center);
+                NativeArray<ushort>.Copy(preLight.LightMap, sourceData.CenterLight);
 
                 // Apply cross-chunk light modifications to the neighbor arrays so that
                 // subsequent removal benchmarks start from correct border light state.
@@ -780,6 +799,7 @@ namespace Benchmarks
             int index = ChunkMath.GetFlattenedIndexInChunk(pos.x, pos.y, pos.z);
             data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level,
                 BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
+            data.CenterLight[index] = LightBitMapping.PackLightData(0, level, level, level);
 
             data.SourceBlockLightQueue.Add(new LightQueueNode
             {
@@ -796,9 +816,10 @@ namespace Benchmarks
         private static void RemoveLightSource(LightingBenchmarkData data, Vector3Int pos)
         {
             int index = ChunkMath.GetFlattenedIndexInChunk(pos.x, pos.y, pos.z);
-            byte oldLevel = BurstVoxelDataBitMapping.GetBlockLight(data.Center[index]);
+            byte oldLevel = LightBitMapping.GetMaxBlocklight(data.CenterLight[index]);
 
             data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+            data.CenterLight[index] = 0;
 
             data.SourceBlockLightQueue.Add(new LightQueueNode
             {
@@ -975,9 +996,12 @@ namespace Benchmarks
             private const int HEIGHTMAP_SIZE = VoxelData.ChunkWidth * VoxelData.ChunkWidth;
 
             public NativeArray<uint> Center;
+            public NativeArray<ushort> CenterLight;
             public NativeArray<ushort> HeightMap;
             public NativeArray<uint> NeighborN, NeighborE, NeighborS, NeighborW;
             public NativeArray<uint> NeighborNE, NeighborSE, NeighborSW, NeighborNW;
+            public NativeArray<ushort> LightN, LightE, LightS, LightW;
+            public NativeArray<ushort> LightNE, LightSE, LightSW, LightNW;
 
             // No current scenario populates SourceSunLightQueue (sunlight uses column
             // recalc via SourceSunRecalcQueue), but the field mirrors the job struct's
@@ -989,6 +1013,7 @@ namespace Benchmarks
             public LightingBenchmarkData(Allocator allocator)
             {
                 Center = new NativeArray<uint>(MAP_SIZE, allocator);
+                CenterLight = new NativeArray<ushort>(MAP_SIZE, allocator);
                 HeightMap = new NativeArray<ushort>(HEIGHTMAP_SIZE, allocator);
 
                 NeighborN = new NativeArray<uint>(MAP_SIZE, allocator);
@@ -1000,6 +1025,15 @@ namespace Benchmarks
                 NeighborSW = new NativeArray<uint>(MAP_SIZE, allocator);
                 NeighborNW = new NativeArray<uint>(MAP_SIZE, allocator);
 
+                LightN = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightE = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightS = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightW = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightNE = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightSE = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightSW = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightNW = new NativeArray<ushort>(MAP_SIZE, allocator);
+
                 SourceSunLightQueue = new List<LightQueueNode>();
                 SourceBlockLightQueue = new List<LightQueueNode>();
                 SourceSunRecalcQueue = new List<Vector2Int>();
@@ -1008,6 +1042,7 @@ namespace Benchmarks
             public void Dispose()
             {
                 if (Center.IsCreated) Center.Dispose();
+                if (CenterLight.IsCreated) CenterLight.Dispose();
                 if (HeightMap.IsCreated) HeightMap.Dispose();
                 if (NeighborN.IsCreated) NeighborN.Dispose();
                 if (NeighborE.IsCreated) NeighborE.Dispose();
@@ -1017,6 +1052,14 @@ namespace Benchmarks
                 if (NeighborSE.IsCreated) NeighborSE.Dispose();
                 if (NeighborSW.IsCreated) NeighborSW.Dispose();
                 if (NeighborNW.IsCreated) NeighborNW.Dispose();
+                if (LightN.IsCreated) LightN.Dispose();
+                if (LightE.IsCreated) LightE.Dispose();
+                if (LightS.IsCreated) LightS.Dispose();
+                if (LightW.IsCreated) LightW.Dispose();
+                if (LightNE.IsCreated) LightNE.Dispose();
+                if (LightSE.IsCreated) LightSE.Dispose();
+                if (LightSW.IsCreated) LightSW.Dispose();
+                if (LightNW.IsCreated) LightNW.Dispose();
             }
         }
 

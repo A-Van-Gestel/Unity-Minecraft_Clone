@@ -393,11 +393,11 @@ namespace Editor.WorldTools
 
                 if (lightMod.Channel == LightChannel.Sun)
                 {
-                    byte currentSunlight = BurstVoxelDataBitMapping.GetSunLight(packed);
+                    byte currentSkyLight = hasLightMap ? LightBitMapping.GetSkyLight(light) : (byte)0;
 
-                    // Stale-snapshot guard: non-zero sunlight mods may only INCREASE light.
+                    // Stale-snapshot guard: non-zero skylight mods may only INCREASE light.
                     // Zero mods (darkness removal) always apply.
-                    if (lightMod.LightLevel > 0 && lightMod.LightLevel < currentSunlight)
+                    if (lightMod.LightLevel > 0 && lightMod.LightLevel < currentSkyLight)
                         continue;
 
                     targetMap[flatIndex] = BurstVoxelDataBitMapping.SetSunLight(packed, lightMod.LightLevel);

@@ -410,9 +410,9 @@ namespace Data
 
             // --- Capture Old State for Lighting ---
             ushort oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
-            byte oldBlocklight = BurstVoxelDataBitMapping.GetBlockLight(oldPackedData);
-            byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
             ushort oldLightData = GetLightData(localPos.x, localPos.y, localPos.z);
+            byte oldSkyLight = LightBitMapping.GetSkyLight(oldLightData);
+            byte oldBlocklight = LightBitMapping.GetMaxBlocklight(oldLightData);
             byte oldBlockR = LightBitMapping.GetBlocklightR(oldLightData);
             byte oldBlockG = LightBitMapping.GetBlocklightG(oldLightData);
             byte oldBlockB = LightBitMapping.GetBlocklightB(oldLightData);
@@ -459,7 +459,7 @@ namespace Data
             // --- Queue Lighting Updates ---
 
             // 1. Queue the modified block itself for light REMOVAL.
-            AddToSunLightQueue(localPos, oldSunlight);
+            AddToSunLightQueue(localPos, oldSkyLight);
             AddToBlockLightQueue(localPos, oldBlocklight, oldBlockR, oldBlockG, oldBlockB);
 
             // 2. "WAKE UP" NEIGHBORS to fill any new empty space with their light.
@@ -468,13 +468,13 @@ namespace Data
                 Vector3Int neighborPos = localPos + VoxelData.FaceChecks[i];
                 if (IsVoxelInChunk(neighborPos))
                 {
-                    uint neighborPacked = GetVoxel(neighborPos.x, neighborPos.y, neighborPos.z);
+                    ushort neighborLight = GetLightData(neighborPos.x, neighborPos.y, neighborPos.z);
 
-                    byte neighborSunlight = BurstVoxelDataBitMapping.GetSunLight(neighborPacked);
-                    if (neighborSunlight > 0)
+                    byte neighborSkyLight = LightBitMapping.GetSkyLight(neighborLight);
+                    if (neighborSkyLight > 0)
                         AddToSunLightQueue(neighborPos, 0);
 
-                    byte neighborBlocklight = BurstVoxelDataBitMapping.GetBlockLight(neighborPacked);
+                    byte neighborBlocklight = LightBitMapping.GetMaxBlocklight(neighborLight);
                     if (neighborBlocklight > 0)
                         AddToBlockLightQueue(neighborPos, 0, 0, 0, 0);
                 }
