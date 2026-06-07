@@ -352,7 +352,7 @@ sequenceDiagram
     participant Main as ProcessLightingJobs<br/>(Main Thread)
     participant NChunk as Neighbor ChunkData
     participant LSM as LightingStateManager
-    Job ->> Job: SetLight(neighborPos, level, channel)
+    Job ->> Job: SetSunlight / SetBlocklightRGB(neighborPos, ...)
     Job ->> Job: Add to CrossChunkLightMods list
     Job ->> Job: Update neighborWriteCache
     Note over Main: Next frame...

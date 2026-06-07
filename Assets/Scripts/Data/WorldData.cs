@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using Helpers;
 using JetBrains.Annotations;
 using Jobs;
-using Jobs.BurstData;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Pool;
@@ -263,10 +263,7 @@ namespace Data
                 //     whose air voxels were initialized to 0 by the section pool
                 //  3. Any voxel whose sunlight wasn't set by the ProcessGenerationJobs fill
                 if (World.Instance != null && !World.Instance.settings.enableLighting)
-                {
-                    for (int v = 0; v < jobArray.Length; v++)
-                        jobArray[v] = BurstVoxelDataBitMapping.SetSunLight(jobArray[v], 15);
-                }
+                    LightingHelper.StampFullBrightSunlight(jobArray);
             }
 
             return jobArray;
@@ -296,14 +293,8 @@ namespace Data
                 }
             }
 
-            // With lighting disabled, stamp sunlight=15 on every voxel in the ushort light snapshot.
-            // Mirrors the uint GetJobArray full-bright fill — without this the mesh job reads
-            // zero sunlight from the ushort array and renders everything black.
             if (World.Instance != null && !World.Instance.settings.enableLighting)
-            {
-                for (int v = 0; v < jobArray.Length; v++)
-                    jobArray[v] = LightBitMapping.SetSunLight(jobArray[v], 15);
-            }
+                LightingHelper.StampFullBrightSunlight(jobArray);
 
             return jobArray;
         }

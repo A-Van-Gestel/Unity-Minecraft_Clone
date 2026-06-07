@@ -752,10 +752,7 @@ namespace Data
             // Covers null sections (air), post-generation structure sections, and any voxel
             // whose sunlight wasn't set by the ProcessGenerationJobs fill.
             if (World.Instance != null && !World.Instance.settings.enableLighting)
-            {
-                for (int v = 0; v < totalVoxels; v++)
-                    jobArray[v] = BurstVoxelDataBitMapping.SetSunLight(jobArray[v], 15);
-            }
+                LightingHelper.StampFullBrightSunlight(jobArray);
 
             return jobArray;
         }

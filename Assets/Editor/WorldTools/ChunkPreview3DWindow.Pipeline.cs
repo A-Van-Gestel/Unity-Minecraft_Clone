@@ -435,19 +435,15 @@ namespace Editor.WorldTools
 
             foreach (KeyValuePair<Vector2Int, NativeArray<uint>> kvp in _chunkMaps)
             {
-                NativeArray<uint> map = kvp.Value;
-                for (int v = 0; v < map.Length; v++)
-                    map[v] = BurstVoxelDataBitMapping.SetSunLight(map[v], 15);
+                LightingHelper.StampFullBrightSunlight(kvp.Value);
 
-                // Create a matching ushort light map with sunlight=15
                 if (!_chunkLightMaps.TryGetValue(kvp.Key, out NativeArray<ushort> lightMap))
                 {
                     lightMap = new NativeArray<ushort>(chunkVolume, Allocator.Persistent);
                     _chunkLightMaps[kvp.Key] = lightMap;
                 }
 
-                for (int v = 0; v < lightMap.Length; v++)
-                    lightMap[v] = LightBitMapping.SetSunLight(lightMap[v], 15);
+                LightingHelper.StampFullBrightSunlight(lightMap);
             }
         }
 

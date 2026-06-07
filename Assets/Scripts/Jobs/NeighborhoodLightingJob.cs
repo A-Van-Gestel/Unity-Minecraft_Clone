@@ -308,7 +308,7 @@ namespace Jobs
                 {
                     if (neighborLight < node.LightLevel)
                     {
-                        SetLight(neighborPos, 0, LightChannel.Sun, ref cache);
+                        SetSunlight(neighborPos, 0, ref cache);
                         if (IsInCenterChunk(neighborPos))
                             rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborLight });
                     }
@@ -343,36 +343,9 @@ namespace Jobs
                 bool anyRemoved = false;
                 bool anyRespread = false;
 
-                // Per-channel: if neighbor's value is less than the old value, it was dependent on the removed source
-                if (nR > 0 && nR < node.LightR)
-                {
-                    newR = 0;
-                    anyRemoved = true;
-                }
-                else if (nR >= node.LightR && node.LightR > 0)
-                {
-                    anyRespread = true;
-                }
-
-                if (nG > 0 && nG < node.LightG)
-                {
-                    newG = 0;
-                    anyRemoved = true;
-                }
-                else if (nG >= node.LightG && node.LightG > 0)
-                {
-                    anyRespread = true;
-                }
-
-                if (nB > 0 && nB < node.LightB)
-                {
-                    newB = 0;
-                    anyRemoved = true;
-                }
-                else if (nB >= node.LightB && node.LightB > 0)
-                {
-                    anyRespread = true;
-                }
+                ProcessDarknessChannel(nR, node.LightR, ref newR, ref anyRemoved, ref anyRespread);
+                ProcessDarknessChannel(nG, node.LightG, ref newG, ref anyRemoved, ref anyRespread);
+                ProcessDarknessChannel(nB, node.LightB, ref newB, ref anyRemoved, ref anyRespread);
 
                 if (anyRemoved)
                 {
@@ -385,6 +358,27 @@ namespace Jobs
                 {
                     pQueue.Enqueue(neighborPos);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Processes a single color channel during RGB darkness removal.
+        /// If the neighbor's value is less than the old source value, the channel was dependent
+        /// on the removed source and is cleared. Otherwise, it came from an independent source
+        /// and is flagged for re-spreading.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void ProcessDarknessChannel(byte neighborVal, byte oldVal, ref byte newVal,
+            ref bool anyRemoved, ref bool anyRespread)
+        {
+            if (neighborVal > 0 && neighborVal < oldVal)
+            {
+                newVal = 0;
+                anyRemoved = true;
+            }
+            else if (neighborVal >= oldVal && oldVal > 0)
+            {
+                anyRespread = true;
             }
         }
 
@@ -434,7 +428,7 @@ namespace Jobs
                     lightToPropagate = (byte)Mathf.Max(0, sourceLight - 1);
                     if (lightToPropagate > neighborLight)
                     {
-                        SetLight(neighborPos, lightToPropagate, LightChannel.Sun, ref cache);
+                        SetSunlight(neighborPos, lightToPropagate, ref cache);
                     }
                 }
                 else
@@ -448,7 +442,7 @@ namespace Jobs
 
                     if (lightToPropagate > neighborLight)
                     {
-                        SetLight(neighborPos, lightToPropagate, LightChannel.Sun, ref cache);
+                        SetSunlight(neighborPos, lightToPropagate, ref cache);
                         if (IsInCenterChunk(neighborPos))
                             pQueue.Enqueue(neighborPos);
                     }
@@ -542,7 +536,7 @@ namespace Jobs
                 // Update the current block in the column to be fully lit.
                 if (oldSunlight != 15)
                 {
-                    SetLight(currentPos, 15, LightChannel.Sun, ref cache);
+                    SetSunlight(currentPos, 15, ref cache);
                     if (15 > oldSunlight)
                         pQueue.Enqueue(currentPos);
                     else
@@ -572,7 +566,7 @@ namespace Jobs
                     {
                         // We MUST manually set this block's light to 0 before adding it to the removal queue.
                         // Otherwise, it acts as a permanent ghost light source during the darkness propagation pass!
-                        SetLight(neighborPos, 0, LightChannel.Sun, ref cache);
+                        SetSunlight(neighborPos, 0, ref cache);
 
                         rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborSunlight });
                     }
@@ -592,7 +586,7 @@ namespace Jobs
                 // Update the current block in the column based on the light from above.
                 if (oldSunlight != lightFromSky)
                 {
-                    SetLight(currentPos, lightFromSky, LightChannel.Sun, ref cache);
+                    SetSunlight(currentPos, lightFromSky, ref cache);
                     if (lightFromSky > oldSunlight)
                         pQueue.Enqueue(currentPos);
                     else
@@ -658,7 +652,7 @@ namespace Jobs
                         uint neighborPacked = GetPackedData(neighborPos, ref cache);
                         if (neighborPacked == uint.MaxValue) continue;
 
-                        CheckEdgeVoxel(pos, centerPacked, neighborPacked, LightChannel.Sun,
+                        CheckEdgeVoxel(pos, centerPacked, neighborPacked,
                             sunPlacement, ref cache);
                         CheckEdgeVoxelRGB(pos, centerPacked, neighborPos,
                             blockPlacement, ref cache);
@@ -672,7 +666,7 @@ namespace Jobs
         /// Detects missing light (black spots) where the neighbor has light that should propagate here.
         /// </summary>
         private void CheckEdgeVoxel(
-            Vector3Int centerPos, uint centerPacked, uint neighborPacked, LightChannel channel,
+            Vector3Int centerPos, uint centerPacked, uint neighborPacked,
             NativeQueue<Vector3Int> placementQueue, ref NativeHashMap<long, ulong> cache)
         {
             byte centerLight = BurstVoxelDataBitMapping.GetSunLight(centerPacked);
@@ -685,7 +679,7 @@ namespace Jobs
 
             if (expectedFromNeighbor > centerLight)
             {
-                SetLight(centerPos, expectedFromNeighbor, channel, ref cache);
+                SetSunlight(centerPos, expectedFromNeighbor, ref cache);
                 placementQueue.Enqueue(centerPos);
             }
         }
@@ -901,10 +895,10 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Sets scalar sunlight level. Writes to both legacy uint bits and the ushort light array.
+        /// Sets sunlight level. Writes to both legacy uint bits and the ushort light array.
         /// For blocklight, use <see cref="SetBlocklightRGB"/> instead.
         /// </summary>
-        private void SetLight(Vector3Int localPos, byte lightLevel, LightChannel channel, ref NativeHashMap<long, ulong> cache)
+        private void SetSunlight(Vector3Int localPos, byte lightLevel, ref NativeHashMap<long, ulong> cache)
         {
             if (localPos.y is < 0 or >= VoxelData.ChunkHeight) return;
 
@@ -912,33 +906,17 @@ namespace Jobs
             {
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
 
-                uint packedData = Map[mapIndex];
-                uint newPackedData = channel == LightChannel.Sun
-                    ? BurstVoxelDataBitMapping.SetSunLight(packedData, lightLevel)
-                    : BurstVoxelDataBitMapping.SetBlockLight(packedData, lightLevel);
-                Map[mapIndex] = newPackedData;
-
-                // Dual-write to ushort light array
-                ushort lightData = LightMap[mapIndex];
-                ushort newLightData = channel == LightChannel.Sun
-                    ? LightBitMapping.SetSunLight(lightData, lightLevel)
-                    : lightData; // Scalar blocklight SetLight should not be used for RGB — use SetBlocklightRGB
-                if (channel == LightChannel.Block)
-                    newLightData = LightBitMapping.SetBlocklightRGB(lightData, lightLevel, lightLevel, lightLevel);
-                LightMap[mapIndex] = newLightData;
+                Map[mapIndex] = BurstVoxelDataBitMapping.SetSunLight(Map[mapIndex], lightLevel);
+                LightMap[mapIndex] = LightBitMapping.SetSunLight(LightMap[mapIndex], lightLevel);
             }
             else
             {
                 Vector3Int globalPos = new Vector3Int(localPos.x + ChunkPosition.x, localPos.y, localPos.z + ChunkPosition.y);
                 CrossChunkLightMods.Add(new LightModification
                 {
-                    GlobalPosition = globalPos, LightLevel = lightLevel, Channel = channel,
-                    BlockR = channel == LightChannel.Block ? lightLevel : (byte)0,
-                    BlockG = channel == LightChannel.Block ? lightLevel : (byte)0,
-                    BlockB = channel == LightChannel.Block ? lightLevel : (byte)0,
+                    GlobalPosition = globalPos, LightLevel = lightLevel, Channel = LightChannel.Sun,
                 });
 
-                // Update the write-through cache (ulong: upper 32 = voxel, lower 16 = light)
                 long cacheKey = EncodeNeighborKey(localPos.x, localPos.y, localPos.z);
                 uint currentPacked;
                 ushort currentLight;
@@ -953,12 +931,8 @@ namespace Jobs
                     currentLight = GetLightData(localPos, ref cache);
                 }
 
-                uint updatedPacked = channel == LightChannel.Sun
-                    ? BurstVoxelDataBitMapping.SetSunLight(currentPacked, lightLevel)
-                    : BurstVoxelDataBitMapping.SetBlockLight(currentPacked, lightLevel);
-                ushort updatedLight = channel == LightChannel.Sun
-                    ? LightBitMapping.SetSunLight(currentLight, lightLevel)
-                    : LightBitMapping.SetBlocklightRGB(currentLight, lightLevel, lightLevel, lightLevel);
+                uint updatedPacked = BurstVoxelDataBitMapping.SetSunLight(currentPacked, lightLevel);
+                ushort updatedLight = LightBitMapping.SetSunLight(currentLight, lightLevel);
 
                 cache[cacheKey] = ((ulong)updatedPacked << 16) | updatedLight;
             }
