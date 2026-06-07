@@ -616,7 +616,7 @@ namespace Benchmarks
                         {
                             int index = ChunkMath.GetFlattenedIndexInChunk(x, 100, z);
                             sourceData.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(
-                                BlockIDs.Stone, 0, 0,
+                                BlockIDs.Stone,
                                 BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
                             sourceData.HeightMap[x + VoxelData.ChunkWidth * z] = 100;
 
@@ -748,8 +748,8 @@ namespace Benchmarks
         private static void FillDefaultTerrain(LightingBenchmarkData data, int height)
         {
             byte legacySolidMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false);
-            uint solid = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0, 0, legacySolidMeta);
-            uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+            uint solid = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, legacySolidMeta);
+            uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
 
             for (int y = 0; y < VoxelData.ChunkHeight; y++)
             {
@@ -819,7 +819,7 @@ namespace Benchmarks
         private static void PlaceLightSource(LightingBenchmarkData data, Vector3Int pos, byte level)
         {
             int index = ChunkMath.GetFlattenedIndexInChunk(pos.x, pos.y, pos.z);
-            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level,
+            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava,
                 BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
             data.CenterLight[index] = LightBitMapping.PackLightData(0, level, level, level);
 
@@ -840,7 +840,7 @@ namespace Benchmarks
             int index = ChunkMath.GetFlattenedIndexInChunk(pos.x, pos.y, pos.z);
             byte oldLevel = LightBitMapping.GetMaxBlocklight(data.CenterLight[index]);
 
-            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
             data.CenterLight[index] = 0;
 
             data.SourceBlockLightQueue.Add(new LightQueueNode
@@ -858,7 +858,7 @@ namespace Benchmarks
         private static void SetupEdgeCheckScenario(LightingBenchmarkData data)
         {
             // Fill all neighbor maps with lit air above the terrain (sunlight=15).
-            uint litAir = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 15, 0, 0);
+            uint litAir = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
             for (int y = 61; y < VoxelData.ChunkHeight; y++)
             {
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
@@ -886,28 +886,28 @@ namespace Benchmarks
                 for (int x = 0; x < VoxelData.ChunkWidth; x++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, 0);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
                 }
 
                 // North border (z=15)
                 for (int x = 0; x < VoxelData.ChunkWidth; x++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, VoxelData.ChunkWidth - 1);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
                 }
 
                 // West border (x=0)
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(0, y, z);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
                 }
 
                 // East border (x=15)
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(VoxelData.ChunkWidth - 1, y, z);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
                 }
             }
 

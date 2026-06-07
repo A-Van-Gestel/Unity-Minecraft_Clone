@@ -403,7 +403,7 @@ namespace Benchmarks
             for (int i = 0; i < data.Center.Length; i++)
             {
                 (ushort idToPlace, byte meta) = GetVoxelForPattern(type, i);
-                uint packed = BurstVoxelDataBitMapping.PackVoxelData(idToPlace, 15, 0, meta);
+                uint packed = BurstVoxelDataBitMapping.PackVoxelData(idToPlace, meta);
                 data.FillAll(i, packed);
             }
 

@@ -392,17 +392,13 @@ namespace Data
             uint oldPackedData = GetVoxel(localPos.x, localPos.y, localPos.z);
 
             // --- Create the new voxel data from the modification ---
-            // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
-            // The LightingJob will then fill it with propagated light from neighbors.
-            // When lighting is disabled, sunlight is set to max (15) so every block renders at full brightness.
             BlockType newProps = World.Instance.BlockTypes[mod.ID];
             bool lightingEnabled = World.Instance.settings.enableLighting;
 
             // The mod is responsible for providing the correct meta byte for the block it places —
             // schema-aware callers encode via BurstVoxelMetadataUtility, transitional callers via
             // BurstVoxelDataBitMapping.BuildMetaLegacy (per PER_BLOCK_METADATA_SCHEMAS.md §7.4).
-            byte initialSunlight = lightingEnabled ? (byte)0 : (byte)15;
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, initialSunlight, newProps.lightEmission, mod.Meta);
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, mod.Meta);
 
             // Check if the full voxel state has actually changed.
             if (oldPackedData == newPackedData)

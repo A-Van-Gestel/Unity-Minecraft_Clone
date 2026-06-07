@@ -402,20 +402,28 @@ namespace Serialization
         }
 
         /// <summary>
-        /// Initializes the runtime ushort light array from the uint packed voxel data.
-        /// Copies sunlight directly and maps scalar blocklight to white RGB (L, L, L).
+        /// Initializes the runtime ushort light array from legacy uint packed voxel data (v6 format).
+        /// Extracts sunlight (bits 16-19) and blocklight (bits 20-23) from the uint, then
+        /// zeros those bits since they are no longer used at runtime.
         /// </summary>
         private static void InitLightDataFromPacked(ChunkSection section)
         {
+            const uint LEGACY_SUN_MASK = 0x000F0000;
+            const int LEGACY_SUN_SHIFT = 16;
+            const uint LEGACY_BLOCK_MASK = 0x00F00000;
+            const int LEGACY_BLOCK_SHIFT = 20;
+            const uint LEGACY_LIGHT_CLEAR_MASK = ~(LEGACY_SUN_MASK | LEGACY_BLOCK_MASK);
+
             uint[] voxels = section.voxels;
             ushort[] lightData = section.LightData;
 
             for (int i = 0; i < voxels.Length; i++)
             {
                 uint packed = voxels[i];
-                byte sun = BurstVoxelDataBitMapping.GetSunLight(packed);
-                byte block = BurstVoxelDataBitMapping.GetBlockLight(packed);
+                byte sun = (byte)((packed & LEGACY_SUN_MASK) >> LEGACY_SUN_SHIFT);
+                byte block = (byte)((packed & LEGACY_BLOCK_MASK) >> LEGACY_BLOCK_SHIFT);
                 lightData[i] = LightBitMapping.PackLightData(sun, block, block, block);
+                voxels[i] = packed & LEGACY_LIGHT_CLEAR_MASK;
             }
         }
     }

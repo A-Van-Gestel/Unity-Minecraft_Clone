@@ -225,8 +225,7 @@ namespace Editor.WorldTools
                     break;
             }
 
-            // Pack the new block ID and meta, preserving light values (will be overwritten by lighting)
-            targetMap[flatIndex] = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, 0, 0, mod.Meta);
+            targetMap[flatIndex] = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, mod.Meta);
         }
 
         /// <summary>

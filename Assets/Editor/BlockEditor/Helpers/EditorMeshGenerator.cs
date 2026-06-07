@@ -77,8 +77,7 @@ namespace Editor.BlockEditor.Helpers
             {
                 // Create mock data needed by the helper that isn't available in the editor.
                 BlockTypeJobData mockProps = new BlockTypeJobData(blockType);
-                // Use fluid level 0 (full block) and full sunlight (15) for the preview.
-                uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0,
+                uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0,
                     BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: (byte)fluidLevel, isFluid: false));
 
                 // For a simple, flat preview, an empty (default) array is sufficient.

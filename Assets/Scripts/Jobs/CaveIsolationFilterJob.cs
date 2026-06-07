@@ -86,8 +86,7 @@ namespace Jobs
                         BlockTypeJobData props = BlockTypes[blockID];
                         byte meta = BurstVoxelDataBitMapping.BuildMetaLegacy(
                             orientation: 1, fluidLevel: props.FluidLevel, isFluid: false);
-                        VoxelMap[idx] = BurstVoxelDataBitMapping.PackVoxelData(
-                            blockID, 0, props.LightEmission, meta);
+                        VoxelMap[idx] = BurstVoxelDataBitMapping.PackVoxelData(blockID, meta);
                         CaveMask[idx] = 0;
                     }
                 }

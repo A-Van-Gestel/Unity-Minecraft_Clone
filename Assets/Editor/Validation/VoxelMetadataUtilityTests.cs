@@ -369,7 +369,7 @@ namespace Editor.Validation
                 for (byte o = 0; o <= 5; o++)
                 {
                     uint packed = BurstVoxelDataBitMapping.PackVoxelData(
-                        id: 1, sunLight: 0, blockLight: 0,
+                        id: 1,
                         meta: BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: o, fluidLevel: 0, isFluid: false));
                     byte decoded = BurstVoxelDataBitMapping.GetOrientation(packed);
                     AssertEqual(o, decoded, $"BitMapping round-trip world orientation {o}");
@@ -385,7 +385,7 @@ namespace Editor.Validation
             {
                 // World orientation 0 (Back/South) stores as internal index 1, not 0.
                 uint packed0 = BurstVoxelDataBitMapping.PackVoxelData(
-                    id: 1, sunLight: 0, blockLight: 0,
+                    id: 1,
                     meta: BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, fluidLevel: 0, isFluid: false));
                 byte storedIndex0 = (byte)(BurstVoxelDataBitMapping.GetMeta(packed0)
                                            & BurstVoxelDataBitMapping.META_VAL_ORIENT_MASK);
@@ -394,7 +394,7 @@ namespace Editor.Validation
 
                 // World orientation 1 (Front/North) stores as internal index 0, not 1.
                 uint packed1 = BurstVoxelDataBitMapping.PackVoxelData(
-                    id: 1, sunLight: 0, blockLight: 0,
+                    id: 1,
                     meta: BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
                 byte storedIndex1 = (byte)(BurstVoxelDataBitMapping.GetMeta(packed1)
                                            & BurstVoxelDataBitMapping.META_VAL_ORIENT_MASK);
@@ -427,7 +427,7 @@ namespace Editor.Validation
                 for (byte worldFace = 0; worldFace <= 5; worldFace++)
                 {
                     uint packed = BurstVoxelDataBitMapping.PackVoxelData(
-                        id: 1, sunLight: 0, blockLight: 0,
+                        id: 1,
                         meta: BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: worldFace, fluidLevel: 0, isFluid: false));
                     var state = new VoxelState(packed);
                     AssertEqual(state.Orientation, state.GetOrientation(MetadataSchema.None),
@@ -500,7 +500,7 @@ namespace Editor.Validation
                 for (byte level = 0; level <= 15; level++)
                 {
                     uint packed = BurstVoxelDataBitMapping.PackVoxelData(
-                        id: 1, sunLight: 0, blockLight: 0,
+                        id: 1,
                         meta: BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, fluidLevel: level, isFluid: true));
                     var state = new VoxelState(packed);
                     AssertEqual(state.FluidLevel, state.GetFluidLevel(MetadataSchema.None),
