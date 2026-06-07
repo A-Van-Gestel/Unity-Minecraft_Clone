@@ -5,6 +5,7 @@ using Jobs.BurstData;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Jobs
@@ -943,7 +944,7 @@ namespace Jobs
             }
             else
             {
-                byte legacyScalar = (byte)Mathf.Max(r, Mathf.Max(g, b));
+                byte legacyScalar = (byte)math.max(r, math.max(g, (int)b));
                 Vector3Int globalPos = new Vector3Int(localPos.x + ChunkPosition.x, localPos.y, localPos.z + ChunkPosition.y);
                 CrossChunkLightMods.Add(new LightModification
                 {
