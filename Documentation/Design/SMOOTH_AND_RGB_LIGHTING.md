@@ -1,7 +1,7 @@
 # Smooth Lighting & Full RGB Light Engine
 
-- **Status:** Phase 1 & Phase 2 Implemented (2026-06-07)
-- **Current Implementation:** Per-vertex smooth lighting with per-channel RGB blocklight BFS + shader-only sky tinting
+- **Status:** Phase 1, Phase 2 & Phase B Implemented (2026-06-07)
+- **Current Implementation:** Per-vertex smooth lighting with per-channel RGB blocklight BFS + shader-only sky tinting. Legacy uint light bits removed; `ushort LightData[]` is sole authority.
 - **Phase 1 Target:** Smooth (ambient-occlusion-style) vertex-averaged lighting with full RGB data layout — **Implemented**
 - **Phase 2 Target:** RGB blocklight propagation (per-channel independent BFS) + shader-only sunlight sky tinting — **Implemented**
 - **Depends On:** None (can be implemented on the current codebase)
@@ -10,7 +10,7 @@
     - Storage: Separate `NativeArray<ushort>` per section (Option A) — not widened `ulong` voxels
     - Sunlight: Shader-only sky tinting (monochrome BFS, tinted via `SkyLightColor` uniform) — not full BFS RGB
     - Blocklight: Per-channel independent propagation (3×4 bits) — not single emission + tint
-    - Legacy `uint` light bits: Dual-write during Phase 2, deprecated in post-cleanup step
+    - Legacy `uint` light bits: Removed in Phase B (v10). Bits 16-23 zeroed/reserved.
     - Queue serialization: Upgraded to RGB format with AOT migration — not reconstructed at runtime
     - Emission UI: Color picker with synced RGB sliders (0-15 per channel)
 
@@ -20,7 +20,9 @@
 
 ### 1.1 Light Storage
 
-Light is packed into each voxel's 32-bit `uint` data alongside block ID and metadata:
+> **Note:** This section describes the pre-Phase-2 scalar light system. Since Phase 2 (RGB) and Phase B (legacy bit removal), light is stored in a separate `ushort[] LightData` array per section — see §3.2.2 and §3.2.4. The `uint` voxel no longer carries light bits (bits 16-23 are reserved/zeroed). The content below is preserved for historical context.
+
+Light was packed into each voxel's 32-bit `uint` data alongside block ID and metadata:
 
 | Field      | Bits  | Range   | Purpose                              |
 |------------|-------|---------|--------------------------------------|
@@ -29,7 +31,7 @@ Light is packed into each voxel's 32-bit `uint` data alongside block ID and meta
 | Blocklight | 20-23 | 0-15    | Light emitted by torches, lava, etc. |
 | Metadata   | 24-31 | 0-255   | Orientation / fluid level / schema   |
 
-The final light value used for rendering is `max(sunlight, blocklight)`, yielding a single scalar 0-15 per voxel. Extraction is done via `BurstVoxelDataBitMapping.GetLight()`.
+The final light value used for rendering was `max(sunlight, blocklight)`, yielding a single scalar 0-15 per voxel. Extraction was done via `BurstVoxelDataBitMapping.GetLight()`.
 
 ### 1.2 Mesh Generation (Light → Vertex)
 
@@ -780,13 +782,14 @@ New ushort:     [Sun: 4][BlockR: 4][BlockG: 4][BlockB: 4] = 16 bits
 
 **No change to the existing `uint` layout:** ID, metadata, fluid logic, and all non-lighting systems are untouched. Clean separation of concerns: one array for block identity, one for light state. The BFS can operate on a contiguous light-only buffer without polluting the cache with ID/metadata bits.
 
-**Serialization (v9+):** The `ushort[] LightData` array is persisted to disk using a flag-based section format introduced in save version 9 (chunk format v6). Each section is written with a type flag:
+**Serialization (v10, chunk format v7):** The `ushort[] LightData` array is persisted to disk using a flag-based section format. Each section is written with a type flag:
 
-- `0x00` — Voxels only: no RGB blocklight present; LightData reconstructed from legacy `uint` light bits on load.
-- `0x01` — Voxels + LightData: section has RGB blocklight; `ushort[]` bulk-read on load.
-- `0x02` — Light-only: fully-air section carrying propagated light (sunlight/blocklight from neighbors); only LightData is stored, no voxel array.
+- `0x00` — Voxels + uniform sky: 1B sky level + 2B nonAirCount + voxels. LightData reconstructed via `FillUniformSkyLight` on load.
+- `0x01` — Voxels + full LightData: section has non-uniform light; both arrays bulk-read on load.
+- `0x02` — Light-only + uniform sky: 1B flag + 1B sky level (2 bytes total). Air section with uniform sky light.
+- `0x03` — Light-only + full LightData: air section with non-uniform light; LightData bulk-read on load.
 
-This eliminates the lossy `InitLightDataFromPacked` reconstruction for sections with blocklight and enables light-only air sections to persist their propagated light across save/load without requiring BFS re-propagation.
+The uniform-sky optimization (flags 0x00/0x02) stores a single byte instead of the full 8192B LightData array, dramatically reducing save file sizes for air-only sections. See §3.8.2.5 for the complete design.
 
 #### 3.2.3 `ushort` Light Array Bit Packing
 
@@ -827,16 +830,9 @@ public static ushort PackLightData(byte sun, byte blockR, byte blockG, byte bloc
         | ((blockG & CHANNEL_MASK) << BLOCK_G_SHIFT) | ((blockB & CHANNEL_MASK) << BLOCK_B_SHIFT));
 ```
 
-#### 3.2.4 Legacy Scalar Light Bits (Dual-Write Strategy)
+#### 3.2.4 Legacy Scalar Light Bits (Removed — Phase B)
 
-The sunlight (bits 16-19) and blocklight (bits 20-23) in the existing `uint` become **derived values** during Phase 2 implementation. After the BFS writes to the `ushort` light array, it also writes `max(R,G,B)` to the legacy blocklight bits and the sunlight scalar to the legacy sunlight bits. This maintains compatibility with all existing scalar light readers:
-
-- `ChunkData.ModifyVoxel` — reads `GetSunLight()`/`GetBlockLight()` for queue seeding
-- `MeshGenerationJob.SampleNeighborLight` — reads scalar light for smooth lighting
-- Mob spawning checks — uses `max(sun, block) >= threshold`
-- Face culling heuristics
-
-**Post-cleanup step (Phase B, §3.8.2):** Migrate all scalar light readers to the new `ushort` array, stop dual-writing, rename "SunLight" → "SkyLight", redesign section flags with uniform-sky optimization, and free the 8 bits in the `uint` for future metadata expansion. Save version 9 → 10, chunk format v6 → v7.
+The sunlight (bits 16-19) and blocklight (bits 20-23) that previously existed in the `uint` have been removed as of Phase B (§3.8.2). All light readers now use `LightBitMapping` on the `ushort LightData[]` array. The BFS writes exclusively to `LightData` — no dual-write remains. Bits 16-23 in the `uint` are zeroed and reserved for future metadata expansion. Save version 10, chunk format v7.
 
 ### 3.3 Sunlight: Shader-Only Sky Tinting
 
@@ -1110,15 +1106,11 @@ When all 3 blocklight channels are 0.0, the blocklight contribution is uniformly
 
 ### 3.7 Serialization Impact
 
-#### 3.7.1 Light Array — Runtime-Only
+#### 3.7.1 Light Array — Persisted (v9+)
 
-The `ushort` light array is **runtime-only** and does **not** need to be saved to disk. On chunk load, the light array is initialized from the `uint` packed voxel data via `ChunkSerializer.InitLightDataFromPacked`: sunlight is copied directly, and scalar blocklight is mapped to white RGB `(L, L, L)`. This provides a correct baseline for chunks that skip the lighting pipeline (already fully lit, no pending changes). Chunks that do go through the lighting pipeline (initial lighting, pending queue entries, edge checks) will overwrite these values with
-proper BFS-computed RGB data. This means:
+> **Updated (Phase B):** The `ushort[] LightData` array is now persisted to disk as part of the section format (save version 9+, chunk format v6+). The `uint` voxel no longer carries light bits. `InitLightDataFromPacked` has been removed.
 
-- No changes to the section serialization format for voxel data.
-- The `ushort` light array is allocated during chunk generation and freed on unload.
-- The existing scalar sunlight/blocklight bits in the `uint` continue to be written to disk as part of the voxel data (they are derived values during Phase 2, deprecated in the post-cleanup step).
-- On every load, `InitLightDataFromPacked` derives the ushort from the uint, ensuring the mesh job always has valid light data even without a BFS pass.
+The `ushort[] LightData` array is serialized alongside voxel data using a flag-based section format. In chunk format v7 (save v10), four section flags control how light data is stored — see §3.8.2.5 for the full flag design. Uniform-sky sections (flags 0x00 and 0x02) store only a single byte for the sky level; the full array is reconstructed via `LightingHelper.FillUniformSkyLight` on load.
 
 #### 3.7.2 Light Queue Serialization — Upgraded to RGB
 
@@ -1172,17 +1164,17 @@ LightData is now persisted to disk using a flag-based section format (save versi
 
 ### 3.8.2 Phase B: Legacy Light Bit Removal & SkyLight Rename (v9 → v10)
 
-- **Status:** Design spec (not yet implemented)
+- **Status:** Implemented (2026-06-07)
 - **Prerequisites:** Phase A (v9) confirmed working, Phase 2 stable
 - **Save version:** 9 → 10, chunk format v6 → v7
 
-#### 3.8.2.1 Goals
+#### 3.8.2.1 Summary
 
-1. Migrate all scalar light readers (`GetSunLight()`, `GetBlockLight()` on the `uint`) to read from the `ushort LightData[]` array via `LightBitMapping`.
-2. Rename "SunLight" → "SkyLight" across the codebase. The value represents sky light (tinted by `SkyLightColor` in the shader per time-of-day), not literal sunlight.
-3. Remove the dual-write from the BFS (stop writing to legacy `uint` light bits).
-4. Reclaim the 8 freed bits (sunlight 4 + blocklight 4) in the `uint` for future metadata expansion (biome tint, damage state, block variant, etc.).
-5. Redesign section flags (v7) with a uniform-sky-level optimization for faster world loading and smaller save files.
+1. Migrated all scalar light readers (`GetSunLight()`, `GetBlockLight()` on the `uint`) to read from the `ushort LightData[]` array via `LightBitMapping`.
+2. Renamed "SunLight" → "SkyLight" across the codebase. The value represents sky light (tinted by `SkyLightColor` in the shader per time-of-day), not literal sunlight.
+3. Removed the dual-write from the BFS (stopped writing to legacy `uint` light bits).
+4. Reclaimed the 8 freed bits (sunlight 4 + blocklight 4) in the `uint` for future metadata expansion (biome tint, damage state, block variant, etc.).
+5. Redesigned section flags (v7) with a uniform-sky-level optimization for faster world loading and smaller save files.
 
 #### 3.8.2.2 Terminology Rename: SunLight → SkyLight
 
@@ -1279,16 +1271,16 @@ For each section in old v6 format:
 
 HeightMap, state flags, and light queues pass through unchanged.
 
-#### 3.8.2.7 Implementation Order
+#### 3.8.2.7 Implementation Order (Completed)
 
-1. Update design doc (this section) as spec
-2. Rename `LightBitMapping` methods (SunLight → SkyLight)
-3. Migrate all readers + rename variables (dual-write still active = safe)
-4. Remove dual-writes from BFS and mod-application paths
-5. Strip `PackVoxelData` signature (remove light args), delete light getters/setters from `BurstVoxelDataBitMapping`
-6. Implement new v7 flag design in serialization reader/writer
-7. Write migration step (v9 → v10)
-8. Final documentation pass (reword as implemented)
+1. Updated design doc (this section) as spec
+2. Renamed `LightBitMapping` methods (SunLight → SkyLight)
+3. Migrated all readers + renamed variables (dual-write still active = safe transition)
+4. Removed dual-writes from BFS and mod-application paths
+5. Stripped `PackVoxelData` signature (removed light args), deleted light getters/setters from `BurstVoxelDataBitMapping`
+6. Implemented new v7 flag design in serialization reader/writer
+7. Wrote migration step (v9 → v10): `Migration_v9_to_v10_StripLightBitsAndNewFlags.cs`
+8. Final documentation pass (this update)
 
 ### 3.9 Visual Examples
 
@@ -1310,21 +1302,21 @@ HeightMap, state flags, and light queues pass through unchanged.
 
 ### 4.1 Phased Rollout
 
-| Step         | Change                                                                   | Risk                                                            | Rollback                                              |
-|--------------|--------------------------------------------------------------------------|-----------------------------------------------------------------|-------------------------------------------------------|
-| **Phase 1a** | Interleave `TexCoord1` (UNorm8x4) with Normal in stream 3 + all shaders  | Low — additive change, revert stream 3 to Normal-only to undo   | Revert stream 3 layout + remove `NormalLightVertex`   |
-| **Phase 1b** | Implement corner averaging + diagonal occlusion + LUT in mesh job        | Medium — affects every visible face, ~24 extra reads per face   | Set `smoothLighting = false` (flat per-face fallback) |
-| **Phase 1c** | Add anisotropy fix (quad diagonal flip)                                  | Low — only changes triangle winding order when needed           | Revert to default winding                             |
-| **Phase 1d** | Add smooth lighting settings toggle                                      | Low — UI-only                                                   | Remove setting field                                  |
-| **Phase 1e** | Fluid smooth lighting via precomputed `FluidCornerLights` struct         | Low — isolated to fluid path, flat fallback via settings toggle | Set `smoothLighting = false` (flat per-face fallback) |
-| **Phase 2a** | Baseline benchmarks + fix broken benchmark scenarios                     | Low — no code changes, establishes performance reference        | N/A                                                   |
-| **Phase 2b** | Add `ushort` light array + `LightBitMapping` helpers + pool reset        | Medium — new allocation per section, pool reset rules apply     | Remove array, fall back to scalar-only path           |
-| **Phase 2c** | Block emission color (BlockType + BlockTypeJobData + editor UI)          | Low — additive data fields, existing blocks default to white    | Remove color fields, fall back to scalar emission     |
-| **Phase 2d** | Triple-channel blocklight BFS + per-channel darkness removal             | **High** — core lighting engine change                          | Feature flag to use scalar BFS                        |
-| **Phase 2e** | Light queue serialization upgrade + AOT migration step                   | Medium — serialization format change                            | Revert migration, fall back to scalar queue format    |
-| **Phase 2f** | Mesh job: `SampleCorner`/`BuildFlatLightData` encode `(sun, bR, bG, bB)` | Low — just reading new data from the `ushort` array             | Write Phase 1 encoding (sun, sun, sun, block)         |
-| **Phase 2g** | Shaders: `SkyLightColor` uniform + `ApplyVoxelLightingRGB` update        | Low — shader-only, no BFS change                                | Set `SkyLightColor = white`, revert to Phase 1 call   |
-| **Post**     | Deprecate legacy `uint` light bits (separate refactor)                   | Low — mechanical migration of readers                           | Re-enable dual-write                                  |
+| Step            | Change                                                                   | Risk                                                            | Rollback                                              |
+|-----------------|--------------------------------------------------------------------------|-----------------------------------------------------------------|-------------------------------------------------------|
+| **Phase 1a**    | Interleave `TexCoord1` (UNorm8x4) with Normal in stream 3 + all shaders  | Low — additive change, revert stream 3 to Normal-only to undo   | Revert stream 3 layout + remove `NormalLightVertex`   |
+| **Phase 1b**    | Implement corner averaging + diagonal occlusion + LUT in mesh job        | Medium — affects every visible face, ~24 extra reads per face   | Set `smoothLighting = false` (flat per-face fallback) |
+| **Phase 1c**    | Add anisotropy fix (quad diagonal flip)                                  | Low — only changes triangle winding order when needed           | Revert to default winding                             |
+| **Phase 1d**    | Add smooth lighting settings toggle                                      | Low — UI-only                                                   | Remove setting field                                  |
+| **Phase 1e**    | Fluid smooth lighting via precomputed `FluidCornerLights` struct         | Low — isolated to fluid path, flat fallback via settings toggle | Set `smoothLighting = false` (flat per-face fallback) |
+| **Phase 2a**    | Baseline benchmarks + fix broken benchmark scenarios                     | Low — no code changes, establishes performance reference        | N/A                                                   |
+| **Phase 2b**    | Add `ushort` light array + `LightBitMapping` helpers + pool reset        | Medium — new allocation per section, pool reset rules apply     | Remove array, fall back to scalar-only path           |
+| **Phase 2c**    | Block emission color (BlockType + BlockTypeJobData + editor UI)          | Low — additive data fields, existing blocks default to white    | Remove color fields, fall back to scalar emission     |
+| **Phase 2d**    | Triple-channel blocklight BFS + per-channel darkness removal             | **High** — core lighting engine change                          | Feature flag to use scalar BFS                        |
+| **Phase 2e**    | Light queue serialization upgrade + AOT migration step                   | Medium — serialization format change                            | Revert migration, fall back to scalar queue format    |
+| **Phase 2f**    | Mesh job: `SampleCorner`/`BuildFlatLightData` encode `(sun, bR, bG, bB)` | Low — just reading new data from the `ushort` array             | Write Phase 1 encoding (sun, sun, sun, block)         |
+| **Phase 2g**    | Shaders: `SkyLightColor` uniform + `ApplyVoxelLightingRGB` update        | Low — shader-only, no BFS change                                | Set `SkyLightColor = white`, revert to Phase 1 call   |
+| **Post (done)** | Legacy `uint` light bits removed (Phase B, v10)                          | Completed — all readers migrated to `LightBitMapping`           | N/A                                                   |
 
 ### 4.2 Key Risks
 

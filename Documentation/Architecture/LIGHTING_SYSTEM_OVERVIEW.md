@@ -1,6 +1,6 @@
 # Lighting System Overview
 
-This document provides a complete technical reference for the voxel lighting engine. The system is asynchronous, multi-threaded (via Unity's C# Job System and Burst), and handles two distinct light channels: **Sunlight** and **Blocklight**.
+This document provides a complete technical reference for the voxel lighting engine. The system is asynchronous, multi-threaded (via Unity's C# Job System and Burst), and handles two distinct light channels: **Sky light** (monochrome scalar, tinted by `SkyLightColor` in the shader) and **Blocklight** (per-channel RGB).
 The design is heavily inspired by the **Starlight** lighting engine (now **Moonrise**), a high-performance replacement for Minecraft's vanilla lighting. Where our implementation diverges from Starlight, this document explains why.
 
 > **Reference implementation:** `_REFERENCES/Moonrise/` contains the full Moonrise source. Key files are in `.../patches/starlight/light/`.
@@ -11,14 +11,18 @@ The design is heavily inspired by the **Starlight** lighting engine (now **Moonr
 
 ### 1.1 Data Representation
 
-Light is not stored as a separate component. It is packed directly into each voxel's `uint` data (see `DATA_STRUCTURES.md` for the full bit layout):
+Light is stored in a separate `ushort[] LightData` array per section (one `ushort` per voxel, 4096 entries per 16×16×16 section). The `uint` voxel data no longer carries light bits — bits 16-23 are reserved/zeroed (see `DATA_STRUCTURES.md`).
 
-| Field      | Bits  | Range | Purpose                              |
-|------------|-------|-------|--------------------------------------|
-| Sunlight   | 16-19 | 0-15  | Light from the sky                   |
-| Blocklight | 20-23 | 0-15  | Light emitted by torches, lava, etc. |
+| Field        | Bits (ushort) | Range | Purpose                              |
+|--------------|---------------|-------|--------------------------------------|
+| Sky light    | 0-3           | 0-15  | Light from the sky (monochrome)      |
+| Blocklight R | 4-7           | 0-15  | Red channel of block-emitted light   |
+| Blocklight G | 8-11          | 0-15  | Green channel of block-emitted light |
+| Blocklight B | 12-15         | 0-15  | Blue channel of block-emitted light  |
 
-**Final light value:** For rendering, the shader uses `max(sunlight, blocklight)`. 15 is full brightness; 0 is darkness (clamped to `MinLightLevel` = 0.15 for ambient).
+All light access goes through `LightBitMapping` helpers (`GetSkyLight`, `SetSkyLight`, `GetBlocklightR/G/B`, `PackLightData`, etc.).
+
+**Final light value:** For rendering, the shader applies separate shade curves to sky light (modulated by day/night cycle and tinted by `SkyLightColor`) and blocklight RGB, then takes per-channel `max()`. See `SMOOTH_AND_RGB_LIGHTING.md` §3.6 for the full shader pipeline.
 
 ### 1.2 Block Light Properties
 
@@ -50,7 +54,7 @@ The core of the system is a Breadth-First Search (BFS) flood-fill. When a voxel'
 1. Dequeue a position, read its current light level.
 2. For each of 6 neighbors: calculate `targetLevel = sourceLight - max(1, neighborOpacity)`.
 3. If `targetLevel > neighborCurrentLight`, update the neighbor and enqueue it for further spreading.
-4. **Special rule:** Sunlight at level 15 traveling straight *down* through fully transparent blocks does not attenuate (remains 15). This creates the fast vertical sunlight columns.
+4. **Special rule:** Sky light at level 15 traveling straight *down* through fully transparent blocks does not attenuate (remains 15). This creates the fast vertical sky light columns.
 5. **Opaque surface lighting:** Opaque blocks receive light on their surface (`sourceLight - 1`) but are never enqueued for further propagation. Light stops at opaque surfaces.
 
 **Ordering is critical:** All darkness removal completes before any light spreading begins. This ensures the "clean slate" from removal is fully established before new light fills in, preventing ghost light artifacts.
@@ -62,24 +66,24 @@ The neighbor's own lighting job handles propagation within its borders after the
 
 ---
 
-## 2. Sunlight vs. Blocklight
+## 2. Sky Light vs. Blocklight
 
 ### 2.1 Blocklight
 
-Simple: originates from blocks with `lightEmission > 0` and propagates outward in all 6 directions using the standard BFS. Light decreases by `max(1, opacity)` per step.
+Blocklight is fully RGB — each light-emitting block defines an emission color `(R, G, B)` with independent 4-bit channels (0-15 each). The BFS propagates three channels independently, using per-channel `max()` at each destination voxel for correct additive color mixing. Each channel attenuates by `max(1, opacity)` per step.
 
-### 2.2 Sunlight
+### 2.2 Sky Light
 
-More complex, with special optimizations:
+More complex, with special optimizations. Sky light remains a monochrome scalar (0-15) in the BFS; time-of-day color (blue moonlight, warm dawn, red blood moon) is applied as a shader uniform (`SkyLightColor`) at render time.
 
 **Source:** The sky above the chunk (conceptually Y = ChunkHeight), with a starting value of 15.
 
-**Heightmap:** Each chunk maintains a `heightMap[256]` (16x16 columns) storing the Y-level of the highest light-obstructing block per column. This enables fast sunlight initialization.
+**Heightmap:** Each chunk maintains a `heightMap[256]` (16x16 columns) storing the Y-level of the highest light-obstructing block per column. This enables fast sky light initialization.
 
-**Column Recalculation (`RecalculateSunlightForColumn`):**
+**Column Recalculation (`RecalculateSkylightForColumn`):**
 
-1. **Above the heightmap:** All voxels above the highest opaque block are set to sunlight 15.
-2. **Horizontal shadow casting:** If the highest block is opaque, check its 4 horizontal neighbors for partial sunlight (1-14). If found, set them to 0 and enqueue for darkness removal to clear stale scattered light.
+1. **Above the heightmap:** All voxels above the highest opaque block are set to sky light 15.
+2. **Horizontal shadow casting:** If the highest block is opaque, check its 4 horizontal neighbors for partial sky light (1-14). If found, set them to 0 and enqueue for darkness removal to clear stale scattered light.
 3. **Below the heightmap:** Propagate downward from the highest block with opacity-based attenuation.
 
 After column recalculation, the standard BFS phases handle horizontal spreading.
@@ -92,9 +96,9 @@ After column recalculation, the standard BFS phases handle horizontal spreading.
 
 When a player places or breaks a block (`ChunkData.ModifyVoxel`):
 
-1. The old sunlight and blocklight values are captured.
+1. The old sky light and blocklight RGB values are captured from `section.LightData[]` via `LightBitMapping`.
 2. The heightmap is updated if the block is light-obstructing.
-3. The modified voxel and its 6 neighbors are added to `_sunlightBfsQueue` and `_blocklightBfsQueue`.
+3. The modified voxel and its 6 neighbors are added to `_skylightBfsQueue` and `_blocklightBfsQueue`.
 4. The chunk is flagged: `HasLightChangesToProcess = true`.
 
 ### 3.2 Job Scheduling (`WorldJobManager.ScheduleLightingUpdate`)
@@ -106,7 +110,7 @@ On the main thread each frame, `World.Update()` iterates a **dirty set** (`_chun
 3. Check that all 8 neighbors have finished terrain generation (`AreNeighborsDataReady`).
 4. Create snapshot copies of the center chunk map (writable) and all 8 neighbor maps (read-only).
 5. Transfer the managed light queues to `NativeQueue`s for the job.
-6. Check `SunlightRecalculationQueue` for pending column recalculations (from unloaded neighbor recovery).
+6. Check `SkylightRecalculationQueue` for pending column recalculations (from unloaded neighbor recovery).
 7. Schedule the `NeighborhoodLightingJob`.
 8. **Self-clean:** Remove the chunk from the dirty set when all flags are clear.
 
@@ -114,14 +118,14 @@ A time-based fail-safe full scan (every ~1 second) re-populates the dirty set fr
 
 ### 3.3 The Job (`NeighborhoodLightingJob`)
 
-**Inputs:** Center chunk map (writable), 8 neighbor maps (read-only), heightmap, light queues, block type data.
+**Inputs:** Center chunk map (writable), center light map (writable), 8 neighbor maps + light maps (read-only), heightmap, light queues, block type data.
 
 **Execution order:**
 
 1. **Edge check** *(optional)* — If `PerformEdgeCheck` is set, validate light at all 4 horizontal chunk borders against neighbor data. Border voxels with less light than their neighbor could supply are enqueued for re-spreading. See Section 3.6 for details.
-2. **Seed** — Process column recalculation queue, sunlight BFS queue, blocklight BFS queue.
-3. **Sunlight darkness removal** → **Sunlight spreading**.
-4. **Blocklight darkness removal** → **Blocklight spreading**.
+2. **Seed** — Process column recalculation queue, sky light BFS queue, blocklight BFS queue.
+3. **Sky light darkness removal** → **Sky light spreading**.
+4. **Blocklight darkness removal** → **Blocklight spreading** (per-channel RGB).
 
 **Cross-chunk writes:** The job cannot write to read-only neighbor maps. Instead:
 
@@ -129,16 +133,16 @@ A time-based fail-safe full scan (every ~1 second) re-populates the dirty set fr
 - A **write-through cache** (`NativeHashMap<long, uint>`) ensures that subsequent reads within the same job execution see the modified values. This is critical for darkness removal: if we set a neighbor voxel to 0, the re-spreading phase must see that 0, not the stale read-only
   value.
 
-**Output:** Modified center map, cross-chunk modifications list, `IsStable` flag.
+**Output:** Modified center map + light map, cross-chunk modifications list, `IsStable` flag.
 
 ### 3.4 Result Processing (`WorldJobManager.ProcessLightingJobs`)
 
 Back on the main thread:
 
-1. **Merge light bits** into live chunk data via `ApplyLightingJobResult` — only light bits are overwritten, preserving block changes made during job execution (TOCTOU safety).
+1. **Merge light data** into live chunk data via `ApplyLightingJobResult` — the `ushort[] LightData` array is copied back from the job's NativeArray. Block changes made to the `uint` voxel array during job execution are preserved (TOCTOU safety).
 2. **Apply cross-chunk modifications** to loaded neighbor chunks, subject to two heightmap guards:
-    - **Guard 1 (skip false darkness):** If a voxel above the heightmap currently has sunlight=15 and the mod tries to decrease it, skip. The voxel has direct sky access; the cross-chunk shadow casting doesn't see this chunk's heightmap and would incorrectly darken it.
-    - **Guard 2 (skip underground sunlight increases):** If a sunlight mod tries to increase light on a voxel at or below the heightmap, skip. This prevents light leakage where a neighbor's air column BFS wraps around and sets sunlight on underground voxels.
+    - **Guard 1 (skip false darkness):** If a voxel above the heightmap currently has sky light=15 and the mod tries to decrease it, skip. The voxel has direct sky access; the cross-chunk shadow casting doesn't see this chunk's heightmap and would incorrectly darken it.
+    - **Guard 2 (skip underground sky light increases):** If a sky light mod tries to increase light on a voxel at or below the heightmap, skip. This prevents light leakage where a neighbor's air column BFS wraps around and sets sky light on underground voxels.
       The chunk's own BFS handles underground lighting correctly via column recalculation.
     - If neither guard triggers: set the light value directly and enqueue the position in the neighbor's light queue for further propagation.
 3. **Handle unloaded neighbors:** If a target neighbor isn't loaded, save the affected column coordinates to `LightingStateManager` for recovery when the chunk eventually loads.
@@ -196,16 +200,16 @@ This section documents how our lighting engine compares to the Starlight referen
 **Our system:** Same. All darkness removal completes before light spreading begins, for both channels.
 **Status:** Implemented correctly.
 
-#### Vertical Sunlight No-Attenuation Rule
+#### Vertical Sky Light No-Attenuation Rule
 
-**Starlight:** Sunlight at level 15 traveling downward through fully transparent blocks stays at 15.
+**Starlight:** Sky light at level 15 traveling downward through fully transparent blocks stays at 15.
 **Our system:** Same rule in `PropagateLight` (line 204 of `NeighborhoodLightingJob.cs`).
 **Status:** Implemented correctly.
 
 #### Heightmap-Driven Column Optimization
 
 **Starlight:** Uses `heightMapBlockChange[]` to track the lowest Y that needs updating per column.
-**Our system:** Uses `heightMap[]` in `RecalculateSunlightForColumn` to skip air above the highest opaque block.
+**Our system:** Uses `heightMap[]` in `RecalculateSkylightForColumn` to skip air above the highest opaque block.
 **Status:** Implemented correctly.
 
 #### TOCTOU-Safe Light Merge
@@ -299,10 +303,9 @@ The snapshot + merge approach is the idiomatic Unity solution and works correctl
 **Starlight:** Starlight's nibble arrays are separate from block data. A null nibble means "no light data." When a null (empty) section borders a non-empty section,`initNibble()` either sets it to full light (above all blocks) or
 "extrudes" the bottom layer of the section above (copies light downward). This ensures empty sections have correct light for neighbor lookups. `checkNullSection()` handles this with a cache (`nullPropagationCheckCache`) to avoid redundant initialization.
 
-**Our system:** Light is packed into the same `uint` as block data. An "empty" voxel (air, ID=0) still has light bits that get set normally by the BFS. There is no concept of a "null nibble" because every voxel always has a `uint` allocated.
+**Our system:** Light is stored in a separate `ushort[] LightData` array per section. An "empty" voxel (air, ID=0) still has light data that gets set normally by the BFS. There is no concept of a "null nibble" because every allocated section has a full `LightData` array.
 
-**Why not applicable:** Our packed `uint` format means light storage always exists for every voxel. The BFS writes light values into air voxels the same way as any other.
-Starlight needs extrusion because its light storage is separate and lazily allocated; our storage is always present.
+**Why not applicable:** Our per-section `LightData` array means light storage always exists for every voxel in an allocated section. The BFS writes light values into air voxels the same way as any other. Null sections (unallocated) are handled at a higher level — they do not participate in the BFS.
 
 #### Conditionally Opaque Blocks / VoxelShape Face Occlusion
 
@@ -349,19 +352,19 @@ uint data = unifiedMap[index];
 
 See Section 4.2 above. Pack position + level + direction bitmask into a `ulong` queue entry. Skip the reverse direction when propagating. Use `math.tzcnt` (count trailing zeros) for branchless bit iteration.
 
-### 5.3 Virtual Skylight (Heightmap-Based Read Optimization)
+### 5.3 Virtual Sky Light (Heightmap-Based Read Optimization)
 
 **Priority: Medium** | **Complexity: Medium**
 
-**Current:** `RecalculateSunlightForColumn` writes sunlight=15 to every air voxel above the heightmap. This generates thousands of memory writes per column.
+**Current:** `RecalculateSkylightForColumn` writes sky light=15 to every air voxel above the heightmap via the `ushort LightData[]` array. This generates thousands of memory writes per column.
 
 **Starlight approach:** Treats sky-exposed air as "extruded" — the level 15 is implicit from the heightmap, never explicitly stored.
 
-**Proposed:** Add a heightmap check to `GetSunLight`:
+**Proposed:** Add a heightmap check to `GetSkyLight`:
 
 ```csharp
 if (y > heightMap[x + 16 * z]) return 15;  // Virtual: no memory read needed
-return (byte)((packedData >> 16) & 0xF);    // Physical: read from packed data
+return LightBitMapping.GetSkyLight(lightData[index]);  // Physical: read from LightData
 ```
 
 This eliminates the write loop and reduces memory bandwidth.
@@ -388,7 +391,7 @@ When multiple blocks change in the same vertical column (e.g., explosions, falli
 
 ## 6. Lighting-Disabled Mode (`enableLighting = false`)
 
-The `enableLighting` setting (`SettingsManager.enableLighting`) is an `[InitializationField]` — it can only be changed from the main menu and requires a world reload to take effect. When disabled, the entire lighting engine is bypassed and every block renders at full brightness (sunlight = 15). This section documents where and how the disabled path diverges from the normal pipeline.
+The `enableLighting` setting (`SettingsManager.enableLighting`) is an `[InitializationField]` — it can only be changed from the main menu and requires a world reload to take effect. When disabled, the entire lighting engine is bypassed and every block renders at full brightness (sky light = 15). This section documents where and how the disabled path diverges from the normal pipeline.
 
 ### 6.1 Design Intent
 
@@ -398,40 +401,37 @@ The setting exists to fully disable the lighting engine for debugging, performan
 
 The disabled-lighting path is implemented via guards at specific pipeline entry points, not via a single top-level switch. Each guard prevents work from being enqueued that no job will ever consume:
 
-| Location                                | Guard                                                                        | Purpose                                                                                       |
-|-----------------------------------------|------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
-| `ChunkData.AddToSunLightQueue`          | `enableLighting` check                                                       | Prevents BFS queue entries + `HasLightChangesToProcess` flag                                  |
-| `ChunkData.AddToBlockLightQueue`        | `enableLighting` check                                                       | Same, for blocklight channel                                                                  |
-| `ChunkData.ModifyVoxel`                 | `lightingEnabled` local                                                      | Sets `initialSunlight = 15` (not 0); gates `QueueSunlightRecalculation`                       |
-| `WorldJobManager.ProcessGenerationJobs` | Stage 2: gates `LightingStateManager` recovery                               | Prevents orphaned recalculation queue entries and stale `HasLightChangesToProcess`            |
-| `WorldJobManager.ProcessGenerationJobs` | Stage 3: sunlight fill loop (else branch)                                    | Sets sunlight = 15 on all non-null sections; skips null sections to avoid wasteful allocation |
-| `WorldJobManager.ScheduleMeshing`       | `enableLighting` gate on `HasLightChangesToProcess` / `NeedsInitialLighting` | Bypasses lighting-readiness check — meshing proceeds without waiting for lighting             |
-| `World.AreNeighborsMeshReady`           | `enableLighting` gate on `NeedsInitialLighting`                              | Same bypass for neighbor readiness                                                            |
-| `World.ForceCompleteDataJobsCoroutine`  | Wraps entire Phase 2 lighting loop                                           | Skips all BFS jobs during initial world load; clears stale flags from disk-loaded chunks      |
-| `World.Update` lighting scheduler       | `enableLighting` wraps entire block                                          | Skips dirty-set drain, watchdog scan, and job scheduling                                      |
-| `GetChunkMapForJob` / `GetMapForJob`    | Post-copy sunlight stamp when `enableLighting = false`                       | Stamps sunlight=15 on every voxel in the snapshot, covering null sections and post-fill mods  |
+| Location                                | Guard                                                                        | Purpose                                                                                         |
+|-----------------------------------------|------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| `ChunkData.AddToSkyLightQueue`          | `enableLighting` check                                                       | Prevents BFS queue entries + `HasLightChangesToProcess` flag                                    |
+| `ChunkData.AddToBlockLightQueue`        | `enableLighting` check                                                       | Same, for blocklight channel                                                                    |
+| `ChunkData.ModifyVoxel`                 | `lightingEnabled` local                                                      | Sets initial sky light = 15 (not 0); gates `QueueSkylightRecalculation`                         |
+| `WorldJobManager.ProcessGenerationJobs` | Stage 2: gates `LightingStateManager` recovery                               | Prevents orphaned recalculation queue entries and stale `HasLightChangesToProcess`              |
+| `WorldJobManager.ProcessGenerationJobs` | Stage 3: sky light fill (else branch)                                        | Fills `LightData` with sky=15 on all non-null sections via `LightingHelper.FillUniformSkyLight` |
+| `WorldJobManager.ScheduleMeshing`       | `enableLighting` gate on `HasLightChangesToProcess` / `NeedsInitialLighting` | Bypasses lighting-readiness check — meshing proceeds without waiting for lighting               |
+| `World.AreNeighborsMeshReady`           | `enableLighting` gate on `NeedsInitialLighting`                              | Same bypass for neighbor readiness                                                              |
+| `World.ForceCompleteDataJobsCoroutine`  | Wraps entire Phase 2 lighting loop                                           | Skips all BFS jobs during initial world load; clears stale flags from disk-loaded chunks        |
+| `World.Update` lighting scheduler       | `enableLighting` wraps entire block                                          | Skips dirty-set drain, watchdog scan, and job scheduling                                        |
+| `GetChunkMapForJob` / `GetMapForJob`    | Post-copy sky light stamp when `enableLighting = false`                      | Stamps sky light=15 on every entry in the light map snapshot via `LightingHelper`               |
 
-### 6.3 Sunlight Fill (Generation Path)
+### 6.3 Sky Light Fill (Generation Path)
 
-When a chunk completes terrain generation with lighting disabled, `ProcessGenerationJobs` runs a fill loop instead of setting `NeedsInitialLighting`:
+When a chunk completes terrain generation with lighting disabled, `ProcessGenerationJobs` fills `LightData` instead of setting `NeedsInitialLighting`:
 
 ```
-for each Y in [0, ChunkHeight):
-    if section is null → skip (avoids allocating ~16 KB for air-only sections)
-    for each (X, Z):
-        packed = GetVoxel(x, y, z)
-        packed = SetSunLight(packed, 15)
-        SetVoxel(x, y, z, packed)
+for each section in chunkData.sections:
+    if section is null → skip (avoids allocating sections for air-only volumes)
+    LightingHelper.FillUniformSkyLight(section.LightData, skyLevel: 15)
 ```
 
-The null-section skip is critical: without it, writing `sunlight = 15` to an air voxel produces a non-zero packed value (`0x000F0000`), causing `SetVoxel` to allocate a `ChunkSection` that meshing never reads (`IsEmpty = true`). At ~4 null sections per chunk above terrain, this would waste ~66 KB per chunk.
+The null-section skip is critical: without it, allocating a `ChunkSection` just to fill its `LightData` wastes ~24 KB per section for air-only volumes that meshing never reads (`IsEmpty = true`).
 
-**Job snapshot sunlight stamp:** The sunlight fill only covers sections that are non-null at the time it runs. Sections allocated *after* the fill — by structure placement via `ApplyModifications` — have their air voxels initialized to sunlight=0 by the section pool. Null sections also contribute sunlight=0 in the flattened snapshot. Rather than patching individual cases, both `GetChunkMapForJob` and `GetMapForJob` apply a full-array sunlight stamp when lighting is disabled: after copying all section data, every voxel in the snapshot has its sunlight
-bits set to 15 via `SetSunLight(packed, 15)`. This is a single post-copy sweep over the 32,768-voxel array that catches all three sources of stale sunlight=0 (null sections, post-fill structure sections, and any other edge case) without allocating physical `ChunkSection` objects.
+**Job snapshot sky light stamp:** The sky light fill only covers sections that are non-null at the time it runs. Sections allocated *after* the fill — by structure placement via `ApplyModifications` — have their `LightData` initialized to all-zeros by the section pool. Rather than patching individual cases, both `GetChunkMapForJob` and `GetMapForJob` apply a full-array sky light stamp to the light map snapshot when lighting is disabled, using `LightingHelper.StampFullBrightSunlight`. This catches all sources of stale sky light=0 without allocating
+physical `ChunkSection` objects.
 
 ### 6.4 Block Modification Path
 
-`ModifyVoxel` packs the new block with `sunlight = 15` (instead of the normal `0`) so every placed block starts at full brightness. The `QueueSunlightRecalculation` call is skipped entirely — without a running BFS engine, queued columns would set `HasLightChangesToProcess = true` with no job to clear it.
+`ModifyVoxel` writes sky light = 15 to the section's `LightData[]` (instead of the normal 0) so every placed block starts at full brightness. The `QueueSkylightRecalculation` call is skipped entirely — without a running BFS engine, queued columns would set `HasLightChangesToProcess = true` with no job to clear it.
 
 The heightmap is still maintained unconditionally (it is cheap and has no downstream consumers when lighting is disabled).
 
@@ -442,7 +442,7 @@ The heightmap is still maintained unconditionally (it is cheap and has no downst
 ### 6.6 Key Invariants
 
 1. **No path may set `HasLightChangesToProcess = true` when lighting is disabled** without a corresponding clear before meshing. The `ScheduleMeshing` gate bypass is a safety net, not a substitute for preventing the flag from being set.
-2. **Null sections must remain null.** The sunlight fill must skip them to avoid a memory explosion above terrain.
+2. **Null sections must remain null.** The sky light fill must skip them to avoid a memory explosion above terrain.
 3. **`enableLighting` is `[InitializationField]`** — it cannot be toggled at runtime. All disabled-path logic assumes a consistent value for the entire world session. `ChunkData.Reset()` clears all transient flags on pool recycling, so a world reload with a different setting starts clean.
 
 ---
@@ -451,13 +451,15 @@ The heightmap is still maintained unconditionally (it is cheap and has no downst
 
 | File                                         | Role                                                                                |
 |----------------------------------------------|-------------------------------------------------------------------------------------|
-| `Jobs/NeighborhoodLightingJob.cs`            | Core BFS flood-fill job (sunlight + blocklight propagation)                         |
+| `Jobs/NeighborhoodLightingJob.cs`            | Core BFS flood-fill job (sky light + RGB blocklight propagation)                    |
 | `WorldJobManager.cs`                         | Schedules lighting jobs, processes results, applies cross-chunk modifications       |
 | `Data/ChunkData.cs`                          | Heightmap management, light queues, `ModifyVoxel` triggering, `NeedsEdgeCheck` flag |
-| `Data/ChunkSection.cs`                       | Section-level voxel storage, `IsEmpty`/`IsFullySolid` flags                         |
-| `Jobs/BurstData/BurstVoxelDataBitMapping.cs` | Bit-packing/unpacking for light values in `uint`                                    |
+| `Data/ChunkSection.cs`                       | Section-level voxel + `LightData` storage, `IsEmpty`/`IsFullySolid` flags           |
+| `Jobs/BurstData/LightBitMapping.cs`          | Bit-packing/unpacking for light values in `ushort LightData[]`                      |
+| `Jobs/BurstData/BurstVoxelDataBitMapping.cs` | Bit-packing/unpacking for block ID and metadata in `uint`                           |
+| `Helpers/LightingHelper.cs`                  | Shared lighting utilities (`FillUniformSkyLight`, `StampFullBrightSunlight`)        |
 | `Helpers/ChunkMath.cs`                       | Coordinate → flat index conversion                                                  |
-| `Serialization/LightingStateManager.cs`      | Persists pending sunlight recalculations for unloaded chunks                        |
+| `Serialization/LightingStateManager.cs`      | Persists pending sky light recalculations for unloaded chunks                       |
 | `Jobs/StandardChunkGenerationJob.cs`         | Initial heightmap computation during world generation                               |
 
 **Starlight reference files** (Java, in `_REFERENCES/Moonrise/.../starlight/light/`):
