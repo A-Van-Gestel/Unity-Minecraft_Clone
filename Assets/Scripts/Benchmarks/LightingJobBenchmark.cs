@@ -857,8 +857,10 @@ namespace Benchmarks
         /// </summary>
         private static void SetupEdgeCheckScenario(LightingBenchmarkData data)
         {
-            // Fill all neighbor maps with lit air above the terrain (sunlight=15).
-            uint litAir = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
+            // Fill all neighbor voxel maps with air and neighbor light maps with sky=15
+            // above the terrain. The edge check reads light from the ushort LightN/E/S/W arrays.
+            uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
+            ushort fullSky = LightBitMapping.PackLightData(15, 0, 0, 0);
             for (int y = 61; y < VoxelData.ChunkHeight; y++)
             {
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
@@ -866,48 +868,56 @@ namespace Benchmarks
                     for (int x = 0; x < VoxelData.ChunkWidth; x++)
                     {
                         int i = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
-                        data.NeighborN[i] = litAir;
-                        data.NeighborE[i] = litAir;
-                        data.NeighborS[i] = litAir;
-                        data.NeighborW[i] = litAir;
-                        data.NeighborNE[i] = litAir;
-                        data.NeighborSE[i] = litAir;
-                        data.NeighborSW[i] = litAir;
-                        data.NeighborNW[i] = litAir;
+                        data.NeighborN[i] = air;
+                        data.NeighborE[i] = air;
+                        data.NeighborS[i] = air;
+                        data.NeighborW[i] = air;
+                        data.NeighborNE[i] = air;
+                        data.NeighborSE[i] = air;
+                        data.NeighborSW[i] = air;
+                        data.NeighborNW[i] = air;
+                        data.LightN[i] = fullSky;
+                        data.LightE[i] = fullSky;
+                        data.LightS[i] = fullSky;
+                        data.LightW[i] = fullSky;
+                        data.LightNE[i] = fullSky;
+                        data.LightSE[i] = fullSky;
+                        data.LightSW[i] = fullSky;
+                        data.LightNW[i] = fullSky;
                     }
                 }
             }
 
-            // Center chunk border voxels above terrain are air with sunlight=0 (stale).
-            // The edge check should detect that neighbors have light=15 and correct these.
+            // Center chunk border voxels above terrain are air with sky=0 (stale).
+            // The edge check should detect that neighbors have sky=15 and correct these.
             for (int y = 61; y < VoxelData.ChunkHeight; y++)
             {
                 // South border (z=0)
                 for (int x = 0; x < VoxelData.ChunkWidth; x++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, 0);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
+                    data.Center[idx] = air;
                 }
 
                 // North border (z=15)
                 for (int x = 0; x < VoxelData.ChunkWidth; x++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, VoxelData.ChunkWidth - 1);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
+                    data.Center[idx] = air;
                 }
 
                 // West border (x=0)
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(0, y, z);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
+                    data.Center[idx] = air;
                 }
 
                 // East border (x=15)
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(VoxelData.ChunkWidth - 1, y, z);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
+                    data.Center[idx] = air;
                 }
             }
 
