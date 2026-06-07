@@ -65,37 +65,6 @@ namespace Data
             set => _packedData = BurstVoxelDataBitMapping.SetOrientation(_packedData, value); // Direct set
         }
 
-        /// <summary>
-        /// Returns the highest light level between sunlight and blocklight.
-        /// </summary>
-        /// <value>A byte from 0 to 15 representing the maximum light.</value>
-        public byte Light
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => BurstVoxelDataBitMapping.GetLight(_packedData);
-        }
-
-        /// <summary>
-        /// Gets or sets the incoming sunlight level (0-15).
-        /// </summary>
-        public byte Sunlight
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => BurstVoxelDataBitMapping.GetSunLight(_packedData);
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => _packedData = BurstVoxelDataBitMapping.SetSunLight(_packedData, value);
-        }
-
-        /// <summary>
-        /// Gets or sets the incoming blocklight level (0-15).
-        /// </summary>
-        public byte Blocklight
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => BurstVoxelDataBitMapping.GetBlockLight(_packedData);
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => _packedData = BurstVoxelDataBitMapping.SetBlockLight(_packedData, value);
-        }
 
         /// <summary>
         /// Gets or sets the fluid level of the voxel using the legacy bit-slicing encoding
@@ -329,15 +298,6 @@ namespace Data
         /// </summary>
         public BlockType Properties => World.Instance.BlockTypes[ID];
 
-        /// <summary>
-        /// Returns the highest light level between sunlight and blocklight as a float between 0 and 1.
-        /// </summary>
-        /// <value>A float from 0 to 1 representing the light intensity.</value>
-        public float LightAsFloat
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => Light * VoxelData.UnitOfLight;
-        }
 
         // --- Operator Overloads for comparison ---
 
@@ -372,7 +332,7 @@ namespace Data
 
         public override string ToString()
         {
-            return $"VoxelState: {{ Id = {ID}, Light = {Light}, Meta = 0x{Meta:X2}, Orientation = {Orientation}, Properties = {Properties} }}";
+            return $"VoxelState: {{ Id = {ID}, Meta = 0x{Meta:X2}, Orientation = {Orientation}, Properties = {Properties} }}";
         }
 
         #endregion

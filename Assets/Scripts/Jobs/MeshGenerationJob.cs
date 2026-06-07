@@ -318,11 +318,14 @@ namespace Jobs
 
                 // Collect 14 neighbors for smoothing & culling
                 NativeArray<OptionalVoxelState> neighbors = new NativeArray<OptionalVoxelState>(14, Allocator.Temp);
+                NativeArray<ushort> neighborLights = new NativeArray<ushort>(14, Allocator.Temp);
 
                 for (int i = 0; i < s_fluidNeighborOffsets.Length; i++)
                 {
-                    VoxelState? neighborState = GetVoxelStateFromLocalPos(pos + s_fluidNeighborOffsets[i]);
+                    Vector3Int neighborPos = pos + s_fluidNeighborOffsets[i];
+                    VoxelState? neighborState = GetVoxelStateFromLocalPos(neighborPos);
                     if (neighborState.HasValue) neighbors[i] = new OptionalVoxelState(neighborState.Value);
+                    neighborLights[i] = GetLightDataFromLocalPos(neighborPos);
                 }
 
                 FluidCornerLights cornerLights = default;
@@ -342,12 +345,13 @@ namespace Jobs
                 }
 
                 VoxelMeshHelper.GenerateFluidMeshData(in pos, packedData, in voxelProps, in templates, in BlockTypes, in neighbors,
-                    SmoothLighting >= SmoothLightingQuality.Standard, in cornerLights,
+                    in neighborLights, SmoothLighting >= SmoothLightingQuality.Standard, in cornerLights,
                     ref _vertexIndex, ref Output.Vertices, ref Output.FluidTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                     ref Output.LightData);
 
-                // Dispose the temporary native array.
+                // Dispose the temporary native arrays.
                 neighbors.Dispose();
+                neighborLights.Dispose();
                 return; // Fluid blocks are never also a custom mesh or standard cube.
             }
 
