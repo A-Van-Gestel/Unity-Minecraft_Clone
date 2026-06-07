@@ -253,25 +253,18 @@ namespace Jobs
                 byte emB = props.EmissionB;
 
                 // Seed emission values into LightMap if the block emits light
-                bool needsUpdate = false;
                 if (emR > 0 || emG > 0 || emB > 0)
                 {
                     byte curR = LightBitMapping.GetBlocklightR(currentLight);
                     byte curG = LightBitMapping.GetBlocklightG(currentLight);
                     byte curB = LightBitMapping.GetBlocklightB(currentLight);
                     if (curR < emR || curG < emG || curB < emB)
-                        needsUpdate = true;
-                    if (needsUpdate)
                     {
                         LightMap[i] = LightBitMapping.PackLightData(sun,
                             (byte)Mathf.Max(emR, curR),
                             (byte)Mathf.Max(emG, curG),
                             (byte)Mathf.Max(emB, curB));
                     }
-                }
-                else if (needsUpdate)
-                {
-                    LightMap[i] = LightBitMapping.SetSkyLight(currentLight, sun);
                 }
             }
         }
@@ -651,7 +644,10 @@ namespace Jobs
                         uint neighborPacked = GetPackedData(neighborPos, ref cache);
                         if (neighborPacked == uint.MaxValue) continue;
 
-                        CheckEdgeVoxel(pos, centerPacked, neighborPos,
+                        ushort centerLightData = GetLightData(pos, ref cache);
+                        ushort neighborLightData = GetLightData(neighborPos, ref cache);
+
+                        CheckEdgeVoxel(pos, centerPacked, centerLightData, neighborLightData,
                             sunPlacement, ref cache);
                         CheckEdgeVoxelRGB(pos, centerPacked, neighborPos,
                             blockPlacement, ref cache);
@@ -665,11 +661,11 @@ namespace Jobs
         /// Detects missing light (black spots) where the neighbor has light that should propagate here.
         /// </summary>
         private void CheckEdgeVoxel(
-            Vector3Int centerPos, uint centerPacked, Vector3Int neighborPos,
+            Vector3Int centerPos, uint centerPacked, ushort centerLightData, ushort neighborLightData,
             NativeQueue<Vector3Int> placementQueue, ref NativeHashMap<long, ulong> cache)
         {
-            byte centerLight = LightBitMapping.GetSkyLight(GetLightData(centerPos, ref cache));
-            byte neighborLight = LightBitMapping.GetSkyLight(GetLightData(neighborPos, ref cache));
+            byte centerLight = LightBitMapping.GetSkyLight(centerLightData);
+            byte neighborLight = LightBitMapping.GetSkyLight(neighborLightData);
 
             BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
             if (centerProps.IsOpaque) return;

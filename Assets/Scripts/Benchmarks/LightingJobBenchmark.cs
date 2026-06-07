@@ -535,32 +535,61 @@ namespace Benchmarks
             int localX = gx;
             int localZ = gz;
             NativeArray<uint> target;
+            NativeArray<ushort> lightTarget;
 
             if (gx < 0)
             {
                 localX = gx + VoxelData.ChunkWidth;
-                target = gz < 0 ? sourceData.NeighborSW :
-                    gz >= VoxelData.ChunkWidth ? sourceData.NeighborNW : sourceData.NeighborW;
-                if (gz < 0) localZ = gz + VoxelData.ChunkWidth;
-                else if (gz >= VoxelData.ChunkWidth) localZ = gz - VoxelData.ChunkWidth;
+                if (gz < 0)
+                {
+                    localZ = gz + VoxelData.ChunkWidth;
+                    target = sourceData.NeighborSW;
+                    lightTarget = sourceData.LightSW;
+                }
+                else if (gz >= VoxelData.ChunkWidth)
+                {
+                    localZ = gz - VoxelData.ChunkWidth;
+                    target = sourceData.NeighborNW;
+                    lightTarget = sourceData.LightNW;
+                }
+                else
+                {
+                    target = sourceData.NeighborW;
+                    lightTarget = sourceData.LightW;
+                }
             }
             else if (gx >= VoxelData.ChunkWidth)
             {
                 localX = gx - VoxelData.ChunkWidth;
-                target = gz < 0 ? sourceData.NeighborSE :
-                    gz >= VoxelData.ChunkWidth ? sourceData.NeighborNE : sourceData.NeighborE;
-                if (gz < 0) localZ = gz + VoxelData.ChunkWidth;
-                else if (gz >= VoxelData.ChunkWidth) localZ = gz - VoxelData.ChunkWidth;
+                if (gz < 0)
+                {
+                    localZ = gz + VoxelData.ChunkWidth;
+                    target = sourceData.NeighborSE;
+                    lightTarget = sourceData.LightSE;
+                }
+                else if (gz >= VoxelData.ChunkWidth)
+                {
+                    localZ = gz - VoxelData.ChunkWidth;
+                    target = sourceData.NeighborNE;
+                    lightTarget = sourceData.LightNE;
+                }
+                else
+                {
+                    target = sourceData.NeighborE;
+                    lightTarget = sourceData.LightE;
+                }
             }
             else if (gz < 0)
             {
                 localZ = gz + VoxelData.ChunkWidth;
                 target = sourceData.NeighborS;
+                lightTarget = sourceData.LightS;
             }
             else if (gz >= VoxelData.ChunkWidth)
             {
                 localZ = gz - VoxelData.ChunkWidth;
                 target = sourceData.NeighborN;
+                lightTarget = sourceData.LightN;
             }
             else
             {
@@ -575,6 +604,13 @@ namespace Benchmarks
                 ? BurstVoxelDataBitMapping.SetSunLight(packed, mod.LightLevel)
                 : BurstVoxelDataBitMapping.SetBlockLight(packed, mod.LightLevel);
             target[idx] = updated;
+
+            // Also update the parallel ushort light array so the BFS job reads correct values
+            ushort light = lightTarget[idx];
+            if (mod.Channel == LightChannel.Sun)
+                lightTarget[idx] = LightBitMapping.SetSkyLight(light, mod.LightLevel);
+            else
+                lightTarget[idx] = LightBitMapping.SetBlocklightRGB(light, mod.BlockR, mod.BlockG, mod.BlockB);
         }
 
         /// <summary>
