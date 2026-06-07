@@ -505,11 +505,10 @@ public class WorldJobManager : IDisposable
                 else
                 {
                     // Lighting disabled: stamp sky=15 on every section's LightData
-                    ushort fullBrightSky = LightBitMapping.PackLightData(15, 0, 0, 0);
                     foreach (ChunkSection section in chunkData.sections)
                     {
                         if (section == null) continue;
-                        Array.Fill(section.LightData, fullBrightSky);
+                        LightingHelper.FillUniformSkyLight(section.LightData, 15);
                     }
                 }
 

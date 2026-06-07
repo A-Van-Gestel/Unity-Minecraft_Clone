@@ -31,7 +31,10 @@ public static class SaveSystem
     //           See Migration_v7_to_v8_RGBLightQueues.cs.
     // v9 (RGB): Persists ushort[] LightData per section with flag-based format (0x00 voxels-only,
     //           0x01 voxels+light, 0x02 light-only). See Migration_v8_to_v9_LightDataSerialization.cs.
-    public const int CURRENT_VERSION = 9;
+    // v10 (RGB): Strips legacy light bits from uint voxels (bits 16-23 zeroed/reserved). Introduces
+    //            uniform-sky-level optimization (flags 0x00/0x02 store 1B sky level instead of full
+    //            LightData). New flag 0x03 for light-only+full. See Migration_v9_to_v10_StripLightBitsAndNewFlags.cs.
+    public const int CURRENT_VERSION = 10;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.
