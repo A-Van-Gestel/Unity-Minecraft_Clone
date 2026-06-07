@@ -417,9 +417,8 @@ namespace Data
             // --- Update The Map (Sections) ---
             SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData, newProps, oldProps);
 
-            // Keep the ushort light array in sync when lighting is disabled.
-            // The uint packed data already has sunlight=15 from PackVoxelData above,
-            // but the mesh job reads from the ushort array — it must match.
+            // When lighting is disabled, stamp sky=15 so the mesh job renders full brightness.
+            // Light data lives exclusively in the ushort LightData array (the uint carries no light bits).
             if (!lightingEnabled)
                 SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkyLight(0, 15));
 
