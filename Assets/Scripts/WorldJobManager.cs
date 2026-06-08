@@ -808,7 +808,7 @@ public class WorldJobManager : IDisposable
                 bool needsSection = false;
                 for (int i = 0; i < sectionVolume; i++)
                 {
-                    if (jobMap[indexOffset + i] != 0)
+                    if (jobMap[indexOffset + i] != 0 || jobLightMap[indexOffset + i] != 0)
                     {
                         needsSection = true;
                         break;
@@ -825,18 +825,22 @@ public class WorldJobManager : IDisposable
 
             if (section != null)
             {
+                bool sectionHasLight = false;
+
                 for (int i = 0; i < sectionVolume; i++)
                 {
                     // Overwrite ushort light array with the job's computed values.
                     // Cross-chunk mods that were applied to the live data during the job
                     // may be temporarily lost, but the edge check convergence rounds will
                     // detect and correct border inconsistencies.
-                    section.LightData[i] = jobLightMap[indexOffset + i];
+                    ushort lightVal = jobLightMap[indexOffset + i];
+                    section.LightData[i] = lightVal;
 
                     if (section.voxels[i] != 0) sectionHasData = true;
+                    if (lightVal != 0) sectionHasLight = true;
                 }
 
-                if (!sectionHasData)
+                if (!sectionHasData && !sectionHasLight)
                 {
                     _world.ChunkPool.ReturnChunkSection(section);
                     chunkData.sections[s] = null;
