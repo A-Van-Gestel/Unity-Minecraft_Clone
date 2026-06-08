@@ -32,6 +32,15 @@ namespace Data
         public ChunkSection[] sections; // For 128 height, this array has length 8.
 
         /// <summary>
+        /// Per-section uniform sky light level for compact representation.
+        /// <c>0x00–0x0F</c>: section light is uniform at this sky level with zero blocklight.
+        /// <c>0xFF</c>: no compact shortcut — use real <see cref="ChunkSection.LightData"/>.
+        /// Covers both null sections (empty sky above terrain) and non-null sections (pitch-black underground).
+        /// </summary>
+        [NonSerialized]
+        public byte[] SectionUniformSkyLevel;
+
+        /// <summary>
         /// The heightmap for this chunk. Stores the Y-level of the highest opaque block for each column.
         /// </summary>
         public ushort[] heightMap = new ushort[VoxelData.ChunkWidth * VoxelData.ChunkWidth];
@@ -142,6 +151,9 @@ namespace Data
         public Queue<LightQueueNode> BlocklightBfsQueue => _blocklightBfsQueue;
 
 
+        /// <summary>Sentinel: this section index has no uniform-sky shortcut.</summary>
+        internal const byte UNIFORM_SKY_NONE = 0xFF;
+
         #region Constructors and Initializers
 
         /// <summary>
@@ -170,6 +182,8 @@ namespace Data
         {
             const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
             sections = new ChunkSection[sectionCount];
+            SectionUniformSkyLevel = new byte[sectionCount];
+            Array.Fill(SectionUniformSkyLevel, UNIFORM_SKY_NONE);
         }
 
         // --- Pooling Support ---
@@ -202,6 +216,9 @@ namespace Data
             // Clear Heightmap (retains array)
             Array.Clear(heightMap, 0, heightMap.Length);
 
+            // Clear compact sky levels
+            Array.Fill(SectionUniformSkyLevel, UNIFORM_SKY_NONE);
+
             // Recycle Sections
             // CRITICAL: We must return sections to the pool before we lose the reference.
             if (World.Instance != null && World.Instance.ChunkPool != null)
@@ -233,6 +250,22 @@ namespace Data
             }
 
             return new ChunkSection(); // Fallback
+        }
+
+        /// <summary>
+        /// Promotes a compact uniform-sky section to a full section with populated <see cref="ChunkSection.LightData"/>.
+        /// If the section is not compact, this is a no-op. Allocates a section from the pool if null.
+        /// </summary>
+        private void PromoteCompactSection(int sectionIndex)
+        {
+            byte sky = SectionUniformSkyLevel[sectionIndex];
+            if (sky == UNIFORM_SKY_NONE) return;
+
+            SectionUniformSkyLevel[sectionIndex] = UNIFORM_SKY_NONE;
+
+            sections[sectionIndex] ??= GetNewSection();
+
+            LightingHelper.FillUniformSkyLight(sections[sectionIndex].LightData, sky);
         }
 
         #endregion
@@ -342,6 +375,9 @@ namespace Data
                 //    when loadedData is recycled in the next step.
                 loadedData.sections[i] = null;
             }
+
+            // Transfer compact sky levels
+            Array.Copy(loadedData.SectionUniformSkyLevel, SectionUniformSkyLevel, SectionUniformSkyLevel.Length);
 
             // Copy Queues
             // We move the queues from the loaded object (temp) to this object (live)
@@ -523,6 +559,10 @@ namespace Data
             int sectionY = y / ChunkMath.SECTION_SIZE;
             int localY = y % ChunkMath.SECTION_SIZE;
 
+            // Promote compact sections unconditionally — even non-null sections can be compact
+            // (VOXELS_UNIFORM_SKY: has voxels but light stored as a single byte).
+            PromoteCompactSection(sectionY);
+
             // Create section if it doesn't exist (on write)
             if (sections[sectionY] == null)
             {
@@ -590,11 +630,15 @@ namespace Data
 
         /// <summary>
         /// Gets the packed <c>ushort</c> light data for a voxel at the given local position.
-        /// Returns 0 if the section is null (unallocated air).
+        /// Returns the compact uniform sky value if the section is compacted, or 0 if fully unallocated.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ushort GetLightData(int x, int y, int z)
         {
             int sectionY = y / ChunkMath.SECTION_SIZE;
+            byte uniformSky = SectionUniformSkyLevel[sectionY];
+            if (uniformSky != UNIFORM_SKY_NONE)
+                return LightBitMapping.PackLightData(uniformSky, 0, 0, 0);
             if (sections[sectionY] == null) return 0;
 
             int localY = y % ChunkMath.SECTION_SIZE;
@@ -604,12 +648,17 @@ namespace Data
 
         /// <summary>
         /// Sets the packed <c>ushort</c> light data for a voxel at the given local position.
-        /// Allocates the section if it is null.
+        /// Promotes compact sections by filling <see cref="ChunkSection.LightData"/> from the uniform value first.
         /// </summary>
         public void SetLightData(int x, int y, int z, ushort value)
         {
             int sectionY = y / ChunkMath.SECTION_SIZE;
-            sections[sectionY] ??= GetNewSection();
+            PromoteCompactSection(sectionY);
+            if (sections[sectionY] == null)
+            {
+                if (value == 0) return;
+                sections[sectionY] = GetNewSection();
+            }
 
             int localY = y % ChunkMath.SECTION_SIZE;
             int index = x + localY * ChunkMath.SECTION_SIZE + z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;

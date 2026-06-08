@@ -1,6 +1,7 @@
 using System;
 using System.Text;
 using Data;
+using Helpers;
 using Helpers.UI;
 using JetBrains.Annotations;
 using Jobs.BurstData;
@@ -396,6 +397,9 @@ public class DebugScreen : MonoBehaviour
         _topLeftBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshInfo);
         _topLeftBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
 
+        // --- Section Info ---
+        AppendSectionInfo(playerPosition);
+
         // --- Voxel Info ---
         _topLeftBuilder.AppendLine();
         _topLeftBuilder.AppendLine("GROUND VOXEL:");
@@ -488,6 +492,57 @@ public class DebugScreen : MonoBehaviour
     }
 
     #region Inspector Methods
+
+    /// <summary>
+    /// Appends section-level debug information for the chunk section the player currently occupies.
+    /// </summary>
+    private void AppendSectionInfo(Vector3 playerPosition)
+    {
+        _topLeftBuilder.AppendLine();
+        _topLeftBuilder.AppendLine("SECTION:");
+
+        if (_currentChunk == null)
+        {
+            _topLeftBuilder.AppendLine("None");
+            return;
+        }
+
+        ChunkData chunkData = _currentChunk.ChunkData;
+        int playerY = Mathf.FloorToInt(playerPosition.y);
+        int sectionIndex = Mathf.Clamp(playerY / ChunkMath.SECTION_SIZE, 0, chunkData.sections.Length - 1);
+        ChunkSection section = chunkData.sections[sectionIndex];
+        byte uniformSky = chunkData.SectionUniformSkyLevel[sectionIndex];
+        bool isCompact = uniformSky != ChunkData.UNIFORM_SKY_NONE;
+
+        _topLeftBuilder.Append("Index: ").Append(sectionIndex)
+            .Append(" (Y ").Append(sectionIndex * ChunkMath.SECTION_SIZE)
+            .Append("-").Append((sectionIndex + 1) * ChunkMath.SECTION_SIZE - 1).Append(')').AppendLine();
+
+        if (isCompact && section == null)
+        {
+            _topLeftBuilder.AppendLine("State: Compact (not allocated)");
+            _topLeftBuilder.Append("Uniform Sky Level: ").Append(uniformSky).AppendLine();
+        }
+        else if (isCompact)
+        {
+            _topLeftBuilder.AppendLine("State: Compact (voxels only)");
+            _topLeftBuilder.Append("Uniform Sky Level: ").Append(uniformSky).AppendLine();
+            _topLeftBuilder.Append("Non-Air: ").Append(section.nonAirCount)
+                .Append(" | Opaque: ").Append(section.opaqueCount).AppendLine();
+        }
+        else if (section == null)
+        {
+            _topLeftBuilder.AppendLine("State: Null (no data)");
+        }
+        else
+        {
+            _topLeftBuilder.AppendLine("State: Full (allocated)");
+            _topLeftBuilder.Append("Non-Air: ").Append(section.nonAirCount)
+                .Append(" | Opaque: ").Append(section.opaqueCount).AppendLine();
+            _topLeftBuilder.Append("Empty: ").Append(BoolToYesNoString(section.IsEmpty))
+                .Append(" | Fully Solid: ").Append(BoolToYesNoString(section.IsFullySolid)).AppendLine();
+        }
+    }
 
     /// <summary>
     /// Appends a streamlined set of voxel properties to a StringBuilder,

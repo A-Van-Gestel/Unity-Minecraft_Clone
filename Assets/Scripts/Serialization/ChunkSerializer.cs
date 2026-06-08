@@ -131,12 +131,21 @@ namespace Serialization
             int sectionBitmask = 0;
             // Pre-allocate a safe local array for the background thread
             ChunkSection[] safeSections = new ChunkSection[data.sections.Length];
+            // Snapshot compact sky levels (byte array — value copy is safe for the background thread)
+            byte[] skyLevels = data.SectionUniformSkyLevel;
 
             for (int i = 0; i < data.sections.Length; i++)
             {
                 // Snapshot the reference. If the main thread nullifies data.sections immediately after this line,
-                // our local 'sec' variable still safely points  to the object in memory, preventing NREs.
+                // our local 'sec' variable still safely points to the object in memory, preventing NREs.
                 ChunkSection sec = data.sections[i];
+
+                if (skyLevels[i] != ChunkData.UNIFORM_SKY_NONE)
+                {
+                    sectionBitmask |= 1 << i;
+                    safeSections[i] = sec; // May be null for light-only compact sections
+                    continue;
+                }
 
                 if (sec != null && SectionHasData(sec))
                 {
@@ -153,8 +162,16 @@ namespace Serialization
                 // Check bitmask to skip empty sections
                 if ((sectionBitmask & (1 << i)) != 0)
                 {
-                    // Pass our safe reference to the writer
-                    WriteSection(writer, safeSections[i]);
+                    if (safeSections[i] != null)
+                    {
+                        WriteSection(writer, safeSections[i], skyLevels[i]);
+                    }
+                    else if (skyLevels[i] != ChunkData.UNIFORM_SKY_NONE)
+                    {
+                        // Compact light-only section — write 2 bytes
+                        writer.Write(SECTION_FLAG_LIGHT_ONLY_UNIFORM_SKY);
+                        writer.Write(skyLevels[i]);
+                    }
                 }
             }
 
@@ -198,8 +215,25 @@ namespace Serialization
                 int sectionBitmask = reader.ReadInt32();
                 for (int i = 0; i < chunk.sections.Length; i++)
                 {
-                    if ((sectionBitmask & (1 << i)) != 0)
-                        chunk.sections[i] = ReadSection(reader);
+                    if ((sectionBitmask & (1 << i)) == 0) continue;
+
+                    byte flag = reader.ReadByte();
+
+                    if (flag == SECTION_FLAG_LIGHT_ONLY_UNIFORM_SKY)
+                    {
+                        // Compact: store sky byte, skip section allocation.
+                        chunk.SectionUniformSkyLevel[i] = reader.ReadByte();
+                    }
+                    else if (flag == SECTION_FLAG_VOXELS_UNIFORM_SKY)
+                    {
+                        // Voxels + uniform sky: store sky byte, allocate section for voxels only.
+                        chunk.SectionUniformSkyLevel[i] = reader.ReadByte();
+                        chunk.sections[i] = ReadSectionVoxelsOnly(reader);
+                    }
+                    else
+                    {
+                        chunk.sections[i] = ReadSectionWithFlag(reader, flag);
+                    }
                 }
 
                 // --- Lighting ---
@@ -271,23 +305,49 @@ namespace Serialization
             }
         }
 
-        private static void WriteSection(BinaryWriter writer, ChunkSection section)
+        /// <summary>
+        /// Writes a section to the binary stream using the v7 flag-based format.
+        /// </summary>
+        /// <param name="writer">The binary writer.</param>
+        /// <param name="section">The section to serialize.</param>
+        /// <param name="compactSkyLevel">The compact uniform sky level from <see cref="ChunkData.SectionUniformSkyLevel"/>.
+        /// <c>0xFF</c> means not compact — classify from <see cref="ChunkSection.LightData"/>.</param>
+        private static void WriteSection(BinaryWriter writer, ChunkSection section, byte compactSkyLevel)
         {
             bool hasBlocks = section.nonAirCount > 0;
-            ClassifyLightData(section.LightData,
-                out bool hasBlocklight, out bool hasAnyLight,
-                out bool isUniformSky, out byte uniformSkyLevel);
+
+            // When the runtime has compacted the light into a byte, use it directly
+            // instead of scanning the (potentially stale) LightData array.
+            bool hasBlocklight;
+            bool hasAnyLight;
+            bool isUniformSky;
+            byte uniformSkyLevel;
+
+            if (compactSkyLevel != ChunkData.UNIFORM_SKY_NONE)
+            {
+                hasBlocklight = false;
+                hasAnyLight = compactSkyLevel != 0;
+                isUniformSky = true;
+                uniformSkyLevel = compactSkyLevel;
+            }
+            else
+            {
+                LightingHelper.ClassifyLightData(section.LightData,
+                    out hasBlocklight, out hasAnyLight,
+                    out isUniformSky, out uniformSkyLevel);
+            }
 
             if (hasBlocks)
             {
                 // Validate array sizes
                 if (section.voxels.Length != ChunkMath.SECTION_VOLUME)
                     throw new InvalidDataException($"Section voxel array corrupted. Size: {section.voxels.Length.ToString()}");
-                if (section.LightData.Length != ChunkMath.SECTION_VOLUME)
-                    throw new InvalidDataException($"Section LightData array corrupted. Size: {section.LightData.Length.ToString()}");
 
                 if (hasBlocklight || !isUniformSky)
                 {
+                    if (section.LightData.Length != ChunkMath.SECTION_VOLUME)
+                        throw new InvalidDataException($"Section LightData array corrupted. Size: {section.LightData.Length.ToString()}");
+
                     // Flag 0x01: Voxels + full LightData (blocklight present or non-uniform sky)
                     writer.Write(SECTION_FLAG_VOXELS_AND_LIGHT);
                     writer.Write((ushort)section.nonAirCount);
@@ -305,9 +365,6 @@ namespace Serialization
             }
             else if (hasBlocklight || hasAnyLight)
             {
-                if (section.LightData.Length != ChunkMath.SECTION_VOLUME)
-                    throw new InvalidDataException($"Section LightData array corrupted. Size: {section.LightData.Length.ToString()}");
-
                 if (!hasBlocklight && isUniformSky)
                 {
                     // Flag 0x02: Light-only + uniform sky (2 bytes total)
@@ -316,6 +373,9 @@ namespace Serialization
                 }
                 else
                 {
+                    if (section.LightData.Length != ChunkMath.SECTION_VOLUME)
+                        throw new InvalidDataException($"Section LightData array corrupted. Size: {section.LightData.Length.ToString()}");
+
                     // Flag 0x03: Light-only + full LightData (blocklight or non-uniform sky)
                     writer.Write(SECTION_FLAG_LIGHT_ONLY_FULL);
                     writer.Write(MemoryMarshal.AsBytes(section.LightData.AsSpan()));
@@ -341,39 +401,12 @@ namespace Serialization
         }
 
         /// <summary>
-        /// Single-pass scan of <paramref name="lightData"/> to classify content: blocklight presence,
-        /// any non-zero light, sky uniformity, and the uniform sky level (if all sky values are equal).
+        /// Reads a section where the flag byte has already been consumed by the caller.
+        /// Handles flags <c>0x01</c> (voxels + full light) and <c>0x03</c> (light-only + full light).
+        /// Flags <c>0x00</c> and <c>0x02</c> are handled inline by the caller for compact deserialization.
         /// </summary>
-        private static void ClassifyLightData(ushort[] lightData,
-            out bool hasBlocklight, out bool hasAnyLight,
-            out bool isUniformSky, out byte uniformSkyLevel)
+        private static ChunkSection ReadSectionWithFlag(BinaryReader reader, byte flag)
         {
-            const ushort BLOCKLIGHT_RGB_MASK = 0xFFF0;
-            const int SKY_MASK = 0xF;
-            hasBlocklight = false;
-            hasAnyLight = false;
-            isUniformSky = true;
-            uniformSkyLevel = (byte)(lightData[0] & SKY_MASK);
-
-            foreach (ushort t in lightData)
-            {
-                if ((t & BLOCKLIGHT_RGB_MASK) != 0)
-                    hasBlocklight = true;
-
-                if (t != 0)
-                    hasAnyLight = true;
-
-                if ((t & SKY_MASK) != uniformSkyLevel)
-                    isUniformSky = false;
-
-                if (hasBlocklight && !isUniformSky)
-                    return;
-            }
-        }
-
-        private static ChunkSection ReadSection(BinaryReader reader)
-        {
-            byte flag = reader.ReadByte();
             if (flag > SECTION_FLAG_LIGHT_ONLY_FULL)
                 throw new InvalidDataException($"Unknown section flag: 0x{flag:X2}");
 
@@ -382,35 +415,42 @@ namespace Serialization
             {
                 switch (flag)
                 {
-                    case SECTION_FLAG_VOXELS_UNIFORM_SKY:
-                    {
-                        byte skyLevel = reader.ReadByte();
-                        section.nonAirCount = reader.ReadUInt16();
-                        ReadBulkData(reader, MemoryMarshal.AsBytes(section.voxels.AsSpan()));
-                        FillUniformSkyLight(section.LightData, skyLevel);
-                        break;
-                    }
-
                     case SECTION_FLAG_VOXELS_AND_LIGHT:
                         section.nonAirCount = reader.ReadUInt16();
                         ReadBulkData(reader, MemoryMarshal.AsBytes(section.voxels.AsSpan()));
                         ReadBulkData(reader, MemoryMarshal.AsBytes(section.LightData.AsSpan()));
                         break;
 
-                    case SECTION_FLAG_LIGHT_ONLY_UNIFORM_SKY:
-                    {
-                        byte skyLevel = reader.ReadByte();
-                        section.nonAirCount = 0;
-                        FillUniformSkyLight(section.LightData, skyLevel);
-                        break;
-                    }
-
                     case SECTION_FLAG_LIGHT_ONLY_FULL:
                         section.nonAirCount = 0;
                         ReadBulkData(reader, MemoryMarshal.AsBytes(section.LightData.AsSpan()));
                         break;
+
+                    default:
+                        throw new InvalidDataException($"Unexpected section flag in ReadSectionWithFlag: 0x{flag:X2}");
                 }
 
+                return section;
+            }
+            catch
+            {
+                section.Reset();
+                World.Instance.ChunkPool.ReturnChunkSection(section);
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Reads a section that has voxels but whose light is handled as a compact uniform sky byte.
+        /// Expects the stream positioned after the sky level byte (already read by caller).
+        /// </summary>
+        private static ChunkSection ReadSectionVoxelsOnly(BinaryReader reader)
+        {
+            ChunkSection section = World.Instance.ChunkPool.GetChunkSection();
+            try
+            {
+                section.nonAirCount = reader.ReadUInt16();
+                ReadBulkData(reader, MemoryMarshal.AsBytes(section.voxels.AsSpan()));
                 return section;
             }
             catch
@@ -437,15 +477,6 @@ namespace Serialization
 
                 bytesReadTotal += bytesRead;
             }
-        }
-
-        /// <summary>
-        /// Bulk-fills a LightData array with a uniform sky light level (blocklight R/G/B = 0).
-        /// Used when reading v7 flag 0x00 and 0x02 sections.
-        /// </summary>
-        private static void FillUniformSkyLight(ushort[] lightData, byte skyLevel)
-        {
-            LightingHelper.FillUniformSkyLight(lightData, skyLevel);
         }
     }
 }

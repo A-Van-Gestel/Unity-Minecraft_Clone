@@ -274,7 +274,12 @@ namespace Data
                 const int sectionSize = 16 * 16 * 16;
                 for (int i = 0; i < chunk.sections.Length; i++)
                 {
-                    if (chunk.sections[i] != null)
+                    byte uniformSky = chunk.SectionUniformSkyLevel[i];
+                    if (uniformSky != ChunkData.UNIFORM_SKY_NONE)
+                    {
+                        LightingHelper.FillUniformSkyLight(jobArray, i * sectionSize, sectionSize, uniformSky);
+                    }
+                    else if (chunk.sections[i] != null)
                     {
                         NativeArray<ushort>.Copy(
                             chunk.sections[i].LightData, 0,

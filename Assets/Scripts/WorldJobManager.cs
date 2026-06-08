@@ -803,6 +803,9 @@ public class WorldJobManager : IDisposable
             bool sectionHasData = false;
             bool isNewSection = false;
 
+            // Clear any stale compact flag — the lighting job will provide fresh data.
+            chunkData.SectionUniformSkyLevel[s] = ChunkData.UNIFORM_SKY_NONE;
+
             if (section == null)
             {
                 bool needsSection = false;
@@ -842,16 +845,57 @@ public class WorldJobManager : IDisposable
 
                 if (!sectionHasData && !sectionHasLight)
                 {
+                    // No blocks, no light — discard entirely.
                     _world.ChunkPool.ReturnChunkSection(section);
                     chunkData.sections[s] = null;
                 }
-                else if (!isNewSection)
+                else
                 {
-                    section.RecalculateCounts(_world.BlockTypes);
+                    // Try to compact the light data into a uniform sky byte.
+                    TryCompactSectionLight(chunkData, s, section, sectionHasData, sectionHasLight);
+
+                    if (!isNewSection && chunkData.sections[s] != null)
+                        section.RecalculateCounts(_world.BlockTypes);
                 }
             }
 
             indexOffset += sectionVolume;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to compact a section's light data into a single uniform sky level byte.
+    /// If successful, stores the byte in <see cref="ChunkData.SectionUniformSkyLevel"/> and,
+    /// for light-only sections (no blocks), returns the section to the pool.
+    /// </summary>
+    private void TryCompactSectionLight(ChunkData chunkData, int sectionIndex,
+        ChunkSection section, bool hasBlocks, bool hasLight)
+    {
+        if (!hasLight)
+        {
+            // Pitch black — uniform sky level 0.
+            chunkData.SectionUniformSkyLevel[sectionIndex] = 0;
+            if (!hasBlocks)
+            {
+                _world.ChunkPool.ReturnChunkSection(section);
+                chunkData.sections[sectionIndex] = null;
+            }
+
+            return;
+        }
+
+        LightingHelper.ClassifyLightData(section.LightData,
+            out bool hasBlocklight, out _, out bool isUniformSky, out byte uniformSkyLevel);
+
+        if (hasBlocklight || !isUniformSky) return;
+
+        // Uniform sky, no blocklight — compact it.
+        chunkData.SectionUniformSkyLevel[sectionIndex] = uniformSkyLevel;
+
+        if (!hasBlocks)
+        {
+            _world.ChunkPool.ReturnChunkSection(section);
+            chunkData.sections[sectionIndex] = null;
         }
     }
 

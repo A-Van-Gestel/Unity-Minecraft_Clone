@@ -220,6 +220,9 @@ namespace Serialization
             if (source.heightMap != null && snapshot.heightMap != null)
                 Array.Copy(source.heightMap, snapshot.heightMap, source.heightMap.Length);
 
+            // Copy compact sky levels
+            Array.Copy(source.SectionUniformSkyLevel, snapshot.SectionUniformSkyLevel, source.SectionUniformSkyLevel.Length);
+
             // Correctly iterate the Section Array
             for (int i = 0; i < source.sections.Length; i++)
             {
@@ -229,9 +232,12 @@ namespace Serialization
                     ChunkSection snapSec = World.Instance.ChunkPool.GetChunkSection();
                     snapSec.nonAirCount = source.sections[i].nonAirCount;
 
-                    // Copy voxels and light data
+                    // Copy voxels
                     Array.Copy(source.sections[i].voxels, snapSec.voxels, ChunkMath.SECTION_VOLUME);
-                    Array.Copy(source.sections[i].LightData, snapSec.LightData, ChunkMath.SECTION_VOLUME);
+
+                    // Skip LightData copy for compact sections — the sky byte carries the information.
+                    if (source.SectionUniformSkyLevel[i] == ChunkData.UNIFORM_SKY_NONE)
+                        Array.Copy(source.sections[i].LightData, snapSec.LightData, ChunkMath.SECTION_VOLUME);
 
                     // Assign to snapshot array
                     snapshot.sections[i] = snapSec;
