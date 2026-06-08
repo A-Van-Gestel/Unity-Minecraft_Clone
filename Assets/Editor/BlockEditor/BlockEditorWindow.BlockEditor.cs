@@ -451,6 +451,53 @@ namespace Editor.BlockEditor
                     _selectedBlock.lightEmissionColor = EditorGUILayout.ColorField(
                         new GUIContent("Emission Color", "The color of light emitted by this block. Combined with intensity to produce per-channel RGB values."),
                         _selectedBlock.lightEmissionColor, showEyedropper: true, showAlpha: false, hdr: false);
+
+                    // Derive per-channel 0-15 values (same formula as BlockTypeJobData)
+                    Color emColor = _selectedBlock.lightEmissionColor;
+                    float maxComp = Mathf.Max(emColor.r, Mathf.Max(emColor.g, emColor.b));
+                    float emScale = maxComp > 0 ? _selectedBlock.lightEmission / maxComp : 0;
+                    int derivedR = Mathf.Clamp(Mathf.RoundToInt(emColor.r * emScale), 0, 15);
+                    int derivedG = Mathf.Clamp(Mathf.RoundToInt(emColor.g * emScale), 0, 15);
+                    int derivedB = Mathf.Clamp(Mathf.RoundToInt(emColor.b * emScale), 0, 15);
+
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.PrefixLabel(new GUIContent("Emission RGB", "Per-channel emission levels (0-15). Editing these updates the color picker and intensity."));
+                    EditorGUI.BeginChangeCheck();
+                    int newR = EditorGUILayout.IntField(derivedR, GUILayout.MinWidth(30));
+                    int newG = EditorGUILayout.IntField(derivedG, GUILayout.MinWidth(30));
+                    int newB = EditorGUILayout.IntField(derivedB, GUILayout.MinWidth(30));
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        newR = Mathf.Clamp(newR, 0, 15);
+                        newG = Mathf.Clamp(newG, 0, 15);
+                        newB = Mathf.Clamp(newB, 0, 15);
+                        int peak = Mathf.Max(newR, Mathf.Max(newG, newB));
+                        _selectedBlock.lightEmission = (byte)peak;
+                        _selectedBlock.lightEmissionColor = peak > 0
+                            ? new Color(newR / (float)peak, newG / (float)peak, newB / (float)peak)
+                            : Color.white;
+                    }
+
+                    EditorGUILayout.EndHorizontal();
+
+                    // Attenuation preview — shows how the emission color shifts over 15 blocks
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.PrefixLabel(new GUIContent("Light Falloff", "Preview of how the emission color attenuates over 15 blocks of distance."));
+                    Rect falloffRect = GUILayoutUtility.GetRect(0, 20, GUILayout.ExpandWidth(true));
+                    EditorGUILayout.EndHorizontal();
+
+                    if (Event.current.type == EventType.Repaint)
+                    {
+                        float cellWidth = falloffRect.width / 15f;
+                        for (int d = 0; d < 15; d++)
+                        {
+                            int chR = Mathf.Max(derivedR - d, 0);
+                            int chG = Mathf.Max(derivedG - d, 0);
+                            int chB = Mathf.Max(derivedB - d, 0);
+                            Color cellColor = new Color(chR / 15f, chG / 15f, chB / 15f);
+                            EditorGUI.DrawRect(new Rect(falloffRect.x + d * cellWidth, falloffRect.y, cellWidth + 1, falloffRect.height), cellColor);
+                        }
+                    }
                 }
 
                 EditorGUILayout.Space();
