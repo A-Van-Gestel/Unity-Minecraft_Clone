@@ -114,13 +114,13 @@ namespace Editor.Benchmarking
                 switch (ratio)
                 {
                     case < 0.25f:
-                        // Solid block with some light: stone (ID=3) + sunlight 12
-                        section.voxels[i] = BurstVoxelDataBitMapping.PackVoxelData(3, 12, 0,
+                        // Solid block: stone (ID=3)
+                        section.voxels[i] = BurstVoxelDataBitMapping.PackVoxelData(3,
                             BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
                         break;
                     case < 0.50f:
-                        // Air with light data (the problematic case): ID=0, sunlight=15
-                        section.voxels[i] = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0,
+                        // Air (the problematic case for nonAirCount): ID=0
+                        section.voxels[i] = BurstVoxelDataBitMapping.PackVoxelData(0,
                             BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, fluidLevel: 0, isFluid: false));
                         break;
                     default:

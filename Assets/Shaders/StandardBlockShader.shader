@@ -30,10 +30,11 @@ Shader "Minecraft/Blocks"
             #include "Includes/VoxelCommon.hlsl"
             #include "Includes/VoxelLighting.hlsl"
 
-            // Global properties set by World.cs via Shader.SetGlobalFloat — must be outside CBUFFER
+            // Global properties set by World.cs — must be outside CBUFFER
             float GlobalLightLevel;
             float minGlobalLightLevel;
             float maxGlobalLightLevel;
+            half3 SkyLightColor;
 
             VoxelV2F vertFunction(VoxelAppdata v)
             {
@@ -51,8 +52,9 @@ Shader "Minecraft/Blocks"
 
                 half4 col = SampleBlockTexture(i.uv);
 
-                // Apply voxel lighting with separate sunlight/blocklight channels
-                col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.rgb, i.lightData.a,
+                // Apply voxel lighting: sun (scalar, tinted by sky color) + block (RGB)
+                col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba,
+                                                SkyLightColor,
                                                 GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // Multiply by vertex RGB to support BlockIconGenerator shadows and tinting

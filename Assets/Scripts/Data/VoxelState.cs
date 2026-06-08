@@ -65,37 +65,6 @@ namespace Data
             set => _packedData = BurstVoxelDataBitMapping.SetOrientation(_packedData, value); // Direct set
         }
 
-        /// <summary>
-        /// Returns the highest light level between sunlight and blocklight.
-        /// </summary>
-        /// <value>A byte from 0 to 15 representing the maximum light.</value>
-        public byte Light
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => BurstVoxelDataBitMapping.GetLight(_packedData);
-        }
-
-        /// <summary>
-        /// Gets or sets the incoming sunlight level (0-15).
-        /// </summary>
-        public byte Sunlight
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => BurstVoxelDataBitMapping.GetSunLight(_packedData);
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => _packedData = BurstVoxelDataBitMapping.SetSunLight(_packedData, value);
-        }
-
-        /// <summary>
-        /// Gets or sets the incoming blocklight level (0-15).
-        /// </summary>
-        public byte Blocklight
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => BurstVoxelDataBitMapping.GetBlockLight(_packedData);
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            set => _packedData = BurstVoxelDataBitMapping.SetBlockLight(_packedData, value);
-        }
 
         /// <summary>
         /// Gets or sets the fluid level of the voxel using the legacy bit-slicing encoding
@@ -282,33 +251,8 @@ namespace Data
         public VoxelState(byte blockId)
         {
             _packedData = BurstVoxelDataBitMapping.PackVoxelData(
-                blockId, // blockId
-                0, // SunLight = 0
-                0, // BlockLight = 0
+                blockId,
                 BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false)); // Default: Front orientation
-        }
-
-        /// <summary>
-        /// Creates a new voxel state from all its components using the legacy
-        /// orientation/fluid-level encoding.
-        /// </summary>
-        /// <param name="blockId">The ID of the block.</param>
-        /// <param name="sunLightLevel">The initial sunlight level (0-15).</param>
-        /// <param name="blockLightLevel">The initial blocklight level (0-15).</param>
-        /// <param name="orientation">The face orientation (default 1).</param>
-        /// <param name="fluidLevel">The fluid level (default 0).</param>
-        /// <remarks>
-        /// Transitional constructor — encodes the meta byte using the legacy
-        /// <see cref="BurstVoxelDataBitMapping.BuildMetaLegacy"/> rule. Schema-aware callers should
-        /// prefer <see cref="VoxelState(uint)"/> with a pre-computed packed value, or
-        /// construct via <see cref="BurstVoxelDataBitMapping.PackVoxelData(ushort, byte, byte, byte)"/>
-        /// using a meta byte produced by <c>BurstVoxelMetadataUtility</c>.
-        /// </remarks>
-        public VoxelState(byte blockId, byte sunLightLevel, byte blockLightLevel, byte orientation = 1, byte fluidLevel = 0)
-        {
-            _packedData = BurstVoxelDataBitMapping.PackVoxelData(
-                blockId, sunLightLevel, blockLightLevel,
-                BurstVoxelDataBitMapping.BuildMetaLegacy(orientation, fluidLevel, isFluid: false));
         }
 
         /// <summary>
@@ -329,15 +273,6 @@ namespace Data
         /// </summary>
         public BlockType Properties => World.Instance.BlockTypes[ID];
 
-        /// <summary>
-        /// Returns the highest light level between sunlight and blocklight as a float between 0 and 1.
-        /// </summary>
-        /// <value>A float from 0 to 1 representing the light intensity.</value>
-        public float LightAsFloat
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => Light * VoxelData.UnitOfLight;
-        }
 
         // --- Operator Overloads for comparison ---
 
@@ -372,7 +307,7 @@ namespace Data
 
         public override string ToString()
         {
-            return $"VoxelState: {{ Id = {ID}, Light = {Light}, Meta = 0x{Meta:X2}, Orientation = {Orientation}, Properties = {Properties} }}";
+            return $"VoxelState: {{ Id = {ID}, Meta = 0x{Meta:X2}, Orientation = {Orientation}, Properties = {Properties} }}";
         }
 
         #endregion

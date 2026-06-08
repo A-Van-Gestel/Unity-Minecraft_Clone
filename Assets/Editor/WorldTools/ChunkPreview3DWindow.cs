@@ -118,6 +118,7 @@ namespace Editor.WorldTools
 
         // --- Generated Data (persistent across frames) ---
         private readonly Dictionary<Vector2Int, NativeArray<uint>> _chunkMaps = new Dictionary<Vector2Int, NativeArray<uint>>();
+        private readonly Dictionary<Vector2Int, NativeArray<ushort>> _chunkLightMaps = new Dictionary<Vector2Int, NativeArray<ushort>>();
         private readonly Dictionary<Vector2Int, NativeArray<ushort>> _heightMaps = new Dictionary<Vector2Int, NativeArray<ushort>>();
 
         // --- Rendered Meshes ---
@@ -484,6 +485,13 @@ namespace Editor.WorldTools
             }
 
             _chunkMaps.Clear();
+
+            foreach (NativeArray<ushort> lm in _chunkLightMaps.Values)
+            {
+                if (lm.IsCreated) lm.Dispose();
+            }
+
+            _chunkLightMaps.Clear();
 
             foreach (NativeArray<ushort> hm in _heightMaps.Values)
             {

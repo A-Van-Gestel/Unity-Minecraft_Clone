@@ -205,6 +205,17 @@ public class WorldJobManager : IDisposable
         NativeArray<uint> backLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), Allocator.Persistent);
         NativeArray<uint> frontLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), Allocator.Persistent);
 
+        // Light maps for RGB light data
+        NativeArray<ushort> lightMap = _world.worldData.GetChunkLightMapForJob(chunkCoord.ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<ushort> lightBack = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<ushort> lightFront = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<ushort> lightLeft = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<ushort> lightRight = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<ushort> lightFrontRight = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<ushort> lightBackRight = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<ushort> lightBackLeft = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), Allocator.Persistent);
+        NativeArray<ushort> lightFrontLeft = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), Allocator.Persistent);
+
         MeshDataJobOutput meshOutput = new MeshDataJobOutput(Allocator.Persistent);
 
         MeshGenerationJob job = new MeshGenerationJob
@@ -221,6 +232,15 @@ public class WorldJobManager : IDisposable
             NeighborBackRight = backRight,
             NeighborBackLeft = backLeft,
             NeighborFrontLeft = frontLeft,
+            LightMap = lightMap,
+            LightBack = lightBack,
+            LightFront = lightFront,
+            LightLeft = lightLeft,
+            LightRight = lightRight,
+            LightFrontRight = lightFrontRight,
+            LightBackRight = lightBackRight,
+            LightBackLeft = lightBackLeft,
+            LightFrontLeft = lightFrontLeft,
             CustomMeshes = _world.JobDataManager.CustomMeshesJobData,
             CustomFaces = _world.JobDataManager.CustomFacesJobData,
             CustomVerts = _world.JobDataManager.CustomVertsJobData,
@@ -234,7 +254,7 @@ public class WorldJobManager : IDisposable
 
         JobHandle meshJobHandle = job.Schedule();
 
-        NativeArray<JobHandle> disposalHandles = new NativeArray<JobHandle>(10, Allocator.Persistent);
+        NativeArray<JobHandle> disposalHandles = new NativeArray<JobHandle>(19, Allocator.Persistent);
         disposalHandles[0] = map.Dispose(meshJobHandle);
         disposalHandles[1] = sectionData.Dispose(meshJobHandle);
         disposalHandles[2] = back.Dispose(meshJobHandle);
@@ -245,6 +265,15 @@ public class WorldJobManager : IDisposable
         disposalHandles[7] = backRight.Dispose(meshJobHandle);
         disposalHandles[8] = backLeft.Dispose(meshJobHandle);
         disposalHandles[9] = frontLeft.Dispose(meshJobHandle);
+        disposalHandles[10] = lightMap.Dispose(meshJobHandle);
+        disposalHandles[11] = lightBack.Dispose(meshJobHandle);
+        disposalHandles[12] = lightFront.Dispose(meshJobHandle);
+        disposalHandles[13] = lightLeft.Dispose(meshJobHandle);
+        disposalHandles[14] = lightRight.Dispose(meshJobHandle);
+        disposalHandles[15] = lightFrontRight.Dispose(meshJobHandle);
+        disposalHandles[16] = lightBackRight.Dispose(meshJobHandle);
+        disposalHandles[17] = lightBackLeft.Dispose(meshJobHandle);
+        disposalHandles[18] = lightFrontLeft.Dispose(meshJobHandle);
 
         JobHandle combinedDisposalHandle = JobHandle.CombineDependencies(disposalHandles);
         JobHandle finalHandle = disposalHandles.Dispose(combinedDisposalHandle);
@@ -282,11 +311,20 @@ public class WorldJobManager : IDisposable
         inputData.NeighborSE = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), allocator);
         inputData.NeighborSW = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), allocator);
         inputData.NeighborNW = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), allocator);
+        inputData.LightN = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), allocator);
+        inputData.LightE = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), allocator);
+        inputData.LightS = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), allocator);
+        inputData.LightW = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), allocator);
+        inputData.LightNE = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), allocator);
+        inputData.LightSE = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), allocator);
+        inputData.LightSW = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), allocator);
+        inputData.LightNW = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), allocator);
 
         LightingJobData jobData = new LightingJobData
         {
             Input = inputData,
             Map = _world.worldData.GetChunkMapForJob(chunkData.Position, allocator),
+            LightMap = _world.worldData.GetChunkLightMapForJob(chunkData.Position, allocator),
             Mods = new NativeList<LightModification>(allocator),
             IsStable = new NativeArray<bool>(1, allocator),
             SunLightQueue = chunkData.GetSunlightQueueForJob(allocator),
@@ -308,6 +346,7 @@ public class WorldJobManager : IDisposable
         NeighborhoodLightingJob job = new NeighborhoodLightingJob
         {
             Map = jobData.Map,
+            LightMap = jobData.LightMap,
             ChunkPosition = chunkData.Position,
             SunlightBfsQueue = jobData.SunLightQueue,
             BlocklightBfsQueue = jobData.BlockLightQueue,
@@ -317,6 +356,10 @@ public class WorldJobManager : IDisposable
             NeighborS = jobData.Input.NeighborS, NeighborW = jobData.Input.NeighborW,
             NeighborNE = jobData.Input.NeighborNE, NeighborSE = jobData.Input.NeighborSE,
             NeighborSW = jobData.Input.NeighborSW, NeighborNW = jobData.Input.NeighborNW,
+            LightN = jobData.Input.LightN, LightE = jobData.Input.LightE,
+            LightS = jobData.Input.LightS, LightW = jobData.Input.LightW,
+            LightNE = jobData.Input.LightNE, LightSE = jobData.Input.LightSE,
+            LightSW = jobData.Input.LightSW, LightNW = jobData.Input.LightNW,
             BlockTypes = _world.JobDataManager.BlockTypesJobData,
             CrossChunkLightMods = jobData.Mods,
             IsStable = jobData.IsStable,
@@ -461,21 +504,11 @@ public class WorldJobManager : IDisposable
                 }
                 else
                 {
-                    for (int y = 0; y < VoxelData.ChunkHeight; y++)
+                    // Lighting disabled: stamp sky=15 on every section's LightData
+                    foreach (ChunkSection section in chunkData.sections)
                     {
-                        // Skip null sections — writing sunlight=15 to air-only sections would
-                        // allocate a ChunkSection (~16 KB) that is never read by meshing (IsEmpty=true).
-                        if (chunkData.sections[y / ChunkMath.SECTION_SIZE] == null) continue;
-
-                        for (int x = 0; x < VoxelData.ChunkWidth; x++)
-                        {
-                            for (int z = 0; z < VoxelData.ChunkWidth; z++)
-                            {
-                                uint packed = chunkData.GetVoxel(x, y, z);
-                                packed = BurstVoxelDataBitMapping.SetSunLight(packed, 15);
-                                chunkData.SetVoxel(x, y, z, packed);
-                            }
-                        }
+                        if (section == null) continue;
+                        LightingHelper.FillUniformSkyLight(section.LightData, 15);
                     }
                 }
 
@@ -567,7 +600,7 @@ public class WorldJobManager : IDisposable
                 bool hasRealCrossChunkMods = false;
                 if (chunkData != null && chunkData.IsPopulated)
                 {
-                    ApplyLightingJobResult(chunkData, jobData.Map);
+                    ApplyLightingJobResult(chunkData, jobData);
                     foreach (LightModification mod in jobData.Mods)
                     {
                         Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
@@ -611,13 +644,12 @@ public class WorldJobManager : IDisposable
 
                         Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
-                        uint oldPackedData = neighborChunk.GetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
                         byte oldLightLevel;
-                        uint newPackedData;
 
                         if (mod.Channel == LightChannel.Sun)
                         {
-                            byte currentSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
+                            ushort currentLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
+                            byte currentSunlight = LightBitMapping.GetSkyLight(currentLight);
 
                             // Guard: Cross-chunk BFS mods are computed against a STALE snapshot of
                             // the neighbor's data (taken before the neighbor's own lighting pass).
@@ -634,22 +666,38 @@ public class WorldJobManager : IDisposable
                             }
 
                             oldLightLevel = currentSunlight;
-                            newPackedData = BurstVoxelDataBitMapping.SetSunLight(oldPackedData, mod.LightLevel);
                         }
                         else
                         {
-                            oldLightLevel = BurstVoxelDataBitMapping.GetBlockLight(oldPackedData);
-                            newPackedData = BurstVoxelDataBitMapping.SetBlockLight(oldPackedData, mod.LightLevel);
+                            // Per-channel MAX guard (mirrors the sunlight guard above):
+                            // Non-zero mod channels use MAX to prevent stale-snapshot mods
+                            // from reducing values set by independent light sources.
+                            // Zero channels pass through for darkness removal.
+                            ushort oldLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
+                            oldLightLevel = LightBitMapping.GetMaxBlocklight(oldLight);
+                            byte oldR = LightBitMapping.GetBlocklightR(oldLight);
+                            byte oldG = LightBitMapping.GetBlocklightG(oldLight);
+                            byte oldB = LightBitMapping.GetBlocklightB(oldLight);
+                            byte applyR = mod.BlockR == 0 ? (byte)0 : (byte)Mathf.Max(oldR, mod.BlockR);
+                            byte applyG = mod.BlockG == 0 ? (byte)0 : (byte)Mathf.Max(oldG, mod.BlockG);
+                            byte applyB = mod.BlockB == 0 ? (byte)0 : (byte)Mathf.Max(oldB, mod.BlockB);
+
+                            if (applyR != oldR || applyG != oldG || applyB != oldB)
+                            {
+                                neighborChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z,
+                                    LightBitMapping.SetBlocklightRGB(oldLight, applyR, applyG, applyB));
+                                neighborChunk.AddToBlockLightQueue(localVoxelPos, oldLightLevel, oldR, oldG, oldB);
+                            }
+
+                            continue;
                         }
 
                         if (oldLightLevel != mod.LightLevel)
                         {
-                            neighborChunk.SetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z, newPackedData);
-
-                            if (mod.Channel == LightChannel.Sun)
-                                neighborChunk.AddToSunLightQueue(localVoxelPos, oldLightLevel);
-                            else
-                                neighborChunk.AddToBlockLightQueue(localVoxelPos, oldLightLevel);
+                            ushort oldSunLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
+                            neighborChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z,
+                                LightBitMapping.SetSkyLight(oldSunLight, mod.LightLevel));
+                            neighborChunk.AddToSunLightQueue(localVoxelPos, oldLightLevel);
                         }
                     }
                 }
@@ -742,8 +790,10 @@ public class WorldJobManager : IDisposable
     /// CRITICAL: This performs a bit-mask merge (only light bits) to avoid overwriting
     /// block changes (TOCTOU) made by the player while the job was running.
     /// </summary>
-    private void ApplyLightingJobResult(ChunkData chunkData, NativeArray<uint> jobMap)
+    private void ApplyLightingJobResult(ChunkData chunkData, LightingJobData jobData)
     {
+        NativeArray<uint> jobMap = jobData.Map;
+        NativeArray<ushort> jobLightMap = jobData.LightMap;
         int indexOffset = 0;
         const int sectionVolume = ChunkMath.SECTION_VOLUME;
 
@@ -753,12 +803,15 @@ public class WorldJobManager : IDisposable
             bool sectionHasData = false;
             bool isNewSection = false;
 
+            // Clear any stale compact flag — the lighting job will provide fresh data.
+            chunkData.SectionUniformSkyLevel[s] = ChunkData.UNIFORM_SKY_NONE;
+
             if (section == null)
             {
                 bool needsSection = false;
                 for (int i = 0; i < sectionVolume; i++)
                 {
-                    if (jobMap[indexOffset + i] != 0)
+                    if (jobMap[indexOffset + i] != 0 || jobLightMap[indexOffset + i] != 0)
                     {
                         needsSection = true;
                         break;
@@ -775,34 +828,74 @@ public class WorldJobManager : IDisposable
 
             if (section != null)
             {
+                bool sectionHasLight = false;
+
                 for (int i = 0; i < sectionVolume; i++)
                 {
-                    uint liveData = section.voxels[i];
-                    uint jobVoxel = jobMap[indexOffset + i];
+                    // Overwrite ushort light array with the job's computed values.
+                    // Cross-chunk mods that were applied to the live data during the job
+                    // may be temporarily lost, but the edge check convergence rounds will
+                    // detect and correct border inconsistencies.
+                    ushort lightVal = jobLightMap[indexOffset + i];
+                    section.LightData[i] = lightVal;
 
-                    byte jobSunlight = BurstVoxelDataBitMapping.GetSunLight(jobVoxel);
-                    byte jobBlocklight = BurstVoxelDataBitMapping.GetBlockLight(jobVoxel);
-
-                    liveData = BurstVoxelDataBitMapping.SetSunLight(liveData, jobSunlight);
-                    liveData = BurstVoxelDataBitMapping.SetBlockLight(liveData, jobBlocklight);
-
-                    section.voxels[i] = liveData;
-
-                    if (liveData != 0) sectionHasData = true;
+                    if (section.voxels[i] != 0) sectionHasData = true;
+                    if (lightVal != 0) sectionHasLight = true;
                 }
 
-                if (!sectionHasData)
+                if (!sectionHasData && !sectionHasLight)
                 {
+                    // No blocks, no light — discard entirely.
                     _world.ChunkPool.ReturnChunkSection(section);
                     chunkData.sections[s] = null;
                 }
-                else if (!isNewSection)
+                else
                 {
-                    section.RecalculateCounts(_world.BlockTypes);
+                    // Try to compact the light data into a uniform sky byte.
+                    TryCompactSectionLight(chunkData, s, section, sectionHasData, sectionHasLight);
+
+                    if (!isNewSection && chunkData.sections[s] != null)
+                        section.RecalculateCounts(_world.BlockTypes);
                 }
             }
 
             indexOffset += sectionVolume;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to compact a section's light data into a single uniform sky level byte.
+    /// If successful, stores the byte in <see cref="ChunkData.SectionUniformSkyLevel"/> and,
+    /// for light-only sections (no blocks), returns the section to the pool.
+    /// </summary>
+    private void TryCompactSectionLight(ChunkData chunkData, int sectionIndex,
+        ChunkSection section, bool hasBlocks, bool hasLight)
+    {
+        if (!hasLight)
+        {
+            // Pitch black — uniform sky level 0.
+            chunkData.SectionUniformSkyLevel[sectionIndex] = 0;
+            if (!hasBlocks)
+            {
+                _world.ChunkPool.ReturnChunkSection(section);
+                chunkData.sections[sectionIndex] = null;
+            }
+
+            return;
+        }
+
+        LightingHelper.ClassifyLightData(section.LightData,
+            out bool hasBlocklight, out _, out bool isUniformSky, out byte uniformSkyLevel);
+
+        if (hasBlocklight || !isUniformSky) return;
+
+        // Uniform sky, no blocklight — compact it.
+        chunkData.SectionUniformSkyLevel[sectionIndex] = uniformSkyLevel;
+
+        if (!hasBlocks)
+        {
+            _world.ChunkPool.ReturnChunkSection(section);
+            chunkData.sections[sectionIndex] = null;
         }
     }
 

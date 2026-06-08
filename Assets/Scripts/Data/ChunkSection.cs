@@ -10,6 +10,14 @@ namespace Data
     {
         public uint[] voxels;
 
+        /// <summary>
+        /// Parallel light array storing per-voxel RGB light data (Phase 2).
+        /// Layout: <c>[Sun:4][BlockR:4][BlockG:4][BlockB:4]</c> = 16 bits.
+        /// Persisted to disk via flag-based section format (v9+). Bulk-read on load
+        /// when present; reconstructed from legacy <c>uint</c> light bits for older saves.
+        /// </summary>
+        public ushort[] LightData;
+
         // Optimization: Track non-air blocks.
         public int nonAirCount;
 
@@ -23,6 +31,8 @@ namespace Data
         {
             // 4096 * 4 bytes = 16KB allocation
             voxels = new uint[ChunkMath.SECTION_VOLUME];
+            // 4096 * 2 bytes = 8KB allocation
+            LightData = new ushort[ChunkMath.SECTION_VOLUME];
             nonAirCount = 0;
             opaqueCount = 0;
         }
@@ -36,6 +46,7 @@ namespace Data
             nonAirCount = 0;
             opaqueCount = 0;
             Array.Clear(voxels, 0, voxels.Length);
+            Array.Clear(LightData, 0, LightData.Length);
         }
 
         /// <summary>

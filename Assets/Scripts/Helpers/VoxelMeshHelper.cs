@@ -24,15 +24,18 @@ namespace Helpers
         };
 
         /// <summary>
-        /// Builds a flat light <see cref="Color32"/> with separate sun/block channels from raw
-        /// 0-15 light values. Encodes to UNorm8 via <c>value * 17</c> (maps 0-15 → 0-255).
+        /// Builds a flat light <see cref="Color32"/> from a packed ushort light value.
+        /// Layout: R=sky*17, G=blockR*17, B=blockG*17, A=blockB*17 (matches smooth lighting encoding).
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static Color32 BuildFlatLight(byte sun, byte block)
+        public static Color32 BuildFlatLight(ushort lightData)
         {
-            byte s = (byte)(sun * 17);
-            byte b = (byte)(block * 17);
-            return new Color32(s, s, s, b);
+            return new Color32(
+                (byte)(LightBitMapping.GetSkyLight(lightData) * 17),
+                (byte)(LightBitMapping.GetBlocklightR(lightData) * 17),
+                (byte)(LightBitMapping.GetBlocklightG(lightData) * 17),
+                (byte)(LightBitMapping.GetBlocklightB(lightData) * 17)
+            );
         }
 
         /// <summary>
@@ -671,6 +674,7 @@ namespace Helpers
             in NativeArray<float> templates,
             in NativeArray<BlockTypeJobData> blockTypes,
             [ReadOnly] in NativeArray<OptionalVoxelState> neighbors, // 14 neighbors: N, E, S, W, NE, SE, SW, NW, Above, Below, Above_N, Above_E, Above_S, Above_W
+            [ReadOnly] in NativeArray<ushort> neighborLights, // 14 parallel light values
             bool smoothLighting,
             in FluidCornerLights cornerLights,
             ref int vertexIndex,
@@ -747,8 +751,8 @@ namespace Helpers
                 else
                 {
                     Color32 flat = above.HasValue
-                        ? BuildFlatLight(above.State.Sunlight, above.State.Blocklight)
-                        : new Color32(255, 255, 255, 0);
+                        ? BuildFlatLight(neighborLights[8])
+                        : new Color32(255, 0, 0, 0);
                     topLight0 = topLight1 = topLight2 = topLight3 = flat;
                 }
 
@@ -809,23 +813,28 @@ namespace Helpers
                 OptionalVoxelState sideNeighbor;
                 OptionalVoxelState sideNeighborAbove;
 
+                int sideIndex;
                 switch (faceIndex)
                 {
                     case 1:
                         sideNeighbor = n_N;
                         sideNeighborAbove = above_N;
+                        sideIndex = 0;
                         break;
                     case 0:
                         sideNeighbor = n_S;
                         sideNeighborAbove = above_S;
+                        sideIndex = 2;
                         break;
                     case 5:
                         sideNeighbor = n_E;
                         sideNeighborAbove = above_E;
+                        sideIndex = 1;
                         break;
                     case 4:
                         sideNeighbor = n_W;
                         sideNeighborAbove = above_W;
+                        sideIndex = 3;
                         break;
                     default: continue;
                 }
@@ -920,8 +929,8 @@ namespace Helpers
                 else
                 {
                     Color32 flat = sideNeighbor.HasValue
-                        ? BuildFlatLight(sideNeighbor.State.Sunlight, sideNeighbor.State.Blocklight)
-                        : new Color32(255, 255, 255, 0);
+                        ? BuildFlatLight(neighborLights[sideIndex])
+                        : new Color32(255, 0, 0, 0);
                     sideLight1 = sideLight2 = sideLight3 = sideLight4 = flat;
                 }
 
@@ -1005,8 +1014,8 @@ namespace Helpers
                 else
                 {
                     Color32 flat = below.HasValue
-                        ? BuildFlatLight(below.State.Sunlight, below.State.Blocklight)
-                        : new Color32(255, 255, 255, 0);
+                        ? BuildFlatLight(neighborLights[9])
+                        : new Color32(255, 0, 0, 0);
                     botLight0 = botLight1 = botLight2 = botLight3 = flat;
                 }
 

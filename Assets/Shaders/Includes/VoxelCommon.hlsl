@@ -18,7 +18,7 @@ struct VoxelAppdata
     float4 vertex : POSITION;
     float2 uv : TEXCOORD0;
     half4 color : COLOR;
-    half4 lightData : TEXCOORD1; // UNorm8: (sunlight, reserved, reserved, blocklight)
+    half4 lightData : TEXCOORD1; // UNorm8: (skyLight, blocklightR, blocklightG, blocklightB)
 };
 
 // --- Fragment Input ---

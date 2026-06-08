@@ -81,6 +81,10 @@ namespace Data
         [Range(0, 15)]
         public byte lightEmission;
 
+        [Tooltip("The color of light emitted by this block. Combined with Light Emission intensity to produce per-channel RGB values (0-15).")]
+        [ColorUsage(false)]
+        public Color lightEmissionColor = Color.white;
+
         [Header("Placement Rules")]
         [Tooltip("Apply a preset for the tags below. This is a workflow helper and doesn't affect the game directly. After applying, the values are copied to the fields below.")]
         public BlockTagPreset tagPreset;

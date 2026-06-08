@@ -37,6 +37,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 0
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 0
     canReplaceTags: 4294967295
@@ -71,6 +72,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: a91aed358be075240b8070cec5b5d183, type: 2}
     tags: 257
     canReplaceTags: 8258
@@ -105,6 +107,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
     tags: 1041
     canReplaceTags: 8258
@@ -139,6 +142,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
     tags: 1041
     canReplaceTags: 8258
@@ -173,6 +177,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 049839df00a000b4ea7843c245313b35, type: 2}
     tags: 25
     canReplaceTags: 8258
@@ -207,6 +212,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 17
     canReplaceTags: 8258
@@ -241,6 +247,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
     tags: 1041
     canReplaceTags: 8258
@@ -275,6 +282,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2305
     canReplaceTags: 8258
@@ -309,6 +317,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 261
     canReplaceTags: 8258
@@ -343,6 +352,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: a91aed358be075240b8070cec5b5d183, type: 2}
     tags: 257
     canReplaceTags: 8258
@@ -377,6 +387,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
     tags: 1041
     canReplaceTags: 8258
@@ -411,6 +422,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2305
     canReplaceTags: 8258
@@ -445,6 +457,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 845289f1f2ec46f47b7c181729b4cd4d, type: 2}
     tags: 3105
     canReplaceTags: 8258
@@ -479,6 +492,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 0
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2305
     canReplaceTags: 8258
@@ -513,6 +527,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 929eb7cd71e07db4aa16102fa5ec0746, type: 2}
     tags: 1057
     canReplaceTags: 8386
@@ -547,6 +562,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 5
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 40c769fe208bc7d45a9682a06a87e461, type: 2}
     tags: 1217
     canReplaceTags: 0
@@ -581,6 +597,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 371aa74a265a2b448911164183310f2e, type: 2}
     tags: 24640
     canReplaceTags: 0
@@ -615,6 +632,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2305
     canReplaceTags: 8258
@@ -649,6 +667,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2048
     canReplaceTags: 16379
@@ -683,6 +702,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 2
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 90adce5ab71476a47b05068311651645, type: 2}
     tags: 2
     canReplaceTags: 8258
@@ -717,6 +737,7 @@ MonoBehaviour:
     spreadChance: 0.25
     opacity: 7
     lightEmission: 15
+    lightEmissionColor: {r: 1, g: 0.73333335, b: 0.26666668, a: 1}
     tagPreset: {fileID: 11400000, guid: 90adce5ab71476a47b05068311651645, type: 2}
     tags: 2
     canReplaceTags: 8258
@@ -751,6 +772,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 1559d011df30dd845ae9ed95fdef3706, type: 2}
     tags: 769
     canReplaceTags: 256
@@ -785,6 +807,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 0
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 371aa74a265a2b448911164183310f2e, type: 2}
     tags: 24640
     canReplaceTags: 8192
@@ -819,6 +842,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 1
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -853,6 +877,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 2
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -887,6 +912,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 3
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -921,6 +947,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 4
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -955,6 +982,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 5
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -989,6 +1017,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 6
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -1023,6 +1052,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 7
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -1057,6 +1087,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 8
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -1091,6 +1122,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 9
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -1125,6 +1157,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 10
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -1159,6 +1192,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 11
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -1172,7 +1206,7 @@ MonoBehaviour:
     bottomFaceTexture: 235
     leftFaceTexture: 235
     rightFaceTexture: 235
-  - blockName: Debug Lamp 12
+  - blockName: Debug Lamp 12 - Green
     icon: {fileID: 21300000, guid: a4df8d46f74dd37428486de9220d573c, type: 3}
     renderShape: 0
     meshData: {fileID: 0}
@@ -1193,6 +1227,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 12
+    lightEmissionColor: {r: 0, g: 1, b: 0, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -1206,7 +1241,7 @@ MonoBehaviour:
     bottomFaceTexture: 236
     leftFaceTexture: 236
     rightFaceTexture: 236
-  - blockName: Debug Lamp 13
+  - blockName: Debug Lamp 13 - Blue
     icon: {fileID: 21300000, guid: 761df4a0c1287b245ae1ffba82998e2b, type: 3}
     renderShape: 0
     meshData: {fileID: 0}
@@ -1227,6 +1262,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 13
+    lightEmissionColor: {r: 0, g: 0, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -1240,7 +1276,7 @@ MonoBehaviour:
     bottomFaceTexture: 237
     leftFaceTexture: 237
     rightFaceTexture: 237
-  - blockName: Debug Lamp 14
+  - blockName: Debug Lamp 14 - Red
     icon: {fileID: 21300000, guid: 3330b9de37db55f4f8b669d90edf7a33, type: 3}
     renderShape: 0
     meshData: {fileID: 0}
@@ -1261,6 +1297,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 14
+    lightEmissionColor: {r: 1, g: 0, b: 0, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258
@@ -1274,7 +1311,7 @@ MonoBehaviour:
     bottomFaceTexture: 238
     leftFaceTexture: 238
     rightFaceTexture: 238
-  - blockName: Debug Lamp 15
+  - blockName: Debug Lamp 15 - White
     icon: {fileID: 21300000, guid: a88c49276a2385542950593027b0416f, type: 3}
     renderShape: 0
     meshData: {fileID: 0}
@@ -1295,6 +1332,7 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 15
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
     tags: 65536
     canReplaceTags: 8258

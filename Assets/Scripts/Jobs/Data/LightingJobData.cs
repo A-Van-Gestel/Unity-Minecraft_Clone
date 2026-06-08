@@ -14,6 +14,8 @@ namespace Jobs.Data
         public NativeArray<ushort> Heightmap;
         public NativeArray<uint> NeighborN, NeighborE, NeighborS, NeighborW;
         public NativeArray<uint> NeighborNE, NeighborSE, NeighborSW, NeighborNW;
+        public NativeArray<ushort> LightN, LightE, LightS, LightW;
+        public NativeArray<ushort> LightNE, LightSE, LightSW, LightNW;
 
         /// A helper to dispose all the containers at once
         public void Dispose()
@@ -27,6 +29,14 @@ namespace Jobs.Data
             if (NeighborSE.IsCreated) NeighborSE.Dispose();
             if (NeighborSW.IsCreated) NeighborSW.Dispose();
             if (NeighborNW.IsCreated) NeighborNW.Dispose();
+            if (LightN.IsCreated) LightN.Dispose();
+            if (LightE.IsCreated) LightE.Dispose();
+            if (LightS.IsCreated) LightS.Dispose();
+            if (LightW.IsCreated) LightW.Dispose();
+            if (LightNE.IsCreated) LightNE.Dispose();
+            if (LightSE.IsCreated) LightSE.Dispose();
+            if (LightSW.IsCreated) LightSW.Dispose();
+            if (LightNW.IsCreated) LightNW.Dispose();
         }
     }
 
@@ -46,6 +56,7 @@ namespace Jobs.Data
 
         // --- Output data ---
         public NativeArray<uint> Map; // The writable map for the center chunk
+        public NativeArray<ushort> LightMap; // The writable light map for the center chunk
         public NativeQueue<LightQueueNode> SunLightQueue;
         public NativeQueue<LightQueueNode> BlockLightQueue;
         public NativeQueue<Vector2Int> SunLightRecalcQueue;
@@ -60,6 +71,7 @@ namespace Jobs.Data
 
             // --- Output data ---
             if (Map.IsCreated) Map.Dispose();
+            if (LightMap.IsCreated) LightMap.Dispose();
             if (SunLightQueue.IsCreated) SunLightQueue.Dispose();
             if (BlockLightQueue.IsCreated) BlockLightQueue.Dispose();
             if (SunLightRecalcQueue.IsCreated) SunLightRecalcQueue.Dispose();

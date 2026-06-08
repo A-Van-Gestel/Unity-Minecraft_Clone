@@ -77,8 +77,7 @@ namespace Editor.BlockEditor.Helpers
             {
                 // Create mock data needed by the helper that isn't available in the editor.
                 BlockTypeJobData mockProps = new BlockTypeJobData(blockType);
-                // Use fluid level 0 (full block) and full sunlight (15) for the preview.
-                uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0, 15, 0,
+                uint mockPackedData = BurstVoxelDataBitMapping.PackVoxelData(0,
                     BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: (byte)fluidLevel, isFluid: false));
 
                 // For a simple, flat preview, an empty (default) array is sufficient.
@@ -93,12 +92,17 @@ namespace Editor.BlockEditor.Helpers
                 NativeArray<BlockTypeJobData> blockTypesJobData = new NativeArray<BlockTypeJobData>(allBlockTypes.Select(bt => new BlockTypeJobData(bt)).ToArray(), Allocator.Temp);
 
                 FluidCornerLights noCornerLights = default;
+                NativeArray<ushort> mockNeighborLights = new NativeArray<ushort>(14, Allocator.Temp);
+                ushort fullBright = LightBitMapping.PackLightData(15, 0, 0, 0);
+                for (int i = 0; i < 14; i++) mockNeighborLights[i] = fullBright;
+
                 VoxelMeshHelper.GenerateFluidMeshData(Vector3Int.zero, mockPackedData, mockProps, in templates, in blockTypesJobData, mockNeighbors,
-                    false, in noCornerLights,
+                    in mockNeighborLights, false, in noCornerLights,
                     ref vertexIndex, ref nativeVertices, ref nativeFluidTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
                     ref nativeLightData);
 
                 // Dispose all temporary native arrays.
+                mockNeighborLights.Dispose();
                 mockNeighbors.Dispose();
                 templates.Dispose();
                 blockTypesJobData.Dispose();

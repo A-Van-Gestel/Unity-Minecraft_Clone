@@ -10,12 +10,13 @@ The fundamental unit of the world is the voxel. Instead of using a large class o
 
 The `uint` is structured as follows (from least significant bit to most significant):
 
-| Bits    | Size    | Range     | Purpose                                   |
-|---------|---------|-----------|-------------------------------------------|
-| `0-15`  | 16 bits | `0-65535` | **Block ID** (Supports 65k block types)   |
-| `16-19` | 4 bits  | `0-15`    | **Sunlight Level**                        |
-| `20-23` | 4 bits  | `0-15`    | **Blocklight Level**                      |
-| `24-31` | 8 bits  | `0-255`   | **Metadata** (Shared / Context Sensitive) |
+| Bits    | Size    | Range     | Purpose                                              |
+|---------|---------|-----------|------------------------------------------------------|
+| `0-15`  | 16 bits | `0-65535` | **Block ID** (Supports 65k block types)              |
+| `16-23` | 8 bits  | —         | **Reserved** (zeroed, available for future metadata) |
+| `24-31` | 8 bits  | `0-255`   | **Metadata** (Shared / Context Sensitive)            |
+
+> **History:** Bits 16-23 previously stored sunlight (16-19) and blocklight (20-23) levels. As of RGB Lighting - Phase B (save v10, chunk format v7), all light data lives in a separate `ushort[] LightData` array per section (see §2.1). The freed bits are reserved for future metadata expansion (biome tint, damage state, block variant, etc.).
 
 ### Metadata Usage (Context Sensitive)
 
@@ -29,9 +30,9 @@ Bits `24-31` are a flexible storage space. Their interpretation depends on the *
 
 Direct bitwise operations are error-prone. Instead, all interactions with the packed `uint` are handled by two static helper classes:
 
-- **`VoxelState.cs`**: A struct that wraps the `uint`. It provides high-level properties (`.id`, `.light`, `.orientation`) for use on the **main thread**. It also contains helper properties like `.Properties` which can look up the block's `BlockType` from the world's block array.
-- **`BurstVoxelDataBitMapping.cs`**: A Burst-compatible static class containing the exact same bit-mapping logic. It is used exclusively within **Jobs** and Burst-compiled methods. This separation is crucial because `VoxelState` has references to managed code (`World.Instance`)
-  that cannot be used in a job.
+- **`VoxelState.cs`**: A struct that wraps the `uint`. It provides high-level properties (`.id`, `.orientation`) for use on the **main thread**. It also contains helper properties like `.Properties` which can look up the block's `BlockType` from the world's block array. Light data is accessed separately via `LightBitMapping` on the section's `LightData[]` array.
+- **`BurstVoxelDataBitMapping.cs`**: A Burst-compatible static class for block ID and metadata bit-mapping. Used exclusively within **Jobs** and Burst-compiled methods. This separation is crucial because `VoxelState` has references to managed code (`World.Instance`) that cannot be used in a job.
+- **`LightBitMapping.cs`**: A Burst-compatible static class for light data bit-mapping on the `ushort LightData[]` array. Provides `GetSkyLight`, `SetSkyLight`, `GetBlocklightR/G/B`, `SetBlocklightR/G/B`, and `PackLightData` helpers.
 
 ## 2. The Chunk Hierarchy
 
@@ -41,7 +42,8 @@ The world is divided into 16x128x16 chunks. To optimize memory usage and renderi
 
 This class represents a 16x16x16 cube of voxels. It acts as the atomic unit of storage.
 
-- **`uint[] voxels`**: A flat array of `4096` integers ($16^3$).
+- **`uint[] voxels`**: A flat array of `4096` integers ($16^3$). Stores block ID + metadata (no light data).
+- **`ushort[] LightData`**: A parallel flat array of `4096` unsigned shorts. Stores all light channels: `[Sky:4][BlockR:4][BlockG:4][BlockB:4]`. Accessed via `LightBitMapping` helpers. This is the sole authority for light values — the `uint` voxel carries no light bits.
 - **`int nonAirCount`**: Tracks how many blocks are not Air. Used to quickly skip empty sections during processing.
 - **`int opaqueCount`**: Tracks how many blocks are fully opaque. Used to identify fully solid underground sections.
 
@@ -51,8 +53,8 @@ This is a plain C# class that acts as the data container for a full map column. 
 
 - **`ChunkSection[] sections`**: An array of sections (e.g., 8 sections for a 128-block high world).
     - *Optimization:* Indexing logic handles the translation from global Y to Section Index.
-- **`byte[] heightMap`**: A 1D array (`16x16`) storing the Y-coordinate of the highest light-obstructing block in each column. This is critical for sunlight calculation speed.
-- **Lighting Queues**: Contains the queues for pending light updates (`Queue<LightQueueNode>`).
+- **`byte[] heightMap`**: A 1D array (`16x16`) storing the Y-coordinate of the highest light-obstructing block in each column. This is critical for sky light calculation speed.
+- **Lighting Queues**: Contains the queues for pending light updates (`Queue<LightQueueNode>`) — one for sky light, one for blocklight.
 
 ### 2.3. `Chunk.cs` (The Visual Manager)
 
@@ -80,7 +82,7 @@ This class represents the entire save file state.
 
 - **`Dictionary<Vector2Int, ChunkData> Chunks`**: The master collection of all loaded `ChunkData`, indexed by coordinate.
 - **`HashSet<ChunkData> ModifiedChunks`**: Tracks chunks that need to be saved to disk.
-- **`Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue`**: A bucketed queue (Chunk Coordinate -> List of Local Columns) tracking vertical columns that require a full sunlight recalculation (e.g., after a block placement blocks the sky).
+- **`Dictionary<Vector2Int, HashSet<Vector2Int>> SkylightRecalculationQueue`**: A bucketed queue (Chunk Coordinate -> List of Local Columns) tracking vertical columns that require a full sky light recalculation (e.g., after a block placement blocks the sky).
 
 ### `World.cs` (The Orchestrator)
 

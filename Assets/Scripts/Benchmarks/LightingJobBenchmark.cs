@@ -404,8 +404,17 @@ namespace Benchmarks
                     NeighborSE = new NativeArray<uint>(sourceData.NeighborSE, allocator),
                     NeighborSW = new NativeArray<uint>(sourceData.NeighborSW, allocator),
                     NeighborNW = new NativeArray<uint>(sourceData.NeighborNW, allocator),
+                    LightN = new NativeArray<ushort>(sourceData.LightN, allocator),
+                    LightE = new NativeArray<ushort>(sourceData.LightE, allocator),
+                    LightS = new NativeArray<ushort>(sourceData.LightS, allocator),
+                    LightW = new NativeArray<ushort>(sourceData.LightW, allocator),
+                    LightNE = new NativeArray<ushort>(sourceData.LightNE, allocator),
+                    LightSE = new NativeArray<ushort>(sourceData.LightSE, allocator),
+                    LightSW = new NativeArray<ushort>(sourceData.LightSW, allocator),
+                    LightNW = new NativeArray<ushort>(sourceData.LightNW, allocator),
                 },
                 Map = new NativeArray<uint>(sourceData.Center, allocator),
+                LightMap = new NativeArray<ushort>(sourceData.CenterLight, allocator),
 
                 SunLightQueue = new NativeQueue<LightQueueNode>(allocator),
                 BlockLightQueue = new NativeQueue<LightQueueNode>(allocator),
@@ -437,6 +446,7 @@ namespace Benchmarks
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 Map = data.Map,
+                LightMap = data.LightMap,
                 ChunkPosition = new Vector2Int(0, 0),
                 SunlightBfsQueue = data.SunLightQueue,
                 BlocklightBfsQueue = data.BlockLightQueue,
@@ -451,6 +461,14 @@ namespace Benchmarks
                 NeighborSE = data.Input.NeighborSE,
                 NeighborSW = data.Input.NeighborSW,
                 NeighborNW = data.Input.NeighborNW,
+                LightN = data.Input.LightN,
+                LightE = data.Input.LightE,
+                LightS = data.Input.LightS,
+                LightW = data.Input.LightW,
+                LightNE = data.Input.LightNE,
+                LightSE = data.Input.LightSE,
+                LightSW = data.Input.LightSW,
+                LightNW = data.Input.LightNW,
 
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = data.Mods,
@@ -478,8 +496,9 @@ namespace Benchmarks
                 JobHandle handle = ScheduleJob(preLight);
                 handle.Complete();
 
-                // Copy the now-lit center map back into the source data.
+                // Copy the now-lit center map and light map back into the source data.
                 NativeArray<uint>.Copy(preLight.Map, sourceData.Center);
+                NativeArray<ushort>.Copy(preLight.LightMap, sourceData.CenterLight);
 
                 // Apply cross-chunk light modifications to the neighbor arrays so that
                 // subsequent removal benchmarks start from correct border light state.
@@ -515,47 +534,69 @@ namespace Benchmarks
 
             int localX = gx;
             int localZ = gz;
-            NativeArray<uint> target;
+            NativeArray<ushort> lightTarget;
 
             if (gx < 0)
             {
                 localX = gx + VoxelData.ChunkWidth;
-                target = gz < 0 ? sourceData.NeighborSW :
-                    gz >= VoxelData.ChunkWidth ? sourceData.NeighborNW : sourceData.NeighborW;
-                if (gz < 0) localZ = gz + VoxelData.ChunkWidth;
-                else if (gz >= VoxelData.ChunkWidth) localZ = gz - VoxelData.ChunkWidth;
+                if (gz < 0)
+                {
+                    localZ = gz + VoxelData.ChunkWidth;
+                    lightTarget = sourceData.LightSW;
+                }
+                else if (gz >= VoxelData.ChunkWidth)
+                {
+                    localZ = gz - VoxelData.ChunkWidth;
+                    lightTarget = sourceData.LightNW;
+                }
+                else
+                {
+                    lightTarget = sourceData.LightW;
+                }
             }
             else if (gx >= VoxelData.ChunkWidth)
             {
                 localX = gx - VoxelData.ChunkWidth;
-                target = gz < 0 ? sourceData.NeighborSE :
-                    gz >= VoxelData.ChunkWidth ? sourceData.NeighborNE : sourceData.NeighborE;
-                if (gz < 0) localZ = gz + VoxelData.ChunkWidth;
-                else if (gz >= VoxelData.ChunkWidth) localZ = gz - VoxelData.ChunkWidth;
+                if (gz < 0)
+                {
+                    localZ = gz + VoxelData.ChunkWidth;
+                    lightTarget = sourceData.LightSE;
+                }
+                else if (gz >= VoxelData.ChunkWidth)
+                {
+                    localZ = gz - VoxelData.ChunkWidth;
+                    lightTarget = sourceData.LightNE;
+                }
+                else
+                {
+                    lightTarget = sourceData.LightE;
+                }
             }
             else if (gz < 0)
             {
                 localZ = gz + VoxelData.ChunkWidth;
-                target = sourceData.NeighborS;
+                lightTarget = sourceData.LightS;
             }
             else if (gz >= VoxelData.ChunkWidth)
             {
                 localZ = gz - VoxelData.ChunkWidth;
-                target = sourceData.NeighborN;
+                lightTarget = sourceData.LightN;
             }
             else
             {
                 return;
             }
 
-            if (!target.IsCreated || target.Length == 0) return;
+            if (!lightTarget.IsCreated || lightTarget.Length == 0) return;
 
             int idx = ChunkMath.GetFlattenedIndexInChunk(localX, gy, localZ);
-            uint packed = target[idx];
-            uint updated = mod.Channel == LightChannel.Sun
-                ? BurstVoxelDataBitMapping.SetSunLight(packed, mod.LightLevel)
-                : BurstVoxelDataBitMapping.SetBlockLight(packed, mod.LightLevel);
-            target[idx] = updated;
+
+            // Update the ushort light array (authoritative light source)
+            ushort light = lightTarget[idx];
+            if (mod.Channel == LightChannel.Sun)
+                lightTarget[idx] = LightBitMapping.SetSkyLight(light, mod.LightLevel);
+            else
+                lightTarget[idx] = LightBitMapping.SetBlocklightRGB(light, mod.BlockR, mod.BlockG, mod.BlockB);
         }
 
         /// <summary>
@@ -575,7 +616,7 @@ namespace Benchmarks
                         {
                             int index = ChunkMath.GetFlattenedIndexInChunk(x, 100, z);
                             sourceData.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(
-                                BlockIDs.Stone, 0, 0,
+                                BlockIDs.Stone,
                                 BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
                             sourceData.HeightMap[x + VoxelData.ChunkWidth * z] = 100;
 
@@ -707,8 +748,8 @@ namespace Benchmarks
         private static void FillDefaultTerrain(LightingBenchmarkData data, int height)
         {
             byte legacySolidMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false);
-            uint solid = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0, 0, legacySolidMeta);
-            uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+            uint solid = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, legacySolidMeta);
+            uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
 
             for (int y = 0; y < VoxelData.ChunkHeight; y++)
             {
@@ -778,8 +819,9 @@ namespace Benchmarks
         private static void PlaceLightSource(LightingBenchmarkData data, Vector3Int pos, byte level)
         {
             int index = ChunkMath.GetFlattenedIndexInChunk(pos.x, pos.y, pos.z);
-            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava, 0, level,
+            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Lava,
                 BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
+            data.CenterLight[index] = LightBitMapping.PackLightData(0, level, level, level);
 
             data.SourceBlockLightQueue.Add(new LightQueueNode
             {
@@ -796,9 +838,10 @@ namespace Benchmarks
         private static void RemoveLightSource(LightingBenchmarkData data, Vector3Int pos)
         {
             int index = ChunkMath.GetFlattenedIndexInChunk(pos.x, pos.y, pos.z);
-            byte oldLevel = BurstVoxelDataBitMapping.GetBlockLight(data.Center[index]);
+            byte oldLevel = LightBitMapping.GetMaxBlocklight(data.CenterLight[index]);
 
-            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+            data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
+            data.CenterLight[index] = 0;
 
             data.SourceBlockLightQueue.Add(new LightQueueNode
             {
@@ -814,8 +857,10 @@ namespace Benchmarks
         /// </summary>
         private static void SetupEdgeCheckScenario(LightingBenchmarkData data)
         {
-            // Fill all neighbor maps with lit air above the terrain (sunlight=15).
-            uint litAir = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 15, 0, 0);
+            // Fill all neighbor voxel maps with air and neighbor light maps with sky=15
+            // above the terrain. The edge check reads light from the ushort LightN/E/S/W arrays.
+            uint air = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
+            ushort fullSky = LightBitMapping.PackLightData(15, 0, 0, 0);
             for (int y = 61; y < VoxelData.ChunkHeight; y++)
             {
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
@@ -823,48 +868,56 @@ namespace Benchmarks
                     for (int x = 0; x < VoxelData.ChunkWidth; x++)
                     {
                         int i = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
-                        data.NeighborN[i] = litAir;
-                        data.NeighborE[i] = litAir;
-                        data.NeighborS[i] = litAir;
-                        data.NeighborW[i] = litAir;
-                        data.NeighborNE[i] = litAir;
-                        data.NeighborSE[i] = litAir;
-                        data.NeighborSW[i] = litAir;
-                        data.NeighborNW[i] = litAir;
+                        data.NeighborN[i] = air;
+                        data.NeighborE[i] = air;
+                        data.NeighborS[i] = air;
+                        data.NeighborW[i] = air;
+                        data.NeighborNE[i] = air;
+                        data.NeighborSE[i] = air;
+                        data.NeighborSW[i] = air;
+                        data.NeighborNW[i] = air;
+                        data.LightN[i] = fullSky;
+                        data.LightE[i] = fullSky;
+                        data.LightS[i] = fullSky;
+                        data.LightW[i] = fullSky;
+                        data.LightNE[i] = fullSky;
+                        data.LightSE[i] = fullSky;
+                        data.LightSW[i] = fullSky;
+                        data.LightNW[i] = fullSky;
                     }
                 }
             }
 
-            // Center chunk border voxels above terrain are air with sunlight=0 (stale).
-            // The edge check should detect that neighbors have light=15 and correct these.
+            // Center chunk border voxels above terrain are air with sky=0 (stale).
+            // The edge check should detect that neighbors have sky=15 and correct these.
             for (int y = 61; y < VoxelData.ChunkHeight; y++)
             {
                 // South border (z=0)
                 for (int x = 0; x < VoxelData.ChunkWidth; x++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, 0);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+                    data.Center[idx] = air;
                 }
 
                 // North border (z=15)
                 for (int x = 0; x < VoxelData.ChunkWidth; x++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, VoxelData.ChunkWidth - 1);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+                    data.Center[idx] = air;
                 }
 
                 // West border (x=0)
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(0, y, z);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+                    data.Center[idx] = air;
                 }
 
                 // East border (x=15)
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     int idx = ChunkMath.GetFlattenedIndexInChunk(VoxelData.ChunkWidth - 1, y, z);
-                    data.Center[idx] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0, 0, 0);
+                    data.Center[idx] = air;
                 }
             }
 
@@ -975,9 +1028,12 @@ namespace Benchmarks
             private const int HEIGHTMAP_SIZE = VoxelData.ChunkWidth * VoxelData.ChunkWidth;
 
             public NativeArray<uint> Center;
+            public NativeArray<ushort> CenterLight;
             public NativeArray<ushort> HeightMap;
             public NativeArray<uint> NeighborN, NeighborE, NeighborS, NeighborW;
             public NativeArray<uint> NeighborNE, NeighborSE, NeighborSW, NeighborNW;
+            public NativeArray<ushort> LightN, LightE, LightS, LightW;
+            public NativeArray<ushort> LightNE, LightSE, LightSW, LightNW;
 
             // No current scenario populates SourceSunLightQueue (sunlight uses column
             // recalc via SourceSunRecalcQueue), but the field mirrors the job struct's
@@ -989,6 +1045,7 @@ namespace Benchmarks
             public LightingBenchmarkData(Allocator allocator)
             {
                 Center = new NativeArray<uint>(MAP_SIZE, allocator);
+                CenterLight = new NativeArray<ushort>(MAP_SIZE, allocator);
                 HeightMap = new NativeArray<ushort>(HEIGHTMAP_SIZE, allocator);
 
                 NeighborN = new NativeArray<uint>(MAP_SIZE, allocator);
@@ -1000,6 +1057,15 @@ namespace Benchmarks
                 NeighborSW = new NativeArray<uint>(MAP_SIZE, allocator);
                 NeighborNW = new NativeArray<uint>(MAP_SIZE, allocator);
 
+                LightN = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightE = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightS = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightW = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightNE = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightSE = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightSW = new NativeArray<ushort>(MAP_SIZE, allocator);
+                LightNW = new NativeArray<ushort>(MAP_SIZE, allocator);
+
                 SourceSunLightQueue = new List<LightQueueNode>();
                 SourceBlockLightQueue = new List<LightQueueNode>();
                 SourceSunRecalcQueue = new List<Vector2Int>();
@@ -1008,6 +1074,7 @@ namespace Benchmarks
             public void Dispose()
             {
                 if (Center.IsCreated) Center.Dispose();
+                if (CenterLight.IsCreated) CenterLight.Dispose();
                 if (HeightMap.IsCreated) HeightMap.Dispose();
                 if (NeighborN.IsCreated) NeighborN.Dispose();
                 if (NeighborE.IsCreated) NeighborE.Dispose();
@@ -1017,6 +1084,14 @@ namespace Benchmarks
                 if (NeighborSE.IsCreated) NeighborSE.Dispose();
                 if (NeighborSW.IsCreated) NeighborSW.Dispose();
                 if (NeighborNW.IsCreated) NeighborNW.Dispose();
+                if (LightN.IsCreated) LightN.Dispose();
+                if (LightE.IsCreated) LightE.Dispose();
+                if (LightS.IsCreated) LightS.Dispose();
+                if (LightW.IsCreated) LightW.Dispose();
+                if (LightNE.IsCreated) LightNE.Dispose();
+                if (LightSE.IsCreated) LightSE.Dispose();
+                if (LightSW.IsCreated) LightSW.Dispose();
+                if (LightNW.IsCreated) LightNW.Dispose();
             }
         }
 

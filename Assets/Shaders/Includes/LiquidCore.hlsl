@@ -19,32 +19,32 @@
 // No keyword defined = High (default / editor preview).
 
 #if defined(_FLUID_QUALITY_LOW)
-    #define FLUID_FBM_OCTAVES 2
-    #define LAVA_FBM_OCTAVES 3
-    #define FLUID_ENABLE_DUAL_PHASE 0
-    #define FLUID_ENABLE_SHORE_FOAM 0
-    #define FLUID_ENABLE_STREAM_FOAM 0
+#define FLUID_FBM_OCTAVES 2
+#define LAVA_FBM_OCTAVES 3
+#define FLUID_ENABLE_DUAL_PHASE 0
+#define FLUID_ENABLE_SHORE_FOAM 0
+#define FLUID_ENABLE_STREAM_FOAM 0
 #elif defined(_FLUID_QUALITY_MED)
-    #define FLUID_FBM_OCTAVES 3
-    #define LAVA_FBM_OCTAVES 4
-    #define FLUID_ENABLE_DUAL_PHASE 1
-    #define FLUID_ENABLE_SHORE_FOAM 1
-    #define FLUID_ENABLE_STREAM_FOAM 0
+#define FLUID_FBM_OCTAVES 3
+#define LAVA_FBM_OCTAVES 4
+#define FLUID_ENABLE_DUAL_PHASE 1
+#define FLUID_ENABLE_SHORE_FOAM 1
+#define FLUID_ENABLE_STREAM_FOAM 0
 #else // High (default)
-    #define FLUID_FBM_OCTAVES 4
-    #define LAVA_FBM_OCTAVES 5
-    #define FLUID_ENABLE_DUAL_PHASE 1
-    #define FLUID_ENABLE_SHORE_FOAM 1
-    #define FLUID_ENABLE_STREAM_FOAM 1
+#define FLUID_FBM_OCTAVES 4
+#define LAVA_FBM_OCTAVES 5
+#define FLUID_ENABLE_DUAL_PHASE 1
+#define FLUID_ENABLE_SHORE_FOAM 1
+#define FLUID_ENABLE_STREAM_FOAM 1
 #endif
 
 // Refraction is controlled independently via a dedicated keyword / settings slider.
 // _FLUID_REFRACTION_OFF is the opt-out keyword so that the default (no keyword) = ON,
 // which is correct for both the game shader at startup and the editor preview shader.
 #if defined(_FLUID_REFRACTION_OFF)
-    #define FLUID_ENABLE_REFRACTION 0
+#define FLUID_ENABLE_REFRACTION 0
 #else
-    #define FLUID_ENABLE_REFRACTION 1
+#define FLUID_ENABLE_REFRACTION 1
 #endif
 
 // =============================================================================
@@ -57,7 +57,7 @@ struct LiquidAppdata
     float3 normal : NORMAL;
     float4 uv : TEXCOORD0; // xy = localFlowVector, zw = shorePush (normalized direction)
     half4 color : COLOR; // r=LiquidType, g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier, a=unused
-    half4 lightData : TEXCOORD1; // UNorm8: (sunlight, reserved, reserved, blocklight)
+    half4 lightData : TEXCOORD1; // UNorm8: (skyLight, blocklightR, blocklightG, blocklightB)
 };
 
 struct LiquidV2F
@@ -67,11 +67,12 @@ struct LiquidV2F
     float4 screenPos : TEXCOORD1;
     float3 worldNormal : TEXCOORD2;
     float liquidType : TEXCOORD3;
-    float lightLevel : TEXCOORD4;
+    float sunLight : TEXCOORD4;
     float shadowMultiplier : TEXCOORD5;
     float2 localFlowVector : TEXCOORD6; // Physical flow XY vector from mesher
     float2 shorePush : TEXCOORD7; // Normalized push direction from C# mesher
     float packedShoreMask : TEXCOORD8; // Bit-packed 8-bit wall neighbor flags (constant across quad)
+    half3 blockRGB : TEXCOORD9;
 };
 
 // =============================================================================
@@ -108,7 +109,8 @@ LiquidV2F LiquidVert(LiquidAppdata v)
     o.screenPos = ComputeScreenPos(o.vertex);
     o.worldNormal = TransformObjectToWorldNormal(v.normal);
     o.liquidType = v.color.r;
-    o.lightLevel = max(v.lightData.r, v.lightData.a);
+    o.sunLight = v.lightData.r;
+    o.blockRGB = v.lightData.gba;
     o.shadowMultiplier = v.color.b;
     o.localFlowVector = v.uv.xy; // flow XZ
     o.shorePush = v.uv.zw; // shore push direction (normalized)
@@ -311,7 +313,7 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
 
     // --- FLOW & SHORE EFFECTS ---
 
-#if FLUID_ENABLE_SHORE_FOAM
+    #if FLUID_ENABLE_SHORE_FOAM
     float rawSpeed = length(totalFlow);
     float idle = 1.0 - smoothstep(0.1, 0.8, rawSpeed);
 
@@ -322,9 +324,9 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
     // Multiply by 'idle' so fast-flowing lava rivers don't crust over, even at the shores!
     float crust_mask = smoothstep(0.4, 0.8, crust_noise) * shore_gradient * idle;
     lavaCol = lerp(lavaCol, _CrustColor.rgb, saturate(crust_mask * _LavaShoreCrust));
-#endif
+    #endif
 
-#if FLUID_ENABLE_STREAM_FOAM
+    #if FLUID_ENABLE_STREAM_FOAM
     float turbulence = smoothstep(0.1, 0.8, length(totalFlow));
 
     // 2. Bright Sparks where flow is strong (Turbulence)
@@ -332,18 +334,18 @@ void EvaluateLava(LiquidV2F i, float phaseTime, out float3 lavaCol, out float2 h
 
     float flow_mask = (fbm(flow_mask_p, LAVA_FBM_OCTAVES - 1) + 1.0) * 0.5;
     lavaCol += _BrightColor.rgb * smoothstep(0.5, 0.7, flow_mask) * turbulence * _FlowHighlight;
-#endif
+    #endif
 
     // Distortion Normal
-#if FLUID_ENABLE_REFRACTION
+    #if FLUID_ENABLE_REFRACTION
     float2 offset = float2(0.01, 0.0);
     float normal_dx = fbm(p1 + offset.xyy, LAVA_FBM_OCTAVES - 1) - base_fbm;
     float normal_dz = fbm(p1 + offset.yxy, LAVA_FBM_OCTAVES - 1) - base_fbm;
     float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
     heatNormal = normal.xz * _HeatDistortionAmount;
-#else
+    #else
     heatNormal = float2(0, 0);
-#endif
+    #endif
 }
 
 // =============================================================================
@@ -379,7 +381,7 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
     float wave_fbm = fbm(wave_p, FLUID_FBM_OCTAVES);
     float ripple_noise = fbm(ripple_p, FLUID_FBM_OCTAVES);
 
-    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
+    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
 
     float combined_noise = (wave_fbm + ripple_noise) * 0.5;
     combined_noise = (combined_noise + 1.0) * 0.5;
@@ -391,36 +393,36 @@ void EvaluateWater(LiquidV2F i, float phaseTime, out float3 waterCol, out float 
 
     // Combined guard: both features share the stream_noise FBM. The || is intentional so that
     // a future tier enabling stream foam without shore foam still compiles the shared setup.
-#if FLUID_ENABLE_SHORE_FOAM || FLUID_ENABLE_STREAM_FOAM
+    #if FLUID_ENABLE_SHORE_FOAM || FLUID_ENABLE_STREAM_FOAM
     float3 stream_p = i.worldPos * _WaveScale * 2.0 + flow3D * 3.0;
     float stream_noise = (fbm(stream_p, max(FLUID_FBM_OCTAVES - 1, 2)) + 1.0) * 0.5;
-#endif
+    #endif
 
-#if FLUID_ENABLE_STREAM_FOAM
+    #if FLUID_ENABLE_STREAM_FOAM
     float turbulence = smoothstep(0.1, 0.8, length(totalFlow));
 
     // 1. Stream Foam (Turbulence-based)
     // Create isolated streaks that only appear where turbulence is high (at drops/fast flow)
     float stream_foam = smoothstep(0.55, 0.75, stream_noise) * turbulence * _StreamEffect;
     foamAmt = saturate(foamAmt + stream_foam);
-#endif
+    #endif
 
-#if FLUID_ENABLE_SHORE_FOAM
+    #if FLUID_ENABLE_SHORE_FOAM
     // 2. Shore Foam (Mask Distance-based)
     float shore_foam = smoothstep(0.4, 0.75, stream_noise) * shore_gradient * _WaterShoreFoam;
     foamAmt = saturate(foamAmt + shore_foam);
-#endif
+    #endif
 
     // Distortion Normal
-#if FLUID_ENABLE_REFRACTION
+    #if FLUID_ENABLE_REFRACTION
     float2 offset = float2(0.01, 0.0);
     float normal_dx = fbm(wave_p + offset.xyy, max(FLUID_FBM_OCTAVES - 1, 2)) - wave_fbm;
     float normal_dz = fbm(wave_p + offset.yxy, max(FLUID_FBM_OCTAVES - 1, 2)) - wave_fbm;
     float3 normal = normalize(float3(normal_dx, 0.1, normal_dz));
     waterNormal = normal.xz * _DistortionAmount;
-#else
+    #else
     waterNormal = float2(0, 0);
-#endif
+    #endif
 }
 
 // =============================================================================

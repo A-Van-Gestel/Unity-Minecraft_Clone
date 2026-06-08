@@ -516,8 +516,7 @@ namespace Jobs
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
                 byte packedMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(
                     orientation: 1, fluidLevel: voxelProps.FluidLevel, isFluid: false);
-                OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(
-                    voxelValue, 0, voxelProps.LightEmission, packedMeta);
+                OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(voxelValue, packedMeta);
 
                 // --- Structure placement (per-entry independent grids) ---
                 // Place structures on the topmost exposed solid surface above sea level.

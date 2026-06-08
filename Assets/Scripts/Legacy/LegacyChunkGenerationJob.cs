@@ -22,13 +22,26 @@ namespace Legacy
     {
         #region Input Data
 
-        [ReadOnly] public int Seed;
-        [ReadOnly] public int SolidGroundHeight;
-        [ReadOnly] public int SeaLevel;
-        [ReadOnly] public Vector2Int ChunkPosition;
-        [ReadOnly] public NativeArray<BlockTypeJobData> BlockTypes;
-        [ReadOnly] public NativeArray<LegacyBiomeAttributesJobData> Biomes;
-        [ReadOnly] public NativeArray<LegacyLodeJobData> AllLodes;
+        [ReadOnly]
+        public int Seed;
+
+        [ReadOnly]
+        public int SolidGroundHeight;
+
+        [ReadOnly]
+        public int SeaLevel;
+
+        [ReadOnly]
+        public Vector2Int ChunkPosition;
+
+        [ReadOnly]
+        public NativeArray<BlockTypeJobData> BlockTypes;
+
+        [ReadOnly]
+        public NativeArray<LegacyBiomeAttributesJobData> Biomes;
+
+        [ReadOnly]
+        public NativeArray<LegacyLodeJobData> AllLodes;
 
         #endregion
 
@@ -67,7 +80,7 @@ namespace Legacy
                 int mapIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
                 byte packedMeta = BurstVoxelDataBitMapping.BuildMetaLegacy(
                     orientation: 1, fluidLevel: voxelProps.FluidLevel, isFluid: false);
-                OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, 0, voxelProps.LightEmission, packedMeta);
+                OutputMap[mapIndex] = BurstVoxelDataBitMapping.PackVoxelData(voxelID, packedMeta);
 
                 if (!highestBlockFound)
                 {

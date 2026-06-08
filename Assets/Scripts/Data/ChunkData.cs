@@ -32,6 +32,15 @@ namespace Data
         public ChunkSection[] sections; // For 128 height, this array has length 8.
 
         /// <summary>
+        /// Per-section uniform sky light level for compact representation.
+        /// <c>0x00–0x0F</c>: section light is uniform at this sky level with zero blocklight.
+        /// <c>0xFF</c>: no compact shortcut — use real <see cref="ChunkSection.LightData"/>.
+        /// Covers both null sections (empty sky above terrain) and non-null sections (pitch-black underground).
+        /// </summary>
+        [NonSerialized]
+        public byte[] SectionUniformSkyLevel;
+
+        /// <summary>
         /// The heightmap for this chunk. Stores the Y-level of the highest opaque block for each column.
         /// </summary>
         public ushort[] heightMap = new ushort[VoxelData.ChunkWidth * VoxelData.ChunkWidth];
@@ -142,6 +151,9 @@ namespace Data
         public Queue<LightQueueNode> BlocklightBfsQueue => _blocklightBfsQueue;
 
 
+        /// <summary>Sentinel: this section index has no uniform-sky shortcut.</summary>
+        internal const byte UNIFORM_SKY_NONE = 0xFF;
+
         #region Constructors and Initializers
 
         /// <summary>
@@ -170,6 +182,8 @@ namespace Data
         {
             const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
             sections = new ChunkSection[sectionCount];
+            SectionUniformSkyLevel = new byte[sectionCount];
+            Array.Fill(SectionUniformSkyLevel, UNIFORM_SKY_NONE);
         }
 
         // --- Pooling Support ---
@@ -202,6 +216,9 @@ namespace Data
             // Clear Heightmap (retains array)
             Array.Clear(heightMap, 0, heightMap.Length);
 
+            // Clear compact sky levels
+            Array.Fill(SectionUniformSkyLevel, UNIFORM_SKY_NONE);
+
             // Recycle Sections
             // CRITICAL: We must return sections to the pool before we lose the reference.
             if (World.Instance != null && World.Instance.ChunkPool != null)
@@ -233,6 +250,22 @@ namespace Data
             }
 
             return new ChunkSection(); // Fallback
+        }
+
+        /// <summary>
+        /// Promotes a compact uniform-sky section to a full section with populated <see cref="ChunkSection.LightData"/>.
+        /// If the section is not compact, this is a no-op. Allocates a section from the pool if null.
+        /// </summary>
+        private void PromoteCompactSection(int sectionIndex)
+        {
+            byte sky = SectionUniformSkyLevel[sectionIndex];
+            if (sky == UNIFORM_SKY_NONE) return;
+
+            SectionUniformSkyLevel[sectionIndex] = UNIFORM_SKY_NONE;
+
+            sections[sectionIndex] ??= GetNewSection();
+
+            LightingHelper.FillUniformSkyLight(sections[sectionIndex].LightData, sky);
         }
 
         #endregion
@@ -343,10 +376,13 @@ namespace Data
                 loadedData.sections[i] = null;
             }
 
+            // Transfer compact sky levels
+            Array.Copy(loadedData.SectionUniformSkyLevel, SectionUniformSkyLevel, SectionUniformSkyLevel.Length);
+
             // Copy Queues
             // We move the queues from the loaded object (temp) to this object (live)
             foreach (LightQueueNode node in loadedData.SunlightBfsQueue) AddToSunLightQueue(node.Position, node.OldLightLevel);
-            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel);
+            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
 
             // If loaded data had flags, transfer them
             if (loadedData.HasLightChangesToProcess) HasLightChangesToProcess = true;
@@ -392,17 +428,13 @@ namespace Data
             uint oldPackedData = GetVoxel(localPos.x, localPos.y, localPos.z);
 
             // --- Create the new voxel data from the modification ---
-            // The new block's light level is initially set to its own emission value (usually 0 for non-light sources).
-            // The LightingJob will then fill it with propagated light from neighbors.
-            // When lighting is disabled, sunlight is set to max (15) so every block renders at full brightness.
             BlockType newProps = World.Instance.BlockTypes[mod.ID];
             bool lightingEnabled = World.Instance.settings.enableLighting;
 
             // The mod is responsible for providing the correct meta byte for the block it places —
             // schema-aware callers encode via BurstVoxelMetadataUtility, transitional callers via
             // BurstVoxelDataBitMapping.BuildMetaLegacy (per PER_BLOCK_METADATA_SCHEMAS.md §7.4).
-            byte initialSunlight = lightingEnabled ? (byte)0 : (byte)15;
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, initialSunlight, newProps.lightEmission, mod.Meta);
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, mod.Meta);
 
             // Check if the full voxel state has actually changed.
             if (oldPackedData == newPackedData)
@@ -410,12 +442,21 @@ namespace Data
 
             // --- Capture Old State for Lighting ---
             ushort oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
-            byte oldBlocklight = BurstVoxelDataBitMapping.GetBlockLight(oldPackedData);
-            byte oldSunlight = BurstVoxelDataBitMapping.GetSunLight(oldPackedData);
+            ushort oldLightData = GetLightData(localPos.x, localPos.y, localPos.z);
+            byte oldSkyLight = LightBitMapping.GetSkyLight(oldLightData);
+            byte oldBlocklight = LightBitMapping.GetMaxBlocklight(oldLightData);
+            byte oldBlockR = LightBitMapping.GetBlocklightR(oldLightData);
+            byte oldBlockG = LightBitMapping.GetBlocklightG(oldLightData);
+            byte oldBlockB = LightBitMapping.GetBlocklightB(oldLightData);
             BlockType oldProps = World.Instance.BlockTypes[oldId];
 
             // --- Update The Map (Sections) ---
             SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData, newProps, oldProps);
+
+            // When lighting is disabled, stamp sky=15 so the mesh job renders full brightness.
+            // Light data lives exclusively in the ushort LightData array (the uint carries no light bits).
+            if (!lightingEnabled)
+                SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkyLight(0, 15));
 
             // --- MAINTAIN HEIGHTMAP ---
             int heightmapIndex = localPos.x + VoxelData.ChunkWidth * localPos.z;
@@ -449,8 +490,8 @@ namespace Data
             // --- Queue Lighting Updates ---
 
             // 1. Queue the modified block itself for light REMOVAL.
-            AddToSunLightQueue(localPos, oldSunlight);
-            AddToBlockLightQueue(localPos, oldBlocklight);
+            AddToSunLightQueue(localPos, oldSkyLight);
+            AddToBlockLightQueue(localPos, oldBlocklight, oldBlockR, oldBlockG, oldBlockB);
 
             // 2. "WAKE UP" NEIGHBORS to fill any new empty space with their light.
             for (int i = 0; i < 6; i++)
@@ -458,15 +499,15 @@ namespace Data
                 Vector3Int neighborPos = localPos + VoxelData.FaceChecks[i];
                 if (IsVoxelInChunk(neighborPos))
                 {
-                    uint neighborPacked = GetVoxel(neighborPos.x, neighborPos.y, neighborPos.z);
+                    ushort neighborLight = GetLightData(neighborPos.x, neighborPos.y, neighborPos.z);
 
-                    byte neighborSunlight = BurstVoxelDataBitMapping.GetSunLight(neighborPacked);
-                    if (neighborSunlight > 0)
+                    byte neighborSkyLight = LightBitMapping.GetSkyLight(neighborLight);
+                    if (neighborSkyLight > 0)
                         AddToSunLightQueue(neighborPos, 0);
 
-                    byte neighborBlocklight = BurstVoxelDataBitMapping.GetBlockLight(neighborPacked);
+                    byte neighborBlocklight = LightBitMapping.GetMaxBlocklight(neighborLight);
                     if (neighborBlocklight > 0)
-                        AddToBlockLightQueue(neighborPos, 0);
+                        AddToBlockLightQueue(neighborPos, 0, 0, 0, 0);
                 }
             }
 
@@ -517,6 +558,10 @@ namespace Data
         {
             int sectionY = y / ChunkMath.SECTION_SIZE;
             int localY = y % ChunkMath.SECTION_SIZE;
+
+            // Promote compact sections unconditionally — even non-null sections can be compact
+            // (VOXELS_UNIFORM_SKY: has voxels but light stored as a single byte).
+            PromoteCompactSection(sectionY);
 
             // Create section if it doesn't exist (on write)
             if (sections[sectionY] == null)
@@ -583,6 +628,43 @@ namespace Data
             return sections[sectionY].voxels[index];
         }
 
+        /// <summary>
+        /// Gets the packed <c>ushort</c> light data for a voxel at the given local position.
+        /// Returns the compact uniform sky value if the section is compacted, or 0 if fully unallocated.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ushort GetLightData(int x, int y, int z)
+        {
+            int sectionY = y / ChunkMath.SECTION_SIZE;
+            byte uniformSky = SectionUniformSkyLevel[sectionY];
+            if (uniformSky != UNIFORM_SKY_NONE)
+                return LightBitMapping.PackLightData(uniformSky, 0, 0, 0);
+            if (sections[sectionY] == null) return 0;
+
+            int localY = y % ChunkMath.SECTION_SIZE;
+            int index = x + localY * ChunkMath.SECTION_SIZE + z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+            return sections[sectionY].LightData[index];
+        }
+
+        /// <summary>
+        /// Sets the packed <c>ushort</c> light data for a voxel at the given local position.
+        /// Promotes compact sections by filling <see cref="ChunkSection.LightData"/> from the uniform value first.
+        /// </summary>
+        public void SetLightData(int x, int y, int z, ushort value)
+        {
+            int sectionY = y / ChunkMath.SECTION_SIZE;
+            PromoteCompactSection(sectionY);
+            if (sections[sectionY] == null)
+            {
+                if (value == 0) return;
+                sections[sectionY] = GetNewSection();
+            }
+
+            int localY = y % ChunkMath.SECTION_SIZE;
+            int index = x + localY * ChunkMath.SECTION_SIZE + z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+            sections[sectionY].LightData[index] = value;
+        }
+
         #endregion
 
         // --- Lighting Methods ---
@@ -593,12 +675,19 @@ namespace Data
         /// Adds a block light update request to the internal queue for the next lighting pass.
         /// </summary>
         /// <param name="localPos">The local position of the modified voxel.</param>
-        /// <param name="oldLightLevel">The light level the voxel had before modification (needed for darkness propagation).</param>
-        public void AddToBlockLightQueue(Vector3Int localPos, byte oldLightLevel)
+        /// <param name="oldLightLevel">The scalar blocklight level the voxel had before modification.</param>
+        /// <param name="oldR">The old red blocklight channel (0-15).</param>
+        /// <param name="oldG">The old green blocklight channel (0-15).</param>
+        /// <param name="oldB">The old blue blocklight channel (0-15).</param>
+        public void AddToBlockLightQueue(Vector3Int localPos, byte oldLightLevel, byte oldR, byte oldG, byte oldB)
         {
             if (World.Instance.settings.enableLighting)
             {
-                _blocklightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
+                _blocklightBfsQueue.Enqueue(new LightQueueNode
+                {
+                    Position = localPos, OldLightLevel = oldLightLevel,
+                    OldBlockR = oldR, OldBlockG = oldG, OldBlockB = oldB,
+                });
                 HasLightChangesToProcess = true;
             }
         }
@@ -703,15 +792,6 @@ namespace Data
                 // The lighting BFS (when enabled) will fill correct values.
             }
 
-            // With lighting disabled, stamp sunlight=15 on every voxel in the snapshot.
-            // Covers null sections (air), post-generation structure sections, and any voxel
-            // whose sunlight wasn't set by the ProcessGenerationJobs fill.
-            if (World.Instance != null && !World.Instance.settings.enableLighting)
-            {
-                for (int v = 0; v < totalVoxels; v++)
-                    jobArray[v] = BurstVoxelDataBitMapping.SetSunLight(jobArray[v], 15);
-            }
-
             return jobArray;
         }
 
@@ -814,6 +894,9 @@ namespace Data
     {
         public Vector3Int Position;
         public byte OldLightLevel;
+        public byte OldBlockR;
+        public byte OldBlockG;
+        public byte OldBlockB;
 
         // --- Operator Overloads for comparison ---
 
@@ -821,17 +904,18 @@ namespace Data
 
         public static bool operator ==(LightQueueNode a, LightQueueNode b)
         {
-            return a.Position == b.Position && a.OldLightLevel == b.OldLightLevel;
+            return a.Position == b.Position && a.OldLightLevel == b.OldLightLevel &&
+                   a.OldBlockR == b.OldBlockR && a.OldBlockG == b.OldBlockG && a.OldBlockB == b.OldBlockB;
         }
 
         public static bool operator !=(LightQueueNode a, LightQueueNode b)
         {
-            return a.Position != b.Position || a.OldLightLevel != b.OldLightLevel;
+            return !(a == b);
         }
 
         public bool Equals(LightQueueNode other)
         {
-            return Position == other.Position && OldLightLevel == other.OldLightLevel;
+            return this == other;
         }
 
         public override bool Equals(object obj)
@@ -841,7 +925,7 @@ namespace Data
 
         public override int GetHashCode()
         {
-            return Position.GetHashCode() ^ OldLightLevel.GetHashCode();
+            return Position.GetHashCode() ^ OldLightLevel ^ (OldBlockR << 8) ^ (OldBlockG << 16) ^ (OldBlockB << 24);
         }
 
         public override string ToString()

@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using Helpers;
 using JetBrains.Annotations;
 using Jobs;
-using Jobs.BurstData;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Pool;
@@ -255,19 +255,42 @@ namespace Data
                     // If null, the jobArray already contains 0 (Air) from initialization.
                     // The lighting BFS (when enabled) will fill correct values.
                 }
+            }
 
-                // With lighting disabled, stamp sunlight=15 on every voxel in the snapshot.
-                // This covers three cases that would otherwise produce sunlight=0:
-                //  1. Null sections (air above terrain — never allocated to save memory)
-                //  2. Sections allocated by post-generation modifications (structures/trees)
-                //     whose air voxels were initialized to 0 by the section pool
-                //  3. Any voxel whose sunlight wasn't set by the ProcessGenerationJobs fill
-                if (World.Instance != null && !World.Instance.settings.enableLighting)
+            return jobArray;
+        }
+
+        /// <summary>
+        /// Creates a flat NativeArray copy of the chunk's ushort light data for Burst job processing.
+        /// </summary>
+        public NativeArray<ushort> GetChunkLightMapForJob(Vector2Int chunkVoxelPos, Allocator allocator)
+        {
+            ChunkData chunk = RequestChunk(chunkVoxelPos, false);
+
+            NativeArray<ushort> jobArray = new NativeArray<ushort>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, allocator);
+
+            if (chunk != null)
+            {
+                const int sectionSize = 16 * 16 * 16;
+                for (int i = 0; i < chunk.sections.Length; i++)
                 {
-                    for (int v = 0; v < jobArray.Length; v++)
-                        jobArray[v] = BurstVoxelDataBitMapping.SetSunLight(jobArray[v], 15);
+                    byte uniformSky = chunk.SectionUniformSkyLevel[i];
+                    if (uniformSky != ChunkData.UNIFORM_SKY_NONE)
+                    {
+                        LightingHelper.FillUniformSkyLight(jobArray, i * sectionSize, sectionSize, uniformSky);
+                    }
+                    else if (chunk.sections[i] != null)
+                    {
+                        NativeArray<ushort>.Copy(
+                            chunk.sections[i].LightData, 0,
+                            jobArray, i * sectionSize,
+                            sectionSize);
+                    }
                 }
             }
+
+            if (World.Instance != null && !World.Instance.settings.enableLighting)
+                LightingHelper.StampFullBrightSunlight(jobArray);
 
             return jobArray;
         }
@@ -282,7 +305,8 @@ namespace Data
         /// <param name="worldPos">The world position of the voxel</param>
         /// <param name="oldLightLevel">The old light level of the voxel (Defaults to `0`)</param>
         /// <param name="channel">The light channel to update (Defaults to `Block Channel`)</param>
-        public void QueueLightUpdate(Vector3 worldPos, byte oldLightLevel = 0, LightChannel channel = LightChannel.Block)
+        public void QueueLightUpdate(Vector3 worldPos, byte oldLightLevel = 0, LightChannel channel = LightChannel.Block,
+            byte oldBlockR = 0, byte oldBlockG = 0, byte oldBlockB = 0)
         {
             if (!IsVoxelInWorld(worldPos)) return;
 
@@ -290,10 +314,9 @@ namespace Data
 
             if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData) && chunkData.IsPopulated)
             {
-                // Add the *modified block's position* to the chunk's internal light queue.
                 Vector3Int localVoxelPos = GetLocalVoxelPositionInChunk(worldPos);
                 if (channel == LightChannel.Block)
-                    chunkData.AddToBlockLightQueue(localVoxelPos, oldLightLevel);
+                    chunkData.AddToBlockLightQueue(localVoxelPos, oldLightLevel, oldBlockR, oldBlockG, oldBlockB);
                 else
                     chunkData.AddToSunLightQueue(localVoxelPos, oldLightLevel);
 

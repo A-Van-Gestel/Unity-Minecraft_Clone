@@ -35,10 +35,11 @@ Shader "Minecraft/Transparent Blocks"
                 float _AlphaCutout;
             CBUFFER_END
 
-            // Global properties set by World.cs via Shader.SetGlobalFloat — must be outside CBUFFER
+            // Global properties set by World.cs — must be outside CBUFFER
             float GlobalLightLevel;
             float minGlobalLightLevel;
             float maxGlobalLightLevel;
+            half3 SkyLightColor;
 
             VoxelV2F vertFunction(VoxelAppdata v)
             {
@@ -56,8 +57,9 @@ Shader "Minecraft/Transparent Blocks"
                 return half4(i.lightData.r, i.lightData.a, 0.0, 1.0);
                 #endif
 
-                // Apply voxel lighting with separate sunlight/blocklight channels
-                col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.rgb, i.lightData.a,
+                // Apply voxel lighting: sun (scalar, tinted by sky color) + block (RGB)
+                col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba,
+                                                SkyLightColor,
                                                 GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // Multiply by vertex RGB to support BlockIconGenerator shadows and tinting
