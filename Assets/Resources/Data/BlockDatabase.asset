@@ -737,7 +737,7 @@ MonoBehaviour:
     spreadChance: 0.25
     opacity: 7
     lightEmission: 15
-    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    lightEmissionColor: {r: 1, g: 0.73333335, b: 0.26666668, a: 1}
     tagPreset: {fileID: 11400000, guid: 90adce5ab71476a47b05068311651645, type: 2}
     tags: 2
     canReplaceTags: 8258
