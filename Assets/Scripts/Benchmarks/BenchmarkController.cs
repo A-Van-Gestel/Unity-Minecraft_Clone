@@ -80,6 +80,12 @@ namespace Benchmarks
         private Stopwatch _totalStopwatch;
         private Material _blurMaterial;
 
+        // ── Frame Rate Overrides ─────────────────────────────────────────
+
+        private int _savedVSyncCount;
+        private int _savedTargetFrameRate;
+        private bool _frameRateOverridden;
+
         // ── UI ───────────────────────────────────────────────────────────
 
         private BenchmarkHUD _hud;
@@ -142,6 +148,13 @@ namespace Benchmarks
             _generationSpeeds = ParseSpeedString(settings.benchmarkGenerationSpeeds, s_defaultGenerationSpeeds, "Generation");
             _loadingSpeeds = ParseSpeedString(settings.benchmarkLoadingSpeeds, s_defaultLoadingSpeeds, "Loading");
 
+            // Force VSync off and uncap framerate for accurate throughput measurement
+            _savedVSyncCount = QualitySettings.vSyncCount;
+            _savedTargetFrameRate = Application.targetFrameRate;
+            QualitySettings.vSyncCount = 0;
+            Application.targetFrameRate = -1;
+            _frameRateOverridden = true;
+
             BuildWaypoints(settings);
 
             if (_generationWaypoints.Count < 2)
@@ -202,7 +215,9 @@ namespace Benchmarks
                 _configuredRegionChunks,
                 _generationWaypoints.Count,
                 _loadingWaypoints.Count,
-                _totalStopwatch.Elapsed);
+                _totalStopwatch.Elapsed,
+                _savedVSyncCount,
+                _savedTargetFrameRate);
 
             ShowResults(reportResult);
         }
@@ -210,6 +225,13 @@ namespace Benchmarks
         private void OnDestroy()
         {
             _metricsCollector?.StopRecording();
+
+            if (_frameRateOverridden)
+            {
+                QualitySettings.vSyncCount = _savedVSyncCount;
+                Application.targetFrameRate = _savedTargetFrameRate;
+                _frameRateOverridden = false;
+            }
 
             if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark)
                 WorldLaunchState.CurrentMode = RuntimeMode.Default;

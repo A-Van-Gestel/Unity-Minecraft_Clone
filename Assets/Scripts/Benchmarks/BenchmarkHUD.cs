@@ -1,7 +1,9 @@
+using System;
 using System.Diagnostics;
 using System.Text;
 using TMPro;
 using UnityEngine;
+using UnityEngine.Profiling;
 
 namespace Benchmarks
 {
@@ -108,6 +110,28 @@ namespace Benchmarks
                 AppendFixed1Padded(_sb, gcKb, 8);
                 _sb.Append(" KB");
                 _sb.Append("</mspace>");
+                _sb.AppendLine();
+
+                // Line 5: FPS and Memory
+                int wallFps = Mathf.RoundToInt(pm.WallFPS);
+                int cpuFps = Mathf.RoundToInt(pm.CpuFPS);
+                double nativeMb = Profiler.GetTotalAllocatedMemoryLong() / (1024.0 * 1024.0);
+                double managedMb = GC.GetTotalMemory(false) / (1024.0 * 1024.0);
+                double totalMb = nativeMb + managedMb;
+
+                _sb.Append("<mspace=0.55em>");
+                _sb.Append("FPS: ");
+                AppendIntPadded(_sb, wallFps, 3);
+                _sb.Append(" (CPU: ");
+                AppendIntPadded(_sb, cpuFps, 3);
+                _sb.Append(") | Mem: ");
+                AppendFixed1Padded(_sb, totalMb, 6);
+                _sb.Append(" MB (Nat: ");
+                AppendFixed1Padded(_sb, nativeMb, 6);
+                _sb.Append(" + Man: ");
+                AppendFixed1Padded(_sb, managedMb, 6);
+                _sb.Append(")");
+                _sb.Append("</mspace>");
             }
 
             _statusText.text = _sb.ToString();
@@ -177,6 +201,28 @@ namespace Benchmarks
             sb.Append(whole);
             sb.Append('.');
             sb.Append(frac);
+        }
+
+        /// <summary>
+        /// Appends an integer right-aligned in a fixed-width field.
+        /// Uses leading spaces for padding (effective inside a <c>&lt;mspace&gt;</c> block).
+        /// </summary>
+        private static void AppendIntPadded(StringBuilder sb, int value, int totalWidth)
+        {
+            int digits = 1;
+            int temp = value >= 0 ? value : -value;
+            while (temp >= 10)
+            {
+                digits++;
+                temp /= 10;
+            }
+
+            if (value < 0) digits++;
+
+            for (int i = digits; i < totalWidth; i++)
+                sb.Append(' ');
+
+            sb.Append(value);
         }
     }
 }
