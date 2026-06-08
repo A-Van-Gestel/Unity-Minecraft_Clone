@@ -1088,15 +1088,16 @@ col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.rgb, i.lightData.a, ...);
 col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba, SkyLightColor, ...);
 ```
 
-#### 3.6.3 Liquid Shader Scalar Fallback
+#### 3.6.3 Liquid Shader RGB Lighting (Phase 3 — Implemented)
 
-`LiquidCore.hlsl` updates its scalar fallback to take the per-channel max across all 4 light components:
+The liquid shader now supports full RGB lighting via the Hybrid "Lit White" approach (see §5.2). `LiquidCore.hlsl` passes sky and block channels separately through `LiquidV2F`:
 
 ```hlsl
-o.lightLevel = max(v.lightData.r, max(v.lightData.g, max(v.lightData.b, v.lightData.a)));
+o.sunLight = v.lightData.r;
+o.blockRGB = v.lightData.gba;
 ```
 
-A proper RGB-aware liquid lighting path is deferred — the liquid fragment shader uses a custom deep/shallow water color blending that requires separate design work for RGB integration.
+The fragment shader computes a combined lighting multiplier via `ApplyVoxelLightingRGB(half3(1,1,1), ...)` and applies it as a post-multiply tint. Water's deep/shallow blend is driven by `sunLight` only — a red torch in a cave does not make water appear "shallow". See §5 for the full design and future upgrade path to Full Decomposition.
 
 #### 3.6.4 Notes on Shade Curve at Zero
 
@@ -1147,8 +1148,8 @@ The current `WriteLightQueue`/`ReadLightQueue` in `ChunkSerializer.cs` serialize
 | `Shaders/Includes/VoxelLighting.hlsl`                            | Update `ApplyVoxelLightingRGB` signature: `(sun scalar, block RGB, sky color, ...)`                                                                                                                                                |
 | `Shaders/StandardBlockShader.shader`                             | Add `SkyLightColor` uniform; update frag call to `ApplyVoxelLightingRGB(col, lightData.r, lightData.gba, ...)`                                                                                                                     |
 | `Shaders/TransparentBlockShader.shader`                          | Same as StandardBlockShader                                                                                                                                                                                                        |
-| `Shaders/Includes/LiquidCore.hlsl`                               | Update scalar fallback: `max(r, max(g, max(b, a)))`                                                                                                                                                                                |
-| `Shaders/UberLiquidShader.shader`                                | Add `SkyLightColor` uniform                                                                                                                                                                                                        |
+| `Shaders/Includes/LiquidCore.hlsl`                               | RGB-aware: split `lightLevel` into `sunLight` + `blockRGB` in `LiquidV2F`; vertex shader passes channels separately; `EvaluateWater` depth blend uses `sunLight` only (see §5.2)                                                   |
+| `Shaders/UberLiquidShader.shader`                                | Add `SkyLightColor` uniform; replace `CalculateVoxelShade`/`CalculateLinearVoxelShadow` with `ApplyVoxelLightingRGB(half3(1,1,1), ...)` "lit white" multiplier (see §5.2)                                                          |
 | `Serialization/ChunkSerializer.cs`                               | Expand `WriteLightQueue`/`ReadLightQueue` for RGB entries; add `InitLightDataFromPacked` to reconstruct ushort light array from uint packed data on every chunk load                                                               |
 | `Serialization/Migration/Steps/MigrationV7ToV8RGBLightQueues.cs` | AOT migration step (world v7→v8, chunk format v4→v5) for light queue format change                                                                                                                                                 |
 | `Benchmarks/LightingJobBenchmark.cs`                             | Add RGB-specific scenarios; fix existing broken scenarios                                                                                                                                                                          |
@@ -1296,6 +1297,53 @@ HeightMap, state flags, and light queues pass through unchanged.
 
 **Blood moon event:** `SkyLightColor = (1.0, 0.2, 0.15)`. Everything outdoors takes on a deep red hue. The lighting engine supports this natively — `World.cs` just changes the `SkyLightColor` uniform, no re-lighting needed.
 
+### 3.10 Emission Color Tuning Guide
+
+#### 3.10.1 Per-Channel Attenuation and Color Shift
+
+Each RGB channel attenuates independently at -1 per block. A channel starting at value `N` reaches zero at `N` blocks distance. This means lower channels die earlier, causing a **color shift** as distance increases — not just a brightness fade.
+
+**Example: Lava at `(15, 7, 1)`**
+
+| Distance | R  | G | B | Perceived color       |
+|----------|----|---|---|-----------------------|
+| 0        | 15 | 7 | 1 | Warm orange           |
+| 1        | 14 | 6 | 0 | Orange (blue gone)    |
+| 5        | 10 | 2 | 0 | Red-orange            |
+| 7        | 8  | 0 | 0 | Pure red (green gone) |
+| 12       | 3  | 0 | 0 | Dim red               |
+| 15       | 0  | 0 | 0 | Dark                  |
+
+The warm orange hue only extends 7 blocks (where green dies). The remaining 8 blocks are pure red — creating a harsh color boundary.
+
+#### 3.10.2 Tuning Rule of Thumb
+
+To control how far the "warm" part of a glow extends, ensure secondary channels are high enough to survive the desired warm radius:
+
+- **Channel value = warm radius in blocks.** A green channel of 11 means the warm component lasts 11 blocks.
+- **The pure-dominant-color tail** is `(peak - secondary)` blocks long. With `(15, 11, 4)`: pure red tail is only 4 blocks (15 - 11), and it's already quite dim at that distance.
+- **Near-white emissions** `(15, 14, 12)` produce a gentle warm-to-cool shift over the full 15 blocks — subtle and natural.
+- **Heavily saturated emissions** `(15, 3, 0)` produce a dramatic color shift — useful for effect lights (redstone, soul fire) but jarring for ambient lighting.
+
+**Recommended emission colors:**
+
+| Light source   | Emission     | Rationale                                                |
+|----------------|--------------|----------------------------------------------------------|
+| Torch          | (15, 12, 6)  | Warm white, slight orange tail past 12 blocks            |
+| Lava           | (15, 11, 4)  | Amber glow, warm for 11 blocks, orange-red tail          |
+| Redstone torch | (12, 2, 0)   | Intentionally deep red — dramatic color shift is desired |
+| Soul lantern   | (2, 8, 15)   | Cool cyan, slight blue-shift at distance                 |
+| Glowstone      | (15, 14, 10) | Near-white warm glow, minimal color shift                |
+| Sea lantern    | (10, 13, 15) | Cool white with slight blue tint                         |
+
+#### 3.10.3 Self-Luminous Surfaces
+
+Light-emitting blocks with procedural shaders (e.g., lava) should skip the `litWhite` lighting multiplier in their shader path. A self-luminous surface should render at full brightness with its own procedural color — it *is* the light source, not a surface being lit. The emission color affects surrounding blocks via the BFS, not the emitter's own appearance.
+
+#### 3.10.4 Block Editor Preview
+
+The Block Editor includes a **Light Falloff** preview strip below the Emission RGB controls. It shows 15 cells representing the color at each block of distance, making color shift behavior immediately visible during tuning. This helps content creators pick emission values that produce the desired warm radius without needing to test in-game.
+
 ---
 
 ## 4. Migration Path & Risk Assessment
@@ -1380,3 +1428,131 @@ After implementing the triple-channel blocklight BFS (Step 2d):
 - **Save/load round-trip:** Place colored light sources, save the world, reload. Verify pending RGB light queue entries are correctly deserialized and the BFS completes propagation after load.
 - **World migration:** Load a pre-Phase-2 world save. Verify the AOT migration correctly expands scalar queue entries to white RGB. No light artifacts or corruption.
 - **Performance:** Compare profiler snapshots against baseline. Document results in this section after benchmarking.
+
+---
+
+## 5. Fluid RGB Lighting Support
+
+### 5.1 Problem Statement
+
+The liquid shader (`LiquidCore.hlsl` / `UberLiquidShader.shader`) currently collapses all 4 light channels into a single scalar in the vertex shader:
+
+```hlsl
+o.lightLevel = max(v.lightData.r, max(v.lightData.g, max(v.lightData.b, v.lightData.a)));
+```
+
+This discards all color information. A red blocklight placed near water in a dark cave correctly tints the surrounding solid blocks red via `ApplyVoxelLightingRGB`, but the water surface remains its base deep/shallow blue — producing a stark visual contrast.
+
+The C# mesh pipeline already delivers full RGB light data to fluid vertices via `TEXCOORD1` as `half4(skyLight, blocklightR, blocklightG, blocklightB)`. The gap is entirely shader-side.
+
+### 5.2 Chosen Approach: Hybrid "Lit White" Multiplier (Phase 3)
+
+- **Status:** Not yet implemented
+
+#### 5.2.1 Design
+
+Pass `sunLight` (float) and `blockRGB` (half3) separately through `LiquidV2F`, replacing the single `float lightLevel`. In the fragment shader, compute the procedural fluid color (water deep/shallow blend, lava noise, shore effects) as usual, then apply lighting as a single color multiplier derived from `ApplyVoxelLightingRGB`:
+
+```hlsl
+// Vertex shader (LiquidCore.hlsl)
+o.sunLight = v.lightData.r;
+o.blockRGB = v.lightData.gba;
+
+// Fragment shader (UberLiquidShader.shader)
+half3 litWhite = ApplyVoxelLightingRGB(half3(1,1,1), i.sunLight, i.blockRGB,
+                                        SkyLightColor, GlobalLightLevel,
+                                        minGlobalLightLevel, maxGlobalLightLevel);
+final_color *= litWhite;
+```
+
+The "lit white" trick asks: "what color would a white block be under this lighting?" and uses that as a post-multiply tint. This decouples the lighting from the procedural color pipeline entirely — any fluid type just computes its visual appearance, then multiplies by `litWhite` at the end.
+
+Water's deep/shallow blend (`lerp(_DeepColor, _ShallowColor, ...)`) switches from scalar `lightLevel` to `sunLight` only. This is correct: caves should show "deep blue" water based on absence of skylight, not based on a nearby red torch.
+
+**Known side effect — water opacity:** The `water_base_color.a` (used for blending over the refracted background) is also driven by `sunLight` only. Underground water near torches is always at `_DeepColor.a` (0.85, near-opaque) rather than being pushed toward `_ShallowColor.a` (0.75, more transparent) as it was under the old scalar path. The visual difference is ~10% opacity — subtle, but underground water will appear slightly more opaque near torches than before. This is an accepted trade-off: the alternative (using `max(sunLight, max(blockRGB))` for
+alpha only) would re-introduce the problem where colored blocklight makes water *look* shallow without actually being shallow.
+
+#### 5.2.2 Advantages
+
+- **Correct per-channel shade curves.** Each blocklight channel goes through `VoxelLightToShadow` independently, matching the nonlinear gamma correction used by all other block shaders.
+- **Correct sun/block compositing.** The `max(sunContrib, blockContrib)` per-channel logic means a red torch doesn't tint water pink during the day — sunlight wins on the lit side, blocklight wins in shadow. Identical behavior to standard blocks.
+- **Reuses `ApplyVoxelLightingRGB` directly.** No new lighting logic to maintain. Any future changes to the lighting model (new shade curve, HDR, etc.) automatically apply to fluids.
+- **New fluid types get RGB lighting for free.** A future fluid just computes its procedural color and multiplies by `litWhite` — no per-fluid lighting integration work.
+- **Clean upgrade path to Full Decomposition** (§5.3) if needed later.
+
+#### 5.2.3 Limitations
+
+The `litWhite` multiplier is computed independently from the procedural color. This means effects that modulate brightness (lava's `pulse`, foam highlights) are tinted *after* the modulation rather than *during*. The difference is the order of operations:
+
+- **Hybrid:** `(baseColor * pulse) * litWhite` — pulse changes brightness, then lighting tints the result.
+- **Full Decomposition:** `ApplyVoxelLightingRGB(baseColor * pulse, ...)` — pulse and lighting interact through the shade curve together.
+
+In practice, lava's pulse is a subtle oscillation (0.9–1.1 range), so the per-channel difference is ~1-2 RGB values under heavily saturated colored light — imperceptible to the player.
+
+#### 5.2.4 V2F Changes
+
+| Interpolator | Before                      | After                       |
+|--------------|-----------------------------|-----------------------------|
+| `TEXCOORD4`  | `float lightLevel` (scalar) | `float sunLight` (sky only) |
+| `TEXCOORD9`  | —                           | `half3 blockRGB` (new)      |
+
+Total interpolator count increases from 9 (`TEXCOORD0–8`) to 10 (`TEXCOORD0–9`). Well within hardware limits.
+
+### 5.3 Future Upgrade: Full Decomposition (Option 1)
+
+If a future fluid type requires lighting to interact *within* the procedural color pipeline (not as a post-multiply), the Hybrid approach can be upgraded per-fluid to Full Decomposition without any structural changes.
+
+#### 5.3.1 Design
+
+Instead of computing `litWhite` and multiplying at the end, each fluid type manually wires `sunLight` and `blockRGB` into its own procedural color logic at the exact points where lighting should interact.
+
+For water, this means splitting the lighting into two contributions applied at different stages:
+
+```hlsl
+// 1. Sky-driven depth blend (unchanged from Hybrid)
+half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
+
+// 2. Compute procedural surface color (waves, foam, shore effects)
+//    ... existing EvaluateWater logic ...
+
+// 3. Apply lighting per-channel THROUGH the procedural color
+half3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
+final_color = ApplyVoxelLightingRGB(final_color, i.sunLight, i.blockRGB,
+                                     SkyLightColor, GlobalLightLevel,
+                                     minGlobalLightLevel, maxGlobalLightLevel);
+final_color *= i.shadowMultiplier;
+```
+
+For lava, the pulse modulation would move inside the lighting:
+
+```hlsl
+// Compute procedural lava color
+//    ... existing EvaluateLava logic ...
+
+lava_col *= pulse;
+
+// Apply lighting through the pulsed color
+lava_col = ApplyVoxelLightingRGB(lava_col, i.sunLight, i.blockRGB,
+                                  SkyLightColor, GlobalLightLevel,
+                                  minGlobalLightLevel, maxGlobalLightLevel);
+lava_col *= i.shadowMultiplier;
+```
+
+#### 5.3.2 Migration from Hybrid
+
+The upgrade is incremental per fluid type:
+
+1. The V2F struct (`sunLight`, `blockRGB`) and vertex shader unpacking are **identical** — no changes needed.
+2. Remove the `litWhite` post-multiply for the target fluid type.
+3. Insert `ApplyVoxelLightingRGB(proceduralColor, ...)` at the appropriate point in that fluid's fragment logic.
+4. Each fluid can be migrated independently — water can use Full Decomposition while lava stays on Hybrid.
+
+#### 5.3.3 When to Upgrade
+
+Full Decomposition is only worth the per-fluid maintenance cost when:
+
+- A fluid has brightness-varying procedural effects (beyond lava's subtle pulse) that interact visibly with saturated colored light.
+- A fluid uses emissive effects that should *not* be darkened by the lighting multiplier (e.g., a glowing acid fluid that emits its own light — the emission portion should bypass the shade curve).
+- Visual fidelity requirements increase beyond the Hybrid's ~99% accuracy.
+
+For standard water and lava, the Hybrid approach is sufficient.

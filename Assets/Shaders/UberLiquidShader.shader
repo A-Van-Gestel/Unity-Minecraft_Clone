@@ -93,8 +93,9 @@ Shader "Minecraft/UberLiquidShader"
                 if (!unity_IsEditorPlaying) finalLiquidType = _EditorPreviewType;
                 #endif
 
-                float shade = CalculateVoxelShade(i.lightLevel,
-                                                  GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
+                half3 litWhite = ApplyVoxelLightingRGB(half3(1, 1, 1), i.sunLight, i.blockRGB,
+                                                       SkyLightColor,
+                                                       GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // --- FLOW MAPPING TIME SETUP ---
                 float time0, time1, weight0, weight1;
@@ -127,9 +128,8 @@ Shader "Minecraft/UberLiquidShader"
                     float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
                     lava_col *= pulse;
 
-                    // Apply gamma shadow in linear space using shared helper
-                    lava_col *= CalculateLinearVoxelShadow(shade);
-
+                    // Lava is self-luminous — skip litWhite tinting so the
+                    // procedural color (cracks, pulse, crust) renders unmodified.
                     lava_col *= i.shadowMultiplier;
                     return lerp(background, half4(lava_col, 1.0), 0.95);
                 }
@@ -165,12 +165,10 @@ Shader "Minecraft/UberLiquidShader"
 
                     half3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
 
-                    // Apply gamma shadow in linear space using shared helper
-                    final_color *= CalculateLinearVoxelShadow(shade);
-
+                    final_color *= litWhite;
                     final_color *= i.shadowMultiplier;
 
-                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
+                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
                     return lerp(background, half4(final_color, 1.0), water_base_color.a);
                 }
             }
