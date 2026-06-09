@@ -190,46 +190,59 @@ JSON file at save folder root containing world metadata and player state.
 
 ```json
 {
-  "Version": 1,
-  "WorldName": "My World",
-  "Seed": 12345,
-  "CreationDate": 638400000000000000,
-  "LastPlayed": 638400000000000000,
-  "WorldState": {
-    "TimeOfDay": 0.5
+  "version": 11,
+  "worldName": "My World",
+  "seed": 12345,
+  "chunkHeight": 128,
+  "chunkWidth": 16,
+  "worldSizeInChunks": 100,
+  "worldType": 1,
+  "spawnPosition": {
+    "_chunkX": 50,
+    "_chunkZ": 50,
+    "localPosition": {
+      "x": 0.0,
+      "y": 72.0,
+      "z": 0.0
+    }
   },
-  "Player": {
-    "Position": {
+  "creationDate": 638400000000000000,
+  "lastPlayed": 638400000000000000,
+  "worldState": {
+    "timeOfDay": 0.5
+  },
+  "player": {
+    "position": {
       "x": 10.5,
       "y": 70.0,
       "z": -5.5
     },
-    "Rotation": {
+    "rotation": {
       "x": 0.0,
       "y": 90.0,
       "z": 0.0
     },
-    "Capabilities": {
-      "IsFlying": false,
-      "IsNoclipping": false
+    "capabilities": {
+      "isFlying": false,
+      "isNoclipping": false
     },
-    "Inventory": [
+    "inventory": [
       {
-        "Slot": 0,
-        "ID": 14,
-        "Count": 64
+        "slotIndex": 0,
+        "itemID": 14,
+        "amount": 64
       },
       {
-        "Slot": 1,
-        "ID": 3,
-        "Count": 12
+        "slotIndex": 1,
+        "itemID": 3,
+        "amount": 12
       }
     ],
     // Null if empty
     "CursorItem": {
-      "ID": 5,
-      "Count": 64,
-      "OriginSlot": 2
+      "itemID": 5,
+      "amount": 64,
+      "originSlotIndex": 2
     }
   }
 }

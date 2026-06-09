@@ -175,6 +175,25 @@ public class World : MonoBehaviour
     public bool IsWorldLoaded => _isWorldLoaded;
 
     /// <summary>
+    /// The canonical, persisted world spawn point in voxel coordinates.
+    /// Set during initial generation via <see cref="SetSpawnPoint"/>;
+    /// saved/loaded via level.dat.
+    /// </summary>
+    public ChunkRelativePosition WorldSpawnPoint { get; private set; }
+
+    /// <summary>
+    /// Sets the world's canonical spawn point. This is the position used for
+    /// initial spawning and future respawn mechanics (e.g. beds).
+    /// The change is persisted to level.dat on the next save.
+    /// </summary>
+    /// <param name="relativePosition">The spawn point in chunk-relative coordinates.</param>
+    public void SetSpawnPoint(ChunkRelativePosition relativePosition)
+    {
+        WorldSpawnPoint = relativePosition;
+        Debug.Log($"[World] Spawn point set to {relativePosition}");
+    }
+
+    /// <summary>
     /// Runtime toggle for chunk border visualization. Toggled by the player input action;
     /// not persisted to settings because it is transient debug state.
     /// </summary>
@@ -399,6 +418,7 @@ public class World : MonoBehaviour
         // 3. Load Global Metadata (Level.dat & Pending Mods)
         // Only load if it's NOT a new game AND Persistence is actually enabled.
         WorldTypeID loadedWorldType = WorldTypeID.Legacy; // Default for old saves / new legacy games
+        bool isEditorReplay = false;
         if (!isNewGame && settings.EnablePersistence)
         {
             // Load Pending Mods
@@ -416,12 +436,27 @@ public class World : MonoBehaviour
                 loadedWorldType = metadata.worldType;
             }
         }
+        else if (isNewGame && settings.EnablePersistence)
+        {
+            // Editor re-play: IsNewGame defaults to true when hitting Play directly in
+            // the World scene, but the world may already have a persisted save from a
+            // previous session. Detect this early so the world type and spawn point are
+            // restored from the save instead of using fresh-game defaults.
+            WorldSaveData existingMeta = SaveSystem.LoadWorldMetadata(worldName, IsVolatileMode);
+            if (existingMeta != null)
+            {
+                isEditorReplay = true;
+                loadedWorldType = existingMeta.worldType;
+                WorldSpawnPoint = existingMeta.spawnPosition;
+                Debug.Log($"[World] Editor re-play detected — restoring persisted spawn point: {WorldSpawnPoint}");
+            }
+        }
 
         // Initialize world seed
         Random.InitState(VoxelData.Seed);
 
         // --- DETERMINE WORLD TYPE ---
-        WorldTypeID typeToLoad = isNewGame
+        WorldTypeID typeToLoad = isNewGame && !isEditorReplay
             ? WorldLaunchState.SelectedWorldType
             : loadedWorldType;
 
@@ -456,9 +491,18 @@ public class World : MonoBehaviour
         Vector3 savedPlayerPosition = new Vector3();
         if (!wasSaveLoaded)
         {
-            // Set initial spawnPosition to the center of the world for X & Z, and top of the world for Y.
-            spawnPosition = new Vector3Int(VoxelData.WorldCentre, VoxelData.ChunkHeight - 1, VoxelData.WorldCentre);
-            _playerTransform.position = spawnPosition;
+            if (isEditorReplay)
+            {
+                // Spawn point was already restored from the save in step 3.
+                spawnPosition = WorldSpawnPoint.ToAbsoluteWorldPosition();
+                _playerTransform.position = spawnPosition;
+            }
+            else
+            {
+                // Set initial spawnPosition to the center of the world for X & Z, and an unresolved Y value.
+                spawnPosition = new Vector3(VoxelData.WorldCentre, ChunkRelativePosition.UNRESOLVED_HEIGHT, VoxelData.WorldCentre);
+                _playerTransform.position = spawnPosition;
+            }
         }
         else
         {
@@ -537,13 +581,28 @@ public class World : MonoBehaviour
         Debug.Log("Getting spawn position...");
         if (!wasSaveLoaded)
         {
-            spawnPosition = GetHighestVoxel(spawnPosition.ToVector3Int()) + spawnPositionOffset;
+            spawnPosition = ResolveSpawnHeight(spawnPosition);
             _playerTransform.position = spawnPosition;
+
+            if (!isEditorReplay)
+            {
+                // Set the canonical spawn point for new games to the resolved surface position.
+                SetSpawnPoint(new ChunkRelativePosition(spawnPosition));
+            }
         }
         else
         {
             Debug.Log($"Re-using last player location from loaded save. {savedPlayerPosition}");
             _playerTransform.position = savedPlayerPosition;
+
+            // Ensure the canonical spawn point is fully resolved (e.g. from a v10->v11 migration).
+            Vector3 unresolvedSpawn = WorldSpawnPoint.ToAbsoluteWorldPosition();
+            Vector3 resolvedSpawn = ResolveSpawnHeight(unresolvedSpawn);
+            if (resolvedSpawn != unresolvedSpawn)
+            {
+                SetSpawnPoint(new ChunkRelativePosition(resolvedSpawn));
+                Debug.Log($"[World] Lazily resolved canonical spawn point to {WorldSpawnPoint}");
+            }
         }
 
         Debug.Log("Initializing clouds...");
@@ -2676,6 +2735,26 @@ public class World : MonoBehaviour
     // ── Diagnostic Tools ───────────────────────────────────────────────
 
     #endregion
+
+    /// <summary>
+    /// Resolves a spawn position whose Y coordinate is unresolved (at or below
+    /// <see cref="ChunkRelativePosition.UNRESOLVED_HEIGHT"/>) by raycasting
+    /// downward from the top of the world to find the surface, then adding the
+    /// spawn offset. Returns the original position unchanged if already resolved.
+    /// </summary>
+    /// <param name="position">The world-space position to resolve.</param>
+    /// <returns>The surface-resolved position (with spawn offset applied), or the
+    /// original position if it was already resolved.</returns>
+    private Vector3 ResolveSpawnHeight(Vector3 position)
+    {
+        if (position.y > ChunkRelativePosition.UNRESOLVED_HEIGHT + 1f)
+            return position;
+
+        Vector3Int posToResolve = position.ToVector3Int();
+        posToResolve.y = VoxelData.ChunkHeight - 1;
+
+        return GetHighestVoxel(posToResolve) + spawnPositionOffset;
+    }
 
     /// <summary>
     /// Finds the absolute world-space Y-coordinate of the highest solid voxel at a given X/Z position.

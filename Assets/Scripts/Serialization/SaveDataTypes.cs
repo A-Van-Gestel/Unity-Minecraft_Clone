@@ -13,6 +13,7 @@ namespace Serialization
         // Zlib = 3, // Reserved for future use (e.g. Zstd)
     }
 
+
     [Serializable]
     public class WorldSaveData
     {
@@ -41,12 +42,20 @@ namespace Serialization
         /// </summary>
         public WorldTypeID worldType;
 
+        /// <summary>
+        /// The world's canonical spawn point in chunk-relative coordinates.
+        /// Set during initial world generation; used as the fallback player position
+        /// for editor direct-scene-load and future respawn mechanics (e.g. beds).
+        /// </summary>
+        public ChunkRelativePosition spawnPosition;
+
         public long creationDate; // Ticks
         public long lastPlayed; // Ticks
 
         public WorldStateData worldState = new WorldStateData();
         public PlayerSaveData player = new PlayerSaveData();
     }
+
 
     [Serializable]
     public class WorldStateData
@@ -93,7 +102,7 @@ namespace Serialization
 
         public int amount;
 
-        // We track origin slot to try and return it there if possible, 
+        // We track origin slot to try and return it there if possible,
         // though standard logic usually just adds to first available.
         public int originSlotIndex = -1;
     }

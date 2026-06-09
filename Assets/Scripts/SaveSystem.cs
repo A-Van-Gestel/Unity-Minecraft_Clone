@@ -34,7 +34,9 @@ public static class SaveSystem
     // v10 (RGB): Strips legacy light bits from uint voxels (bits 16-23 zeroed/reserved). Introduces
     //            uniform-sky-level optimization (flags 0x00/0x02 store 1B sky level instead of full
     //            LightData). New flag 0x03 for light-only+full. See Migration_v9_to_v10_StripLightBitsAndNewFlags.cs.
-    public const int CURRENT_VERSION = 10;
+    // v10 → v11: Added spawnPosition (ChunkRelativePosition: _chunkX/_chunkZ ints + Vector3 localPosition)
+    //            to level.dat for persistent spawn point support. See Migration_v10_to_v11_SpawnPosition.cs.
+    public const int CURRENT_VERSION = 11;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.
@@ -74,6 +76,7 @@ public static class SaveSystem
             worldType = world.ActiveWorldType != null ? world.ActiveWorldType.typeID : WorldTypeID.Legacy,
             creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.UtcNow.Ticks,
             lastPlayed = DateTime.UtcNow.Ticks,
+            spawnPosition = world.WorldSpawnPoint,
 
             worldState = new WorldStateData
             {
@@ -152,10 +155,13 @@ public static class SaveSystem
         world.globalLightLevel = data.worldState.timeOfDay;
         world.SetGlobalLightValue(); // Apply to shader immediately
 
+        // 2. Restore Spawn Point
+        world.SetSpawnPoint(data.spawnPosition);
+
         // If the player doesn't exist, do nothing
         if (world.player == null) return;
 
-        // 2. Apply Player State
+        // 3. Apply Player State
         world.player.LoadSaveData(data.player);
 
         // Apply Inventory

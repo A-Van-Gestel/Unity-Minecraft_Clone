@@ -33,6 +33,7 @@ namespace Serialization.Migration
             new MigrationV7ToV8RGBLightQueues(),
             new MigrationV8ToV9LightDataSerialization(),
             new MigrationV9ToV10StripLightBitsAndNewFlags(),
+            new MigrationV10ToV11SpawnPosition(),
         };
 
         // Track the path of the backup we create so we can roll it back if needed.
