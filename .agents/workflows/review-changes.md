@@ -37,12 +37,12 @@ For every changed file, run the following checks. A finding in any gate downgrad
 
 ### 4. Use the knowledge graph (if available)
 
-If the `code-review-graph` MCP is connected, use these tools to scope the review:
+If the CodeGraph MCP is connected, use these tools to scope the review:
 
-- `detect_changes` for risk-scored change analysis.
-- `get_affected_flows` for impacted execution paths.
-- `get_impact_radius` for blast radius of each changed node.
-- `query_graph` pattern=`tests_for` for test coverage of each changed function.
+- `codegraph_explore` on the core changed symbols to see how they fit into the broader system architecture.
+- `codegraph_impact` on modified classes/structs to see their blast radius.
+- `codegraph_callers` to verify if existing execution paths might break due to signature or logic changes.
+- `codegraph_callers` to find dependent test files to check if test coverage exists for the modified functions.
 
 If the MCP is unavailable, fall back to Grep/Read for the same information.
 
@@ -66,7 +66,7 @@ Output findings grouped by severity. Each finding includes: what changed, why it
 - [file:line] <finding> — <fix>
 
 ### Test coverage
-<per-file coverage summary from query_graph tests_for, or "not checked" if MCP unavailable>
+<Affected tests based on codegraph_callers/codegraph_impact, or "not checked" if MCP unavailable>
 
 ### Recommendation
 <one of: MERGE / HOLD — <brief reason>>

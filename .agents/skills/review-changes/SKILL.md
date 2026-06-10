@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Reviews pending changes in this Unity/Burst voxel engine for Burst compliance, hot-path GC allocations, pool usage, architectural constraint violations, and serialization compatibility, using the code-review-graph MCP for risk scoring. Use when the user asks to review a diff, check pending changes, prepare a PR, or verify something is safe to merge.
+description: Reviews pending changes in this Unity/Burst voxel engine for Burst compliance, hot-path GC allocations, pool usage, architectural constraint violations, and serialization compatibility, using the CodeGraph MCP for risk scoring. Use when the user asks to review a diff, check pending changes, prepare a PR, or verify something is safe to merge.
 ---
 
 # Change Review Protocol
@@ -18,10 +18,10 @@ Structured, risk-aware code review tuned for this voxel engine's performance and
 
 ### 1. Risk scoring via the graph
 
-- `detect_changes` — risk-scored change analysis.
-- `get_affected_flows` — impacted execution paths.
-- `get_impact_radius` — blast radius of each changed node.
-- `query_graph` pattern="tests_for" — test coverage for each changed function.
+- Use standard file reads or `git diff` to see what changed.
+- `codegraph_impact` — Run on modified symbols to understand their blast radius.
+- `codegraph_callers` — Check what execution paths are affected by the changes.
+- `codegraph_explore` — Contextualize how the changed code fits into the broader architecture without reading entire files.
 
 ### 2. Project-specific review gates
 
@@ -49,7 +49,7 @@ Group findings by severity:
 For each finding, include:
 
 - What changed and why it matters (1 sentence).
-- Test coverage status (from `query_graph` tests_for).
+- Impact radius (from CodeGraph)
 - Specific fix or alternative.
 
 End with a single merge/hold recommendation.

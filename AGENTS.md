@@ -87,48 +87,54 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 - **Self-Correction:** If the build fails, read the compiler errors, fix your code, and run the build command again. Do not ask the user to test broken code.
 - **Doc Sync:** When a change alters behavior described in a `Documentation/Architecture/`, `Design/`, or `Guides/` doc — or ships a feature drafted in a Design doc — use the `docs-sync` skill to update the matching doc in the same commit. Skip for refactors, bug fixes that preserve documented behavior, and test-only changes.
 
-<!-- code-review-graph MCP tools -->
+<!-- CodeGraph MCP tools -->
 
-## MCP Tools: code-review-graph
+## MCP Tools: CodeGraph
 
-**IMPORTANT: This project has a knowledge graph. ALWAYS use the
-code-review-graph MCP tools BEFORE using Grep/Glob/Read to explore
-the codebase.** The graph is faster, cheaper (fewer tokens), and gives
-you structural context (callers, dependents, test coverage) that file
-scanning cannot.
+**IMPORTANT: This project uses CodeGraph for semantic code intelligence. ALWAYS use the `codegraph_*` MCP tools BEFORE using Grep/Glob/Read to explore the codebase.** CodeGraph gives you instant structural context (callers, dependents, exact signatures) without expensive and slow file scanning.
 
-### When to use graph tools FIRST
+### Where CodeGraph excels (use FIRST)
 
-- **Exploring code**: `semantic_search_nodes` or `query_graph` instead of Grep
-- **Understanding impact**: `get_impact_radius` instead of manually tracing imports
-- **Code review**: `detect_changes` + `get_review_context` instead of reading entire files
-- **Finding relationships**: `query_graph` with callers_of/callees_of/imports_of/tests_for
-- **Architecture questions**: `get_architecture_overview` + `list_communities`
+- **Initial orientation**: "How does X work?", "How does X reach Y?", understanding a new area of the codebase. `codegraph_explore` returns verbatim source + relationship maps + blast radius in one call — far better than manually grepping and reading.
+- **Structural questions**: callers, callees, impact analysis, dynamic-dispatch hops (Unity event callbacks, `Action<T>` delegates, job scheduling chains) that grep can't follow.
+- **Architecture overview**: `codegraph_explore` for high-level "how does this area work" + `codegraph_files` for indexed file structure.
+- **Symbol lookup**: `codegraph_search` to quickly locate functions/classes by name.
 
-Fall back to Grep/Glob/Read **only** when the graph doesn't cover what you need.
+### Where CodeGraph falls short (use Grep/Read instead)
+
+- **Diff-based work** (code reviews, targeted bug fixes): The entry point is `git diff` + `Read` of specific lines, not symbol exploration. CodeGraph is useful for the *tracing* phase (does this change break callers? what behavior does this rely on?) but not for reading the diff itself.
+- **Multi-file implementation tasks**: Tasks spanning many files across layers (e.g., a new block type touching data, meshing, lighting, and serialization) can exhaust token budget during orientation, leaving nothing for the implementation phase. Plan explore calls carefully — use them for the highest-value questions first, then switch to Grep/Read.
+- **Precise surgical edits**: Once you know *what* to change, you need exact line numbers and full file context. Use `Read` directly.
+- **Exhaustive call-site auditing**: When you need to find *every* caller of a changed function (e.g., to verify no call site is broken), `Grep` is more reliable than explore's capped results. Use `codegraph_callers` for a quick overview, but verify with Grep for completeness.
+- **Relevance noise**: Broad explore queries can return irrelevant files (unrelated modules matching common terms), consuming token budget without value. Use specific symbol names rather than vague topic queries.
+
+### Recommended workflow
+
+1. **Orient with CodeGraph** (1–2 explore calls): Understand the data model, flow, and relationships.
+2. **Switch to Grep/Read for detail work**: Find all call sites, read exact file contents, make edits.
+3. **Use targeted CodeGraph tools as needed**: `codegraph_callers`/`codegraph_callees`/`codegraph_impact` for specific structural queries during implementation.
 
 ### Key Tools
 
-| Tool                        | Use when                                               |
-|-----------------------------|--------------------------------------------------------|
-| `detect_changes`            | Reviewing code changes — gives risk-scored analysis    |
-| `get_review_context`        | Need source snippets for review — token-efficient      |
-| `get_impact_radius`         | Understanding blast radius of a change                 |
-| `get_affected_flows`        | Finding which execution paths are impacted             |
-| `query_graph`               | Tracing callers, callees, imports, tests, dependencies |
-| `semantic_search_nodes`     | Finding functions/classes by name or keyword           |
-| `get_architecture_overview` | Understanding high-level codebase structure            |
-| `refactor_tool`             | Planning renames, finding dead code                    |
+| Tool                            | Use when                                                                                                                                                                                                                              |
+|---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `codegraph_explore`             | **Primary for orientation.** Answer "how does X work" or survey an area in one call. Returns verbatim source, relationship map, and blast radius. Surfaces dynamic-dispatch hops grep can't follow. Save for highest-value questions. |
+| `codegraph_impact`              | Use before editing to understand the blast radius of changing a core struct or interface (crucial for DOTS/Burst architectures).                                                                                                      |
+| `codegraph_callers` / `callees` | Walk call flows and execution paths. Use `callers` for a quick overview; verify with Grep when exhaustive coverage matters.                                                                                                          |
+| `codegraph_search`              | Find symbols by name across the entire codebase instantly (FTS5 full-text search).                                                                                                                                                   |
+| `codegraph_node`                | Get one specific symbol's full details and source code (returns every overload for ambiguous names).                                                                                                                                  |
+| `codegraph_files`               | Get indexed file structure (faster than filesystem scanning).                                                                                                                                                                        |
+| `codegraph_status`              | Check index health and statistics.                                                                                                                                                                                                   |
 
-### Token efficiency
+### Syncing & Staleness
 
-- Start every graph-driven task with `get_minimal_context(task="<your task>")` before any other graph tool.
-- Use `detail_level="minimal"` on all calls; escalate to `"standard"` only when minimal is insufficient.
-- Target: complete any review/debug/refactor task in ≤5 tool calls and ≤800 output tokens.
+CodeGraph auto-syncs in the background via native OS file watchers — you do not need to run manual update or sync commands. However, there is a brief debounce window (~2s) after edits. During that window, if a tool response references a still-pending file, it will prepend a **⚠️ banner** naming the file and telling you to `Read` it directly for live content. Pending files *not* referenced by the response appear as a small footer instead. **When you see a staleness banner, Read the named file(s) directly** — don't trust the graph's snapshot for those specific files until the sync completes.
 
-The graph auto-updates on file changes via hooks — no manual rebuild needed.
+Trust CodeGraph for structural queries — don't re-verify with Grep unless you need exhaustive call-site coverage (e.g., confirming every caller before a breaking change).
 
 For task-specific workflows, see the `voxel-debugging`, `refactor-safely`, and `review-changes` skills under `.agents/skills/`.
+
+<!-- Unity MCP tools -->
 
 ## MCP Tools: unity-mcp (Live Unity Editor)
 

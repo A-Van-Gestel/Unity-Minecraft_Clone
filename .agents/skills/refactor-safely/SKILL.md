@@ -1,11 +1,11 @@
 ---
 name: refactor-safely
-description: Plans and executes safe renames, file moves, and dead-code removal in this Unity/Burst voxel engine using the code-review-graph MCP. Use when the user asks to rename a class/method/field/file, move code between folders, split a large file, extract a type, or clean up suspected dead code.
+description: Plans and executes safe renames, file moves, and dead-code removal in this Unity/Burst voxel engine using the CodeGraph MCP. Use when the user asks to rename a class/method/field/file, move code between folders, split a large file, extract a type, or clean up suspected dead code.
 ---
 
 # Safe Refactor Protocol
 
-This voxel engine has Unity-specific and Burst-specific refactor landmines that generic refactoring tools do not catch. Use the code-review-graph MCP for structural analysis, then layer the project-specific guardrails on top before applying anything.
+This voxel engine has Unity-specific and Burst-specific refactor landmines that generic refactoring tools do not catch. Use the CodeGraph MCP for structural analysis, then layer the project-specific guardrails on top before applying anything.
 
 ## When to use this skill
 
@@ -19,31 +19,29 @@ This voxel engine has Unity-specific and Burst-specific refactor landmines that 
 
 ### 1. Plan with the graph (preview only)
 
-- `refactor_tool` mode="rename" — preview every affected location before touching anything.
-- `refactor_tool` mode="dead_code" — find unreferenced code.
-- `refactor_tool` mode="suggest" — community-driven decomposition suggestions.
-- `get_impact_radius` — understand blast radius before proceeding.
-- `get_affected_flows` — ensure no critical execution path breaks.
-- `find_large_functions` — identify decomposition targets.
+- `codegraph_search` — Find the exact symbol and its ID.
+- `codegraph_callers` — See everywhere the symbol is used to ensure you catch all references.
+- `codegraph_impact` — Understand the blast radius before proceeding (e.g., changing a struct might impact downstream Burst jobs).
+- `codegraph_explore` — Survey the surrounding architecture if you are splitting a large file or extracting a type.
 
 ### 2. Project-specific guardrails (verify BEFORE applying)
 
-Generic rename/move tools miss these. Check each before `apply_refactor_tool`:
+Generic rename/move tools miss these. Check each before applying edits:
 
-- **`.meta` file rule:** Moving or renaming a `.cs` file MUST also move/rename the sibling `.meta` file, or use `git mv`. A missing `.meta` migration silently breaks prefab/scene GUID references — the code compiles, but prefabs show "missing script" in the Editor. This is one of the most common and hardest-to-diagnose Unity refactor failures.
-- **Burst job compile re-verification:** Any rename of a field, struct, or type touched by code under `Assets/Scripts/Jobs/` requires confirming the job still Burst-compiles. `detect_changes` reports the C# rename but will not catch a newly-introduced Burst incompatibility (e.g. a renamed field now shadows a managed type, or a helper changed its signature to return a non-blittable). Run `dotnet build "Assembly-CSharp.csproj"` and, if possible, ask the user to confirm the Burst Inspector is still clean after the refactor.
-- **Architectural constraints:** Reject any refactor that introduces reference types per voxel, replaces sub-chunk meshing with monolithic columns, swaps the BFS flood-fill lighting for something else, or routes terrain data through `BinaryFormatter`/JSON/XmlSerializer. See the "Core Architecture Constraints" section of `AGENTS.md` for the full list.
-- **Public API → scene/prefab data break:** Renaming a `[SerializeField] private` field or a public field referenced by a ScriptableObject/prefab is a *data* break, not a compile break. Unity silently resets the field to its default on next load. Before renaming such fields, either (a) `[FormerlySerializedAs("oldName")]` preserves existing data, or (b) grep `.unity` / `.prefab` / `.asset` files for the old name so you know what you are about to break.
-- **Docstring & region preservation:** Per `AGENTS.md`, existing `///` XML docstrings, inline comments, and `#region` tags must survive the refactor. Use targeted diffs, not full file rewrites.
+- **`.meta` file rule:** Moving or renaming a `.cs` file MUST also move/rename the sibling `.meta` file, or use `git mv`. A missing `.meta` migration silently breaks prefab/scene GUID references.
+- **Burst job compile re-verification:** Any rename of a field, struct, or type touched by code under `Assets/Scripts/Jobs/` requires confirming the job still Burst-compiles. Run `dotnet build "Assembly-CSharp.csproj"` and ask the user to confirm the Burst Inspector is clean.
+- **Architectural constraints:** Reject any refactor that introduces reference types per voxel, replaces sub-chunk meshing with monolithic columns, or routes terrain data through JSON/XmlSerializer. See `AGENTS.md`.
+- **Public API → scene/prefab data break:** Renaming a `[SerializeField] private` field or a public field referenced by a ScriptableObject/prefab is a *data* break. Either (a) use `[FormerlySerializedAs("oldName")]` or (b) grep `.unity` / `.prefab` / `.asset` files for the old name.
+- **Docstring & region preservation:** Existing `///` XML docstrings, inline comments, and `#region` tags must survive the refactor. Use targeted diffs.
 
 ### 3. Apply and verify
 
-- `apply_refactor_tool` with the refactor_id from step 1.
-- `detect_changes` after — confirm the refactor did what you expected and nothing else.
-- Run `dotnet build "Assembly-CSharp.csproj"`. If the refactor touches any file under `Assets/Editor/`, also run `dotnet build "Assembly-CSharp-Editor.csproj"`. If either build fails, fix the errors before reporting the refactor done.
-- If `.cs` files moved, confirm `.meta` files moved with them — `git status` should show renames, not delete + add.
-- If public serialized fields were renamed, confirm either `[FormerlySerializedAs]` was added or the user has accepted the data-break.
+- Make the code edits using standard file write tools.
+- Wait ~2 seconds for CodeGraph to automatically sync the changes in the background.
+- `codegraph_status` — Check that there are no pending syncs.
+- `codegraph_callers` — Re-run on the newly named symbol to ensure references survived and re-linked properly.
+- Run `dotnet build "Assembly-CSharp.csproj"`. If touching Editor code, run `dotnet build "Assembly-CSharp-Editor.csproj"`.
 - **Unity MCP verification (unity-mcp):** After the refactor compiles:
-    - `Unity_ManageAsset` → `GetInfo` on moved/renamed assets to confirm the GUID is preserved (same GUID = references survived).
-    - `Unity_ManageGameObject` → `get_components` on affected prefab instances in the scene to verify component references didn't break (look for `null` where a reference should exist).
+    - `Unity_ManageAsset` → `GetInfo` on moved/renamed assets to confirm the GUID is preserved.
+    - `Unity_ManageGameObject` → `get_components` on affected prefab instances to verify component references didn't break.
     - `Unity_ReadConsole` — check for "missing script" or "missing reference" warnings that indicate a GUID break the compiler can't catch.

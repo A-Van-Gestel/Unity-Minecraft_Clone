@@ -17,12 +17,11 @@ When debugging complex systems in this voxel engine, you must act as a Senior Sy
 ## How to use it
 
 0. **CHECK KNOWN BUGS FIRST:** Before anything else, scan the relevant category file in `@Documentation/Bugs/` (e.g. `LIGHTING_BUGS.md`, `FLUID_BUGS.md`, `CHUNK_MANAGEMENT_BUGS.md`, `JOB_SYSTEM_BUGS.md`) and `_FIXED_BUGS.md` to see if the symptom matches an open issue, a known limitation, or a previously-fixed bug that may have regressed.
-1. **LOCATE THE CODE:** Use the code-review-graph MCP to find the suspected surface area before instrumenting.
-    - `semantic_search_nodes` to find code related to the symptom (e.g. "light propagation", "fluid flow", "chunk meshing").
-    - `query_graph` with `callers_of` / `callees_of` to trace call chains into and out of the suspected function.
-    - `get_impact_radius` on suspected files to see what else depends on them.
-    - `detect_changes` first — recent changes are the most common source of new bugs; check them before assuming a deep-rooted issue.
-    - `get_flow` to visualize full execution paths through the suspected area.
+1. **LOCATE THE CODE:** Use the CodeGraph MCP to find the suspected surface area before instrumenting.
+    - `codegraph_search` to find code related to the symptom (e.g., "propagateLight", "fluidLevel").
+    - `codegraph_callers` / `codegraph_callees` to trace call chains into and out of the suspected function.
+    - `codegraph_explore` to view the relevant implementations and interfaces grouped contextually.
+    - `codegraph_impact` on suspected files/structs to see what else depends on them before altering them.
 2. **INSPECT LIVE STATE (unity-mcp):** Before guessing, use the Unity MCP to observe what's actually happening:
     - `Unity_ReadConsole` — check for errors/warnings/exceptions that correlate with the symptom. Filter by type (`Error`, `Warning`) and text.
     - `Unity_ManageGameObject` — find the affected chunk/object and inspect its component state, including `[SerializeField]` values not visible from code reads (e.g. `find` by name, then `get_components` with `include_non_public_serialized: true`).

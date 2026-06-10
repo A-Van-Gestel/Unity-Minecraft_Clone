@@ -91,8 +91,11 @@ crashlytics-build.properties
 # Repomix
 /repomix-output.*
 
-# Added by code-review-graph
-.code-review-graph/
+# Added by tirth8205/code-review-graph
+/.code-review-graph/
+
+# colbymchenry/CodeGraph
+/.codegraph/
 
 # Python tooling (see Tools/Python/, python-scripting skill)
 /Tools/Python/.venv/
