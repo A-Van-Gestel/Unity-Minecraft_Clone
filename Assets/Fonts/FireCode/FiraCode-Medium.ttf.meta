@@ -10,7 +10,11 @@ TrueTypeFontImporter:
   includeFontData: 1
   fontNames:
   - Fira Code
-  fallbackFontReferences: []
+  fallbackFontReferences:
+  - {fileID: 12800000, guid: 05170da1c21bacf428eb753bbc067cbc, type: 3}
+  - {fileID: 12800000, guid: 74215dd26a33e0f46ae7a10da2b5e9f7, type: 3}
+  - {fileID: 12800000, guid: 68236961f9a3b6544b1cc80dd7c69b75, type: 3}
+  - {fileID: 12800000, guid: 7aa26428568bb6c47866052cf27ee68c, type: 3}
   customCharacters: 
   fontRenderingMode: 0
   ascentCalculationMode: 1

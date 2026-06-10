@@ -1,4 +1,5 @@
 using Data;
+using Input;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -89,8 +90,17 @@ public class InputManager : MonoBehaviour
 
     #region Gameplay Properties
 
-    /// <summary>WASD / stick movement as a normalized Vector2.</summary>
-    public Vector2 MoveInput => _moveAction.ReadValue<Vector2>();
+    /// <summary>WASD / stick movement as a normalized Vector2. Composited with touch joystick on mobile.</summary>
+    public Vector2 MoveInput
+    {
+        get
+        {
+            Vector2 result = _moveAction.ReadValue<Vector2>();
+            if (TouchControls.Instance != null)
+                result += TouchControls.Instance.MoveInput;
+            return Vector2.ClampMagnitude(result, 1f);
+        }
+    }
 
     /// <summary>
     /// Normalization factor to convert raw <c>Mouse.delta</c> pixel values to
@@ -99,20 +109,33 @@ public class InputManager : MonoBehaviour
     /// </summary>
     private const float MOUSE_DELTA_SCALE = 0.1f;
 
-    /// <summary>Mouse delta / right-stick look, scaled to match legacy Input Manager sensitivity.</summary>
-    public Vector2 LookInput => _lookAction.ReadValue<Vector2>() * MOUSE_DELTA_SCALE;
+    /// <summary>Mouse delta / right-stick look, scaled to match legacy Input Manager sensitivity. Composited with touch look on mobile.</summary>
+    public Vector2 LookInput
+    {
+        get
+        {
+            Vector2 result = _lookAction.ReadValue<Vector2>() * MOUSE_DELTA_SCALE;
+            if (TouchControls.Instance != null)
+                result += TouchControls.Instance.LookDelta;
+            return result;
+        }
+    }
 
     /// <summary><c>true</c> during the frame the Jump button was first pressed.</summary>
-    public bool JumpPressed => _jumpAction.WasPressedThisFrame();
+    public bool JumpPressed => _jumpAction.WasPressedThisFrame()
+                               || (TouchControls.Instance != null && TouchControls.Instance.JumpPressed);
 
     /// <summary><c>true</c> while the Jump button is held down.</summary>
-    public bool JumpHeld => _jumpAction.IsPressed();
+    public bool JumpHeld => _jumpAction.IsPressed()
+                            || (TouchControls.Instance != null && TouchControls.Instance.JumpHeld);
 
     /// <summary>Analog jump value (0 or 1 for digital bindings).</summary>
-    public float JumpValue => _jumpAction.ReadValue<float>();
+    public float JumpValue => Mathf.Max(_jumpAction.ReadValue<float>(),
+        TouchControls.Instance != null ? TouchControls.Instance.JumpValue : 0f);
 
     /// <summary>Analog crouch value (0 or 1 for digital bindings).</summary>
-    public float CrouchValue => _crouchAction.ReadValue<float>();
+    public float CrouchValue => Mathf.Max(_crouchAction.ReadValue<float>(),
+        TouchControls.Instance != null ? TouchControls.Instance.CrouchValue : 0f);
 
     /// <summary><c>true</c> during the frame the Sprint button was first pressed.</summary>
     public bool SprintPressed => _sprintAction.WasPressedThisFrame();
@@ -121,10 +144,12 @@ public class InputManager : MonoBehaviour
     public bool SprintReleased => _sprintAction.WasReleasedThisFrame();
 
     /// <summary><c>true</c> during the frame the Attack (LMB) button was first pressed.</summary>
-    public bool AttackPressed => _attackAction.WasPressedThisFrame();
+    public bool AttackPressed => _attackAction.WasPressedThisFrame()
+                                 || (TouchControls.Instance != null && TouchControls.Instance.AttackPressed);
 
     /// <summary><c>true</c> during the frame the Use (RMB) button was first pressed.</summary>
-    public bool UsePressed => _useAction.WasPressedThisFrame();
+    public bool UsePressed => _useAction.WasPressedThisFrame()
+                              || (TouchControls.Instance != null && TouchControls.Instance.UsePressed);
 
     /// <summary>Mouse scroll-wheel delta on the Y axis.</summary>
     public float ScrollValue => _scrollAction.ReadValue<Vector2>().y;
@@ -133,7 +158,8 @@ public class InputManager : MonoBehaviour
     public bool AltModifierHeld => _altModifierAction.IsPressed();
 
     /// <summary><c>true</c> during the frame the Toggle Inventory button was pressed.</summary>
-    public bool ToggleInventoryPressed => _toggleInventoryAction.WasPressedThisFrame();
+    public bool ToggleInventoryPressed => _toggleInventoryAction.WasPressedThisFrame()
+                                          || (TouchControls.Instance != null && TouchControls.Instance.ToggleInventoryPressed);
 
     /// <summary><c>true</c> during the frame the Escape button was pressed.</summary>
     public bool EscapePressed => _escapeAction.WasPressedThisFrame();
@@ -142,7 +168,8 @@ public class InputManager : MonoBehaviour
     public bool ToggleBlockHighlightPressed => _toggleBlockHighlightAction.WasPressedThisFrame();
 
     /// <summary><c>true</c> during the frame the Toggle Debug Screen button was pressed.</summary>
-    public bool ToggleDebugScreenPressed => _toggleDebugScreenAction.WasPressedThisFrame();
+    public bool ToggleDebugScreenPressed => _toggleDebugScreenAction.WasPressedThisFrame()
+                                            || (TouchControls.Instance != null && TouchControls.Instance.ToggleDebugPressed);
 
     /// <summary><c>true</c> during the frame the Save World button was pressed.</summary>
     public bool SaveWorldPressed => _saveWorldAction.WasPressedThisFrame();
@@ -151,7 +178,8 @@ public class InputManager : MonoBehaviour
     public bool ToggleChunkBordersPressed => _toggleChunkBordersAction.WasPressedThisFrame();
 
     /// <summary><c>true</c> during the frame the Toggle Flying button was pressed.</summary>
-    public bool ToggleFlyingPressed => _toggleFlyingAction.WasPressedThisFrame();
+    public bool ToggleFlyingPressed => _toggleFlyingAction.WasPressedThisFrame()
+                                       || (TouchControls.Instance != null && TouchControls.Instance.ToggleFlyingPressed);
 
     /// <summary><c>true</c> during the frame the Cycle Visualization Mode button was pressed.</summary>
     public bool CycleVisModePressed => _cycleVisModeAction.WasPressedThisFrame();
@@ -160,7 +188,8 @@ public class InputManager : MonoBehaviour
     public bool DebugCodePressed => _debugCodeAction.WasPressedThisFrame();
 
     /// <summary><c>true</c> during the frame the Toggle Noclip button was pressed.</summary>
-    public bool ToggleNoclipPressed => _toggleNoclipAction.WasPressedThisFrame();
+    public bool ToggleNoclipPressed => _toggleNoclipAction.WasPressedThisFrame()
+                                       || (TouchControls.Instance != null && TouchControls.Instance.ToggleNoclipPressed);
 
     #endregion
 
@@ -307,6 +336,14 @@ public class InputManager : MonoBehaviour
         _pointAction = _uiMap.FindAction("Point", throwIfNotFound: true);
         _uiClickAction = _uiMap.FindAction("Click", throwIfNotFound: true);
         _uiRightClickAction = _uiMap.FindAction("RightClick", throwIfNotFound: true);
+
+        // --- Touch Controls (mobile only) ---
+        if (Application.isMobilePlatform)
+        {
+            GameObject touchObj = new GameObject("TouchControls");
+            touchObj.transform.SetParent(transform);
+            touchObj.AddComponent<TouchControls>();
+        }
     }
 
     private void OnEnable()

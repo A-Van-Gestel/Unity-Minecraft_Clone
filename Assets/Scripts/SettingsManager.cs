@@ -524,7 +524,37 @@ public static class SettingsManager
 {
     private const string KEY_DEV = "dev";
 
-    private static readonly string s_settingsFilePath = Application.dataPath + "/settings.json";
+    private static readonly string s_settingsFilePath = GetSettingsFilePath();
+
+    private static string GetSettingsFilePath()
+    {
+        string primaryPath = Application.dataPath + "/settings.json";
+        // ReSharper disable once UnusedVariable
+        string fallbackPath = Application.persistentDataPath + "/settings.json";
+
+#if UNITY_EDITOR
+        return primaryPath;
+#elif !UNITY_STANDALONE
+        // Non-desktop devices (Android, iOS, WebGL, Consoles) strictly use persistent path
+        return fallbackPath;
+#else
+        // Desktop builds: Try data path first for portability, fallback to persistent if read-only
+        if (File.Exists(fallbackPath))
+            return fallbackPath;
+
+        try
+        {
+            string testFile = Application.dataPath + "/.permission_test";
+            File.WriteAllText(testFile, "");
+            File.Delete(testFile);
+            return primaryPath;
+        }
+        catch
+        {
+            return fallbackPath;
+        }
+#endif
+    }
 
     /// <summary>
     /// Cached singleton Settings instance. Populated on first LoadSettings() call,
