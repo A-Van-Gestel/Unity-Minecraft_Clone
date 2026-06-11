@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using Data.Enums;
+using Input;
 using Serialization;
 using UI;
 using UI.Enums;
@@ -21,8 +22,10 @@ public class Toolbar : MonoBehaviour
         _input = InputManager.Instance;
 
         byte index = 1;
-        foreach (UIItemSlot s in slots)
+        for (int i = 0; i < slots.Length; i++)
         {
+            UIItemSlot s = slots[i];
+
             // Attach tooltip trigger before linking the ItemSlot so the
             // first UpdateSlot() call finds it and sets the text immediately.
             TooltipTrigger trigger = s.gameObject.AddComponent<TooltipTrigger>();
@@ -31,6 +34,14 @@ public class Toolbar : MonoBehaviour
             ItemStack stack = new ItemStack(index, Random.Range(2, 65));
             ItemSlot slot = new ItemSlot(s, stack);
             index++;
+
+            // On mobile, make toolbar slots tappable to select them.
+            if (Application.isMobilePlatform)
+            {
+                ToolbarSlotButton btn = s.gameObject.AddComponent<ToolbarSlotButton>();
+                btn.SlotIndex = i;
+                btn.Toolbar = this;
+            }
         }
     }
 
@@ -68,6 +79,19 @@ public class Toolbar : MonoBehaviour
                 SetItemSlot();
             }
         }
+    }
+
+    /// <summary>
+    /// Selects the given hotbar slot index and updates the highlight position.
+    /// Called by keyboard/scroll input and by <see cref="ToolbarSlotButton"/> on mobile.
+    /// </summary>
+    /// <param name="index">Slot index from 0 to <c>slots.Length - 1</c>.</param>
+    public void SelectSlot(int index)
+    {
+        if (index < 0 || index >= slots.Length) return;
+
+        slotIndex = index;
+        SetItemSlot();
     }
 
     private void SetItemSlot()

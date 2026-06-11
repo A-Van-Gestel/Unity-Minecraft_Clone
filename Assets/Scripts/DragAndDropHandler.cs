@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using JetBrains.Annotations;
 using Serialization;
 using UI;
@@ -6,38 +5,80 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
+/// <summary>
+/// Handles moving item stacks between inventory slots via a floating cursor slot.
+/// Slot interactions are driven by EventSystem pointer events forwarded from
+/// <see cref="UIItemSlot"/> (mouse and touch alike); this class only decides
+/// what a left-click / right-click / tap / long-press means.
+/// </summary>
 public class DragAndDropHandler : MonoBehaviour
 {
+    /// <summary>Singleton instance, set in <see cref="Awake"/>. Used by <see cref="UIItemSlot"/> to forward pointer events.</summary>
+    public static DragAndDropHandler Instance { get; private set; }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void DomainReset()
+    {
+        Instance = null;
+    }
+
     [SerializeField]
     private UIItemSlot _cursorSlot;
 
     private ItemSlot _cursorItemSlot;
     private UIItemSlot _lastClickedSlot;
 
-    [SerializeField]
-    private GraphicRaycaster _m_Raycaster;
-
-    private PointerEventData _m_PointerEventData;
-
-    [SerializeField]
-    private EventSystem _m_EventSystem;
-
     private World _world;
     private InputManager _input;
 
     private CreativeInventory _creativeInventory;
 
+    // --- Long-press state for mobile right-click emulation ---
+    // A press is in flight while _pendingSlot is non-null.
+    private const float LONG_PRESS_THRESHOLD = 0.4f;
+    private bool _isMobile;
+    private float _touchDownTime;
+    private bool _longPressHandled;
+    private UIItemSlot _pendingSlot;
+
+    private void Awake()
+    {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+
+        Instance = this;
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this) Instance = null;
+    }
+
     private void Start()
     {
         _world = GameObject.Find("World").GetComponent<World>();
         _input = InputManager.Instance;
+        _isMobile = Application.isMobilePlatform;
 
         _cursorItemSlot = new ItemSlot(_cursorSlot);
+
+        // The cursor slot follows the pointer; its graphics must never block
+        // raycasts or it would swallow every click meant for the slot below it.
+        foreach (Graphic graphic in _cursorSlot.GetComponentsInChildren<Graphic>(true))
+            graphic.raycastTarget = false;
     }
 
     private void Update()
     {
-        bool inventoryOpen = WorldUIManager.Instance != null && WorldUIManager.Instance.IsCreativeInventoryOpen;
+        bool inventoryOpen = IsInventoryOpen;
+
+        // Inventory closed mid-press: drop any pending tap / long-press so the
+        // stale slot can't receive a ghost click when the inventory reopens.
+        if (!inventoryOpen)
+            CancelPendingPress();
 
         // Inventory is closed and cursor slot is empty, do nothing.
         if (!inventoryOpen && !_cursorSlot.HasItem)
@@ -55,13 +96,89 @@ public class DragAndDropHandler : MonoBehaviour
 
         _cursorSlot.transform.position = _input.MousePosition;
 
-        // Left click behavior: Take full stack, place full stack, swap stack if different items
-        if (_input.UIClickPressed)
-            HandleSlotLeftClick(CheckForSlot());
+        // Mobile long-press fires while the finger is still down, so it must be
+        // polled here rather than waiting for the pointer-up event.
+        if (_isMobile && _pendingSlot != null && !_longPressHandled
+            && Time.unscaledTime - _touchDownTime >= LONG_PRESS_THRESHOLD)
+        {
+            HandleSlotRightClick(_pendingSlot);
+            _longPressHandled = true;
+        }
+    }
 
-        // Right click behavior: Take halve stack, place one item
-        if (_input.UIRightClickPressed)
-            HandleSlotRightClick(CheckForSlot());
+    /// <summary><c>true</c> while the creative inventory UI is open.</summary>
+    private static bool IsInventoryOpen => WorldUIManager.Instance != null && WorldUIManager.Instance.IsCreativeInventoryOpen;
+
+    // --- POINTER EVENT ENTRY POINTS (forwarded by UIItemSlot) ---
+
+    /// <summary>
+    /// Starts tap / long-press detection on mobile. The target slot is captured
+    /// at press time so the action doesn't depend on pointer position at release.
+    /// No-op on desktop, which uses <see cref="OnSlotPointerClick"/> instead.
+    /// </summary>
+    /// <param name="slot">The slot the pointer was pressed on.</param>
+    /// <param name="eventData">The pointer event data from the EventSystem.</param>
+    public void OnSlotPointerDown(UIItemSlot slot, PointerEventData eventData)
+    {
+        if (!_isMobile || !IsInventoryOpen) return;
+
+        _touchDownTime = Time.unscaledTime;
+        _longPressHandled = false;
+        _pendingSlot = slot;
+    }
+
+    /// <summary>
+    /// Completes a mobile tap: a short tap acts as left-click (full stack); if the
+    /// long-press (right-click) already fired in <see cref="Update"/>, the release does nothing.
+    /// No-op on desktop, which uses <see cref="OnSlotPointerClick"/> instead.
+    /// </summary>
+    /// <param name="slot">The slot the pointer was released over (unused; the press-time slot is authoritative).</param>
+    /// <param name="eventData">The pointer event data from the EventSystem.</param>
+    public void OnSlotPointerUp(UIItemSlot slot, PointerEventData eventData)
+    {
+        if (!_isMobile || _pendingSlot == null) return;
+
+        // Inventory closed between press and release, drop the gesture.
+        if (!IsInventoryOpen)
+        {
+            CancelPendingPress();
+            return;
+        }
+
+        if (!_longPressHandled)
+            HandleSlotLeftClick(_pendingSlot);
+
+        _pendingSlot = null;
+    }
+
+    /// <summary>
+    /// Drops any in-flight tap / long-press gesture without performing a click.
+    /// </summary>
+    private void CancelPendingPress()
+    {
+        _pendingSlot = null;
+    }
+
+    /// <summary>
+    /// Desktop click handling: left click takes / places / swaps the full stack,
+    /// right click takes half a stack / places one item.
+    /// No-op on mobile, where taps are handled via pointer down / up.
+    /// </summary>
+    /// <param name="slot">The slot that was clicked.</param>
+    /// <param name="eventData">The pointer event data from the EventSystem.</param>
+    public void OnSlotPointerClick(UIItemSlot slot, PointerEventData eventData)
+    {
+        if (_isMobile || !IsInventoryOpen) return;
+
+        switch (eventData.button)
+        {
+            case PointerEventData.InputButton.Left:
+                HandleSlotLeftClick(slot);
+                break;
+            case PointerEventData.InputButton.Right:
+                HandleSlotRightClick(slot);
+                break;
+        }
     }
 
     /// <summary>
@@ -280,30 +397,6 @@ public class DragAndDropHandler : MonoBehaviour
         // Inventory is full
         Debug.Log($"Inventory is full, remaining stack: ID = {uiItemSlot.ItemSlot.Stack.ID.ToString()}, amount = {uiItemSlot.ItemSlot.Stack.Amount.ToString()}");
         return false;
-    }
-
-    [CanBeNull]
-    private UIItemSlot CheckForSlot()
-    {
-        _m_PointerEventData = new PointerEventData(_m_EventSystem);
-        _m_PointerEventData.position = _input.MousePosition;
-
-        List<RaycastResult> results = new List<RaycastResult>();
-        _m_Raycaster.Raycast(_m_PointerEventData, results);
-
-        if (results.Count == 0) return null;
-
-        // Check if the topmost hit is a UIItemSlot or a child of one.
-        // If something else is on top (e.g. pause menu background), return null.
-        Transform hit = results[0].gameObject.transform;
-        while (hit != null)
-        {
-            if (hit.CompareTag("UIItemSlot"))
-                return hit.GetComponent<UIItemSlot>();
-            hit = hit.parent;
-        }
-
-        return null;
     }
 
     // --- SAVE / LOAD LOGIC ---

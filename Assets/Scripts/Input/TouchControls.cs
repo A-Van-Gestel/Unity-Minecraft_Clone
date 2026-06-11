@@ -88,6 +88,9 @@ namespace Input
         /// <summary><c>true</c> during the frame the Inventory button was pressed.</summary>
         public bool ToggleInventoryPressed => _inventoryBtn != null && _inventoryBtn.WasPressedThisFrame;
 
+        /// <summary><c>true</c> during the frame the Pause (Escape) button was pressed.</summary>
+        public bool EscapePressed => _pauseBtn != null && _pauseBtn.WasPressedThisFrame;
+
         /// <summary><c>true</c> while the Crouch button is held down.</summary>
         public bool CrouchHeld => _crouchBtn != null && _crouchBtn.IsPressed;
 
@@ -122,6 +125,7 @@ namespace Input
         private TouchButton _noclipBtn;
         private TouchButton _debugBtn;
         private TouchButton _inventoryBtn;
+        private TouchButton _pauseBtn;
         private TouchButton _crouchBtn;
 
         private readonly List<RectTransform> _allButtonRects = new List<RectTransform>();
@@ -475,6 +479,7 @@ namespace Input
             _noclipBtn = CreateTopButton(parent, "Noclip", ref x, y);
             _debugBtn = CreateTopButton(parent, "Debug", ref x, y);
             _inventoryBtn = CreateTopButton(parent, "Inv", ref x, y);
+            _pauseBtn = CreateTopButton(parent, "Pause", ref x, y);
         }
 
         private TouchButton CreateTopButton(RectTransform parent, string label, ref float x, float y)

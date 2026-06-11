@@ -4407,8 +4407,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _cursorSlot: {fileID: 1559195428}
-  _m_Raycaster: {fileID: 1080100303}
-  _m_EventSystem: {fileID: 749848861}
 --- !u!114 &1080100308
 MonoBehaviour:
   m_ObjectHideFlags: 0

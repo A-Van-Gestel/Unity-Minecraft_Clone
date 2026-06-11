@@ -76,7 +76,6 @@ public class InputManager : MonoBehaviour
 
     private InputAction _pointAction;
     private InputAction _uiClickAction;
-    private InputAction _uiRightClickAction;
 
     // ──────────────────────────────────────────────
     //  Hotbar array (indexed 0–8 for slots 1–9)
@@ -162,7 +161,8 @@ public class InputManager : MonoBehaviour
                                           || (TouchControls.Instance != null && TouchControls.Instance.ToggleInventoryPressed);
 
     /// <summary><c>true</c> during the frame the Escape button was pressed.</summary>
-    public bool EscapePressed => _escapeAction.WasPressedThisFrame();
+    public bool EscapePressed => _escapeAction.WasPressedThisFrame()
+                                 || (TouchControls.Instance != null && TouchControls.Instance.EscapePressed);
 
     /// <summary><c>true</c> during the frame the Toggle Block Highlight button was pressed.</summary>
     public bool ToggleBlockHighlightPressed => _toggleBlockHighlightAction.WasPressedThisFrame();
@@ -204,9 +204,6 @@ public class InputManager : MonoBehaviour
 
     /// <summary><c>true</c> during the frame the left mouse button was first pressed (UI context).</summary>
     public bool UIClickPressed => _uiClickAction.WasPressedThisFrame();
-
-    /// <summary><c>true</c> during the frame the right mouse button was first pressed (UI context).</summary>
-    public bool UIRightClickPressed => _uiRightClickAction.WasPressedThisFrame();
 
     #endregion
 
@@ -335,7 +332,6 @@ public class InputManager : MonoBehaviour
         // --- Cache UI Actions ---
         _pointAction = _uiMap.FindAction("Point", throwIfNotFound: true);
         _uiClickAction = _uiMap.FindAction("Click", throwIfNotFound: true);
-        _uiRightClickAction = _uiMap.FindAction("RightClick", throwIfNotFound: true);
 
         // --- Touch Controls (mobile only) ---
         if (Application.isMobilePlatform)
