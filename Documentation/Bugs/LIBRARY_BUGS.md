@@ -6,6 +6,35 @@ This document outlines **open** bugs and architectural improvements related to t
 
 ---
 
+## NativeCompressions (LZ4) — Version pinned to 0.6.0
+
+**Severity:** Critical version constraint
+**Status:** Pinned / monitoring upstream
+**Files:** `Assets/packages.config`, `Assets/Scripts/Serialization/CompressionFactory.cs`
+
+**Do NOT upgrade `NativeCompressions.LZ4.*` past 0.6.0.** Version 0.6.1's `LZ4Stream` is
+asymmetric: the compressor writes raw block format while the decompressor only parses LZ4 frame
+format — and it **hangs forever at 100% CPU** on non-frame input instead of throwing. This
+bricked every world saved/migrated under 0.6.1 and caused full-system hangs on load.
+Full analysis, standalone repro, and mitigation: `SERIALIZATION_BUGS.md` #03.
+
+`CompressionFactory.ValidateLz4FrameMagic` now fail-fasts on non-frame payloads before they
+reach the native decompressor; keep that guard regardless of library version.
+
+### Alternative library (for future research): K4os.Compression.LZ4
+
+Not evaluated in the original LZ4 library research; documented here after the 0.6.1 incident:
+
+- NuGet: `K4os.Compression.LZ4` (block API) + `K4os.Compression.LZ4.Streams` (frame/stream API). MIT.
+- The de-facto standard .NET LZ4 port — widely battle-tested (used by major .NET projects).
+- Pure managed (with unsafe fast paths): **no per-platform native binaries**, which removes the
+  android-arm/arm64/x64/linux/win runtime-package matrix NativeCompressions requires.
+- Reads/writes the standard LZ4 frame format → compatible with existing 0.6.0-era saves.
+- Trade-off: somewhat lower throughput than a native lz4 binding; chunk loads are not
+  decompression-bound, so this is unlikely to matter in practice.
+
+---
+
 ## FastNoiseLite Simplified API — Lightweight Config and Factory Methods
 
 **Severity:** Architecture Improvement  

@@ -127,10 +127,12 @@ cross-chunk BFS modifications that evaluate a non-zero sunlight level *must neve
 With smooth lighting enabled, flat terrain surfaces (especially visible on sand/desert biomes) exhibit diagonal shadow lines forming a subtle zigzag or checkerboard pattern. The artifacts follow the quad triangulation diagonal and are most visible on large, uniformly lit horizontal surfaces viewed at a shallow angle.
 
 **Root Cause:**
-`GenerateStandardCubeWithLegacyOrientation` computes corner-averaged light values using the world face index `p` but emits vertices using the translated face index `translatedP` (which accounts for the block's Y-axis texture rotation). For side faces this is inherently correct because `GetTranslatedFaceIndex` remaps to a face whose vertex ordering, after rotation, aligns with the world corner positions. But for top/bottom faces (`translatedP == p`), the vertices are rotated while the corner light values are not, assigning lights to wrong vertex positions and causing the anisotropy fix to choose wrong triangulation diagonals.
+`GenerateStandardCubeWithLegacyOrientation` computes corner-averaged light values using the world face index `p` but emits vertices using the translated face index `translatedP` (which accounts for the block's Y-axis texture rotation). For side faces this is inherently correct because `GetTranslatedFaceIndex` remaps to a face whose vertex ordering, after rotation, aligns with the world corner positions. But for top/bottom faces (`translatedP == p`), the vertices are rotated while the corner light values are not, assigning lights to wrong vertex positions
+and causing the anisotropy fix to choose wrong triangulation diagonals.
 
 **Fix:**
-Added `PermuteCornerLightsForYRotation` in `MeshGenerationJob.cs` which permutes `(l0, l1, l2, l3)` for top/bottom faces based on the Y rotation step count (0°/90°/180°/270°). The permutation was derived by tracing each vertex's post-rotation world position back to the corner offset LUT index it corresponds to. Called immediately after `CalculateCornerLights` and before `GenerateStandardCubeFace` in the `GenerateStandardCubeWithLegacyOrientation` smooth-lighting branch. See also: [Design doc Section 2.5.4](../Design/SMOOTH_AND_RGB_LIGHTING.md#254-legacy-rotated-blocks).
+Added `PermuteCornerLightsForYRotation` in `MeshGenerationJob.cs` which permutes `(l0, l1, l2, l3)` for top/bottom faces based on the Y rotation step count (0°/90°/180°/270°). The permutation was derived by tracing each vertex's post-rotation world position back to the corner offset LUT index it corresponds to. Called immediately after `CalculateCornerLights` and before `GenerateStandardCubeFace` in the `GenerateStandardCubeWithLegacyOrientation` smooth-lighting branch. See
+also: [Design doc Section 2.5.4](../Design/SMOOTH_AND_RGB_LIGHTING.md#254-legacy-rotated-blocks).
 
 ---
 
@@ -654,6 +656,73 @@ Furthermore, applying animations from the pool caused a 1-frame visual flash, an
 **Symptom:** JSON Settings creation and loading logic was duplicated across multiple scripts.  
 **Root Cause:** `Settings` was previously nested inside `World.cs` and lacked a dedicated serialization controller.  
 **Fix:** Extracted `Settings` into a standalone POCO and created a centralized `SettingsManager` that handles loading, saving, and Editor-specific DB refresh functionality. The duplicated load logic was removed from all caller scripts.
+
+---
+
+## Serialization & Storage
+
+### ~~03. NativeCompressions LZ4Stream is asymmetric and hangs forever on its own output~~
+
+**Severity:** CRITICAL — world loads hang the entire system at 100% CPU  
+**Files:** `CompressionFactory.cs` (`LZ4Stream` usage), `ChunkSerializer.Deserialize`, `MigrationManager.Compress/Decompress`  
+**Library:** `NativeCompressions.LZ4` 0.6.1 (added 2026-06-10 with the Android work)  
+**Discovered:** 2026-06-11, diagnosed via startup heartbeat + step tracing + standalone PowerShell repro.  
+**Fixed:** June 2026  
+**Status:** Resolved — reverted to 0.6.0, fail-fast guard added, affected save restored from backup. Version pin documented in `LIBRARY_BUGS.md`.
+
+**Symptom:** Loading any world saved (or migrated) after the switch to NativeCompressions hangs at
+"Loading/Generating initial chunks" forever. All `LoadChunkAsync` ThreadPool tasks enter
+`ChunkSerializer.Deserialize` and never return (`finished=0`); the ThreadPool injects ~1 new
+thread/second, each of which also wedges; CPU climbs until the system is unresponsive.
+
+**Root cause (two stacked library defects, reproduced OUTSIDE Unity in a 3-line repro):**
+
+1. **Asymmetric formats.** `LZ4Stream(CompressionMode.Compress)` writes raw **block** format
+   (`[int32 blockSize][LZ4 block]`, e.g. `25 00 00 00 FF 04 ...`), but
+   `LZ4Stream(CompressionMode.Decompress)` only parses the LZ4 **frame** format
+   (magic `04 22 4D 18`). The library cannot round-trip its own stream output.
+2. **Hang instead of error.** On non-frame input, `LZ4Stream.Read` spins forever at 100% CPU
+   instead of throwing — so the engine's "corrupt chunk → log warning → regenerate" recovery
+   path never triggers.
+
+**Why loads used to work:** pre-existing saves were written by the previous LZ4 implementation in
+frame format, which the decompressor DOES parse. The first re-save/migration through
+NativeCompressions (e.g. the v7 migration of `Test Ocean`, 2026-06-11 18:05) converted payloads
+to the unreadable block format, bricking the world.
+
+**Evidence:**
+
+- `Test Ocean_Backup_v7_20260611_180526/Region/r.0.2.bin` chunks: `04 22 4D 18 ...` (frame, valid —
+  Python `lz4.frame.decompress` succeeds, 131,630 bytes, chunk version 4).
+- Live `Test Ocean/Region/r.0.2.bin` chunks: `06 03 00 00 BF 07 ...` (block-size-prefixed, all 1015 chunks).
+- Standalone repro: compress 1,900 bytes via `LZ4Stream` → 45 bytes starting `25 00 00 00`;
+  reading it back with `LZ4Stream(Decompress)` spins a pwsh process at 100% CPU indefinitely.
+
+**Regression origin:** the **0.6.0 → 0.6.1 upgrade** (done 2026-06-10 alongside the Android
+runtime additions). Verified by standalone round-trip tests of both versions' DLLs outside Unity:
+
+| Version | `LZ4Stream(Compress)` writes          | Round-trips own output?      |
+|---------|---------------------------------------|------------------------------|
+| 0.6.0   | LZ4 **frame** (`04 22 4D 18 ...`)     | ✅ Yes                        |
+| 0.6.1   | raw **block** (`[int32 size][block]`) | ❌ Decompressor hangs forever |
+
+**Fix (2026-06-11, confirmed by user):**
+
+1. **Reverted all 6 NativeCompressions packages to 0.6.0** (`Assets/packages.config` +
+   `Assets/Packages/` folders rebuilt with preserved `.meta` GUIDs/import settings).
+2. **Fail-fast guard:** `CompressionFactory.ValidateLz4FrameMagic` now verifies the LZ4 frame
+   magic before constructing the decompressor. Non-frame payloads throw `InvalidDataException`
+   immediately, which `ChunkSerializer.Deserialize` already converts into the
+   "corrupt chunk → warn → regenerate" recovery path. A hang of this class cannot recur silently.
+3. **Save repair:** live `Test Ocean` (block-format, unreadable) moved aside to
+   `Test Ocean_BROKEN_lz4block_20260611`; restored from the intact pre-migration backup
+   `Test Ocean_Backup_v7_20260611_180526` (frame format verified). The v7 migration re-ran
+   on next load using the fixed (0.6.0) compressor.
+
+**Follow-ups (tracked in `LIBRARY_BUGS.md` — "NativeCompressions (LZ4) — Version pinned to 0.6.0"):**
+do not upgrade past 0.6.0 until fixed upstream; consider the explicit `LZ4Encoder`/`LZ4Decoder`
+frame API or switching to `K4os.Compression.LZ4`; any world saved while 0.6.1 was installed
+(2026-06-10 → 2026-06-11) contains unreadable chunks that now regenerate instead of hanging.
 
 ---
 
