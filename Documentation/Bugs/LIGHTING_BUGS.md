@@ -52,50 +52,11 @@ A chunk's initial lighting pass seeds only **sunlight**: `RecalculateSunLightLig
 
 ---
 
-## Bug 07: Cross-chunk emissive sources produce a hard cut-off (or flicker) at the chunk border
-
-**Severity:** High
-**Status:** **Fixed in code (June 2026)** — all three repro scenarios (**K07a/K07b/K07c**) pass and all 9 baselines stay green. **Awaiting in-game confirmation** (two emissive sources at a chunk border: place/break each side, watch for cut-off/flicker) — archive once confirmed. The fix has four parts:
-
-1. *Defect 1 (destructive seeding):* the job's blocklight seeding is now per-channel — a channel is force-cleared only when it still holds exactly its pre-change value (`cur == old > 0`, the block-change signature); emission is stamped via per-channel max. `CrossChunkLightModApplier` wake nodes report `old = 0` for channels that didn't lose light (pure uplift ⇒ `anyIncreased` re-spread) and real old values only for genuinely lowered channels.
-2. *Defect 2 (dropped re-spread):* when a darkness wave meets an independent source across the border, `PropagateDarkness`/`PropagateDarknessRGB` now pull the neighbor's attenuated contribution back into the just-darkened center voxel (via `CheckEdgeVoxel`/`CheckEdgeVoxelRGB`) instead of silently dropping the seed.
-3. *Secondary (zero-channel pass-through):* `LightModification` gained an `IsRemoval` flag (job-output only — NOT in the save format); placement mods can now only raise channels, only genuine removal mods may zero them.
-4. *Collateral engine bugs found by the repros:* (a) the `ushort.MaxValue` light sentinel collides with a legitimate fully-lit voxel (sky 15 + RGB 15,15,15 = 0xFFFF) — e.g. a white max-emission lamp on a sunlit surface neither propagated on place nor cleared on break; the RGB paths now bounds-check via `GetPackedData` and the redundant light-sentinel checks were removed. (b) An opaque emissive re-radiated *received* surface light; opaque sources now propagate only their own emission (spec rule mirrored in the validation oracle).
-
-**Confidence:** Confirmed — the harness reproduced all three reported symptoms through the real job + the shared mod-apply logic, including light corruption stamped into opaque floor voxels during the ping-pong.
-**Files:** `NeighborhoodLightingJob.cs` — `Execute` (BlocklightBfsQueue seeding, ~lines 159–195), `PropagateDarknessRGB` (~line 351), `PropagateDarkness` (~line 309); `WorldJobManager.cs` — `ProcessLightingJobs` (blocklight mod application, ~lines 813–836), `ApplyLightingJobResult` (~lines 977–988)
-
-**Symptoms (user-confirmed in game):**
-Placing an emissive block in chunk A directly against the border of chunk B, while chunk B contains its own emissive source whose light bleeds into A, produces a hard cut-off between the two light fields exactly at the chunk border (each side shows only its own chunk's source). Depending on configuration the border can instead flicker indefinitely. After a world reload the two sources blend correctly — until **any** light update near the border re-triggers the artifact. Pre-dates the RGB upgrade; RGB colors just made it visible.
-
-**Root Cause (two compounding defects):**
-
-1. **Cross-chunk uplift mods are re-interpreted as block-removal events by the receiving chunk.**
-   When `ProcessLightingJobs` applies a blocklight `LightModification` to a neighbor chunk, it enqueues the BFS wake-up node with the voxel's *real pre-apply* light values: `AddToBlockLightQueue(localVoxelPos, oldLightLevel, oldR, oldG, oldB)` (`WorldJobManager.cs:832`). But the job's seeding logic (`NeighborhoodLightingJob.cs:175–178`) treats **any** node at a non-emissive block with `OldBlock > 0` as "block was broken, ushort retains stale emission" and **force-clears the voxel to (0,0,0)**, then detects `anyDecreased` and launches a darkness wave with
-   the old values. The wake-up convention (`OldBlock == 0` ⇒ don't clear) only holds for nodes created by `ChunkData.ModifyVoxel`; cross-chunk applies violate it whenever the target voxel already had light (exactly the two-sources-at-the-border case). Net effect: the uplift from chunk A is wiped before it can spread into B, **and** B's own legitimate light near the border is eaten by a spurious removal wave.
-
-2. **Removal re-spread seeds across the border are dropped.**
-   In `PropagateDarknessRGB`, when the darkness wave meets a voxel whose light comes from an *independent* source, that voxel is queued for re-spreading — but only `if (anyRespread && IsInCenterChunk(neighborPos))` (`NeighborhoodLightingJob.cs:351`). If the independent source's light lives across the chunk border, the re-spread seed is silently discarded, so light removed on this side is never restored from the neighbor's contribution. The sunlight path has the identical pattern (~line 309–313). `CheckEdgeVoxelRGB` could heal this, but edge checks only
-   run during initial-generation convergence rounds (`RemainingEdgeCheckRounds`), never after player edits.
-
-**Why it flickers:** B's spurious removal wave reaches the border and emits darkness mods back into A; A's next job re-places its own light and emits uplift mods back into B; each uplift is again destructively re-interpreted (defect 1) → mutual ping-pong. `IsStable` is false whenever `CrossChunkLightMods` is non-empty, so both chunks keep rescheduling lighting jobs and rebuilding meshes every round — visible as flicker. When the ping-pong happens to damp out, the residual state is the static cut-off.
-
-**Why a reload looks correct:** the saved light data contains the blended result from initial generation (where edge-check rounds run and merge borders), and the BFS queues are empty on load. The first light update near the border re-enters the destructive cycle.
-
-**Secondary contributor:** the per-channel mod-apply guard (`applyX = mod.BlockX == 0 ? 0 : max(oldX, mod.BlockX)`, `WorldJobManager.cs:824–826`) lets a *zero* channel from a stale-snapshot placement mod pass through as a darkness removal, clearing channels owned by an independent source the emitting job never saw.
-
-**Proposed fix direction:**
-
-- Distinguish node kinds. Add a discriminator to `LightQueueNode` (e.g. `BlockChanged` vs `CrossChunkApply`) so the seeding force-clear only fires for genuine block-change removals. ⚠️ `LightQueueNode` is serialized in chunk save data (`ChunkData.cs:384–385`) — this is a save-format change requiring an AOT migration step + version bump. A format-neutral alternative: enqueue cross-chunk *uplift* applications with `old = (0,0,0)` (wake-up semantics — the light value was already written, so `anyIncreased` still fires) and keep real old values only for mods
-  that zeroed a channel.
-- For defect 2: when `anyRespread` fires for an out-of-center `neighborPos`, perform a single-voxel pull at `node.Pos` (mirror `CheckEdgeVoxelRGB`: re-add the attenuated neighbor light and enqueue `node.Pos` in the placement queue). Apply the same to the sunlight path.
-
----
-
 ## Bug 08: Broken emissive blocks leave permanent "ghost" blocklight (cross-chunk removal loss)
 
 **Severity:** Medium–High (ghost values get baked into saved region data — permanent world corruption until manually disturbed)
-**Status:** Open / Path 2 (in-flight race) reproduced deterministically in the validation suite via the flight API (scenario **K08a**: sunlight uplift lost to a stale merge, receiving chunk stays 3–5 levels darker than the oracle, permanently). Baseline scenario **B7** documents that the *blocklight* removal race currently self-heals through Bug 07's force-clear — B7 must stay green when Bug 07 is fixed, exactly as the analysis below predicts. Path 1 (unloaded-neighbor pending-store degradation) is not yet covered by the suite.
+**Status:** Open / Path 2 (in-flight race) reproduced deterministically in the validation suite via the flight API (scenario **K08a**: sunlight uplift lost to a stale merge, receiving chunk stays 3–5 levels darker than the oracle, permanently). Baseline scenario **B7** documents that the *blocklight* removal race self-heals through the seeding force-clear (now per-channel after the Bug 07 fix, June 2026 — B7 stayed green through it, exactly as the analysis below predicted). Path 1 (unloaded-neighbor pending-store degradation) is not yet covered by the
+suite.
 **Confidence:** Confirmed for the in-flight-job race (now deterministic); High for the unloaded-neighbor path (code inspection).
 **Files:** `WorldJobManager.cs` — `ProcessLightingJobs` (dropped-mod handling, ~lines 762–784; `ApplyLightingJobResult`, ~lines 977–988); `Serialization/LightingStateManager.cs`; `NeighborhoodLightingJob.cs` — `Execute` sunlight seeding (~lines 147–157)
 
@@ -110,7 +71,7 @@ Breaking an emissive block sometimes leaves its light behind permanently; no lat
 
 2. **`ApplyLightingJobResult` full-LightMap overwrite races with mods applied during the job's flight.**
    The result merge overwrites the entire ushort light array with the job's output and the comment (`WorldJobManager.cs:979–983`) explicitly accepts that cross-chunk mods applied to live data during the job "may be temporarily lost", deferring to edge-check convergence. But (a) edge checks only run during initial generation (`NeedsEdgeCheck` is only set via `RemainingEdgeCheckRounds`), and (b) `CheckEdgeVoxel`/`CheckEdgeVoxelRGB` are **add-only** — they can never remove over-bright stale light (see Bug 05 notes). A lost *removal* is therefore permanent.
-   For **sunlight** the loss is total: the reverted voxel makes the seeded queue node a no-op (`currentLight == node.OldLightLevel` enqueues nothing, `NeighborhoodLightingJob.cs:153–156`). For **blocklight** the node currently survives only because of the force-clear path — which is itself Bug 07's defect; fixing Bug 07 naively would surface this race.
+   For **sunlight** the loss is total: the reverted voxel makes the seeded queue node a no-op (`currentLight == node.OldLightLevel` enqueues nothing, `NeighborhoodLightingJob.cs:153–156`). For **blocklight** the node survives via the force-clear path — kept (per-channel, on the block-change signature `cur == old > 0`) through the June 2026 Bug 07 fix precisely so this race keeps self-healing (guarded by baseline **B7**).
 
 **Proposed fix direction:**
 

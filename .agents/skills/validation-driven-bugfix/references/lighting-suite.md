@@ -7,7 +7,7 @@ Everything lives under `Assets/Editor/Validation/Lighting/`. Menu item: **`Minec
 | File                                     | Role                                                                                                                                                  |
 |------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `LightingValidationSuite.cs`             | Runner: `Scenario` struct (`Name`, `Func<bool> Run`, `KnownBugId`), partial-method registration, try/catch per scenario, categorized summary          |
-| `LightingValidationSuite.Baseline.cs`    | `B1`–`B9` regression scenarios (must stay green)                                                                                                      |
+| `LightingValidationSuite.Baseline.cs`    | `B1`–`B12` regression scenarios (must stay green)                                                                                                     |
 | `LightingValidationSuite.KnownBugs.cs`   | `K`-scenarios reproducing open bugs from `LIGHTING_BUGS.md` (expected red)                                                                            |
 | `Framework/LightingTestWorld.cs`         | Harness core: N×N grid of chunk buffers, runs the real `NeighborhoodLightingJob`, applies cross-chunk mods via the shared `CrossChunkLightModApplier` |
 | `Framework/LightingTestWorld.Builder.cs` | Authoring + queries (two write paths, see below)                                                                                                      |
@@ -47,10 +47,10 @@ world.CompleteLightingJob(flight);            // run + stale merge + mod applica
 - **Plain oracle scenario:** `B1` / `B5` (place → converge → `MatchesOracle`).
 - **Ghost-light / returns-to-baseline:** `B4` (`SnapshotLightField` → place → break → `FieldsEqual`).
 - **Race via flight API:** `B7` and `K08a` (Begin → edit + neighbor job → Complete → assert).
-- **Tripwire baseline:** `B7` — encodes behavior that only worked *because of* Bug 07's force-clear; planted before the Bug 07 fix to catch a naive fix. Pattern: docstring states which fix it guards.
-- **Isolated invariant (contaminated field):** `B9` — `NoBlocklightInVolume` floor scan instead of full oracle compare, with a docstring note to restore the full compare after Bug 07. (Bug 07 is now fixed — restoring B9's oracle compare is an open TODO.)
+- **Tripwire baseline:** `B7` — encodes behavior that only worked *because of* the seeding force-clear, planted before the Bug 07 fix to catch a naive fix (dropping the force-clear entirely); it stayed green through the fix (June 2026). Pattern: docstring states which fix it guards.
+- **Isolated invariant (contaminated field):** `B9` — while Bug 07 was open it ran a `NoBlocklightInVolume` floor scan instead of a full oracle compare, with a dated docstring note; the full compare was restored once Bug 07 was fixed (June 2026). Pattern for any scenario whose full-field assertion is contaminated by a *different* open bug.
 - **Won't-reproduce → baseline:** `B8` (authored as the Bug 05 repro, converges correctly; bug entry notes repro is still TODO).
-- **Promoted scenario:** `B9` (was `K09`; see `_FIXED_BUGS.md` Lighting entry 10 for the full promotion record).
+- **Promoted scenarios:** `B9` (was `K09`, Bug 09) and `B10`–`B12` (were `K07a`–`K07c`, Bug 07); see `_FIXED_BUGS.md` Lighting entries 10–11 for the full promotion records.
 
 ## Lighting-specific gotchas
 

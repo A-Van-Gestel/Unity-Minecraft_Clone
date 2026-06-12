@@ -23,6 +23,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B7: Blocklight removal survives an in-flight neighbor job (race)", Baseline_InFlightBlocklightRemovalRace));
             scenarios.Add(new Scenario("B8: Wave-parallel initial lighting of diagonal sky-well converges to oracle", Baseline_DiagonalSkyWellParallelGen));
             scenarios.Add(new Scenario("B9: No blocklight propagation from inside opaque volumes", Baseline_OpaqueVolumeLightContainment));
+            scenarios.Add(new Scenario("B10: Two emissive sources blend across the chunk border", Baseline_CrossBorderTwoSourceBlend));
+            scenarios.Add(new Scenario("B11: Adjacent opposing lamps at the border converge without flicker", Baseline_AdjacentBorderLampsNoFlicker));
+            scenarios.Add(new Scenario("B12: Broken source's area is re-lit by the cross-border independent source", Baseline_CrossBorderRespread));
         }
 
         /// <summary>
@@ -201,11 +204,11 @@ namespace Editor.Validation.Lighting
         /// <summary>
         /// B7: The blocklight twin of the K08a race — a lamp at the border is broken while the
         /// neighbor chunk has a job in flight, so the darkness mods are overwritten by the stale
-        /// merge. Today this ghost light self-heals: the surviving wake-up nodes carry
-        /// <c>OldBlock &gt; 0</c>, which triggers the seeding force-clear — the very mechanism that is
-        /// Bug 07's defect 1. This scenario is a baseline GUARD: it must STAY green when Bug 07 is
-        /// fixed. A naive fix (dropping the force-clear without re-seeding removals) surfaces the
-        /// Bug 08 race here, exactly as LIGHTING_BUGS.md predicts.
+        /// merge. This ghost light self-heals: the surviving wake-up nodes carry real old values for
+        /// the lowered channels, which triggers the per-channel seeding force-clear
+        /// (<c>cur == old &gt; 0</c>). Planted as a tripwire BEFORE the Bug 07 fix (a naive fix —
+        /// dropping the force-clear without re-seeding removals — would surface the Bug 08 race
+        /// here, exactly as LIGHTING_BUGS.md predicted); it stayed green through the fix (June 2026).
         /// </summary>
         private static bool Baseline_InFlightBlocklightRemovalRace()
         {
@@ -265,9 +268,9 @@ namespace Editor.Validation.Lighting
         /// guard in <c>PropagateLightRGB</c> must stop it from acting as a source. The floor surface
         /// (y=10) legitimately receives a 1-deep stamp; everything below (y ≤ 9) must stay at
         /// blocklight (0,0,0) across the whole grid.
-        /// <para>Deliberately NOT a full oracle compare: the same edit also triggers Bug 07's
-        /// cross-border removal/re-spread loss, which contaminates the full field until that bug is
-        /// fixed (covered by K07a–c). This scenario isolates the opaque-containment invariant.</para>
+        /// <para>The full-field oracle compare was restored after the Bug 07 fix (June 2026) — it
+        /// was temporarily reduced to the volume-scan invariant while Bug 07's cross-border
+        /// removal/re-spread loss contaminated the field.</para>
         /// </summary>
         private static bool Baseline_OpaqueVolumeLightContainment()
         {
@@ -293,6 +296,100 @@ namespace Editor.Validation.Lighting
             passed &= LightingAssert.NoBlocklightInVolume(world,
                 new Vector3Int(0, 0, 0), new Vector3Int(worldMax, 9, worldMax),
                 "B9: floor interior carries no blocklight");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B9: field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B10: Two emissive sources on opposite sides of a chunk border must blend per-channel
+        /// across it (Bug 07, fixed June 2026 — promoted from known-bug scenario K07a). A blue lamp
+        /// in chunk (2,1) bleeds across the border; a red lamp is then placed in (1,1) near that
+        /// border. Guards against cross-chunk uplift mods being re-interpreted as removals
+        /// (hard cut-off at the border).
+        /// </summary>
+        private static bool Baseline_CrossBorderTwoSourceBlend()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B10: initial lighting converges");
+
+            // First source: blue lamp in chunk (2,1), one voxel east of the border.
+            world.PlaceBlock(new Vector3Int(33, 11, 24), TestBlockPalette.LampBlue);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B10: first source converges");
+
+            // Second source: red lamp in chunk (1,1), against the border.
+            world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.LampRed);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B10: second source converges");
+
+            // Probe on the blue side: red must have crossed the border. The straight line
+            // 30→34 passes THROUGH the opaque blue lamp at x=33, so the red light detours
+            // over it: 30(15) → 31(14) → 32(13) → (32,12)(12) → (33,12)(11) → (34,12)(10)
+            // → (34,11)(9). Oracle-verified.
+            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(34, 11, 24)).R == 9,
+                "B10: red light crosses into the blue lamp's chunk",
+                $"Expected R=9 at x=34 (detour around the opaque blue lamp), got {world.GetBlocklightRGB(new Vector3Int(34, 11, 24))} — hard cut-off at the border");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B10: blended field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B11: Red and blue lamps DIRECTLY adjacent across the border (x=31 / x=32) — the maximal
+        /// mutual-interference configuration (Bug 07, fixed June 2026 — promoted from known-bug
+        /// scenario K07b). Guards against the documented ping-pong (each side's uplift destructively
+        /// re-interpreted by the other), which manifested as non-convergence within the round budget
+        /// (flicker) or a stable-but-wrong field (cut-off).
+        /// </summary>
+        private static bool Baseline_AdjacentBorderLampsNoFlicker()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B11: initial lighting converges");
+
+            world.PlaceBlock(new Vector3Int(31, 11, 24), TestBlockPalette.LampRed);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B11: first lamp converges");
+
+            world.PlaceBlock(new Vector3Int(32, 11, 24), TestBlockPalette.LampBlue);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B11: adjacent lamps converge without ping-pong");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B11: field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B12: Breaking one of two overlapping cross-border sources must re-light the broken
+        /// source's area from the surviving source and return the field bit-identically to the
+        /// single-source baseline (Bug 07, fixed June 2026 — promoted from known-bug scenario K07c).
+        /// Guards the out-of-center re-spread pull in <c>PropagateDarkness</c>/<c>PropagateDarknessRGB</c>
+        /// (re-spread seeds for border voxels used to be silently dropped).
+        /// </summary>
+        private static bool Baseline_CrossBorderRespread()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B12: initial lighting converges");
+
+            // The surviving source: torch in chunk (2,1).
+            world.PlaceBlock(new Vector3Int(36, 11, 24), TestBlockPalette.Torch);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B12: surviving source converges");
+
+            Dictionary<Vector2Int, ushort[]> baseline = world.SnapshotLightField();
+
+            // The doomed source: torch in chunk (1,1), fields overlapping across the border.
+            world.PlaceBlock(new Vector3Int(28, 11, 24), TestBlockPalette.Torch);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B12: both sources converge");
+
+            world.BreakBlock(new Vector3Int(28, 11, 24));
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B12: post-break convergence");
+
+            passed &= LightingAssert.FieldsEqual(baseline, world, "B12: field returns to the single-source baseline");
             return passed;
         }
     }

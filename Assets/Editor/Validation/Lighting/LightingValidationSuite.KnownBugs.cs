@@ -20,9 +20,6 @@ namespace Editor.Validation.Lighting
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("K06: Generated emissive block illuminates surroundings on initial lighting", KnownBug06_GeneratedEmissiveSeedsBfs, "Bug 06"));
-            scenarios.Add(new Scenario("K07a: Two emissive sources blend across the chunk border", KnownBug07A_TwoSourceBorderBlend, "Bug 07"));
-            scenarios.Add(new Scenario("K07b: Adjacent opposing lamps at the border converge without flicker", KnownBug07B_AdjacentLampsNoFlicker, "Bug 07"));
-            scenarios.Add(new Scenario("K07c: Broken source's area is re-lit by the cross-border independent source", KnownBug07C_CrossBorderRespread, "Bug 07"));
             scenarios.Add(new Scenario("K08a: Sunlight uplift mods survive an in-flight neighbor job (race)", KnownBug08A_InFlightSunlightUpliftLoss, "Bug 08"));
         }
 
@@ -46,99 +43,6 @@ namespace Editor.Validation.Lighting
                 $"Expected (14,14,14) next to the lamp, got {world.GetBlocklightRGB(new Vector3Int(25, 11, 24))} — emission was stamped but never propagated");
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "K06: field matches oracle");
-            return passed;
-        }
-
-        /// <summary>
-        /// K07a (Bug 07): Chunk (2,1) holds a blue lamp whose light bleeds across the border into
-        /// chunk (1,1); then a red lamp is placed in (1,1) near that border. The correct result is
-        /// the per-channel blend of both fields across the border. The documented defect: the red
-        /// lamp's uplift mods are re-interpreted as removals in (2,1) (force-clear on
-        /// <c>OldBlock &gt; 0</c> wake-ups) and the zero-channel pass-through wipes the blue channel —
-        /// a hard cut-off at the border instead of a blend.
-        /// </summary>
-        private static bool KnownBug07A_TwoSourceBorderBlend()
-        {
-            using LightingTestWorld world = new LightingTestWorld(3);
-            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
-            world.RecalculateHeightmaps();
-
-            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "K07a: initial lighting converges");
-
-            // First source: blue lamp in chunk (2,1), one voxel east of the border.
-            world.PlaceBlock(new Vector3Int(33, 11, 24), TestBlockPalette.LampBlue);
-            passed &= LightingAssert.Converged(world.RunToConvergence(), "K07a: first source converges");
-
-            // Second source: red lamp in chunk (1,1), against the border.
-            world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.LampRed);
-            passed &= LightingAssert.Converged(world.RunToConvergence(), "K07a: second source converges");
-
-            // Probe on the blue side: red must have crossed the border. The straight line
-            // 30→34 passes THROUGH the opaque blue lamp at x=33, so the red light detours
-            // over it: 30(15) → 31(14) → 32(13) → (32,12)(12) → (33,12)(11) → (34,12)(10)
-            // → (34,11)(9). Oracle-verified.
-            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(34, 11, 24)).R == 9,
-                "K07a: red light crosses into the blue lamp's chunk",
-                $"Expected R=9 at x=34 (detour around the opaque blue lamp), got {world.GetBlocklightRGB(new Vector3Int(34, 11, 24))} — hard cut-off at the border");
-
-            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "K07a: blended field matches oracle");
-            return passed;
-        }
-
-        /// <summary>
-        /// K07b (Bug 07, flicker form): Red and blue lamps DIRECTLY adjacent across the border
-        /// (x=31 / x=32) — the maximal mutual-interference configuration. The documented ping-pong
-        /// (each side's uplift destructively re-interpreted by the other) manifests here as either
-        /// non-convergence within the round budget (flicker) or a stable-but-wrong field (cut-off).
-        /// </summary>
-        private static bool KnownBug07B_AdjacentLampsNoFlicker()
-        {
-            using LightingTestWorld world = new LightingTestWorld(3);
-            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
-            world.RecalculateHeightmaps();
-
-            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "K07b: initial lighting converges");
-
-            world.PlaceBlock(new Vector3Int(31, 11, 24), TestBlockPalette.LampRed);
-            passed &= LightingAssert.Converged(world.RunToConvergence(), "K07b: first lamp converges");
-
-            world.PlaceBlock(new Vector3Int(32, 11, 24), TestBlockPalette.LampBlue);
-            passed &= LightingAssert.Converged(world.RunToConvergence(), "K07b: adjacent lamps converge without ping-pong");
-
-            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "K07b: field matches oracle");
-            return passed;
-        }
-
-        /// <summary>
-        /// K07c (Bug 07, defect 2): Two white torches with overlapping fields on opposite sides of
-        /// the border. Breaking the first must restore its area from the surviving cross-border
-        /// source and return the field bit-identically to the single-source baseline. The documented
-        /// defect: re-spread seeds for out-of-center voxels are dropped
-        /// (<c>IsInCenterChunk</c> guard in <c>PropagateDarknessRGB</c>), so light removed on one
-        /// side is never restored from the neighbor's contribution.
-        /// </summary>
-        private static bool KnownBug07C_CrossBorderRespread()
-        {
-            using LightingTestWorld world = new LightingTestWorld(3);
-            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
-            world.RecalculateHeightmaps();
-
-            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "K07c: initial lighting converges");
-
-            // The surviving source: torch in chunk (2,1).
-            world.PlaceBlock(new Vector3Int(36, 11, 24), TestBlockPalette.Torch);
-            passed &= LightingAssert.Converged(world.RunToConvergence(), "K07c: surviving source converges");
-
-            Dictionary<Vector2Int, ushort[]> baseline = world.SnapshotLightField();
-
-            // The doomed source: torch in chunk (1,1), fields overlapping across the border.
-            world.PlaceBlock(new Vector3Int(28, 11, 24), TestBlockPalette.Torch);
-            passed &= LightingAssert.Converged(world.RunToConvergence(), "K07c: both sources converge");
-
-            world.BreakBlock(new Vector3Int(28, 11, 24));
-            passed &= LightingAssert.Converged(world.RunToConvergence(), "K07c: post-break convergence");
-
-            passed &= LightingAssert.FieldsEqual(baseline, world, "K07c: field returns to the single-source baseline");
             return passed;
         }
 

@@ -155,7 +155,36 @@ Opaque voxels legitimately *receive* surface light (`source - 1`) but must never
 
 **Fix:**
 Added the missing opaque-source guard at the top of `PropagateLightRGB`, mirroring the sunlight path — with an exemption for emissive opaque blocks (lamps/glowstone must radiate their own emission): `if (sourceProps.IsOpaque && !sourceProps.IsLightSource) return;`. The `ModifyVoxel` wake-up loop was left unchanged (the job-side guard is the robust fix since wake nodes can also originate from cross-chunk applies and serialized queues). Baseline scenario **B9** asserts the containment invariant (no blocklight anywhere below the floor's surface layer
-across the whole grid); it deliberately does not run a full oracle compare because the same edit also trips Bug 07's cross-border removal/re-spread loss — restore the full-field assertion once Bug 07 is fixed.
+across the whole grid); it deliberately did not run a full oracle compare because the same edit also tripped Bug 07's cross-border removal/re-spread loss — the full-field oracle compare was restored after the Bug 07 fix (June 2026).
+
+---
+
+### ~~11. Cross-chunk emissive sources produce a hard cut-off (or flicker) at the chunk border~~
+
+**Severity:** High
+**Fixed:** June 2026 (was Bug 07 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game (the hard cut-off no longer reproduces in a new world; the flicker required the cut-off defect, so it is resolved with it). Guarded by validation suite baselines **B10/B11/B12** (promoted from known-bug repro scenarios K07a/K07b/K07c); tripwire baseline **B7** (the blocklight removal race that depended on the old force-clear) stayed green through the fix.
+**Confidence:** Confirmed — the harness reproduced all three reported symptoms through the real job + the shared mod-apply logic, including light corruption stamped into opaque floor voxels during the ping-pong.
+**Files:** `NeighborhoodLightingJob.cs` — `Execute` (BlocklightBfsQueue seeding), `PropagateDarknessRGB`, `PropagateDarkness`, `PropagateLightRGB`, `CheckEdgeVoxelRGB`; `Helpers/CrossChunkLightModApplier.cs` — `ComputeBlocklight`; `WorldJobManager.cs` — `ProcessLightingJobs` (blocklight mod application)
+
+**Symptoms (user-confirmed in game):**
+Placing an emissive block in chunk A directly against the border of chunk B, while chunk B contains its own emissive source whose light bleeds into A, produced a hard cut-off between the two light fields exactly at the chunk border (each side showed only its own chunk's source). Depending on configuration the border could instead flicker indefinitely. After a world reload the two sources blended correctly — until **any** light update near the border re-triggered the artifact. Pre-dated the RGB upgrade; RGB colors just made it visible.
+
+**Root Cause (two compounding defects):**
+
+1. **Cross-chunk uplift mods were re-interpreted as block-removal events by the receiving chunk.** The job's seeding logic treated **any** node at a non-emissive block with `OldBlock > 0` as "block was broken" and force-cleared the voxel to (0,0,0), then launched a darkness wave with the old values. Cross-chunk applies violated the wake-up convention whenever the target voxel already had light (exactly the two-sources-at-the-border case): the uplift from chunk A was wiped before it could spread into B, **and** B's own legitimate light near the border was
+   eaten by a spurious removal wave.
+2. **Removal re-spread seeds across the border were dropped.** In `PropagateDarknessRGB` (and the sunlight twin), when the darkness wave met a voxel whose light came from an *independent* source across the chunk border, the re-spread seed was discarded by the `IsInCenterChunk` guard, so light removed on one side was never restored from the neighbor's contribution.
+
+**Why it flickered:** B's spurious removal wave emitted darkness mods back into A; A's next job re-placed its own light and emitted uplift mods back into B; each uplift was again destructively re-interpreted (defect 1) → mutual ping-pong, with both chunks rescheduling lighting jobs and rebuilding meshes every round. When the ping-pong damped out, the residual state was the static cut-off. A *secondary contributor*: the per-channel mod-apply guard let a *zero* channel from a stale-snapshot placement mod pass through as a darkness removal, clearing
+channels owned by an independent source the emitting job never saw.
+
+**Fix (four parts):**
+
+1. *Defect 1 (destructive seeding):* the job's blocklight seeding is now per-channel — a channel is force-cleared only when it still holds exactly its pre-change value (`cur == old > 0`, the block-change signature); emission is stamped via per-channel max. `CrossChunkLightModApplier` wake nodes report `old = 0` for channels that didn't lose light (pure uplift ⇒ `anyIncreased` re-spread) and real old values only for genuinely lowered channels.
+2. *Defect 2 (dropped re-spread):* when a darkness wave meets an independent source across the border, `PropagateDarkness`/`PropagateDarknessRGB` now pull the neighbor's attenuated contribution back into the just-darkened center voxel (via `CheckEdgeVoxel`/`CheckEdgeVoxelRGB`) instead of silently dropping the seed.
+3. *Secondary (zero-channel pass-through):* `LightModification` gained an `IsRemoval` flag (job-output only — NOT in the save format); placement mods can now only raise channels, only genuine removal mods may zero them.
+4. *Collateral engine bugs found by the repros:* (a) the `ushort.MaxValue` light sentinel collided with a legitimate fully-lit voxel (sky 15 + RGB 15,15,15 = 0xFFFF) — e.g. a white max-emission lamp on a sunlit surface neither propagated on place nor cleared on break; the RGB paths now bounds-check via `GetPackedData` and the redundant light-sentinel checks were removed. (b) An opaque emissive re-radiated *received* surface light; opaque sources now propagate only their own emission (spec rule mirrored in the validation oracle).
 
 ---
 
