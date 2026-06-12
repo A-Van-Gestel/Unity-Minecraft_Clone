@@ -64,6 +64,8 @@ This is a high-performance engine. Efficiency is key.
 For any complex bug (lighting stuck, fluids not flowing, chunks frozen, meshing deadlocks, etc.), use the `voxel-debugging` skill under `.agents/skills/`. It covers: checking known-bugs docs, locating code via the graph, instrumenting before fixing, Burst-safe logging rules, and
 waiting for user confirmation. After the user confirms a fix, the `archive-fixed-bug` skill moves the entry to `_FIXED_BUGS.md`.
 
+When fixing a bug **documented in `Documentation/Bugs/`** for a system with an editor validation suite (lighting: `Minecraft Clone/Dev/Validate Lighting Engine`), use the `validation-driven-bugfix` skill: deterministic repro scenario first (expected red), fix until it flips green with all baselines green, promote the repro to a baseline after in-game confirmation. It also covers building validation suites for new systems.
+
 When a change touches the chunk generation → lighting → meshing pipeline specifically, also consult the `chunk-lifecycle` skill — the pipeline has recurring deadlock history and specific invariants.
 
 ## Code Style & Conventions
@@ -120,15 +122,16 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 |---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `codegraph_explore`             | **Primary for orientation.** Answer "how does X work" or survey an area in one call. Returns verbatim source, relationship map, and blast radius. Surfaces dynamic-dispatch hops grep can't follow. Save for highest-value questions. |
 | `codegraph_impact`              | Use before editing to understand the blast radius of changing a core struct or interface (crucial for DOTS/Burst architectures).                                                                                                      |
-| `codegraph_callers` / `callees` | Walk call flows and execution paths. Use `callers` for a quick overview; verify with Grep when exhaustive coverage matters.                                                                                                          |
-| `codegraph_search`              | Find symbols by name across the entire codebase instantly (FTS5 full-text search).                                                                                                                                                   |
+| `codegraph_callers` / `callees` | Walk call flows and execution paths. Use `callers` for a quick overview; verify with Grep when exhaustive coverage matters.                                                                                                           |
+| `codegraph_search`              | Find symbols by name across the entire codebase instantly (FTS5 full-text search).                                                                                                                                                    |
 | `codegraph_node`                | Get one specific symbol's full details and source code (returns every overload for ambiguous names).                                                                                                                                  |
-| `codegraph_files`               | Get indexed file structure (faster than filesystem scanning).                                                                                                                                                                        |
-| `codegraph_status`              | Check index health and statistics.                                                                                                                                                                                                   |
+| `codegraph_files`               | Get indexed file structure (faster than filesystem scanning).                                                                                                                                                                         |
+| `codegraph_status`              | Check index health and statistics.                                                                                                                                                                                                    |
 
 ### Syncing & Staleness
 
-CodeGraph auto-syncs in the background via native OS file watchers — you do not need to run manual update or sync commands. However, there is a brief debounce window (~2s) after edits. During that window, if a tool response references a still-pending file, it will prepend a **⚠️ banner** naming the file and telling you to `Read` it directly for live content. Pending files *not* referenced by the response appear as a small footer instead. **When you see a staleness banner, Read the named file(s) directly** — don't trust the graph's snapshot for those specific files until the sync completes.
+CodeGraph auto-syncs in the background via native OS file watchers — you do not need to run manual update or sync commands. However, there is a brief debounce window (~2s) after edits. During that window, if a tool response references a still-pending file, it will prepend a **⚠️ banner** naming the file and telling you to `Read` it directly for live content. Pending files *not* referenced by the response appear as a small footer instead. **When you see a staleness banner, Read the named file(s) directly** — don't trust the graph's snapshot for those
+specific files until the sync completes.
 
 Trust CodeGraph for structural queries — don't re-verify with Grep unless you need exhaustive call-site coverage (e.g., confirming every caller before a breaking change).
 
