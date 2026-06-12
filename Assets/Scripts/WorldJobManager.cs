@@ -27,7 +27,7 @@ public class WorldJobManager : IDisposable
     #region Job Tracking Dictionaries
 
     public Dictionary<ChunkCoord, GenerationJobData> GenerationJobs { get; } = new Dictionary<ChunkCoord, GenerationJobData>();
-    public Dictionary<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> MeshJobs { get; } = new Dictionary<ChunkCoord, (JobHandle, MeshDataJobOutput)>();
+    public Dictionary<ChunkCoord, MeshingJobData> MeshJobs { get; } = new Dictionary<ChunkCoord, MeshingJobData>();
     public Dictionary<ChunkCoord, LightingJobData> LightingJobs { get; } = new Dictionary<ChunkCoord, LightingJobData>();
 
     /// <summary>
@@ -36,6 +36,11 @@ public class WorldJobManager : IDisposable
     public bool HasActiveJobs => GenerationJobs.Count > 0 || MeshJobs.Count > 0 || LightingJobs.Count > 0;
 
     #endregion
+
+    // --- Native Buffer Pooling ---
+    // Pools the fixed-size full-chunk job input buffers (voxel + light maps) shared by lighting
+    // and meshing jobs, avoiding ~1.7 MB of Persistent alloc/dispose churn per job.
+    private readonly ChunkJobArrayPool _jobArrayPool = new ChunkJobArrayPool();
 
     // --- Cached Collections for GC Optimization ---
     private readonly List<ChunkCoord> _completedGenJobs = new List<ChunkCoord>();
@@ -193,101 +198,162 @@ public class WorldJobManager : IDisposable
             };
         }
 
-        // 2. Allocate all input maps with Persistent
-        NativeArray<uint> map = _world.worldData.GetChunkMapForJob(chunkCoord.ToVoxelOrigin(), Allocator.Persistent);
-
-        NativeArray<uint> back = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<uint> front = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<uint> left = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<uint> right = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<uint> frontRight = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<uint> backRight = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<uint> backLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<uint> frontLeft = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), Allocator.Persistent);
-
-        // Light maps for RGB light data
-        NativeArray<ushort> lightMap = _world.worldData.GetChunkLightMapForJob(chunkCoord.ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<ushort> lightBack = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<ushort> lightFront = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<ushort> lightLeft = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<ushort> lightRight = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<ushort> lightFrontRight = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<ushort> lightBackRight = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<ushort> lightBackLeft = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), Allocator.Persistent);
-        NativeArray<ushort> lightFrontLeft = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), Allocator.Persistent);
-
-        MeshDataJobOutput meshOutput = new MeshDataJobOutput(Allocator.Persistent);
-
-        MeshGenerationJob job = new MeshGenerationJob
+        // 2. Rent all input maps from the pool and fill them (every element is written, so stale
+        // pooled buffers are safe). If anything below throws, the catch releases every buffer
+        // acquired so far (Return/Dispose skip uncreated entries), so the pool never leaks.
+        MeshingJobData jobData = new MeshingJobData { SectionData = sectionData };
+        try
         {
-            Map = map,
-            SectionData = sectionData,
-            BlockTypes = _world.JobDataManager.BlockTypesJobData,
-            ChunkPosition = chunk.ChunkPosition,
-            NeighborBack = back,
-            NeighborFront = front,
-            NeighborLeft = left,
-            NeighborRight = right,
-            NeighborFrontRight = frontRight,
-            NeighborBackRight = backRight,
-            NeighborBackLeft = backLeft,
-            NeighborFrontLeft = frontLeft,
-            LightMap = lightMap,
-            LightBack = lightBack,
-            LightFront = lightFront,
-            LightLeft = lightLeft,
-            LightRight = lightRight,
-            LightFrontRight = lightFrontRight,
-            LightBackRight = lightBackRight,
-            LightBackLeft = lightBackLeft,
-            LightFrontLeft = lightFrontLeft,
-            CustomMeshes = _world.JobDataManager.CustomMeshesJobData,
-            CustomFaces = _world.JobDataManager.CustomFacesJobData,
-            CustomVerts = _world.JobDataManager.CustomVertsJobData,
-            CustomTris = _world.JobDataManager.CustomTrisJobData,
-            WaterVertexTemplates = _world.FluidVertexTemplates.WaterVertexTemplates,
-            LavaVertexTemplates = _world.FluidVertexTemplates.LavaVertexTemplates,
-            SmoothLighting = _world.settings.smoothLighting,
-            ClipBounds = MeshClipBounds.Disabled,
-            Output = meshOutput,
-        };
+            jobData.Map = RentAndFillVoxelMap(chunkCoord.ToVoxelOrigin());
+            jobData.LightMap = RentAndFillLightMap(chunkCoord.ToVoxelOrigin());
+            jobData.Neighbors = AcquireNeighborMaps(chunkCoord, pooled: true, Allocator.Persistent);
+            jobData.Output = new MeshDataJobOutput(Allocator.Persistent);
 
-        JobHandle meshJobHandle = job.Schedule();
+            MeshGenerationJob job = new MeshGenerationJob
+            {
+                Map = jobData.Map,
+                SectionData = sectionData,
+                BlockTypes = _world.JobDataManager.BlockTypesJobData,
+                ChunkPosition = chunk.ChunkPosition,
+                NeighborBack = jobData.Neighbors.NeighborS,
+                NeighborFront = jobData.Neighbors.NeighborN,
+                NeighborLeft = jobData.Neighbors.NeighborW,
+                NeighborRight = jobData.Neighbors.NeighborE,
+                NeighborFrontRight = jobData.Neighbors.NeighborNE,
+                NeighborBackRight = jobData.Neighbors.NeighborSE,
+                NeighborBackLeft = jobData.Neighbors.NeighborSW,
+                NeighborFrontLeft = jobData.Neighbors.NeighborNW,
+                LightMap = jobData.LightMap,
+                LightBack = jobData.Neighbors.LightS,
+                LightFront = jobData.Neighbors.LightN,
+                LightLeft = jobData.Neighbors.LightW,
+                LightRight = jobData.Neighbors.LightE,
+                LightFrontRight = jobData.Neighbors.LightNE,
+                LightBackRight = jobData.Neighbors.LightSE,
+                LightBackLeft = jobData.Neighbors.LightSW,
+                LightFrontLeft = jobData.Neighbors.LightNW,
+                CustomMeshes = _world.JobDataManager.CustomMeshesJobData,
+                CustomFaces = _world.JobDataManager.CustomFacesJobData,
+                CustomVerts = _world.JobDataManager.CustomVertsJobData,
+                CustomTris = _world.JobDataManager.CustomTrisJobData,
+                WaterVertexTemplates = _world.FluidVertexTemplates.WaterVertexTemplates,
+                LavaVertexTemplates = _world.FluidVertexTemplates.LavaVertexTemplates,
+                SmoothLighting = _world.settings.smoothLighting,
+                ClipBounds = MeshClipBounds.Disabled,
+                Output = jobData.Output,
+            };
 
-        NativeArray<JobHandle> disposalHandles = new NativeArray<JobHandle>(19, Allocator.Persistent);
-        disposalHandles[0] = map.Dispose(meshJobHandle);
-        disposalHandles[1] = sectionData.Dispose(meshJobHandle);
-        disposalHandles[2] = back.Dispose(meshJobHandle);
-        disposalHandles[3] = front.Dispose(meshJobHandle);
-        disposalHandles[4] = left.Dispose(meshJobHandle);
-        disposalHandles[5] = right.Dispose(meshJobHandle);
-        disposalHandles[6] = frontRight.Dispose(meshJobHandle);
-        disposalHandles[7] = backRight.Dispose(meshJobHandle);
-        disposalHandles[8] = backLeft.Dispose(meshJobHandle);
-        disposalHandles[9] = frontLeft.Dispose(meshJobHandle);
-        disposalHandles[10] = lightMap.Dispose(meshJobHandle);
-        disposalHandles[11] = lightBack.Dispose(meshJobHandle);
-        disposalHandles[12] = lightFront.Dispose(meshJobHandle);
-        disposalHandles[13] = lightLeft.Dispose(meshJobHandle);
-        disposalHandles[14] = lightRight.Dispose(meshJobHandle);
-        disposalHandles[15] = lightFrontRight.Dispose(meshJobHandle);
-        disposalHandles[16] = lightBackRight.Dispose(meshJobHandle);
-        disposalHandles[17] = lightBackLeft.Dispose(meshJobHandle);
-        disposalHandles[18] = lightFrontLeft.Dispose(meshJobHandle);
-
-        JobHandle combinedDisposalHandle = JobHandle.CombineDependencies(disposalHandles);
-        JobHandle finalHandle = disposalHandles.Dispose(combinedDisposalHandle);
-
-        MeshJobs.Add(chunkCoord, (finalHandle, meshOutput));
+            // POOLING: Input buffers are returned to _jobArrayPool in ProcessMeshJobs after
+            // Handle.Complete() — never dispose or return them while the job may be running.
+            jobData.Handle = job.Schedule();
+            MeshJobs.Add(chunkCoord, jobData);
+        }
+        catch
+        {
+            // A scheduled-but-untracked job must finish before its buffers can be released
+            // (Complete() on a default handle is a no-op).
+            jobData.Handle.Complete();
+            if (jobData.Output.Vertices.IsCreated) jobData.Output.Dispose();
+            ReleaseMeshingJobInputs(jobData);
+            throw;
+        }
 
         return true;
+    }
+
+    /// <summary>
+    /// Rents a full-chunk voxel map buffer from the pool and fills it with the given chunk's data.
+    /// </summary>
+    /// <param name="chunkVoxelPos">The voxel-space world origin of the chunk to snapshot.</param>
+    /// <returns>A pooled buffer with every element written.</returns>
+    private NativeArray<uint> RentAndFillVoxelMap(Vector2Int chunkVoxelPos)
+    {
+        NativeArray<uint> buffer = _jobArrayPool.RentVoxelMap();
+        _world.worldData.FillChunkMapForJob(chunkVoxelPos, buffer);
+        return buffer;
+    }
+
+    /// <summary>
+    /// Rents a full-chunk light map buffer from the pool and fills it with the given chunk's data.
+    /// </summary>
+    /// <param name="chunkVoxelPos">The voxel-space world origin of the chunk to snapshot.</param>
+    /// <returns>A pooled buffer with every element written.</returns>
+    private NativeArray<ushort> RentAndFillLightMap(Vector2Int chunkVoxelPos)
+    {
+        NativeArray<ushort> buffer = _jobArrayPool.RentLightMap();
+        _world.worldData.FillChunkLightMapForJob(chunkVoxelPos, buffer);
+        return buffer;
+    }
+
+    /// <summary>
+    /// Acquires a filled full-chunk voxel map: pooled when <paramref name="pooled"/> is true,
+    /// otherwise a fresh allocation with the given allocator (startup/TempJob path).
+    /// </summary>
+    /// <param name="chunkVoxelPos">The voxel-space world origin of the chunk to snapshot.</param>
+    /// <param name="pooled">Whether to rent from the pool instead of allocating.</param>
+    /// <param name="allocator">The allocator for the non-pooled path.</param>
+    /// <returns>A buffer with every element written.</returns>
+    private NativeArray<uint> AcquireVoxelMap(Vector2Int chunkVoxelPos, bool pooled, Allocator allocator)
+    {
+        return pooled
+            ? RentAndFillVoxelMap(chunkVoxelPos)
+            : _world.worldData.GetChunkMapForJob(chunkVoxelPos, allocator);
+    }
+
+    /// <summary>
+    /// Acquires a filled full-chunk light map: pooled when <paramref name="pooled"/> is true,
+    /// otherwise a fresh allocation with the given allocator (startup/TempJob path).
+    /// </summary>
+    /// <param name="chunkVoxelPos">The voxel-space world origin of the chunk to snapshot.</param>
+    /// <param name="pooled">Whether to rent from the pool instead of allocating.</param>
+    /// <param name="allocator">The allocator for the non-pooled path.</param>
+    /// <returns>A buffer with every element written.</returns>
+    private NativeArray<ushort> AcquireLightMap(Vector2Int chunkVoxelPos, bool pooled, Allocator allocator)
+    {
+        return pooled
+            ? RentAndFillLightMap(chunkVoxelPos)
+            : _world.worldData.GetChunkLightMapForJob(chunkVoxelPos, allocator);
+    }
+
+    /// <summary>
+    /// Acquires the filled neighbor map set (8 voxel + 8 light maps) for the given center chunk:
+    /// pooled when <paramref name="pooled"/> is true, otherwise fresh allocations with the given
+    /// allocator (startup/TempJob path). This is the single authoritative fill site for
+    /// <see cref="NeighborMapSet"/> — its compass directions must match the offsets used here.
+    /// </summary>
+    /// <param name="center">The chunk whose neighborhood is snapshotted.</param>
+    /// <param name="pooled">Whether to rent from the pool instead of allocating.</param>
+    /// <param name="allocator">The allocator for the non-pooled path.</param>
+    /// <returns>A neighbor map set with every buffer filled.</returns>
+    private NeighborMapSet AcquireNeighborMaps(ChunkCoord center, bool pooled, Allocator allocator)
+    {
+        return new NeighborMapSet
+        {
+            NeighborN = AcquireVoxelMap(center.Neighbor(0, 1).ToVoxelOrigin(), pooled, allocator),
+            NeighborE = AcquireVoxelMap(center.Neighbor(1, 0).ToVoxelOrigin(), pooled, allocator),
+            NeighborS = AcquireVoxelMap(center.Neighbor(0, -1).ToVoxelOrigin(), pooled, allocator),
+            NeighborW = AcquireVoxelMap(center.Neighbor(-1, 0).ToVoxelOrigin(), pooled, allocator),
+            NeighborNE = AcquireVoxelMap(center.Neighbor(1, 1).ToVoxelOrigin(), pooled, allocator),
+            NeighborSE = AcquireVoxelMap(center.Neighbor(1, -1).ToVoxelOrigin(), pooled, allocator),
+            NeighborSW = AcquireVoxelMap(center.Neighbor(-1, -1).ToVoxelOrigin(), pooled, allocator),
+            NeighborNW = AcquireVoxelMap(center.Neighbor(-1, 1).ToVoxelOrigin(), pooled, allocator),
+            LightN = AcquireLightMap(center.Neighbor(0, 1).ToVoxelOrigin(), pooled, allocator),
+            LightE = AcquireLightMap(center.Neighbor(1, 0).ToVoxelOrigin(), pooled, allocator),
+            LightS = AcquireLightMap(center.Neighbor(0, -1).ToVoxelOrigin(), pooled, allocator),
+            LightW = AcquireLightMap(center.Neighbor(-1, 0).ToVoxelOrigin(), pooled, allocator),
+            LightNE = AcquireLightMap(center.Neighbor(1, 1).ToVoxelOrigin(), pooled, allocator),
+            LightSE = AcquireLightMap(center.Neighbor(1, -1).ToVoxelOrigin(), pooled, allocator),
+            LightSW = AcquireLightMap(center.Neighbor(-1, -1).ToVoxelOrigin(), pooled, allocator),
+            LightNW = AcquireLightMap(center.Neighbor(-1, 1).ToVoxelOrigin(), pooled, allocator),
+        };
     }
 
     /// <summary>
     /// Schedules a neighborhood lighting job to propagate sunlight and blocklight changes.
     /// </summary>
     /// <param name="chunkData">The central chunk data object.</param>
-    /// <param name="allocator">The allocator to use for job data.</param>
+    /// <param name="allocator">The allocator for the small per-job containers (heightmap, queues,
+    /// mods, stability flag). The full-volume voxel/light maps are always pooled Persistent buffers.</param>
     /// <returns>True if the job was successfully scheduled, false if it exited early or was already scheduled.</returns>
     public bool ScheduleLightingUpdate(ChunkData chunkData, Allocator allocator = Allocator.Persistent)
     {
@@ -300,84 +366,86 @@ public class WorldJobManager : IDisposable
             return false;
         }
 
-        LightingJobInputData inputData = new LightingJobInputData();
+        // POOLING: Only Persistent callers (steady-state gameplay) use pooled buffers. The startup
+        // coroutine passes TempJob and schedules lighting for the whole load area in one sweep —
+        // far past the pool's retention cap — so it keeps allocate-per-job, which TempJob's
+        // linear allocator handles better.
+        bool usePooledBuffers = allocator == Allocator.Persistent;
 
-        inputData.Heightmap = new NativeArray<ushort>(chunkData.heightMap, allocator);
-        inputData.NeighborN = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), allocator);
-        inputData.NeighborE = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), allocator);
-        inputData.NeighborS = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), allocator);
-        inputData.NeighborW = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), allocator);
-        inputData.NeighborNE = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), allocator);
-        inputData.NeighborSE = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), allocator);
-        inputData.NeighborSW = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), allocator);
-        inputData.NeighborNW = _world.worldData.GetChunkMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), allocator);
-        inputData.LightN = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(0, 1).ToVoxelOrigin(), allocator);
-        inputData.LightE = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, 0).ToVoxelOrigin(), allocator);
-        inputData.LightS = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(0, -1).ToVoxelOrigin(), allocator);
-        inputData.LightW = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, 0).ToVoxelOrigin(), allocator);
-        inputData.LightNE = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, 1).ToVoxelOrigin(), allocator);
-        inputData.LightSE = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(1, -1).ToVoxelOrigin(), allocator);
-        inputData.LightSW = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, -1).ToVoxelOrigin(), allocator);
-        inputData.LightNW = _world.worldData.GetChunkLightMapForJob(chunkCoord.Neighbor(-1, 1).ToVoxelOrigin(), allocator);
-
-        LightingJobData jobData = new LightingJobData
+        // If anything below throws, the catch releases every buffer acquired so far
+        // (Return/Dispose skip uncreated entries), so the pool never leaks.
+        LightingJobData jobData = new LightingJobData { UsesPooledBuffers = usePooledBuffers };
+        try
         {
-            Input = inputData,
-            Map = _world.worldData.GetChunkMapForJob(chunkData.Position, allocator),
-            LightMap = _world.worldData.GetChunkLightMapForJob(chunkData.Position, allocator),
-            Mods = new NativeList<LightModification>(allocator),
-            IsStable = new NativeArray<bool>(1, allocator),
-            SunLightQueue = chunkData.GetSunlightQueueForJob(allocator),
-            BlockLightQueue = chunkData.GetBlocklightQueueForJob(allocator),
-            SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator),
-        };
-
-        if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> columns))
-        {
-            foreach (Vector2Int col in columns)
+            jobData.Input = new LightingJobInputData
             {
-                jobData.SunLightRecalcQueue.Enqueue(new Vector2Int(col.x - chunkData.Position.x, col.y - chunkData.Position.y));
+                Heightmap = new NativeArray<ushort>(chunkData.heightMap, allocator),
+                Neighbors = AcquireNeighborMaps(chunkCoord, usePooledBuffers, allocator),
+            };
+            jobData.Map = AcquireVoxelMap(chunkData.Position, usePooledBuffers, allocator);
+            jobData.LightMap = AcquireLightMap(chunkData.Position, usePooledBuffers, allocator);
+            jobData.Mods = new NativeList<LightModification>(allocator);
+            jobData.IsStable = new NativeArray<bool>(1, allocator);
+            jobData.SunLightQueue = chunkData.GetSunlightQueueForJob(allocator);
+            jobData.BlockLightQueue = chunkData.GetBlocklightQueueForJob(allocator);
+            jobData.SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator);
+
+            if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> columns))
+            {
+                foreach (Vector2Int col in columns)
+                {
+                    jobData.SunLightRecalcQueue.Enqueue(new Vector2Int(col.x - chunkData.Position.x, col.y - chunkData.Position.y));
+                }
+
+                _world.worldData.SunlightRecalculationQueue.Remove(chunkData.Position);
+                HashSetPool<Vector2Int>.Release(columns);
             }
 
-            _world.worldData.SunlightRecalculationQueue.Remove(chunkData.Position);
-            HashSetPool<Vector2Int>.Release(columns);
+            NeighborhoodLightingJob job = new NeighborhoodLightingJob
+            {
+                Map = jobData.Map,
+                LightMap = jobData.LightMap,
+                ChunkPosition = chunkData.Position,
+                SunlightBfsQueue = jobData.SunLightQueue,
+                BlocklightBfsQueue = jobData.BlockLightQueue,
+                SunlightColumnRecalcQueue = jobData.SunLightRecalcQueue,
+                Heightmap = jobData.Input.Heightmap,
+                NeighborN = jobData.Input.Neighbors.NeighborN, NeighborE = jobData.Input.Neighbors.NeighborE,
+                NeighborS = jobData.Input.Neighbors.NeighborS, NeighborW = jobData.Input.Neighbors.NeighborW,
+                NeighborNE = jobData.Input.Neighbors.NeighborNE, NeighborSE = jobData.Input.Neighbors.NeighborSE,
+                NeighborSW = jobData.Input.Neighbors.NeighborSW, NeighborNW = jobData.Input.Neighbors.NeighborNW,
+                LightN = jobData.Input.Neighbors.LightN, LightE = jobData.Input.Neighbors.LightE,
+                LightS = jobData.Input.Neighbors.LightS, LightW = jobData.Input.Neighbors.LightW,
+                LightNE = jobData.Input.Neighbors.LightNE, LightSE = jobData.Input.Neighbors.LightSE,
+                LightSW = jobData.Input.Neighbors.LightSW, LightNW = jobData.Input.Neighbors.LightNW,
+                BlockTypes = _world.JobDataManager.BlockTypesJobData,
+                CrossChunkLightMods = jobData.Mods,
+                IsStable = jobData.IsStable,
+                PerformEdgeCheck = chunkData.NeedsEdgeCheck,
+            };
+
+            jobData.Handle = job.Schedule();
+            chunkData.HasLightChangesToProcess = false;
+            if (chunkData.NeedsEdgeCheck) chunkData.NeedsEdgeCheck = false;
+            LightingJobs.Add(chunkCoord, jobData);
+            return true;
         }
-
-        NeighborhoodLightingJob job = new NeighborhoodLightingJob
+        catch
         {
-            Map = jobData.Map,
-            LightMap = jobData.LightMap,
-            ChunkPosition = chunkData.Position,
-            SunlightBfsQueue = jobData.SunLightQueue,
-            BlocklightBfsQueue = jobData.BlockLightQueue,
-            SunlightColumnRecalcQueue = jobData.SunLightRecalcQueue,
-            Heightmap = jobData.Input.Heightmap,
-            NeighborN = jobData.Input.NeighborN, NeighborE = jobData.Input.NeighborE,
-            NeighborS = jobData.Input.NeighborS, NeighborW = jobData.Input.NeighborW,
-            NeighborNE = jobData.Input.NeighborNE, NeighborSE = jobData.Input.NeighborSE,
-            NeighborSW = jobData.Input.NeighborSW, NeighborNW = jobData.Input.NeighborNW,
-            LightN = jobData.Input.LightN, LightE = jobData.Input.LightE,
-            LightS = jobData.Input.LightS, LightW = jobData.Input.LightW,
-            LightNE = jobData.Input.LightNE, LightSE = jobData.Input.LightSE,
-            LightSW = jobData.Input.LightSW, LightNW = jobData.Input.LightNW,
-            BlockTypes = _world.JobDataManager.BlockTypesJobData,
-            CrossChunkLightMods = jobData.Mods,
-            IsStable = jobData.IsStable,
-            PerformEdgeCheck = chunkData.NeedsEdgeCheck,
-        };
-
-        jobData.Handle = job.Schedule();
-        chunkData.HasLightChangesToProcess = false;
-        if (chunkData.NeedsEdgeCheck) chunkData.NeedsEdgeCheck = false;
-        LightingJobs.Add(chunkCoord, jobData);
-        return true;
+            // A scheduled-but-untracked job must finish before its buffers can be released
+            // (Complete() on a default handle is a no-op).
+            jobData.Handle.Complete();
+            ReleaseLightingJobData(jobData);
+            throw;
+        }
     }
 
     /// <summary>
     /// Helper overload for Chunk objects.
     /// </summary>
     /// <param name="chunk">The chunk to schedule lighting for.</param>
-    /// <param name="allocator">The allocator to use for job data.</param>
+    /// <param name="allocator">The allocator for the small per-job containers (the full-volume
+    /// maps are always pooled Persistent buffers).</param>
     /// <returns>True if the job was successfully scheduled, false if it exited early or was already scheduled.</returns>
     public bool ScheduleLightingUpdate(Chunk chunk, Allocator allocator = Allocator.Persistent)
     {
@@ -539,21 +607,24 @@ public class WorldJobManager : IDisposable
     public void ProcessMeshJobs()
     {
         _completedMeshJobs.Clear();
-        foreach (KeyValuePair<ChunkCoord, (JobHandle handle, MeshDataJobOutput meshData)> jobEntry in MeshJobs)
+        foreach (KeyValuePair<ChunkCoord, MeshingJobData> jobEntry in MeshJobs)
         {
-            if (jobEntry.Value.handle.IsCompleted)
+            if (jobEntry.Value.Handle.IsCompleted)
             {
-                jobEntry.Value.handle.Complete();
+                jobEntry.Value.Handle.Complete();
 
                 Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
                 if (chunk != null)
                 {
-                    chunk.ApplyMeshData(jobEntry.Value.meshData);
+                    chunk.ApplyMeshData(jobEntry.Value.Output);
                 }
                 else
                 {
-                    jobEntry.Value.meshData.Dispose();
+                    jobEntry.Value.Output.Dispose();
                 }
+
+                // POOLING: Return the input buffers for reuse.
+                ReleaseMeshingJobInputs(jobEntry.Value);
 
                 _completedMeshJobs.Add(jobEntry.Key);
             }
@@ -563,6 +634,51 @@ public class WorldJobManager : IDisposable
         {
             MeshJobs.Remove(chunkCoord);
         }
+    }
+
+    /// <summary>
+    /// Returns a completed meshing job's pooled input buffers to <see cref="_jobArrayPool"/> and
+    /// disposes its per-job section data. Must only be called after <c>Handle.Complete()</c>.
+    /// Does NOT touch <see cref="MeshingJobData.Output"/> — ownership of the output transfers to
+    /// <c>Chunk.ApplyMeshData</c> (or is disposed by the caller when no chunk exists).
+    /// </summary>
+    /// <param name="jobData">The completed meshing job data.</param>
+    private void ReleaseMeshingJobInputs(in MeshingJobData jobData)
+    {
+        _jobArrayPool.Return(jobData.Map);
+        _jobArrayPool.Return(jobData.LightMap);
+        _jobArrayPool.Return(in jobData.Neighbors);
+
+        if (jobData.SectionData.IsCreated) jobData.SectionData.Dispose();
+    }
+
+    /// <summary>
+    /// Returns a completed lighting job's pooled full-volume buffers to <see cref="_jobArrayPool"/>
+    /// and disposes its per-job containers (heightmap, queues, mods, stability flag).
+    /// Non-pooled jobs are fully disposed instead. Must only be called after <c>Handle.Complete()</c>.
+    /// </summary>
+    /// <param name="jobData">The completed lighting job data.</param>
+    private void ReleaseLightingJobData(in LightingJobData jobData)
+    {
+        // Non-pooled jobs (startup coroutine's TempJob path) own all their buffers — dispose them.
+        if (!jobData.UsesPooledBuffers)
+        {
+            jobData.Dispose();
+            return;
+        }
+
+        // Pooled full-volume buffers
+        _jobArrayPool.Return(jobData.Map);
+        _jobArrayPool.Return(jobData.LightMap);
+        _jobArrayPool.Return(in jobData.Input.Neighbors);
+
+        // Per-job containers
+        if (jobData.Input.Heightmap.IsCreated) jobData.Input.Heightmap.Dispose();
+        if (jobData.SunLightQueue.IsCreated) jobData.SunLightQueue.Dispose();
+        if (jobData.BlockLightQueue.IsCreated) jobData.BlockLightQueue.Dispose();
+        if (jobData.SunLightRecalcQueue.IsCreated) jobData.SunLightRecalcQueue.Dispose();
+        if (jobData.Mods.IsCreated) jobData.Mods.Dispose();
+        if (jobData.IsStable.IsCreated) jobData.IsStable.Dispose();
     }
 
     /// <summary>
@@ -745,7 +861,8 @@ public class WorldJobManager : IDisposable
 
                 if (chunkData != null) chunkData.IsAwaitingMainThreadProcess = false;
 
-                jobData.Dispose();
+                // POOLING: Return the full-volume buffers for reuse; dispose per-job containers.
+                ReleaseLightingJobData(jobData);
                 _completedLightJobs.Add(jobEntry.Key);
             }
         }
@@ -912,21 +1029,25 @@ public class WorldJobManager : IDisposable
             job.Dispose();
         }
 
-        foreach ((JobHandle handle, MeshDataJobOutput meshData) in MeshJobs.Values)
+        foreach (MeshingJobData job in MeshJobs.Values)
         {
-            handle.Complete();
-            meshData.Dispose();
+            job.Handle.Complete();
+            job.Output.Dispose();
+            ReleaseMeshingJobInputs(job);
         }
 
         foreach (LightingJobData job in LightingJobs.Values)
         {
             job.Handle.Complete();
-            job.Dispose();
+            ReleaseLightingJobData(job);
         }
 
         GenerationJobs.Clear();
         MeshJobs.Clear();
         LightingJobs.Clear();
+
+        // POOLING: Dispose retained buffers last — all jobs above have returned theirs by now.
+        _jobArrayPool.Dispose();
 
         _chunkGenerator?.Dispose();
     }

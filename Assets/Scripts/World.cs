@@ -22,7 +22,6 @@ using Physics;
 using Serialization;
 using UI;
 using Unity.Collections;
-using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Pool;
@@ -1045,9 +1044,9 @@ public class World : MonoBehaviour
     private void CompleteAndProcessMeshJobs()
     {
         // Force complete all scheduled mesh jobs immediately.
-        foreach ((JobHandle handle, MeshDataJobOutput meshData) job in JobManager.MeshJobs.Values)
+        foreach (MeshingJobData job in JobManager.MeshJobs.Values)
         {
-            job.handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            job.Handle.Complete(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
         }
 
         // Process their results.

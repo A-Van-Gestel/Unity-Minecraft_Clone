@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Data;
 using Unity.Collections;
 using Unity.Jobs;
@@ -12,31 +13,13 @@ namespace Jobs.Data
     public struct LightingJobInputData
     {
         public NativeArray<ushort> Heightmap;
-        public NativeArray<uint> NeighborN, NeighborE, NeighborS, NeighborW;
-        public NativeArray<uint> NeighborNE, NeighborSE, NeighborSW, NeighborNW;
-        public NativeArray<ushort> LightN, LightE, LightS, LightW;
-        public NativeArray<ushort> LightNE, LightSE, LightSW, LightNW;
+        public NeighborMapSet Neighbors;
 
         /// A helper to dispose all the containers at once
         public void Dispose()
         {
             if (Heightmap.IsCreated) Heightmap.Dispose();
-            if (NeighborN.IsCreated) NeighborN.Dispose();
-            if (NeighborE.IsCreated) NeighborE.Dispose();
-            if (NeighborS.IsCreated) NeighborS.Dispose();
-            if (NeighborW.IsCreated) NeighborW.Dispose();
-            if (NeighborNE.IsCreated) NeighborNE.Dispose();
-            if (NeighborSE.IsCreated) NeighborSE.Dispose();
-            if (NeighborSW.IsCreated) NeighborSW.Dispose();
-            if (NeighborNW.IsCreated) NeighborNW.Dispose();
-            if (LightN.IsCreated) LightN.Dispose();
-            if (LightE.IsCreated) LightE.Dispose();
-            if (LightS.IsCreated) LightS.Dispose();
-            if (LightW.IsCreated) LightW.Dispose();
-            if (LightNE.IsCreated) LightNE.Dispose();
-            if (LightSE.IsCreated) LightSE.Dispose();
-            if (LightSW.IsCreated) LightSW.Dispose();
-            if (LightNW.IsCreated) LightNW.Dispose();
+            Neighbors.Dispose();
         }
     }
 
@@ -50,6 +33,15 @@ namespace Jobs.Data
     public struct LightingJobData
     {
         public JobHandle Handle;
+
+        /// <summary>
+        /// True when the full-volume maps (center + neighbor voxel/light maps) were rented from
+        /// <c>ChunkJobArrayPool</c> and must be returned to it instead of disposed. False for
+        /// TempJob-allocated startup jobs and non-pooled callers (editor pipeline, benchmarks),
+        /// which clean up via <see cref="Dispose"/>. Not read by any Burst job.
+        /// </summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool UsesPooledBuffers;
 
         // --- Input data ---
         public LightingJobInputData Input;

@@ -225,6 +225,11 @@ namespace Data
             }
         }
 
+        // Zeroed source slabs used to clear null-section slices of (potentially stale, pooled)
+        // job buffers via a fast memcpy instead of a per-element loop.
+        private static readonly uint[] s_emptySectionVoxels = new uint[ChunkMath.SECTION_VOLUME];
+        private static readonly ushort[] s_emptySectionLight = new ushort[ChunkMath.SECTION_VOLUME];
+
         /// <summary>
         /// Helper method to get the raw voxel map for jobs.
         /// </summary>
@@ -233,31 +238,48 @@ namespace Data
         /// <returns>Jobs compatible array of voxels</returns>
         public NativeArray<uint> GetChunkMapForJob(Vector2Int chunkVoxelPos, Allocator allocator)
         {
+            // UninitializedMemory is safe: FillChunkMapForJob writes every element.
+            NativeArray<uint> jobArray = new NativeArray<uint>(
+                VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth,
+                allocator, NativeArrayOptions.UninitializedMemory);
+
+            FillChunkMapForJob(chunkVoxelPos, jobArray);
+            return jobArray;
+        }
+
+        /// <summary>
+        /// Fills a caller-provided full-chunk buffer with the raw voxel map for jobs.
+        /// Writes EVERY element of <paramref name="jobArray"/> (null sections are zero-filled),
+        /// so it is safe to use with stale pooled buffers from <see cref="Helpers.ChunkJobArrayPool"/>.
+        /// </summary>
+        /// <param name="chunkVoxelPos">The global chunk coordinates of the given chunk</param>
+        /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth to fill.</param>
+        public void FillChunkMapForJob(Vector2Int chunkVoxelPos, NativeArray<uint> jobArray)
+        {
             ChunkData chunk = RequestChunk(chunkVoxelPos, false);
 
-            // Allocate the full height array for the job
-            NativeArray<uint> jobArray = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, allocator);
+            const int sectionSize = ChunkMath.SECTION_VOLUME;
+            int sectionCount = jobArray.Length / sectionSize;
 
-            if (chunk != null)
+            for (int i = 0; i < sectionCount; i++)
             {
-                // Copy sections into the flat native array
-                const int sectionSize = 16 * 16 * 16;
-                for (int i = 0; i < chunk.sections.Length; i++)
+                if (chunk != null && chunk.sections[i] != null)
                 {
-                    if (chunk.sections[i] != null)
-                    {
-                        // Fast native copy
-                        NativeArray<uint>.Copy(
-                            chunk.sections[i].voxels, 0,
-                            jobArray, i * sectionSize,
-                            sectionSize);
-                    }
-                    // If null, the jobArray already contains 0 (Air) from initialization.
-                    // The lighting BFS (when enabled) will fill correct values.
+                    // Fast native copy
+                    NativeArray<uint>.Copy(
+                        chunk.sections[i].voxels, 0,
+                        jobArray, i * sectionSize,
+                        sectionSize);
+                }
+                else
+                {
+                    // Null section (or missing chunk): zero-fill (Air) — pooled buffers may contain stale data.
+                    NativeArray<uint>.Copy(
+                        s_emptySectionVoxels, 0,
+                        jobArray, i * sectionSize,
+                        sectionSize);
                 }
             }
-
-            return jobArray;
         }
 
         /// <summary>
@@ -265,34 +287,55 @@ namespace Data
         /// </summary>
         public NativeArray<ushort> GetChunkLightMapForJob(Vector2Int chunkVoxelPos, Allocator allocator)
         {
+            // UninitializedMemory is safe: FillChunkLightMapForJob writes every element.
+            NativeArray<ushort> jobArray = new NativeArray<ushort>(
+                VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth,
+                allocator, NativeArrayOptions.UninitializedMemory);
+
+            FillChunkLightMapForJob(chunkVoxelPos, jobArray);
+            return jobArray;
+        }
+
+        /// <summary>
+        /// Fills a caller-provided full-chunk buffer with the chunk's ushort light data for jobs.
+        /// Writes EVERY element of <paramref name="jobArray"/> (null sections are zero-filled),
+        /// so it is safe to use with stale pooled buffers from <see cref="Helpers.ChunkJobArrayPool"/>.
+        /// </summary>
+        /// <param name="chunkVoxelPos">The global chunk coordinates of the given chunk</param>
+        /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth to fill.</param>
+        public void FillChunkLightMapForJob(Vector2Int chunkVoxelPos, NativeArray<ushort> jobArray)
+        {
             ChunkData chunk = RequestChunk(chunkVoxelPos, false);
 
-            NativeArray<ushort> jobArray = new NativeArray<ushort>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, allocator);
+            const int sectionSize = ChunkMath.SECTION_VOLUME;
+            int sectionCount = jobArray.Length / sectionSize;
 
-            if (chunk != null)
+            for (int i = 0; i < sectionCount; i++)
             {
-                const int sectionSize = 16 * 16 * 16;
-                for (int i = 0; i < chunk.sections.Length; i++)
+                byte uniformSky = chunk != null ? chunk.SectionUniformSkyLevel[i] : ChunkData.UNIFORM_SKY_NONE;
+                if (chunk != null && uniformSky != ChunkData.UNIFORM_SKY_NONE)
                 {
-                    byte uniformSky = chunk.SectionUniformSkyLevel[i];
-                    if (uniformSky != ChunkData.UNIFORM_SKY_NONE)
-                    {
-                        LightingHelper.FillUniformSkyLight(jobArray, i * sectionSize, sectionSize, uniformSky);
-                    }
-                    else if (chunk.sections[i] != null)
-                    {
-                        NativeArray<ushort>.Copy(
-                            chunk.sections[i].LightData, 0,
-                            jobArray, i * sectionSize,
-                            sectionSize);
-                    }
+                    LightingHelper.FillUniformSkyLight(jobArray, i * sectionSize, sectionSize, uniformSky);
+                }
+                else if (chunk != null && chunk.sections[i] != null)
+                {
+                    NativeArray<ushort>.Copy(
+                        chunk.sections[i].LightData, 0,
+                        jobArray, i * sectionSize,
+                        sectionSize);
+                }
+                else
+                {
+                    // Null section (or missing chunk): zero-fill — pooled buffers may contain stale data.
+                    NativeArray<ushort>.Copy(
+                        s_emptySectionLight, 0,
+                        jobArray, i * sectionSize,
+                        sectionSize);
                 }
             }
 
             if (World.Instance != null && !World.Instance.settings.enableLighting)
                 LightingHelper.StampFullBrightSunlight(jobArray);
-
-            return jobArray;
         }
 
         #endregion
