@@ -45,6 +45,16 @@
 
 ---
 
+## 4.1 String Allocation in Chunk Pool Reset  `[DONE]`
+
+**What:** GameObject renaming on pool activation (`$"Chunk {X}, {Z}"` / section names) is now wrapped in `#if UNITY_EDITOR` so it only runs in the Editor for hierarchy readability and is fully stripped from builds.
+
+**Files changed:** `Chunk.cs`, `SectionRenderer.cs`, `ChunkPoolManager.cs`, `Clouds.cs`.
+
+**Why it mattered:** Eliminated a managed string allocation plus a native engine-side string update on every chunk pool activation — a constant GC source during player movement. *(Verified implemented during the June 2026 performance audit; see `Design/PERFORMANCE_IMPROVEMENTS_REPORT.md`.)*
+
+---
+
 ## Architectural Strengths (No Action Required)
 
 These areas were already well-implemented at the time of analysis. Documented for completeness.
