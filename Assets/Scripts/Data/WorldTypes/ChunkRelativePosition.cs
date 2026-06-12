@@ -39,7 +39,7 @@ namespace Data.WorldTypes
         public ChunkRelativePosition(ChunkCoord chunk, Vector3 localPosition)
         {
             this = default;
-            this.Chunk = chunk;
+            Chunk = chunk;
             this.localPosition = localPosition;
             Normalize();
         }
