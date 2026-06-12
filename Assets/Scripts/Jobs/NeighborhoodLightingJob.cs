@@ -453,6 +453,14 @@ namespace Jobs
             uint sourcePacked = GetPackedData(pos, ref cache);
             if (sourcePacked == uint.MaxValue) return;
 
+            // An opaque block can RECEIVE surface light (source - 1) but must never act as a
+            // propagation source — otherwise surface-lit opaque voxels that re-enter the BFS
+            // (e.g. via ModifyVoxel neighbor wake-ups) leak light into solid volumes.
+            // Mirrors the IsOpaque source guard in the sunlight path (PropagateLight).
+            // Emissive opaque blocks (lamps) are exempt: they must radiate their own emission.
+            BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
+            if (sourceProps.IsOpaque && !sourceProps.IsLightSource) return;
+
             ushort sourceLight = GetLightData(pos, ref cache);
             if (sourceLight == ushort.MaxValue) return;
 

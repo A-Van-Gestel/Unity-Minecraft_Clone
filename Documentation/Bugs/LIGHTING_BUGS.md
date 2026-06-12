@@ -116,7 +116,8 @@ Breaking an emissive block sometimes leaves its light behind permanently; no lat
 ## Bug 09: Blocklight leaks into opaque volumes (woken surface-lit opaque voxels become BFS sources)
 
 **Severity:** Medium (visual-only inside solid terrain, but corrupts saved light data and compounds with every nearby edit)
-**Status:** Open / Reproduced deterministically in the validation suite (scenario **K09**)
+**Status:** **Fixed in code (June 2026)** — opaque-source guard added to `PropagateLightRGB` (skip when `IsOpaque && !IsLightSource`, exempting emissive opaque lamps). Suite-confirmed: repro scenario K09 was promoted to baseline **B9** (opaque-containment invariant, green; all other baselines unaffected). **Awaiting in-game confirmation** (check the BlockLight `VoxelDebugVisualization` near torch/lava edits) — archive this entry to `_FIXED_BUGS.md` once confirmed.
+Note: B9 deliberately asserts only the containment invariant, not a full oracle compare — the same edit also trips Bug 07's cross-border removal/re-spread loss, which still contaminates the full field (covered by K07a–c).
 **Confidence:** Confirmed — mechanism verified by code inspection and harness reproduction.
 **Files:** `NeighborhoodLightingJob.cs` — `PropagateLightRGB` (~line 451, missing source-opacity guard); `ChunkData.cs` — `ModifyVoxel` neighbor wake-up (~lines 497–512, wakes lit neighbors without an opacity check)
 

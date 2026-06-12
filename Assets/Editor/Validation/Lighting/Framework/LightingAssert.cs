@@ -154,6 +154,56 @@ namespace Editor.Validation.Lighting.Framework
             return false;
         }
 
+        /// <summary>
+        /// Asserts that no voxel in the inclusive world-space box carries any blocklight.
+        /// Used to verify opaque-volume interiors stay lightless (deeper than the legitimate
+        /// 1-voxel surface stamp) regardless of nearby light sources and edits.
+        /// </summary>
+        /// <param name="world">The test world to scan.</param>
+        /// <param name="min">The inclusive minimum corner of the volume.</param>
+        /// <param name="max">The inclusive maximum corner of the volume.</param>
+        /// <param name="testName">The scenario name used in the log output.</param>
+        /// <returns>True when the whole volume is blocklight-free.</returns>
+        public static bool NoBlocklightInVolume(LightingTestWorld world, Vector3Int min, Vector3Int max, string testName)
+        {
+            StringBuilder report = new StringBuilder();
+            int litVoxels = 0;
+
+            for (int x = min.x; x <= max.x; x++)
+            {
+                for (int y = min.y; y <= max.y; y++)
+                {
+                    for (int z = min.z; z <= max.z; z++)
+                    {
+                        Vector3Int pos = new Vector3Int(x, y, z);
+                        ushort light = world.GetLightData(pos);
+                        if (LightBitMapping.GetBlocklightR(light) == 0 &&
+                            LightBitMapping.GetBlocklightG(light) == 0 &&
+                            LightBitMapping.GetBlocklightB(light) == 0)
+                        {
+                            continue;
+                        }
+
+                        litVoxels++;
+                        if (litVoxels <= MAX_REPORTED_MISMATCHES)
+                            AppendMismatch(report, pos, LightBitMapping.GetSkyLight(light), light);
+                    }
+                }
+            }
+
+            if (litVoxels == 0)
+            {
+                Debug.Log($"[PASS] {testName}");
+                return true;
+            }
+
+            if (litVoxels > MAX_REPORTED_MISMATCHES)
+                report.AppendLine($"... and {litVoxels - MAX_REPORTED_MISMATCHES} more.");
+
+            Debug.LogError($"[FAIL] {testName}\n{litVoxels} voxel(s) carry blocklight inside the volume {min}-{max}:\n{report}");
+            return false;
+        }
+
         private static void AppendMismatch(StringBuilder report, Vector3Int worldPos, ushort expected, ushort actual)
         {
             report.AppendLine(

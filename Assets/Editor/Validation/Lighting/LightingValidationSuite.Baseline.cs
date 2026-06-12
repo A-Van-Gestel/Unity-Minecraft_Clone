@@ -22,6 +22,7 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B6: Sealed cavity is pitch black", Baseline_SealedCavity));
             scenarios.Add(new Scenario("B7: Blocklight removal survives an in-flight neighbor job (race)", Baseline_InFlightBlocklightRemovalRace));
             scenarios.Add(new Scenario("B8: Wave-parallel initial lighting of diagonal sky-well converges to oracle", Baseline_DiagonalSkyWellParallelGen));
+            scenarios.Add(new Scenario("B9: No blocklight propagation from inside opaque volumes", Baseline_OpaqueVolumeLightContainment));
         }
 
         /// <summary>
@@ -254,6 +255,44 @@ namespace Editor.Validation.Lighting
 
             bool passed = LightingAssert.Converged(world.RunInitialLightingParallel(), "B8: wave-parallel initial lighting converges");
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B8: under-slab field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B9: Blocklight must never propagate from inside opaque volumes (Bug 09, fixed June 2026 —
+        /// promoted from known-bug scenario K09). A torch on a stone floor plus a place/break edit
+        /// next to it wakes the surface-lit opaque floor voxel as a BFS node; the opaque-source
+        /// guard in <c>PropagateLightRGB</c> must stop it from acting as a source. The floor surface
+        /// (y=10) legitimately receives a 1-deep stamp; everything below (y ≤ 9) must stay at
+        /// blocklight (0,0,0) across the whole grid.
+        /// <para>Deliberately NOT a full oracle compare: the same edit also triggers Bug 07's
+        /// cross-border removal/re-spread loss, which contaminates the full field until that bug is
+        /// fixed (covered by K07a–c). This scenario isolates the opaque-containment invariant.</para>
+        /// </summary>
+        private static bool Baseline_OpaqueVolumeLightContainment()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B9: initial lighting converges");
+
+            // Torch on the floor; the floor surface around it receives a legitimate surface stamp.
+            world.PlaceBlock(new Vector3Int(24, 11, 24), TestBlockPalette.Torch);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B9: torch converges");
+
+            // The leak trigger: one edit next to the lit floor enqueues the surface-lit opaque
+            // floor voxel below it as a BFS wake-up node.
+            world.PlaceBlock(new Vector3Int(25, 11, 24), TestBlockPalette.Stone);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B9: post-place convergence");
+            world.BreakBlock(new Vector3Int(25, 11, 24));
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B9: post-break convergence");
+
+            // Depth >= 2 inside the floor (below the surface layer) must be blocklight-free everywhere.
+            const int worldMax = 3 * VoxelData.ChunkWidth - 1;
+            passed &= LightingAssert.NoBlocklightInVolume(world,
+                new Vector3Int(0, 0, 0), new Vector3Int(worldMax, 9, worldMax),
+                "B9: floor interior carries no blocklight");
             return passed;
         }
     }
