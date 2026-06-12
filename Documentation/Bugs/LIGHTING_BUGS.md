@@ -110,3 +110,25 @@ Breaking an emissive block sometimes leaves its light behind permanently; no lat
 
 - Path 1: extend the pending-lighting store to persist full blocklight modifications (position + RGB + channel) instead of sun-only columns. ⚠️ Changes the `pending_lighting.bin` format — requires an AOT migration step (`MigratePendingLighting`) + version bump per the serialization rules.
 - Path 2: don't apply cross-chunk mods directly to a chunk that has an in-flight lighting job; buffer them per-chunk and apply (data + queue node) after that job's `ApplyLightingJobResult` runs. Alternatively re-apply buffered mods on top of the merged result.
+
+---
+
+## Bug 09: Blocklight leaks into opaque volumes (woken surface-lit opaque voxels become BFS sources)
+
+**Severity:** Medium (visual-only inside solid terrain, but corrupts saved light data and compounds with every nearby edit)
+**Status:** Open / Reproduced deterministically in the validation suite (scenario **K09**)
+**Confidence:** Confirmed — mechanism verified by code inspection and harness reproduction.
+**Files:** `NeighborhoodLightingJob.cs` — `PropagateLightRGB` (~line 451, missing source-opacity guard); `ChunkData.cs` — `ModifyVoxel` neighbor wake-up (~lines 497–512, wakes lit neighbors without an opacity check)
+
+**History:** Suspected since the original multithreaded/job-based lighting rewrite (visible in the BlockLight `VoxelDebugVisualization` mode), but never documented because lava was the only blocklight source and work focused on sky lighting. First captured deterministically by the validation suite's K07 oracle diffs (light stamped multiple voxels deep into the stone floor), then isolated as an independent defect.
+
+**Symptoms:**
+Blocklight values appear *inside* opaque volumes, deeper than the legitimate 1-voxel surface stamp, triggered by any block edit adjacent to a lit opaque surface. Worse than a single-voxel creep: once an interior voxel is lit and re-enters a BFS queue (wake-ups, re-spread), the missing guard lets it propagate *laterally within the solid layer* — the K09 repro shows a decaying light trail (12 → 1) running ~22 voxels through the stone floor at depth 2, radiating from beneath a single torch after one place/break edit. Visible in the BlockLight debug
+visualization; baked into saved region light data.
+
+**Root Cause:**
+Opaque voxels legitimately *receive* surface light (`source - 1`) but must never *propagate* it. The sunlight path enforces this (`PropagateLight`: `if (sourceProps.IsOpaque) return;`) — **the RGB blocklight path has no such guard**. Normally opaque voxels are never enqueued as sources, but `ChunkData.ModifyVoxel`'s neighbor wake-up enqueues ANY neighbor with `GetMaxBlocklight > 0`, including surface-lit opaque voxels. The job's seeding loop then sees `anyIncreased` (current surface light > wake node's old 0) and feeds the opaque voxel into
+`PropagateLightRGB`, which stamps `surface - 1` into the next layer of solid blocks.
+
+**Proposed fix direction:**
+Add the missing source guard to `PropagateLightRGB`, mirroring the sunlight path — **but it must exempt emissive opaque blocks** (lamps/glowstone are opaque sources that legitimately propagate their own emission): skip propagation when the source is opaque AND non-emissive (`BlockTypes[id].IsOpaque && !IsLightSource`). Alternatively (or additionally) skip opaque voxels in `ModifyVoxel`'s wake-up loop, though the job-side guard is the robust fix since wake nodes can originate from other paths (cross-chunk applies, serialized queues).

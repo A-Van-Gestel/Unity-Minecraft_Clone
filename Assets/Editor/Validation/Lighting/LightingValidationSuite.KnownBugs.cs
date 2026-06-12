@@ -24,6 +24,7 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("K07b: Adjacent opposing lamps at the border converge without flicker", KnownBug07B_AdjacentLampsNoFlicker, "Bug 07"));
             scenarios.Add(new Scenario("K07c: Broken source's area is re-lit by the cross-border independent source", KnownBug07C_CrossBorderRespread, "Bug 07"));
             scenarios.Add(new Scenario("K08a: Sunlight uplift mods survive an in-flight neighbor job (race)", KnownBug08A_InFlightSunlightUpliftLoss, "Bug 08"));
+            scenarios.Add(new Scenario("K09: No blocklight propagation from inside opaque volumes", KnownBug09_OpaqueVolumeLightLeak, "Bug 09"));
         }
 
         /// <summary>
@@ -172,6 +173,45 @@ namespace Editor.Validation.Lighting
 
             passed &= LightingAssert.Converged(world.RunToConvergence(), "K08a: post-race convergence");
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "K08a: field matches oracle after the race");
+            return passed;
+        }
+
+        /// <summary>
+        /// K09 (Bug 09): Blocklight leaks into opaque volumes. An edit next to a surface-lit floor
+        /// wakes the lit opaque floor voxel (<c>ModifyVoxel</c> wakes any neighbor with
+        /// blocklight &gt; 0, opacity unchecked); the job's seeding loop sees <c>anyIncreased</c> and
+        /// feeds it into <c>PropagateLightRGB</c>, which — unlike the sunlight path — has no
+        /// opaque-source guard, stamping light one voxel deeper into the stone. Independent of the
+        /// Bug 07 border defects: a single torch and one place/break edit suffice.
+        /// </summary>
+        private static bool KnownBug09_OpaqueVolumeLightLeak()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "K09: initial lighting converges");
+
+            // Torch on the floor; the floor surface beneath/around it receives legitimate surface light.
+            world.PlaceBlock(new Vector3Int(24, 11, 24), TestBlockPalette.Torch);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "K09: torch converges");
+
+            // One edit next to the lit floor: place and break a stone block. Its wake-up loop
+            // enqueues the surface-lit opaque floor voxel below it as a BFS source.
+            world.PlaceBlock(new Vector3Int(25, 11, 24), TestBlockPalette.Stone);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "K09: post-place convergence");
+            world.BreakBlock(new Vector3Int(25, 11, 24));
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "K09: post-break convergence");
+
+            // Two blocks deep into the floor the oracle has 0 on all channels — any value there is
+            // light propagated from inside an opaque volume. Probe directly beneath the torch: the
+            // leak radiates from there and self-propagates laterally within the solid y=9 layer
+            // (interior voxels become sources too — no opaque-source guard in PropagateLightRGB).
+            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(24, 9, 24)) == (0, 0, 0),
+                "K09: no blocklight two voxels deep inside the floor",
+                $"Expected (0,0,0) at depth 2 beneath the torch, got {world.GetBlocklightRGB(new Vector3Int(24, 9, 24))} — opaque voxel acted as a BFS source");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "K09: field matches oracle");
             return passed;
         }
     }
