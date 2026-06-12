@@ -1,7 +1,7 @@
 # Design Document: Infinite World Storage & Serialization Architecture
 
-**Version:** 1.6
-**Date:** 2026-02-15  
+**Version:** 1.7
+**Date:** 2026-06-13  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
@@ -17,6 +17,7 @@ The core of this transition involves:
 4. **Custom Binary Serialization:** Abandoning `BinaryFormatter` for a high-performance, versioned binary writer/reader with **LZ4 Compression**.
 5. **Asynchronous I/O Pipeline:** Ensuring saving and loading never stalls the Main Thread.
 6. **Lighting State Preservation:** Critical system to prevent "black spots" by preserving lighting calculation state across save/load cycles.
+7. **Versioned Save Format with AOT Migration:** Every save carries a version number (`level.dat`, currently v11) and is upgraded offline before the world opens — see `AOT_WORLD_MIGRATION_SYSTEM.md`.
 
 ---
 
@@ -48,8 +49,9 @@ A subsystem responsible for the lifecycle of chunk data across memory, disk, and
 * Uses `ConcurrentDictionary<Vector2Int, Lazy<RegionFile>>` for thread-safe region file access.
 * Region files are opened lazily and cached for the session.
 * All disk I/O happens on background threads via `Task.Run()`.
+* The constructor takes the world's `saveVersion` (from `level.dat`) and resolves an `IRegionAddressCodec` via `RegionAddressCodec.ForVersion()`. All region address arithmetic (chunk voxel position → region file + local slot) goes through this codec — see Section 3.1.
 
-**File Location:** `Assets/Scripts/Serialization/ChunkStorageManager.cs`
+**File Location:** `Assets/Scripts/Serialization/ChunkStorageManager.cs` (codec: `Assets/Scripts/Helpers/RegionAddressCodec.cs`)
 
 ### 2.3. The Editor "Volatile" Mode
 
@@ -57,6 +59,7 @@ Implemented to allow testing without corrupting production saves.
 
 * **Production Saves:** `Application.persistentDataPath/Saves/{WorldName}/`
 * **Editor Volatile Saves:** `Application.persistentDataPath/Editor_Temp_Saves/{WorldName}/`
+* **Benchmark Saves:** `Application.persistentDataPath/Benchmark_Saves/{WorldName}/` — used when `WorldLaunchState.CurrentMode == RuntimeMode.Benchmark`; can be purged via `SaveSystem.ClearAllBenchmarks()`.
 * **Behavior:** When "Volatile Mode" is enabled in editor settings, saves go to temporary location.
 * **Note:** Volatile saves persist between editor sessions unless manually deleted.
 
@@ -120,9 +123,9 @@ Without this manager, chunks unloaded during lighting propagation would permanen
 **Purpose:** Serialize player position, rotation, capabilities, and inventory.
 
 **File:** `level.dat` (JSON format)  
-**Location:** Logic spread across `Player.cs`, `Toolbar.cs`, and `SaveSystem.cs`
+**Location:** Logic spread across `Player.cs`, `Toolbar.cs`, `DragAndDropHandler.cs`, and `SaveSystem.cs` (DTOs in `Assets/Scripts/Serialization/SaveDataTypes.cs`)
 
-**Implementation Status:** ⚠️ Partially implemented. Currently, saves position/rotation but inventory persistence needs completion.
+**Implementation Status:** ✅ Implemented. Saves position, rotation, capabilities (flying/noclip), the full toolbar inventory, and the cursor-held item (`cursorItem`, null when empty).
 
 ---
 
@@ -132,28 +135,36 @@ Without this manager, chunks unloaded during lighting propagation would permanen
 
 * **Region Size:** $32 \times 32$ Chunks (1024 Chunks per file)
 * **Naming Convention:** `r.{regionX}.{regionZ}.bin`
-* **Coordinate Mapping:**
+* **Coordinate Mapping (V2+ codec):** chunk voxel-space origin → chunk index → region address:
+    - `chunkX = voxelX / ChunkWidth` (and likewise for Z)
     - `regionX = Floor(chunkX / 32)`
     - `regionZ = Floor(chunkZ / 32)`
-    - Local chunk index: `(chunkX % 32) + (chunkZ % 32) * 32`
+    - Local slot: `localX = chunkX % 32` (negative-corrected), index `localX + localZ * 32`
 
-**Example:** Chunk at world coordinates (50, 45) → Region (1, 1), local index 18+13*32 = 434
+**Example:** Chunk index (50, 45) → Region (1, 1), local index 18+13*32 = 434
+
+**Versioned Addressing (`RegionAddressCodec`):**  
+All address arithmetic is encapsulated in `IRegionAddressCodec` implementations selected by save version (`RegionAddressCodec.ForVersion(saveVersion)` in `Assets/Scripts/Helpers/RegionAddressCodec.cs`):
+
+* **V1 (save version 1):** Historical bug — treated the chunk's *voxel-space* position as a chunk index, so local slots only ever hit 0 or 16 and regions were 32 voxels wide. The V1 codec exists solely so migration tooling can decode old layouts; its encoder throws unless `allowLegacyEncoder: true` is passed explicitly.
+* **V2 (save version ≥ 2):** Correct chunk-index addressing as described above. Worlds on V1 are automatically repacked by `Migration_v1_to_v2_RegionRepack` (see `AOT_WORLD_MIGRATION_SYSTEM.md`).
 
 ### 3.2. File Structure (Binary)
 
-| Byte Offset     | Size | Description                                                                                      |
-|:----------------|:-----|:-------------------------------------------------------------------------------------------------|
-| **0 - 4095**    | 4KB  | **Location Table:** 1024 entries (uint: offset, ushort: length, byte: algorithm, byte: reserved) |
-| **4096 - 8191** | 4KB  | **Timestamp Table:** 1024 long entries (DateTime.Ticks)                                          |
-| **8192...**     | Var  | **Chunk Data Payload:** Compressed binary blobs                                                  |
+The file is divided into 4KB **sectors** (Anvil-style):
 
-**Implementation Detail:**  
-Each location table entry is 8 bytes:
+| Byte Offset     | Size | Description                                                                                    |
+|:----------------|:-----|:-----------------------------------------------------------------------------------------------|
+| **0 - 4095**    | 4KB  | **Location Table:** 1024 packed int entries — `(sectorStart << 8) \| sectorCount`              |
+| **4096 - 8191** | 4KB  | **Reserved sector** (allocated but currently unused; originally intended as a timestamp table) |
+| **8192...**     | Var  | **Chunk Records:** sector-aligned compressed binary blobs                                      |
 
-* 4 bytes: Offset to chunk data in file
-* 2 bytes: Compressed data length
-* 1 byte: Compression algorithm (0=None, 1=GZip, 2=LZ4)
-* 1 byte: Reserved for future use
+**Implementation Details:**
+
+* Each location table entry is a 4-byte int: the high 3 bytes are the chunk's starting **sector index**, the low byte is its **sector count** (max 255 sectors ≈ 1MB per chunk). An entry of 0 means "chunk not present".
+* Each chunk record on disk is: `int totalLength` (payload + 1), `byte compressionAlgorithm` (0=None, 1=GZip, 2=LZ4), the compressed payload, then zero-padding up to the next sector boundary.
+* **Fragmentation management:** `RegionFile` keeps an in-memory sector usage map. On save it overwrites in place when the new size needs the same sector count, otherwise it frees the old sectors and finds the first contiguous free run (or appends at the end). There is no defragmentation pass yet.
+* **Thread safety:** `FileStream` position is not thread-safe, so each `RegionFile` takes an exclusive `_fileLock` for **both** reads and writes. Chunks in different regions still save/load concurrently.
 
 **File Location:** `Assets/Scripts/Serialization/RegionFile.cs`
 
@@ -170,10 +181,11 @@ Each location table entry is 8 bytes:
 
 **Implementation Details:**
 
-* The Region File Header stores the algorithm ID for each chunk individually.
-* This allows mixing compression types within the same world (e.g., migrating from GZip to LZ4 incrementally).
+* Each chunk record stores its own algorithm byte (immediately after the length header), allowing mixed compression types within the same world (e.g., migrating from GZip to LZ4 incrementally).
 * `ChunkSerializer` requests a stream from `CompressionFactory`, which handles the wrapping (and disposal) of the underlying compression stream.
-* **Safety:** `CompressionFactory` includes a robust `IsLZ4Available` check to fallback to GZip if the native DLL is missing, preventing data loss.
+* **Safety:** `CompressionFactory` includes a robust `IsLZ4Available` check to fallback to GZip if the native DLL is missing, preventing data loss. (Reading LZ4 data without the DLL cannot fall back and throws.)
+* **Safety:** Before decompressing LZ4, the factory validates the LZ4 Frame magic number (`04 22 4D 18`) — NativeCompressions' `LZ4Stream` spins forever on non-frame input instead of throwing (see `Documentation/Bugs/SERIALIZATION_BUGS.md` #03). Corrupt payloads become an `InvalidDataException`, which the deserializer turns into "warn → regenerate chunk".
+* The per-world default algorithm comes from `World.settings.saveCompression`.
 
 **Performance Profile (LZ4):**
 
@@ -248,7 +260,7 @@ JSON file at save folder root containing world metadata and player state.
       }
     ],
     // Null if empty
-    "CursorItem": {
+    "cursorItem": {
       "itemID": 5,
       "amount": 64,
       "originSlotIndex": 2
@@ -257,50 +269,77 @@ JSON file at save folder root containing world metadata and player state.
 }
 ```
 
-**Implementation:** `SaveSystem.cs` writes this file on world exit and auto-save intervals.
+**Implementation:** `SaveSystem.SaveWorld()` serializes a `WorldSaveData` DTO (`Assets/Scripts/Serialization/SaveDataTypes.cs`) via Unity's `JsonUtility` and writes it on world exit and on manual saves. The `version` field (currently **11** — `SaveSystem.CURRENT_VERSION`) drives the AOT migration system; the per-version changelog lives as comments above that constant and in `AOT_WORLD_MIGRATION_SYSTEM.md`.
 
 ### 4.2. Chunk Blob Format (Inside Region File)
 
 **Compression Layer:** Applied to entire blob before storage  
 **Serializer:** `ChunkSerializer.cs` using `BinaryWriter/BinaryReader`
 
-**Version 1 Structure:**
+**Version 7 Structure (current — `ChunkSerializer.CURRENT_CHUNK_VERSION`):**
 
 ```
-┌─────────────────────────────────────────┐
-│ byte:    Chunk Format Version (1)       │
-├─────────────────────────────────────────┤
-│ int:     Chunk X Coordinate             │
-│ int:     Chunk Z Coordinate             │
-├─────────────────────────────────────────┤
-│ bool:    NeedsInitialLighting Flag      │ ← CRITICAL for black spot prevention
-├─────────────────────────────────────────┤
-│ byte[256]: HeightMap (16x16)            │
-├─────────────────────────────────────────┤
-│ int:     Section Bitmask                │ ← Bits 0-7 indicate which sections exist
-├─────────────────────────────────────────┤
-│ FOR EACH SECTION (if bit set):          │
-│   ┌───────────────────────────────────┐ │
-│   │ byte:   Section Version (1)       │ │
-│   │ ushort: NonAirCount               │ │
-│   │ uint[4096]: Voxel Data (packed)   │ │ ← 16x16x16 = 4096 voxels
-│   └───────────────────────────────────┘ │
-├─────────────────────────────────────────┤
-│ Lighting Queues:                        │
-│   ┌───────────────────────────────────┐ │
-│   │ int: Sunlight Queue Count         │ │
-│   │ FOR EACH NODE:                    │ │
-│   │   int: Position.x                 │ │
-│   │   int: Position.y                 │ │
-│   │   int: Position.z                 │ │
-│   │   byte: OldLightLevel             │ │
-│   └───────────────────────────────────┘ │
-│   ┌───────────────────────────────────┐ │
-│   │ int: Blocklight Queue Count       │ │
-│   │ (same structure as sunlight)      │ │
-│   └───────────────────────────────────┘ │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ byte:    Chunk Format Version (7)            │
+├──────────────────────────────────────────────┤
+│ int:     Chunk X Coordinate (voxel-space)    │
+│ int:     Chunk Z Coordinate (voxel-space)    │
+├──────────────────────────────────────────────┤
+│ bool:    NeedsInitialLighting Flag           │ ← CRITICAL for black spot prevention
+├──────────────────────────────────────────────┤
+│ ushort[256]: HeightMap (16x16, 512 bytes)    │
+├──────────────────────────────────────────────┤
+│ int:     Section Bitmask                     │ ← Bits 0-7: section has voxels OR light
+├──────────────────────────────────────────────┤
+│ FOR EACH SECTION (if bit set):               │
+│   byte: Section Type Flag, then:             │
+│   ┌────────────────────────────────────────┐ │
+│   │ 0x00 Voxels + uniform sky:             │ │
+│   │   byte: sky level                      │ │
+│   │   ushort: NonAirCount                  │ │
+│   │   uint[4096]: Voxel Data (packed)      │ │
+│   ├────────────────────────────────────────┤ │
+│   │ 0x01 Voxels + full LightData:          │ │
+│   │   ushort: NonAirCount                  │ │
+│   │   uint[4096]: Voxel Data (packed)      │ │
+│   │   ushort[4096]: LightData              │ │
+│   ├────────────────────────────────────────┤ │
+│   │ 0x02 Light-only + uniform sky:         │ │
+│   │   byte: sky level (2 bytes total)      │ │
+│   ├────────────────────────────────────────┤ │
+│   │ 0x03 Light-only + full LightData:      │ │
+│   │   ushort[4096]: LightData              │ │
+│   └────────────────────────────────────────┘ │
+├──────────────────────────────────────────────┤
+│ Lighting Queues:                             │
+│   ┌────────────────────────────────────────┐ │
+│   │ int: Sunlight Queue Count              │ │
+│   │ FOR EACH NODE (16 bytes):              │ │
+│   │   int: Position.x                      │ │
+│   │   int: Position.y                      │ │
+│   │   int: Position.z                      │ │
+│   │   byte: OldLightLevel                  │ │
+│   │   byte: OldBlockR                      │ │
+│   │   byte: OldBlockG                      │ │
+│   │   byte: OldBlockB                      │ │
+│   └────────────────────────────────────────┘ │
+│   ┌────────────────────────────────────────┐ │
+│   │ int: Blocklight Queue Count            │ │
+│   │ (same node structure as sunlight)      │ │
+│   └────────────────────────────────────────┘ │
+└──────────────────────────────────────────────┘
 ```
+
+**Format history** (each transition has a matching AOT migration step — see `AOT_WORLD_MIGRATION_SYSTEM.md`):
+
+| Chunk version | World version | Change                                                                                                                    |
+|:--------------|:--------------|:--------------------------------------------------------------------------------------------------------------------------|
+| 1-2           | ≤ v2          | Original layout: section version byte + NonAirCount + packed voxels; light lived in the voxel `uint` (bits 16-23)         |
+| 3             | v3            | Version bump to force re-lighting of 'IsEmpty' sections (`Migration_v2_to_v3_RestoreLighting`)                            |
+| 4             | v6            | Voxel metadata bytes converted to schema-aware encoding (`Migration_v5_to_v6_LegacyToSchemaBased`)                        |
+| 5             | v8            | Light queue nodes grew from 13 to 16 bytes (RGB blocklight: OldBlockR/G/B) (`Migration_v7_to_v8_RGBLightQueues`)          |
+| 6             | v9            | Section version byte replaced by flag-based section type; persists `ushort[] LightData` (`Migration_v8_to_v9_...`)        |
+| 7             | v10           | Legacy light bits stripped from voxels (bits 16-23 reserved/zeroed); uniform-sky-level flags 0x00/0x02/0x03 (`v9_to_v10`) |
 
 **Critical Implementation Notes:**
 
@@ -308,10 +347,16 @@ JSON file at save folder root containing world metadata and player state.
    Must be saved and restored. If a chunk is unloaded before initial lighting completes, this flag ensures it will be re-lit on reload. Without this, chunks appear completely dark.
 
 2. **Lighting Queues:**  
-   Represent in-progress BFS propagation. Saving these allow lighting calculations to resume exactly where they left off. Queue nodes contain the voxel position and the *old* light level (needed for removal propagation).
+   Represent in-progress BFS propagation. Saving these allow lighting calculations to resume exactly where they left off. Queue nodes contain the voxel position, the *old* sunlight level, and the *old* RGB blocklight channels (needed for removal propagation).
 
 3. **Active Voxels Not Saved:**  
    Fluids, grass, and other "active" blocks are recalculated via `Chunk.OnDataPopulated()` on load. This reduces save file size by ~10% and ensures behavior updates apply retroactively.
+
+4. **Strict version check:**  
+   The live serializer only reads `CURRENT_CHUNK_VERSION`. Older versions are upgraded offline by the AOT Migration Manager before the world opens; encountering an old version byte at runtime throws (world is corrupt or bypassed migration).
+
+5. **Compact sections:**  
+   The section bitmask covers sections with voxels **or** light. A fully-air section whose sky light is uniform (tracked at runtime in `ChunkData.SectionUniformSkyLevel`) serializes as just 2 bytes (flag 0x02 + sky level) — no `ChunkSection` allocation on load.
 
 **File Location:** `Assets/Scripts/Serialization/ChunkSerializer.cs`
 
@@ -319,7 +364,7 @@ JSON file at save folder root containing world metadata and player state.
 
 Binary file storing voxel modifications targeting unloaded chunks.
 
-**Structure:**
+**Structure (v5+ format):**
 
 ```
 int:  ChunkCount
@@ -332,17 +377,18 @@ FOR EACH CHUNK:
     int:    GlobalPosition.y
     int:    GlobalPosition.z
     ushort: BlockID
-    byte:   Orientation
-    byte:   FluidLevel
+    byte:   Meta
 ```
+
+Save version v5 collapsed the previous `(Orientation, FluidLevel)` byte pair into a single schema-aware `Meta` byte (see `PER_BLOCK_METADATA_SCHEMAS.md` §7.4 and `Migration_v4_to_v5_VoxelModMeta`). The runtime-only `ImmediateUpdate` and `Rule` fields are intentionally not persisted.
 
 **Use Case:** Structure generation (eg: trees) that extends into neighboring chunks that haven't loaded yet.
 
 **File Location:** `Assets/Scripts/Serialization/ModificationManager.cs`
 
-### 4.4. Pending Lighting Format (`lighting_pending.bin`)
+### 4.4. Pending Lighting Format (`pending_lighting.bin`)
 
-Binary file storing columns that need sunlight recalculation.
+Binary file storing columns that need sunlight recalculation. (The filename was standardized from the older `lighting_pending.bin` by `Migration_v6_to_v7_SaveFormatExtensibility`.)
 
 **Structure:**
 
@@ -365,6 +411,33 @@ Since columns are always 0-15, using `byte` instead of `int` saves 75% space per
 
 **File Location:** `Assets/Scripts/Serialization/LightingStateManager.cs`
 
+### 4.5. Pending Blocklight Format (`pending_blocklight.bin`)
+
+Binary file storing cross-chunk blocklight modifications awaiting unloaded target chunks (Bug 08, path 1 — see Section 2.4.B). Unlike `pending_lighting.bin`, the file is **self-describing** via a leading version byte, so its layout can migrate in isolation; its absence simply means "nothing pending".
+
+**Structure (file version 1):**
+
+```
+byte: File Version (1)
+int:  ChunkCount
+FOR EACH CHUNK:
+  int:  ChunkX
+  int:  ChunkZ
+  int:  ModCount
+  FOR EACH MOD:
+    byte: LocalX (0-15)
+    byte: LocalY (0-127)
+    byte: LocalZ (0-15)
+    byte: R (0-15)
+    byte: G (0-15)
+    byte: B (0-15)
+    bool: IsRemoval
+```
+
+In memory, mods are keyed by local voxel position with last-write-wins semantics — every mod carries absolute target channel values, so a newer mod fully supersedes an older one for the same voxel.
+
+**File Location:** `Assets/Scripts/Serialization/LightingStateManager.cs`
+
 ---
 
 ## 5. The I/O Pipeline (Threading)
@@ -382,24 +455,29 @@ All disk I/O is asynchronous to prevent frame hitches.
 **Save Flow:**
 
 ```
-Main Thread                         Background Thread
+Main Thread                            Background Thread (ThreadPool)
 ─────────────────────────────────────────────────────────
 1. Determine chunk needs save
 2. Check if modified
-3. Copy chunk data to buffer    →  4. Receive buffer
-   (fast, stack allocated)          5. Serialize to bytes
-                                    6. Compress (if enabled)
-                                    7. Lock region file
-                                    8. Write to disk
-                                    9. Update timestamp
-                                    10. Return buffer to pool
+3. Snapshot chunk data into a
+   pooled ChunkData (sections,
+   sky levels, queues)           →  4. Serialize snapshot to pooled buffer
+                                    5. Compress (per settings.saveCompression)
+                                    6. Lock region file (_fileLock)
+                                    7. Write sector-aligned record to disk
+                                    8. Update location table entry
+9. Return buffer + snapshot
+   to their pools (finally)
 ```
 
 **Memory Management:**  
-Uses `SerializationBufferPool` to recycle byte arrays, preventing GC pressure.
+Uses `SerializationBufferPool` to recycle byte arrays, and `ChunkStorageManager.CreateSerializationSnapshot()` builds the thread-safe copy from pooled `ChunkData`/`ChunkSection` instances — zero steady-state GC.
+
+**Cancellation:**  
+`SaveChunkAsync` takes a `CancellationToken` (the world's shutdown token) so in-flight async saves abort cleanly on quit instead of racing the synchronous shutdown flush.
 
 **Thread Safety:**  
-Region files use `lock(this)` on write operations. Multiple chunks in different regions can save concurrently.
+Each region file takes an exclusive private `_fileLock` for both reads and writes (`FileStream` position is not thread-safe). Multiple chunks in different regions can save concurrently.
 
 **Performance Target:**  
 < 1ms main thread impact per chunk save (measured: ~0.3ms)
@@ -429,29 +507,42 @@ Main Thread                         Background Thread
 
 **Critical Restoration Steps:**
 
-**Step 9 - PopulateFromSave:**
+**Step 9 - PopulateFromSave (condensed — see `ChunkData.cs` for full version):**
 
 ```csharp
 // In ChunkData.cs
 public void PopulateFromSave(ChunkData loadedData)
 {
-    this.heightMap = loadedData.heightMap;
-    this.sections = loadedData.sections;
-    
-    // CRITICAL: Restore the flag that triggers initial lighting
-    this.NeedsInitialLighting = loadedData.NeedsInitialLighting;
-    
-    // Copy lighting queues
-    foreach(var node in loadedData.SunlightBfsQueue) 
-        this.AddToSunLightQueue(node.Position, node.OldLightLevel);
-    foreach(var node in loadedData.BlocklightBfsQueue) 
-        this.AddToBlockLightQueue(node.Position, node.OldLightLevel);
-    
+    Array.Copy(loadedData.heightMap, heightMap, heightMap.Length);
+
+    // CRITICAL: Steal section ownership instead of copying. loadedData is a pooled
+    // instance that will be recycled — null out its slots so its Reset() doesn't
+    // return the stolen sections to the pool.
+    for (int i = 0; i < sections.Length; i++)
+    {
+        if (sections[i] != null) World.Instance.ChunkPool.ReturnChunkSection(sections[i]);
+        sections[i] = loadedData.sections[i];
+        loadedData.sections[i] = null;
+    }
+
+    // Transfer compact uniform sky levels
+    Array.Copy(loadedData.SectionUniformSkyLevel, SectionUniformSkyLevel, SectionUniformSkyLevel.Length);
+
+    // Copy lighting queues (RGB-aware)
+    foreach (var node in loadedData.SunlightBfsQueue)
+        AddToSunLightQueue(node.Position, node.OldLightLevel);
+    foreach (var node in loadedData.BlocklightBfsQueue)
+        AddToBlockLightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
+
     // Transfer pending flags
-    if (loadedData.HasLightChangesToProcess) 
-        this.HasLightChangesToProcess = true;
-    
-    this.IsPopulated = true;
+    if (loadedData.HasLightChangesToProcess) HasLightChangesToProcess = true;
+    if (loadedData.NeedsInitialLighting) NeedsInitialLighting = true;
+
+    // Active blocks (fluids/grass) recalculated via RecalculateCounts, not saved
+    foreach (ChunkSection section in sections)
+        section?.RecalculateCounts(World.Instance.BlockTypes);
+
+    IsPopulated = true;
 }
 ```
 
@@ -596,7 +687,18 @@ if (loaded != null)
         // Re-inject into global queue (see code in section 5.2)
         data.HasLightChangesToProcess = true;
     }
-    
+
+    // 2b. Replay pending cross-chunk blocklight mods. Each mod runs through
+    //     CrossChunkLightModApplier.ComputeBlocklight — exactly like the live
+    //     cross-chunk apply path (see section 2.4.B). When lighting is disabled,
+    //     the store is left untouched so the mods survive until a session with
+    //     lighting enabled.
+    if (settings.enableLighting &&
+        LightingStateManager.TryGetAndRemovePendingBlocklight(coord, out var pendingBlocklight))
+    {
+        // ... apply each mod, enqueue BFS wake-up nodes, release pooled dictionary
+    }
+
     // 3. Check if chunk needs initial lighting
     if (data.NeedsInitialLighting)
     {
@@ -699,50 +801,43 @@ Edge chunks with `NeedsInitialLighting=true` never get lit → permanent black b
 
 ```csharp
 /// <summary>
-/// Checks if all of a chunk's cardinal neighbors that EXIST IN THE WORLD 
-/// have finished generating. Out-of-bounds neighbors are considered "ready".
+/// Verifies that all 8 horizontal neighbors (cardinal + diagonal) of a chunk exist,
+/// have completely finished terrain generation, and are populated with voxel data.
+/// Out-of-bounds chunks (beyond world limits) are treated as intrinsically "ready".
 /// </summary>
-private bool AreNeighborsDataReady(ChunkCoord coord)
+public bool AreNeighborsDataReady(ChunkCoord coord)
 {
-    ChunkCoord[] neighbors = new ChunkCoord[]
+    // Check all 8 horizontal neighbors to prevent light leaks into ungenerated chunks.
+    foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
     {
-        new ChunkCoord(coord.X, coord.Z + 1), // North
-        new ChunkCoord(coord.X, coord.Z - 1), // South
-        new ChunkCoord(coord.X + 1, coord.Z), // East
-        new ChunkCoord(coord.X - 1, coord.Z)  // West
-    };
+        ChunkCoord neighborCoord = coord.Neighbor(offset.x, offset.z);
 
-    foreach (ChunkCoord neighborCoord in neighbors)
-    {
-        // NEW: Skip out-of-bounds neighbors
-        if (!IsChunkInWorld(neighborCoord))
+        // Neighbors outside the world will never exist — treat as ready.
+        if (!IsChunkInWorld(neighborCoord)) continue;
+
+        // Still actively generating terrain data.
+        if (JobManager.GenerationJobs.ContainsKey(neighborCoord))
         {
-            continue; // Treat as "ready" - it will never exist
+            return false;
         }
 
-        Vector2Int neighborPos = new Vector2Int(
-            neighborCoord.X * VoxelData.ChunkWidth,
-            neighborCoord.Z * VoxelData.ChunkWidth
-        );
-
-        if (!worldData.Chunks.TryGetValue(neighborPos, out ChunkData neighborData))
+        // Chunk hasn't been created yet, or exists but terrain isn't populated.
+        if (!worldData.Chunks.TryGetValue(neighborCoord.ToVoxelOrigin(), out ChunkData neighborData) ||
+            !neighborData.IsPopulated)
         {
-            return false; // In-world neighbor not loaded yet
-        }
-
-        if (!neighborData.IsPopulated || 
-            JobManager.generationJobs.ContainsKey(neighborCoord))
-        {
-            return false; // Neighbor not ready
+            return false;
         }
     }
 
-    return true; // All in-world neighbors ready
+    // All neighbors exist and are populated.
+    return true;
 }
 ```
 
+**Note:** The check covers all 8 horizontal neighbors (diagonals included) because lighting jobs copy data from diagonal neighbors too. It is intentionally weaker than the meshing gate `AreNeighborsReadyAndLit` — see `CHUNK_LIFECYCLE_PIPELINE.md` for the gate hierarchy.
+
 **Edge Case Handling:**  
-An edge chunk at (0, 50) only waits for North (0,51), South (0,49), and East (1,50). The West neighbor (-1,50) is out-of-bounds and automatically "ready".
+An edge chunk at (0, 50) only waits for its in-world neighbors. Out-of-bounds neighbors (e.g. West (-1,50)) are automatically "ready".
 
 ### 7.3. Performance Consideration
 
@@ -777,10 +872,12 @@ An edge chunk at (0, 50) only waits for North (0,51), South (0,49), and East (1,
 * Saves all modified chunks + global state
 * Non-blocking (async)
 
-**Manual Save:**
+**Manual Save (Implemented — `World.SaveWorldData()`):**
 
-* Currently: Automatic on world exit
-* Player Controlled: F4 quick-save hotkey
+* Automatic on world exit
+* Player Controlled: quick-save input action (`SaveWorldPressed` in `Player.cs`)
+* Pause menu "Save" / "Save & Quit" buttons (`PauseMenuController.cs`)
+* Saves all modified chunks asynchronously, then writes `level.dat` + pending stores
 
 ---
 
@@ -995,13 +1092,17 @@ Before each major release:
 - [x] **LZ4 Compression Support**
 - [x] **Seed Mismatch Fix**
 - [x] **Quit/Flush Reliability Fix**
+- [x] **AOT World Migration System** (save versions v1 → v11; see `AOT_WORLD_MIGRATION_SYSTEM.md`)
+- [x] **Versioned region addressing** (`RegionAddressCodec` V1/V2 + region repack migration)
+- [x] **PlayerStateManager** (position, rotation, capabilities, inventory, cursor item)
+- [x] **Pending blocklight store** (`pending_blocklight.bin`, Bug 08)
+- [x] **RGB blocklight + LightData serialization** (chunk format v5-v7)
 
 ### ⚠️ Partial / In Progress
 
-- [ ] PlayerStateManager (position saved, inventory saved but could be improved)
 - [ ] Chunk prioritization system
-- [ ] Save versioning / migration system
 - [ ] ProcessPendingInitialLighting retry system
+- [ ] Auto-save interval
 
 ### 📋 Planned
 
@@ -1016,33 +1117,41 @@ Before each major release:
 
 ### A. File Locations Quick Reference
 
-| Component            | File Path                                              |
-|----------------------|--------------------------------------------------------|
-| ChunkSerializer      | `Assets/Scripts/Serialization/ChunkSerializer.cs`      |
-| ChunkStorageManager  | `Assets/Scripts/Serialization/ChunkStorageManager.cs`  |
-| RegionFile           | `Assets/Scripts/Serialization/RegionFile.cs`           |
-| ModificationManager  | `Assets/Scripts/Serialization/ModificationManager.cs`  |
-| LightingStateManager | `Assets/Scripts/Serialization/LightingStateManager.cs` |
-| CompressionFactory   | `Assets/Scripts/Serialization/CompressionFactory.cs`   |
-| WorldData            | `Assets/Scripts/Data/WorldData.cs`                     |
-| ChunkData            | `Assets/Scripts/Data/ChunkData.cs`                     |
-| World                | `Assets/Scripts/World.cs`                              |
-| WorldJobManager      | `Assets/Scripts/WorldJobManager.cs`                    |
+| Component               | File Path                                                   |
+|-------------------------|-------------------------------------------------------------|
+| SaveSystem              | `Assets/Scripts/SaveSystem.cs`                              |
+| ChunkSerializer         | `Assets/Scripts/Serialization/ChunkSerializer.cs`           |
+| ChunkStorageManager     | `Assets/Scripts/Serialization/ChunkStorageManager.cs`       |
+| RegionFile              | `Assets/Scripts/Serialization/RegionFile.cs`                |
+| RegionAddressCodec      | `Assets/Scripts/Helpers/RegionAddressCodec.cs`              |
+| ModificationManager     | `Assets/Scripts/Serialization/ModificationManager.cs`       |
+| LightingStateManager    | `Assets/Scripts/Serialization/LightingStateManager.cs`      |
+| CompressionFactory      | `Assets/Scripts/Serialization/CompressionFactory.cs`        |
+| SaveDataTypes (DTOs)    | `Assets/Scripts/Serialization/SaveDataTypes.cs`             |
+| SerializationBufferPool | `Assets/Scripts/Serialization/SerializationBufferPool.cs`   |
+| AOT Migration System    | `Assets/Scripts/Serialization/Migration/` (manager + steps) |
+| WorldData               | `Assets/Scripts/Data/WorldData.cs`                          |
+| ChunkData               | `Assets/Scripts/Data/ChunkData.cs`                          |
+| World                   | `Assets/Scripts/World.cs`                                   |
+| WorldJobManager         | `Assets/Scripts/WorldJobManager.cs`                         |
 
 ### B. Save File Structure Example
 
 ```
 Saves/
 └── My World/
-    ├── level.dat                    (JSON metadata)
+    ├── level.dat                    (JSON metadata + player state)
     ├── pending_mods.bin             (VoxelMod queue)
-    ├── lighting_pending.bin         (Sunlight queue)
+    ├── pending_lighting.bin         (Sunlight column queue)
+    ├── pending_blocklight.bin       (Cross-chunk blocklight mods; absent if nothing pending)
     └── Region/
-        ├── r.0.0.bin                (1024 chunks)
+        ├── r.0.0.bin                (up to 1024 chunks)
         ├── r.0.1.bin
         ├── r.1.0.bin
         └── ...
 ```
+
+Pre-migration backups are created as sibling world folders named `{WorldName}_Backup_v{sourceVersion}_{timestamp}` and are hidden from the world selector.
 
 ### C. Glossary
 
@@ -1066,8 +1175,9 @@ Saves/
 * **v1.4** - Status updated to "Implemented (Stable)"
 * **v1.5** - Comprehensive update with all implementation details, bug resolutions, and future plans
 * **v1.6** - Added LZ4 Compression implementation details and documented resolution of Chunk Regeneration bugs
+* **v1.7** - Synced with codebase: sector-based region file layout, versioned region addressing (`RegionAddressCodec` V1/V2), chunk format v7 (flag-based sections, uniform-sky optimization, RGB light queues), v5+ pending mods Meta byte, `pending_lighting.bin` rename + `pending_blocklight.bin` format, save snapshotting/cancellation, 8-neighbor data-ready gate, completed player state & AOT migration checklist items
 
 ---
 
-**Last Updated:** 2026-02-15  
+**Last Updated:** 2026-06-13  
 **Next Review:** Chunk prioritization or Defragmentation
