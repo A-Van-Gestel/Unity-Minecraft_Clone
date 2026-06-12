@@ -48,6 +48,13 @@ public class WorldJobManager : IDisposable
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
     private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _droppedLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
 
+    // Cross-chunk light mods whose target chunk had its own lighting job in flight at apply time.
+    // Applying them immediately would be overwritten by that job's full-LightMap merge and the
+    // surviving wake-up node would become a no-op — losing the mod permanently (Bug 08, path 2).
+    // They are drained right after the target's merge instead. Persists across frames: the
+    // target's job may complete on a later frame than the emitter's.
+    private readonly Dictionary<ChunkCoord, List<LightModification>> _deferredCrossChunkMods = new Dictionary<ChunkCoord, List<LightModification>>();
+
     #region Constructor
 
     /// <summary>
@@ -564,6 +571,12 @@ public class WorldJobManager : IDisposable
                     chunkData.HasLightChangesToProcess = true;
                 }
 
+                // Freshly generated chunks recompute all light from current neighbor data during
+                // initial lighting and the edge-check rounds, so pending blocklight mods recorded
+                // while this chunk was absent are obsolete — discard them so a later save/load
+                // cycle cannot replay them on top of unrelated light data.
+                _world.LightingStateManager.DiscardPendingBlocklight(jobEntry.Key);
+
                 // --- STAGE 3: Lighting ---
                 if (_world.settings.enableLighting)
                 {
@@ -716,6 +729,12 @@ public class WorldJobManager : IDisposable
                 if (chunkData != null && chunkData.IsPopulated)
                 {
                     ApplyLightingJobResult(chunkData, jobData);
+
+                    // Apply mods other chunks' jobs deferred for THIS chunk while its job was in
+                    // flight — now that the merge is done they can no longer be overwritten
+                    // (Bug 08, path 2). Their wake-up nodes flag the chunk for another lighting pass.
+                    DrainDeferredCrossChunkMods(jobEntry.Key, chunkData);
+
                     foreach (LightModification mod in jobData.Mods)
                     {
                         Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
@@ -745,42 +764,58 @@ public class WorldJobManager : IDisposable
                                 continue;
                             }
 
-                            if (!_droppedLightUpdates.TryGetValue(neighborChunkCoord, out HashSet<Vector2Int> cols))
+                            if (mod.Channel == LightChannel.Sun)
                             {
-                                cols = HashSetPool<Vector2Int>.Get();
-                                _droppedLightUpdates[neighborChunkCoord] = cols;
+                                if (!_droppedLightUpdates.TryGetValue(neighborChunkCoord, out HashSet<Vector2Int> cols))
+                                {
+                                    cols = HashSetPool<Vector2Int>.Get();
+                                    _droppedLightUpdates[neighborChunkCoord] = cols;
+                                }
+
+                                cols.Add(new Vector2Int(localX, localZ));
+                            }
+                            else
+                            {
+                                // A sunlight column recalc cannot restore RGB data — persist the
+                                // actual blocklight modification for replay when the chunk is
+                                // loaded from disk (Bug 08, path 1: broken lamps left permanent
+                                // ghost light in neighbors that were unloaded at removal time).
+                                _world.LightingStateManager.AddPendingBlocklight(neighborChunkCoord,
+                                    new Vector3Int(localX, mod.GlobalPosition.y, localZ),
+                                    mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
                             }
 
-                            cols.Add(new Vector2Int(localX, localZ));
                             continue;
                         }
 
                         hasRealCrossChunkMods = true;
 
-                        Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
-
-                        // The decision logic (stale-snapshot guards, wake-up node old values) lives in
-                        // CrossChunkLightModApplier so the editor lighting validation suite exercises
-                        // the exact same rules as this production path.
-                        ushort currentLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
-                        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod);
-
-                        if (!decision.ShouldApply)
+                        // The target chunk has its own lighting job in flight, snapshotted before
+                        // this mod existed. Applying now would be overwritten by that job's
+                        // full-LightMap merge (Bug 08, path 2) — defer; drained right after the
+                        // target's own merge. A target already processed this pass
+                        // (_completedLightJobs) has merged and is safe to apply to directly.
+                        if (LightingJobs.ContainsKey(neighborChunkCoord) && !_completedLightJobs.Contains(neighborChunkCoord))
                         {
+                            if (!_deferredCrossChunkMods.TryGetValue(neighborChunkCoord, out List<LightModification> deferredList))
+                            {
+                                deferredList = ListPool<LightModification>.Get();
+                                _deferredCrossChunkMods[neighborChunkCoord] = deferredList;
+                            }
+
+                            deferredList.Add(mod);
                             continue;
                         }
 
-                        neighborChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z, decision.NewLight);
-
-                        if (mod.Channel == LightChannel.Sun)
-                        {
-                            neighborChunk.AddToSunLightQueue(localVoxelPos, decision.OldLevel);
-                        }
-                        else
-                        {
-                            neighborChunk.AddToBlockLightQueue(localVoxelPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
-                        }
+                        ApplyCrossChunkLightMod(neighborChunk, in mod);
                     }
+                }
+                else
+                {
+                    // The job result is discarded (the chunk vanished or lost its data mid-flight),
+                    // so mods other chunks deferred for it can never be drained — degrade them to
+                    // the persisted pending stores instead.
+                    DegradeDeferredCrossChunkMods(jobEntry.Key);
                 }
 
                 // Override stability: If the Burst job reported not-stable solely because
@@ -868,6 +903,97 @@ public class WorldJobManager : IDisposable
     }
 
     /// <summary>
+    /// Applies one cross-chunk light modification to a live, populated chunk: evaluates the shared
+    /// decision logic, writes the new packed light value, and enqueues the BFS wake-up node (which
+    /// also flags the chunk for its next lighting pass via <c>HasLightChangesToProcess</c>).
+    /// The decision rules (stale-snapshot guards, wake-up node old values) live in
+    /// <see cref="CrossChunkLightModApplier"/> so the editor lighting validation suite exercises
+    /// the exact same rules as this production path.
+    /// </summary>
+    /// <param name="targetChunk">The populated chunk the modification targets.</param>
+    /// <param name="mod">The cross-chunk modification emitted by a neighbor's lighting job.</param>
+    private void ApplyCrossChunkLightMod(ChunkData targetChunk, in LightModification mod)
+    {
+        Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
+
+        ushort currentLight = targetChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
+        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod);
+
+        if (!decision.ShouldApply)
+        {
+            return;
+        }
+
+        targetChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z, decision.NewLight);
+
+        if (mod.Channel == LightChannel.Sun)
+        {
+            targetChunk.AddToSunLightQueue(localVoxelPos, decision.OldLevel);
+        }
+        else
+        {
+            targetChunk.AddToBlockLightQueue(localVoxelPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
+        }
+    }
+
+    /// <summary>
+    /// Applies the cross-chunk mods that were deferred for a chunk while its lighting job was in
+    /// flight. Called immediately after the chunk's job result merge, so the applied values can no
+    /// longer be overwritten by a stale LightMap (the Bug 08 path-2 fix).
+    /// </summary>
+    /// <param name="chunkCoord">The chunk whose job result was just merged.</param>
+    /// <param name="chunkData">The chunk's live data.</param>
+    private void DrainDeferredCrossChunkMods(ChunkCoord chunkCoord, ChunkData chunkData)
+    {
+        if (!_deferredCrossChunkMods.Remove(chunkCoord, out List<LightModification> deferred)) return;
+
+        foreach (LightModification mod in deferred)
+        {
+            ApplyCrossChunkLightMod(chunkData, in mod);
+        }
+
+        ListPool<LightModification>.Release(deferred);
+    }
+
+    /// <summary>
+    /// Degrades deferred cross-chunk mods whose target chunk vanished (unloaded or lost its data)
+    /// before its in-flight job result could be merged: sunlight mods fall back to persisted column
+    /// recalculations, blocklight mods to the persisted pending-blocklight store — the same
+    /// degradation paths used for mods that target unloaded chunks directly.
+    /// </summary>
+    /// <param name="chunkCoord">The chunk whose deferred mods can no longer be drained.</param>
+    private void DegradeDeferredCrossChunkMods(ChunkCoord chunkCoord)
+    {
+        if (!_deferredCrossChunkMods.Remove(chunkCoord, out List<LightModification> deferred)) return;
+
+        Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
+        foreach (LightModification mod in deferred)
+        {
+            int localX = mod.GlobalPosition.x - chunkVoxelPos.x;
+            int localZ = mod.GlobalPosition.z - chunkVoxelPos.y;
+
+            if (mod.Channel == LightChannel.Sun)
+            {
+                if (!_droppedLightUpdates.TryGetValue(chunkCoord, out HashSet<Vector2Int> cols))
+                {
+                    cols = HashSetPool<Vector2Int>.Get();
+                    _droppedLightUpdates[chunkCoord] = cols;
+                }
+
+                cols.Add(new Vector2Int(localX, localZ));
+            }
+            else
+            {
+                _world.LightingStateManager.AddPendingBlocklight(chunkCoord,
+                    new Vector3Int(localX, mod.GlobalPosition.y, localZ),
+                    mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
+            }
+        }
+
+        ListPool<LightModification>.Release(deferred);
+    }
+
+    /// <summary>
     /// Merges the lighting results from a background job into the live ChunkData.
     /// CRITICAL: This performs a bit-mask merge (only light bits) to avoid overwriting
     /// block changes (TOCTOU) made by the player while the job was running.
@@ -915,9 +1041,10 @@ public class WorldJobManager : IDisposable
                 for (int i = 0; i < sectionVolume; i++)
                 {
                     // Overwrite ushort light array with the job's computed values.
-                    // Cross-chunk mods that were applied to the live data during the job
-                    // may be temporarily lost, but the edge check convergence rounds will
-                    // detect and correct border inconsistencies.
+                    // This overwrite is safe against cross-chunk mods: mods targeting a chunk
+                    // with an in-flight job are deferred and drained right after this merge
+                    // (see DrainDeferredCrossChunkMods — the Bug 08 path-2 fix), so live data
+                    // written during the flight is never silently reverted.
                     ushort lightVal = jobLightMap[indexOffset + i];
                     section.LightData[i] = lightVal;
 
@@ -1010,6 +1137,15 @@ public class WorldJobManager : IDisposable
         GenerationJobs.Clear();
         MeshJobs.Clear();
         LightingJobs.Clear();
+
+        // In-flight lighting results are discarded wholesale at shutdown, so mods deferred for
+        // those jobs are dropped with them — release the pooled lists.
+        foreach (List<LightModification> deferred in _deferredCrossChunkMods.Values)
+        {
+            ListPool<LightModification>.Release(deferred);
+        }
+
+        _deferredCrossChunkMods.Clear();
 
         // POOLING: Dispose retained buffers last — all jobs above have returned theirs by now.
         _jobArrayPool.Dispose();

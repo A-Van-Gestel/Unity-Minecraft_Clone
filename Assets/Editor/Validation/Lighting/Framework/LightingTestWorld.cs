@@ -43,6 +43,15 @@ namespace Editor.Validation.Lighting.Framework
         private NativeArray<BlockTypeJobData> _blockTypesNative;
         private bool _isDisposed;
 
+        // Chunks with a lighting job currently in flight (mirror of production's LightingJobs keys,
+        // minus the already-processed _completedLightJobs entries).
+        private readonly HashSet<Vector2Int> _inFlightCoords = new HashSet<Vector2Int>();
+
+        // Cross-chunk mods deferred because their target chunk had its own job in flight — applying
+        // immediately would be overwritten by that job's merge. Drained right after the target's
+        // merge (mirror of WorldJobManager._deferredCrossChunkMods, the Bug 08 path-2 fix).
+        private readonly Dictionary<Vector2Int, List<LightModification>> _deferredMods = new Dictionary<Vector2Int, List<LightModification>>();
+
         /// <summary>The number of chunks along each horizontal axis of the grid.</summary>
         public int GridSize { get; }
 
@@ -139,6 +148,10 @@ namespace Editor.Validation.Lighting.Framework
 
             /// <summary>Mods dropped because they targeted chunks outside the grid (out-of-world).</summary>
             public int ModsDroppedOutOfWorld;
+
+            /// <summary>Mods deferred because their target chunk had its own job in flight; they are
+            /// applied right after that chunk's merge (the Bug 08 path-2 defer/drain).</summary>
+            public int ModsDeferred;
         }
 
         /// <summary>
@@ -153,6 +166,12 @@ namespace Editor.Validation.Lighting.Framework
         public LightingJobFlight BeginLightingJob(Vector2Int chunkCoord, bool performEdgeCheck = false)
         {
             TestChunk chunk = GetChunk(chunkCoord);
+
+            // Production never schedules a second lighting job for a chunk that already has one in
+            // flight (the LightingJobs.ContainsKey guard) — a test doing so is a setup error.
+            if (!_inFlightCoords.Add(chunkCoord))
+                throw new InvalidOperationException($"Chunk {chunkCoord} already has a lighting job in flight.");
+
             LightingJobFlight flight = new LightingJobFlight { Coord = chunkCoord };
 
             // Center chunk: writable copies (the job owns them for the duration of the flight).
@@ -212,9 +231,11 @@ namespace Editor.Validation.Lighting.Framework
 
         /// <summary>
         /// Runs the in-flight job synchronously, merges its light output into the live chunk (full
-        /// overwrite — mirroring <c>WorldJobManager.ApplyLightingJobResult</c>, including its accepted
-        /// in-flight-mod loss), and applies the emitted cross-chunk mods to neighbor chunks via
-        /// <see cref="CrossChunkLightModApplier"/>. Disposes all flight containers.
+        /// overwrite — mirroring <c>WorldJobManager.ApplyLightingJobResult</c>), drains mods other
+        /// jobs deferred for this chunk during the flight, and applies the emitted cross-chunk mods
+        /// to neighbor chunks via <see cref="CrossChunkLightModApplier"/> — deferring those whose
+        /// target has its own job in flight (the Bug 08 path-2 defer/drain). Disposes all flight
+        /// containers.
         /// </summary>
         /// <param name="flight">The flight created by <see cref="BeginLightingJob"/>.</param>
         /// <returns>The run result, including effective stability.</returns>
@@ -223,15 +244,28 @@ namespace Editor.Validation.Lighting.Framework
             if (flight.Completed) throw new InvalidOperationException("Flight already completed.");
             flight.Completed = true;
 
+            // The chunk now counts as processed: mods emitted by jobs completed after this point
+            // apply to its live data directly (production's _completedLightJobs semantics).
+            _inFlightCoords.Remove(flight.Coord);
+
             TestChunk chunk = GetChunk(flight.Coord);
             NeighborhoodLightingJob job = flight.Job;
             job.Run();
 
             // Merge: overwrite the live light buffer with the job's computed values.
-            // Production merges per section but the effective light result is identical —
-            // cross-chunk mods applied to live data during the flight are overwritten here,
-            // which is exactly the accepted-loss window described in Bug 08 (path 2).
+            // Production merges per section but the effective light result is identical.
+            // Mods applied to live data during the flight would be overwritten here — which is
+            // why mods targeting in-flight chunks are DEFERRED and drained right after this
+            // merge instead (the Bug 08 path-2 fix).
             job.LightMap.CopyTo(chunk.Light);
+
+            // Drain mods deferred for this chunk while its job was in flight
+            // (mirror of WorldJobManager.DrainDeferredCrossChunkMods).
+            if (_deferredMods.Remove(flight.Coord, out List<LightModification> deferred))
+            {
+                foreach (LightModification mod in deferred)
+                    ApplyModToChunk(chunk, in mod);
+            }
 
             LightingRunResult result = new LightingRunResult
             {
@@ -255,34 +289,25 @@ namespace Editor.Validation.Lighting.Framework
 
                 hasRealCrossChunkMods = true;
 
-                Vector3Int localPos = new Vector3Int(
-                    mod.GlobalPosition.x - target.VoxelOrigin.x,
-                    mod.GlobalPosition.y,
-                    mod.GlobalPosition.z - target.VoxelOrigin.y);
-
-                int index = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
-                ushort currentLight = target.Light[index];
-
-                CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod);
-                if (!decision.ShouldApply) continue;
-
-                target.Light[index] = decision.NewLight;
-
-                if (mod.Channel == LightChannel.Sun)
+                // The target has its own job in flight, snapshotted before this mod existed —
+                // applying now would be overwritten by that job's merge. Defer; drained right
+                // after the target's merge (mirror of the production defer in
+                // WorldJobManager.ProcessLightingJobs).
+                if (_inFlightCoords.Contains(targetCoord))
                 {
-                    target.SunQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = decision.OldLevel });
-                }
-                else
-                {
-                    target.BlockQueue.Enqueue(new LightQueueNode
+                    if (!_deferredMods.TryGetValue(targetCoord, out List<LightModification> deferredList))
                     {
-                        Position = localPos, OldLightLevel = decision.OldLevel,
-                        OldBlockR = decision.OldR, OldBlockG = decision.OldG, OldBlockB = decision.OldB,
-                    });
+                        deferredList = new List<LightModification>();
+                        _deferredMods[targetCoord] = deferredList;
+                    }
+
+                    deferredList.Add(mod);
+                    result.ModsDeferred++;
+                    continue;
                 }
 
-                target.HasLightWork = true;
-                result.ModsApplied++;
+                if (ApplyModToChunk(target, in mod))
+                    result.ModsApplied++;
             }
 
             // Production stability override: not-stable solely due to out-of-world mods counts as stable.
@@ -462,6 +487,45 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         // --- Private helpers ---
+
+        /// <summary>
+        /// Applies one cross-chunk mod to a live chunk through the shared production decision logic
+        /// and enqueues the BFS wake-up node (mirror of <c>WorldJobManager.ApplyCrossChunkLightMod</c>).
+        /// </summary>
+        /// <param name="target">The chunk the modification targets.</param>
+        /// <param name="mod">The cross-chunk modification emitted by a neighbor's lighting job.</param>
+        /// <returns>True when the decision resulted in an actual write + wake-up node.</returns>
+        private static bool ApplyModToChunk(TestChunk target, in LightModification mod)
+        {
+            Vector3Int localPos = new Vector3Int(
+                mod.GlobalPosition.x - target.VoxelOrigin.x,
+                mod.GlobalPosition.y,
+                mod.GlobalPosition.z - target.VoxelOrigin.y);
+
+            int index = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
+            ushort currentLight = target.Light[index];
+
+            CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod);
+            if (!decision.ShouldApply) return false;
+
+            target.Light[index] = decision.NewLight;
+
+            if (mod.Channel == LightChannel.Sun)
+            {
+                target.SunQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = decision.OldLevel });
+            }
+            else
+            {
+                target.BlockQueue.Enqueue(new LightQueueNode
+                {
+                    Position = localPos, OldLightLevel = decision.OldLevel,
+                    OldBlockR = decision.OldR, OldBlockG = decision.OldG, OldBlockB = decision.OldB,
+                });
+            }
+
+            target.HasLightWork = true;
+            return true;
+        }
 
         private static T NewOwned<T>(LightingJobFlight flight, T container) where T : struct, IDisposable
         {

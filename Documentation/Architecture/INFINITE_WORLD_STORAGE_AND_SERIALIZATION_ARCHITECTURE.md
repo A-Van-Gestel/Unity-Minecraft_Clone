@@ -81,27 +81,36 @@ Three separate managers handle state that exists outside individual chunk blobs:
 
 #### B. LightingStateManager
 
-**Purpose:** Preserves lighting calculation state to prevent "black spots" bug.
+**Purpose:** Preserves lighting calculation state to prevent "black spots" and ghost-light bugs.
 
-**File:** `lighting_pending.bin`  
+**Files:** `pending_lighting.bin` (sunlight columns), `pending_blocklight.bin` (blocklight modifications)  
 **Location:** `Assets/Scripts/Serialization/LightingStateManager.cs`  
-**Saves:** Columns from `WorldData.SunlightRecalculationQueue` that belong to unloaded chunks.
+**Saves:**
+
+* Columns from `WorldData.SunlightRecalculationQueue` that belong to unloaded chunks.
+* Cross-chunk **blocklight** modifications (local position + RGB + removal flag) targeting unloaded chunks. A sunlight column recalc cannot restore RGB data — without this store, blocklight removals (broken lamps) and uplifts that crossed into an unloaded chunk were permanently lost, leaving ghost light baked into saved data (Bug 08, path 1).
 
 **Key Methods:**
 
 * `AddPending(ChunkCoord, HashSet<Vector2Int>)` - Save pending sunlight columns for a chunk
 * `TryGetAndRemove(ChunkCoord, out HashSet<Vector2Int>)` - Restore pending columns on load
+* `AddPendingBlocklight(ChunkCoord, Vector3Int, r, g, b, isRemoval)` - Save one pending blocklight modification (last write per voxel wins)
+* `TryGetAndRemovePendingBlocklight(ChunkCoord, out Dictionary<Vector3Int, PendingBlocklightMod>)` - Restore pending blocklight mods on load
+* `DiscardPendingBlocklight(ChunkCoord)` - Drop pending blocklight mods for freshly GENERATED chunks (initial lighting recomputes from current neighbor data, so they're obsolete)
 
-**Critical Design Decision:**  
-This manager stores *local* column coordinates (0-15), not global positions. This reduces file size and makes data portable if chunk coordinates shift.
+**Critical Design Decisions:**
+
+* This manager stores *local* coordinates (columns 0-15; voxel positions 0-15 / 0-127), not global positions. This reduces file size and makes data portable if chunk coordinates shift.
+* `pending_blocklight.bin` is a **separate, self-describing file** (leading version byte) rather than an extension of `pending_lighting.bin` — adding it required no save-format migration (its absence simply means "nothing pending").
 
 **Restoration Flow:**
 
 1. Chunk loads from disk via `LoadChunkAsync()`
 2. `World.LoadOrGenerateChunk()` checks `LightingStateManager`
 3. If pending columns exist, they're converted to global coordinates and re-injected into `WorldData.SunlightRecalculationQueue`
-4. Chunk's `HasLightChangesToProcess` flag is set
-5. Lighting job is scheduled in the next Update cycle
+4. If pending blocklight mods exist, each is replayed through `CrossChunkLightModApplier.ComputeBlocklight` against the loaded light data — exactly like the live cross-chunk apply path — writing the new value and enqueueing a BFS wake-up node
+5. Chunk's `HasLightChangesToProcess` flag is set
+6. Lighting job is scheduled in the next Update cycle
 
 **Why This Matters:**  
 Without this manager, chunks unloaded during lighting propagation would permanently lose their "needs lighting" state, resulting in dark columns that never recover. This was the root cause of the "black spots" bug.
@@ -616,15 +625,11 @@ if (loaded != null)
 **The Vanishing Neighbor Problem:**  
 During lighting job execution, neighbor chunks may unload. Light updates targeting those chunks must not be dropped.
 
-**Solution - Batched Deferred Updates:**
+**Solution - Batched Deferred Updates (per channel):**
 
 **In WorldJobManager.ProcessLightingJobs():**
 
 ```csharp
-// Track all vanishing neighbor updates
-Dictionary<ChunkCoord, HashSet<Vector2Int>> vanishingNeighborUpdates = 
-    new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
-
 foreach (LightModification mod in jobData.Mods)
 {
     Vector2Int neighborCoord = worldData.GetChunkCoordFor(mod.GlobalPosition);
@@ -632,25 +637,31 @@ foreach (LightModification mod in jobData.Mods)
 
     if (neighborChunk == null || !neighborChunk.IsPopulated) 
     {
-        // Neighbor unloaded - batch for LightingStateManager
-        ChunkCoord coord = new ChunkCoord(neighborCoord);
-        int localX = mod.GlobalPosition.x - neighborCoord.x;
-        int localZ = mod.GlobalPosition.z - neighborCoord.y;
-        
-        if (!vanishingNeighborUpdates.ContainsKey(coord))
+        // Neighbor unloaded — degrade per channel:
+        if (mod.Channel == LightChannel.Sun)
         {
-            vanishingNeighborUpdates[coord] = new HashSet<Vector2Int>();
+            // Sunlight: the affected COLUMN is batched into _droppedLightUpdates and
+            // saved to LightingStateManager at the end of the pass — a column recalc
+            // is authoritative for the sky channel.
         }
-        vanishingNeighborUpdates[coord].Add(new Vector2Int(localX, localZ));
-        
+        else
+        {
+            // Blocklight: a column recalc cannot restore RGB data — persist the FULL
+            // modification (local position + RGB + removal flag) for replay on load.
+            _world.LightingStateManager.AddPendingBlocklight(coord, localPos,
+                mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
+        }
         continue;
     }
 
-    // Apply to loaded neighbor (existing logic)
+    // Target has its own lighting job in flight? Defer the mod; it is drained right
+    // after that job's merge (otherwise the merge would overwrite it — Bug 08 path 2).
+
+    // Otherwise apply to the loaded neighbor via CrossChunkLightModApplier.
 }
 
-// Batch save all vanishing neighbor updates
-foreach (var kvp in vanishingNeighborUpdates)
+// Batch save all vanishing neighbor sunlight columns
+foreach (var kvp in _droppedLightUpdates)
 {
     _world.LightingStateManager.AddPending(kvp.Key, kvp.Value);
 }

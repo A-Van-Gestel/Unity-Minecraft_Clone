@@ -145,7 +145,10 @@ Back on the main thread:
     - **Guard 2 (skip underground sky light increases):** If a sky light mod tries to increase light on a voxel at or below the heightmap, skip. This prevents light leakage where a neighbor's air column BFS wraps around and sets sky light on underground voxels.
       The chunk's own BFS handles underground lighting correctly via column recalculation.
     - If neither guard triggers: set the light value directly and enqueue the position in the neighbor's light queue for further propagation.
-3. **Handle unloaded neighbors:** If a target neighbor isn't loaded, save the affected column coordinates to `LightingStateManager` for recovery when the chunk eventually loads.
+    - **In-flight defer:** If the target neighbor has its own lighting job in flight (its inputs were snapshotted before this mod existed), the mod is NOT applied — that job's full-LightMap merge would overwrite it and the surviving wake-up node would become a no-op, losing the mod permanently. Instead it is deferred (`_deferredCrossChunkMods`) and drained immediately after the target's own merge.
+3. **Handle unloaded neighbors:** If a target neighbor isn't loaded, persist the mod for recovery when the chunk eventually loads, per channel:
+    - **Sunlight mods** degrade to affected column coordinates in `LightingStateManager` (`pending_lighting.bin`) — the column recalculation is authoritative for the sky channel.
+    - **Blocklight mods** are persisted in full (local position + RGB + removal flag, `pending_blocklight.bin`) and replayed through `CrossChunkLightModApplier` when the chunk loads from disk — a column recalc cannot restore RGB data, so without this, removals (broken lamps) would leave permanent ghost light in the saved neighbor.
 4. **Stability check:**
     - If `IsStable`: request mesh rebuild for this chunk and neighbors.
     - If not stable: set `HasLightChangesToProcess = true` for another pass next frame.

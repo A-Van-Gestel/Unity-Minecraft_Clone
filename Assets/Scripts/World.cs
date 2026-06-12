@@ -732,6 +732,39 @@ public class World : MonoBehaviour
                     data.HasLightChangesToProcess = true;
                 }
 
+                // Replay pending cross-chunk blocklight modifications recorded while this chunk was
+                // unloaded. The sunlight column restore above cannot carry RGB data — without this
+                // replay, blocklight removals (broken lamps) and uplifts that crossed into this
+                // chunk while it was unloaded would be lost forever, leaving ghost light baked into
+                // the saved data (Bug 08, path 1). When lighting is disabled, the store is left
+                // untouched so the mods survive until a session with lighting enabled.
+                if (settings.enableLighting &&
+                    LightingStateManager.TryGetAndRemovePendingBlocklight(chunkCoord, out Dictionary<Vector3Int, LightingStateManager.PendingBlocklightMod> pendingBlocklight))
+                {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    if (logSaveDiagnostics)
+                        Debug.Log($"[LoadOrGenerateChunk] Replaying {pendingBlocklight.Count} pending blocklight mods for chunk {chunkCoord}");
+#endif
+
+                    foreach (KeyValuePair<Vector3Int, LightingStateManager.PendingBlocklightMod> entry in pendingBlocklight)
+                    {
+                        Vector3Int localPos = entry.Key;
+                        ushort currentLight = data.GetLightData(localPos.x, localPos.y, localPos.z);
+
+                        // Same shared decision logic as the live cross-chunk apply path
+                        // (WorldJobManager.ApplyCrossChunkLightMod).
+                        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.ComputeBlocklight(
+                            currentLight, entry.Value.R, entry.Value.G, entry.Value.B, entry.Value.IsRemoval);
+
+                        if (!decision.ShouldApply) continue;
+
+                        data.SetLightData(localPos.x, localPos.y, localPos.z, decision.NewLight);
+                        data.AddToBlockLightQueue(localPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
+                    }
+
+                    DictionaryPool<Vector3Int, LightingStateManager.PendingBlocklightMod>.Release(pendingBlocklight);
+                }
+
                 // Check for initial lighting needs
                 if (data.NeedsInitialLighting)
                 {
