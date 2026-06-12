@@ -125,9 +125,10 @@ namespace Jobs
 
             // --- PASS -2: SYNC EMISSION TO LIGHT ARRAY ---
             // The uint packed data has emission baked in by generation/placement, but the ushort
-            // light array may be uninitialized. Scan center chunk blocks and write emission RGB
-            // so the BFS and edge checks can read from the ushort array consistently.
-            SyncEmissionToLightArray();
+            // light array may be uninitialized. Scan center chunk blocks, write emission RGB so the
+            // BFS and edge checks can read from the ushort array consistently, and enqueue every
+            // stamped position for placement BFS so generation-written emissives propagate (Bug 06).
+            SyncEmissionToLightArray(blocklightPlacementQueue);
 
             // --- PASS -1: EDGE CONSISTENCY CHECK (Starlight-inspired) ---
             // Validates light values on all 4 horizontal chunk borders against neighbor data.
@@ -246,8 +247,14 @@ namespace Jobs
         /// Synchronizes the ushort light array with data from the uint packed map.
         /// Ensures sunlight and blocklight emission values (baked into the uint by generation/placement)
         /// are reflected in the ushort light array so BFS and edge checks read consistent data.
+        /// Every position whose emission gets stamped is also enqueued into the blocklight placement
+        /// queue so the emission actually PROPAGATES — generation-written emissives never pass through
+        /// ModifyVoxel and would otherwise illuminate only their own voxel (Bug 06). The stamp
+        /// condition (stored light below emission) is self-limiting: once propagated, the voxel holds
+        /// at least its emission and later job runs neither stamp nor enqueue.
         /// </summary>
-        private void SyncEmissionToLightArray()
+        /// <param name="blocklightPlacementQueue">The job-local blocklight placement BFS queue to seed.</param>
+        private void SyncEmissionToLightArray(NativeQueue<Vector3Int> blocklightPlacementQueue)
         {
             for (int i = 0; i < Map.Length; i++)
             {
@@ -272,9 +279,21 @@ namespace Jobs
                     if (curR < emR || curG < emG || curB < emB)
                     {
                         LightMap[i] = LightBitMapping.PackLightData(sun,
-                            (byte)Mathf.Max(emR, curR),
-                            (byte)Mathf.Max(emG, curG),
-                            (byte)Mathf.Max(emB, curB));
+                            (byte)math.max((int)emR, curR),
+                            (byte)math.max((int)emG, curG),
+                            (byte)math.max((int)emB, curB));
+
+                        // Inverse of ChunkMath.GetFlattenedIndexInChunk
+                        // (index = section*SECTION_VOLUME + z*(width*sectionSize) + localY*width + x)
+                        // — computed only on this rare stamp path to keep the scan linear.
+                        int sectionIdx = i / ChunkMath.SECTION_VOLUME;
+                        int inSection = i % ChunkMath.SECTION_VOLUME;
+                        int z = inSection / (ChunkMath.CHUNK_WIDTH * ChunkMath.SECTION_SIZE);
+                        int rem = inSection % (ChunkMath.CHUNK_WIDTH * ChunkMath.SECTION_SIZE);
+                        int y = sectionIdx * ChunkMath.SECTION_SIZE + rem / ChunkMath.CHUNK_WIDTH;
+                        int x = rem % ChunkMath.CHUNK_WIDTH;
+
+                        blocklightPlacementQueue.Enqueue(new Vector3Int(x, y, z));
                     }
                 }
             }

@@ -1,6 +1,4 @@
 using System.Collections.Generic;
-using Editor.Validation.Lighting.Framework;
-using UnityEngine;
 
 namespace Editor.Validation.Lighting
 {
@@ -19,30 +17,7 @@ namespace Editor.Validation.Lighting
         // a faithful repro remains TODO before that bug's fix can be test-driven.
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
-            scenarios.Add(new Scenario("K06: Generated emissive block illuminates surroundings on initial lighting", KnownBug06_GeneratedEmissiveSeedsBfs, "Bug 06"));
-        }
-
-        /// <summary>
-        /// K06 (Bug 06): A lamp written by GENERATION (raw voxel write, no queue seeding — the
-        /// <c>SetBlock</c> path). The initial lighting pass stamps the lamp's own emission via
-        /// <c>SyncEmissionToLightArray</c> but never enqueues it for propagation, so the
-        /// surroundings stay dark until something else touches the area.
-        /// </summary>
-        private static bool KnownBug06_GeneratedEmissiveSeedsBfs()
-        {
-            using LightingTestWorld world = new LightingTestWorld(3);
-            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
-            world.SetBlock(new Vector3Int(24, 11, 24), TestBlockPalette.LampWhite);
-            world.RecalculateHeightmaps();
-
-            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "K06: initial lighting converges");
-
-            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(25, 11, 24)) == (14, 14, 14),
-                "K06: generated lamp illuminates its neighbor voxel",
-                $"Expected (14,14,14) next to the lamp, got {world.GetBlocklightRGB(new Vector3Int(25, 11, 24))} — emission was stamped but never propagated");
-
-            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "K06: field matches oracle");
-            return passed;
+            // No open known-bug scenarios — Bug 05 still needs a faithful repro (see note above).
         }
     }
 }

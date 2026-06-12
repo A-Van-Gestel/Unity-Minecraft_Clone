@@ -27,6 +27,7 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B11: Adjacent opposing lamps at the border converge without flicker", Baseline_AdjacentBorderLampsNoFlicker));
             scenarios.Add(new Scenario("B12: Broken source's area is re-lit by the cross-border independent source", Baseline_CrossBorderRespread));
             scenarios.Add(new Scenario("B13: Sunlight uplift mods survive an in-flight neighbor job (race)", Baseline_InFlightSunlightUpliftRace));
+            scenarios.Add(new Scenario("B14: Generated emissive block illuminates surroundings on initial lighting", Baseline_GeneratedEmissiveSeedsBfs));
         }
 
         /// <summary>
@@ -426,6 +427,31 @@ namespace Editor.Validation.Lighting
 
             passed &= LightingAssert.Converged(world.RunToConvergence(), "B13: post-race convergence");
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B13: field matches oracle after the race");
+            return passed;
+        }
+
+        /// <summary>
+        /// B14: A lamp written by GENERATION (raw voxel write, no queue seeding — the
+        /// <c>SetBlock</c> path) must illuminate its surroundings during initial lighting
+        /// (Bug 06, fixed June 2026 — promoted from known-bug scenario K06). Guards the
+        /// placement-queue seeding in <c>SyncEmissionToLightArray</c>: every position whose
+        /// emission gets stamped is enqueued for placement BFS, so generation-written emissives
+        /// propagate instead of illuminating only their own voxel.
+        /// </summary>
+        private static bool Baseline_GeneratedEmissiveSeedsBfs()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.SetBlock(new Vector3Int(24, 11, 24), TestBlockPalette.LampWhite);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B14: initial lighting converges");
+
+            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(25, 11, 24)) == (14, 14, 14),
+                "B14: generated lamp illuminates its neighbor voxel",
+                $"Expected (14,14,14) next to the lamp, got {world.GetBlocklightRGB(new Vector3Int(25, 11, 24))} — emission was stamped but never propagated");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B14: field matches oracle");
             return passed;
         }
     }

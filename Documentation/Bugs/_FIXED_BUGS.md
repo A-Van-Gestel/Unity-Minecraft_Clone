@@ -213,6 +213,25 @@ Breaking an emissive block sometimes left its light behind permanently; no later
 
 ---
 
+### ~~13. Generated emissive blocks never seed the blocklight BFS (initial lighting)~~
+
+**Severity:** Medium
+**Fixed:** June 2026 (was Bug 06 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game in a freshly generated world (the red-debug-lamp-as-forest-surface setup: generated lamps now illuminate their surroundings immediately at generation time). Guarded by validation suite baseline **B14** (promoted from known-bug repro scenario K06).
+⚠️ *Old-world caveat:* worlds saved BEFORE this fix already carry the stamped-but-unpropagated lamp voxels in their light data, so the fix's trigger (stored light below emission) never fires for them — those lamps stay dark until a nearby block update wakes them, exactly the pre-fix behavior. Only newly generated chunks are healed.
+**Confidence:** Confirmed — reproduced in-game (June 2026) by setting the forest biome's surface block to the red debug lamp: no block lighting was generated at all (the masking by fluid-simulation light updates only applies to flowing lava).
+**Files:** `NeighborhoodLightingJob.cs` — `SyncEmissionToLightArray`, `Execute` (queue seeding); `Chunk.cs` — `OnDataPopulated`; `World.cs` — initial lighting scheduling (`RecalculateSunLightLight`)
+
+**Description:**
+A chunk's initial lighting pass seeded only **sunlight**: `RecalculateSunLightLight()` enqueues all 256 columns into the sunlight recalc queue, and the `BlocklightBfsQueue` is empty for a freshly generated chunk. Inside the job, `SyncEmissionToLightArray` stamped each emissive block's RGB emission into its own `LightMap` cell — but **never enqueued those positions into the blocklight placement queue**, so the emission was not propagated to surrounding voxels. `Chunk.OnDataPopulated` only registers active voxels; it does not queue light updates either.
+
+**Impact (user-confirmed in game):** A generated emissive block illuminated only its own voxel; surrounding air stayed dark until *some* block update near it woke the BFS (e.g. lava flow `ModifyVoxel` calls, or a player edit). Confirmed with the red debug lamp as a biome surface block; confined non-flowing lava pools and future emissive blocks in structures (glowstone etc.) hit the same gap.
+
+**Fix (June 2026):** `SyncEmissionToLightArray` now takes the job-local blocklight placement queue and enqueues every position whose emission it stamps, so the stamped emission propagates within the same job (and reaches neighbors via the normal cross-chunk mods). The stamp condition (stored light below emission) is self-limiting: once propagated, the voxel holds at least its emission, so later job runs neither stamp nor enqueue — zero steady-state overhead for emissive-dense chunks (lava oceans). The index→position conversion runs only on the rare stamp
+path, keeping the scan linear.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~
