@@ -5,7 +5,6 @@ using Data.JobData;
 using Data.WorldTypes;
 using Helpers;
 using Jobs;
-using Jobs.BurstData;
 using Jobs.Data;
 using Jobs.Generators;
 using Legacy;
@@ -760,60 +759,26 @@ public class WorldJobManager : IDisposable
 
                         Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
-                        byte oldLightLevel;
+                        // The decision logic (stale-snapshot guards, wake-up node old values) lives in
+                        // CrossChunkLightModApplier so the editor lighting validation suite exercises
+                        // the exact same rules as this production path.
+                        ushort currentLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
+                        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod);
 
-                        if (mod.Channel == LightChannel.Sun)
+                        if (!decision.ShouldApply)
                         {
-                            ushort currentLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
-                            byte currentSunlight = LightBitMapping.GetSkyLight(currentLight);
-
-                            // Guard: Cross-chunk BFS mods are computed against a STALE snapshot of
-                            // the neighbor's data (taken before the neighbor's own lighting pass).
-                            // This means a mod might try to set sunlight to a value LOWER than what
-                            // the neighbor's own column recalculation has already computed.
-                            //
-                            // Rule: Non-zero cross-chunk sunlight mods may only INCREASE light.
-                            // - Uplift mods (from PropagateLight): must be >= current to apply.
-                            // - Darkness removal mods (level=0, from PropagateDarkness): always apply
-                            //   so that block removal/placement propagates correctly across borders.
-                            if (mod.LightLevel > 0 && mod.LightLevel < currentSunlight)
-                            {
-                                continue;
-                            }
-
-                            oldLightLevel = currentSunlight;
-                        }
-                        else
-                        {
-                            // Per-channel MAX guard (mirrors the sunlight guard above):
-                            // Non-zero mod channels use MAX to prevent stale-snapshot mods
-                            // from reducing values set by independent light sources.
-                            // Zero channels pass through for darkness removal.
-                            ushort oldLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
-                            oldLightLevel = LightBitMapping.GetMaxBlocklight(oldLight);
-                            byte oldR = LightBitMapping.GetBlocklightR(oldLight);
-                            byte oldG = LightBitMapping.GetBlocklightG(oldLight);
-                            byte oldB = LightBitMapping.GetBlocklightB(oldLight);
-                            byte applyR = mod.BlockR == 0 ? (byte)0 : (byte)Mathf.Max(oldR, mod.BlockR);
-                            byte applyG = mod.BlockG == 0 ? (byte)0 : (byte)Mathf.Max(oldG, mod.BlockG);
-                            byte applyB = mod.BlockB == 0 ? (byte)0 : (byte)Mathf.Max(oldB, mod.BlockB);
-
-                            if (applyR != oldR || applyG != oldG || applyB != oldB)
-                            {
-                                neighborChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z,
-                                    LightBitMapping.SetBlocklightRGB(oldLight, applyR, applyG, applyB));
-                                neighborChunk.AddToBlockLightQueue(localVoxelPos, oldLightLevel, oldR, oldG, oldB);
-                            }
-
                             continue;
                         }
 
-                        if (oldLightLevel != mod.LightLevel)
+                        neighborChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z, decision.NewLight);
+
+                        if (mod.Channel == LightChannel.Sun)
                         {
-                            ushort oldSunLight = neighborChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
-                            neighborChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z,
-                                LightBitMapping.SetSkyLight(oldSunLight, mod.LightLevel));
-                            neighborChunk.AddToSunLightQueue(localVoxelPos, oldLightLevel);
+                            neighborChunk.AddToSunLightQueue(localVoxelPos, decision.OldLevel);
+                        }
+                        else
+                        {
+                            neighborChunk.AddToBlockLightQueue(localVoxelPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
                         }
                     }
                 }
