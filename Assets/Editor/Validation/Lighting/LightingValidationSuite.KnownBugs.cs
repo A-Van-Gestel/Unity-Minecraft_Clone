@@ -73,11 +73,13 @@ namespace Editor.Validation.Lighting
             world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.LampRed);
             passed &= LightingAssert.Converged(world.RunToConvergence(), "K07a: second source converges");
 
-            // Probe on the blue side: red must have crossed the border (oracle: 15 at source,
-            // -1 per air step → 30→34 is 4 steps = 11 on the red channel at x=34).
-            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(34, 11, 24)).R == 11,
+            // Probe on the blue side: red must have crossed the border. The straight line
+            // 30→34 passes THROUGH the opaque blue lamp at x=33, so the red light detours
+            // over it: 30(15) → 31(14) → 32(13) → (32,12)(12) → (33,12)(11) → (34,12)(10)
+            // → (34,11)(9). Oracle-verified.
+            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(34, 11, 24)).R == 9,
                 "K07a: red light crosses into the blue lamp's chunk",
-                $"Expected R=11 at x=34, got {world.GetBlocklightRGB(new Vector3Int(34, 11, 24))} — hard cut-off at the border");
+                $"Expected R=9 at x=34 (detour around the opaque blue lamp), got {world.GetBlocklightRGB(new Vector3Int(34, 11, 24))} — hard cut-off at the border");
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "K07a: blended field matches oracle");
             return passed;

@@ -166,6 +166,18 @@ namespace Editor.Validation.Lighting.Framework
                 byte srcR = field.R[srcIndex];
                 byte srcG = field.G[srcIndex];
                 byte srcB = field.B[srcIndex];
+
+                // Opaque blocks do not transmit light: an opaque emissive radiates only its OWN emission,
+                // never received surface light (matches the engine's opaque-source rule in PropagateLightRGB).
+                // Only seed-enqueued emissives can be opaque here — opaque receivers are never enqueued.
+                BlockTypeJobData srcProps = blockTypes[ids[srcIndex]];
+                if (srcProps.IsOpaque)
+                {
+                    srcR = srcProps.EmissionR;
+                    srcG = srcProps.EmissionG;
+                    srcB = srcProps.EmissionB;
+                }
+
                 if (srcR == 0 && srcG == 0 && srcB == 0) continue;
 
                 for (int i = 0; i < 6; i++)

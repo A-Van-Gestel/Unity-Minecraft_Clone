@@ -69,7 +69,7 @@ namespace Helpers
         {
             return mod.Channel == LightChannel.Sun
                 ? ComputeSunlight(currentLight, mod.LightLevel)
-                : ComputeBlocklight(currentLight, mod.BlockR, mod.BlockG, mod.BlockB);
+                : ComputeBlocklight(currentLight, mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
         }
 
         /// <summary>
@@ -113,30 +113,48 @@ namespace Helpers
         /// <param name="modR">The red blocklight channel the modification wants to set (0-15).</param>
         /// <param name="modG">The green blocklight channel the modification wants to set (0-15).</param>
         /// <param name="modB">The blue blocklight channel the modification wants to set (0-15).</param>
+        /// <param name="isRemoval">True when the modification was emitted by a darkness/removal pass
+        /// (zero channels mean "remove"); false for placement/edge-check mods (zero channels mean
+        /// "no contribution" and may never lower the live value).</param>
         /// <returns>The apply decision, including the new light value and wake-up node old values.</returns>
-        public static ApplyDecision ComputeBlocklight(ushort currentLight, byte modR, byte modG, byte modB)
+        public static ApplyDecision ComputeBlocklight(ushort currentLight, byte modR, byte modG, byte modB, bool isRemoval)
         {
-            byte oldLevel = LightBitMapping.GetMaxBlocklight(currentLight);
             byte oldR = LightBitMapping.GetBlocklightR(currentLight);
             byte oldG = LightBitMapping.GetBlocklightG(currentLight);
             byte oldB = LightBitMapping.GetBlocklightB(currentLight);
 
-            // Per-channel MAX guard (mirrors the sunlight guard above):
-            // Non-zero mod channels use MAX to prevent stale-snapshot mods
-            // from reducing values set by independent light sources.
-            // Zero channels pass through for darkness removal.
-            byte applyR = modR == 0 ? (byte)0 : Max(oldR, modR);
-            byte applyG = modG == 0 ? (byte)0 : Max(oldG, modG);
-            byte applyB = modB == 0 ? (byte)0 : Max(oldB, modB);
+            // Per-channel apply rule:
+            // - Placement mods (BFS uplift, edge checks): channels only ever RAISE the live value.
+            //   A zero channel means the emitting job had no light to contribute there — possibly
+            //   a stale snapshot that never saw an independent source — never "remove"
+            //   (Bug 07 secondary contributor).
+            // - Removal mods (darkness waves): a zero channel is a genuine removal and passes
+            //   through; non-zero channels still MAX-merge so a stale snapshot cannot lower
+            //   values owned by independent light sources.
+            byte applyR = isRemoval && modR == 0 ? (byte)0 : Max(oldR, modR);
+            byte applyG = isRemoval && modG == 0 ? (byte)0 : Max(oldG, modG);
+            byte applyB = isRemoval && modB == 0 ? (byte)0 : Max(oldB, modB);
 
             if (applyR == oldR && applyG == oldG && applyB == oldB)
             {
                 return ApplyDecision.Skip;
             }
 
+            // Wake-up node semantics (Bug 07 defect 1): the new light value is written to the live
+            // data before the receiving chunk's next lighting job runs, so the wake node reports
+            // old = 0 for every channel that did NOT lose light — the job's seeding then sees a
+            // pure increase (anyIncreased) and re-spreads the uplift, instead of re-interpreting
+            // the apply as a block removal and force-clearing the voxel. Only channels that
+            // genuinely lost light report their real old value, launching the darkness wave with
+            // the correct strength.
+            byte wakeR = applyR < oldR ? oldR : (byte)0;
+            byte wakeG = applyG < oldG ? oldG : (byte)0;
+            byte wakeB = applyB < oldB ? oldB : (byte)0;
+            byte wakeLevel = Max(wakeR, Max(wakeG, wakeB));
+
             return new ApplyDecision(
                 LightBitMapping.SetBlocklightRGB(currentLight, applyR, applyG, applyB),
-                oldLevel, oldR, oldG, oldB);
+                wakeLevel, wakeR, wakeG, wakeB);
         }
 
         private static byte Max(byte a, byte b)

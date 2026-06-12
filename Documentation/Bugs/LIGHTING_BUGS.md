@@ -55,8 +55,14 @@ A chunk's initial lighting pass seeds only **sunlight**: `RecalculateSunLightLig
 ## Bug 07: Cross-chunk emissive sources produce a hard cut-off (or flicker) at the chunk border
 
 **Severity:** High
-**Status:** Open / Reproduced deterministically in the validation suite (scenarios **K07a** two-source border cut-off, **K07b** adjacent-lamp flicker — genuine non-convergence past the round budget, **K07c** cross-border re-spread loss after breaking a source)
-**Confidence:** Confirmed — the harness reproduces all three reported symptoms through the real job + the shared mod-apply logic, including light corruption stamped into opaque floor voxels during the ping-pong.
+**Status:** **Fixed in code (June 2026)** — all three repro scenarios (**K07a/K07b/K07c**) pass and all 9 baselines stay green. **Awaiting in-game confirmation** (two emissive sources at a chunk border: place/break each side, watch for cut-off/flicker) — archive once confirmed. The fix has four parts:
+
+1. *Defect 1 (destructive seeding):* the job's blocklight seeding is now per-channel — a channel is force-cleared only when it still holds exactly its pre-change value (`cur == old > 0`, the block-change signature); emission is stamped via per-channel max. `CrossChunkLightModApplier` wake nodes report `old = 0` for channels that didn't lose light (pure uplift ⇒ `anyIncreased` re-spread) and real old values only for genuinely lowered channels.
+2. *Defect 2 (dropped re-spread):* when a darkness wave meets an independent source across the border, `PropagateDarkness`/`PropagateDarknessRGB` now pull the neighbor's attenuated contribution back into the just-darkened center voxel (via `CheckEdgeVoxel`/`CheckEdgeVoxelRGB`) instead of silently dropping the seed.
+3. *Secondary (zero-channel pass-through):* `LightModification` gained an `IsRemoval` flag (job-output only — NOT in the save format); placement mods can now only raise channels, only genuine removal mods may zero them.
+4. *Collateral engine bugs found by the repros:* (a) the `ushort.MaxValue` light sentinel collides with a legitimate fully-lit voxel (sky 15 + RGB 15,15,15 = 0xFFFF) — e.g. a white max-emission lamp on a sunlit surface neither propagated on place nor cleared on break; the RGB paths now bounds-check via `GetPackedData` and the redundant light-sentinel checks were removed. (b) An opaque emissive re-radiated *received* surface light; opaque sources now propagate only their own emission (spec rule mirrored in the validation oracle).
+
+**Confidence:** Confirmed — the harness reproduced all three reported symptoms through the real job + the shared mod-apply logic, including light corruption stamped into opaque floor voxels during the ping-pong.
 **Files:** `NeighborhoodLightingJob.cs` — `Execute` (BlocklightBfsQueue seeding, ~lines 159–195), `PropagateDarknessRGB` (~line 351), `PropagateDarkness` (~line 309); `WorldJobManager.cs` — `ProcessLightingJobs` (blocklight mod application, ~lines 813–836), `ApplyLightingJobResult` (~lines 977–988)
 
 **Symptoms (user-confirmed in game):**
