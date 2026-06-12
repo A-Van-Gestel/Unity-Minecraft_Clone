@@ -50,33 +50,3 @@ A chunk's initial lighting pass seeds only **sunlight**: `RecalculateSunLightLig
 
 **Proposed fix:** In `SyncEmissionToLightArray` (or in the seeding section of `Execute`), enqueue every position whose emission was stamped into the blocklight placement queue. This is cheap (the scan already runs) and makes initial lighting self-contained.
 
----
-
-## Bug 08: Broken emissive blocks leave permanent "ghost" blocklight (cross-chunk removal loss)
-
-**Severity:** Medium–High (ghost values get baked into saved region data — permanent world corruption until manually disturbed)
-**Status:** **Fixed in code (June 2026)** — repro scenario **K08a** flips green and all 12 baselines stay green, including tripwire **B7** (the blocklight removal race the analysis below predicted a naive fix would surface). **Awaiting in-game confirmation** (break an emissive block whose glow crosses a chunk border — both while the neighbor is busy re-lighting and across an unload/reload of the neighbor) — archive once confirmed. The fix has two parts, one per loss path:
-
-1. *Path 2 (in-flight overwrite race):* `ProcessLightingJobs` no longer applies a cross-chunk mod to a chunk that has its own lighting job in flight (that job snapshotted its inputs before the mod existed, so its full-LightMap merge would overwrite the apply and the surviving wake node would become a no-op). Such mods are deferred (`_deferredCrossChunkMods`, pooled lists) and drained immediately after the target's own merge through the same shared `CrossChunkLightModApplier` path — their wake nodes flag the chunk for another lighting pass automatically. Targets that vanish mid-flight degrade their deferred mods to the persisted pending stores; shutdown releases them (in-flight results are discarded wholesale there anyway). Validated by **K08a**; the defer/drain is mirrored in the harness (`LightingTestWorld`), so every wave-parallel scenario now exercises it.
-2. *Path 1 (unloaded-neighbor degradation):* blocklight mods targeting unloaded/unpopulated chunks are no longer degraded to sun-only column recalcs. `LightingStateManager` now persists the full modification (local position + RGB + `IsRemoval`, last write per voxel wins) to a NEW self-describing `pending_blocklight.bin` — a separate file, so no save-format migration was needed. On load-from-disk the mods replay through `CrossChunkLightModApplier.ComputeBlocklight` exactly like the live apply path (write + wake node); freshly *generated* chunks discard their pending mods instead (initial lighting recomputes from current neighbor truth). NOT suite-covered (the harness has no unload/save/load mirror) — verified by code inspection; confirm in-game via the render-distance-edge case.
-
-**Confidence:** Confirmed for the in-flight-job race (deterministic repro); High for the unloaded-neighbor path (code inspection).
-**Files:** `WorldJobManager.cs` — `ProcessLightingJobs` (dropped-mod handling, ~lines 762–784; `ApplyLightingJobResult`, ~lines 977–988); `Serialization/LightingStateManager.cs`; `NeighborhoodLightingJob.cs` — `Execute` sunlight seeding (~lines 147–157)
-
-**Symptoms (user-confirmed in game):**
-Breaking an emissive block sometimes leaves its light behind permanently; no later update removes it. Suspected (not yet confirmed) to be cross-chunk related — the analysis below supports that: the ghost data lives in a *neighboring* chunk of the broken block.
-
-**Root Cause (two independent loss paths for removal information):**
-
-1. **Blocklight mods targeting unloaded/unpopulated chunks are degraded to sunlight-only column recalcs.**
-   When a cross-chunk mod's target chunk is null or `!IsPopulated`, `ProcessLightingJobs` records only the affected *column* into `_droppedLightUpdates` → `LightingStateManager.AddPending` (`WorldJobManager.cs:762–784`, `:898–904`). That store (`pending_lighting.bin`) feeds `SunlightRecalculationQueue` → `RecalculateSunlightForColumn`, which touches **only the sky channel**. The RGB removal (and uplift) information is permanently discarded. Breaking a lamp whose glow crosses into a chunk that is unloaded — or loaded but not yet populated — leaves that
-   chunk's saved light data glowing forever. Note the receiving radius matters: a lamp at a border illuminates up to ~14 voxels into the neighbor, so this triggers easily at render-distance edges and during chunk streaming.
-
-2. **`ApplyLightingJobResult` full-LightMap overwrite races with mods applied during the job's flight.**
-   The result merge overwrites the entire ushort light array with the job's output and the comment (`WorldJobManager.cs:979–983`) explicitly accepts that cross-chunk mods applied to live data during the job "may be temporarily lost", deferring to edge-check convergence. But (a) edge checks only run during initial generation (`NeedsEdgeCheck` is only set via `RemainingEdgeCheckRounds`), and (b) `CheckEdgeVoxel`/`CheckEdgeVoxelRGB` are **add-only** — they can never remove over-bright stale light (see Bug 05 notes). A lost *removal* is therefore permanent.
-   For **sunlight** the loss is total: the reverted voxel makes the seeded queue node a no-op (`currentLight == node.OldLightLevel` enqueues nothing, `NeighborhoodLightingJob.cs:153–156`). For **blocklight** the node survives via the force-clear path — kept (per-channel, on the block-change signature `cur == old > 0`) through the June 2026 Bug 07 fix precisely so this race keeps self-healing (guarded by baseline **B7**).
-
-**Fix notes (vs. the originally proposed direction):**
-
-- Path 1 was implemented as a separate `pending_blocklight.bin` file instead of extending the `pending_lighting.bin` format — format-neutral for existing saves (no AOT migration step or version bump needed; the file's absence means "nothing pending"). The new file carries its own leading version byte so future layout changes can migrate it in isolation.
-- Path 2 was implemented as the buffer-and-apply-after-merge variant. The defer condition is "target has an entry in `LightingJobs` that hasn't been processed this pass" — a target processed earlier in the same `ProcessLightingJobs` pass has already merged and is safe to apply to directly.

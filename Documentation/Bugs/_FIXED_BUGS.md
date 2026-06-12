@@ -188,6 +188,31 @@ channels owned by an independent source the emitting job never saw.
 
 ---
 
+### ~~12. Broken emissive blocks leave permanent "ghost" blocklight (cross-chunk removal loss)~~
+
+**Severity:** Medium–High (ghost values got baked into saved region data — permanent world corruption until manually disturbed)
+**Fixed:** June 2026 (was Bug 08 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — path 2 (in-flight overwrite race) confirmed in-game via flowing lava at a chunk border while constant water updates kept the neighboring chunk's lighting jobs in flight, plus deterministic suite repro; guarded by validation suite baseline **B13** (promoted from known-bug scenario K08a) with tripwire **B7** (the blocklight twin of the race) green throughout. Path 1 (unloaded-neighbor degradation) is verified by code inspection only — no in-game repro is practical without command support (requires breaking a border lamp while its
+neighbor is unloaded), and the harness has no unload/save/load mirror.
+**Files:** `WorldJobManager.cs` — `ProcessLightingJobs` (defer/drain, per-channel dropped-mod handling), `ApplyCrossChunkLightMod`, `DrainDeferredCrossChunkMods`, `DegradeDeferredCrossChunkMods`; `Serialization/LightingStateManager.cs` — pending-blocklight store + `pending_blocklight.bin`; `World.cs` — `LoadOrGenerateChunk` replay; `Editor/Validation/Lighting/Framework/LightingTestWorld.cs` — defer/drain mirror
+
+**Symptoms (user-confirmed in game):**
+Breaking an emissive block sometimes left its light behind permanently; no later update removed it. The ghost data lived in a *neighboring* chunk of the broken block.
+
+**Root Cause (two independent loss paths for removal information):**
+
+1. **Blocklight mods targeting unloaded/unpopulated chunks were degraded to sunlight-only column recalcs.** `ProcessLightingJobs` recorded only the affected *column* into the pending store (`pending_lighting.bin`), which feeds `RecalculateSunlightForColumn` — sky channel only. The RGB removal (and uplift) information was permanently discarded; a lamp at a border illuminates up to ~14 voxels into the neighbor, so this triggered easily at render-distance edges and during chunk streaming.
+2. **`ApplyLightingJobResult`'s full-LightMap overwrite raced with mods applied during the job's flight.** The merge explicitly accepted that mods applied to live data mid-flight "may be temporarily lost", deferring to edge-check convergence — but edge checks only run during initial generation and are add-only, so a lost *removal* was permanent. For sunlight the loss was total (the reverted voxel made the wake node a no-op); blocklight self-healed only via the seeding force-clear (the mechanism guarded by B7).
+
+**Fix (one part per loss path):**
+
+1. *Path 2 (in-flight overwrite race):* cross-chunk mods targeting a chunk with its own unprocessed lighting job in flight are deferred (`_deferredCrossChunkMods`, pooled lists) and drained immediately after that chunk's merge, through the same shared `CrossChunkLightModApplier` path — wake nodes flag the chunk for another pass automatically. Targets that vanish mid-flight degrade their deferred mods to the persisted pending stores; shutdown releases them. The defer/drain is mirrored in the validation harness, so every wave-parallel scenario exercises
+   it.
+2. *Path 1 (unloaded-neighbor degradation):* blocklight mods targeting unloaded/unpopulated chunks are persisted in full (local position + RGB + `IsRemoval`, last write per voxel wins) to a NEW self-describing `pending_blocklight.bin` — a separate file, so no save-format migration was needed. On load-from-disk they replay through `CrossChunkLightModApplier.ComputeBlocklight` exactly like the live path; freshly *generated* chunks discard their pending mods (initial lighting recomputes from current neighbor truth). Sunlight mods keep the column-recalc
+   degradation, which is authoritative for the sky channel.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

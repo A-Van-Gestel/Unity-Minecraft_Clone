@@ -26,6 +26,7 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B10: Two emissive sources blend across the chunk border", Baseline_CrossBorderTwoSourceBlend));
             scenarios.Add(new Scenario("B11: Adjacent opposing lamps at the border converge without flicker", Baseline_AdjacentBorderLampsNoFlicker));
             scenarios.Add(new Scenario("B12: Broken source's area is re-lit by the cross-border independent source", Baseline_CrossBorderRespread));
+            scenarios.Add(new Scenario("B13: Sunlight uplift mods survive an in-flight neighbor job (race)", Baseline_InFlightSunlightUpliftRace));
         }
 
         /// <summary>
@@ -122,8 +123,8 @@ namespace Editor.Validation.Lighting
         /// <summary>
         /// B4: A white lamp placed and then broken inside a sealed stone box (light fully contained
         /// within one chunk). The light field must return bit-identically to the pre-placement
-        /// baseline — the in-chunk form of the ghost-light invariant (the cross-chunk form is the
-        /// Bug 08 scenario).
+        /// baseline — the in-chunk form of the ghost-light invariant (the cross-chunk forms are
+        /// the B7/B13 race scenarios).
         /// </summary>
         private static bool Baseline_SealedBoxPlaceBreak()
         {
@@ -202,7 +203,7 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// B7: The blocklight twin of the K08a race — a lamp at the border is broken while the
+        /// B7: The blocklight twin of the B13 race (formerly K08a) — a lamp at the border is broken while the
         /// neighbor chunk has a job in flight, so the darkness mods are overwritten by the stale
         /// merge. This ghost light self-heals: the surviving wake-up nodes carry real old values for
         /// the lowered channels, which triggers the per-channel seeding force-clear
@@ -390,6 +391,41 @@ namespace Editor.Validation.Lighting
             passed &= LightingAssert.Converged(world.RunToConvergence(), "B12: post-break convergence");
 
             passed &= LightingAssert.FieldsEqual(baseline, world, "B12: field returns to the single-source baseline");
+            return passed;
+        }
+
+        /// <summary>
+        /// B13: Cross-chunk mods must survive an in-flight lighting job on the receiving chunk
+        /// (Bug 08 path 2, fixed June 2026 — promoted from known-bug scenario K08a). A roof spans
+        /// the border; chunk (2,1) has a lighting job IN FLIGHT (inputs already snapshotted) when a
+        /// roof block is broken in (1,1) and that chunk's job emits sunlight uplift mods into (2,1).
+        /// Guards the defer/drain: mods targeting an in-flight chunk are deferred and applied right
+        /// after that chunk's merge, instead of being applied to live data and silently reverted by
+        /// the stale full-LightMap overwrite (which left the area permanently darker than the oracle).
+        /// </summary>
+        private static bool Baseline_InFlightSunlightUpliftRace()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+
+            // Roof at y=30 spanning the (1,1)/(2,1) border.
+            world.FillBox(new Vector3Int(26, 30, 18), new Vector3Int(38, 30, 30), TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B13: initial lighting converges");
+
+            // Put chunk (2,1)'s job in flight, THEN break a roof block in (1,1) near the border and
+            // run (1,1)'s job — its uplift mods target (2,1) mid-flight and must be deferred.
+            LightingTestWorld.LightingJobFlight inFlight = world.BeginLightingJob(new Vector2Int(2, 1));
+
+            world.BreakBlock(new Vector3Int(30, 30, 24));
+            world.RunLightingJob(new Vector2Int(1, 1));
+
+            // The merge that used to overwrite the uplift; the deferred mods drain right after it.
+            world.CompleteLightingJob(inFlight);
+
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B13: post-race convergence");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B13: field matches oracle after the race");
             return passed;
         }
     }
