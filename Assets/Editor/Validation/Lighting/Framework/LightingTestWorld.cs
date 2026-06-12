@@ -379,6 +379,88 @@ namespace Editor.Validation.Lighting.Framework
             return totalRounds;
         }
 
+        /// <summary>
+        /// Wave-parallel convergence: each round BEGINS the jobs of every pending chunk first (all
+        /// snapshot the same pre-round state) and only then COMPLETES them in order. This mirrors
+        /// production under load, where many lighting jobs are in flight in the same frame and
+        /// cross-chunk mods are applied to chunks whose own job already snapshotted — the in-flight
+        /// loss window that <see cref="RunToConvergence"/> (strictly sequential) can never produce.
+        /// </summary>
+        /// <param name="maxRounds">The round budget before giving up.</param>
+        /// <returns>The number of waves taken, or -1 when work was still pending after <paramref name="maxRounds"/>.</returns>
+        public int RunWaveToConvergence(int maxRounds = DefaultMaxRounds)
+        {
+            List<Vector2Int> pending = new List<Vector2Int>();
+            List<LightingJobFlight> flights = new List<LightingJobFlight>();
+
+            for (int round = 1; round <= maxRounds; round++)
+            {
+                pending.Clear();
+                foreach (KeyValuePair<Vector2Int, TestChunk> entry in _chunks)
+                {
+                    if (entry.Value.HasLightWork)
+                        pending.Add(entry.Key);
+                }
+
+                if (pending.Count == 0)
+                    return round - 1;
+
+                pending.Sort((a, b) => a.y != b.y ? a.y.CompareTo(b.y) : a.x.CompareTo(b.x));
+
+                flights.Clear();
+                foreach (Vector2Int coord in pending)
+                    flights.Add(BeginLightingJob(coord));
+
+                foreach (LightingJobFlight flight in flights)
+                    CompleteLightingJob(flight);
+            }
+
+            foreach (TestChunk chunk in _chunks.Values)
+            {
+                if (chunk.HasLightWork)
+                    return -1;
+            }
+
+            return maxRounds;
+        }
+
+        /// <summary>
+        /// Wave-parallel variant of <see cref="RunInitialLighting"/>: the initial 256-column recalcs
+        /// of ALL chunks run as one concurrent wave (every job sees its neighbors fully unlit), and
+        /// the two edge-check rounds also run as waves — the faithful mirror of initial world
+        /// generation, where neighboring chunks light simultaneously from stale snapshots
+        /// (the convergence condition behind Bug 05).
+        /// </summary>
+        /// <param name="maxRounds">The round budget for each convergence stage.</param>
+        /// <returns>The total number of waves taken, or -1 if any stage failed to converge.</returns>
+        public int RunInitialLightingParallel(int maxRounds = DefaultMaxRounds)
+        {
+            foreach (TestChunk chunk in _chunks.Values)
+                QueueFullSunlightRecalc(chunk.Coord);
+
+            int totalRounds = RunWaveToConvergence(maxRounds);
+            if (totalRounds < 0) return -1;
+
+            const int edgeCheckRounds = 2; // ChunkData.RemainingEdgeCheckRounds initial value
+            List<LightingJobFlight> flights = new List<LightingJobFlight>();
+
+            for (int round = 0; round < edgeCheckRounds; round++)
+            {
+                flights.Clear();
+                foreach (Vector2Int coord in AllChunkCoords())
+                    flights.Add(BeginLightingJob(coord, performEdgeCheck: true));
+
+                foreach (LightingJobFlight flight in flights)
+                    CompleteLightingJob(flight);
+
+                int rounds = RunWaveToConvergence(maxRounds);
+                if (rounds < 0) return -1;
+                totalRounds += rounds;
+            }
+
+            return totalRounds;
+        }
+
         // --- Private helpers ---
 
         private static T NewOwned<T>(LightingJobFlight flight, T container) where T : struct, IDisposable

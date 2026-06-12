@@ -20,6 +20,8 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B4: Place-then-break lamp in sealed box returns to baseline", Baseline_SealedBoxPlaceBreak));
             scenarios.Add(new Scenario("B5: Emissive spill across border into dark neighbor", Baseline_CrossChunkSpill));
             scenarios.Add(new Scenario("B6: Sealed cavity is pitch black", Baseline_SealedCavity));
+            scenarios.Add(new Scenario("B7: Blocklight removal survives an in-flight neighbor job (race)", Baseline_InFlightBlocklightRemovalRace));
+            scenarios.Add(new Scenario("B8: Wave-parallel initial lighting of diagonal sky-well converges to oracle", Baseline_DiagonalSkyWellParallelGen));
         }
 
         /// <summary>
@@ -192,6 +194,66 @@ namespace Editor.Validation.Lighting
                 $"Expected packed light 0, got {world.GetLightData(center)}");
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B6: field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B7: The blocklight twin of the K08a race — a lamp at the border is broken while the
+        /// neighbor chunk has a job in flight, so the darkness mods are overwritten by the stale
+        /// merge. Today this ghost light self-heals: the surviving wake-up nodes carry
+        /// <c>OldBlock &gt; 0</c>, which triggers the seeding force-clear — the very mechanism that is
+        /// Bug 07's defect 1. This scenario is a baseline GUARD: it must STAY green when Bug 07 is
+        /// fixed. A naive fix (dropping the force-clear without re-seeding removals) surfaces the
+        /// Bug 08 race here, exactly as LIGHTING_BUGS.md predicts.
+        /// </summary>
+        private static bool Baseline_InFlightBlocklightRemovalRace()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B7: initial lighting converges");
+
+            Dictionary<Vector2Int, ushort[]> baseline = world.SnapshotLightField();
+
+            // Lamp on the border column of chunk (1,1); its light bleeds ~13 voxels into (2,1).
+            world.PlaceBlock(new Vector3Int(31, 11, 24), TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B7: lamp converges");
+
+            // Race: (2,1)'s job snapshots BEFORE the lamp is broken; (1,1)'s removal mods are
+            // applied to (2,1)'s live data mid-flight and then overwritten by the stale merge.
+            LightingTestWorld.LightingJobFlight inFlight = world.BeginLightingJob(new Vector2Int(2, 1));
+            world.BreakBlock(new Vector3Int(31, 11, 24));
+            world.RunLightingJob(new Vector2Int(1, 1));
+            world.CompleteLightingJob(inFlight);
+
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B7: post-race convergence");
+            passed &= LightingAssert.FieldsEqual(baseline, world, "B7: no ghost light survives the race");
+            return passed;
+        }
+
+        /// <summary>
+        /// B8: A solid slab covers a 5×5 grid with a single sky well in a diagonal neighbor of the
+        /// center region; ALL chunks run their initial lighting as one concurrent wave (stale,
+        /// unlit neighbor snapshots) followed by the production's two edge-check rounds.
+        /// This was authored as the minimal Bug 05 repro, but the engine converges to the oracle —
+        /// so it guards diagonal initial-generation convergence as a baseline instead. Bug 05 still
+        /// needs a faithful repro (denser multi-pocket canopies / different mod-loss timing).
+        /// </summary>
+        private static bool Baseline_DiagonalSkyWellParallelGen()
+        {
+            using LightingTestWorld world = new LightingTestWorld(5);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+
+            // Full-grid slab at y=30 with one 1×1 sky well at (49, 30, 49) — inside chunk (3,3),
+            // one voxel from the corner it shares diagonally with center chunk (2,2).
+            const int worldMax = 5 * VoxelData.ChunkWidth - 1;
+            world.FillBox(new Vector3Int(0, 30, 0), new Vector3Int(worldMax, 30, worldMax), TestBlockPalette.Stone);
+            world.SetBlock(new Vector3Int(49, 30, 49), TestBlockPalette.Air);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLightingParallel(), "B8: wave-parallel initial lighting converges");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B8: under-slab field matches oracle");
             return passed;
         }
     }
