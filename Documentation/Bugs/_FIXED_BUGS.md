@@ -136,6 +136,29 @@ also: [Design doc Section 2.5.4](../Design/SMOOTH_AND_RGB_LIGHTING.md#254-legacy
 
 ---
 
+### ~~10. Blocklight leaks into opaque volumes (woken surface-lit opaque voxels become BFS sources)~~
+
+**Severity:** Medium (visual-only inside solid terrain, but corrupted saved light data and compounded with every nearby edit)
+**Fixed:** June 2026 (was Bug 09 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game via the BlockLight `VoxelDebugVisualization`; guarded by validation suite baseline **B9** (promoted from known-bug repro scenario K09)
+**Files:** `NeighborhoodLightingJob.cs` — `PropagateLightRGB`; `ChunkData.cs` — `ModifyVoxel` neighbor wake-up (~lines 497–512, wakes lit neighbors without an opacity check)
+
+**History:** Suspected since the original multithreaded/job-based lighting rewrite (visible in the BlockLight `VoxelDebugVisualization` mode), but never documented because lava was the only blocklight source and work focused on sky lighting. First captured deterministically by the validation suite's K07 oracle diffs (light stamped multiple voxels deep into the stone floor), then isolated as an independent defect.
+
+**Symptoms:**
+Blocklight values appeared *inside* opaque volumes, deeper than the legitimate 1-voxel surface stamp, triggered by any block edit adjacent to a lit opaque surface. Worse than a single-voxel creep: once an interior voxel was lit and re-entered a BFS queue (wake-ups, re-spread), the missing guard let it propagate *laterally within the solid layer* — the K09 repro showed a decaying light trail (12 → 1) running ~22 voxels through the stone floor at depth 2, radiating from beneath a single torch after one place/break edit. Visible in the BlockLight debug
+visualization; baked into saved region light data.
+
+**Root Cause:**
+Opaque voxels legitimately *receive* surface light (`source - 1`) but must never *propagate* it. The sunlight path enforces this (`PropagateLight`: `if (sourceProps.IsOpaque) return;`) — **the RGB blocklight path had no such guard**. Normally opaque voxels are never enqueued as sources, but `ChunkData.ModifyVoxel`'s neighbor wake-up enqueues ANY neighbor with `GetMaxBlocklight > 0`, including surface-lit opaque voxels. The job's seeding loop then saw `anyIncreased` (current surface light > wake node's old 0) and fed the opaque voxel into
+`PropagateLightRGB`, which stamped `surface - 1` into the next layer of solid blocks.
+
+**Fix:**
+Added the missing opaque-source guard at the top of `PropagateLightRGB`, mirroring the sunlight path — with an exemption for emissive opaque blocks (lamps/glowstone must radiate their own emission): `if (sourceProps.IsOpaque && !sourceProps.IsLightSource) return;`. The `ModifyVoxel` wake-up loop was left unchanged (the job-side guard is the robust fix since wake nodes can also originate from cross-chunk applies and serialized queues). Baseline scenario **B9** asserts the containment invariant (no blocklight anywhere below the floor's surface layer
+across the whole grid); it deliberately does not run a full oracle compare because the same edit also trips Bug 07's cross-border removal/re-spread loss — restore the full-field assertion once Bug 07 is fixed.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~
