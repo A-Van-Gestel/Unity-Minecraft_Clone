@@ -125,29 +125,9 @@ namespace Editor.Validation.Lighting.Framework
 
             chunk.Data.SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData);
 
-            // --- Maintain heightmap (Case 1 / Case 2 of ModifyVoxel) ---
-            int heightmapIndex = localPos.x + VoxelData.ChunkWidth * localPos.z;
-            ushort currentHeight = chunk.Data.heightMap[heightmapIndex];
-
-            if (newProps.IsLightObstructing && localPos.y > currentHeight)
-            {
-                chunk.Data.heightMap[heightmapIndex] = (ushort)localPos.y;
-            }
-            else if (!newProps.IsLightObstructing && localPos.y == currentHeight)
-            {
-                ushort newHeight = 0;
-                for (int y = localPos.y - 1; y >= 0; y--)
-                {
-                    ushort checkId = BurstVoxelDataBitMapping.GetId(chunk.Data.GetVoxel(localPos.x, y, localPos.z));
-                    if (_blockTypes[checkId].IsLightObstructing)
-                    {
-                        newHeight = (ushort)y;
-                        break;
-                    }
-                }
-
-                chunk.Data.heightMap[heightmapIndex] = newHeight;
-            }
+            // --- Maintain heightmap via the shared ChunkData logic (same code as production ModifyVoxel) ---
+            chunk.Data.UpdateColumnHeightAfterEdit(localPos.x, localPos.z, localPos.y,
+                newProps.IsLightObstructing, new JobDataBlockObstruction(_blockTypes));
 
             // --- Queue lighting updates ---
 
@@ -319,6 +299,21 @@ namespace Editor.Validation.Lighting.Framework
             return localPos.x >= 0 && localPos.x < VoxelData.ChunkWidth &&
                    localPos.z >= 0 && localPos.z < VoxelData.ChunkWidth &&
                    localPos.y >= 0 && localPos.y < VoxelData.ChunkHeight;
+        }
+
+        /// <summary>
+        /// Allocation-free <see cref="IBlockObstruction"/> over the harness's Burst block palette,
+        /// so <see cref="LightingTestWorld.PlaceBlock"/> drives the shared
+        /// <see cref="ChunkData.UpdateColumnHeightAfterEdit{TObstruction}"/> with the same semantics
+        /// production uses via its managed palette.
+        /// </summary>
+        private readonly struct JobDataBlockObstruction : IBlockObstruction
+        {
+            private readonly BlockTypeJobData[] _blockTypes;
+
+            public JobDataBlockObstruction(BlockTypeJobData[] blockTypes) => _blockTypes = blockTypes;
+
+            public bool IsLightObstructing(ushort blockId) => _blockTypes[blockId].IsLightObstructing;
         }
     }
 }

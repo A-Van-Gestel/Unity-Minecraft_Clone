@@ -459,33 +459,9 @@ namespace Data
                 SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkyLight(0, 15));
 
             // --- MAINTAIN HEIGHTMAP ---
-            int heightmapIndex = localPos.x + VoxelData.ChunkWidth * localPos.z;
-            ushort currentHeight = heightMap[heightmapIndex];
-
-            // Case 1: A light-obstructing block was placed ABOVE the current highest block.
-            if (newProps.IsLightObstructing && localPos.y > currentHeight)
-            {
-                heightMap[heightmapIndex] = (ushort)localPos.y;
-            }
-            // Case 2: The current highest light-obstructing block was removed or made fully transparent.
-            else if (!newProps.IsLightObstructing && localPos.y == currentHeight)
-            {
-                // We need to scan downwards from here to find the NEW highest block.
-                ushort newHeight = 0;
-                for (int y = localPos.y - 1; y >= 0; y--)
-                {
-                    uint checkPacked = GetVoxel(localPos.x, y, localPos.z);
-                    ushort checkId = BurstVoxelDataBitMapping.GetId(checkPacked);
-                    // FIX: Was IsOpaque — changed to IsLightObstructing for consistency with Case 1 (line 346).
-                    if (World.Instance.BlockTypes[checkId].IsLightObstructing)
-                    {
-                        newHeight = (ushort)y;
-                        break; // Found the new highest block, stop scanning.
-                    }
-                }
-
-                heightMap[heightmapIndex] = newHeight;
-            }
+            // Shared Case 1 / Case 2 logic (also run by the editor lighting validation harness).
+            UpdateColumnHeightAfterEdit(localPos.x, localPos.z, localPos.y,
+                newProps.IsLightObstructing, new ManagedBlockObstruction(World.Instance.BlockTypes));
 
             // --- Queue Lighting Updates ---
 
@@ -536,6 +512,63 @@ namespace Data
             }
 
             World.Instance.worldData.ModifiedChunks.Add(this);
+        }
+
+        /// <summary>
+        /// Recomputes one column's heightmap entry after a single voxel edit, applying the same
+        /// Case 1 / Case 2 rules <see cref="ModifyVoxel"/> uses. Extracted so the production edit path
+        /// and the editor lighting validation harness (<c>LightingTestWorld.PlaceBlock</c>) maintain the
+        /// heightmap through identical code instead of hand-copied duplicates. Allocation-free: the
+        /// obstruction test is a generic value type, so no closure is captured on the edit path.
+        /// </summary>
+        /// <typeparam name="TObstruction">A value-type block-obstruction lookup over the caller's palette.</typeparam>
+        /// <param name="localX">Local X of the edited column (0-15).</param>
+        /// <param name="localZ">Local Z of the edited column (0-15).</param>
+        /// <param name="localY">Local Y of the edited voxel.</param>
+        /// <param name="newIsLightObstructing">Whether the newly-placed block is light-obstructing.</param>
+        /// <param name="obstruction">Light-obstruction lookup for the downward rescan (Case 2).</param>
+        public void UpdateColumnHeightAfterEdit<TObstruction>(int localX, int localZ, int localY,
+            bool newIsLightObstructing, in TObstruction obstruction)
+            where TObstruction : struct, IBlockObstruction
+        {
+            int heightmapIndex = localX + VoxelData.ChunkWidth * localZ;
+            ushort currentHeight = heightMap[heightmapIndex];
+
+            // Case 1: A light-obstructing block was placed ABOVE the current highest block.
+            if (newIsLightObstructing && localY > currentHeight)
+            {
+                heightMap[heightmapIndex] = (ushort)localY;
+            }
+            // Case 2: The current highest light-obstructing block was removed or made fully transparent.
+            else if (!newIsLightObstructing && localY == currentHeight)
+            {
+                // Scan downwards from here to find the NEW highest light-obstructing block.
+                ushort newHeight = 0;
+                for (int y = localY - 1; y >= 0; y--)
+                {
+                    ushort checkId = BurstVoxelDataBitMapping.GetId(GetVoxel(localX, y, localZ));
+                    if (obstruction.IsLightObstructing(checkId))
+                    {
+                        newHeight = (ushort)y;
+                        break; // Found the new highest block, stop scanning.
+                    }
+                }
+
+                heightMap[heightmapIndex] = newHeight;
+            }
+        }
+
+        /// <summary>
+        /// Allocation-free <see cref="IBlockObstruction"/> over the live managed block palette
+        /// (<c>World.Instance.BlockTypes</c>) used by <see cref="ModifyVoxel"/>'s heightmap maintenance.
+        /// </summary>
+        private readonly struct ManagedBlockObstruction : IBlockObstruction
+        {
+            private readonly BlockType[] _blockTypes;
+
+            public ManagedBlockObstruction(BlockType[] blockTypes) => _blockTypes = blockTypes;
+
+            public bool IsLightObstructing(ushort blockId) => _blockTypes[blockId].IsLightObstructing;
         }
 
         #endregion

@@ -74,18 +74,24 @@ there is invisible.
   instead of producing a false pass. (Routing **decision** only — the processing *loop* and the merge
   are still separate; see A1.)
 
-### A3 — `PlaceBlock` / `BreakBlock` reimplement `ChunkData.ModifyVoxel`  ·  **OPEN · LOW (drift risk)**
+### A3 — `PlaceBlock` / `BreakBlock` reimplement `ChunkData.ModifyVoxel`  ·  **PARTIALLY CLOSED (2026-06-13) · remainder LOW**
 
 - `LightingTestWorld.Builder.cs` hand-mirrors `ModifyVoxel`: same-chunk-only neighbor wake, removal-node
-  seeding with old values, incremental heightmap maintenance, opacity-change column recalc. **Faithful as
-  of June 2026** (verified line-by-line), but it is a copy that can silently drift from production.
-- **One real structural divergence:** production routes the opacity-change column recalc through the
-  **world-level** `WorldData.SunlightRecalculationQueue` (a shared dict drained + `Remove`d at schedule
-  time, with `HashSetPool` lifecycle); the harness uses a per-chunk queue. Equivalent for one in-grid
-  chunk, but that shared structure is exactly where Bug 09's suspected "fluid re-flow floods the queue /
-  reschedule loses the seed" would live — and the harness can't represent its interleaving.
-- **Suggested mitigation:** periodically re-diff against `ModifyVoxel`; longer-term, consider sharing the
-  light-queueing portion of `ModifyVoxel` the way mod-apply was shared.
+  seeding with old values, incremental heightmap maintenance, opacity-change column recalc.
+- **Shared (2026-06-13):** the incremental **heightmap maintenance** (Case 1 / Case 2) was the largest
+  `World`-independent duplicate; it now lives in `ChunkData.UpdateColumnHeightAfterEdit<TObstruction>`
+  (allocation-free struct obstruction test, `IBlockObstruction`), called by **both** production
+  `ModifyVoxel` and the harness `PlaceBlock`. A divergence in the height rule now breaks the build.
+- **Still divergent (by necessity, LOW):** the BFS **enqueue path** — self removal-node seeding + the
+  6-neighbor wake — is structurally `World`-coupled: `AddToSunLightQueue`/`AddToBlockLightQueue` guard on
+  `World.Instance.settings.enableLighting` and flag `HasLightChangesToProcess` (→ `OnLightWorkFlagged`),
+  so the editor harness (no live `World`) cannot reuse them and seeds its own `TestChunk` queues. Sharing
+  this would require decoupling those methods from `World` **and** touching the hot `ModifyVoxel` edit
+  path — not worth it for a LOW finding. Likewise the opacity-change column recalc routes through the
+  **world-level** `WorldData.SunlightRecalculationQueue` in production vs a per-chunk queue in the harness
+  (the structural divergence near Bug 09's suspected "fluid re-flow floods the queue" path).
+- **Mitigation for the remainder:** periodically re-diff the harness `PlaceBlock` enqueue/wake against
+  `ModifyVoxel`. If the enqueue path is ever shared, decouple `AddTo*Queue` from `World` first.
 
 ### A4 — Oracle shares assumptions with the engine ·  **OPEN · LOW**
 
@@ -168,18 +174,18 @@ there is invisible.
 
 ## 5. Priority backlog (snapshot)
 
-| #  | Finding                                | Status     | Priority        | Effort        |
-|----|----------------------------------------|------------|-----------------|---------------|
-| B1 | Chunk-unload / persist-replay path     | OPEN       | High            | Medium        |
-| C1 | Bug-09 fuzz layer (randomize geometry) | OPEN       | High (ROI)      | Low           |
-| B2 | `neighborsDataReady` toggle            | OPEN       | Medium          | Low           |
-| B4 | Pool-recycle / flag-pairing            | OPEN       | Medium          | Medium        |
-| C2 | Bug-05 dense-canopy geometry           | OPEN       | Medium          | Medium        |
-| A3 | `ModifyVoxel` drift watch              | OPEN       | Low             | Low (ongoing) |
-| A4 | Oracle shared-assumption probes        | OPEN       | Low             | Low           |
-| B5 | Meshing-gate coverage                  | OPEN       | Low (by design) | —             |
-| A1 | Section / uniform-sky merge bypass     | **CLOSED** | —               | done          |
-| A2 | Shared mod-routing decision            | **CLOSED** | —               | done          |
+| #  | Finding                                         | Status      | Priority        | Effort         |
+|----|-------------------------------------------------|-------------|-----------------|----------------|
+| B1 | Chunk-unload / persist-replay path              | OPEN        | High            | Medium         |
+| C1 | Bug-09 fuzz layer (randomize geometry)          | OPEN        | High (ROI)      | Low            |
+| B2 | `neighborsDataReady` toggle                     | OPEN        | Medium          | Low            |
+| B4 | Pool-recycle / flag-pairing                     | OPEN        | Medium          | Medium         |
+| C2 | Bug-05 dense-canopy geometry                    | OPEN        | Medium          | Medium         |
+| A3 | `ModifyVoxel` heightmap (shared) / enqueue path | **PARTIAL** | Low             | heightmap done |
+| A4 | Oracle shared-assumption probes                 | OPEN        | Low             | Low            |
+| B5 | Meshing-gate coverage                           | OPEN        | Low (by design) | —              |
+| A1 | Section / uniform-sky merge bypass              | **CLOSED**  | —               | done           |
+| A2 | Shared mod-routing decision                     | **CLOSED**  | —               | done           |
 
 ---
 
