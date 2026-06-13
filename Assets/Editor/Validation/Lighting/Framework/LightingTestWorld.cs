@@ -291,45 +291,55 @@ namespace Editor.Validation.Lighting.Framework
                 ModsEmitted = flight.Mods.Length,
             };
 
-            // Apply cross-chunk mods — mirror of WorldJobManager.ProcessLightingJobs.
+            // Apply cross-chunk mods through the SAME shared routing decision as
+            // WorldJobManager.ProcessLightingJobs, so the harness and production can never disagree
+            // on drop/defer/apply or the stability override.
             bool hasRealCrossChunkMods = false;
             foreach (LightModification mod in flight.Mods)
             {
                 Vector2Int targetCoord = WorldToChunkCoord(new Vector2Int(mod.GlobalPosition.x, mod.GlobalPosition.z));
+                bool targetInWorld = _chunks.TryGetValue(targetCoord, out TestChunk target);
 
-                // Mods targeting chunks outside the grid can never be consumed —
-                // production skips them without affecting stability (out-of-world skip).
-                if (!_chunks.TryGetValue(targetCoord, out TestChunk target))
+                // The fixed test grid has no in-world-but-unloaded chunks: every in-grid chunk is
+                // loaded, so targetLoaded mirrors targetInWorld (PersistUndeliverable never occurs).
+                LightingJobProcessor.CrossChunkModRoute route = LightingJobProcessor.RouteCrossChunkMod(
+                    targetInWorld,
+                    targetLoaded: targetInWorld,
+                    targetJobInFlightThisPass: targetInWorld && _inFlightCoords.Contains(targetCoord));
+
+                hasRealCrossChunkMods |= LightingJobProcessor.CountsAsRealCrossChunkMod(route);
+
+                switch (route)
                 {
-                    result.ModsDroppedOutOfWorld++;
-                    continue;
+                    case LightingJobProcessor.CrossChunkModRoute.DropOutOfWorld:
+                    case LightingJobProcessor.CrossChunkModRoute.PersistUndeliverable:
+                        // PersistUndeliverable is unreachable in the fixed grid (every in-world chunk
+                        // is loaded); both routes mean "the mod left the modelled volume" here.
+                        result.ModsDroppedOutOfWorld++;
+                        continue;
+
+                    case LightingJobProcessor.CrossChunkModRoute.Defer:
+                        // Applying now would be overwritten by the target's merge — defer; drained
+                        // right after the target's merge (the Bug 08 path-2 defer/drain).
+                        if (!_deferredMods.TryGetValue(targetCoord, out List<LightModification> deferredList))
+                        {
+                            deferredList = new List<LightModification>();
+                            _deferredMods[targetCoord] = deferredList;
+                        }
+
+                        deferredList.Add(mod);
+                        result.ModsDeferred++;
+                        continue;
+
+                    case LightingJobProcessor.CrossChunkModRoute.ApplyDirect:
+                        if (ApplyModToChunk(target, in mod))
+                            result.ModsApplied++;
+                        continue;
                 }
-
-                hasRealCrossChunkMods = true;
-
-                // The target has its own job in flight, snapshotted before this mod existed —
-                // applying now would be overwritten by that job's merge. Defer; drained right
-                // after the target's merge (mirror of the production defer in
-                // WorldJobManager.ProcessLightingJobs).
-                if (_inFlightCoords.Contains(targetCoord))
-                {
-                    if (!_deferredMods.TryGetValue(targetCoord, out List<LightModification> deferredList))
-                    {
-                        deferredList = new List<LightModification>();
-                        _deferredMods[targetCoord] = deferredList;
-                    }
-
-                    deferredList.Add(mod);
-                    result.ModsDeferred++;
-                    continue;
-                }
-
-                if (ApplyModToChunk(target, in mod))
-                    result.ModsApplied++;
             }
 
             // Production stability override: not-stable solely due to out-of-world mods counts as stable.
-            result.IsStable = result.JobReportedStable || !hasRealCrossChunkMods;
+            result.IsStable = LightingJobProcessor.IsEffectivelyStable(result.JobReportedStable, hasRealCrossChunkMods);
 
             if (!result.IsStable)
                 chunk.HasLightWork = true;

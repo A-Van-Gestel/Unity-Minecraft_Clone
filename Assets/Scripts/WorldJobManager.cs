@@ -746,43 +746,56 @@ public class WorldJobManager : IDisposable
                         Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
                         ChunkCoord neighborChunkCoord = ChunkCoord.FromVoxelOrigin(neighborChunkVoxelPos);
 
-                        // Skip mods targeting chunks outside world boundaries entirely.
-                        // These can never be consumed (the target chunk will never exist),
-                        // and would cause perpetual IsStable=false rescheduling for boundary chunks.
-                        if (!World.IsChunkInWorld(neighborChunkCoord))
+                        // Resolve the target chunk's state, then route via the shared decision so the
+                        // editor validation harness exercises this exact drop/persist/defer/apply rule.
+                        // The terrain lookup and in-flight checks are guarded by targetInWorld so an
+                        // out-of-world mod short-circuits without touching the chunk store or job dict.
+                        bool targetInWorld = World.IsChunkInWorld(neighborChunkCoord);
+                        ChunkData neighborChunk = targetInWorld
+                            ? _world.worldData.RequestChunk(neighborChunkVoxelPos, false)
+                            : null;
+                        bool targetLoaded = neighborChunk != null && neighborChunk.IsPopulated;
+
+                        // A target already processed this pass (_completedLightJobs) has merged and is
+                        // safe to apply to directly; one still in flight must be deferred (Bug 08 path 2).
+                        bool targetJobInFlightThisPass = targetInWorld &&
+                                                         LightingJobs.ContainsKey(neighborChunkCoord) &&
+                                                         !_completedLightJobs.Contains(neighborChunkCoord);
+
+                        LightingJobProcessor.CrossChunkModRoute route = LightingJobProcessor.RouteCrossChunkMod(
+                            targetInWorld, targetLoaded, targetJobInFlightThisPass);
+
+                        // Out-of-world mods can never be consumed; everything else keeps the chunk from
+                        // being treated as stable until delivered.
+                        hasRealCrossChunkMods |= LightingJobProcessor.CountsAsRealCrossChunkMod(route);
+
+                        switch (route)
                         {
-                            continue;
+                            case LightingJobProcessor.CrossChunkModRoute.DropOutOfWorld:
+                                // Dropped without affecting stability (boundary chunks would otherwise
+                                // reschedule lighting indefinitely).
+                                continue;
+
+                            case LightingJobProcessor.CrossChunkModRoute.PersistUndeliverable:
+                                PersistUndeliverableLightMod(neighborChunkCoord, in mod);
+                                continue;
+
+                            case LightingJobProcessor.CrossChunkModRoute.Defer:
+                                // Applying now would be overwritten by the target's own full-LightMap
+                                // merge — defer; drained right after that merge (DrainDeferredCrossChunkMods).
+                                if (!_deferredCrossChunkMods.TryGetValue(neighborChunkCoord, out List<LightModification> deferredList))
+                                {
+                                    deferredList = ListPool<LightModification>.Get();
+                                    _deferredCrossChunkMods[neighborChunkCoord] = deferredList;
+                                }
+
+                                deferredList.Add(mod);
+                                continue;
+
+                            case LightingJobProcessor.CrossChunkModRoute.ApplyDirect:
+                                ApplyCrossChunkLightMod(neighborChunk, in mod);
+                                continue;
                         }
-
-                        ChunkData neighborChunk = _world.worldData.RequestChunk(neighborChunkVoxelPos, false);
-
-                        if (neighborChunk == null || !neighborChunk.IsPopulated)
-                        {
-                            hasRealCrossChunkMods = true;
-                            PersistUndeliverableLightMod(neighborChunkCoord, in mod);
-                            continue;
-                        }
-
-                        hasRealCrossChunkMods = true;
-
-                        // The target chunk has its own lighting job in flight, snapshotted before
-                        // this mod existed. Applying now would be overwritten by that job's
-                        // full-LightMap merge (Bug 08, path 2) — defer; drained right after the
-                        // target's own merge. A target already processed this pass
-                        // (_completedLightJobs) has merged and is safe to apply to directly.
-                        if (LightingJobs.ContainsKey(neighborChunkCoord) && !_completedLightJobs.Contains(neighborChunkCoord))
-                        {
-                            if (!_deferredCrossChunkMods.TryGetValue(neighborChunkCoord, out List<LightModification> deferredList))
-                            {
-                                deferredList = ListPool<LightModification>.Get();
-                                _deferredCrossChunkMods[neighborChunkCoord] = deferredList;
-                            }
-
-                            deferredList.Add(mod);
-                            continue;
-                        }
-
-                        ApplyCrossChunkLightMod(neighborChunk, in mod);
                     }
                 }
                 else
@@ -797,10 +810,7 @@ public class WorldJobManager : IDisposable
                 // of cross-chunk mods targeting out-of-world positions (which can never be
                 // consumed), treat the chunk as effectively stable. Without this, world-boundary
                 // chunks would reschedule lighting indefinitely.
-                if (!isChunkStable && !hasRealCrossChunkMods)
-                {
-                    isChunkStable = true;
-                }
+                isChunkStable = LightingJobProcessor.IsEffectivelyStable(isChunkStable, hasRealCrossChunkMods);
 
                 if (isChunkStable)
                 {
