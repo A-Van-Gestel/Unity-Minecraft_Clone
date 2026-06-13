@@ -30,6 +30,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B14: Generated emissive block illuminates surroundings on initial lighting", Baseline_GeneratedEmissiveSeedsBfs));
             scenarios.Add(new Scenario("B15: Rapid break+place at chunk border with neighbor in-flight converges (Bug 09 guard)", Baseline_RapidBreakPlaceCrossChunkInFlight));
             scenarios.Add(new Scenario("B16: Double rapid break+place with both chunks in-flight converges (Bug 09 guard)", Baseline_DoubleRapidBreakPlaceBothInFlight));
+            scenarios.Add(new Scenario("B17: ContainsKey-guarded break+place at chunk border converges via frame simulator (Bug 09 guard)", Baseline_FrameSimContainsKeyBreakPlace));
+            scenarios.Add(new Scenario("B18: Single-slot budget break+place converges via frame simulator (Bug 09 guard)", Baseline_FrameSimSingleSlotBreakPlace));
+            scenarios.Add(new Scenario("B19: Reverse completion order break+place converges via frame simulator (Bug 09 guard)", Baseline_FrameSimReverseOrderBreakPlace));
         }
 
         /// <summary>
@@ -561,6 +564,131 @@ namespace Editor.Validation.Lighting
             passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
                 "B16: blocklight crosses into chunk B after double race",
                 $"Expected R >= 13 at x=32 in chunk B, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        // --- Frame-simulator baselines (promoted from K09a/b/c — Bug 09 repro attempts, June 2026) ---
+        // These exercise the production scheduling behaviors the direct harness cannot model:
+        // ContainsKey rejection, budget throttling, and completion order sensitivity. All converge
+        // correctly, guarding the orchestration layer against regressions.
+
+        /// <summary>
+        /// B17 (promoted from K09a): Break+place with the ContainsKey scheduling guard rejecting the
+        /// re-schedule. The emission BFS nodes accumulate in the managed queue while the removal job
+        /// is in-flight; the next frame drains and processes them. Guards that the guard+accumulate
+        /// path converges to the oracle.
+        /// </summary>
+        private static bool Baseline_FrameSimContainsKeyBreakPlace()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B17: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B17: initial lamp converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+
+            world.BreakBlock(lampPos);
+            LightingFrameSimulator.FrameResult f0 = sim.RunFrame();
+            passed &= LightingAssert.IsTrue(f0.JobsScheduled >= 1,
+                "B17: frame 0 schedules removal job",
+                $"Expected >= 1 job scheduled, got {f0.JobsScheduled}");
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+
+            int frames = sim.RunToConvergence();
+            passed &= LightingAssert.Converged(frames, "B17: post-race frame convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B17: field matches oracle after ContainsKey-guarded break+place");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(32, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
+                "B17: blocklight crosses chunk border after ContainsKey race",
+                $"Expected R >= 13 at x=32, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B18 (promoted from K09b): Break+place under extreme budget pressure (1 job per frame).
+        /// Guards that cross-chunk mod delivery converges even when chunks take turns.
+        /// </summary>
+        private static bool Baseline_FrameSimSingleSlotBreakPlace()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B18: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B18: initial lamp converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+
+            world.BreakBlock(lampPos);
+            sim.RunFrame(budget: 1);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+
+            int frames = sim.RunToConvergenceSingleSlot();
+            passed &= LightingAssert.Converged(frames, "B18: single-slot convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B18: field matches oracle after single-slot budget break+place");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(32, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
+                "B18: blocklight crosses chunk border under budget pressure",
+                $"Expected R >= 13 at x=32, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B19 (promoted from K09c): Break+place with reverse completion order. Guards that the
+        /// defer-vs-apply decision is correct regardless of dictionary iteration order in
+        /// production's <c>ProcessLightingJobs</c>.
+        /// </summary>
+        private static bool Baseline_FrameSimReverseOrderBreakPlace()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B19: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B19: initial lamp converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+
+            world.BreakBlock(lampPos);
+            sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Reverse);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+
+            int frames = sim.RunToConvergence(order: LightingFrameSimulator.CompletionOrder.Reverse);
+            passed &= LightingAssert.Converged(frames, "B19: reverse-order convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B19: field matches oracle after reverse-order break+place");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(32, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
+                "B19: blocklight crosses chunk border with reverse completion",
+                $"Expected R >= 13 at x=32, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
 
             return passed;
         }

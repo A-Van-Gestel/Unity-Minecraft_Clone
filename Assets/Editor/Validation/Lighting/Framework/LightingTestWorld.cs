@@ -163,6 +163,13 @@ namespace Editor.Validation.Lighting.Framework
         public bool IsChunkInFlight(Vector2Int chunkCoord) => _inFlightCoords.Contains(chunkCoord);
 
         /// <summary>
+        /// Returns true when the specified chunk has pending BFS work (managed queue nodes waiting
+        /// to be drained into a lighting job). Per-chunk mirror of the <see cref="HasPendingLightWork"/>
+        /// property (which checks <b>any</b> chunk in the grid).
+        /// </summary>
+        public bool ChunkHasLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).HasLightWork;
+
+        /// <summary>
         /// Snapshots the 3×3 neighborhood and drains the chunk's BFS queues into a ready-to-run job,
         /// without executing it. Mirrors the scheduling half of the production pipeline. Mutations to
         /// live chunk data made between this call and <see cref="CompleteLightingJob"/> are invisible

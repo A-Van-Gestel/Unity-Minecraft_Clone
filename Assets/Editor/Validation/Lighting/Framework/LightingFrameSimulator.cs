@@ -105,7 +105,7 @@ namespace Editor.Validation.Lighting.Framework
             int scheduled = 0;
             foreach (Vector2Int coord in _world.AllChunkCoords())
             {
-                if (!_world.HasPendingLightWork(coord))
+                if (!_world.ChunkHasLightWork(coord))
                     continue;
 
                 LightingScheduleDecision.Result decision = LightingScheduleDecision.Evaluate(

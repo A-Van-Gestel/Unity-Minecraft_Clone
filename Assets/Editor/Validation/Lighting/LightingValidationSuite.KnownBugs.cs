@@ -16,13 +16,16 @@ namespace Editor.Validation.Lighting
         // denser multi-pocket canopy patterns or mod-loss timing the minimal case doesn't hit;
         // a faithful repro remains TODO before that bug's fix can be test-driven.
 
-        // NOTE on Bug 09: two repro attempts were made — single-cycle break+place with neighbor
-        // in-flight (K09a) and double-cycle with both chunks in-flight (K09b). Both converge to
-        // the oracle field — they now live as baselines B15 and B16, guarding the defer/drain
-        // mechanism under these interleavings. Bug 09 likely requires production-only timing
-        // (frame-budget throttling, fluid re-scheduling contention, or the LightingJobs.ContainsKey
-        // guard preventing re-scheduling during rapid edits) that the harness cannot model;
-        // a faithful repro remains TODO before that bug's fix can be test-driven.
+        // NOTE on Bug 09: five repro attempts total — two direct-harness (B15, B16) and three
+        // frame-simulator (B17, B18, B19). All converge to the oracle field. The frame simulator
+        // models the ContainsKey in-flight guard, budget throttling (single-slot), and reverse
+        // completion order — the three production behaviors the direct harness cannot. Bug 09
+        // likely requires either multi-frame flight lifetimes (job in-flight across >1 frame tick
+        // while additional mutations accumulate), fluid-flow contention (continuous voxel edits
+        // from water re-filling the broken position), or Dictionary iteration randomness in
+        // ProcessLightingJobs that the simulator's deterministic ordering cannot reproduce.
+        // A faithful repro remains TODO.
+
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
             // No open known-bug scenarios — Bug 05 and Bug 09 still need faithful repros (see notes above).

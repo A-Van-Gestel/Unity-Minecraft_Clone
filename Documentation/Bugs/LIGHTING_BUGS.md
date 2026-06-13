@@ -50,12 +50,14 @@ When rapidly breaking and re-placing a blocklight source (e.g., a torch or glows
 The issue is **not permanent** — forcing a lighting update on the affected chunk(s) (e.g., placing/breaking another block nearby) correctly re-triggers the BFS and restores proper lighting. This suggests the light data is not corrupted, but rather the emission seeding or cross-chunk mod delivery is being dropped during a specific race window.
 
 **Reproduction Steps:**
+
 1. Enter a world and navigate to a chunk border (ideally underwater in an ocean biome for easier reproduction).
 2. Place a blocklight source (e.g., Jack O' Lantern) in Chunk A, directly adjacent to the Chunk B border.
 3. Break the light source and immediately re-place it. Repeat rapidly.
 4. Observe that after several cycles, Chunk B (or both chunks) may fail to update with the new blocklight.
 
 **Aggravating factors:**
+
 - **Fluid-heavy chunks significantly increase reproduction rate.** Testing underwater in ocean biomes shows noticeably slower cross-chunk light updates compared to non-fluid biomes. The additional voxel modifications from fluid flow (e.g., water flowing back into the broken block's position) likely create contention with the lighting job pipeline — either by flooding the deferred cross-chunk mod queue or by causing the chunk's lighting job to be scheduled/cancelled repeatedly before cross-chunk mods are delivered.
 - **IL2CPP master build timing:** All testing was performed in a release IL2CPP build. Mono/Editor builds would be slower overall, potentially widening or narrowing the race window.
 
@@ -66,7 +68,12 @@ A race condition in the cross-chunk blocklight mod delivery path. When a blockli
 - The chunk's lighting job is cancelled and re-scheduled due to the concurrent voxel modification (fluid flow), and the re-scheduling loses the pending blocklight emission seed.
 - The deferred cross-chunk mod queue for Chunk B is processed against stale snapshot data, causing the mods to be silently discarded as no-ops.
 
-**Validation suite (June 2026):** Two repro attempts were made — single-cycle break+place with neighbor in-flight, and double-cycle with both chunks in-flight (wave-parallel). Both converge to the oracle field — they now guard the defer/drain mechanism as baselines **B15** and **B16**. The bug likely requires production-only timing (frame-budget throttling, fluid re-scheduling contention, or the `LightingJobs.ContainsKey` guard preventing re-scheduling during rapid edits under load) that the deterministic harness cannot model. A faithful failing repro is still TODO before this bug's fix can be test-driven.
+**Validation suite (June 2026):** Five repro attempts total across two harness layers:
+
+- **Direct harness (B15, B16):** Single-cycle break+place with neighbor in-flight, and double-cycle with both chunks in-flight (wave-parallel). Both converge — guard the defer/drain mechanism.
+- **Frame simulator (B17, B18, B19):** A `LightingFrameSimulator` was built to model three production scheduling behaviors the direct harness cannot: the `ContainsKey` in-flight guard that rejects re-scheduling while a job runs (B17), budget-throttled single-slot convergence (B18), and reverse completion order exercising the `_completedLightJobs` ordering dependency (B19). All three converge to the oracle.
+
+The bug likely requires either multi-frame flight lifetimes (job in-flight across >1 frame tick while additional mutations accumulate), fluid-flow contention (continuous voxel edits from water re-filling the broken position between frames), or `Dictionary` iteration randomness in `ProcessLightingJobs` that the simulator's deterministic ordering cannot reproduce. A faithful failing repro is still TODO before this bug's fix can be test-driven.
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
 
