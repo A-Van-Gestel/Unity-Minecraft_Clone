@@ -966,12 +966,9 @@ public class WorldJobManager : IDisposable
     /// </summary>
     private void PersistUndeliverableLightMod(ChunkCoord targetChunkCoord, in LightModification mod)
     {
-        Vector2Int chunkVoxelPos = targetChunkCoord.ToVoxelOrigin();
-        int localX = mod.GlobalPosition.x - chunkVoxelPos.x;
-        int localZ = mod.GlobalPosition.z - chunkVoxelPos.y;
-
-        if (localX < 0 || localX >= VoxelData.ChunkWidth ||
-            localZ < 0 || localZ >= VoxelData.ChunkWidth)
+        // Shared column math + in-footprint bounds guard (LightingModPersister), so production and the
+        // lighting validation harness can never drift on how a mod's local column is resolved.
+        if (!LightingModPersister.TryComputeLocalColumn(targetChunkCoord, in mod, out int localX, out int localZ))
         {
             Debug.LogError($"[PersistUndeliverableLightMod] Invalid local column calculation: ({localX.ToString()}, {localZ.ToString()}) for global pos {mod.GlobalPosition.ToString()}");
             return;
