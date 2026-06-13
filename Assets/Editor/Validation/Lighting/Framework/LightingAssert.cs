@@ -1,5 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
+using Data;
 using Helpers;
 using Jobs.BurstData;
 using UnityEngine;
@@ -205,6 +208,130 @@ namespace Editor.Validation.Lighting.Framework
 
             Debug.LogError($"[FAIL] {testName}\n{litVoxels} voxel(s) carry blocklight inside the volume {min}-{max}:\n{report}");
             return false;
+        }
+
+        /// <summary>
+        /// Asserts that the real production <see cref="ChunkData.Reset"/> clears every transient field a
+        /// pooled chunk accumulates during its lifecycle, so a recycled chunk inherits no stale state
+        /// (LIGHTING_VALIDATION_HARNESS_FIDELITY.md, finding B4; guards the historical
+        /// <c>RemainingEdgeCheckRounds</c>-stale-after-recycle bug). Dirties a real <see cref="ChunkData"/>
+        /// across all known transient surfaces (flags, the edge-check counter, both BFS queues, light, and
+        /// the heightmap/sections), recycles it through <c>Reset()</c>, and verifies it matches a freshly
+        /// constructed instance. A reflection backstop additionally dirties and compares EVERY
+        /// <c>[NonSerialized]</c> primitive field, so a new transient flag/counter added later without a
+        /// reset is caught generically — without a test edit.
+        /// </summary>
+        /// <param name="testName">The scenario name used in the log output.</param>
+        /// <returns>True when <c>Reset()</c> left no stale transient state.</returns>
+        public static bool AssertResetClearsTransientState(string testName)
+        {
+            // Reset()/the flag setters fire the static OnLightWorkFlagged; neutralize any stale subscriber
+            // for the duration (no live World exists in the editor suite) and restore it afterwards.
+            Action<Vector2Int> savedCallback = ChunkData.OnLightWorkFlagged;
+            ChunkData.OnLightWorkFlagged = null;
+
+            try
+            {
+                Vector2Int pos = new Vector2Int(64, 64);
+                ChunkData fresh = new ChunkData(pos);
+                ChunkData subject = new ChunkData(pos);
+
+                // --- Dirty every transient surface a real lifecycle would touch ---
+                subject.IsPopulated = true;
+                subject.IsLoading = true;
+                subject.NeedsInitialLighting = true;
+                subject.HasLightChangesToProcess = true;
+                subject.NeedsEdgeCheck = true;
+                subject.IsAwaitingMainThreadProcess = true;
+                subject.RemainingEdgeCheckRounds = 0; // the historical bug condition: counter exhausted
+                subject.SunlightBfsQueue.Enqueue(default);
+                subject.BlocklightBfsQueue.Enqueue(default);
+                subject.SetLightData(2, 5, 3, 0x0ABC); // allocates a section + writes light
+                for (int i = 0; i < subject.heightMap.Length; i++) subject.heightMap[i] = 200;
+
+                // Generic backstop: dirty every [NonSerialized] primitive field (catches a NEW transient
+                // flag/counter added later — the RemainingEdgeCheckRounds bug class — without a test edit).
+                List<FieldInfo> transientPrimitives = NonSerializedPrimitiveFields();
+                foreach (FieldInfo f in transientPrimitives)
+                {
+                    if (f.FieldType == typeof(bool)) f.SetValue(subject, true);
+                    else f.SetValue(subject, Convert.ChangeType(0x5A, f.FieldType));
+                }
+
+                // --- Recycle through the REAL production Reset() ---
+                subject.Reset(pos);
+
+                // --- Verify no stale state remains ---
+                List<string> stale = new List<string>();
+
+                if (subject.IsPopulated) stale.Add("IsPopulated");
+                if (subject.IsLoading) stale.Add("IsLoading");
+                if (subject.Chunk != null) stale.Add("Chunk");
+                if (subject.NeedsInitialLighting) stale.Add("NeedsInitialLighting");
+                if (subject.HasLightChangesToProcess) stale.Add("HasLightChangesToProcess");
+                if (subject.NeedsEdgeCheck) stale.Add("NeedsEdgeCheck");
+                if (subject.IsAwaitingMainThreadProcess) stale.Add("IsAwaitingMainThreadProcess");
+                if (subject.RemainingEdgeCheckRounds != 2)
+                    stale.Add($"RemainingEdgeCheckRounds={subject.RemainingEdgeCheckRounds} (expected 2)");
+                if (subject.SunLightQueueCount != 0) stale.Add("SunlightBfsQueue");
+                if (subject.BlockLightQueueCount != 0) stale.Add("BlocklightBfsQueue");
+                if (subject.GetLightData(2, 5, 3) != 0) stale.Add("light @ (2,5,3)");
+
+                foreach (ushort h in subject.heightMap)
+                {
+                    if (h != 0)
+                    {
+                        stale.Add("heightMap");
+                        break;
+                    }
+                }
+
+                foreach (ChunkSection section in subject.sections)
+                {
+                    if (section != null)
+                    {
+                        stale.Add("sections");
+                        break;
+                    }
+                }
+
+                // Reflection backstop: any [NonSerialized] primitive whose reset value diverges from a
+                // fresh instance (covers fields not explicitly checked above).
+                foreach (FieldInfo f in transientPrimitives)
+                {
+                    object s = f.GetValue(subject);
+                    object fr = f.GetValue(fresh);
+                    if (!Equals(s, fr)) stale.Add($"{f.Name} (reflection: {s} != fresh {fr})");
+                }
+
+                return IsTrue(stale.Count == 0, testName,
+                    stale.Count == 0 ? null : $"ChunkData.Reset() left stale state on: {string.Join(", ", stale)}");
+            }
+            finally
+            {
+                ChunkData.OnLightWorkFlagged = savedCallback;
+            }
+        }
+
+        /// <summary>
+        /// Returns the <c>[NonSerialized]</c> primitive (bool/integer) instance fields of
+        /// <see cref="ChunkData"/> — exactly the transient flag/counter family that
+        /// <see cref="ChunkData.Reset"/> is responsible for clearing. Filtering to <c>[NonSerialized]</c>
+        /// excludes on-disk save fields (whose reset is not Reset()'s job), avoiding false positives.
+        /// </summary>
+        private static List<FieldInfo> NonSerializedPrimitiveFields()
+        {
+            List<FieldInfo> result = new List<FieldInfo>();
+            FieldInfo[] fields = typeof(ChunkData).GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            foreach (FieldInfo f in fields)
+            {
+                if (!f.IsDefined(typeof(NonSerializedAttribute), false)) continue;
+                if (f.IsInitOnly) continue; // readonly (e.g. the BFS queues) — checked explicitly, not settable
+                if (!f.FieldType.IsPrimitive || f.FieldType == typeof(char)) continue;
+                result.Add(f);
+            }
+
+            return result;
         }
 
         private static void AppendMismatch(StringBuilder report, Vector3Int worldPos, ushort expected, ushort actual)

@@ -62,9 +62,9 @@ there is invisible.
   production code (`GetVoxel`/`SetVoxel`/`GetLightData`/`SetLightData`/`FillJob*Map`/`ApplyJobLightMap`).
   The suite now traverses the compaction layer it used to skip; all 29 baselines stay green. This also made
   voxel storage section-faithful as a side effect (the merge's keep/discard reads `section.voxels[i]`).
-- **Still NOT covered (separate findings):** `ChunkData.Reset()` / pool recycle stale-state (B4) is its own
-  gap — the harness creates fresh `ChunkData` per chunk and never recycles. Phase B uniform-sky-section work
-  is now exercised through the shared merge/read path.
+- **Still NOT covered (separate findings):** Phase B uniform-sky-section work is now exercised through the
+  shared merge/read path. (`ChunkData.Reset()` / pool recycle stale-state — formerly listed here as B4 —
+  is now **closed**; the harness recycles through the real `Reset()` and guards it with baselines B33/B34.)
 
 ### A2 — `ProcessLightingJobs` mod-routing orchestration was hand-copied ·  **CLOSED (2026-06-13)**
 
@@ -155,13 +155,29 @@ there is invisible.
   master build logging of mod delivery), not another synchronous harness layer. Do not invest in a 6th
   simulator permutation expecting it to catch Bug 09.
 
-### B4 — No pool-recycle / flag-pairing modeling ·  **OPEN · MEDIUM**
+### B4 — No pool-recycle / flag-pairing modeling ·  **CLOSED (2026-06-14)**
 
-- Per `.agents/rules/pool-reset-safety.md` and `chunk-pipeline.md`, `RemainingEdgeCheckRounds`-stale-after-
-  recycle was a real shipped bug. The harness models the **value** `RemainingEdgeCheckRounds = 2` but never
-  models `ChunkData.Reset()`, pool recycle, or the set/clear-site pairing of
-  `HasLightChangesToProcess` / `NeedsEdgeCheck` / `IsAwaitingMainThreadProcess`. A recycled-chunk-with-
-  stale-flags defect — a documented *recurring* family — is invisible.
+- **Was:** per `.agents/rules/pool-reset-safety.md` and `chunk-pipeline.md`, `RemainingEdgeCheckRounds`-
+  stale-after-recycle was a real shipped bug. The harness gated the pipeline on its OWN mirror state
+  (`TestChunk.HasLightWork` + a local `const edgeCheckRounds = 2`), never on `ChunkData`'s real flags,
+  and never called `ChunkData.Reset()` or recycled (`new ChunkData` per chunk). So a recycled-chunk-with-
+  stale-flags defect — a documented *recurring* family — was invisible.
+- **Now:** the harness drives pipeline gating off `ChunkData`'s **real** flags — `HasLightChangesToProcess`
+  (backs `TestChunk.HasLightWork`), `RemainingEdgeCheckRounds` (consumed by the edge-check loops via the
+  shared `DecrementEdgeCheckRound`), `NeedsEdgeCheck` (consumed + cleared in `BeginLightingJob`), and
+  `IsAwaitingMainThreadProcess` (set/cleared across `CompleteLightingJob`). The static
+  `ChunkData.OnLightWorkFlagged` is neutralized for the harness's lifetime (save/null/restore) so the real
+  setters are safe headless. `LightingTestWorld.RecycleAllChunks()` routes every chunk through the real
+  production `Reset()` (the pool return/acquire path; `World.Instance == null` → its `Array.Clear(sections)`
+  fallback). Two baselines guard it: **B33** recycles a slab/sky-well world through `Reset()` and re-lights
+  to the same oracle field (only correct if light/queues/sections/flags cleared AND
+  `RemainingEdgeCheckRounds` restored to 2 — a stale 0 skips the edge rounds), and **B34**
+  (`LightingAssert.AssertResetClearsTransientState`) dirties a real `ChunkData` and asserts `Reset()` clears
+  every transient surface, with a **reflection backstop over every `[NonSerialized]` primitive field** so a
+  new transient flag/counter added later without a reset is caught generically — without a test edit.
+- **Still NOT covered (minor):** the harness's BFS wake-up queues remain `TestChunk`-managed mirrors of
+  `ChunkData`'s (production's `AddTo*Queue` is `World`-coupled — see A3), so the production queues' reset is
+  verified by B34's direct check rather than through the live enqueue path.
 
 ### B5 — Lighting→meshing handoff is out of scope ·  **OPEN · LOW (by design)**
 
@@ -196,12 +212,12 @@ there is invisible.
 |----|-------------------------------------------------|-------------|-----------------|----------------|
 | C1 | Bug-09 fuzz layer (randomize geometry)          | OPEN        | High (ROI)      | Low            |
 | B2 | `neighborsDataReady` toggle                     | OPEN        | Medium          | Low            |
-| B4 | Pool-recycle / flag-pairing                     | OPEN        | Medium          | Medium         |
 | C2 | Bug-05 dense-canopy geometry                    | OPEN        | Medium          | Medium         |
 | A3 | `ModifyVoxel` heightmap (shared) / enqueue path | **PARTIAL** | Low             | heightmap done |
 | A4 | Oracle shared-assumption probes                 | OPEN        | Low             | Low            |
 | B5 | Meshing-gate coverage                           | OPEN        | Low (by design) | —              |
 | B1 | Chunk-unload / persist-replay path              | **CLOSED**  | —               | done           |
+| B4 | Pool-recycle / flag-pairing                     | **CLOSED**  | —               | done           |
 | A1 | Section / uniform-sky merge bypass              | **CLOSED**  | —               | done           |
 | A2 | Shared mod-routing decision                     | **CLOSED**  | —               | done           |
 

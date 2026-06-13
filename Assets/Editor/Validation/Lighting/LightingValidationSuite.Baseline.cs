@@ -46,6 +46,8 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B30: Cross-chunk blocklight toward an unloaded neighbor persists and replays on load (Bug 08 path-1)", Baseline_PersistReplayCrossChunkBlocklight));
             scenarios.Add(new Scenario("B31: Deferred mods degrade to the pending store when the emitting chunk unloads mid-flight, then replay on load", Baseline_DegradeDeferredOnEmittingChunkUnload));
             scenarios.Add(new Scenario("B32: Freshly-generated chunk discards persisted blocklight and re-derives the spill from its loaded neighbor", Baseline_GeneratedChunkDiscardsPendingBlocklight));
+            scenarios.Add(new Scenario("B33: Pool-recycled chunks (real ChunkData.Reset()) re-light to the same field — no stale state", Baseline_PoolRecycleResetsChunkState));
+            scenarios.Add(new Scenario("B34: ChunkData.Reset() clears every transient flag/counter/queue on recycle (RemainingEdgeCheckRounds guard)", Baseline_ChunkDataResetClearsTransientState));
         }
 
         /// <summary>
@@ -1455,6 +1457,61 @@ namespace Editor.Validation.Lighting
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B32: re-derived field matches oracle");
             return passed;
+        }
+
+        /// <summary>
+        /// B33: Pool-recycle correctness (closes finding B4). A 5×5 slab-with-diagonal-sky-well world
+        /// (the B8 geometry, whose under-slab field only converges correctly when the post-generation
+        /// edge-check rounds run) is lit, then EVERY chunk's <see cref="ChunkData"/> is recycled through
+        /// the real production <c>Reset()</c> (the pool return/acquire path), the identical terrain is
+        /// re-authored (Reset wipes voxels), and the world is re-lit. The re-lit field must equal both the
+        /// pre-recycle snapshot and the oracle — which only holds if <c>Reset()</c> cleared all transient
+        /// state (light, BFS queues, sections, flags) AND restored <c>RemainingEdgeCheckRounds = 2</c>
+        /// (a stale 0 would skip the edge rounds and leave the under-slab borders unreconciled).
+        /// </summary>
+        private static bool Baseline_PoolRecycleResetsChunkState()
+        {
+            using LightingTestWorld world = new LightingTestWorld(5);
+
+            // Slab at y=30 over a 5×5 floor with a single 1×1 sky well at (49,30,49) — the B8 geometry.
+            const int worldMax = 5 * VoxelData.ChunkWidth - 1;
+
+            void BuildWorld()
+            {
+                world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+                world.FillBox(new Vector3Int(0, 30, 0), new Vector3Int(worldMax, 30, worldMax), TestBlockPalette.Stone);
+                world.SetBlock(new Vector3Int(49, 30, 49), TestBlockPalette.Air);
+                world.RecalculateHeightmaps();
+            }
+
+            BuildWorld();
+            bool passed = LightingAssert.Converged(world.RunInitialLightingParallel(), "B33: pre-recycle initial lighting converges");
+
+            Dictionary<Vector2Int, ushort[]> baseline = world.SnapshotLightField();
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B33: pre-recycle field matches oracle");
+
+            // Recycle every chunk through the REAL ChunkData.Reset(), then rebuild + re-light identically.
+            world.RecycleAllChunks();
+            BuildWorld(); // Reset() wiped voxels — re-author the identical terrain.
+
+            passed &= LightingAssert.Converged(world.RunInitialLightingParallel(), "B33: post-recycle re-lighting converges");
+            passed &= LightingAssert.FieldsEqual(baseline, world, "B33: re-lit field equals the pre-recycle snapshot");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B33: re-lit field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B34: Direct reset-completeness guard for the pooled <see cref="ChunkData"/> (finding B4; the
+        /// regression guard for the historical <c>RemainingEdgeCheckRounds</c>-stale-after-recycle bug).
+        /// Dirties a real <c>ChunkData</c> across all transient surfaces, recycles it through the real
+        /// <c>Reset()</c>, and asserts no stale state remains — with a reflection backstop over every
+        /// <c>[NonSerialized]</c> primitive field so a new transient flag/counter added later without a
+        /// reset is caught generically. See <see cref="LightingAssert.AssertResetClearsTransientState"/>.
+        /// </summary>
+        private static bool Baseline_ChunkDataResetClearsTransientState()
+        {
+            return LightingAssert.AssertResetClearsTransientState(
+                "B34: ChunkData.Reset() clears all transient state on pool recycle");
         }
     }
 }

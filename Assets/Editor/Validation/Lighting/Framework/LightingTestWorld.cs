@@ -61,6 +61,13 @@ namespace Editor.Validation.Lighting.Framework
         // Typed as IPendingLightStore so Save()/Load() (disk I/O) are unreachable from the harness.
         private readonly IPendingLightStore _pendingStore = LightingStateManager.CreateInMemory();
 
+        // The harness gates pipeline work on the REAL production flag ChunkData.HasLightChangesToProcess
+        // (see TestChunk.HasLightWork), whose setter fires the static ChunkData.OnLightWorkFlagged. No
+        // live World subscribes in the editor suite, but a stale subscriber from a prior play session
+        // (no domain reload) could throw — so neutralize it for the lifetime of the world and restore on
+        // Dispose. (Setting a flag to false never fires the callback; only true does.)
+        private readonly Action<Vector2Int> _savedLightWorkCallback;
+
         /// <summary>The number of chunks along each horizontal axis of the grid.</summary>
         public int GridSize { get; }
 
@@ -79,6 +86,9 @@ namespace Editor.Validation.Lighting.Framework
             GridSize = gridSize;
             _blockTypes = blockTypes ?? TestBlockPalette.CreateJobDataArray();
             _blockTypesNative = new NativeArray<BlockTypeJobData>(_blockTypes, Allocator.Persistent);
+
+            _savedLightWorkCallback = ChunkData.OnLightWorkFlagged;
+            ChunkData.OnLightWorkFlagged = null;
 
             for (int cx = 0; cx < gridSize; cx++)
             {
@@ -100,14 +110,17 @@ namespace Editor.Validation.Lighting.Framework
             // Release any pending mods still held by the in-memory store (it pools its inner
             // HashSets/Dictionaries) so a finished test never leaks them back into the editor pools.
             _pendingStore.Clear();
+
+            ChunkData.OnLightWorkFlagged = _savedLightWorkCallback;
         }
 
         // --- Per-chunk state ---
 
         /// <summary>
         /// Harness-side stand-in for the lighting-relevant state of <c>ChunkData</c>: flattened voxel and
-        /// light buffers, the per-chunk heightmap, the main-thread BFS wake-up queues, and the
-        /// "has pending light work" flag (mirror of <c>HasLightChangesToProcess</c>).
+        /// light buffers, the per-chunk heightmap, and the main-thread BFS wake-up queues. The
+        /// "has pending light work" gate (<see cref="HasLightWork"/>) is backed by the REAL
+        /// <c>ChunkData.HasLightChangesToProcess</c> flag, not a separate mirror.
         /// </summary>
         private sealed class TestChunk
         {
@@ -126,7 +139,20 @@ namespace Editor.Validation.Lighting.Framework
             public readonly Queue<LightQueueNode> SunQueue = new Queue<LightQueueNode>();
             public readonly Queue<LightQueueNode> BlockQueue = new Queue<LightQueueNode>();
             public readonly Queue<Vector2Int> SunColumnRecalcQueue = new Queue<Vector2Int>();
-            public bool HasLightWork;
+
+            /// <summary>
+            /// Pending-light-work gate, backed by the REAL production flag
+            /// <see cref="ChunkData.HasLightChangesToProcess"/> rather than a separate harness mirror — so
+            /// the set/clear-site pairing runs against production state and a missed reset of it on pool
+            /// recycle is observable (see <c>RecycleChunkData</c> and B33/B34, finding B4). The setter
+            /// fires <c>ChunkData.OnLightWorkFlagged</c> (neutralized for the harness's lifetime; only a
+            /// `true` write fires it).
+            /// </summary>
+            public bool HasLightWork
+            {
+                get => Data.HasLightChangesToProcess;
+                set => Data.HasLightChangesToProcess = value;
+            }
 
             /// <summary>
             /// Whether this chunk is currently loaded/populated. Mirror of production's
@@ -259,6 +285,36 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <summary>
+        /// Recycles every chunk's <see cref="ChunkData"/> through the REAL production <c>Reset()</c> — the
+        /// same call <c>ChunkPoolManager.ReturnChunkData</c> (Reset to zero) and <c>GetChunkData</c> (Reset
+        /// to the live position) make on pool return/acquire. Models a full pool recycle: all transient
+        /// state (light, heightmap, sections, the lighting flags, and the <see cref="ChunkData.RemainingEdgeCheckRounds"/>
+        /// counter) must be cleared/restored, or the next lifecycle inherits stale state. After this call
+        /// the chunks are blank (all-air, unlit) — re-author terrain and re-light as for a fresh world.
+        /// A defect where <c>Reset()</c> fails to clear a flag/counter surfaces as a corrupted re-light
+        /// (this scenario) or a stale field (the reflection invariant <c>AssertResetClearsTransientState</c>).
+        /// See LIGHTING_VALIDATION_HARNESS_FIDELITY.md, finding B4.
+        /// </summary>
+        public void RecycleAllChunks()
+        {
+            foreach (TestChunk chunk in _chunks.Values)
+            {
+                // Mirror production's return-then-acquire double reset (ReturnChunkData resets to zero,
+                // GetChunkData resets to the new position). World.Instance is null in the editor, so
+                // Reset() takes its Array.Clear(sections) fallback rather than pooling sections.
+                chunk.Data.Reset(Vector2Int.zero);
+                chunk.Data.Reset(chunk.VoxelOrigin);
+
+                // The harness's managed BFS wake-up queues mirror ChunkData's; clear them too so a
+                // recycled TestChunk carries no stale wake-ups (they are normally drained on schedule,
+                // so this only matters if a test recycles mid-lifecycle).
+                chunk.SunQueue.Clear();
+                chunk.BlockQueue.Clear();
+                chunk.SunColumnRecalcQueue.Clear();
+            }
+        }
+
+        /// <summary>
         /// Snapshots the 3×3 neighborhood and drains the chunk's BFS queues into a ready-to-run job,
         /// without executing it. Mirrors the scheduling half of the production pipeline. Mutations to
         /// live chunk data made between this call and <see cref="CompleteLightingJob"/> are invisible
@@ -275,6 +331,13 @@ namespace Editor.Validation.Lighting.Framework
             // flight (the LightingJobs.ContainsKey guard) — a test doing so is a setup error.
             if (!_inFlightCoords.Add(chunkCoord))
                 throw new InvalidOperationException($"Chunk {chunkCoord} already has a lighting job in flight.");
+
+            // Edge check runs when explicitly requested OR when the chunk's REAL NeedsEdgeCheck flag is
+            // set, then the flag is cleared on schedule (mirror of production reading + clearing
+            // ChunkData.NeedsEdgeCheck in ScheduleLightingUpdate). Driving off the real flag means a
+            // missed reset of it on pool recycle would alter scheduling — observable (B4).
+            bool edgeCheck = performEdgeCheck || chunk.Data.NeedsEdgeCheck;
+            chunk.Data.NeedsEdgeCheck = false;
 
             LightingJobFlight flight = new LightingJobFlight { Coord = chunkCoord };
 
@@ -331,7 +394,7 @@ namespace Editor.Validation.Lighting.Framework
                 BlockTypes = _blockTypesNative,
                 CrossChunkLightMods = flight.Mods,
                 IsStable = flight.IsStable,
-                PerformEdgeCheck = performEdgeCheck,
+                PerformEdgeCheck = edgeCheck,
             };
 
             return flight;
@@ -359,6 +422,11 @@ namespace Editor.Validation.Lighting.Framework
             TestChunk chunk = GetChunk(flight.Coord);
             NeighborhoodLightingJob job = flight.Job;
             job.Run();
+
+            // Mirror production's main-thread-processing guard (WorldJobManager.ProcessLightingJobs sets
+            // this true before applying the result and clears it after). Set/clear pairing on the real
+            // flag so its reset-completeness on recycle is verified (B4); cleared before returning below.
+            chunk.Data.IsAwaitingMainThreadProcess = true;
 
             LightingRunResult result = new LightingRunResult
             {
@@ -455,6 +523,10 @@ namespace Editor.Validation.Lighting.Framework
             if (!result.IsStable)
                 chunk.HasLightWork = true;
 
+            // Main-thread processing complete (mirror of production clearing IsAwaitingMainThreadProcess
+            // at the end of the per-job pass).
+            chunk.Data.IsAwaitingMainThreadProcess = false;
+
             foreach (IDisposable container in flight.OwnedContainers)
                 container.Dispose();
             flight.OwnedContainers.Clear();
@@ -516,8 +588,8 @@ namespace Editor.Validation.Lighting.Framework
         /// <summary>
         /// Runs the full initial-lighting sequence the production pipeline performs for freshly
         /// generated chunks: every chunk gets a full 256-column sunlight recalculation, the grid is
-        /// converged, and then two edge-check rounds (mirror of <c>RemainingEdgeCheckRounds = 2</c>)
-        /// reconcile borders, each followed by convergence.
+        /// converged, and then the edge-check rounds (driven by each chunk's real
+        /// <c>ChunkData.RemainingEdgeCheckRounds</c>) reconcile borders, each followed by convergence.
         /// </summary>
         /// <param name="maxRounds">The round budget for each convergence stage.</param>
         /// <returns>The total number of convergence rounds taken, or -1 if any stage failed to converge.</returns>
@@ -529,12 +601,12 @@ namespace Editor.Validation.Lighting.Framework
             int totalRounds = RunToConvergence(maxRounds);
             if (totalRounds < 0) return -1;
 
-            const int edgeCheckRounds = 2; // ChunkData.RemainingEdgeCheckRounds initial value
-            for (int round = 0; round < edgeCheckRounds; round++)
+            // Edge-check rounds, driven by each chunk's REAL RemainingEdgeCheckRounds counter (production
+            // decrements it per stabilized round). Consuming the real field — not a fixed local count —
+            // makes a missed Reset() of it on pool recycle observable (B4): a recycled chunk that kept a
+            // stale 0 would silently run zero edge-check rounds and fail to reconcile its borders.
+            while (DecrementEdgeCheckRound())
             {
-                foreach (Vector2Int coord in AllChunkCoords())
-                    RunLightingJob(coord, performEdgeCheck: true);
-
                 int rounds = RunToConvergence(maxRounds);
                 if (rounds < 0) return -1;
                 totalRounds += rounds;
@@ -591,9 +663,9 @@ namespace Editor.Validation.Lighting.Framework
         /// <summary>
         /// Wave-parallel variant of <see cref="RunInitialLighting"/>: the initial 256-column recalcs
         /// of ALL chunks run as one concurrent wave (every job sees its neighbors fully unlit), and
-        /// the two edge-check rounds also run as waves — the faithful mirror of initial world
-        /// generation, where neighboring chunks light simultaneously from stale snapshots
-        /// (the convergence condition behind Bug 05).
+        /// the edge-check rounds (driven by each chunk's real <c>ChunkData.RemainingEdgeCheckRounds</c>)
+        /// also run as waves — the faithful mirror of initial world generation, where neighboring chunks
+        /// light simultaneously from stale snapshots (the convergence condition behind Bug 05).
         /// </summary>
         /// <param name="maxRounds">The round budget for each convergence stage.</param>
         /// <returns>The total number of waves taken, or -1 if any stage failed to converge.</returns>
@@ -605,24 +677,42 @@ namespace Editor.Validation.Lighting.Framework
             int totalRounds = RunWaveToConvergence(maxRounds);
             if (totalRounds < 0) return -1;
 
-            const int edgeCheckRounds = 2; // ChunkData.RemainingEdgeCheckRounds initial value
-            List<LightingJobFlight> flights = new List<LightingJobFlight>();
-
-            for (int round = 0; round < edgeCheckRounds; round++)
+            // Edge-check rounds driven by the real RemainingEdgeCheckRounds counter (see RunInitialLighting);
+            // here each round's flagged chunks run as one concurrent wave via RunWaveToConvergence.
+            while (DecrementEdgeCheckRound())
             {
-                flights.Clear();
-                foreach (Vector2Int coord in AllChunkCoords())
-                    flights.Add(BeginLightingJob(coord, performEdgeCheck: true));
-
-                foreach (LightingJobFlight flight in flights)
-                    CompleteLightingJob(flight);
-
                 int rounds = RunWaveToConvergence(maxRounds);
                 if (rounds < 0) return -1;
                 totalRounds += rounds;
             }
 
             return totalRounds;
+        }
+
+        /// <summary>
+        /// One edge-check round step shared by <see cref="RunInitialLighting"/> and
+        /// <see cref="RunInitialLightingParallel"/>: for every chunk that still has edge-check rounds left
+        /// on its real <see cref="ChunkData.RemainingEdgeCheckRounds"/> counter, decrement it, flag
+        /// <see cref="ChunkData.NeedsEdgeCheck"/> (consumed by <see cref="BeginLightingJob"/>), and mark it
+        /// as having pending work. Mirrors production's per-stabilized-round decrement in
+        /// <c>WorldJobManager.ProcessLightingJobs</c>.
+        /// </summary>
+        /// <returns>True if at least one chunk had a remaining edge-check round (a round should run);
+        /// false when every chunk's counter is exhausted.</returns>
+        private bool DecrementEdgeCheckRound()
+        {
+            bool anyRound = false;
+            foreach (TestChunk chunk in _chunks.Values)
+            {
+                if (chunk.Data.RemainingEdgeCheckRounds <= 0) continue;
+
+                chunk.Data.RemainingEdgeCheckRounds--;
+                chunk.Data.NeedsEdgeCheck = true;
+                chunk.HasLightWork = true;
+                anyRound = true;
+            }
+
+            return anyRound;
         }
 
         // --- Private helpers ---
@@ -757,6 +847,11 @@ namespace Editor.Validation.Lighting.Framework
                 // Initial lighting recomputes all blocklight from current data, so mods recorded while the
                 // chunk was absent are obsolete (mirror of the generated-chunk DiscardPendingBlocklight).
                 _pendingStore.DiscardPendingBlocklight(storeKey);
+
+                // A freshly-generated chunk is recycled through ChunkData.Reset(), which restores
+                // RemainingEdgeCheckRounds = 2 — so its post-generation edge-check rounds (which re-derive
+                // cross-chunk spill from loaded neighbors) fire. Refresh the real counter to model that.
+                chunk.Data.RemainingEdgeCheckRounds = 2;
                 return;
             }
 
