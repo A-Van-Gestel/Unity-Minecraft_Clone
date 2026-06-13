@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using Data;
 using Helpers;
 using Jobs;
+using Serialization;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using UnityEngine.Pool;
 
 namespace Editor.Validation.Lighting.Framework
 {
@@ -52,6 +54,13 @@ namespace Editor.Validation.Lighting.Framework
         // merge (mirror of WorldJobManager._deferredCrossChunkMods, the Bug 08 path-2 fix).
         private readonly Dictionary<Vector2Int, List<LightModification>> _deferredMods = new Dictionary<Vector2Int, List<LightModification>>();
 
+        // The real production pending-light store, run in its disk-free in-memory mode. Cross-chunk mods
+        // targeting an in-world-but-unloaded chunk are persisted here (production's PersistUndeliverable
+        // route) and replayed when the chunk is marked loaded again — exercising the genuine persist/
+        // replay logic the fixed grid otherwise can't reach (LIGHTING_VALIDATION_HARNESS_FIDELITY.md, B1).
+        // Typed as IPendingLightStore so Save()/Load() (disk I/O) are unreachable from the harness.
+        private readonly IPendingLightStore _pendingStore = LightingStateManager.CreateInMemory();
+
         /// <summary>The number of chunks along each horizontal axis of the grid.</summary>
         public int GridSize { get; }
 
@@ -87,6 +96,10 @@ namespace Editor.Validation.Lighting.Framework
             if (_isDisposed) return;
             _isDisposed = true;
             if (_blockTypesNative.IsCreated) _blockTypesNative.Dispose();
+
+            // Release any pending mods still held by the in-memory store (it pools its inner
+            // HashSets/Dictionaries) so a finished test never leaks them back into the editor pools.
+            _pendingStore.Clear();
         }
 
         // --- Per-chunk state ---
@@ -114,6 +127,16 @@ namespace Editor.Validation.Lighting.Framework
             public readonly Queue<LightQueueNode> BlockQueue = new Queue<LightQueueNode>();
             public readonly Queue<Vector2Int> SunColumnRecalcQueue = new Queue<Vector2Int>();
             public bool HasLightWork;
+
+            /// <summary>
+            /// Whether this chunk is currently loaded/populated. Mirror of production's
+            /// "a non-null, populated RequestChunk result". Set false via
+            /// <see cref="MarkChunkUnloaded"/> to model an in-world-but-unloaded chunk: cross-chunk mods
+            /// toward it are then persisted (production's PersistUndeliverable route) rather than applied,
+            /// and a job completing for it discards its result and degrades inbound deferred mods.
+            /// Cleared back to true by <see cref="MarkChunkLoaded"/>.
+            /// </summary>
+            public bool IsLoaded = true;
 
             public TestChunk(Vector2Int coord)
             {
@@ -163,6 +186,17 @@ namespace Editor.Validation.Lighting.Framework
             /// <summary>Mods deferred because their target chunk had its own job in flight; they are
             /// applied right after that chunk's merge (the Bug 08 path-2 defer/drain).</summary>
             public int ModsDeferred;
+
+            /// <summary>Mods persisted to the pending-light store because their target chunk is in-world
+            /// but currently unloaded (production's PersistUndeliverable route). Replayed when the target
+            /// is marked loaded again.</summary>
+            public int ModsPersisted;
+
+            /// <summary>Mods that had been deferred FOR this chunk but were degraded to the pending-light
+            /// store because this chunk's own job completed while it was unloaded — its result (and thus
+            /// the drain that would have consumed them) was discarded (production's
+            /// DegradeDeferredCrossChunkMods).</summary>
+            public int ModsDegraded;
         }
 
         /// <summary>
@@ -179,6 +213,24 @@ namespace Editor.Validation.Lighting.Framework
         /// property (which checks <b>any</b> chunk in the grid).
         /// </summary>
         public bool ChunkHasLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).HasLightWork;
+
+        /// <summary>
+        /// Marks a chunk as in-world but unloaded/unpopulated — production's "RequestChunk returned null
+        /// or an unpopulated chunk". While unloaded: cross-chunk mods toward it are persisted to the
+        /// pending store instead of applied (the PersistUndeliverable route), and if it has a lighting
+        /// job in flight, completing that job discards the result and degrades inbound deferred mods.
+        /// Reverse with <see cref="MarkChunkLoaded"/>.
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate of the chunk to unload.</param>
+        public void MarkChunkUnloaded(Vector2Int chunkCoord) => GetChunk(chunkCoord).IsLoaded = false;
+
+        /// <summary>
+        /// Marks a previously-unloaded chunk as loaded again — the clear site for the unload flag set by
+        /// <see cref="MarkChunkUnloaded"/>. (Replay of the chunk's persisted pending mods is wired in a
+        /// later step; this currently only restores the load flag.)
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate of the chunk to mark loaded.</param>
+        public void MarkChunkLoaded(Vector2Int chunkCoord) => GetChunk(chunkCoord).IsLoaded = true;
 
         /// <summary>
         /// Snapshots the 3×3 neighborhood and drains the chunk's BFS queues into a ready-to-run job,
@@ -282,73 +334,93 @@ namespace Editor.Validation.Lighting.Framework
             NeighborhoodLightingJob job = flight.Job;
             job.Run();
 
-            // Merge through the SAME production per-section + uniform-sky compaction code the live
-            // pipeline runs (ChunkData.ApplyJobLightMap), so section/compaction defects are visible to
-            // the suite instead of being bypassed by a flat-array copy. Block types are null: the
-            // harness does not mesh, and section counts are meshing-only (light-irrelevant).
-            // Mods applied to live data during the flight would be overwritten here — which is why mods
-            // targeting in-flight chunks are DEFERRED and drained right after this merge (Bug 08 path-2).
-            chunk.Data.ApplyJobLightMap(job.Map, job.LightMap, null);
-
-            // Drain mods deferred for this chunk while its job was in flight
-            // (mirror of WorldJobManager.DrainDeferredCrossChunkMods).
-            if (_deferredMods.Remove(flight.Coord, out List<LightModification> deferred))
-            {
-                foreach (LightModification mod in deferred)
-                    ApplyModToChunk(chunk, in mod);
-            }
-
             LightingRunResult result = new LightingRunResult
             {
                 JobReportedStable = flight.IsStable[0],
                 ModsEmitted = flight.Mods.Length,
             };
 
-            // Apply cross-chunk mods through the SAME shared routing decision as
-            // WorldJobManager.ProcessLightingJobs, so the harness and production can never disagree
-            // on drop/defer/apply or the stability override.
             bool hasRealCrossChunkMods = false;
-            foreach (LightModification mod in flight.Mods)
+
+            // Mirror of WorldJobManager.ProcessLightingJobs' "chunkData != null && IsPopulated" gate:
+            // a job whose chunk is still loaded merges + routes its mods; a job whose chunk was unloaded
+            // mid-flight discards its result and degrades inbound deferred mods (the else branch).
+            if (chunk.IsLoaded)
             {
-                Vector2Int targetCoord = WorldToChunkCoord(new Vector2Int(mod.GlobalPosition.x, mod.GlobalPosition.z));
-                bool targetInWorld = _chunks.TryGetValue(targetCoord, out TestChunk target);
+                // Merge through the SAME production per-section + uniform-sky compaction code the live
+                // pipeline runs (ChunkData.ApplyJobLightMap), so section/compaction defects are visible to
+                // the suite instead of being bypassed by a flat-array copy. Block types are null: the
+                // harness does not mesh, and section counts are meshing-only (light-irrelevant).
+                // Mods applied to live data during the flight would be overwritten here — which is why mods
+                // targeting in-flight chunks are DEFERRED and drained right after this merge (Bug 08 path-2).
+                chunk.Data.ApplyJobLightMap(job.Map, job.LightMap, null);
 
-                // The fixed test grid has no in-world-but-unloaded chunks: every in-grid chunk is
-                // loaded, so targetLoaded mirrors targetInWorld (PersistUndeliverable never occurs).
-                LightingJobProcessor.CrossChunkModRoute route = LightingJobProcessor.RouteCrossChunkMod(
-                    targetInWorld,
-                    targetLoaded: targetInWorld,
-                    targetJobInFlightThisPass: targetInWorld && _inFlightCoords.Contains(targetCoord));
-
-                hasRealCrossChunkMods |= LightingJobProcessor.CountsAsRealCrossChunkMod(route);
-
-                switch (route)
+                // Drain mods deferred for this chunk while its job was in flight
+                // (mirror of WorldJobManager.DrainDeferredCrossChunkMods).
+                if (_deferredMods.Remove(flight.Coord, out List<LightModification> deferred))
                 {
-                    case LightingJobProcessor.CrossChunkModRoute.DropOutOfWorld:
-                    case LightingJobProcessor.CrossChunkModRoute.PersistUndeliverable:
-                        // PersistUndeliverable is unreachable in the fixed grid (every in-world chunk
-                        // is loaded); both routes mean "the mod left the modelled volume" here.
-                        result.ModsDroppedOutOfWorld++;
-                        continue;
-
-                    case LightingJobProcessor.CrossChunkModRoute.Defer:
-                        // Applying now would be overwritten by the target's merge — defer; drained
-                        // right after the target's merge (the Bug 08 path-2 defer/drain).
-                        if (!_deferredMods.TryGetValue(targetCoord, out List<LightModification> deferredList))
-                        {
-                            deferredList = new List<LightModification>();
-                            _deferredMods[targetCoord] = deferredList;
-                        }
-
-                        deferredList.Add(mod);
-                        result.ModsDeferred++;
-                        continue;
-
-                    case LightingJobProcessor.CrossChunkModRoute.ApplyDirect:
-                        if (ApplyModToChunk(target, in mod))
-                            result.ModsApplied++;
-                        continue;
+                    foreach (LightModification mod in deferred)
+                        ApplyModToChunk(chunk, in mod);
                 }
+
+                // Apply cross-chunk mods through the SAME shared routing decision as
+                // WorldJobManager.ProcessLightingJobs, so the harness and production can never disagree
+                // on drop/persist/defer/apply or the stability override.
+                foreach (LightModification mod in flight.Mods)
+                {
+                    Vector2Int targetCoord = WorldToChunkCoord(new Vector2Int(mod.GlobalPosition.x, mod.GlobalPosition.z));
+                    bool targetInWorld = _chunks.TryGetValue(targetCoord, out TestChunk target);
+
+                    // targetLoaded now reflects real per-chunk load state (set via MarkChunkUnloaded),
+                    // so the PersistUndeliverable route — target in-world but unloaded — is reachable.
+                    LightingJobProcessor.CrossChunkModRoute route = LightingJobProcessor.RouteCrossChunkMod(
+                        targetInWorld,
+                        targetLoaded: targetInWorld && target.IsLoaded,
+                        targetJobInFlightThisPass: targetInWorld && _inFlightCoords.Contains(targetCoord));
+
+                    hasRealCrossChunkMods |= LightingJobProcessor.CountsAsRealCrossChunkMod(route);
+
+                    switch (route)
+                    {
+                        case LightingJobProcessor.CrossChunkModRoute.DropOutOfWorld:
+                            // Target outside the grid (out-of-world): dropped without affecting stability.
+                            result.ModsDroppedOutOfWorld++;
+                            continue;
+
+                        case LightingJobProcessor.CrossChunkModRoute.PersistUndeliverable:
+                            // Target in-world but unloaded: persist for replay on load (mirror of
+                            // WorldJobManager.PersistUndeliverableLightMod), the Bug 08 path-1 store.
+                            PersistMod(targetCoord, in mod);
+                            result.ModsPersisted++;
+                            continue;
+
+                        case LightingJobProcessor.CrossChunkModRoute.Defer:
+                            // Applying now would be overwritten by the target's merge — defer; drained
+                            // right after the target's merge (the Bug 08 path-2 defer/drain).
+                            if (!_deferredMods.TryGetValue(targetCoord, out List<LightModification> deferredList))
+                            {
+                                deferredList = new List<LightModification>();
+                                _deferredMods[targetCoord] = deferredList;
+                            }
+
+                            deferredList.Add(mod);
+                            result.ModsDeferred++;
+                            continue;
+
+                        case LightingJobProcessor.CrossChunkModRoute.ApplyDirect:
+                            if (ApplyModToChunk(target, in mod))
+                                result.ModsApplied++;
+                            continue;
+                    }
+                }
+            }
+            else
+            {
+                // The emitting chunk was unloaded mid-flight: its job result is discarded (no merge) and
+                // its own emitted mods are dropped. Mods OTHER chunks deferred FOR it can never be drained
+                // now, so degrade them to the pending store (mirror of WorldJobManager's else branch +
+                // DegradeDeferredCrossChunkMods). hasRealCrossChunkMods stays false -> effectively stable.
+                result.ModsDegraded += DegradeDeferredMods(flight.Coord);
             }
 
             // Production stability override: not-stable solely due to out-of-world mods counts as stable.
@@ -565,6 +637,64 @@ namespace Editor.Validation.Lighting.Framework
 
             target.HasLightWork = true;
             return true;
+        }
+
+        /// <summary>
+        /// Persists a single cross-chunk light modification whose target chunk is in-world but unloaded,
+        /// into the in-memory pending store for replay on load. Harness mirror of
+        /// <c>WorldJobManager.PersistUndeliverableLightMod</c>: sun mods become pending column recalcs,
+        /// blocklight mods become pending RGB modifications. Shares the local-column math + in-footprint
+        /// bounds guard with production via <see cref="LightingModPersister.TryComputeLocalColumn"/>.
+        /// </summary>
+        /// <param name="targetCoord">The grid coordinate of the (unloaded) target chunk.</param>
+        /// <param name="mod">The undeliverable cross-chunk modification.</param>
+        private void PersistMod(Vector2Int targetCoord, in LightModification mod)
+        {
+            ChunkCoord targetChunkCoord = new ChunkCoord(targetCoord.x, targetCoord.y);
+
+            if (!LightingModPersister.TryComputeLocalColumn(targetChunkCoord, in mod, out int localX, out int localZ))
+            {
+                Debug.LogError($"[LightingTestWorld] PersistMod: mod at {mod.GlobalPosition.ToString()} falls outside target chunk {targetCoord.ToString()}.");
+                return;
+            }
+
+            if (mod.Channel == LightChannel.Sun)
+            {
+                // Production batches columns via _droppedLightUpdates before AddPending; the harness adds
+                // the single column directly through a pooled scratch set (AddPending copies its contents
+                // into its own pooled set and takes no ownership, so the scratch is released right after).
+                HashSet<Vector2Int> scratch = HashSetPool<Vector2Int>.Get();
+                scratch.Add(new Vector2Int(localX, localZ));
+                _pendingStore.AddPending(targetChunkCoord, scratch);
+                HashSetPool<Vector2Int>.Release(scratch);
+            }
+            else
+            {
+                // A sunlight column recalc cannot restore RGB data — persist the actual blocklight
+                // modification for replay when the chunk is loaded (Bug 08, path 1).
+                _pendingStore.AddPendingBlocklight(targetChunkCoord,
+                    new Vector3Int(localX, mod.GlobalPosition.y, localZ),
+                    mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
+            }
+        }
+
+        /// <summary>
+        /// Degrades the cross-chunk mods that were deferred FOR a chunk whose own job just completed while
+        /// it was unloaded: that chunk's merge (and the drain that would have consumed them) was discarded,
+        /// so the mods are persisted to the pending store instead. Harness mirror of
+        /// <c>WorldJobManager.DegradeDeferredCrossChunkMods</c>.
+        /// </summary>
+        /// <param name="chunkCoord">The (now-unloaded) chunk whose inbound deferred mods are degraded.</param>
+        /// <returns>The number of deferred mods degraded.</returns>
+        private int DegradeDeferredMods(Vector2Int chunkCoord)
+        {
+            if (!_deferredMods.Remove(chunkCoord, out List<LightModification> deferred))
+                return 0;
+
+            foreach (LightModification mod in deferred)
+                PersistMod(chunkCoord, in mod);
+
+            return deferred.Count;
         }
 
         private static T NewOwned<T>(LightingJobFlight flight, T container) where T : struct, IDisposable
