@@ -155,6 +155,14 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <summary>
+        /// Returns true when a lighting job is currently in flight for the given chunk coordinate
+        /// (i.e., <see cref="BeginLightingJob"/> was called but <see cref="CompleteLightingJob"/>
+        /// has not yet been called for the returned flight). Mirrors the production
+        /// <c>LightingJobs.ContainsKey</c> guard in <c>WorldJobManager.ScheduleLightingUpdate</c>.
+        /// </summary>
+        public bool IsChunkInFlight(Vector2Int chunkCoord) => _inFlightCoords.Contains(chunkCoord);
+
+        /// <summary>
         /// Snapshots the 3×3 neighborhood and drains the chunk's BFS queues into a ready-to-run job,
         /// without executing it. Mirrors the scheduling half of the production pipeline. Mutations to
         /// live chunk data made between this call and <see cref="CompleteLightingJob"/> are invisible
