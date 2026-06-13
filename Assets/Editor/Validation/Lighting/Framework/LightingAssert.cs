@@ -186,7 +186,10 @@ namespace Editor.Validation.Lighting.Framework
 
                         litVoxels++;
                         if (litVoxels <= MAX_REPORTED_MISMATCHES)
-                            AppendMismatch(report, pos, LightBitMapping.GetSkyLight(light), light);
+                        {
+                            ushort expected = LightBitMapping.PackLightData(LightBitMapping.GetSkyLight(light), 0, 0, 0);
+                            AppendMismatch(report, pos, expected, light);
+                        }
                     }
                 }
             }
