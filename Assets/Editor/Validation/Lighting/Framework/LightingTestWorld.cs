@@ -215,6 +215,24 @@ namespace Editor.Validation.Lighting.Framework
         public bool ChunkHasLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).HasLightWork;
 
         /// <summary>
+        /// How a chunk's persisted pending light work is treated when it is marked loaded again, mirroring
+        /// the two distinct production load paths.
+        /// </summary>
+        public enum ChunkLoadMode
+        {
+            /// <summary>Loaded from disk (the chunk kept its saved light): persisted sunlight column
+            /// recalcs AND pending cross-chunk blocklight mods are replayed into the live chunk
+            /// (mirror of <c>World.LoadOrGenerateChunk</c>'s restore + replay).</summary>
+            LoadFromDisk,
+
+            /// <summary>Freshly generated (light recomputed from scratch): persisted sunlight column
+            /// recalcs are replayed, but pending blocklight mods are DISCARDED — initial lighting
+            /// recomputes all blocklight, so mods recorded while the chunk was absent are obsolete
+            /// (mirror of <c>WorldJobManager</c>'s generated-chunk <c>DiscardPendingBlocklight</c>).</summary>
+            FreshlyGenerated,
+        }
+
+        /// <summary>
         /// Marks a chunk as in-world but unloaded/unpopulated — production's "RequestChunk returned null
         /// or an unpopulated chunk". While unloaded: cross-chunk mods toward it are persisted to the
         /// pending store instead of applied (the PersistUndeliverable route), and if it has a lighting
@@ -225,12 +243,20 @@ namespace Editor.Validation.Lighting.Framework
         public void MarkChunkUnloaded(Vector2Int chunkCoord) => GetChunk(chunkCoord).IsLoaded = false;
 
         /// <summary>
-        /// Marks a previously-unloaded chunk as loaded again — the clear site for the unload flag set by
-        /// <see cref="MarkChunkUnloaded"/>. (Replay of the chunk's persisted pending mods is wired in a
-        /// later step; this currently only restores the load flag.)
+        /// Marks a previously-unloaded chunk as loaded again (clear site for the unload flag set by
+        /// <see cref="MarkChunkUnloaded"/>) and replays the pending light work the store accumulated while
+        /// it was unloaded, mirroring production's replay-on-load. The seeded BFS wake-up nodes and
+        /// sunlight column recalcs take effect on the next lighting pass the test runs for this chunk.
         /// </summary>
         /// <param name="chunkCoord">The grid coordinate of the chunk to mark loaded.</param>
-        public void MarkChunkLoaded(Vector2Int chunkCoord) => GetChunk(chunkCoord).IsLoaded = true;
+        /// <param name="mode">Whether the chunk is loaded from disk (replay blocklight) or freshly
+        /// generated (discard blocklight). Defaults to <see cref="ChunkLoadMode.LoadFromDisk"/>.</param>
+        public void MarkChunkLoaded(Vector2Int chunkCoord, ChunkLoadMode mode = ChunkLoadMode.LoadFromDisk)
+        {
+            TestChunk chunk = GetChunk(chunkCoord);
+            chunk.IsLoaded = true;
+            ReplayPendingOnLoad(chunkCoord, chunk, mode);
+        }
 
         /// <summary>
         /// Snapshots the 3×3 neighborhood and drains the chunk's BFS queues into a ready-to-run job,
@@ -695,6 +721,72 @@ namespace Editor.Validation.Lighting.Framework
                 PersistMod(chunkCoord, in mod);
 
             return deferred.Count;
+        }
+
+        /// <summary>
+        /// Replays the pending light work the store accumulated for a chunk while it was unloaded, when
+        /// that chunk is marked loaded again. Harness mirror of production's replay-on-load
+        /// (<c>World.LoadOrGenerateChunk</c> for disk loads; <c>WorldJobManager</c>'s generated-chunk path
+        /// for fresh generation): drains the persisted sunlight column recalcs into the chunk's recalc
+        /// queue (both modes), then either replays the pending cross-chunk blocklight mods through the
+        /// shared <see cref="CrossChunkLightModApplier.ComputeBlocklight"/> decision (disk load) or
+        /// discards them (fresh generation). Pooled store containers are released after draining.
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate of the chunk being loaded.</param>
+        /// <param name="chunk">The chunk being loaded.</param>
+        /// <param name="mode">Disk-load (replay blocklight) vs. fresh-generation (discard blocklight).</param>
+        private void ReplayPendingOnLoad(Vector2Int chunkCoord, TestChunk chunk, ChunkLoadMode mode)
+        {
+            ChunkCoord storeKey = new ChunkCoord(chunkCoord.x, chunkCoord.y);
+
+            // Sunlight column recalcs (BOTH load modes). The store holds LOCAL columns (0-15); the harness
+            // per-chunk recalc queue is also in local space (see QueueFullSunlightRecalc / BeginLightingJob),
+            // so they enqueue directly. Production round-trips local->global->local only because it routes
+            // through the world-level SunlightRecalculationQueue — semantically identical.
+            if (_pendingStore.TryGetAndRemove(storeKey, out HashSet<Vector2Int> localCols))
+            {
+                foreach (Vector2Int col in localCols)
+                    chunk.SunColumnRecalcQueue.Enqueue(col);
+
+                chunk.HasLightWork = true;
+                HashSetPool<Vector2Int>.Release(localCols); // TryGetAndRemove transfers ownership to us
+            }
+
+            if (mode == ChunkLoadMode.FreshlyGenerated)
+            {
+                // Initial lighting recomputes all blocklight from current data, so mods recorded while the
+                // chunk was absent are obsolete (mirror of the generated-chunk DiscardPendingBlocklight).
+                _pendingStore.DiscardPendingBlocklight(storeKey);
+                return;
+            }
+
+            // LoadFromDisk: replay each pending blocklight mod through the SAME shared decision logic as
+            // the live cross-chunk apply path, then seed the BFS wake-up node so propagation re-runs
+            // (mirror of World.LoadOrGenerateChunk's replay — Bug 08, path 1).
+            if (_pendingStore.TryGetAndRemovePendingBlocklight(storeKey,
+                    out Dictionary<Vector3Int, LightingStateManager.PendingBlocklightMod> pendingBlocklight))
+            {
+                foreach (KeyValuePair<Vector3Int, LightingStateManager.PendingBlocklightMod> entry in pendingBlocklight)
+                {
+                    Vector3Int localPos = entry.Key;
+                    ushort currentLight = chunk.Data.GetLightData(localPos.x, localPos.y, localPos.z);
+
+                    CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.ComputeBlocklight(
+                        currentLight, entry.Value.R, entry.Value.G, entry.Value.B, entry.Value.IsRemoval);
+
+                    if (!decision.ShouldApply) continue;
+
+                    chunk.Data.SetLightData(localPos.x, localPos.y, localPos.z, decision.NewLight);
+                    chunk.BlockQueue.Enqueue(new LightQueueNode
+                    {
+                        Position = localPos, OldLightLevel = decision.OldLevel,
+                        OldBlockR = decision.OldR, OldBlockG = decision.OldG, OldBlockB = decision.OldB,
+                    });
+                    chunk.HasLightWork = true;
+                }
+
+                DictionaryPool<Vector3Int, LightingStateManager.PendingBlocklightMod>.Release(pendingBlocklight);
+            }
         }
 
         private static T NewOwned<T>(LightingJobFlight flight, T container) where T : struct, IDisposable
