@@ -753,38 +753,7 @@ public class WorldJobManager : IDisposable
                         if (neighborChunk == null || !neighborChunk.IsPopulated)
                         {
                             hasRealCrossChunkMods = true;
-
-                            int localX = mod.GlobalPosition.x - neighborChunkVoxelPos.x;
-                            int localZ = mod.GlobalPosition.z - neighborChunkVoxelPos.y;
-
-                            if (localX < 0 || localX >= VoxelData.ChunkWidth ||
-                                localZ < 0 || localZ >= VoxelData.ChunkWidth)
-                            {
-                                Debug.LogError($"[ProcessLightingJobs] Invalid local column calculation: ({localX.ToString()}, {localZ.ToString()}) for global pos {mod.GlobalPosition.ToString()}");
-                                continue;
-                            }
-
-                            if (mod.Channel == LightChannel.Sun)
-                            {
-                                if (!_droppedLightUpdates.TryGetValue(neighborChunkCoord, out HashSet<Vector2Int> cols))
-                                {
-                                    cols = HashSetPool<Vector2Int>.Get();
-                                    _droppedLightUpdates[neighborChunkCoord] = cols;
-                                }
-
-                                cols.Add(new Vector2Int(localX, localZ));
-                            }
-                            else
-                            {
-                                // A sunlight column recalc cannot restore RGB data — persist the
-                                // actual blocklight modification for replay when the chunk is
-                                // loaded from disk (Bug 08, path 1: broken lamps left permanent
-                                // ghost light in neighbors that were unloaded at removal time).
-                                _world.LightingStateManager.AddPendingBlocklight(neighborChunkCoord,
-                                    new Vector3Int(localX, mod.GlobalPosition.y, localZ),
-                                    mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
-                            }
-
+                            PersistUndeliverableLightMod(neighborChunkCoord, in mod);
                             continue;
                         }
 
@@ -966,38 +935,50 @@ public class WorldJobManager : IDisposable
     {
         if (!_deferredCrossChunkMods.Remove(chunkCoord, out List<LightModification> deferred)) return;
 
-        Vector2Int chunkVoxelPos = chunkCoord.ToVoxelOrigin();
         foreach (LightModification mod in deferred)
         {
-            int localX = mod.GlobalPosition.x - chunkVoxelPos.x;
-            int localZ = mod.GlobalPosition.z - chunkVoxelPos.y;
-
-            if (localX < 0 || localX >= VoxelData.ChunkWidth ||
-                localZ < 0 || localZ >= VoxelData.ChunkWidth)
-            {
-                Debug.LogError($"[DegradeDeferredCrossChunkMods] Invalid local column calculation: ({localX.ToString()}, {localZ.ToString()}) for global pos {mod.GlobalPosition.ToString()}");
-                continue;
-            }
-
-            if (mod.Channel == LightChannel.Sun)
-            {
-                if (!_droppedLightUpdates.TryGetValue(chunkCoord, out HashSet<Vector2Int> cols))
-                {
-                    cols = HashSetPool<Vector2Int>.Get();
-                    _droppedLightUpdates[chunkCoord] = cols;
-                }
-
-                cols.Add(new Vector2Int(localX, localZ));
-            }
-            else
-            {
-                _world.LightingStateManager.AddPendingBlocklight(chunkCoord,
-                    new Vector3Int(localX, mod.GlobalPosition.y, localZ),
-                    mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
-            }
+            PersistUndeliverableLightMod(chunkCoord, in mod);
         }
 
         ListPool<LightModification>.Release(deferred);
+    }
+
+    /// <summary>
+    /// Persists a single cross-chunk light modification that cannot be applied to a live chunk
+    /// (target unloaded or vanished mid-flight). Sun mods are saved as column recalculation
+    /// entries; blocklight mods are saved as pending RGB modifications for replay on load.
+    /// </summary>
+    private void PersistUndeliverableLightMod(ChunkCoord targetChunkCoord, in LightModification mod)
+    {
+        Vector2Int chunkVoxelPos = targetChunkCoord.ToVoxelOrigin();
+        int localX = mod.GlobalPosition.x - chunkVoxelPos.x;
+        int localZ = mod.GlobalPosition.z - chunkVoxelPos.y;
+
+        if (localX < 0 || localX >= VoxelData.ChunkWidth ||
+            localZ < 0 || localZ >= VoxelData.ChunkWidth)
+        {
+            Debug.LogError($"[PersistUndeliverableLightMod] Invalid local column calculation: ({localX.ToString()}, {localZ.ToString()}) for global pos {mod.GlobalPosition.ToString()}");
+            return;
+        }
+
+        if (mod.Channel == LightChannel.Sun)
+        {
+            if (!_droppedLightUpdates.TryGetValue(targetChunkCoord, out HashSet<Vector2Int> cols))
+            {
+                cols = HashSetPool<Vector2Int>.Get();
+                _droppedLightUpdates[targetChunkCoord] = cols;
+            }
+
+            cols.Add(new Vector2Int(localX, localZ));
+        }
+        else
+        {
+            // A sunlight column recalc cannot restore RGB data — persist the actual blocklight
+            // modification for replay when the chunk is loaded from disk (Bug 08, path 1).
+            _world.LightingStateManager.AddPendingBlocklight(targetChunkCoord,
+                new Vector3Int(localX, mod.GlobalPosition.y, localZ),
+                mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
+        }
     }
 
     /// <summary>
