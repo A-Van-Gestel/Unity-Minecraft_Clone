@@ -594,12 +594,12 @@ namespace Benchmarks
 
             int idx = ChunkMath.GetFlattenedIndexInChunk(localX, gy, localZ);
 
-            // Update the ushort light array (authoritative light source)
+            // Delegate to the shared decision logic so MAX-merge guards and IsRemoval
+            // semantics match the production path (WorldJobManager.ApplyCrossChunkLightMod).
             ushort light = lightTarget[idx];
-            if (mod.Channel == LightChannel.Sun)
-                lightTarget[idx] = LightBitMapping.SetSkyLight(light, mod.LightLevel);
-            else
-                lightTarget[idx] = LightBitMapping.SetBlocklightRGB(light, mod.BlockR, mod.BlockG, mod.BlockB);
+            CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(light, in mod);
+            if (decision.ShouldApply)
+                lightTarget[idx] = decision.NewLight;
         }
 
         /// <summary>
