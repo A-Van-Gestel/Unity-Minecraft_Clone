@@ -16,14 +16,15 @@ namespace Editor.Validation.Lighting
         // denser multi-pocket canopy patterns or mod-loss timing the minimal case doesn't hit;
         // a faithful repro remains TODO before that bug's fix can be test-driven.
 
-        // NOTE on Bug 09: fourteen repro attempts total — two direct-harness (B15, B16), three
+        // NOTE on Bug 09: fifteen repro attempts total — two direct-harness (B15, B16), three
         // frame-simulator with complete-all (B17, B18, B19), three with multi-frame flight
-        // lifetimes (B20, B21, B22), three with fluid-flow contention (B23, B24, B25), and three
-        // with seeded iteration-order randomness (B26, B27, B28). All fourteen converge to the
-        // oracle field across all tested orderings and seeds. Every production scheduling behavior
-        // modelable in the synchronous harness has been exhausted. The bug is likely a genuine async
-        // race condition (Burst job system timing, IL2CPP memory ordering) or has been fixed by the
-        // Bug 07/08 cross-chunk mod delivery fixes. A faithful repro remains TODO.
+        // lifetimes (B20, B21, B22), three with fluid-flow contention (B23, B24, B25), three
+        // with seeded iteration-order randomness (B26, B27, B28), and one combined stress test
+        // (B29) layering ALL harness capabilities simultaneously. All fifteen converge to the
+        // oracle across all tested seeds and orderings. Every production scheduling behavior
+        // modelable in the synchronous harness has been exhausted — the bug is either a genuine
+        // async race condition (Burst job system timing, IL2CPP memory ordering) that synchronous
+        // .Run() cannot reproduce, or is no longer present in the current codebase.
 
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {

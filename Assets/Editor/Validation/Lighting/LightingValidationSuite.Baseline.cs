@@ -43,6 +43,7 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B26: Shuffled completion+scheduling with fluid contention converges across 50 seeds (Bug 09 guard)", Baseline_ShuffledFluidContention));
             scenarios.Add(new Scenario("B27: Shuffled scheduling under budget pressure converges across 50 seeds (Bug 09 guard)", Baseline_ShuffledBudgetPressure));
             scenarios.Add(new Scenario("B28: Shuffled dual-chunk interleaved flights converge across 50 seeds (Bug 09 guard)", Baseline_ShuffledDualChunkInterleaved));
+            scenarios.Add(new Scenario("B29: Combined stress — all harness layers simultaneously — converges across 50 seeds (Bug 09 guard)", Baseline_CombinedStress));
         }
 
         /// <summary>
@@ -1236,6 +1237,97 @@ namespace Editor.Validation.Lighting
                 $"B28: all {BASELINE_SEED_SWEEP_ITERATIONS} seeds converge — shuffled dual-chunk interleaved",
                 failingSeed.HasValue
                     ? $"REGRESSION: seed {failingSeed.Value} produces oracle mismatch under shuffled dual-chunk interleaved"
+                    : "");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B29 (promoted from K09m): The definitive combined stress test — layers EVERY production
+        /// behavior the harness can model into a single scenario, modeling heavy ocean biome load:
+        /// underwater environment, single-slot budget, multi-frame held flights, shuffled
+        /// completion+scheduling, fluid-flow contention, two rapid break+fluid+place cycles before
+        /// any flight completes, and interleaved chunk release. Runs
+        /// <see cref="BASELINE_SEED_SWEEP_ITERATIONS"/> seeds. Guards that the defer/drain mechanism
+        /// converges under maximum simultaneous stress regardless of iteration order.
+        /// </summary>
+        private static bool Baseline_CombinedStress()
+        {
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+            Vector2Int chunkB = new Vector2Int(2, 1);
+
+            int? failingSeed = LightingFrameSimulator.FindFailingSeed(
+                worldFactory: () =>
+                {
+                    LightingTestWorld world = new LightingTestWorld(3);
+                    world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+                    world.RecalculateHeightmaps();
+                    world.RunInitialLighting();
+
+                    // Underwater environment — water on all 5 non-floor faces around the lamp.
+                    world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 11, 23), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 11, 25), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 12, 24), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(32, 11, 24), TestBlockPalette.Water);
+                    world.RunToConvergence();
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+                    world.RunToConvergence();
+                    return world;
+                },
+                scenarioBody: (world, sim) =>
+                {
+                    // === Cycle 1: break + fluid + place, all held, budget=1 ===
+                    world.BreakBlock(lampPos);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: (_, __) => false);
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.Water);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: (_, __) => false);
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: (_, __) => false);
+
+                    // === Cycle 2: break + fluid + place again, still held ===
+                    world.BreakBlock(lampPos);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: (_, __) => false);
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.Water);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: (_, __) => false);
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: (_, __) => false);
+
+                    // === Interleaved release under budget pressure ===
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: LightingFrameSimulator.OnlyChunks(chunkA));
+
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: LightingFrameSimulator.OnlyChunks(chunkB));
+
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled);
+
+                    // === Convergence under full stress ===
+                    int frames = sim.RunToConvergence(budgetPerFrame: 1,
+                        order: LightingFrameSimulator.CompletionOrder.Shuffled);
+                    if (frames < 0) return false;
+
+                    return LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                        "B29: field matches oracle (silent check)");
+                },
+                iterations: BASELINE_SEED_SWEEP_ITERATIONS);
+
+            bool passed = LightingAssert.IsTrue(!failingSeed.HasValue,
+                $"B29: all {BASELINE_SEED_SWEEP_ITERATIONS} seeds converge — combined stress",
+                failingSeed.HasValue
+                    ? $"REGRESSION: seed {failingSeed.Value} produces oracle mismatch under combined stress"
                     : "");
 
             return passed;
