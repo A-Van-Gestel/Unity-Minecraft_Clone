@@ -12,7 +12,7 @@ namespace Serialization
     /// recalculations (<c>pending_lighting.bin</c>) and cross-chunk blocklight modifications
     /// (<c>pending_blocklight.bin</c>) awaiting their target chunk.
     /// </summary>
-    public class LightingStateManager
+    public class LightingStateManager : IPendingLightStore
     {
         /// <summary>
         /// A persisted cross-chunk blocklight modification awaiting an unloaded target chunk.
@@ -42,6 +42,11 @@ namespace Serialization
         private readonly string _filePath;
         private readonly string _blocklightFilePath;
 
+        // When true, this store has no backing files: the constructor created no directory and
+        // Save()/Load() are no-ops. Used by disk-free consumers (e.g. the lighting validation harness)
+        // that exercise the real in-memory persist/replay logic without touching the filesystem.
+        private readonly bool _inMemoryOnly;
+
         // Pending sunlight recalculations for chunks that aren't loaded yet (or were saved while waiting).
         // Key: Chunk Coordinate
         // Value: List of LOCAL column coordinates (0-15, 0-15) stored as Vector2Int
@@ -60,6 +65,26 @@ namespace Serialization
             _filePath = Path.Combine(folder, "pending_lighting.bin");
             _blocklightFilePath = Path.Combine(folder, "pending_blocklight.bin");
         }
+
+        /// <summary>
+        /// Private constructor for the in-memory-only variant: creates no save directory and leaves the
+        /// file paths null so <see cref="Save"/>/<see cref="Load"/> become no-ops. The in-memory
+        /// dictionaries and all persist/replay logic are otherwise identical to a disk-backed instance.
+        /// Use <see cref="CreateInMemory"/> to construct one.
+        /// </summary>
+        private LightingStateManager()
+        {
+            _inMemoryOnly = true;
+        }
+
+        /// <summary>
+        /// Creates a pending-light store that lives entirely in memory and never touches the filesystem.
+        /// Intended for disk-free consumers (e.g. the lighting validation harness) that need to exercise
+        /// the real persist/replay logic. The returned instance's <see cref="Save"/>/<see cref="Load"/>
+        /// are no-ops; consume the data through the <see cref="IPendingLightStore"/> surface instead.
+        /// </summary>
+        /// <returns>A new in-memory-only <see cref="LightingStateManager"/>.</returns>
+        public static LightingStateManager CreateInMemory() => new LightingStateManager();
 
         /// <summary>
         /// Adds a set of local column coordinates that need sunlight recalculation to the pending store.
@@ -180,6 +205,14 @@ namespace Serialization
         /// </summary>
         public void Save()
         {
+            // In-memory-only stores have no backing files. Save() is unreachable through
+            // IPendingLightStore (by design); this guard defends against misuse via the concrete type.
+            if (_inMemoryOnly)
+            {
+                Debug.LogError("[LightingStateManager] Save() called on an in-memory-only store; ignoring.");
+                return;
+            }
+
             using (FileStream stream = new FileStream(_filePath, FileMode.Create))
             using (BinaryWriter writer = new BinaryWriter(stream))
             {
@@ -237,6 +270,14 @@ namespace Serialization
         /// </summary>
         public void Load()
         {
+            // In-memory-only stores have no backing files. Load() is unreachable through
+            // IPendingLightStore (by design); this guard defends against misuse via the concrete type.
+            if (_inMemoryOnly)
+            {
+                Debug.LogError("[LightingStateManager] Load() called on an in-memory-only store; ignoring.");
+                return;
+            }
+
             LoadPendingColumns();
             LoadPendingBlocklight();
         }
