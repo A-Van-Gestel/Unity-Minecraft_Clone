@@ -129,6 +129,9 @@ namespace Editor.Validation.Lighting.Framework
             internal NativeList<LightModification> Mods;
             internal readonly List<IDisposable> OwnedContainers = new List<IDisposable>();
             internal bool Completed;
+
+            /// <summary>The chunk coordinate this flight targets. Read-only accessor for test predicates.</summary>
+            public Vector2Int ChunkCoord => Coord;
         }
 
         /// <summary>The outcome of one completed lighting job, after cross-chunk mod application.</summary>

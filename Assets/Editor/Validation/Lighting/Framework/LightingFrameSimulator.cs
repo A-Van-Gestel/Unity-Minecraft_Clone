@@ -7,9 +7,9 @@ namespace Editor.Validation.Lighting.Framework
     /// <summary>
     /// Wraps <see cref="LightingTestWorld"/> with a frame-tick orchestration layer that models the
     /// production scheduling behaviors the bare harness omits: the <c>ContainsKey</c> in-flight guard,
-    /// per-frame job budget throttling, and controllable completion ordering. This enables deterministic
-    /// reproduction of orchestration-layer timing bugs (e.g., Bug 09) that only manifest when scheduling
-    /// is rejected or delayed.
+    /// per-frame job budget throttling, controllable completion ordering, and multi-frame job lifetimes.
+    /// This enables deterministic reproduction of orchestration-layer timing bugs (e.g., Bug 09) that
+    /// only manifest when scheduling is rejected or delayed.
     /// <para>
     /// The underlying <see cref="LightingTestWorld"/> remains the execution engine — this class only
     /// decides <b>when</b> to call <see cref="LightingTestWorld.BeginLightingJob"/> and
@@ -40,10 +40,24 @@ namespace Editor.Validation.Lighting.Framework
 
             /// <summary>Chunks that had pending work but could not schedule (in-flight guard or budget exhausted).</summary>
             public int ChunksStarved;
+
+            /// <summary>Flights that remained in-flight because the completion predicate rejected them.</summary>
+            public int JobsCarriedOver;
+        }
+
+        /// <summary>
+        /// Tracks an in-flight job together with the frame on which it was scheduled, enabling
+        /// age-based completion predicates that model multi-frame Burst job lifetimes.
+        /// </summary>
+        private struct PendingFlight
+        {
+            public LightingTestWorld.LightingJobFlight Flight;
+            public int ScheduledOnFrame;
         }
 
         private readonly LightingTestWorld _world;
-        private readonly List<LightingTestWorld.LightingJobFlight> _pendingFlights = new List<LightingTestWorld.LightingJobFlight>();
+        private readonly List<PendingFlight> _pendingFlights = new List<PendingFlight>();
+        private int _currentFrame;
 
         /// <summary>
         /// Constructs a frame simulator wrapping the given test world. The test world must already be
@@ -58,12 +72,17 @@ namespace Editor.Validation.Lighting.Framework
         /// <summary>The number of in-flight jobs currently held by the simulator (scheduled but not yet completed).</summary>
         public int InFlightCount => _pendingFlights.Count;
 
+        /// <summary>The current frame number, incremented at the start of each <see cref="RunFrame"/> call.</summary>
+        public int CurrentFrame => _currentFrame;
+
         /// <summary>
         /// Executes one simulated frame tick, mirroring the production <c>ProcessLightingJobs</c> →
         /// <c>World.Update</c> lighting-scan cycle:
         /// <list type="number">
-        /// <item>Complete all pending flights (in the specified order), applying cross-chunk mods via
-        /// the existing <see cref="LightingTestWorld.CompleteLightingJob"/> logic.</item>
+        /// <item>Complete pending flights that pass the <paramref name="completionPredicate"/> (in the
+        /// specified order), applying cross-chunk mods via the existing
+        /// <see cref="LightingTestWorld.CompleteLightingJob"/> logic. Flights rejected by the predicate
+        /// remain in-flight, keeping their chunk locked by the <c>ContainsKey</c> guard.</item>
         /// <item>Schedule new jobs for chunks with pending work, up to the budget, respecting the
         /// <see cref="LightingScheduleDecision"/> in-flight guard.</item>
         /// </list>
@@ -73,32 +92,50 @@ namespace Editor.Validation.Lighting.Framework
         /// <param name="order">The order in which pending flights are completed. Affects which
         /// cross-chunk mods are deferred vs. applied directly (the <c>_completedLightJobs</c> ordering
         /// dependency in production's <c>ProcessLightingJobs</c>).</param>
+        /// <param name="completionPredicate">Optional predicate controlling which flights complete this
+        /// frame. Receives the flight and its age in frames (current frame minus the frame it was
+        /// scheduled on). Returns <c>true</c> to complete the flight, <c>false</c> to hold it in-flight.
+        /// When <c>null</c> (default), all flights complete — preserving the original behavior.</param>
         /// <returns>Statistics for this frame tick.</returns>
-        public FrameResult RunFrame(int budget = int.MaxValue, CompletionOrder order = CompletionOrder.Fifo)
+        public FrameResult RunFrame(int budget = int.MaxValue, CompletionOrder order = CompletionOrder.Fifo,
+            Func<LightingTestWorld.LightingJobFlight, int, bool> completionPredicate = null)
         {
+            _currentFrame++;
             FrameResult result = default;
 
-            // --- Phase 1: Complete pending flights ---
+            // --- Phase 1: Complete pending flights (selectively) ---
             if (_pendingFlights.Count > 0)
             {
-                List<LightingTestWorld.LightingJobFlight> toComplete;
+                List<PendingFlight> toProcess;
                 if (order == CompletionOrder.Reverse)
                 {
-                    toComplete = new List<LightingTestWorld.LightingJobFlight>(_pendingFlights);
-                    toComplete.Reverse();
+                    toProcess = new List<PendingFlight>(_pendingFlights);
+                    toProcess.Reverse();
                 }
                 else
                 {
-                    toComplete = _pendingFlights;
+                    toProcess = new List<PendingFlight>(_pendingFlights);
                 }
 
-                foreach (LightingTestWorld.LightingJobFlight flight in toComplete)
+                List<PendingFlight> carriedOver = new List<PendingFlight>();
+
+                foreach (PendingFlight pending in toProcess)
                 {
-                    _world.CompleteLightingJob(flight);
+                    int age = _currentFrame - pending.ScheduledOnFrame;
+
+                    if (completionPredicate != null && !completionPredicate(pending.Flight, age))
+                    {
+                        carriedOver.Add(pending);
+                        result.JobsCarriedOver++;
+                        continue;
+                    }
+
+                    _world.CompleteLightingJob(pending.Flight);
                     result.JobsCompleted++;
                 }
 
                 _pendingFlights.Clear();
+                _pendingFlights.AddRange(carriedOver);
             }
 
             // --- Phase 2: Schedule new jobs ---
@@ -124,7 +161,11 @@ namespace Editor.Validation.Lighting.Framework
                     continue;
                 }
 
-                _pendingFlights.Add(_world.BeginLightingJob(coord));
+                _pendingFlights.Add(new PendingFlight
+                {
+                    Flight = _world.BeginLightingJob(coord),
+                    ScheduledOnFrame = _currentFrame,
+                });
                 scheduled++;
             }
 
@@ -136,6 +177,11 @@ namespace Editor.Validation.Lighting.Framework
         /// Runs frame ticks until all chunks converge (no pending light work and no in-flight jobs)
         /// or the frame budget is exhausted. This is the frame-aware equivalent of
         /// <see cref="LightingTestWorld.RunToConvergence"/>.
+        /// <para>
+        /// This method always uses a <c>null</c> completion predicate (complete-all). Scenarios that
+        /// need multi-frame job lifetimes should drive the frame loop manually with explicit per-frame
+        /// predicates, then call this method for the final convergence phase.
+        /// </para>
         /// </summary>
         /// <param name="maxFrames">Maximum number of frame ticks before giving up.</param>
         /// <param name="budgetPerFrame">Jobs per frame (mirrors <c>maxLightJobsPerFrame</c>).</param>
@@ -169,5 +215,44 @@ namespace Editor.Validation.Lighting.Framework
         {
             return RunToConvergence(maxFrames, budgetPerFrame: 1, order);
         }
+
+        #region Completion Predicate Factories
+
+        /// <summary>
+        /// Creates a predicate that completes flights only after they have been in-flight for at least
+        /// <paramref name="minFrames"/> frames. Models Burst jobs that take multiple frames to complete.
+        /// </summary>
+        /// <param name="minFrames">Minimum age (in frames) before a flight is eligible for completion.</param>
+        /// <returns>A completion predicate for use with <see cref="RunFrame"/>.</returns>
+        public static Func<LightingTestWorld.LightingJobFlight, int, bool> MinAge(int minFrames)
+        {
+            return (_, age) => age >= minFrames;
+        }
+
+        /// <summary>
+        /// Creates a predicate that only completes flights targeting the specified chunk coordinates.
+        /// All other flights are held in-flight. Useful for step-by-step scenario scripting where
+        /// specific chunks must complete in a controlled order.
+        /// </summary>
+        /// <param name="coords">The chunk coordinates whose flights should complete.</param>
+        /// <returns>A completion predicate for use with <see cref="RunFrame"/>.</returns>
+        public static Func<LightingTestWorld.LightingJobFlight, int, bool> OnlyChunks(params Vector2Int[] coords)
+        {
+            return (flight, _) => Array.IndexOf(coords, flight.ChunkCoord) >= 0;
+        }
+
+        /// <summary>
+        /// Creates a predicate that completes all flights EXCEPT those targeting the specified chunk
+        /// coordinates. Those flights are held in-flight, simulating a long-running Burst job for
+        /// specific chunks while others complete normally.
+        /// </summary>
+        /// <param name="coords">The chunk coordinates whose flights should be held back.</param>
+        /// <returns>A completion predicate for use with <see cref="RunFrame"/>.</returns>
+        public static Func<LightingTestWorld.LightingJobFlight, int, bool> ExceptChunks(params Vector2Int[] coords)
+        {
+            return (flight, _) => Array.IndexOf(coords, flight.ChunkCoord) < 0;
+        }
+
+        #endregion
     }
 }
