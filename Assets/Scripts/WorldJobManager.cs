@@ -972,6 +972,13 @@ public class WorldJobManager : IDisposable
             int localX = mod.GlobalPosition.x - chunkVoxelPos.x;
             int localZ = mod.GlobalPosition.z - chunkVoxelPos.y;
 
+            if (localX < 0 || localX >= VoxelData.ChunkWidth ||
+                localZ < 0 || localZ >= VoxelData.ChunkWidth)
+            {
+                Debug.LogError($"[DegradeDeferredCrossChunkMods] Invalid local column calculation: ({localX.ToString()}, {localZ.ToString()}) for global pos {mod.GlobalPosition.ToString()}");
+                continue;
+            }
+
             if (mod.Channel == LightChannel.Sun)
             {
                 if (!_droppedLightUpdates.TryGetValue(chunkCoord, out HashSet<Vector2Int> cols))
