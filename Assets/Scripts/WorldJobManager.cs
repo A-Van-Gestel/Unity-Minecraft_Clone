@@ -364,9 +364,15 @@ public class WorldJobManager : IDisposable
     public bool ScheduleLightingUpdate(ChunkData chunkData, Allocator allocator = Allocator.Persistent)
     {
         ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
-        if (LightingJobs.ContainsKey(chunkCoord)) return false;
 
-        if (!_world.AreNeighborsDataReady(chunkCoord))
+        LightingScheduleDecision.Result decision = LightingScheduleDecision.Evaluate(
+            LightingJobs.ContainsKey(chunkCoord),
+            _world.AreNeighborsDataReady(chunkCoord));
+
+        if (decision == LightingScheduleDecision.Result.AlreadyInFlight)
+            return false;
+
+        if (decision == LightingScheduleDecision.Result.NeighborsNotReady)
         {
             chunkData.HasLightChangesToProcess = true;
             return false;
