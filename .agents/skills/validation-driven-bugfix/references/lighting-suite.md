@@ -23,7 +23,8 @@ Namespace: suite = `Editor.Validation.Lighting`, framework = `Editor.Validation.
 
 `Assets/Scripts/Helpers/LightingJobProcessor.cs` — pure static routing decision for a job's emitted cross-chunk mods (drop / persist / defer / apply) plus the stability override. Also called by both production and harness. **Fixes to the defer-vs-apply ordering rule go here, never duplicated into the harness.**
 
-> ⚠️ **Before authoring a repro, know the harness's blind spots.** A green suite does NOT prove an un-modelled area is correct — the harness reimplements the per-section merge as a flat-array copy (section/uniform-sky bugs invisible) and cannot model chunk unload, persist/replay, `neighborsDataReady == false`, pool recycle, or true async races. Read [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../../../../Documentation/Architecture/LIGHTING_VALIDATION_HARNESS_FIDELITY.md) before concluding a bug "can't be reproduced".
+> ⚠️ **Before authoring a repro, know the harness's blind spots.** A green suite does NOT prove an un-modelled area is correct. Closed since this note was written: the per-section merge runs real `ChunkData` code (A1) and chunk unload / persist / replay is modelled (B1, baselines B30–B32). Still un-modelled: `neighborsDataReady == false` (B2), pool recycle / `ChunkData.Reset()` stale-state (B4), and true async races (B3, structural).
+> Read [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../../../../Documentation/Architecture/LIGHTING_VALIDATION_HARNESS_FIDELITY.md) before concluding a bug "can't be reproduced".
 
 ## Harness API cheat sheet
 

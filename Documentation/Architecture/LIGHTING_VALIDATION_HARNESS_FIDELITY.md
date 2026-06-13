@@ -14,6 +14,9 @@ it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real 
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
 helpers `CrossChunkLightModApplier`, `LightingScheduleDecision`, and `LightingJobProcessor`.
 
+it executes the real persist/replay store (`LightingStateManager` in its disk-free in-memory mode, behind
+`IPendingLightStore`) and shares the cross-chunk persist column math via `LightingModPersister` (see B1).
+
 It is **blind** wherever it *reimplements* production or *omits a pipeline stage*. A green suite does
 **not** prove those areas are correct. This document enumerates those blind spots so that:
 
@@ -87,7 +90,7 @@ there is invisible.
   `World.Instance.settings.enableLighting` and flag `HasLightChangesToProcess` (→ `OnLightWorkFlagged`),
   so the editor harness (no live `World`) cannot reuse them and seeds its own `TestChunk` queues. Sharing
   this would require decoupling those methods from `World` **and** touching the hot `ModifyVoxel` edit
-  path — not worth it for a LOW finding. Likewise the opacity-change column recalc routes through the
+  path — not worth it for a LOW finding. Likewise, the opacity-change column recalc routes through the
   **world-level** `WorldData.SunlightRecalculationQueue` in production vs a per-chunk queue in the harness
   (the structural divergence near Bug 09's suspected "fluid re-flow floods the queue" path).
 - **Mitigation for the remainder:** periodically re-diff the harness `PlaceBlock` enqueue/wake against
@@ -109,16 +112,31 @@ there is invisible.
 
 ## 3. Missing harness features (whole bug classes unreachable)
 
-### B1 — No chunk-unload / `RequestChunk == null` / persist-replay path ·  **OPEN · HIGH**
+### B1 — No chunk-unload / `RequestChunk == null` / persist-replay path ·  **CLOSED (2026-06-14)**
 
-- Production `ProcessLightingJobs` has a large branch the harness has no analog for:
-  `DegradeDeferredCrossChunkMods`, `PersistUndeliverableLightMod`, `_droppedLightUpdates` →
-  `LightingStateManager.AddPending`, and replay-on-load. The grid is fixed; chunks never vanish or become
-  unpopulated mid-flight.
-- Bug 09's own suspected cause ("job cancelled/re-scheduled", "chunk lost data mid-flight") lives partly
-  here. The entire persist/replay light path is untested.
-- **Suggested feature:** a "mark chunk unloaded/unpopulated mid-flight" capability on `LightingTestWorld`
-  so `RouteCrossChunkMod` can return `PersistUndeliverable` and the degrade/replay path becomes reachable.
+- **Was:** the grid was fixed; chunks never went unloaded mid-flight, so production's large
+  `ProcessLightingJobs` branch — `PersistUndeliverableLightMod`, `_droppedLightUpdates` →
+  `LightingStateManager.AddPending`/`AddPendingBlocklight`, `DegradeDeferredCrossChunkMods`, and
+  replay-on-load — had no harness analog. `RouteCrossChunkMod`'s `PersistUndeliverable` arm was
+  structurally unreachable (the harness hardcoded `targetLoaded: targetInWorld`). The whole
+  persist/degrade/replay path — including Bug 08 path 1 and the "chunk lost data mid-flight" half of
+  Bug 09 — was untested.
+- **Now:** `TestChunk.IsLoaded` + `LightingTestWorld.MarkChunkUnloaded`/`MarkChunkLoaded` model an
+  in-world-but-unloaded chunk. `CompleteLightingJob` passes the **real** `targetLoaded`, so the
+  `PersistUndeliverable` route fires into a real, disk-free `LightingStateManager` (`CreateInMemory()`,
+  held as `IPendingLightStore` so `Save`/`Load` are unreachable — disk I/O is impossible by construction,
+  no cross-run `pending_*.bin` contamination). The emitting-chunk-unloaded-mid-flight `else` branch +
+  `DegradeDeferredCrossChunkMods` are mirrored; `MarkChunkLoaded` replays the persisted work (sun columns
+    + blocklight through the shared `CrossChunkLightModApplier.ComputeBlocklight`) or discards it
+      (`ChunkLoadMode.FreshlyGenerated` → `DiscardPendingBlocklight`). The per-mod local-column math is shared
+      with production via `LightingModPersister.TryComputeLocalColumn` (a build-time seam — divergence breaks
+      the build). Baselines **B30** (persist→replay), **B31** (deferred-mod degrade → replay), and **B32**
+      (freshly-generated discard, spill re-derived from the loaded neighbor) all converge to the oracle.
+- **Still NOT covered (minor):** the on-disk `Save()`/`Load()` binary round-trip is out of scope by design
+  (a serialization concern, not lighting correctness — the in-memory store exercises the identical
+  `Add*`/`TryGetAndRemove*` logic). The `AddPendingBlocklight` placement-after-removal guard
+  (`LightingStateManager.cs:145`) and sunlight-column persist→replay are run by the store but not yet
+  pinned by a dedicated baseline assertion.
 
 ### B2 — `neighborsDataReady` is hardcoded `true` in the frame simulator ·  **OPEN · MEDIUM**
 
@@ -176,7 +194,6 @@ there is invisible.
 
 | #  | Finding                                         | Status      | Priority        | Effort         |
 |----|-------------------------------------------------|-------------|-----------------|----------------|
-| B1 | Chunk-unload / persist-replay path              | OPEN        | High            | Medium         |
 | C1 | Bug-09 fuzz layer (randomize geometry)          | OPEN        | High (ROI)      | Low            |
 | B2 | `neighborsDataReady` toggle                     | OPEN        | Medium          | Low            |
 | B4 | Pool-recycle / flag-pairing                     | OPEN        | Medium          | Medium         |
@@ -184,6 +201,7 @@ there is invisible.
 | A3 | `ModifyVoxel` heightmap (shared) / enqueue path | **PARTIAL** | Low             | heightmap done |
 | A4 | Oracle shared-assumption probes                 | OPEN        | Low             | Low            |
 | B5 | Meshing-gate coverage                           | OPEN        | Low (by design) | —              |
+| B1 | Chunk-unload / persist-replay path              | **CLOSED**  | —               | done           |
 | A1 | Section / uniform-sky merge bypass              | **CLOSED**  | —               | done           |
 | A2 | Shared mod-routing decision                     | **CLOSED**  | —               | done           |
 

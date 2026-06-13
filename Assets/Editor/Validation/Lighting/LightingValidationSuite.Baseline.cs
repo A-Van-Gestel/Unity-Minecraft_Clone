@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Editor.Validation.Lighting.Framework;
 using UnityEngine;
@@ -44,6 +43,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B27: Shuffled scheduling under budget pressure converges across 50 seeds (Bug 09 guard)", Baseline_ShuffledBudgetPressure));
             scenarios.Add(new Scenario("B28: Shuffled dual-chunk interleaved flights converge across 50 seeds (Bug 09 guard)", Baseline_ShuffledDualChunkInterleaved));
             scenarios.Add(new Scenario("B29: Combined stress — all harness layers simultaneously — converges across 50 seeds (Bug 09 guard)", Baseline_CombinedStress));
+            scenarios.Add(new Scenario("B30: Cross-chunk blocklight toward an unloaded neighbor persists and replays on load (Bug 08 path-1)", Baseline_PersistReplayCrossChunkBlocklight));
+            scenarios.Add(new Scenario("B31: Deferred mods degrade to the pending store when the emitting chunk unloads mid-flight, then replay on load", Baseline_DegradeDeferredOnEmittingChunkUnload));
+            scenarios.Add(new Scenario("B32: Freshly-generated chunk discards persisted blocklight and re-derives the spill from its loaded neighbor", Baseline_GeneratedChunkDiscardsPendingBlocklight));
         }
 
         /// <summary>
@@ -838,14 +840,14 @@ namespace Editor.Validation.Lighting
             // Frame 1: Break lamp → A schedules removal. Hold everything.
             world.BreakBlock(lampPos);
             LightingFrameSimulator.FrameResult f1 = sim.RunFrame(
-                completionPredicate: (_, __) => false);
+                completionPredicate: (_, _) => false);
             passed &= LightingAssert.IsTrue(f1.JobsScheduled >= 1,
                 "B22: frame 1 schedules removal job",
                 $"Expected >= 1 job scheduled, got {f1.JobsScheduled}");
 
             // Frame 2: Place lamp (queued). B schedules. Hold everything.
             world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
-            sim.RunFrame(completionPredicate: (_, __) => false);
+            sim.RunFrame(completionPredicate: (_, _) => false);
 
             // Frame 3: Complete A only. A's removal mods for B → DEFERRED. A re-schedules.
             sim.RunFrame(completionPredicate: LightingFrameSimulator.OnlyChunks(chunkA));
@@ -1012,17 +1014,17 @@ namespace Editor.Validation.Lighting
 
             // Cycle 1
             world.BreakBlock(lampPos);
-            sim.RunFrame(completionPredicate: (_, __) => false);
+            sim.RunFrame(completionPredicate: (_, _) => false);
             world.PlaceBlock(lampPos, TestBlockPalette.Water);
-            sim.RunFrame(completionPredicate: (_, __) => false);
+            sim.RunFrame(completionPredicate: (_, _) => false);
             world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
-            sim.RunFrame(completionPredicate: (_, __) => false);
+            sim.RunFrame(completionPredicate: (_, _) => false);
 
             // Cycle 2
             world.BreakBlock(lampPos);
-            sim.RunFrame(completionPredicate: (_, __) => false);
+            sim.RunFrame(completionPredicate: (_, _) => false);
             world.PlaceBlock(lampPos, TestBlockPalette.Water);
-            sim.RunFrame(completionPredicate: (_, __) => false);
+            sim.RunFrame(completionPredicate: (_, _) => false);
             world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
             sim.RunFrame(completionPredicate: LightingFrameSimulator.OnlyChunks(chunkA));
 
@@ -1211,15 +1213,15 @@ namespace Editor.Validation.Lighting
                 {
                     world.BreakBlock(lampPos);
                     sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled,
-                        completionPredicate: (_, __) => false);
+                        completionPredicate: (_, _) => false);
 
                     world.PlaceBlock(lampPos, TestBlockPalette.Water);
                     sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled,
-                        completionPredicate: (_, __) => false);
+                        completionPredicate: (_, _) => false);
 
                     world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
                     sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled,
-                        completionPredicate: (_, __) => false);
+                        completionPredicate: (_, _) => false);
 
                     sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled);
                     sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled);
@@ -1282,28 +1284,28 @@ namespace Editor.Validation.Lighting
                     // === Cycle 1: break + fluid + place, all held, budget=1 ===
                     world.BreakBlock(lampPos);
                     sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
-                        completionPredicate: (_, __) => false);
+                        completionPredicate: (_, _) => false);
 
                     world.PlaceBlock(lampPos, TestBlockPalette.Water);
                     sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
-                        completionPredicate: (_, __) => false);
+                        completionPredicate: (_, _) => false);
 
                     world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
                     sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
-                        completionPredicate: (_, __) => false);
+                        completionPredicate: (_, _) => false);
 
                     // === Cycle 2: break + fluid + place again, still held ===
                     world.BreakBlock(lampPos);
                     sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
-                        completionPredicate: (_, __) => false);
+                        completionPredicate: (_, _) => false);
 
                     world.PlaceBlock(lampPos, TestBlockPalette.Water);
                     sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
-                        completionPredicate: (_, __) => false);
+                        completionPredicate: (_, _) => false);
 
                     world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
                     sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
-                        completionPredicate: (_, __) => false);
+                        completionPredicate: (_, _) => false);
 
                     // === Interleaved release under budget pressure ===
                     sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
@@ -1330,6 +1332,128 @@ namespace Editor.Validation.Lighting
                     ? $"REGRESSION: seed {failingSeed.Value} produces oracle mismatch under combined stress"
                     : "");
 
+            return passed;
+        }
+
+        /// <summary>
+        /// B30: The cross-chunk persist→replay round-trip (closes the B1 harness gap in
+        /// LIGHTING_VALIDATION_HARNESS_FIDELITY.md; the blocklight half of Bug 08, path 1). A torch on
+        /// the last column of chunk (1,1) would normally spill into (2,1), but (2,1) is UNLOADED when the
+        /// edit converges — so the emitted cross-chunk mod is routed to <c>PersistUndeliverable</c> and
+        /// saved in the (in-memory) <c>LightingStateManager</c> instead of applied. While (2,1) is
+        /// unloaded its blocklight stays dark; once it is marked loaded, the persisted mod is replayed
+        /// through the real <c>CrossChunkLightModApplier.ComputeBlocklight</c> path and BFS reconstructs
+        /// the full spill — the converged field must match the all-loaded oracle exactly.
+        /// </summary>
+        private static bool Baseline_PersistReplayCrossChunkBlocklight()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B30: initial lighting converges");
+
+            // (2,1) is in-world but unloaded: the lamp's cross-chunk mod must be persisted, not applied.
+            world.MarkChunkUnloaded(new Vector2Int(2, 1));
+            world.PlaceBlock(new Vector3Int(31, 11, 24), TestBlockPalette.Torch);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B30: persist-while-unloaded converges");
+
+            // The spill never crossed the border — it was persisted instead of applied.
+            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(33, 11, 24)) == (0, 0, 0),
+                "B30: light stays out of the unloaded neighbor (persisted, not applied)",
+                $"Expected (0,0,0) at x=33 while (2,1) unloaded, got {world.GetBlocklightRGB(new Vector3Int(33, 11, 24))}");
+
+            // Reload (2,1): the persisted mod replays and propagation re-runs.
+            world.MarkChunkLoaded(new Vector2Int(2, 1), LightingTestWorld.ChunkLoadMode.LoadFromDisk);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B30: post-replay convergence");
+
+            // Same value the working live cross-chunk path produces (cf. B5): 14 at the torch, −1 per air step.
+            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(33, 11, 24)) == (12, 12, 12),
+                "B30: replayed light crosses the chunk border",
+                $"Expected (12,12,12) at x=33 after replay, got {world.GetBlocklightRGB(new Vector3Int(33, 11, 24))}");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B30: replayed field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B31: The degrade path (closes the second half of the B1 gap). A cross-chunk mod that was
+        /// DEFERRED for chunk (2,1) (because (2,1) had its own job in flight) can no longer be drained
+        /// when (2,1)'s job completes while the chunk is UNLOADED — its result is discarded, so the
+        /// deferred mods are degraded to the pending store (mirror of
+        /// <c>WorldJobManager.DegradeDeferredCrossChunkMods</c>) rather than lost. Marking (2,1) loaded
+        /// then replays them, and the converged field must match the all-loaded oracle.
+        /// </summary>
+        private static bool Baseline_DegradeDeferredOnEmittingChunkUnload()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B31: initial lighting converges");
+
+            // (2,1)'s job is in flight, so (1,1)'s emitted spill mod is DEFERRED for it (not applied).
+            LightingTestWorld.LightingJobFlight inFlightB = world.BeginLightingJob(new Vector2Int(2, 1));
+            world.PlaceBlock(new Vector3Int(31, 11, 24), TestBlockPalette.Torch);
+            LightingTestWorld.LightingRunResult aResult = world.RunLightingJob(new Vector2Int(1, 1));
+            passed &= LightingAssert.IsTrue(aResult.ModsDeferred > 0,
+                "B31: spill mod is deferred while the neighbor's job is in flight",
+                $"Expected ModsDeferred > 0, got {aResult.ModsDeferred}");
+
+            // (2,1) unloads before its job completes: the deferred mods can never be drained, so
+            // completing the (now discarded) job must DEGRADE them to the pending store.
+            world.MarkChunkUnloaded(new Vector2Int(2, 1));
+            LightingTestWorld.LightingRunResult bResult = world.CompleteLightingJob(inFlightB);
+            passed &= LightingAssert.IsTrue(bResult.ModsDegraded > 0,
+                "B31: inbound deferred mods degrade when the emitting chunk is unloaded",
+                $"Expected ModsDegraded > 0, got {bResult.ModsDegraded}");
+
+            // Reload (2,1): the degraded-then-persisted mods replay and propagation re-runs.
+            world.MarkChunkLoaded(new Vector2Int(2, 1), LightingTestWorld.ChunkLoadMode.LoadFromDisk);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B31: post-replay convergence");
+
+            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(33, 11, 24)) == (12, 12, 12),
+                "B31: degraded-then-replayed light crosses the chunk border",
+                $"Expected (12,12,12) at x=33 after replay, got {world.GetBlocklightRGB(new Vector3Int(33, 11, 24))}");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B31: replayed field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B32: The freshly-generated discard path (<c>DiscardPendingBlocklight</c>). When a chunk is
+        /// regenerated rather than loaded from disk, blocklight mods recorded while it was absent are
+        /// obsolete — initial lighting recomputes all blocklight from current neighbor data. Here (2,1)
+        /// accumulates a persisted spill from (1,1)'s torch while unloaded, is then marked loaded in
+        /// <c>FreshlyGenerated</c> mode (discarding that persisted blocklight), and re-lit: the spill must
+        /// be re-derived from the loaded neighbor's border light, so the converged field still matches the
+        /// oracle. Guards that discarding never loses light that the neighbor can re-supply.
+        /// </summary>
+        private static bool Baseline_GeneratedChunkDiscardsPendingBlocklight()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B32: initial lighting converges");
+
+            // Torch spills toward the unloaded (2,1): the mod is persisted (not applied).
+            world.MarkChunkUnloaded(new Vector2Int(2, 1));
+            world.PlaceBlock(new Vector3Int(31, 11, 24), TestBlockPalette.Torch);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B32: persist-while-unloaded converges");
+
+            // Regenerate (2,1): the persisted blocklight is DISCARDED, not replayed.
+            world.MarkChunkLoaded(new Vector2Int(2, 1), LightingTestWorld.ChunkLoadMode.FreshlyGenerated);
+
+            // Re-light the whole grid (initial-generation convergence + edge-check rounds): the discarded
+            // spill must be re-derived from (1,1)'s border light, since the torch is still present there.
+            passed &= LightingAssert.Converged(world.RunInitialLighting(), "B32: post-regeneration re-lighting converges");
+
+            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(33, 11, 24)) == (12, 12, 12),
+                "B32: discarded spill is re-derived from the loaded neighbor",
+                $"Expected (12,12,12) at x=33 after regeneration, got {world.GetBlocklightRGB(new Vector3Int(33, 11, 24))}");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B32: re-derived field matches oracle");
             return passed;
         }
     }
