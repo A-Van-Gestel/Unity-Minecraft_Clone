@@ -137,6 +137,14 @@ namespace Serialization
                 _pendingBlocklightMods[chunkCoord] = mods;
             }
 
+            // Guard against a placement mod overwriting a prior removal mod for the same voxel:
+            // the removal's darkness wave must still run to clear the old lamp's propagated light;
+            // the placement's uplift will be recomputed by SyncEmissionToLightArray on load since
+            // the block's emission is baked into the packed uint data. A removal may always overwrite
+            // a placement (the block is gone), and same-type overwrites keep the latest state.
+            if (!isRemoval && mods.TryGetValue(localPos, out PendingBlocklightMod existing) && existing.IsRemoval)
+                return;
+
             mods[localPos] = new PendingBlocklightMod { R = r, G = g, B = b, IsRemoval = isRemoval };
         }
 
