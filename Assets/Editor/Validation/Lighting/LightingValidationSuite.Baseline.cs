@@ -28,6 +28,8 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B12: Broken source's area is re-lit by the cross-border independent source", Baseline_CrossBorderRespread));
             scenarios.Add(new Scenario("B13: Sunlight uplift mods survive an in-flight neighbor job (race)", Baseline_InFlightSunlightUpliftRace));
             scenarios.Add(new Scenario("B14: Generated emissive block illuminates surroundings on initial lighting", Baseline_GeneratedEmissiveSeedsBfs));
+            scenarios.Add(new Scenario("B15: Rapid break+place at chunk border with neighbor in-flight converges (Bug 09 guard)", Baseline_RapidBreakPlaceCrossChunkInFlight));
+            scenarios.Add(new Scenario("B16: Double rapid break+place with both chunks in-flight converges (Bug 09 guard)", Baseline_DoubleRapidBreakPlaceBothInFlight));
         }
 
         /// <summary>
@@ -452,6 +454,114 @@ namespace Editor.Validation.Lighting
                 $"Expected (14,14,14) next to the lamp, got {world.GetBlocklightRGB(new Vector3Int(25, 11, 24))} — emission was stamped but never propagated");
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B14: field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B15: A lamp on the last column of chunk A (x=31) whose light spills into chunk B (x≥32).
+        /// Chunk B has a lighting job in-flight (simulating concurrent voxel-edit contention from fluid
+        /// flow). The lamp is broken and immediately re-placed while B is in-flight, so the removal
+        /// cross-chunk mods are deferred and the new emission snapshots stale neighbor light. After
+        /// convergence, the light field must match the oracle.
+        ///
+        /// Authored as a Bug 09 repro attempt — the engine converges correctly under this deterministic
+        /// interleaving (the defer/drain mechanism handles it). Guards that the break+place race with
+        /// a single in-flight neighbor doesn't regress. Bug 09 likely requires production-only timing
+        /// (frame-budget throttling, fluid re-scheduling contention) that the harness cannot model;
+        /// a faithful repro remains TODO.
+        /// </summary>
+        private static bool Baseline_RapidBreakPlaceCrossChunkInFlight()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B15: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B15: initial lamp converges");
+
+            Vector2Int chunkB = new Vector2Int(2, 1);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+            LightingTestWorld.LightingJobFlight flightB = world.BeginLightingJob(chunkB);
+
+            world.BreakBlock(lampPos);
+            world.RunLightingJob(chunkA);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+
+            world.CompleteLightingJob(flightB);
+
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B15: post-race convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B15: field matches oracle after rapid break+place race");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(32, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
+                "B15: blocklight crosses chunk border after race",
+                $"Expected R >= 13 at x=32 (one step from lamp), got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B16: Two rapid break+place cycles with both chunks having jobs in-flight during the second
+        /// cycle (wave-parallel). Guards that the defer/drain mechanism handles bidirectional in-flight
+        /// contention without light loss.
+        ///
+        /// Authored as a Bug 09 total-emission-loss repro attempt — the engine converges correctly.
+        /// Bug 09 likely requires production-only timing; a faithful repro remains TODO.
+        /// </summary>
+        private static bool Baseline_DoubleRapidBreakPlaceBothInFlight()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B16: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+            Vector2Int chunkB = new Vector2Int(2, 1);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B16: initial lamp converges");
+
+            LightingTestWorld.LightingJobFlight flightB1 = world.BeginLightingJob(chunkB);
+            world.BreakBlock(lampPos);
+            world.RunLightingJob(chunkA);
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            world.CompleteLightingJob(flightB1);
+
+            world.RunLightingJob(chunkA);
+            if (world.HasPendingLightWork)
+                world.RunLightingJob(chunkB);
+
+            LightingTestWorld.LightingJobFlight flightA = world.BeginLightingJob(chunkA);
+            LightingTestWorld.LightingJobFlight flightB2 = world.BeginLightingJob(chunkB);
+
+            world.BreakBlock(lampPos);
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+
+            world.CompleteLightingJob(flightA);
+            world.CompleteLightingJob(flightB2);
+
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B16: post-double-race convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B16: field matches oracle after double race");
+
+            (byte R, byte G, byte B) atLamp = world.GetBlocklightRGB(new Vector3Int(30, 11, 24));
+            passed &= LightingAssert.IsTrue(atLamp.R >= 14,
+                "B16: blocklight present in chunk A after double race",
+                $"Expected R >= 14 adjacent to lamp in chunk A, got ({atLamp.R},{atLamp.G},{atLamp.B})");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(32, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
+                "B16: blocklight crosses into chunk B after double race",
+                $"Expected R >= 13 at x=32 in chunk B, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
             return passed;
         }
     }

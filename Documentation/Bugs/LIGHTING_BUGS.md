@@ -34,3 +34,39 @@ We implemented iterative `RemainingEdgeCheckRounds = 2` to combat this, but dens
 
 **Validation suite (June 2026):** a minimal repro attempt — 5×5 grid, full slab with a single *diagonal* sky well, all chunks lit in one concurrent wave with stale snapshots plus the production 2 edge-check rounds — **converges to the oracle** and now guards as baseline scenario **B8**. A faithful failing repro (denser multi-pocket canopies / different mod-loss timing) is still TODO before this bug's fix can be test-driven.
 
+---
+
+## Bug 09: Cross-Chunk Blocklight Lost on Rapid Place/Break at Chunk Border
+
+**Severity:** Medium-High
+**Status:** Open
+
+**Description:**
+When rapidly breaking and re-placing a blocklight source (e.g., a torch or glowstone) at a chunk border — specifically in Chunk A adjacent to Chunk B — the lighting engine can fail to propagate the blocklight emission into Chunk B, or fail to emit light entirely in both chunks. Two distinct failure modes are observed:
+
+1. **Partial propagation:** Chunk A receives the blocklight correctly, but Chunk B stays dark — the cross-chunk BFS propagation is silently skipped.
+2. **Total emission loss:** Neither Chunk A nor Chunk B receives any blocklight, despite the emissive block being physically present in the world.
+
+The issue is **not permanent** — forcing a lighting update on the affected chunk(s) (e.g., placing/breaking another block nearby) correctly re-triggers the BFS and restores proper lighting. This suggests the light data is not corrupted, but rather the emission seeding or cross-chunk mod delivery is being dropped during a specific race window.
+
+**Reproduction Steps:**
+1. Enter a world and navigate to a chunk border (ideally underwater in an ocean biome for easier reproduction).
+2. Place a blocklight source (e.g., Jack O' Lantern) in Chunk A, directly adjacent to the Chunk B border.
+3. Break the light source and immediately re-place it. Repeat rapidly.
+4. Observe that after several cycles, Chunk B (or both chunks) may fail to update with the new blocklight.
+
+**Aggravating factors:**
+- **Fluid-heavy chunks significantly increase reproduction rate.** Testing underwater in ocean biomes shows noticeably slower cross-chunk light updates compared to non-fluid biomes. The additional voxel modifications from fluid flow (e.g., water flowing back into the broken block's position) likely create contention with the lighting job pipeline — either by flooding the deferred cross-chunk mod queue or by causing the chunk's lighting job to be scheduled/cancelled repeatedly before cross-chunk mods are delivered.
+- **IL2CPP master build timing:** All testing was performed in a release IL2CPP build. Mono/Editor builds would be slower overall, potentially widening or narrowing the race window.
+
+**Root Cause Suspected:**
+A race condition in the cross-chunk blocklight mod delivery path. When a blocklight source is broken and re-placed in rapid succession while the chunk is simultaneously undergoing other voxel modifications (fluid re-flow), one of the following likely occurs:
+
+- The removal pass's deferred cross-chunk mods for Chunk B are still in flight when the new placement triggers a fresh lighting job, causing the new emission's cross-chunk mods to be dropped or overwritten.
+- The chunk's lighting job is cancelled and re-scheduled due to the concurrent voxel modification (fluid flow), and the re-scheduling loses the pending blocklight emission seed.
+- The deferred cross-chunk mod queue for Chunk B is processed against stale snapshot data, causing the mods to be silently discarded as no-ops.
+
+**Validation suite (June 2026):** Two repro attempts were made — single-cycle break+place with neighbor in-flight, and double-cycle with both chunks in-flight (wave-parallel). Both converge to the oracle field — they now guard the defer/drain mechanism as baselines **B15** and **B16**. The bug likely requires production-only timing (frame-budget throttling, fluid re-scheduling contention, or the `LightingJobs.ContainsKey` guard preventing re-scheduling during rapid edits under load) that the deterministic harness cannot model. A faithful failing repro is still TODO before this bug's fix can be test-driven.
+
+**Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
+
