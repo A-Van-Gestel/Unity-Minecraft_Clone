@@ -190,7 +190,8 @@ namespace Jobs
 
                 if (newR != curR || newG != curG || newB != curB)
                 {
-                    SetBlocklightRGB(node.Position, newR, newG, newB, isRemovalContext: true, ref neighborWriteCache);
+                    bool isRemoval = newR < curR || newG < curG || newB < curB;
+                    SetBlocklightRGB(node.Position, newR, newG, newB, isRemovalContext: isRemoval, ref neighborWriteCache);
                 }
 
                 bool anyIncreased = newR > node.OldBlockR || newG > node.OldBlockG || newB > node.OldBlockB;
