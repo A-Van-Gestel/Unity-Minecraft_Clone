@@ -445,7 +445,7 @@ namespace Jobs
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte AttenuateLight(int sourceLight, byte opacity)
         {
-            return (byte)Mathf.Max(0, sourceLight - Mathf.Max(1, opacity));
+            return (byte)math.max(0, sourceLight - math.max(1, (int)opacity));
         }
 
         private void PropagateLight(Vector3Int pos, LightChannel channel, NativeQueue<Vector3Int> pQueue, ref NativeHashMap<long, ulong> cache)
@@ -480,7 +480,7 @@ namespace Jobs
 
                 if (neighborProps.IsOpaque)
                 {
-                    lightToPropagate = (byte)Mathf.Max(0, sourceLight - 1);
+                    lightToPropagate = (byte)math.max(0, sourceLight - 1);
                     if (lightToPropagate > neighborLight)
                     {
                         SetSunlight(neighborPos, lightToPropagate, ref cache);
@@ -559,13 +559,13 @@ namespace Jobs
                 if (neighborProps.IsOpaque)
                 {
                     // Opaque blocks receive surface light (source - 1) but do not propagate further
-                    byte propR = (byte)Mathf.Max(0, srcR - 1);
-                    byte propG = (byte)Mathf.Max(0, srcG - 1);
-                    byte propB = (byte)Mathf.Max(0, srcB - 1);
+                    byte propR = (byte)math.max(0, srcR - 1);
+                    byte propG = (byte)math.max(0, srcG - 1);
+                    byte propB = (byte)math.max(0, srcB - 1);
 
-                    byte finalR = (byte)Mathf.Max(nR, propR);
-                    byte finalG = (byte)Mathf.Max(nG, propG);
-                    byte finalB = (byte)Mathf.Max(nB, propB);
+                    byte finalR = (byte)math.max((int)nR, (int)propR);
+                    byte finalG = (byte)math.max((int)nG, (int)propG);
+                    byte finalB = (byte)math.max((int)nB, (int)propB);
 
                     if (finalR != nR || finalG != nG || finalB != nB)
                     {
@@ -578,9 +578,9 @@ namespace Jobs
                     byte propG = AttenuateLight(srcG, neighborProps.Opacity);
                     byte propB = AttenuateLight(srcB, neighborProps.Opacity);
 
-                    byte finalR = (byte)Mathf.Max(nR, propR);
-                    byte finalG = (byte)Mathf.Max(nG, propG);
-                    byte finalB = (byte)Mathf.Max(nB, propB);
+                    byte finalR = (byte)math.max((int)nR, (int)propR);
+                    byte finalG = (byte)math.max((int)nG, (int)propG);
+                    byte finalB = (byte)math.max((int)nB, (int)propB);
 
                     if (finalR != nR || finalG != nG || finalB != nB)
                     {
@@ -787,9 +787,9 @@ namespace Jobs
             byte expG = AttenuateLight(nG, centerProps.Opacity);
             byte expB = AttenuateLight(nB, centerProps.Opacity);
 
-            byte finalR = (byte)Mathf.Max(cR, expR);
-            byte finalG = (byte)Mathf.Max(cG, expG);
-            byte finalB = (byte)Mathf.Max(cB, expB);
+            byte finalR = (byte)math.max((int)cR, (int)expR);
+            byte finalG = (byte)math.max((int)cG, (int)expG);
+            byte finalB = (byte)math.max((int)cB, (int)expB);
 
             if (finalR != cR || finalG != cG || finalB != cB)
             {
