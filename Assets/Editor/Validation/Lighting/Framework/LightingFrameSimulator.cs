@@ -7,7 +7,8 @@ namespace Editor.Validation.Lighting.Framework
     /// <summary>
     /// Wraps <see cref="LightingTestWorld"/> with a frame-tick orchestration layer that models the
     /// production scheduling behaviors the bare harness omits: the <c>ContainsKey</c> in-flight guard,
-    /// per-frame job budget throttling, controllable completion ordering, and multi-frame job lifetimes.
+    /// per-frame job budget throttling, controllable completion ordering, multi-frame job lifetimes,
+    /// and seeded iteration-order randomness (Dictionary simulation).
     /// This enables deterministic reproduction of orchestration-layer timing bugs (e.g., Bug 09) that
     /// only manifest when scheduling is rejected or delayed.
     /// <para>
@@ -27,6 +28,12 @@ namespace Editor.Validation.Lighting.Framework
             /// <summary>Reverse of scheduling order. Exercises the <c>_completedLightJobs</c>
             /// defer-vs-apply ordering dependency in the opposite direction.</summary>
             Reverse,
+
+            /// <summary>Seeded Fisher-Yates shuffle. Models the non-deterministic
+            /// <c>Dictionary</c> iteration order in production's <c>ProcessLightingJobs</c>.
+            /// Requires a non-null seed in the constructor; throws <see cref="InvalidOperationException"/>
+            /// if the simulator was constructed without a seed.</summary>
+            Shuffled,
         }
 
         /// <summary>Per-frame statistics returned by <see cref="RunFrame"/>.</summary>
@@ -57,6 +64,7 @@ namespace Editor.Validation.Lighting.Framework
 
         private readonly LightingTestWorld _world;
         private readonly List<PendingFlight> _pendingFlights = new List<PendingFlight>();
+        private readonly System.Random _rng;
         private int _currentFrame;
 
         /// <summary>
@@ -64,9 +72,16 @@ namespace Editor.Validation.Lighting.Framework
         /// set up (chunks created, initial lighting done if needed).
         /// </summary>
         /// <param name="world">The underlying test world whose Begin/Complete API this simulator orchestrates.</param>
-        public LightingFrameSimulator(LightingTestWorld world)
+        /// <param name="seed">Optional RNG seed for iteration-order randomness. When set, Phase 2
+        /// (scheduling) shuffles the chunk iteration order each frame, modeling production's
+        /// non-deterministic <c>HashSet</c>/<c>Dictionary</c> iteration. Use
+        /// <see cref="CompletionOrder.Shuffled"/> to also randomize Phase 1 (completion order).
+        /// When <c>null</c> (default), both phases use deterministic ordering — preserving backward
+        /// compatibility with all existing baselines.</param>
+        public LightingFrameSimulator(LightingTestWorld world, int? seed = null)
         {
             _world = world ?? throw new ArgumentNullException(nameof(world));
+            _rng = seed.HasValue ? new System.Random(seed.Value) : null;
         }
 
         /// <summary>The number of in-flight jobs currently held by the simulator (scheduled but not yet completed).</summary>
@@ -106,15 +121,18 @@ namespace Editor.Validation.Lighting.Framework
             // --- Phase 1: Complete pending flights (selectively) ---
             if (_pendingFlights.Count > 0)
             {
-                List<PendingFlight> toProcess;
+                List<PendingFlight> toProcess = new List<PendingFlight>(_pendingFlights);
+
                 if (order == CompletionOrder.Reverse)
                 {
-                    toProcess = new List<PendingFlight>(_pendingFlights);
                     toProcess.Reverse();
                 }
-                else
+                else if (order == CompletionOrder.Shuffled)
                 {
-                    toProcess = new List<PendingFlight>(_pendingFlights);
+                    if (_rng == null)
+                        throw new InvalidOperationException(
+                            "CompletionOrder.Shuffled requires a non-null seed in the LightingFrameSimulator constructor.");
+                    FisherYatesShuffle(toProcess, _rng);
                 }
 
                 List<PendingFlight> carriedOver = new List<PendingFlight>();
@@ -139,8 +157,22 @@ namespace Editor.Validation.Lighting.Framework
             }
 
             // --- Phase 2: Schedule new jobs ---
+            // When a seed is set, shuffle the iteration order to model production's non-deterministic
+            // HashSet/Dictionary iteration in World.Update and ProcessLightingJobs.
+            IEnumerable<Vector2Int> schedulingOrder;
+            if (_rng != null)
+            {
+                List<Vector2Int> shuffled = new List<Vector2Int>(_world.AllChunkCoords());
+                FisherYatesShuffle(shuffled, _rng);
+                schedulingOrder = shuffled;
+            }
+            else
+            {
+                schedulingOrder = _world.AllChunkCoords();
+            }
+
             int scheduled = 0;
-            foreach (Vector2Int coord in _world.AllChunkCoords())
+            foreach (Vector2Int coord in schedulingOrder)
             {
                 if (!_world.ChunkHasLightWork(coord))
                     continue;
@@ -254,5 +286,61 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         #endregion
+
+        #region Multi-Seed Sweep
+
+        /// <summary>
+        /// Runs a scenario body repeatedly with different RNG seeds, looking for the first seed that
+        /// produces a failure. Each iteration creates a fresh <see cref="LightingTestWorld"/> via the
+        /// factory, constructs a <see cref="LightingFrameSimulator"/> seeded with
+        /// <c>startSeed + i</c>, executes the scenario body, and disposes the world.
+        /// <para>
+        /// The scenario body receives the world and simulator and must return <c>true</c> for pass,
+        /// <c>false</c> for fail. When a seed fails, the scenario is deterministically reproducible —
+        /// re-running with that exact seed produces the same frame-by-frame permutation sequence.
+        /// </para>
+        /// </summary>
+        /// <param name="worldFactory">Factory that creates a fully set-up <see cref="LightingTestWorld"/>
+        /// (chunks, initial lighting, block placement) for each iteration.</param>
+        /// <param name="scenarioBody">The scenario to run. Returns <c>true</c> if the engine converges
+        /// correctly, <c>false</c> if the seed reveals a failure.</param>
+        /// <param name="iterations">Number of seeds to try.</param>
+        /// <param name="startSeed">First seed value; subsequent seeds are <c>startSeed + 1</c>,
+        /// <c>startSeed + 2</c>, etc.</param>
+        /// <returns>The first failing seed, or <c>null</c> if all seeds pass.</returns>
+        public static int? FindFailingSeed(
+            Func<LightingTestWorld> worldFactory,
+            Func<LightingTestWorld, LightingFrameSimulator, bool> scenarioBody,
+            int iterations = 1000,
+            int startSeed = 0)
+        {
+            for (int i = 0; i < iterations; i++)
+            {
+                int seed = startSeed + i;
+                using LightingTestWorld world = worldFactory();
+                LightingFrameSimulator sim = new LightingFrameSimulator(world, seed);
+
+                if (!scenarioBody(world, sim))
+                    return seed;
+            }
+
+            return null;
+        }
+
+        #endregion
+
+        /// <summary>
+        /// In-place Fisher-Yates shuffle using the provided seeded RNG.
+        /// </summary>
+        private static void FisherYatesShuffle<T>(List<T> list, System.Random rng)
+        {
+            for (int i = list.Count - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                T tmp = list[i];
+                list[i] = list[j];
+                list[j] = tmp;
+            }
+        }
     }
 }

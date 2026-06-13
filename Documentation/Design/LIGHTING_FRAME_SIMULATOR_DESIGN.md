@@ -412,7 +412,7 @@ Assets/Scripts/WorldJobManager.cs     (refactor to use LightingScheduleDecision)
 
 1. **Should the simulator model `maxMeshRebuildsPerFrame` or meshing gates?** Probably not — the lighting bug is purely in the lighting scheduling layer. Meshing is downstream and doesn't feed back into lighting decisions. Keep scope minimal.
 
-2. **Should the simulator model the `_chunksNeedingLightWork` HashSet iteration order?** In production, the dirty-set is iterated as a `HashSet` (non-deterministic). The simulator could take an explicit scheduling-order parameter (like completion order) to test sensitivity. Worth adding if the basic repro attempts still converge.
+2. ~~**Should the simulator model the `_chunksNeedingLightWork` HashSet iteration order?**~~ **Implemented (June 2026).** The constructor accepts an optional `int? seed` parameter. When set, Phase 2 (scheduling) shuffles the chunk iteration order via Fisher-Yates each frame, and `CompletionOrder.Shuffled` randomizes Phase 1 (completion) as well. `FindFailingSeed(worldFactory, scenarioBody, iterations)` sweeps many seeds to find any that produces an oracle mismatch. Three scenarios (B26, B27, B28) exercise shuffled ordering with 50 seeds each — all converge to the oracle.
 
 3. **Should we model `RemainingEdgeCheckRounds` in the simulator?** Only if we're trying to reproduce Bug 05 variants. For Bug 09 (blocklight at a border), edge checks are not involved. Add later if needed.
 

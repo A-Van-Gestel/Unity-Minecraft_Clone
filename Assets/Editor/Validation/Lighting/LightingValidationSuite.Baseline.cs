@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Editor.Validation.Lighting.Framework;
 using UnityEngine;
@@ -39,6 +40,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B23: Fluid fills broken lamp position while removal in-flight converges (Bug 09 guard)", Baseline_FluidFillsDuringRemoval));
             scenarios.Add(new Scenario("B24: Fluid + re-place with held removal flight and budget pressure converges (Bug 09 guard)", Baseline_FluidReplaceHeldFlightBudget));
             scenarios.Add(new Scenario("B25: Repeated break+fluid+place cycles with interleaved completion converges (Bug 09 guard)", Baseline_RepeatedFluidCycles));
+            scenarios.Add(new Scenario("B26: Shuffled completion+scheduling with fluid contention converges across 50 seeds (Bug 09 guard)", Baseline_ShuffledFluidContention));
+            scenarios.Add(new Scenario("B27: Shuffled scheduling under budget pressure converges across 50 seeds (Bug 09 guard)", Baseline_ShuffledBudgetPressure));
+            scenarios.Add(new Scenario("B28: Shuffled dual-chunk interleaved flights converge across 50 seeds (Bug 09 guard)", Baseline_ShuffledDualChunkInterleaved));
         }
 
         /// <summary>
@@ -1034,6 +1038,205 @@ namespace Editor.Validation.Lighting
             passed &= LightingAssert.IsTrue(crossBorder.R >= 11,
                 "B25: blocklight crosses chunk border after repeated fluid cycles",
                 $"Expected R >= 11 at x=33, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        // --- Seeded iteration-order randomness baselines (promoted from K09j/k/l — Bug 09 repro attempts, June 2026) ---
+        // These exercise Dictionary iteration randomness in ProcessLightingJobs via seeded Fisher-Yates
+        // shuffles of both completion and scheduling order. Each scenario runs 50 RNG seeds looking for
+        // any that produces an oracle mismatch. All seeds converge correctly, guarding that the
+        // defer/drain mechanism is order-independent.
+
+        private const int BASELINE_SEED_SWEEP_ITERATIONS = 50;
+
+        /// <summary>
+        /// B26 (promoted from K09j): The "kitchen sink" — combines every production behavior the
+        /// simulator models (ContainsKey guard, multi-frame flights, fluid-flow contention) plus
+        /// randomized iteration order via <see cref="LightingFrameSimulator.CompletionOrder.Shuffled"/>.
+        /// Runs <see cref="BASELINE_SEED_SWEEP_ITERATIONS"/> seeds. Guards that the defer/drain mechanism
+        /// converges regardless of Dictionary iteration order under fluid contention.
+        /// </summary>
+        private static bool Baseline_ShuffledFluidContention()
+        {
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+
+            int? failingSeed = LightingFrameSimulator.FindFailingSeed(
+                worldFactory: () =>
+                {
+                    LightingTestWorld world = new LightingTestWorld(3);
+                    world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+                    world.RecalculateHeightmaps();
+                    world.RunInitialLighting();
+
+                    world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 11, 23), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 11, 25), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 12, 24), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(32, 11, 24), TestBlockPalette.Water);
+                    world.RunToConvergence();
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+                    world.RunToConvergence();
+                    return world;
+                },
+                scenarioBody: (world, sim) =>
+                {
+                    world.BreakBlock(lampPos);
+                    sim.RunFrame(budget: 2, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.Water);
+                    sim.RunFrame(budget: 2, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+                    sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled);
+
+                    int frames = sim.RunToConvergence(order: LightingFrameSimulator.CompletionOrder.Shuffled);
+                    if (frames < 0) return false;
+
+                    return LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                        "B26: field matches oracle (silent check)");
+                },
+                iterations: BASELINE_SEED_SWEEP_ITERATIONS);
+
+            bool passed = LightingAssert.IsTrue(!failingSeed.HasValue,
+                $"B26: all {BASELINE_SEED_SWEEP_ITERATIONS} seeds converge — shuffled fluid contention",
+                failingSeed.HasValue
+                    ? $"REGRESSION: seed {failingSeed.Value} produces oracle mismatch under shuffled fluid contention"
+                    : "");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B27 (promoted from K09k): Shuffled scheduling under extreme budget pressure (1 job per frame).
+        /// Under single-slot budget with shuffled scheduling, a different chunk gets the single slot each
+        /// frame depending on the seed. Runs <see cref="BASELINE_SEED_SWEEP_ITERATIONS"/> seeds. Guards
+        /// convergence under maximum starvation + shuffled iteration order.
+        /// </summary>
+        private static bool Baseline_ShuffledBudgetPressure()
+        {
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+
+            int? failingSeed = LightingFrameSimulator.FindFailingSeed(
+                worldFactory: () =>
+                {
+                    LightingTestWorld world = new LightingTestWorld(3);
+                    world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+                    world.RecalculateHeightmaps();
+                    world.RunInitialLighting();
+
+                    world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 11, 23), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 11, 25), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 12, 24), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(32, 11, 24), TestBlockPalette.Water);
+                    world.RunToConvergence();
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+                    world.RunToConvergence();
+                    return world;
+                },
+                scenarioBody: (world, sim) =>
+                {
+                    world.BreakBlock(lampPos);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.Water);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled);
+                    sim.RunFrame(budget: 1, order: LightingFrameSimulator.CompletionOrder.Shuffled);
+
+                    int frames = sim.RunToConvergence(budgetPerFrame: 1,
+                        order: LightingFrameSimulator.CompletionOrder.Shuffled);
+                    if (frames < 0) return false;
+
+                    return LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                        "B27: field matches oracle (silent check)");
+                },
+                iterations: BASELINE_SEED_SWEEP_ITERATIONS);
+
+            bool passed = LightingAssert.IsTrue(!failingSeed.HasValue,
+                $"B27: all {BASELINE_SEED_SWEEP_ITERATIONS} seeds converge — shuffled budget pressure",
+                failingSeed.HasValue
+                    ? $"REGRESSION: seed {failingSeed.Value} produces oracle mismatch under shuffled budget pressure"
+                    : "");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B28 (promoted from K09l): Both chunks have in-flight jobs simultaneously, completed with
+        /// <see cref="LightingFrameSimulator.CompletionOrder.Shuffled"/> — the RNG decides whether A or B
+        /// completes first in each frame. Combined with held flights and fluid contention for maximum
+        /// interleaving. Runs <see cref="BASELINE_SEED_SWEEP_ITERATIONS"/> seeds. Guards that
+        /// bidirectional defer/drain is order-independent.
+        /// </summary>
+        private static bool Baseline_ShuffledDualChunkInterleaved()
+        {
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+
+            int? failingSeed = LightingFrameSimulator.FindFailingSeed(
+                worldFactory: () =>
+                {
+                    LightingTestWorld world = new LightingTestWorld(3);
+                    world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+                    world.RecalculateHeightmaps();
+                    world.RunInitialLighting();
+
+                    world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 11, 23), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 11, 25), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(31, 12, 24), TestBlockPalette.Water);
+                    world.PlaceBlock(new Vector3Int(32, 11, 24), TestBlockPalette.Water);
+                    world.RunToConvergence();
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+                    world.RunToConvergence();
+                    return world;
+                },
+                scenarioBody: (world, sim) =>
+                {
+                    world.BreakBlock(lampPos);
+                    sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: (_, __) => false);
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.Water);
+                    sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: (_, __) => false);
+
+                    world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+                    sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled,
+                        completionPredicate: (_, __) => false);
+
+                    sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled);
+                    sim.RunFrame(order: LightingFrameSimulator.CompletionOrder.Shuffled);
+
+                    int frames = sim.RunToConvergence(
+                        order: LightingFrameSimulator.CompletionOrder.Shuffled);
+                    if (frames < 0) return false;
+
+                    return LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                        "B28: field matches oracle (silent check)");
+                },
+                iterations: BASELINE_SEED_SWEEP_ITERATIONS);
+
+            bool passed = LightingAssert.IsTrue(!failingSeed.HasValue,
+                $"B28: all {BASELINE_SEED_SWEEP_ITERATIONS} seeds converge — shuffled dual-chunk interleaved",
+                failingSeed.HasValue
+                    ? $"REGRESSION: seed {failingSeed.Value} produces oracle mismatch under shuffled dual-chunk interleaved"
+                    : "");
 
             return passed;
         }

@@ -16,15 +16,14 @@ namespace Editor.Validation.Lighting
         // denser multi-pocket canopy patterns or mod-loss timing the minimal case doesn't hit;
         // a faithful repro remains TODO before that bug's fix can be test-driven.
 
-        // NOTE on Bug 09: eleven repro attempts total — two direct-harness (B15, B16), three
+        // NOTE on Bug 09: fourteen repro attempts total — two direct-harness (B15, B16), three
         // frame-simulator with complete-all (B17, B18, B19), three with multi-frame flight
-        // lifetimes (B20, B21, B22), and three with fluid-flow contention (B23, B24, B25).
-        // All converge to the oracle field. The fluid scenarios model water flowing back into the
-        // broken lamp position (opacity change + BFS injection) while the removal job is in-flight,
-        // combined with held flights, budget pressure, and repeated break+fluid+place cycles.
-        // The only remaining unmodeled production behavior is Dictionary iteration randomness
-        // in ProcessLightingJobs — the simulator uses deterministic row-major ordering.
-        // A faithful repro remains TODO.
+        // lifetimes (B20, B21, B22), three with fluid-flow contention (B23, B24, B25), and three
+        // with seeded iteration-order randomness (B26, B27, B28). All fourteen converge to the
+        // oracle field across all tested orderings and seeds. Every production scheduling behavior
+        // modelable in the synchronous harness has been exhausted. The bug is likely a genuine async
+        // race condition (Burst job system timing, IL2CPP memory ordering) or has been fixed by the
+        // Bug 07/08 cross-chunk mod delivery fixes. A faithful repro remains TODO.
 
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
