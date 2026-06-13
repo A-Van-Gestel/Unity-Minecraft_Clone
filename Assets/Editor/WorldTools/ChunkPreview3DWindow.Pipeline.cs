@@ -403,18 +403,11 @@ namespace Editor.WorldTools
                 }
                 else
                 {
-                    // Per-channel MAX guard: non-zero mod channels use MAX to prevent
-                    // stale-snapshot mods from reducing values set by independent sources.
-                    // Zero channels pass through for darkness removal.
-                    byte oldR = LightBitMapping.GetBlocklightR(light);
-                    byte oldG = LightBitMapping.GetBlocklightG(light);
-                    byte oldB = LightBitMapping.GetBlocklightB(light);
-                    byte applyR = lightMod.BlockR == 0 ? (byte)0 : (byte)Mathf.Max(oldR, lightMod.BlockR);
-                    byte applyG = lightMod.BlockG == 0 ? (byte)0 : (byte)Mathf.Max(oldG, lightMod.BlockG);
-                    byte applyB = lightMod.BlockB == 0 ? (byte)0 : (byte)Mathf.Max(oldB, lightMod.BlockB);
+                    CrossChunkLightModApplier.ApplyDecision decision =
+                        CrossChunkLightModApplier.ComputeBlocklight(light, lightMod.BlockR, lightMod.BlockG, lightMod.BlockB, lightMod.IsRemoval);
 
-                    if (hasLightMap)
-                        targetLightMap[flatIndex] = LightBitMapping.SetBlocklightRGB(light, applyR, applyG, applyB);
+                    if (hasLightMap && decision.ShouldApply)
+                        targetLightMap[flatIndex] = decision.NewLight;
                 }
             }
         }
