@@ -48,6 +48,13 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B32: Freshly-generated chunk discards persisted blocklight and re-derives the spill from its loaded neighbor", Baseline_GeneratedChunkDiscardsPendingBlocklight));
             scenarios.Add(new Scenario("B33: Pool-recycled chunks (real ChunkData.Reset()) re-light to the same field — no stale state", Baseline_PoolRecycleResetsChunkState));
             scenarios.Add(new Scenario("B34: ChunkData.Reset() clears every transient flag/counter/queue on recycle (RemainingEdgeCheckRounds guard)", Baseline_ChunkDataResetClearsTransientState));
+
+            // --- A4 oracle-independence probes (hand-derived constants, NO MatchesOracle) ---
+            scenarios.Add(new Scenario("B35: Vertical sunlight reaches the floor through air at full 15 (oracle-independent probe)", Baseline_ProbeVerticalSunlightThroughAir));
+            scenarios.Add(new Scenario("B36: Vertical sunlight passes a solid glass column undimmed — opacity, not solidity, blocks light (oracle-independent probe)", Baseline_ProbeVerticalSunlightThroughGlass));
+            scenarios.Add(new Scenario("B37: Skylight decays -1/voxel below a leaves cap in a sealed shaft (oracle-independent probe)", Baseline_ProbeSkyAttenuationBelowCanopy));
+            scenarios.Add(new Scenario("B38: Horizontal blocklight falls off -1 per air voxel on all channels (oracle-independent probe)", Baseline_ProbeHorizontalBlocklightFalloff));
+            scenarios.Add(new Scenario("B39: Opaque face receives source-1 surface light but never propagates inward (oracle-independent probe)", Baseline_ProbeOpaqueSurfaceStamp));
         }
 
         /// <summary>

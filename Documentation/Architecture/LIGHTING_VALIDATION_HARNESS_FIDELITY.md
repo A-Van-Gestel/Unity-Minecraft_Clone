@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (29 baselines + frame simulator, menu item
+The lighting validation suite (39 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -96,17 +96,32 @@ there is invisible.
 - **Mitigation for the remainder:** periodically re-diff the harness `PlaceBlock` enqueue/wake against
   `ModifyVoxel`. If the enqueue path is ever shared, decouple `AddTo*Queue` from `World` first.
 
-### A4 — Oracle shares assumptions with the engine ·  **OPEN · LOW**
+### A4 — Oracle shares assumptions with the engine ·  **MOSTLY CLOSED (2026-06-14) · remainder LOW (optional 2nd oracle)**
 
 - `LightingOracle` is a hand-written spec. Where it encodes the **same** rule as the engine — notably the
   vertical-sunlight rule (`isVerticalSunlight` requires `IsFullyTransparentToLight` on both source and
   target), the opaque-source rule, and `Attenuate = max(0, src − max(1, opacity))` — a shared-wrong
   assumption passes `MatchesOracle`.
-- **Partly mitigated** today by independent hardcoded probes (`R == 9`, `crossBorder >= 13`) and
-  oracle-free invariants (`NoBlocklightInVolume`, `FieldsEqual` baseline-return).
-- **Suggested fix:** ensure every oracle rule has ≥1 independent hardcoded probe; the vertical-transparency
-  rule is the highest-risk shared assumption and currently lacks one. Optionally add a second,
-  differently-implemented oracle for differential testing.
+- **Confirmed shared (2026-06-14 audit):** the suspicion was correct — these are not just *similar* rules,
+  they are the **same mechanism** on both sides. `LightingOracle.SolveSky`'s column pass (15 above the
+  heightmap, attenuate downward) mirrors production `NeighborhoodLightingJob.RecalculateSunlightForColumn`
+  (PASS 1 / PASS 2) line-for-line; the `isVerticalSunlight` condition is byte-identical
+  (`LightingOracle.cs` vs `NeighborhoodLightingJob.cs:477`); and both call the identical
+  `max(0, src − max(1, opacity))` attenuation. So a defect in any of these, replicated on both sides,
+  is invisible to `MatchesOracle`. (Block-obstruction is keyed on opacity — `IsLightObstructing = opacity > 0`,
+  `IsFullyTransparentToLight = opacity == 0`, `IsOpaque = opacity ≥ 15` — never on solidity.)
+- **Now:** every shared oracle rule has ≥1 **independent hand-derived probe** that asserts a constant the
+  oracle never produced (no `MatchesOracle` call), so a formula broken in *both* engine and oracle still
+  flips a probe red. Implemented as baselines **B35–B39** in `LightingValidationSuite.OracleProbes.cs`:
+  - **B35** — vertical sunlight through open air reaches the floor at full `15` (column pass "15 above heightmap" + no depth attenuation).
+  - **B36** — vertical sunlight through a *solid* glass column (opacity 0) stays `15`: the named highest-risk vertical-transparency rule — pins that only opacity, not solidity, blocks light.
+  - **B37** — sealed shaft under a leaves cap (opacity 1) decays `14 → 10 → 6` (`−1`/voxel): PASS-2 downward attenuation + the opacity-1 step.
+  - **B38** — torch horizontal blocklight falloff `14, 13, … 10` (`−1`/air voxel on all RGB channels): the `max(1, opacity)` air step.
+  - **B39** — opaque face receives exactly `source−1` (=13) surface light but never propagates inward (enclosed center stays `0`): tighter than B9's containment-only check.
+- **Still NOT covered (remainder, LOW):** the *optional* second, differently-implemented oracle for full
+  differential testing is not built — the B35–B39 probes cover the named shared rules but are not a
+  general differential check. Pre-existing independent probes (`R == 9`, `crossBorder >= 13`) and
+  oracle-free invariants (`NoBlocklightInVolume`, `FieldsEqual` baseline-return) remain in force.
 
 ---
 
@@ -214,7 +229,7 @@ there is invisible.
 | B2 | `neighborsDataReady` toggle                     | OPEN        | Medium          | Low            |
 | C2 | Bug-05 dense-canopy geometry                    | OPEN        | Medium          | Medium         |
 | A3 | `ModifyVoxel` heightmap (shared) / enqueue path | **PARTIAL** | Low             | heightmap done |
-| A4 | Oracle shared-assumption probes                 | OPEN        | Low             | Low            |
+| A4 | Oracle shared-assumption probes                 | **MOSTLY CLOSED** | Low (2nd oracle) | probes done |
 | B5 | Meshing-gate coverage                           | OPEN        | Low (by design) | —              |
 | B1 | Chunk-unload / persist-replay path              | **CLOSED**  | —               | done           |
 | B4 | Pool-recycle / flag-pairing                     | **CLOSED**  | —               | done           |
