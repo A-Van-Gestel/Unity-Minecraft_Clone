@@ -667,6 +667,214 @@ namespace Data
 
         #endregion
 
+        #region Lighting Job Map I/O (shared with WorldJobManager / WorldData / lighting validation harness)
+
+        // Zeroed source slabs used to clear null-section slices of (potentially stale, pooled)
+        // job buffers via a fast memcpy instead of a per-element loop.
+        private static readonly uint[] s_emptySectionVoxels = new uint[ChunkMath.SECTION_VOLUME];
+        private static readonly ushort[] s_emptySectionLight = new ushort[ChunkMath.SECTION_VOLUME];
+
+        /// <summary>
+        /// Fills a caller-provided full-chunk buffer with this chunk's raw voxel map, in the
+        /// section-contiguous layout the Burst jobs expect (null sections zero-filled). Writes EVERY
+        /// element, so it is safe with stale pooled buffers. Shared by the production job-input fill
+        /// (<see cref="WorldData.FillChunkMapForJob"/>) and the editor lighting validation harness, so
+        /// both snapshot job inputs through identical section-reconstruction code.
+        /// </summary>
+        /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth.</param>
+        public void FillJobVoxelMap(NativeArray<uint> jobArray)
+        {
+            const int sectionSize = ChunkMath.SECTION_VOLUME;
+            int sectionCount = jobArray.Length / sectionSize;
+
+            for (int i = 0; i < sectionCount; i++)
+            {
+                NativeArray<uint>.Copy(sections[i] != null
+                        ? sections[i].voxels
+                        : s_emptySectionVoxels, 0, jobArray, i * sectionSize, sectionSize
+                );
+            }
+        }
+
+        /// <summary>
+        /// Fills a caller-provided full-chunk buffer with this chunk's ushort light map, reconstructing
+        /// compact uniform-sky sections, in the section-contiguous layout the Burst jobs expect (null
+        /// sections zero-filled). Writes EVERY element. Shared by the production job-input fill
+        /// (<see cref="WorldData.FillChunkLightMapForJob"/>) and the editor lighting validation harness.
+        /// </summary>
+        /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth.</param>
+        public void FillJobLightMap(NativeArray<ushort> jobArray)
+        {
+            const int sectionSize = ChunkMath.SECTION_VOLUME;
+            int sectionCount = jobArray.Length / sectionSize;
+
+            for (int i = 0; i < sectionCount; i++)
+            {
+                byte uniformSky = SectionUniformSkyLevel[i];
+                if (uniformSky != UNIFORM_SKY_NONE)
+                    LightingHelper.FillUniformSkyLight(jobArray, i * sectionSize, sectionSize, uniformSky);
+                else if (sections[i] != null)
+                    NativeArray<ushort>.Copy(sections[i].LightData, 0, jobArray, i * sectionSize, sectionSize);
+                else
+                    NativeArray<ushort>.Copy(s_emptySectionLight, 0, jobArray, i * sectionSize, sectionSize);
+            }
+        }
+
+        /// <summary>Zero-fills a full-chunk voxel job buffer (missing-chunk fallback).</summary>
+        /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth.</param>
+        public static void FillEmptyVoxelMap(NativeArray<uint> jobArray)
+        {
+            const int sectionSize = ChunkMath.SECTION_VOLUME;
+            int sectionCount = jobArray.Length / sectionSize;
+            for (int i = 0; i < sectionCount; i++)
+                NativeArray<uint>.Copy(s_emptySectionVoxels, 0, jobArray, i * sectionSize, sectionSize);
+        }
+
+        /// <summary>Zero-fills a full-chunk light job buffer (missing-chunk fallback).</summary>
+        /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth.</param>
+        public static void FillEmptyLightMap(NativeArray<ushort> jobArray)
+        {
+            const int sectionSize = ChunkMath.SECTION_VOLUME;
+            int sectionCount = jobArray.Length / sectionSize;
+            for (int i = 0; i < sectionCount; i++)
+                NativeArray<ushort>.Copy(s_emptySectionLight, 0, jobArray, i * sectionSize, sectionSize);
+        }
+
+        /// <summary>
+        /// Merges a completed lighting job's full light map into this chunk's sections (full overwrite),
+        /// recompacting uniform-sky sections and creating/returning sections as light appears or vanishes.
+        /// Moved here from <c>WorldJobManager.ApplyLightingJobResult</c> so the production main-thread
+        /// path and the editor lighting validation harness merge through identical section/compaction code.
+        /// <para>
+        /// Cross-chunk mods applied to live data during the flight are safe against this overwrite: mods
+        /// targeting a chunk with an in-flight job are deferred and drained right after this merge
+        /// (the Bug 08 path-2 defer/drain), so they are never silently reverted.
+        /// </para>
+        /// </summary>
+        /// <param name="jobVoxelMap">The job's input voxel map snapshot (section-contiguous, full chunk).</param>
+        /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
+        /// <param name="blockTypes">Block palette for section count recalculation, or null to recompute
+        /// the non-air count only (the harness passes null — counts are meshing-only, light-irrelevant).</param>
+        public void ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
+            [CanBeNull] BlockType[] blockTypes)
+        {
+            int indexOffset = 0;
+            const int sectionVolume = ChunkMath.SECTION_VOLUME;
+
+            for (int s = 0; s < sections.Length; s++)
+            {
+                ChunkSection section = sections[s];
+                bool sectionHasData = false;
+                bool isNewSection = false;
+
+                // Clear any stale compact flag — the lighting job will provide fresh data.
+                SectionUniformSkyLevel[s] = UNIFORM_SKY_NONE;
+
+                if (section == null)
+                {
+                    bool needsSection = false;
+                    for (int i = 0; i < sectionVolume; i++)
+                    {
+                        if (jobVoxelMap[indexOffset + i] != 0 || jobLightMap[indexOffset + i] != 0)
+                        {
+                            needsSection = true;
+                            break;
+                        }
+                    }
+
+                    if (needsSection)
+                    {
+                        section = GetNewSection();
+                        sections[s] = section;
+                        isNewSection = true;
+                    }
+                }
+
+                if (section != null)
+                {
+                    bool sectionHasLight = false;
+
+                    for (int i = 0; i < sectionVolume; i++)
+                    {
+                        // Overwrite the ushort light array with the job's computed values.
+                        ushort lightVal = jobLightMap[indexOffset + i];
+                        section.LightData[i] = lightVal;
+
+                        if (section.voxels[i] != 0) sectionHasData = true;
+                        if (lightVal != 0) sectionHasLight = true;
+                    }
+
+                    if (!sectionHasData && !sectionHasLight)
+                    {
+                        // No blocks, no light — discard entirely.
+                        ReturnSection(s);
+                    }
+                    else
+                    {
+                        // Try to compact the light data into a uniform sky byte.
+                        TryCompactSectionLight(s, section, sectionHasData, sectionHasLight);
+
+                        if (!isNewSection && sections[s] != null)
+                            section.RecalculateCounts(blockTypes);
+                    }
+                }
+
+                indexOffset += sectionVolume;
+            }
+        }
+
+        /// <summary>
+        /// Attempts to compact a section's light data into a single uniform sky level byte.
+        /// On success, stores the byte in <see cref="SectionUniformSkyLevel"/> and, for light-only
+        /// sections (no blocks), returns the section to the pool.
+        /// </summary>
+        /// <param name="sectionIndex">The section to compact.</param>
+        /// <param name="section">The section's data.</param>
+        /// <param name="hasBlocks">Whether the section contains any non-air voxels.</param>
+        /// <param name="hasLight">Whether the section contains any non-zero light.</param>
+        private void TryCompactSectionLight(int sectionIndex, ChunkSection section, bool hasBlocks, bool hasLight)
+        {
+            if (!hasLight)
+            {
+                // Pitch black — uniform sky level 0.
+                SectionUniformSkyLevel[sectionIndex] = 0;
+                if (!hasBlocks)
+                    ReturnSection(sectionIndex);
+
+                return;
+            }
+
+            LightingHelper.ClassifyLightData(section.LightData,
+                out bool hasBlocklight, out _, out bool isUniformSky, out byte uniformSkyLevel);
+
+            if (hasBlocklight || !isUniformSky) return;
+
+            // Uniform sky, no blocklight — compact it.
+            SectionUniformSkyLevel[sectionIndex] = uniformSkyLevel;
+
+            if (!hasBlocks)
+                ReturnSection(sectionIndex);
+        }
+
+        /// <summary>
+        /// Returns a section to the chunk pool (or simply drops the reference when no <see cref="World"/>
+        /// is active — startup/shutdown/editor-test) and nulls the slot. Mirrors the pool-return fallback
+        /// in <see cref="Reset"/>.
+        /// </summary>
+        /// <param name="sectionIndex">The section slot to clear.</param>
+        private void ReturnSection(int sectionIndex)
+        {
+            ChunkSection section = sections[sectionIndex];
+            if (section == null) return;
+
+            if (World.Instance != null && World.Instance.ChunkPool != null)
+                World.Instance.ChunkPool.ReturnChunkSection(section);
+
+            sections[sectionIndex] = null;
+        }
+
+        #endregion
+
         // --- Lighting Methods ---
 
         #region Ligting Methods

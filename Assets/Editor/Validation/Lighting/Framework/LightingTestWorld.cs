@@ -100,9 +100,16 @@ namespace Editor.Validation.Lighting.Framework
         {
             public readonly Vector2Int Coord;
             public readonly Vector2Int VoxelOrigin;
-            public readonly uint[] Voxels = new uint[ChunkBufferLength];
-            public readonly ushort[] Light = new ushort[ChunkBufferLength];
-            public readonly ushort[] HeightMap = new ushort[VoxelData.ChunkWidth * VoxelData.ChunkWidth];
+
+            /// <summary>
+            /// Real production storage: voxels and ushort light held in <see cref="ChunkSection"/>s with
+            /// uniform-sky compaction. The harness reads, writes, snapshots, and merges light through the
+            /// same <see cref="ChunkData"/> code production uses (<c>GetLightData</c>/<c>SetLightData</c>,
+            /// <c>FillJobLightMap</c>, <c>ApplyJobLightMap</c>) — closing the section-merge fidelity gap
+            /// (see Documentation/Architecture/LIGHTING_VALIDATION_HARNESS_FIDELITY.md, finding A1).
+            /// </summary>
+            public readonly ChunkData Data;
+
             public readonly Queue<LightQueueNode> SunQueue = new Queue<LightQueueNode>();
             public readonly Queue<LightQueueNode> BlockQueue = new Queue<LightQueueNode>();
             public readonly Queue<Vector2Int> SunColumnRecalcQueue = new Queue<Vector2Int>();
@@ -112,6 +119,7 @@ namespace Editor.Validation.Lighting.Framework
             {
                 Coord = coord;
                 VoxelOrigin = coord * VoxelData.ChunkWidth;
+                Data = new ChunkData(VoxelOrigin);
             }
         }
 
@@ -193,9 +201,13 @@ namespace Editor.Validation.Lighting.Framework
             LightingJobFlight flight = new LightingJobFlight { Coord = chunkCoord };
 
             // Center chunk: writable copies (the job owns them for the duration of the flight).
-            NativeArray<uint> map = NewOwned(flight, new NativeArray<uint>(chunk.Voxels, Allocator.Persistent));
-            NativeArray<ushort> lightMap = NewOwned(flight, new NativeArray<ushort>(chunk.Light, Allocator.Persistent));
-            NativeArray<ushort> heightmap = NewOwned(flight, new NativeArray<ushort>(chunk.HeightMap, Allocator.Persistent));
+            // Reconstructed from the section store via the SAME production fill code the live pipeline
+            // uses (ChunkData.FillJob*Map) — every element is written, so UninitializedMemory is safe.
+            NativeArray<uint> map = NewOwned(flight, new NativeArray<uint>(ChunkBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory));
+            chunk.Data.FillJobVoxelMap(map);
+            NativeArray<ushort> lightMap = NewOwned(flight, new NativeArray<ushort>(ChunkBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory));
+            chunk.Data.FillJobLightMap(lightMap);
+            NativeArray<ushort> heightmap = NewOwned(flight, new NativeArray<ushort>(chunk.Data.heightMap, Allocator.Persistent));
 
             // Seed queues: drain the chunk's managed queues into native ones (production flushes
             // ChunkData's queues into the job the same way; the chunk-side flag clears on schedule).
@@ -270,12 +282,13 @@ namespace Editor.Validation.Lighting.Framework
             NeighborhoodLightingJob job = flight.Job;
             job.Run();
 
-            // Merge: overwrite the live light buffer with the job's computed values.
-            // Production merges per section but the effective light result is identical.
-            // Mods applied to live data during the flight would be overwritten here — which is
-            // why mods targeting in-flight chunks are DEFERRED and drained right after this
-            // merge instead (the Bug 08 path-2 fix).
-            job.LightMap.CopyTo(chunk.Light);
+            // Merge through the SAME production per-section + uniform-sky compaction code the live
+            // pipeline runs (ChunkData.ApplyJobLightMap), so section/compaction defects are visible to
+            // the suite instead of being bypassed by a flat-array copy. Block types are null: the
+            // harness does not mesh, and section counts are meshing-only (light-irrelevant).
+            // Mods applied to live data during the flight would be overwritten here — which is why mods
+            // targeting in-flight chunks are DEFERRED and drained right after this merge (Bug 08 path-2).
+            chunk.Data.ApplyJobLightMap(job.Map, job.LightMap, null);
 
             // Drain mods deferred for this chunk while its job was in flight
             // (mirror of WorldJobManager.DrainDeferredCrossChunkMods).
@@ -530,13 +543,12 @@ namespace Editor.Validation.Lighting.Framework
                 mod.GlobalPosition.y,
                 mod.GlobalPosition.z - target.VoxelOrigin.y);
 
-            int index = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
-            ushort currentLight = target.Light[index];
+            ushort currentLight = target.Data.GetLightData(localPos.x, localPos.y, localPos.z);
 
             CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod);
             if (!decision.ShouldApply) return false;
 
-            target.Light[index] = decision.NewLight;
+            target.Data.SetLightData(localPos.x, localPos.y, localPos.z, decision.NewLight);
 
             if (mod.Channel == LightChannel.Sun)
             {
@@ -565,16 +577,22 @@ namespace Editor.Validation.Lighting.Framework
         {
             // Outside the grid = outside the world: hand the job a zero-length array — the job
             // treats Length == 0 as void space, and the scheduler requires constructed containers.
-            return _chunks.TryGetValue(chunkCoord + new Vector2Int(dx, dz), out TestChunk neighbor)
-                ? NewOwned(flight, new NativeArray<uint>(neighbor.Voxels, Allocator.Persistent))
-                : NewOwned(flight, new NativeArray<uint>(0, Allocator.Persistent));
+            if (!_chunks.TryGetValue(chunkCoord + new Vector2Int(dx, dz), out TestChunk neighbor))
+                return NewOwned(flight, new NativeArray<uint>(0, Allocator.Persistent));
+
+            NativeArray<uint> arr = new NativeArray<uint>(ChunkBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            neighbor.Data.FillJobVoxelMap(arr);
+            return NewOwned(flight, arr);
         }
 
         private NativeArray<ushort> SnapshotNeighborLight(LightingJobFlight flight, Vector2Int chunkCoord, int dx, int dz)
         {
-            return _chunks.TryGetValue(chunkCoord + new Vector2Int(dx, dz), out TestChunk neighbor)
-                ? NewOwned(flight, new NativeArray<ushort>(neighbor.Light, Allocator.Persistent))
-                : NewOwned(flight, new NativeArray<ushort>(0, Allocator.Persistent));
+            if (!_chunks.TryGetValue(chunkCoord + new Vector2Int(dx, dz), out TestChunk neighbor))
+                return NewOwned(flight, new NativeArray<ushort>(0, Allocator.Persistent));
+
+            NativeArray<ushort> arr = new NativeArray<ushort>(ChunkBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            neighbor.Data.FillJobLightMap(arr);
+            return NewOwned(flight, arr);
         }
 
         private TestChunk GetChunk(Vector2Int chunkCoord)

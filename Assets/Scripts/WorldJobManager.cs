@@ -998,118 +998,15 @@ public class WorldJobManager : IDisposable
     }
 
     /// <summary>
-    /// Merges the lighting results from a background job into the live ChunkData.
-    /// CRITICAL: This performs a bit-mask merge (only light bits) to avoid overwriting
-    /// block changes (TOCTOU) made by the player while the job was running.
+    /// Merges the lighting results from a background job into the live ChunkData. Delegates to
+    /// <see cref="ChunkData.ApplyJobLightMap"/> — the shared per-section merge + uniform-sky compaction
+    /// that the editor lighting validation harness also runs, so the two can never silently diverge.
+    /// The full-LightMap overwrite is safe against cross-chunk mods: mods targeting a chunk with an
+    /// in-flight job are deferred and drained right after this merge (the Bug 08 path-2 fix).
     /// </summary>
     private void ApplyLightingJobResult(ChunkData chunkData, LightingJobData jobData)
     {
-        NativeArray<uint> jobMap = jobData.Map;
-        NativeArray<ushort> jobLightMap = jobData.LightMap;
-        int indexOffset = 0;
-        const int sectionVolume = ChunkMath.SECTION_VOLUME;
-
-        for (int s = 0; s < chunkData.sections.Length; s++)
-        {
-            ChunkSection section = chunkData.sections[s];
-            bool sectionHasData = false;
-            bool isNewSection = false;
-
-            // Clear any stale compact flag — the lighting job will provide fresh data.
-            chunkData.SectionUniformSkyLevel[s] = ChunkData.UNIFORM_SKY_NONE;
-
-            if (section == null)
-            {
-                bool needsSection = false;
-                for (int i = 0; i < sectionVolume; i++)
-                {
-                    if (jobMap[indexOffset + i] != 0 || jobLightMap[indexOffset + i] != 0)
-                    {
-                        needsSection = true;
-                        break;
-                    }
-                }
-
-                if (needsSection)
-                {
-                    section = _world.ChunkPool.GetChunkSection();
-                    chunkData.sections[s] = section;
-                    isNewSection = true;
-                }
-            }
-
-            if (section != null)
-            {
-                bool sectionHasLight = false;
-
-                for (int i = 0; i < sectionVolume; i++)
-                {
-                    // Overwrite ushort light array with the job's computed values.
-                    // This overwrite is safe against cross-chunk mods: mods targeting a chunk
-                    // with an in-flight job are deferred and drained right after this merge
-                    // (see DrainDeferredCrossChunkMods — the Bug 08 path-2 fix), so live data
-                    // written during the flight is never silently reverted.
-                    ushort lightVal = jobLightMap[indexOffset + i];
-                    section.LightData[i] = lightVal;
-
-                    if (section.voxels[i] != 0) sectionHasData = true;
-                    if (lightVal != 0) sectionHasLight = true;
-                }
-
-                if (!sectionHasData && !sectionHasLight)
-                {
-                    // No blocks, no light — discard entirely.
-                    _world.ChunkPool.ReturnChunkSection(section);
-                    chunkData.sections[s] = null;
-                }
-                else
-                {
-                    // Try to compact the light data into a uniform sky byte.
-                    TryCompactSectionLight(chunkData, s, section, sectionHasData, sectionHasLight);
-
-                    if (!isNewSection && chunkData.sections[s] != null)
-                        section.RecalculateCounts(_world.BlockTypes);
-                }
-            }
-
-            indexOffset += sectionVolume;
-        }
-    }
-
-    /// <summary>
-    /// Attempts to compact a section's light data into a single uniform sky level byte.
-    /// If successful, stores the byte in <see cref="ChunkData.SectionUniformSkyLevel"/> and,
-    /// for light-only sections (no blocks), returns the section to the pool.
-    /// </summary>
-    private void TryCompactSectionLight(ChunkData chunkData, int sectionIndex,
-        ChunkSection section, bool hasBlocks, bool hasLight)
-    {
-        if (!hasLight)
-        {
-            // Pitch black — uniform sky level 0.
-            chunkData.SectionUniformSkyLevel[sectionIndex] = 0;
-            if (!hasBlocks)
-            {
-                _world.ChunkPool.ReturnChunkSection(section);
-                chunkData.sections[sectionIndex] = null;
-            }
-
-            return;
-        }
-
-        LightingHelper.ClassifyLightData(section.LightData,
-            out bool hasBlocklight, out _, out bool isUniformSky, out byte uniformSkyLevel);
-
-        if (hasBlocklight || !isUniformSky) return;
-
-        // Uniform sky, no blocklight — compact it.
-        chunkData.SectionUniformSkyLevel[sectionIndex] = uniformSkyLevel;
-
-        if (!hasBlocks)
-        {
-            _world.ChunkPool.ReturnChunkSection(section);
-            chunkData.sections[sectionIndex] = null;
-        }
+        chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes);
     }
 
     #region IDisposable

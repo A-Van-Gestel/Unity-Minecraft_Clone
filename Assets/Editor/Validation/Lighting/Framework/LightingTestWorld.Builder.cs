@@ -32,8 +32,8 @@ namespace Editor.Validation.Lighting.Framework
         public void SetBlock(Vector3Int worldPos, ushort blockId)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
-            chunk.Voxels[ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z)] =
-                BurstVoxelDataBitMapping.PackVoxelData(blockId, 0);
+            chunk.Data.SetVoxel(localPos.x, localPos.y, localPos.z,
+                BurstVoxelDataBitMapping.PackVoxelData(blockId, 0));
         }
 
         /// <summary>
@@ -78,7 +78,7 @@ namespace Editor.Validation.Lighting.Framework
                         ushort height = 0;
                         for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
                         {
-                            ushort id = BurstVoxelDataBitMapping.GetId(chunk.Voxels[ChunkMath.GetFlattenedIndexInChunk(x, y, z)]);
+                            ushort id = BurstVoxelDataBitMapping.GetId(chunk.Data.GetVoxel(x, y, z));
                             if (_blockTypes[id].IsLightObstructing)
                             {
                                 height = (ushort)y;
@@ -86,7 +86,7 @@ namespace Editor.Validation.Lighting.Framework
                             }
                         }
 
-                        chunk.HeightMap[x + VoxelData.ChunkWidth * z] = height;
+                        chunk.Data.heightMap[x + VoxelData.ChunkWidth * z] = height;
                     }
                 }
             }
@@ -106,16 +106,15 @@ namespace Editor.Validation.Lighting.Framework
         public void PlaceBlock(Vector3Int worldPos, ushort blockId)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
-            int index = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
 
-            uint oldPackedData = chunk.Voxels[index];
+            uint oldPackedData = chunk.Data.GetVoxel(localPos.x, localPos.y, localPos.z);
             uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, 0);
             if (oldPackedData == newPackedData)
                 return;
 
             // --- Capture Old State for Lighting (ChunkData.ModifyVoxel order) ---
             ushort oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
-            ushort oldLightData = chunk.Light[index];
+            ushort oldLightData = chunk.Data.GetLightData(localPos.x, localPos.y, localPos.z);
             byte oldSkyLight = LightBitMapping.GetSkyLight(oldLightData);
             byte oldBlocklight = LightBitMapping.GetMaxBlocklight(oldLightData);
             byte oldBlockR = LightBitMapping.GetBlocklightR(oldLightData);
@@ -124,22 +123,22 @@ namespace Editor.Validation.Lighting.Framework
             BlockTypeJobData newProps = _blockTypes[blockId];
             BlockTypeJobData oldProps = _blockTypes[oldId];
 
-            chunk.Voxels[index] = newPackedData;
+            chunk.Data.SetVoxel(localPos.x, localPos.y, localPos.z, newPackedData);
 
             // --- Maintain heightmap (Case 1 / Case 2 of ModifyVoxel) ---
             int heightmapIndex = localPos.x + VoxelData.ChunkWidth * localPos.z;
-            ushort currentHeight = chunk.HeightMap[heightmapIndex];
+            ushort currentHeight = chunk.Data.heightMap[heightmapIndex];
 
             if (newProps.IsLightObstructing && localPos.y > currentHeight)
             {
-                chunk.HeightMap[heightmapIndex] = (ushort)localPos.y;
+                chunk.Data.heightMap[heightmapIndex] = (ushort)localPos.y;
             }
             else if (!newProps.IsLightObstructing && localPos.y == currentHeight)
             {
                 ushort newHeight = 0;
                 for (int y = localPos.y - 1; y >= 0; y--)
                 {
-                    ushort checkId = BurstVoxelDataBitMapping.GetId(chunk.Voxels[ChunkMath.GetFlattenedIndexInChunk(localPos.x, y, localPos.z)]);
+                    ushort checkId = BurstVoxelDataBitMapping.GetId(chunk.Data.GetVoxel(localPos.x, y, localPos.z));
                     if (_blockTypes[checkId].IsLightObstructing)
                     {
                         newHeight = (ushort)y;
@@ -147,7 +146,7 @@ namespace Editor.Validation.Lighting.Framework
                     }
                 }
 
-                chunk.HeightMap[heightmapIndex] = newHeight;
+                chunk.Data.heightMap[heightmapIndex] = newHeight;
             }
 
             // --- Queue lighting updates ---
@@ -169,7 +168,7 @@ namespace Editor.Validation.Lighting.Framework
                 if (!IsLocalPosInChunk(neighborPos))
                     continue;
 
-                ushort neighborLight = chunk.Light[ChunkMath.GetFlattenedIndexInChunk(neighborPos.x, neighborPos.y, neighborPos.z)];
+                ushort neighborLight = chunk.Data.GetLightData(neighborPos.x, neighborPos.y, neighborPos.z);
 
                 if (LightBitMapping.GetSkyLight(neighborLight) > 0)
                     chunk.SunQueue.Enqueue(new LightQueueNode { Position = neighborPos, OldLightLevel = 0 });
@@ -219,7 +218,7 @@ namespace Editor.Validation.Lighting.Framework
         public ushort GetBlockId(Vector3Int worldPos)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
-            return BurstVoxelDataBitMapping.GetId(chunk.Voxels[ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z)]);
+            return BurstVoxelDataBitMapping.GetId(chunk.Data.GetVoxel(localPos.x, localPos.y, localPos.z));
         }
 
         /// <summary>Returns the packed ushort light value at the given world position.</summary>
@@ -227,7 +226,7 @@ namespace Editor.Validation.Lighting.Framework
         public ushort GetLightData(Vector3Int worldPos)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
-            return chunk.Light[ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z)];
+            return chunk.Data.GetLightData(localPos.x, localPos.y, localPos.z);
         }
 
         /// <summary>Returns the sky light level (0-15) at the given world position.</summary>
@@ -288,8 +287,14 @@ namespace Editor.Validation.Lighting.Framework
             Dictionary<Vector2Int, ushort[]> snapshot = new Dictionary<Vector2Int, ushort[]>(_chunks.Count);
             foreach (KeyValuePair<Vector2Int, TestChunk> entry in _chunks)
             {
+                // Reconstruct the full light field through the real compaction-aware read path
+                // (ChunkData.GetLightData) so the snapshot reflects exactly what the engine reads.
                 ushort[] copy = new ushort[ChunkBufferLength];
-                Array.Copy(entry.Value.Light, copy, ChunkBufferLength);
+                ChunkData data = entry.Value.Data;
+                for (int x = 0; x < VoxelData.ChunkWidth; x++)
+                for (int y = 0; y < VoxelData.ChunkHeight; y++)
+                for (int z = 0; z < VoxelData.ChunkWidth; z++)
+                    copy[ChunkMath.GetFlattenedIndexInChunk(x, y, z)] = data.GetLightData(x, y, z);
                 snapshot[entry.Key] = copy;
             }
 

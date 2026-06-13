@@ -10,8 +10,9 @@
 
 The lighting validation suite (29 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
-it executes the real `NeighborhoodLightingJob` and shares the real decision helpers
-`CrossChunkLightModApplier`, `LightingScheduleDecision`, and `LightingJobProcessor`.
+it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
+uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
+helpers `CrossChunkLightModApplier`, `LightingScheduleDecision`, and `LightingJobProcessor`.
 
 It is **blind** wherever it *reimplements* production or *omits a pipeline stage*. A green suite does
 **not** prove those areas are correct. This document enumerates those blind spots so that:
@@ -40,22 +41,27 @@ Findings came from a June 2026 audit comparing the harness against production
 These pass green in the suite but the corresponding production code is **not** exercised, so a defect
 there is invisible.
 
-### A1 — Section / uniform-sky merge is bypassed entirely ·  **OPEN · HIGHEST PRIORITY**
+### A1 — Section / uniform-sky merge is bypassed entirely ·  **CLOSED (2026-06-13)**
 
-- **Harness:** `LightingTestWorld.CompleteLightingJob` merges with `job.LightMap.CopyTo(chunk.Light)`
-  onto a flat `ushort[]`. `TestChunk` has no sections.
-- **Production:** `WorldJobManager.ApplyLightingJobResult` does a **per-section** merge with
-  `SectionUniformSkyLevel` compaction (`TryCompactSectionLight` → `LightingHelper.ClassifyLightData`),
-  `ChunkSection` pool get/return, and a `UNIFORM_SKY_NONE` reset per section. The job's **input** light
-  snapshot is also reconstructed through this layer (`RentAndFillLightMap` → `FillChunkLightMapForJob`).
-- **What can pass green while broken:** section compaction/decompaction bugs, a stale uniform-sky byte,
-  a recycled `ChunkSection` carrying stale `LightData`, a wrong `ClassifyLightData`, or any
-  read-path reconstruction defect.
-- **Intersects:** the Phase B legacy-light-removal work (uniform-sky section flags) — the exact code the
-  suite cannot see today.
-- **Suggested fix:** give `TestChunk` a section-backed light store (or a thin section façade) and route
-  reads/writes through the same compaction path, so both merge **and** input snapshot traverse it. This
-  is the single biggest fidelity win.
+- **Was:** `LightingTestWorld.CompleteLightingJob` merged with `job.LightMap.CopyTo(chunk.Light)` onto a
+  flat `ushort[]`; `TestChunk` had no sections. Production `WorldJobManager.ApplyLightingJobResult` does a
+  **per-section** merge with `SectionUniformSkyLevel` compaction (`TryCompactSectionLight` →
+  `LightingHelper.ClassifyLightData`), `ChunkSection` pool get/return, and a `UNIFORM_SKY_NONE` reset per
+  section — and the job's **input** snapshot is reconstructed through the same layer
+  (`FillChunkLightMapForJob`/`FillChunkMapForJob`). The harness skipped all of it, so section
+  compaction/decompaction bugs, stale uniform-sky bytes, recycled-`ChunkSection` light, and read-path
+  reconstruction defects could pass green.
+- **Now:** the merge + fill logic was extracted onto `ChunkData` as shared instance methods
+  (`ApplyJobLightMap`, `FillJobLightMap`, `FillJobVoxelMap`, `FillEmpty*Map`, with `TryCompactSectionLight`
+  moved in). Production (`WorldJobManager.ApplyLightingJobResult`, `WorldData.FillChunk*ForJob`) now
+  **delegates** to them — no on-disk layout change, logic-move only. The harness `TestChunk` holds a real
+  `ChunkData`: voxels + light live in real `ChunkSection`s and every read/write/snapshot/merge runs the
+  production code (`GetVoxel`/`SetVoxel`/`GetLightData`/`SetLightData`/`FillJob*Map`/`ApplyJobLightMap`).
+  The suite now traverses the compaction layer it used to skip; all 29 baselines stay green. This also made
+  voxel storage section-faithful as a side effect (the merge's keep/discard reads `section.voxels[i]`).
+- **Still NOT covered (separate findings):** `ChunkData.Reset()` / pool recycle stale-state (B4) is its own
+  gap — the harness creates fresh `ChunkData` per chunk and never recycles. Phase B uniform-sky-section work
+  is now exercised through the shared merge/read path.
 
 ### A2 — `ProcessLightingJobs` mod-routing orchestration was hand-copied ·  **CLOSED (2026-06-13)**
 
@@ -164,7 +170,6 @@ there is invisible.
 
 | #  | Finding                                | Status     | Priority        | Effort        |
 |----|----------------------------------------|------------|-----------------|---------------|
-| A1 | Section / uniform-sky merge bypass     | OPEN       | Highest         | High          |
 | B1 | Chunk-unload / persist-replay path     | OPEN       | High            | Medium        |
 | C1 | Bug-09 fuzz layer (randomize geometry) | OPEN       | High (ROI)      | Low           |
 | B2 | `neighborsDataReady` toggle            | OPEN       | Medium          | Low           |
@@ -173,6 +178,7 @@ there is invisible.
 | A3 | `ModifyVoxel` drift watch              | OPEN       | Low             | Low (ongoing) |
 | A4 | Oracle shared-assumption probes        | OPEN       | Low             | Low           |
 | B5 | Meshing-gate coverage                  | OPEN       | Low (by design) | —             |
+| A1 | Section / uniform-sky merge bypass     | **CLOSED** | —               | done          |
 | A2 | Shared mod-routing decision            | **CLOSED** | —               | done          |
 
 ---
