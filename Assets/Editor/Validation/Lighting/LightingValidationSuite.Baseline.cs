@@ -36,6 +36,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B20: Stale neighbor snapshot during held removal flight converges (Bug 09 guard)", Baseline_MultiFrameStaleNeighborSnapshot));
             scenarios.Add(new Scenario("B21: Neighbor stabilizes before source re-emits converges (Bug 09 guard)", Baseline_MultiFrameNeighborStabilizesEarly));
             scenarios.Add(new Scenario("B22: Dual-chunk held flights with interleaved completion converges (Bug 09 guard)", Baseline_MultiFrameDualChunkInterleaved));
+            scenarios.Add(new Scenario("B23: Fluid fills broken lamp position while removal in-flight converges (Bug 09 guard)", Baseline_FluidFillsDuringRemoval));
+            scenarios.Add(new Scenario("B24: Fluid + re-place with held removal flight and budget pressure converges (Bug 09 guard)", Baseline_FluidReplaceHeldFlightBudget));
+            scenarios.Add(new Scenario("B25: Repeated break+fluid+place cycles with interleaved completion converges (Bug 09 guard)", Baseline_RepeatedFluidCycles));
         }
 
         /// <summary>
@@ -855,6 +858,182 @@ namespace Editor.Validation.Lighting
             passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
                 "B22: blocklight crosses chunk border after interleaved completion",
                 $"Expected R >= 13 at x=32, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        // --- Fluid-flow contention baselines (promoted from K09g/h/i — Bug 09 repro attempts, June 2026) ---
+        // These exercise water flowing back into a broken lamp position (Air→Water opacity change +
+        // BFS node injection) while a removal job is in-flight, combined with multi-frame flight
+        // lifetimes, budget pressure, and repeated cycles. All converge correctly, guarding the
+        // defer/drain + opacity-change re-schedule path under fluid contention.
+
+        /// <summary>
+        /// B23 (promoted from K09g): Break a lamp at the chunk border in an underwater environment.
+        /// Water flows back into the vacated position (Air→Water, opacity 0→2) while the removal job
+        /// is held in-flight. The water placement injects BFS nodes and changes opacity mid-flight.
+        /// Chunk B snapshots stale pre-removal light. Lamp is re-placed (Water→Lamp). Guards that
+        /// the opacity change + fluid BFS contention converges correctly.
+        /// </summary>
+        private static bool Baseline_FluidFillsDuringRemoval()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B23: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+
+            world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(31, 11, 23), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(31, 11, 25), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(31, 12, 24), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(32, 11, 24), TestBlockPalette.Water);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B23: water placement converges");
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B23: initial lamp converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+
+            world.BreakBlock(lampPos);
+            sim.RunFrame(completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+            world.PlaceBlock(lampPos, TestBlockPalette.Water);
+            sim.RunFrame(completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            sim.RunFrame();
+
+            int frames = sim.RunToConvergence();
+            passed &= LightingAssert.Converged(frames, "B23: post-race convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B23: field matches oracle after fluid-flow contention");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(33, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 11,
+                "B23: blocklight crosses chunk border through water after fluid contention",
+                $"Expected R >= 11 at x=33 (through water, opacity 2), got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B24 (promoted from K09h): Fluid contention combined with budget pressure (1 job per frame)
+        /// and a removal flight held for 3 frames. Water fills the broken position, then the lamp is
+        /// re-placed. Under single-slot budget, only one chunk can schedule per frame. Guards
+        /// convergence under maximum starvation + fluid contention.
+        /// </summary>
+        private static bool Baseline_FluidReplaceHeldFlightBudget()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B24: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+
+            world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(31, 11, 23), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(31, 11, 25), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(31, 12, 24), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(32, 11, 24), TestBlockPalette.Water);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B24: water placement converges");
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B24: initial lamp converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+
+            world.BreakBlock(lampPos);
+            sim.RunFrame(budget: 1, completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+            world.PlaceBlock(lampPos, TestBlockPalette.Water);
+            sim.RunFrame(budget: 1, completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            sim.RunFrame(budget: 1, completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+            sim.RunFrame(budget: 1);
+
+            int frames = sim.RunToConvergenceSingleSlot();
+            passed &= LightingAssert.Converged(frames, "B24: single-slot convergence after fluid contention");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B24: field matches oracle after fluid + budget pressure");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(33, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 11,
+                "B24: blocklight crosses chunk border after fluid + budget contention",
+                $"Expected R >= 11 at x=33, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B25 (promoted from K09i): Two rapid break+fluid+place cycles with interleaved completion
+        /// and both chunks held in-flight. Models repeated player interaction underwater — two full
+        /// cycles of (break → water flows in → re-place) happen before any jobs complete. Guards that
+        /// cross-chunk mods survive through double-cycle fluid contention.
+        /// </summary>
+        private static bool Baseline_RepeatedFluidCycles()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B25: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+            Vector2Int chunkB = new Vector2Int(2, 1);
+
+            world.PlaceBlock(new Vector3Int(30, 11, 24), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(31, 11, 23), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(31, 11, 25), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(31, 12, 24), TestBlockPalette.Water);
+            world.PlaceBlock(new Vector3Int(32, 11, 24), TestBlockPalette.Water);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B25: water placement converges");
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B25: initial lamp converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+
+            // Cycle 1
+            world.BreakBlock(lampPos);
+            sim.RunFrame(completionPredicate: (_, __) => false);
+            world.PlaceBlock(lampPos, TestBlockPalette.Water);
+            sim.RunFrame(completionPredicate: (_, __) => false);
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            sim.RunFrame(completionPredicate: (_, __) => false);
+
+            // Cycle 2
+            world.BreakBlock(lampPos);
+            sim.RunFrame(completionPredicate: (_, __) => false);
+            world.PlaceBlock(lampPos, TestBlockPalette.Water);
+            sim.RunFrame(completionPredicate: (_, __) => false);
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            sim.RunFrame(completionPredicate: LightingFrameSimulator.OnlyChunks(chunkA));
+
+            sim.RunFrame(completionPredicate: LightingFrameSimulator.OnlyChunks(chunkB));
+            sim.RunFrame();
+
+            int frames = sim.RunToConvergence();
+            passed &= LightingAssert.Converged(frames, "B25: post-double-cycle convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B25: field matches oracle after repeated fluid cycles");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(33, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 11,
+                "B25: blocklight crosses chunk border after repeated fluid cycles",
+                $"Expected R >= 11 at x=33, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
 
             return passed;
         }

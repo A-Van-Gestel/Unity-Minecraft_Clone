@@ -43,8 +43,13 @@ namespace Editor.Validation.Lighting.Framework
         /// <summary>Non-opaque emissive source (opacity 0), white light at intensity 14 — torch-like.</summary>
         public const ushort Torch = 9;
 
+        /// <summary>Non-solid fluid block (opacity 2, non-emissive). Models water flowing into a
+        /// vacated lamp position — the voxel change triggers lighting BFS nodes while opacity 2
+        /// slightly attenuates light passing through (matching production water properties).</summary>
+        public const ushort Water = 10;
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 10;
+        public const int Count = 11;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -65,6 +70,7 @@ namespace Editor.Validation.Lighting.Framework
             jobData[LampGreen] = ToJobData(MakeBlock("TestLampGreen", opacity: 15, emission: 15, Color.green));
             jobData[LampBlue] = ToJobData(MakeBlock("TestLampBlue", opacity: 15, emission: 15, Color.blue));
             jobData[Torch] = ToJobData(MakeBlock("TestTorch", opacity: 0, emission: 14, Color.white, isSolid: false));
+            jobData[Water] = ToJobData(MakeBlock("TestWater", opacity: 2, emission: 0, Color.white, isSolid: false));
             return jobData;
         }
 
