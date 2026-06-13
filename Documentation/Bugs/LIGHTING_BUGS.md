@@ -68,12 +68,13 @@ A race condition in the cross-chunk blocklight mod delivery path. When a blockli
 - The chunk's lighting job is cancelled and re-scheduled due to the concurrent voxel modification (fluid flow), and the re-scheduling loses the pending blocklight emission seed.
 - The deferred cross-chunk mod queue for Chunk B is processed against stale snapshot data, causing the mods to be silently discarded as no-ops.
 
-**Validation suite (June 2026):** Five repro attempts total across two harness layers:
+**Validation suite (June 2026):** Eight repro attempts total across three harness layers:
 
 - **Direct harness (B15, B16):** Single-cycle break+place with neighbor in-flight, and double-cycle with both chunks in-flight (wave-parallel). Both converge — guard the defer/drain mechanism.
-- **Frame simulator (B17, B18, B19):** A `LightingFrameSimulator` was built to model three production scheduling behaviors the direct harness cannot: the `ContainsKey` in-flight guard that rejects re-scheduling while a job runs (B17), budget-throttled single-slot convergence (B18), and reverse completion order exercising the `_completedLightJobs` ordering dependency (B19). All three converge to the oracle.
+- **Frame simulator, complete-all (B17, B18, B19):** A `LightingFrameSimulator` was built to model three production scheduling behaviors the direct harness cannot: the `ContainsKey` in-flight guard that rejects re-scheduling while a job runs (B17), budget-throttled single-slot convergence (B18), and reverse completion order exercising the `_completedLightJobs` ordering dependency (B19). All three converge to the oracle.
+- **Frame simulator, multi-frame flight lifetimes (B20, B21, B22):** Completion predicates hold chunk A's removal job in-flight across 2–3 frames while chunk B snapshots stale pre-removal light. B20: stale neighbor snapshot (B schedules and completes while A is held). B21: B stabilizes before A's removal even completes. B22: both chunks in-flight simultaneously with interleaved completion maximizing deferred mod accumulation. All three converge to the oracle.
 
-The bug likely requires either multi-frame flight lifetimes (job in-flight across >1 frame tick while additional mutations accumulate), fluid-flow contention (continuous voxel edits from water re-filling the broken position between frames), or `Dictionary` iteration randomness in `ProcessLightingJobs` that the simulator's deterministic ordering cannot reproduce. A faithful failing repro is still TODO before this bug's fix can be test-driven.
+The bug likely requires either fluid-flow contention (continuous voxel edits from water re-filling the broken position between frames) or `Dictionary` iteration randomness in `ProcessLightingJobs` that the simulator's deterministic ordering cannot reproduce. A faithful failing repro is still TODO before this bug's fix can be test-driven.
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
 

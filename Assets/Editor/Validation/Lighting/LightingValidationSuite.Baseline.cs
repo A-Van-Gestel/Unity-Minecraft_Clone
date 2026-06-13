@@ -33,6 +33,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B17: ContainsKey-guarded break+place at chunk border converges via frame simulator (Bug 09 guard)", Baseline_FrameSimContainsKeyBreakPlace));
             scenarios.Add(new Scenario("B18: Single-slot budget break+place converges via frame simulator (Bug 09 guard)", Baseline_FrameSimSingleSlotBreakPlace));
             scenarios.Add(new Scenario("B19: Reverse completion order break+place converges via frame simulator (Bug 09 guard)", Baseline_FrameSimReverseOrderBreakPlace));
+            scenarios.Add(new Scenario("B20: Stale neighbor snapshot during held removal flight converges (Bug 09 guard)", Baseline_MultiFrameStaleNeighborSnapshot));
+            scenarios.Add(new Scenario("B21: Neighbor stabilizes before source re-emits converges (Bug 09 guard)", Baseline_MultiFrameNeighborStabilizesEarly));
+            scenarios.Add(new Scenario("B22: Dual-chunk held flights with interleaved completion converges (Bug 09 guard)", Baseline_MultiFrameDualChunkInterleaved));
         }
 
         /// <summary>
@@ -688,6 +691,169 @@ namespace Editor.Validation.Lighting
             (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(32, 11, 24));
             passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
                 "B19: blocklight crosses chunk border with reverse completion",
+                $"Expected R >= 13 at x=32, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        // --- Multi-frame flight lifetime baselines (promoted from K09d/e/f — Bug 09 repro attempts, June 2026) ---
+        // These exercise completion predicates that hold flights across multiple frame ticks, creating
+        // stale-snapshot interleavings the complete-all simulator cannot produce. All converge
+        // correctly, guarding the defer/drain + re-schedule path under multi-frame flight lifetimes.
+
+        /// <summary>
+        /// B20 (promoted from K09d): Chunk A's removal job stays in-flight for 2 frames while chunk B
+        /// schedules and completes its own job with a stale snapshot of A's pre-removal light. When A's
+        /// removal finally completes and emits cross-chunk removal mods, B has already merged its stale
+        /// result. The emission re-schedule must propagate correctly into B's live data. Guards the
+        /// multi-frame stale-snapshot interleaving path.
+        /// </summary>
+        private static bool Baseline_MultiFrameStaleNeighborSnapshot()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B20: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B20: initial lamp converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+
+            // Frame 1: Break lamp, schedule removal. Hold chunk A's flight.
+            world.BreakBlock(lampPos);
+            LightingFrameSimulator.FrameResult f1 = sim.RunFrame(
+                completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+            passed &= LightingAssert.IsTrue(f1.JobsScheduled >= 1,
+                "B20: frame 1 schedules removal job",
+                $"Expected >= 1 job scheduled, got {f1.JobsScheduled}");
+
+            // Frame 2: Place lamp (emission nodes queue up). B schedules with stale snapshot. Hold A.
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            sim.RunFrame(completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+            // Frame 3: Release everything.
+            sim.RunFrame();
+
+            int frames = sim.RunToConvergence();
+            passed &= LightingAssert.Converged(frames, "B20: post-race convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B20: field matches oracle after stale-snapshot race");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(32, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
+                "B20: blocklight crosses chunk border after multi-frame race",
+                $"Expected R >= 13 at x=32, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B21 (promoted from K09e): Chunk B snapshots stale data from chunk A AND stabilizes before
+        /// chunk A's removal completes. A's removal mods apply directly to B (already completed), then
+        /// A re-schedules with emission nodes. Guards that emission propagates into B even when B
+        /// stabilized early with stale data.
+        /// </summary>
+        private static bool Baseline_MultiFrameNeighborStabilizesEarly()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B21: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+            Vector2Int chunkB = new Vector2Int(2, 1);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B21: initial lamp converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+
+            // Frame 1: Break lamp → schedules removal for A. Hold A.
+            world.BreakBlock(lampPos);
+            sim.RunFrame(completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+            // Frame 2: Place lamp (queued). B schedules with stale snapshot. Hold A.
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            sim.RunFrame(completionPredicate: LightingFrameSimulator.ExceptChunks(chunkA));
+
+            // Frame 3: Complete B only. B may stabilize with stale data.
+            sim.RunFrame(completionPredicate: LightingFrameSimulator.OnlyChunks(chunkB));
+
+            // Frame 4: Release A. Removal merges. A re-schedules with emission.
+            sim.RunFrame();
+
+            int frames = sim.RunToConvergence();
+            passed &= LightingAssert.Converged(frames, "B21: post-race convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B21: field matches oracle after early-stabilization race");
+
+            (byte R, byte G, byte B) inB = world.GetBlocklightRGB(new Vector3Int(33, 11, 24));
+            passed &= LightingAssert.IsTrue(inB.R >= 12,
+                "B21: emission propagated into chunk B after delayed source re-emission",
+                $"Expected R >= 12 at x=33 in chunk B, got ({inB.R},{inB.G},{inB.B})");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B22 (promoted from K09f): Both chunks have in-flight jobs simultaneously, completed in an
+        /// interleaved order that maximizes deferred mod accumulation. A completes first (removal mods
+        /// DEFERRED for still-in-flight B), then B completes and drains them. Guards bidirectional
+        /// defer/drain under multi-frame dual-chunk contention.
+        /// </summary>
+        private static bool Baseline_MultiFrameDualChunkInterleaved()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B22: initial lighting converges");
+
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+            Vector2Int chunkA = new Vector2Int(1, 1);
+            Vector2Int chunkB = new Vector2Int(2, 1);
+
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B22: initial lamp converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+
+            // Frame 1: Break lamp → A schedules removal. Hold everything.
+            world.BreakBlock(lampPos);
+            LightingFrameSimulator.FrameResult f1 = sim.RunFrame(
+                completionPredicate: (_, __) => false);
+            passed &= LightingAssert.IsTrue(f1.JobsScheduled >= 1,
+                "B22: frame 1 schedules removal job",
+                $"Expected >= 1 job scheduled, got {f1.JobsScheduled}");
+
+            // Frame 2: Place lamp (queued). B schedules. Hold everything.
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+            sim.RunFrame(completionPredicate: (_, __) => false);
+
+            // Frame 3: Complete A only. A's removal mods for B → DEFERRED. A re-schedules.
+            sim.RunFrame(completionPredicate: LightingFrameSimulator.OnlyChunks(chunkA));
+
+            // Frame 4: Complete B. Drains deferred mods. Also complete A's emission if scheduled.
+            sim.RunFrame();
+
+            int frames = sim.RunToConvergence();
+            passed &= LightingAssert.Converged(frames, "B22: post-race convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B22: field matches oracle after dual-chunk interleaved completion");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(32, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
+                "B22: blocklight crosses chunk border after interleaved completion",
                 $"Expected R >= 13 at x=32, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
 
             return passed;

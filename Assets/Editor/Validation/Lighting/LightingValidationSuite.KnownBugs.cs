@@ -16,13 +16,14 @@ namespace Editor.Validation.Lighting
         // denser multi-pocket canopy patterns or mod-loss timing the minimal case doesn't hit;
         // a faithful repro remains TODO before that bug's fix can be test-driven.
 
-        // NOTE on Bug 09: five repro attempts total — two direct-harness (B15, B16) and three
-        // frame-simulator (B17, B18, B19). All converge to the oracle field. The frame simulator
-        // models the ContainsKey in-flight guard, budget throttling (single-slot), and reverse
-        // completion order — the three production behaviors the direct harness cannot. Bug 09
-        // likely requires either multi-frame flight lifetimes (job in-flight across >1 frame tick
-        // while additional mutations accumulate), fluid-flow contention (continuous voxel edits
-        // from water re-filling the broken position), or Dictionary iteration randomness in
+        // NOTE on Bug 09: eight repro attempts total — two direct-harness (B15, B16), three
+        // frame-simulator with complete-all (B17, B18, B19), and three frame-simulator with
+        // multi-frame flight lifetimes (B20, B21, B22). All converge to the oracle field.
+        // The multi-frame scenarios model held flights via completion predicates: chunk A's
+        // removal job stays in-flight across 2–3 frames while chunk B snapshots stale pre-removal
+        // light, potentially stabilizing before chunk A's re-emission is even scheduled.
+        // Bug 09 likely requires either fluid-flow contention (continuous voxel edits from water
+        // re-filling the broken position between frames) or Dictionary iteration randomness in
         // ProcessLightingJobs that the simulator's deterministic ordering cannot reproduce.
         // A faithful repro remains TODO.
 

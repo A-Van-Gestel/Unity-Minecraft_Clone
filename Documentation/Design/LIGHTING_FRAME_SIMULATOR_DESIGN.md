@@ -1,6 +1,6 @@
 # Lighting Frame Simulator — Design Draft
 
-**Status:** Draft
+**Status:** Implemented
 **Date:** June 2026
 **Purpose:** Enable deterministic reproduction of orchestration-layer lighting bugs (Bug 09, potentially Bug 05 variants) that the current `LightingTestWorld` harness cannot model.
 
@@ -12,12 +12,12 @@ The existing `LightingTestWorld` harness exercises the **Burst job algebra** (BF
 
 Production bugs like Bug 09 occur in the **orchestration layer** — the frame-loop logic in `World.Update` and `WorldJobManager` that decides *when* and *whether* a lighting job runs. The harness can't reproduce them because it lacks four production behaviors:
 
-| # | Production behavior | Harness equivalent | Gap |
-|---|---|---|---|
-| 1 | **Scheduling guard** — `LightingJobs.ContainsKey(coord)` rejects scheduling while a job is in-flight | `BeginLightingJob` throws on double-schedule (setup error, not a modeling choice) | No way to model "try to schedule, get rejected, BFS nodes accumulate" |
-| 2 | **Frame budget** — `maxLightJobsPerFrame` caps how many jobs schedule per frame; excess chunks wait | `RunToConvergence` processes every pending chunk every round | No starvation / delayed scheduling |
-| 3 | **Concurrent voxel mutations** — fluid flow injects `AddToBlockLightQueue` + `HasLightChangesToProcess = true` while a lighting job is in-flight | No secondary modification source | No way to model mid-flight voxel edits that re-flag a chunk |
-| 4 | **Non-deterministic completion order** — `ProcessLightingJobs` iterates a `Dictionary`, so completion order within a frame is unstable; `_completedLightJobs` makes the defer-vs-apply decision order-dependent | `RunToConvergence`: sequential row-major; `RunWaveToConvergence`: all-Begin then all-Complete in row-major | No ordering variation |
+| # | Production behavior                                                                                                                                                                                             | Harness equivalent                                                                                         | Gap                                                                   |
+|---|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| 1 | **Scheduling guard** — `LightingJobs.ContainsKey(coord)` rejects scheduling while a job is in-flight                                                                                                            | `BeginLightingJob` throws on double-schedule (setup error, not a modeling choice)                          | No way to model "try to schedule, get rejected, BFS nodes accumulate" |
+| 2 | **Frame budget** — `maxLightJobsPerFrame` caps how many jobs schedule per frame; excess chunks wait                                                                                                             | `RunToConvergence` processes every pending chunk every round                                               | No starvation / delayed scheduling                                    |
+| 3 | **Concurrent voxel mutations** — fluid flow injects `AddToBlockLightQueue` + `HasLightChangesToProcess = true` while a lighting job is in-flight                                                                | No secondary modification source                                                                           | No way to model mid-flight voxel edits that re-flag a chunk           |
+| 4 | **Non-deterministic completion order** — `ProcessLightingJobs` iterates a `Dictionary`, so completion order within a frame is unstable; `_completedLightJobs` makes the defer-vs-apply decision order-dependent | `RunToConvergence`: sequential row-major; `RunWaveToConvergence`: all-Begin then all-Complete in row-major | No ordering variation                                                 |
 
 ## 2. Design Overview
 
@@ -44,13 +44,13 @@ Add a **`LightingFrameSimulator`** class that wraps `LightingTestWorld` and repl
 
 ### 2.1 What changes vs. what stays
 
-| Component | Changes? | Notes |
-|---|---|---|
-| `LightingTestWorld` | **Minimal** | One new method: `TryBeginLightingJob` (returns null instead of throwing when chunk is in-flight). Minor: expose `_inFlightCoords` read-only for the simulator's scheduling guard. |
-| `LightingTestWorld.Builder` (partial) | **None** | `SetBlock`, `PlaceBlock`, `BreakBlock` continue to enqueue BFS nodes on `TestChunk.BlockQueue`/`SunQueue` and set `HasLightWork`. |
-| `LightingValidationSuite.Baseline` | **Additive** | New scenarios using `LightingFrameSimulator`. Existing B1–B16 untouched. |
-| `LightingValidationSuite.KnownBugs` | **Additive** | Bug 09 repro scenarios using the simulator. |
-| `WorldJobManager` | **Extract only** | Factor scheduling-guard decision into a static pure function (shared with simulator). |
+| Component                             | Changes?         | Notes                                                                                                                                                                             |
+|---------------------------------------|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `LightingTestWorld`                   | **Minimal**      | One new method: `TryBeginLightingJob` (returns null instead of throwing when chunk is in-flight). Minor: expose `_inFlightCoords` read-only for the simulator's scheduling guard. |
+| `LightingTestWorld.Builder` (partial) | **None**         | `SetBlock`, `PlaceBlock`, `BreakBlock` continue to enqueue BFS nodes on `TestChunk.BlockQueue`/`SunQueue` and set `HasLightWork`.                                                 |
+| `LightingValidationSuite.Baseline`    | **Additive**     | New scenarios using `LightingFrameSimulator`. Existing B1–B16 untouched.                                                                                                          |
+| `LightingValidationSuite.KnownBugs`   | **Additive**     | Bug 09 repro scenarios using the simulator.                                                                                                                                       |
+| `WorldJobManager`                     | **Extract only** | Factor scheduling-guard decision into a static pure function (shared with simulator).                                                                                             |
 
 ## 3. Detailed Design
 
@@ -80,6 +80,7 @@ public static class LightingScheduleDecision
 ```
 
 **Production callsite** (`WorldJobManager.ScheduleLightingUpdate`):
+
 ```csharp
 // Before (current):
 if (LightingJobs.ContainsKey(chunkCoord)) return false;
@@ -112,17 +113,21 @@ private class ChunkSchedulingState
 ```
 
 The `HasLightChangesToProcess` flag in the simulator mirrors the production flag. It's set when:
+
 - A voxel modification enqueues BFS nodes (via `LightingTestWorld.Builder.PlaceBlock` / `BreakBlock` / `SetBlock`)
 - Cross-chunk mods are applied (wake-up nodes set `HasLightWork`)
 - A job completes not-stable
 
 It's cleared when a job is successfully scheduled (matching production's line 434: `chunkData.HasLightChangesToProcess = false`).
 
-**Why not reuse `TestChunk.HasLightWork`?** `HasLightWork` serves double duty in the current harness — it's both the "has pending BFS nodes" flag and the scheduling trigger. The simulator needs to separate these: `HasLightWork` drives whether there are BFS nodes to drain into a job, while `HasLightChangesToProcess` drives whether the scheduler *tries* to schedule. In production these are the same field, but the simulator needs to model the case where `HasLightChangesToProcess` is true but scheduling fails (ContainsKey guard), and then a *new* voxel edit sets it again redundantly.
+**Why not reuse `TestChunk.HasLightWork`?** `HasLightWork` serves double duty in the current harness — it's both the "has pending BFS nodes" flag and the scheduling trigger. The simulator needs to separate these: `HasLightWork` drives whether there are BFS nodes to drain into a job, while `HasLightChangesToProcess` drives whether the scheduler *tries* to schedule. In production these are the same field, but the simulator needs to model the case where `HasLightChangesToProcess` is true but scheduling fails (ContainsKey guard), and then a *new* voxel edit
+sets it again redundantly.
 
-After more thought: we can keep using `TestChunk.HasLightWork` as the single source of truth (it already tracks "chunk has pending BFS work"), and the simulator's scheduling guard is simply: `HasLightWork && !InFlight`. The redundant-set case (fluid edit while in-flight re-sets `HasLightWork`) is naturally handled because `CompleteLightingJob` doesn't clear `HasLightWork` if new nodes were enqueued during the flight. This matches production: `HasLightChangesToProcess` is cleared at schedule time, but re-set by any `AddToBlockLightQueue` call during the flight.
+After more thought: we can keep using `TestChunk.HasLightWork` as the single source of truth (it already tracks "chunk has pending BFS work"), and the simulator's scheduling guard is simply: `HasLightWork && !InFlight`. The redundant-set case (fluid edit while in-flight re-sets `HasLightWork`) is naturally handled because `CompleteLightingJob` doesn't clear `HasLightWork` if new nodes were enqueued during the flight. This matches production: `HasLightChangesToProcess` is cleared at schedule time, but re-set by any `AddToBlockLightQueue` call during the
+flight.
 
 **Revised:** No separate `ChunkSchedulingState` class needed. The simulator uses:
+
 - `TestChunk.HasLightWork` — "should attempt to schedule" (already exists)
 - `LightingTestWorld._inFlightCoords` — "is in-flight" (already exists, needs read access)
 
@@ -223,6 +228,7 @@ RunFrame(budget):
 In the current `LightingTestWorld`, `BeginLightingJob` doesn't actually schedule an async job — it creates the `NeighborhoodLightingJob` struct, and `CompleteLightingJob` calls `.Run()` synchronously. The "flight" is purely a logical concept for snapshot isolation.
 
 The simulator holds flights in a `_pendingFlights` list between frames. On the next `RunFrame`, it completes them (which runs the Burst job synchronously and merges results). This lets us control:
+
 - **Completion order**: shuffle or reverse the list to test order sensitivity
 - **Multi-frame flights**: hold a flight across multiple frames (skip its completion) to model a job that takes longer than one frame to complete
 
@@ -294,15 +300,16 @@ The existing `BeginLightingJob` **keeps its throw** — direct test scenarios th
 
 This is the subtlest part. In production:
 
-| Event | `HasLightChangesToProcess` | Managed BFS queue |
-|---|---|---|
-| `AddToBlockLightQueue` (voxel edit) | Set `true` | Node enqueued |
-| `ScheduleLightingUpdate` succeeds | Cleared `false` | Drained into NativeQueue for job |
-| `ScheduleLightingUpdate` rejected (ContainsKey) | Stays `true` | Nodes stay in managed queue |
-| Cross-chunk mod applied | Set `true` (via `AddToBlockLightQueue`) | Wake-up node enqueued |
-| Job completes not-stable | Set `true` | (no new nodes; the job re-runs with the same light field) |
+| Event                                           | `HasLightChangesToProcess`              | Managed BFS queue                                         |
+|-------------------------------------------------|-----------------------------------------|-----------------------------------------------------------|
+| `AddToBlockLightQueue` (voxel edit)             | Set `true`                              | Node enqueued                                             |
+| `ScheduleLightingUpdate` succeeds               | Cleared `false`                         | Drained into NativeQueue for job                          |
+| `ScheduleLightingUpdate` rejected (ContainsKey) | Stays `true`                            | Nodes stay in managed queue                               |
+| Cross-chunk mod applied                         | Set `true` (via `AddToBlockLightQueue`) | Wake-up node enqueued                                     |
+| Job completes not-stable                        | Set `true`                              | (no new nodes; the job re-runs with the same light field) |
 
 In the harness, `TestChunk.HasLightWork` and the managed queues (`SunQueue`, `BlockQueue`) already model this correctly:
+
 - `PlaceBlock`/`BreakBlock` enqueue nodes and set `HasLightWork = true`
 - `BeginLightingJob` drains queues and sets `HasLightWork = false`
 - `CompleteLightingJob` sets `HasLightWork = true` if not stable or if cross-chunk mods wake up the chunk
@@ -394,12 +401,12 @@ Assets/Scripts/WorldJobManager.cs     (refactor to use LightingScheduleDecision)
 
 ## 7. Risks and Mitigations
 
-| Risk | Mitigation |
-|---|---|
-| Simulator drifts from production scheduling logic | The `LightingScheduleDecision` extraction ensures the guard logic is shared code. The completion/merge/defer path is already shared (both use `CompleteLightingJob` → `CrossChunkLightModApplier`). |
-| Bug 09 still doesn't reproduce (needs even more specific timing) | Promote scenarios to baselines. The budget-pressure and completion-order tests are valuable regression guards regardless. Note: if the bug is truly in the `Dictionary` iteration randomness of `ProcessLightingJobs`, the `Reverse` completion order should catch it. |
-| `InjectVoxelEdit` doesn't faithfully model fluid flow | Fluid flow is a sequence of `SetVoxel` + `QueueLightUpdate` calls. The simulator's `InjectVoxelEdit` calls the same `LightingTestWorld.Builder` methods that enqueue BFS nodes. The only thing missing is fluid *simulation logic* (which direction water flows, how many ticks it takes) — but for the lighting bug, all that matters is that *a voxel changes and BFS nodes are queued while a job is in-flight*. |
-| Performance: frame-by-frame simulation is slower than `RunToConvergence` | Each frame tick runs 0–N Burst jobs synchronously (same as current baselines). Budget-limited scenarios run fewer jobs per frame but more frames. Expected total runtime increase: negligible (a few hundred milliseconds per scenario). |
+| Risk                                                                     | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                          |
+|--------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Simulator drifts from production scheduling logic                        | The `LightingScheduleDecision` extraction ensures the guard logic is shared code. The completion/merge/defer path is already shared (both use `CompleteLightingJob` → `CrossChunkLightModApplier`).                                                                                                                                                                                                                 |
+| Bug 09 still doesn't reproduce (needs even more specific timing)         | Promote scenarios to baselines. The budget-pressure and completion-order tests are valuable regression guards regardless. Note: if the bug is truly in the `Dictionary` iteration randomness of `ProcessLightingJobs`, the `Reverse` completion order should catch it.                                                                                                                                              |
+| `InjectVoxelEdit` doesn't faithfully model fluid flow                    | Fluid flow is a sequence of `SetVoxel` + `QueueLightUpdate` calls. The simulator's `InjectVoxelEdit` calls the same `LightingTestWorld.Builder` methods that enqueue BFS nodes. The only thing missing is fluid *simulation logic* (which direction water flows, how many ticks it takes) — but for the lighting bug, all that matters is that *a voxel changes and BFS nodes are queued while a job is in-flight*. |
+| Performance: frame-by-frame simulation is slower than `RunToConvergence` | Each frame tick runs 0–N Burst jobs synchronously (same as current baselines). Budget-limited scenarios run fewer jobs per frame but more frames. Expected total runtime increase: negligible (a few hundred milliseconds per scenario).                                                                                                                                                                            |
 
 ## 8. Open Questions
 
@@ -409,4 +416,5 @@ Assets/Scripts/WorldJobManager.cs     (refactor to use LightingScheduleDecision)
 
 3. **Should we model `RemainingEdgeCheckRounds` in the simulator?** Only if we're trying to reproduce Bug 05 variants. For Bug 09 (blocklight at a border), edge checks are not involved. Add later if needed.
 
-4. **Multi-frame flights**: Should the simulator support holding a flight across multiple frames (modeling a Burst job that takes >1 frame)? This would be needed if the bug requires the job to be in-flight for multiple frame ticks while mutations accumulate. Easy to add: just skip completion of selected flights in `RunFrame`. Worth including in the initial implementation as an optional parameter.
+4. **Multi-frame flights**: ~~Should the simulator support holding a flight across multiple frames?~~ **Implemented (June 2026).** `RunFrame` accepts an optional `completionPredicate` (`Func<LightingJobFlight, int, bool>`) that controls which flights complete each frame. Flights rejected by the predicate carry over to the next frame with their in-flight status preserved. Static factories `MinAge(n)`, `OnlyChunks(...)`, and `ExceptChunks(...)` cover common patterns. Three scenarios (B20, B21, B22) exercise multi-frame flight lifetimes with stale-snapshot
+   interleavings — all converge to the oracle.
