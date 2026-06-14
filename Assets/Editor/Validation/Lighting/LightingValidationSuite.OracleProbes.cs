@@ -167,5 +167,99 @@ namespace Editor.Validation.Lighting
                 $"Expected (0,0,0) at the cube center, got {world.GetBlocklightRGB(new Vector3Int(26, 13, 26))} (opaque wrongly propagating inward?)");
             return passed;
         }
+
+        /// <summary>
+        /// B45 (A4 probe — cumulative multi-layer attenuation, fidelity finding C5): every other attenuation
+        /// probe pins a SINGLE obstruction (B2 one DimGlass pane, B37 one leaves cap), so a shared engine+oracle
+        /// bug in how per-step attenuation COMPOSES across layers passes <see cref="LightingAssert.MatchesOracle"/>
+        /// silently. This probe forces light through stacked opacity-5 <see cref="TestBlockPalette.DimGlass"/>
+        /// layers in series — on both light types — and asserts the cumulative result against hand-counted
+        /// constants (no oracle call). Opacity 5 (not the leaves' opacity 1) is what makes each layer
+        /// distinguishable from the −1 air step, so each layer's contribution is observable.
+        /// <para>
+        /// Attenuation is charged on ENTERING a voxel (the destination's opacity), reducing to
+        /// <c>max(0, src − max(1, opacity))</c> — confirmed against <c>NeighborhoodLightingJob.PropagateLight</c>.
+        /// For the vertical column the sky-exposed top block reads 15 "for free" (it is the heightmap surface),
+        /// so a 3-block DimGlass cap is needed to charge two cumulative −5 steps (10 → 5); the horizontal case
+        /// charges both panes because the lamp source is not free (15 → 10 → 5).
+        /// </para>
+        /// </summary>
+        private static bool Baseline_ProbeCumulativeMultiLayerAttenuation()
+        {
+            bool passed = true;
+
+            // --- Part A: vertical SKYLIGHT through two stacked DimGlass layers (column-descent attenuation) ---
+            using (LightingTestWorld world = new LightingTestWorld(3))
+            {
+                world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+
+                // Seal a 1-wide vertical shaft at column (24,24): stone walls on all four sides, y=11..20,
+                // so the ONLY light entry is straight down through the cap (cf. B37).
+                world.FillBox(new Vector3Int(23, 11, 24), new Vector3Int(23, 20, 24), TestBlockPalette.Stone);
+                world.FillBox(new Vector3Int(25, 11, 24), new Vector3Int(25, 20, 24), TestBlockPalette.Stone);
+                world.FillBox(new Vector3Int(24, 11, 23), new Vector3Int(24, 20, 23), TestBlockPalette.Stone);
+                world.FillBox(new Vector3Int(24, 11, 25), new Vector3Int(24, 20, 25), TestBlockPalette.Stone);
+
+                // Three-block DimGlass cap (opacity 5 each) at the top of the shaft; air below to the floor.
+                // Attenuation is charged on ENTERING a voxel (destination opacity) and the sky-exposed top
+                // block reads 15 "for free" (it is the heightmap surface), so two STACKED layers would charge
+                // only once — a third layer is needed to observe two cumulative −5 steps.
+                world.SetBlock(new Vector3Int(24, 20, 24), TestBlockPalette.DimGlass);
+                world.SetBlock(new Vector3Int(24, 19, 24), TestBlockPalette.DimGlass);
+                world.SetBlock(new Vector3Int(24, 18, 24), TestBlockPalette.DimGlass);
+                world.RecalculateHeightmaps();
+                passed &= LightingAssert.Converged(world.RunInitialLighting(), "B45A: initial lighting converges");
+
+                // Hand-derived (light enters each voxel attenuated by the DESTINATION's opacity; the cap is the
+                // free sky surface). heightmap top = top DimGlass at y=20 → reads 15.
+                //   y=19 = 15 − opacity(entering DimGlass = 5) = 10
+                //   y=18 = 10 − opacity(entering DimGlass = 5) =  5   ← two layers charged cumulatively (one layer → 10)
+                //   y=17 =  5 − opacity(entering air = 1)      =  4
+                passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 20, 24)) == 15,
+                    "B45A: DimGlass cap at the heightmap reads full sky",
+                    $"Expected sky=15 at the cap, got {world.GetSkyLight(new Vector3Int(24, 20, 24))}");
+                passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 19, 24)) == 10,
+                    "B45A: entering one DimGlass layer attenuates the column by 5",
+                    $"Expected sky=10 below the first charged layer, got {world.GetSkyLight(new Vector3Int(24, 19, 24))}");
+                passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 18, 24)) == 5,
+                    "B45A: entering two DimGlass layers attenuates the column by 10 cumulatively",
+                    $"Expected sky=5 below the second charged layer, got {world.GetSkyLight(new Vector3Int(24, 18, 24))} (per-layer attenuation not composing?)");
+                passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(24, 17, 24)) == 4,
+                    "B45A: air below the cap resumes the -1/voxel step",
+                    $"Expected sky=4 one voxel below the foliage, got {world.GetSkyLight(new Vector3Int(24, 17, 24))}");
+            }
+
+            // --- Part B: horizontal BLOCKLIGHT through two DimGlass panes (BFS attenuation), all channels ---
+            using (LightingTestWorld world = new LightingTestWorld(3))
+            {
+                world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+
+                // A solid stone block with a 1-voxel tunnel carved straight through it, so the ONLY blocklight
+                // path is east through the two panes (no go-around path to pollute the hand-derived chain).
+                world.FillBox(new Vector3Int(19, 11, 23), new Vector3Int(23, 13, 25), TestBlockPalette.Stone);
+                world.SetBlock(new Vector3Int(20, 12, 24), TestBlockPalette.LampWhite); // emission 15
+                world.SetBlock(new Vector3Int(21, 12, 24), TestBlockPalette.DimGlass);
+                world.SetBlock(new Vector3Int(22, 12, 24), TestBlockPalette.DimGlass);
+                world.SetBlock(new Vector3Int(23, 12, 24), TestBlockPalette.Air);
+                world.RecalculateHeightmaps();
+                passed &= LightingAssert.Converged(world.RunInitialLighting(), "B45B: initial lighting converges");
+
+                // Hand-derived (BFS attenuates by the DESTINATION voxel's opacity); white lamp → all channels equal:
+                //   (21) DimGlass = 15 − 5 = 10
+                //   (22) DimGlass = 10 − 5 = 5    ← second layer composes (single pane from a lamp would be 10)
+                //   (23) air      =  5 − 1 = 4
+                passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(21, 12, 24)) == (10, 10, 10),
+                    "B45B: one DimGlass pane attenuates blocklight by 5 on all channels",
+                    $"Expected (10,10,10) inside the first pane, got {world.GetBlocklightRGB(new Vector3Int(21, 12, 24))}");
+                passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(22, 12, 24)) == (5, 5, 5),
+                    "B45B: two DimGlass panes attenuate blocklight by 10 cumulatively",
+                    $"Expected (5,5,5) inside the second pane, got {world.GetBlocklightRGB(new Vector3Int(22, 12, 24))} (per-layer attenuation not composing?)");
+                passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(new Vector3Int(23, 12, 24)) == (4, 4, 4),
+                    "B45B: air beyond the panes resumes the -1/voxel step",
+                    $"Expected (4,4,4) beyond the second pane, got {world.GetBlocklightRGB(new Vector3Int(23, 12, 24))}");
+            }
+
+            return passed;
+        }
     }
 }

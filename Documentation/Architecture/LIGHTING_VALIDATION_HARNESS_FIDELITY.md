@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (44 baselines + frame simulator, menu item
+The lighting validation suite (45 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -301,15 +301,24 @@ there is invisible.
   field re-derives from the loaded neighbor and matches the all-loaded oracle; (b) a persist scenario recording
   a removal then a placement at the same unloaded-target column, asserting the guard's ordering.
 
-### C5 — Attenuation is only ever single-layer; no cumulative multi-layer probe ·  **OPEN · MEDIUM**
+### C5 — Attenuation is only ever single-layer; no cumulative multi-layer probe ·  **CLOSED (2026-06-14)**
 
-- Every attenuation check is a single obstruction: **B2** (one DimGlass pane), **B37** (one leaves cap). No
-  scenario pins that light loses `max(1, opacity)` *per step* through several layers in series, so a shared
-  engine+oracle bug in the per-step composition passes `MatchesOracle` silently — an A4-class blind spot.
-- **Oracle-independent (A4-style), needs no new capability.**
-- **Proposed (B45):** a vertical sky probe through a stacked-DimGlass cap (−5/layer, distinguishable from the
-  −1 air step) over a sealed stone shaft, plus a horizontal blocklight probe through two DimGlass panes in
-  series — both asserting hand-derived cumulative constants, no `MatchesOracle`.
+- **Was:** every attenuation check was a single obstruction — **B2** (one DimGlass pane), **B37** (one leaves
+  cap, opacity 1, which can't even disambiguate the per-step convention since a leaf step equals the air step).
+  No scenario pinned that light loses `max(1, opacity)` *per step* through several layers in series, so a
+  shared engine+oracle bug in the per-step composition passed `MatchesOracle` silently — an A4-class blind spot.
+- **Now:** baseline **B45** (`Baseline_ProbeCumulativeMultiLayerAttenuation`, oracle-independent like B35–B39):
+  a vertical sky probe through a 3-block DimGlass cap over a sealed stone shaft (`15 → 10 → 5 → 4`) and a
+  horizontal blocklight probe through two DimGlass panes in a stone tunnel (`15 → 10 → 5 → 4`, all channels) —
+  both with hand-counted constants, no `MatchesOracle`. Confirms attenuation **composes** across opacity-5
+  layers (each charges −5, distinguishable from the −1 air step).
+- **Derivation correction surfaced while authoring (kept here as the rationale):** attenuation is charged on
+  **entering** a voxel (the destination's opacity, `max(0, src − max(1, opacity))`), and the BFS flood
+  dominates the column-recalc result. The sky-exposed top block reads 15 "for free" (it's the heightmap
+  surface), so two *stacked* DimGlass charge only once vertically — a **third** layer is needed to observe two
+  cumulative −5 steps. The horizontal case charges both panes because the lamp source isn't free. (My first
+  pass asserted a 2-layer vertical stack and read `9`, not `5` — engine correct, probe wrong; fixed to a
+  3-block cap. This is exactly the A4 value: an oracle-independent constant forces the rule into the open.)
 
 ### C6 — No per-channel removal-independence scenario ·  **OPEN · LOW–MEDIUM**
 
@@ -382,7 +391,7 @@ representative deterministic baselines. **Do not remove B22 / B26–B29** (each 
 | #  | Finding                                                | Status            | Priority         | Effort         |
 |----|--------------------------------------------------------|-------------------|------------------|----------------|
 | C4 | Sunlight persist→replay + `AddPendingBlocklight` guard | OPEN              | Medium           | small          |
-| C5 | Cumulative multi-layer attenuation probe (B45)         | OPEN              | Medium           | small          |
+| C5 | Cumulative multi-layer attenuation probe (B45)         | **CLOSED**        | —                | done           |
 | C3 | Cross-chunk sunlight removal / darkening quadrant      | OPEN              | Medium           | small          |
 | C6 | Per-channel removal independence                       | OPEN              | Low–Medium       | small          |
 | C7 | Deterministic corner spill / in-chunk re-shadow        | OPEN              | Low              | small          |
