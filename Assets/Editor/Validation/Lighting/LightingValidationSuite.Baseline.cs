@@ -60,6 +60,9 @@ namespace Editor.Validation.Lighting
             // --- C4a sunlight-column persist→replay (the Sun-channel twin of B30) ---
             scenarios.Add(new Scenario("B46: Cross-chunk sunlight toward an unloaded neighbor persists as a column and replays on load (finding C4a)", Baseline_PersistReplayCrossChunkSunlight));
 
+            // --- C4b AddPendingBlocklight placement-after-removal guard (direct store invariant) ---
+            scenarios.Add(new Scenario("B47: AddPendingBlocklight placement-after-removal guard holds (finding C4b)", Baseline_PendingBlocklightPlacementAfterRemovalGuard));
+
             // --- C1 Bug-09 geometry fuzz (randomized border/source/held-chunk/budget across 50 seeds) ---
             scenarios.Add(new Scenario("B40: Bug-09 cross-chunk geometry fuzz converges to the oracle across 50 randomized seeds (Bug 09 guard)", Baseline_Bug09GeometryFuzz));
 
@@ -1539,6 +1542,21 @@ namespace Editor.Validation.Lighting
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B46: replayed field matches oracle");
             return passed;
+        }
+
+        /// <summary>
+        /// B47: The <c>AddPendingBlocklight</c> placement-after-removal guard (closes finding C4b in
+        /// LIGHTING_VALIDATION_HARNESS_FIDELITY.md). B30/B31/B32 exercise the persist store end-to-end but
+        /// never pin its order-sensitive overwrite rule: a placement mod must NOT overwrite a pending removal
+        /// for the same voxel (the removal's darkness wave must still run on load), while a removal MUST
+        /// overwrite a pending placement. Pinned directly against the real <c>LightingStateManager</c>
+        /// in-memory store (oracle-free, like B34's <c>Reset()</c> guard) — a regression here is invisible to
+        /// every field-comparison baseline. See <see cref="LightingAssert.AssertPendingBlocklightPlacementAfterRemovalGuard"/>.
+        /// </summary>
+        private static bool Baseline_PendingBlocklightPlacementAfterRemovalGuard()
+        {
+            return LightingAssert.AssertPendingBlocklightPlacementAfterRemovalGuard(
+                "B47: AddPendingBlocklight guard — a placement never overwrites a pending removal; a removal overwrites a placement");
         }
 
         /// <summary>

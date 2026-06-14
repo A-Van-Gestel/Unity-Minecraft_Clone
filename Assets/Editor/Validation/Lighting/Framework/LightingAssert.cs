@@ -5,7 +5,9 @@ using System.Text;
 using Data;
 using Helpers;
 using Jobs.BurstData;
+using Serialization;
 using UnityEngine;
+using UnityEngine.Pool;
 
 namespace Editor.Validation.Lighting.Framework
 {
@@ -313,6 +315,75 @@ namespace Editor.Validation.Lighting.Framework
             finally
             {
                 ChunkData.OnLightWorkFlagged = savedCallback;
+            }
+        }
+
+        /// <summary>
+        /// Pins the <c>AddPendingBlocklight</c> placement-after-removal guard (finding C4b;
+        /// <c>LightingStateManager.cs:165</c>) directly against the real <see cref="IPendingLightStore"/>
+        /// (a disk-free <see cref="LightingStateManager.CreateInMemory"/>), like B34 pins <c>Reset()</c>.
+        /// The guard is asymmetric and order-sensitive:
+        /// <list type="bullet">
+        /// <item>A <b>placement</b> mod must NOT overwrite a pending <b>removal</b> for the same voxel — the
+        /// removal's darkness wave must still run on load to clear the old lamp's propagated light (the
+        /// placement's uplift is recomputed from baked emission, so dropping it is safe).</item>
+        /// <item>A <b>removal</b> mod MUST overwrite a pending <b>placement</b> (the block is gone).</item>
+        /// </list>
+        /// An oracle-free invariant: a regression (e.g. dropping the guard, or making it symmetric) flips
+        /// this red even though every cross-chunk persist/replay baseline (B30–B32) stays green.
+        /// </summary>
+        /// <param name="testName">The scenario name used in the log output.</param>
+        /// <returns>True when both arms of the guard hold.</returns>
+        public static bool AssertPendingBlocklightPlacementAfterRemovalGuard(string testName)
+        {
+            IPendingLightStore store = LightingStateManager.CreateInMemory();
+            try
+            {
+                ChunkCoord coord = new ChunkCoord(2, 1);
+                Vector3Int removedThenPlaced = new Vector3Int(5, 11, 8); // removal first → placement must be dropped
+                Vector3Int placedThenRemoved = new Vector3Int(9, 11, 4); // placement first → removal must win
+
+                // Arm 1: record a removal, then a placement for the SAME voxel — the placement is dropped.
+                store.AddPendingBlocklight(coord, removedThenPlaced, 0, 0, 0, isRemoval: true);
+                store.AddPendingBlocklight(coord, removedThenPlaced, 14, 14, 14, isRemoval: false);
+
+                // Arm 2: record a placement, then a removal — the removal overwrites it.
+                store.AddPendingBlocklight(coord, placedThenRemoved, 14, 14, 14, isRemoval: false);
+                store.AddPendingBlocklight(coord, placedThenRemoved, 0, 0, 0, isRemoval: true);
+
+                if (!store.TryGetAndRemovePendingBlocklight(coord,
+                        out Dictionary<Vector3Int, LightingStateManager.PendingBlocklightMod> mods))
+                    return IsTrue(false, testName, "no pending blocklight mods were recorded");
+
+                List<string> failures = new List<string>();
+                try
+                {
+                    if (!mods.TryGetValue(removedThenPlaced, out LightingStateManager.PendingBlocklightMod a))
+                        failures.Add($"{removedThenPlaced}: mod missing");
+                    else if (!a.IsRemoval || a.R != 0 || a.G != 0 || a.B != 0)
+                        failures.Add($"{removedThenPlaced}: a placement overwrote the pending removal " +
+                                     $"(got IsRemoval={a.IsRemoval}, ({a.R},{a.G},{a.B}); expected the (0,0,0) removal to survive)");
+
+                    if (!mods.TryGetValue(placedThenRemoved, out LightingStateManager.PendingBlocklightMod b))
+                        failures.Add($"{placedThenRemoved}: mod missing");
+                    else if (!b.IsRemoval || b.R != 0 || b.G != 0 || b.B != 0)
+                        failures.Add($"{placedThenRemoved}: a removal failed to overwrite the pending placement " +
+                                     $"(got IsRemoval={b.IsRemoval}, ({b.R},{b.G},{b.B}))");
+                }
+                finally
+                {
+                    // TryGetAndRemovePendingBlocklight transfers ownership of the pooled dict to us.
+                    DictionaryPool<Vector3Int, LightingStateManager.PendingBlocklightMod>.Release(mods);
+                }
+
+                return IsTrue(failures.Count == 0, testName,
+                    failures.Count == 0
+                        ? null
+                        : $"AddPendingBlocklight placement-after-removal guard violated: {string.Join("; ", failures)}");
+            }
+            finally
+            {
+                store.Clear();
             }
         }
 
