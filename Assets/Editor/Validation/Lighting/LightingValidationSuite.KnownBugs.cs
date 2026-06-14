@@ -10,11 +10,12 @@ namespace Editor.Validation.Lighting
     /// </summary>
     public static partial class LightingValidationSuite
     {
-        // NOTE on Bug 05: a minimal repro was attempted (5×5 grid, full slab with a single diagonal
-        // sky well, wave-parallel initial lighting via RunInitialLightingParallel) but the engine
-        // converges to the oracle field — it now lives as baseline B8. Bug 05 likely requires
-        // denser multi-pocket canopy patterns or mod-loss timing the minimal case doesn't hit;
-        // a faithful repro remains TODO before that bug's fix can be test-driven.
+        // NOTE on Bug 05: a minimal repro (single diagonal sky well, baseline B8) converges, and the
+        // procedural dense-canopy geometry fuzz (LightingValidationSuite.Bug05Canopy.cs, baseline B42 +
+        // nightly menu) ALSO converges across all seeds once Bug 10 is fixed — so the Bug-05 shadow
+        // mechanism is not synchronously reproducible (in-range light paths reconcile within the 2 edge
+        // rounds). The canopy fuzz's real catch was Bug 10 (K10a/K10b below). A faithful Bug-05 repro
+        // remains TODO and likely needs in-build instrumentation, not another synchronous layer (cf. B3).
 
         // NOTE on Bug 09: fifteen repro attempts total — two direct-harness (B15, B16), three
         // frame-simulator with complete-all (B17, B18, B19), three with multi-frame flight
@@ -28,7 +29,8 @@ namespace Editor.Validation.Lighting
 
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
-            // No open known-bug scenarios — Bug 05 and Bug 09 still need faithful repros (see notes above).
+            // No open known-bug scenarios. Bug 05 and Bug 09 still need faithful repros (see notes above);
+            // Bug 10 was fixed and its repros promoted to baselines B43/B44.
         }
     }
 }

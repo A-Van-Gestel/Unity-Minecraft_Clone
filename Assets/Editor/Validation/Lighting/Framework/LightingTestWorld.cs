@@ -732,6 +732,46 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <summary>
+        /// Diagnostic variant of <see cref="RunInitialLightingParallel"/> that runs a FIXED number of
+        /// wave-parallel edge-check rounds instead of the production-faithful count driven by each chunk's
+        /// real <see cref="ChunkData.RemainingEdgeCheckRounds"/> (= 2). Used by the Bug-05 dense-canopy
+        /// fuzz to distinguish a round-budget shortfall — the field DOES converge to the oracle given
+        /// enough rounds, which is exactly the Bug-05 mechanism (cardinal-only <c>CheckEdges</c> needing
+        /// more than 2 hops for a multi-chunk diagonal pocket) — from a genuinely unreachable pocket (dark
+        /// in the oracle too, i.e. not Bug 05). This is NOT a production code path: production caps edge
+        /// checks at <c>RemainingEdgeCheckRounds = 2</c>.
+        /// </summary>
+        /// <param name="forcedEdgeRounds">The exact number of edge-check rounds to run after the initial wave.</param>
+        /// <param name="maxRounds">The convergence round budget for each wave stage.</param>
+        /// <returns>The total number of convergence waves taken, or -1 if any stage failed to converge.</returns>
+        public int RunInitialLightingParallelForcedEdgeRounds(int forcedEdgeRounds, int maxRounds = DefaultMaxRounds)
+        {
+            foreach (TestChunk chunk in _chunks.Values)
+                QueueFullSunlightRecalc(chunk.Coord);
+
+            int totalRounds = RunWaveToConvergence(maxRounds);
+            if (totalRounds < 0) return -1;
+
+            // Force exactly forcedEdgeRounds edge-check waves, bypassing the real RemainingEdgeCheckRounds
+            // cap. Flagging NeedsEdgeCheck + HasLightWork makes BeginLightingJob run the border CheckEdges
+            // pass (it consumes NeedsEdgeCheck into the job's PerformEdgeCheck), same as a real edge round.
+            for (int r = 0; r < forcedEdgeRounds; r++)
+            {
+                foreach (TestChunk chunk in _chunks.Values)
+                {
+                    chunk.Data.NeedsEdgeCheck = true;
+                    chunk.HasLightWork = true;
+                }
+
+                int rounds = RunWaveToConvergence(maxRounds);
+                if (rounds < 0) return -1;
+                totalRounds += rounds;
+            }
+
+            return totalRounds;
+        }
+
+        /// <summary>
         /// One edge-check round step shared by <see cref="RunInitialLighting"/> and
         /// <see cref="RunInitialLightingParallel"/>: for every chunk that still has edge-check rounds left
         /// on its real <see cref="ChunkData.RemainingEdgeCheckRounds"/> counter, decrement it, flag

@@ -232,6 +232,29 @@ path, keeping the scan linear.
 
 ---
 
+### ~~14. Cross-chunk edge check leaks light out of opaque border blocks~~
+
+**Severity:** Low-Medium
+**Fixed:** June 2026 (was Bug 10 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed via the validation suite (repros flipped red→green, all baselines green). Promoted to validation baselines **B43** (sunlight) and **B44** (blocklight) from known-bug repros K10a/K10b.
+**Confidence:** Confirmed by the validation framework; not separately reproduced in-game, but **no regression observed in-game** after the fix. Likely in-game manifestation: the diagonal over-bright / light-decrease band seen along chunk borders **at world height** in the ChunkBorder debug VoxelVisualization mode (the opaque heightmap surface sits exactly on the borders there, so its surface light leaked one voxel across each border — producing the cross-border diagonal pattern).
+**Found by:** the Bug-05 dense-canopy geometry fuzz (`LightingValidationSuite.Bug05Canopy.cs`), whose opaque under-canopy dividers sit on chunk borders and triggered the leak — the fuzz did not reproduce Bug 05 but surfaced this distinct defect.
+**Files:** `NeighborhoodLightingJob.cs` — `CheckEdgeVoxel`, `CheckEdgeVoxelRGB` (+ call sites in `CheckEdges` and `PropagateDarkness`)
+
+**Description:**
+Voxels just inside a chunk border ended up **over-bright** (more light than the borderless-correct value) when an *opaque* block sat on the adjacent chunk's matching border voxel. The edge-reconciliation pass (`NeighborhoodLightingJob.CheckEdges`) read the cross-chunk neighbor's stored light and propagated an attenuated copy into the center chunk **without checking whether that neighbor was opaque** — so an opaque wall's *received surface light* (which it must never re-transmit) leaked across the chunk boundary. Because the edge check is add-only (
+`CheckEdgeVoxel` can only raise light, never lower it), the surplus was never reconciled away and persisted until a full relight. This is the **inverse artifact** of Bug 05 (over-bright instead of shadowed), explicitly anticipated in Bug 05's June-2026 observation.
+
+**Root Cause:**
+`CheckEdgeVoxel` (sunlight) guarded `centerProps.IsOpaque` but not the *neighbor's* opacity, and `CheckEdgeVoxelRGB` (blocklight) propagated the opaque neighbor's *stored* channels rather than its emission. The in-chunk propagators do the opposite — `PropagateLight` returns early on an opaque source and `PropagateLightRGB` substitutes an opaque source's own emission for its stored light. The cross-chunk edge path omitted the symmetric guard, so opaque blocks acted as sunlight sources (and received-surface-blocklight sources) across chunk borders.
+
+**Fix (June 2026):**
+
+- `CheckEdgeVoxel`: now receives the neighbor's packed voxel and returns early when the neighbor is opaque (an opaque block has no transmissible sky light — mirror of the `PropagateLight` source guard).
+- `CheckEdgeVoxelRGB`: when the neighbor is opaque, seeds from its **emission** (`EmissionR/G/B`) rather than its stored blocklight — mirror of the `PropagateLightRGB` opaque-source rule, so opaque *emissive* blocks (lamps) still illuminate across borders (guarded by baselines B5/B10) while opaque non-emissive blocks transmit nothing.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

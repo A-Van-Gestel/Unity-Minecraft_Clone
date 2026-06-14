@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (41 baselines + frame simulator, menu item
+The lighting validation suite (44 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -247,12 +247,32 @@ there is invisible.
   3×3 (enough for diagonal delivery); and the fuzz still passes `neighborsDataReady: true` (see B2), so the
   scheduling-deferral path stays unexercised even under fuzzing.
 
-### C2 — Bug 05 needs the right geometry, not a new capability ·  **OPEN · MEDIUM**
+### C2 — Bug 05 needs the right geometry, not a new capability ·  **CLOSED (2026-06-14)**
 
-- The harness already does `RunInitialLightingParallel` + 2 edge rounds; what's missing is the *geometry*
-  the bug names: dense multi-pocket canopies whose light depends on diagonal paths that consume both
-  cardinal edge-check rounds. A procedural dense-canopy filler + a `ConvergedWithin(rounds, n)` assertion
-  would make it findable.
+- **Was:** the harness already did `RunInitialLightingParallel` + 2 edge rounds, but only ever over B8's
+  single-diagonal-well geometry (which converges). The *geometry* Bug 05 names — dense multi-pocket
+  canopies whose pockets depend on multi-chunk diagonal paths — was the untested axis.
+- **Now:** a procedural dense-canopy geometry fuzz (`LightingValidationSuite.Bug05Canopy.cs`).
+  `Bug05CanopyCase.FromSeed` randomizes — as a pure function of the seed — the canopy height/thickness, the
+  number and placement of sky wells, and the opaque under-canopy dividers that carve the gap into pockets
+  and force winding cross-chunk paths; each case runs the production wave-parallel initial lighting and
+  asserts the field matches the borderless oracle. Tiered like C1: **B42** runs a small sweep on every
+  suite invocation; the menu item **`Minecraft Clone/Dev/Validate Lighting Engine (Bug 05 Canopy Fuzz)`**
+  runs 200 nightly and, on a failing seed, re-runs it with forced extra edge rounds
+  (`LightingTestWorld.RunInitialLightingParallelForcedEdgeRounds` — the realized form of the proposed
+  `ConvergedWithin`) to classify it as a round-budget shortfall vs. an unreachable pocket.
+- **Outcome:** the fuzz did **not** reproduce the Bug-05 shadow mechanism, but it **found a different,
+  deterministic engine bug** — **Bug 10**, an over-bright *leak* of an opaque border block's surface light
+  across the chunk boundary (`CheckEdgeVoxel`/`CheckEdgeVoxelRGB` lacked the neighbor-opacity guard that
+  the in-chunk propagators have; the inverse artifact Bug 05's notes anticipated). With Bug 10 fixed, **all
+  fuzz seeds converge to the oracle within the production 2 edge-check rounds** — confirming the analytical
+  result that in-range 6-connected paths reconcile within 2 rounds, so Bug 05 (if real) is not
+  synchronously reproducible (parallel to Bug 09 / finding B3). Per the validation-driven-bugfix
+  "won't-reproduce → baseline" rule, the canopy fuzz now guards dense-canopy generation convergence as
+  **B42** (broad regression coverage) rather than reproducing Bug 05.
+- **Still NOT covered (minor):** no failure shrinker; grid fixed at 5×5; and, like C1, the search is
+  synchronous (it cannot catch an async/Burst race). A faithful Bug-05 repro, if the bug is real, likely
+  needs in-build instrumentation (see B3), not another synchronous geometry layer.
 
 ---
 
@@ -260,10 +280,10 @@ there is invisible.
 
 | #  | Finding                                         | Status            | Priority         | Effort         |
 |----|-------------------------------------------------|-------------------|------------------|----------------|
-| C2 | Bug-05 dense-canopy geometry                    | OPEN              | Medium           | Medium         |
 | A3 | `ModifyVoxel` heightmap (shared) / enqueue path | **PARTIAL**       | Low              | heightmap done |
 | A4 | Oracle shared-assumption probes                 | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
 | B5 | Meshing-gate coverage                           | OPEN              | Low (by design)  | —              |
+| C2 | Bug-05 dense-canopy geometry (found Bug 10)     | **CLOSED**        | —                | done           |
 | B2 | `neighborsDataReady` toggle                     | **CLOSED**        | —                | done           |
 | C1 | Bug-09 geometry fuzz (randomize geometry)       | **CLOSED**        | —                | done           |
 | B1 | Chunk-unload / persist-replay path              | **CLOSED**        | —                | done           |

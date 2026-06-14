@@ -351,7 +351,7 @@ namespace Jobs
                         if (centerPacked != uint.MaxValue)
                         {
                             CheckEdgeVoxel(node.Pos, centerPacked, GetLightData(node.Pos, ref cache),
-                                neighborLightData, pQueue, ref cache);
+                                neighborPacked, neighborLightData, pQueue, ref cache);
                         }
                     }
                 }
@@ -445,7 +445,7 @@ namespace Jobs
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte AttenuateLight(int sourceLight, byte opacity)
         {
-            return (byte)math.max(0, sourceLight - math.max(1, (int)opacity));
+            return (byte)math.max(0, sourceLight - math.max(1, opacity));
         }
 
         private void PropagateLight(Vector3Int pos, LightChannel channel, NativeQueue<Vector3Int> pQueue, ref NativeHashMap<long, ulong> cache)
@@ -563,9 +563,9 @@ namespace Jobs
                     byte propG = (byte)math.max(0, srcG - 1);
                     byte propB = (byte)math.max(0, srcB - 1);
 
-                    byte finalR = (byte)math.max((int)nR, (int)propR);
-                    byte finalG = (byte)math.max((int)nG, (int)propG);
-                    byte finalB = (byte)math.max((int)nB, (int)propB);
+                    byte finalR = (byte)math.max(nR, (int)propR);
+                    byte finalG = (byte)math.max(nG, (int)propG);
+                    byte finalB = (byte)math.max(nB, (int)propB);
 
                     if (finalR != nR || finalG != nG || finalB != nB)
                     {
@@ -578,9 +578,9 @@ namespace Jobs
                     byte propG = AttenuateLight(srcG, neighborProps.Opacity);
                     byte propB = AttenuateLight(srcB, neighborProps.Opacity);
 
-                    byte finalR = (byte)math.max((int)nR, (int)propR);
-                    byte finalG = (byte)math.max((int)nG, (int)propG);
-                    byte finalB = (byte)math.max((int)nB, (int)propB);
+                    byte finalR = (byte)math.max(nR, (int)propR);
+                    byte finalG = (byte)math.max(nG, (int)propG);
+                    byte finalB = (byte)math.max(nB, (int)propB);
 
                     if (finalR != nR || finalG != nG || finalB != nB)
                     {
@@ -727,7 +727,7 @@ namespace Jobs
                         ushort centerLightData = GetLightData(pos, ref cache);
                         ushort neighborLightData = GetLightData(neighborPos, ref cache);
 
-                        CheckEdgeVoxel(pos, centerPacked, centerLightData, neighborLightData,
+                        CheckEdgeVoxel(pos, centerPacked, centerLightData, neighborPacked, neighborLightData,
                             sunPlacement, ref cache);
                         CheckEdgeVoxelRGB(pos, centerPacked, neighborPos,
                             blockPlacement, ref cache);
@@ -740,8 +740,11 @@ namespace Jobs
         /// Checks a single border voxel's sunlight against its cross-chunk neighbor.
         /// Detects missing light (black spots) where the neighbor has light that should propagate here.
         /// </summary>
+        /// <param name="neighborPacked">The cross-chunk neighbor's packed voxel data, used to reject an
+        /// opaque neighbor as a light source (its sky value is non-transmissible surface light).</param>
         private void CheckEdgeVoxel(
-            Vector3Int centerPos, uint centerPacked, ushort centerLightData, ushort neighborLightData,
+            Vector3Int centerPos, uint centerPacked, ushort centerLightData,
+            uint neighborPacked, ushort neighborLightData,
             NativeQueue<Vector3Int> placementQueue, ref NativeHashMap<long, ulong> cache)
         {
             byte centerLight = LightBitMapping.GetSkyLight(centerLightData);
@@ -749,6 +752,13 @@ namespace Jobs
 
             BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
             if (centerProps.IsOpaque) return;
+
+            // An opaque neighbor cannot transmit sunlight across the border: its sky value is
+            // non-propagable surface light (opaque blocks have no sky emission), so seeding from it would
+            // leak light out of a wall into the adjacent chunk (Bug 10). Mirror of the IsOpaque source
+            // guard in PropagateLight; the add-only edge check could never reconcile the surplus away.
+            BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
+            if (neighborProps.IsOpaque) return;
 
             byte expectedFromNeighbor = AttenuateLight(neighborLight, centerProps.Opacity);
 
@@ -783,13 +793,27 @@ namespace Jobs
             byte nG = LightBitMapping.GetBlocklightG(neighborLight);
             byte nB = LightBitMapping.GetBlocklightB(neighborLight);
 
+            // An opaque neighbor must not transmit its RECEIVED surface blocklight across the border (that
+            // leaks a 1-deep stamp out of a wall — Bug 10); it may only seed its OWN emission, exactly as
+            // PropagateLightRGB treats an opaque source. So an opaque lamp still illuminates across the
+            // border while an opaque non-emissive block (emission 0) contributes nothing.
+            uint neighborPacked = GetPackedData(neighborPos, ref cache);
+            if (neighborPacked == uint.MaxValue) return;
+            BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
+            if (neighborProps.IsOpaque)
+            {
+                nR = neighborProps.EmissionR;
+                nG = neighborProps.EmissionG;
+                nB = neighborProps.EmissionB;
+            }
+
             byte expR = AttenuateLight(nR, centerProps.Opacity);
             byte expG = AttenuateLight(nG, centerProps.Opacity);
             byte expB = AttenuateLight(nB, centerProps.Opacity);
 
-            byte finalR = (byte)math.max((int)cR, (int)expR);
-            byte finalG = (byte)math.max((int)cG, (int)expG);
-            byte finalB = (byte)math.max((int)cB, (int)expB);
+            byte finalR = (byte)math.max(cR, (int)expR);
+            byte finalG = (byte)math.max(cG, (int)expG);
+            byte finalB = (byte)math.max(cB, (int)expB);
 
             if (finalR != cR || finalG != cG || finalB != cB)
             {

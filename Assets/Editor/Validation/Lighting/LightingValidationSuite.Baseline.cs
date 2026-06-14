@@ -61,6 +61,13 @@ namespace Editor.Validation.Lighting
 
             // --- B2 neighbors-not-ready scheduling deferral ---
             scenarios.Add(new Scenario("B41: Scheduling defers while neighbors' terrain data is not ready, then converges to the oracle once ready (finding B2)", Baseline_NeighborsNotReadyDefersScheduling));
+
+            // --- C2 Bug-05 dense-canopy generation fuzz (randomized canopy/wells/dividers across seeds) ---
+            scenarios.Add(new Scenario("B42: Dense-canopy generation converges to the oracle across randomized seeds (finding C2; surfaced Bug 10)", Baseline_Bug05CanopyFuzz));
+
+            // --- Bug 10 (fixed June 2026, promoted from K10a/K10b): opaque-border light leak ---
+            scenarios.Add(new Scenario("B43: No sunlight leaks out of an opaque block across a chunk border (Bug 10 guard)", Baseline_OpaqueBorderSunlightNoLeak));
+            scenarios.Add(new Scenario("B44: No surface blocklight leaks out of an opaque block across a chunk border (Bug 10 guard)", Baseline_OpaqueBorderBlocklightNoLeak));
         }
 
         /// <summary>
@@ -1539,6 +1546,65 @@ namespace Editor.Validation.Lighting
         /// retained work schedules and the field must converge to the all-ready oracle — proving the
         /// deferral neither loses nor double-applies the work.
         /// </summary>
+        /// <summary>
+        /// B43 (Bug 10, sunlight — promoted from K10a, fixed June 2026): the cross-chunk edge check must
+        /// not propagate an opaque block's surface sky light across the chunk border. An enclosed under-roof
+        /// gap with one sky well in chunk (0,1) and a full-gap-height opaque post on the (0,1)/(1,1) shared
+        /// border: the post is lit to sky 5 on its well-facing side, but being opaque it must transmit
+        /// nothing — the air just inside (1,1) is borderless-correct at 2 (light routed AROUND the post via
+        /// z=23/25), not 4. Guards the neighbor-opacity guard added to <c>CheckEdgeVoxel</c>; an add-only
+        /// edge check could never reconcile the over-bright surplus away. Likely in-game manifestation: a
+        /// diagonal over-bright band along chunk borders at world-height (where the opaque heightmap surface
+        /// sits on the borders), visible in the ChunkBorder debug visualization.
+        /// </summary>
+        private static bool Baseline_OpaqueBorderSunlightNoLeak()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+
+            const int worldMax = 3 * VoxelData.ChunkWidth - 1;
+            // Enclosing roof at y=14 — the under-roof gap (y=11..13) is dark except the single sky well.
+            world.FillBox(new Vector3Int(0, 14, 0), new Vector3Int(worldMax, 14, worldMax), TestBlockPalette.Stone);
+            // Sky well in chunk (0,1): remove the one roof voxel so sunlight reaches the gap below.
+            world.SetBlock(new Vector3Int(5, 14, 24), TestBlockPalette.Air);
+            // Full-gap-height opaque post on the (0,1)/(1,1) shared border.
+            for (int y = 11; y <= 13; y++)
+                world.SetBlock(new Vector3Int(15, y, 24), TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B43: initial lighting converges");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B43: no sunlight leaks across the opaque border post");
+            return passed;
+        }
+
+        /// <summary>
+        /// B44 (Bug 10, blocklight — promoted from K10b, fixed June 2026): the same enclosed geometry lit by
+        /// a torch instead of a sky well. An opaque border block must transmit only its OWN emission across
+        /// the border (none — stone), never the surface blocklight it received. Guards the opaque-neighbor
+        /// emission rule added to <c>CheckEdgeVoxelRGB</c>; the legitimate opaque-EMISSIVE cross-border case
+        /// stays covered by baselines B5/B10.
+        /// </summary>
+        private static bool Baseline_OpaqueBorderBlocklightNoLeak()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+
+            const int worldMax = 3 * VoxelData.ChunkWidth - 1;
+            // Enclosing roof at y=14 with no well — under-roof sunlight is 0, isolating the blocklight path.
+            world.FillBox(new Vector3Int(0, 14, 0), new Vector3Int(worldMax, 14, worldMax), TestBlockPalette.Stone);
+            // Torch in chunk (0,1) two voxels from the border; opaque post on the shared border.
+            world.SetBlock(new Vector3Int(13, 11, 24), TestBlockPalette.Torch);
+            for (int y = 11; y <= 13; y++)
+                world.SetBlock(new Vector3Int(15, y, 24), TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B44: initial lighting converges");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B44: no surface blocklight leaks across the opaque border post");
+            return passed;
+        }
+
         private static bool Baseline_NeighborsNotReadyDefersScheduling()
         {
             using LightingTestWorld world = new LightingTestWorld(3);
