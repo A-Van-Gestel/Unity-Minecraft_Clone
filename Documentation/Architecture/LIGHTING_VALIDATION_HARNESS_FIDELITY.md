@@ -274,26 +274,133 @@ there is invisible.
   synchronous (it cannot catch an async/Burst race). A faithful Bug-05 repro, if the bug is real, likely
   needs in-build instrumentation (see B3), not another synchronous geometry layer.
 
+### C3 — Cross-chunk *sunlight removal / darkening* is the untested race quadrant ·  **OPEN · MEDIUM**
+
+- The dynamic cross-chunk matrix is lopsided. **B7** covers blocklight *removal* across a border with the
+  neighbor in flight; **B13** covers sunlight *uplift* (addition) across a border in flight; **B12** covers
+  blocklight cross-border *re-spread* after a removal. The fourth quadrant — sunlight *darkening* crossing a
+  border — has **no** scenario, neither steady-state nor racing. Placing an opaque block that re-shadows a
+  near-border column drives `PropagateDarkness`/the sunlight-column recalc into the neighbor; nothing asserts
+  it converges (B3 only ever *opens* a shaft via break).
+- **Needs no new harness capability:** the in-flight twin reuses `BeginLightingJob`/`CompleteLightingJob`
+  exactly as B7/B13.
+- **Proposed:** (a) steady-state — seal a near-border sky shaft, assert the neighbor's side-lit region
+  re-darkens to the oracle; (b) race — the sunlight twin of B7: seal the shaft while the neighbor chunk has a
+  job in flight.
+
+### C4 — Sunlight-column persist→replay and the `AddPendingBlocklight` placement-after-removal guard are unpinned ·  **OPEN · MEDIUM**
+
+- Elevated from the B1 "still NOT covered" note. **B30/B31/B32 all persist→replay *blocklight*** (torch). The
+  persist store's **sunlight-column** path (`PersistMod` `Channel == Sun` → `LightingStateManager.AddPending`
+  → `SunColumnRecalcQueue` replay on load — `LightingTestWorld.cs:859`) and the `AddPendingBlocklight`
+  placement-after-removal guard (`LightingStateManager.cs:145`) both *run* but no baseline asserts their
+  result.
+- **Needs no new harness capability** — `PersistMod` already routes sun columns.
+- **Proposed:** (a) the sunlight twin of B30 — a roof break near a border while the neighbor is
+  `MarkChunkUnloaded` → sun column persisted (stays dark while unloaded) → `MarkChunkLoaded(LoadFromDisk)` →
+  field re-derives from the loaded neighbor and matches the all-loaded oracle; (b) a persist scenario recording
+  a removal then a placement at the same unloaded-target column, asserting the guard's ordering.
+
+### C5 — Attenuation is only ever single-layer; no cumulative multi-layer probe ·  **OPEN · MEDIUM**
+
+- Every attenuation check is a single obstruction: **B2** (one DimGlass pane), **B37** (one leaves cap). No
+  scenario pins that light loses `max(1, opacity)` *per step* through several layers in series, so a shared
+  engine+oracle bug in the per-step composition passes `MatchesOracle` silently — an A4-class blind spot.
+- **Oracle-independent (A4-style), needs no new capability.**
+- **Proposed (B45):** a vertical sky probe through a stacked-DimGlass cap (−5/layer, distinguishable from the
+  −1 air step) over a sealed stone shaft, plus a horizontal blocklight probe through two DimGlass panes in
+  series — both asserting hand-derived cumulative constants, no `MatchesOracle`.
+
+### C6 — No per-channel removal-independence scenario ·  **OPEN · LOW–MEDIUM**
+
+- **B10/B11** *blend* two channels; **B12** removes a *white* source. Nothing asserts that removing one
+  *colored* source leaves the *other* channel intact (the per-channel `PropagateDarknessRGB` path) — e.g.
+  overlap a red and a green source, break the red, assert green survives unchanged and red clears fully.
+- **Needs no new capability** — the palette already has pure R/G/B lamps.
+
+### C7 — Diagonal/corner delivery and dynamic in-chunk opaque-placement re-shadow lack deterministic baselines ·  **OPEN · LOW**
+
+- Corner (diagonal-neighbor) cross-chunk delivery exists only *inside* B40's fuzz (probabilistic per seed);
+  there is no fixed, deterministic corner-spill baseline (source at a chunk corner → diagonal neighbor lit →
+  oracle).
+- Dynamic in-chunk column re-shadow on opaque *placement* (place a block mid-air in a lit column → everything
+  below darkens to side-bleed → break → re-light) is untested as a dedicated baseline; B3 only opens a shaft.
+  Likely caught incidentally by other oracle compares — hence LOW.
+
+> **None of C3–C7 require a new harness capability** — each reuses existing primitives
+> (`MarkChunkUnloaded`/`MarkChunkLoaded`, `BeginLightingJob`/`CompleteLightingJob`, the pure-channel lamp
+> palette, `GetSkyLight`/`GetBlocklightRGB`). The genuinely open *harness-feature* gaps remain those already
+> catalogued: no failure shrinker (C1/C2), fixed grid sizes (3×3 / 5×5), `neighborsDataReady` is a hand-set
+> toggle not derived from generation state (B2), no second differential oracle (A4), the on-disk
+> `Save()`/`Load()` round-trip is out of scope (B1), and the lighting→meshing gate is out of scope (B5).
+
 ---
 
-## 5. Priority backlog (snapshot)
+## 5. Redundancy & overlapping coverage (consolidation backlog)
 
-| #  | Finding                                         | Status            | Priority         | Effort         |
-|----|-------------------------------------------------|-------------------|------------------|----------------|
-| A3 | `ModifyVoxel` heightmap (shared) / enqueue path | **PARTIAL**       | Low              | heightmap done |
-| A4 | Oracle shared-assumption probes                 | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
-| B5 | Meshing-gate coverage                           | OPEN              | Low (by design)  | —              |
-| C2 | Bug-05 dense-canopy geometry (found Bug 10)     | **CLOSED**        | —                | done           |
-| B2 | `neighborsDataReady` toggle                     | **CLOSED**        | —                | done           |
-| C1 | Bug-09 geometry fuzz (randomize geometry)       | **CLOSED**        | —                | done           |
-| B1 | Chunk-unload / persist-replay path              | **CLOSED**        | —                | done           |
-| B4 | Pool-recycle / flag-pairing                     | **CLOSED**        | —                | done           |
-| A1 | Section / uniform-sky merge bypass              | **CLOSED**        | —                | done           |
-| A2 | Shared mod-routing decision                     | **CLOSED**        | —                | done           |
+This section catalogues baselines that test the **same** property (the inverse of a fidelity gap) so the suite
+can be made more legible. Consolidation is **optional and lower priority than the C3–C7 gaps** — the redundant
+scenarios still run fast and provide regression value; the win is readability, not coverage.
+
+### The Bug-09 guard fleet (B15–B29) is heavily redundant
+
+All fifteen scenarios (promoted from K09a–m) assert a single property — *the defer/drain + re-schedule
+mechanism converges to the oracle* — over a **single geometry** (`LampWhite` at `(31,11,24)`, the
+`(1,1)/(2,1)` +X border), permuting only completion/scheduling order. With **B3** declared WONTFIX
+(synchronous order-permutation exhausted) and **B40** now fuzzing geometry *and* order, most are subsumed:
+
+| Baseline(s)       | Distinct axis it adds                    | Subsumed by                                 | Verdict     |
+|-------------------|------------------------------------------|---------------------------------------------|-------------|
+| B15, B16          | direct-harness single / double in-flight | B40 (held-chunk) + B26–B28                  | collapsible |
+| B17               | ContainsKey scheduling guard             | runs in *every* frame-sim scenario          | collapsible |
+| B18               | single-slot budget                       | B27 / B40 `budget:1`                        | collapsible |
+| B19               | reverse completion order                 | Shuffled order (B26–B29, B40)               | collapsible |
+| B20, B21          | multi-frame held flight (one chunk)      | B40 holds a chunk across frames             | collapsible |
+| B23, B24, B25     | fluid contention, single instances       | B26 (50-seed shuffled fluid), B27 (+budget) | collapsible |
+| **B22, B28**      | **both chunks in flight simultaneously** | — (B40 only ever holds one)                 | **keep**    |
+| **B26, B27, B29** | **full 5-face underwater environment**   | — (B40's fillers are single voxels)         | **keep**    |
+| **B40**           | **the geometry / corner axis**           | —                                           | **keep**    |
+
+**Collapsible set:** B15–B21 + B23–B25 (~ten single-instance order permutations) → fold into 2–3
+representative deterministic baselines. **Do not remove B22 / B26–B29** (each carries an axis B40 does not).
+
+### Smaller, intentional overlaps (note, don't remove)
+
+- **B1 ↔ B38** — same physical setup (torch in open air); B38 is deliberately B1 with hand-derived constants
+  instead of `MatchesOracle` (the A4 design).
+- **B9 ↔ B39** — both assert opaque receive-but-don't-propagate; B39's docstring says *"Tighter than B9."*
+  B9 keeps the place/break BFS-wake trigger, B39 keeps the exact surface-stamp magnitude.
+- **B3 ↔ B35 / B37** — the full-bright vertical shaft and the downward attenuation are re-pinned independently
+  by the A4 probes.
+- **B33 ↔ B8** — B33's *pre-recycle* block is a near byte-for-byte repeat of B8 (same geometry, same
+  `RunInitialLightingParallel`, same `MatchesOracle`); only the post-recycle assertion is novel.
 
 ---
 
-## 6. Cross-references
+## 6. Priority backlog (snapshot)
+
+| #  | Finding                                                | Status            | Priority         | Effort         |
+|----|--------------------------------------------------------|-------------------|------------------|----------------|
+| C4 | Sunlight persist→replay + `AddPendingBlocklight` guard | OPEN              | Medium           | small          |
+| C5 | Cumulative multi-layer attenuation probe (B45)         | OPEN              | Medium           | small          |
+| C3 | Cross-chunk sunlight removal / darkening quadrant      | OPEN              | Medium           | small          |
+| C6 | Per-channel removal independence                       | OPEN              | Low–Medium       | small          |
+| C7 | Deterministic corner spill / in-chunk re-shadow        | OPEN              | Low              | small          |
+| §5 | Bug-09 fleet (B15–B25) consolidation                   | OPEN              | Low (legibility) | medium         |
+| A3 | `ModifyVoxel` heightmap (shared) / enqueue path        | **PARTIAL**       | Low              | heightmap done |
+| A4 | Oracle shared-assumption probes                        | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
+| B5 | Meshing-gate coverage                                  | OPEN              | Low (by design)  | —              |
+| C2 | Bug-05 dense-canopy geometry (found Bug 10)            | **CLOSED**        | —                | done           |
+| B2 | `neighborsDataReady` toggle                            | **CLOSED**        | —                | done           |
+| C1 | Bug-09 geometry fuzz (randomize geometry)              | **CLOSED**        | —                | done           |
+| B1 | Chunk-unload / persist-replay path                     | **CLOSED**        | —                | done           |
+| B4 | Pool-recycle / flag-pairing                            | **CLOSED**        | —                | done           |
+| A1 | Section / uniform-sky merge bypass                     | **CLOSED**        | —                | done           |
+| A2 | Shared mod-routing decision                            | **CLOSED**        | —                | done           |
+
+---
+
+## 7. Cross-references
 
 - Harness file map & API: `.agents/skills/validation-driven-bugfix/references/lighting-suite.md`
 - Frame simulator design: [LIGHTING_FRAME_SIMULATOR_DESIGN.md](../Design/LIGHTING_FRAME_SIMULATOR_DESIGN.md)
