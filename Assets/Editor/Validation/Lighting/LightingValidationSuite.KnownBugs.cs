@@ -17,15 +17,16 @@ namespace Editor.Validation.Lighting
         // rounds). The canopy fuzz's real catch was Bug 10 (K10a/K10b below). A faithful Bug-05 repro
         // remains TODO and likely needs in-build instrumentation, not another synchronous layer (cf. B3).
 
-        // NOTE on Bug 09: fifteen repro attempts total — two direct-harness (B15, B16), three
-        // frame-simulator with complete-all (B17, B18, B19), three with multi-frame flight
-        // lifetimes (B20, B21, B22), three with fluid-flow contention (B23, B24, B25), three
-        // with seeded iteration-order randomness (B26, B27, B28), and one combined stress test
-        // (B29) layering ALL harness capabilities simultaneously. All fifteen converge to the
-        // oracle across all tested seeds and orderings. Every production scheduling behavior
-        // modelable in the synchronous harness has been exhausted — the bug is either a genuine
-        // async race condition (Burst job system timing, IL2CPP memory ordering) that synchronous
-        // .Run() cannot reproduce, or is no longer present in the current codebase.
+        // NOTE on Bug 09: fifteen synchronous repro attempts exhausted every production scheduling behavior
+        // the harness can model (direct-harness single/both-in-flight, frame-simulator ContainsKey/budget/
+        // reverse order, multi-frame held flights, fluid-flow contention, seeded iteration-order randomness,
+        // and a combined stress test) — all converged to the oracle across every tested seed and ordering.
+        // Consolidated 2026-06-14 (see LIGHTING_VALIDATION_HARNESS_FIDELITY.md §5): the deterministic
+        // single-instance scenarios folded into two representatives — B15 (direct-harness break+place,
+        // single- then both-in-flight) and B16 (fluid break→water→place under a held flight + budget) —
+        // backed by B22 (dual-chunk both-in-flight), B26–B29 (50-seed sweeps), and B40 (geometry fuzz).
+        // The conclusion stands: the bug is either a genuine async race (Burst job timing, IL2CPP memory
+        // ordering) that synchronous .Run() cannot reproduce, or is no longer present in the codebase.
 
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {

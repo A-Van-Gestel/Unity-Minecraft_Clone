@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (47 baselines + frame simulator, menu item
+The lighting validation suite (39 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -352,18 +352,17 @@ there is invisible.
 
 ---
 
-## 5. Redundancy & overlapping coverage (consolidation backlog)
+## 5. Redundancy & overlapping coverage (Bug-09 fleet consolidated 2026-06-14)
 
-This section catalogues baselines that test the **same** property (the inverse of a fidelity gap) so the suite
-can be made more legible. Consolidation is **optional and lower priority than the C3–C7 gaps** — the redundant
-scenarios still run fast and provide regression value; the win is readability, not coverage.
+This section catalogues baselines that test the **same** property (the inverse of a fidelity gap). The Bug-09
+fleet redundancy was **resolved on 2026-06-14**; the smaller intentional overlaps below are kept by design.
 
-### The Bug-09 guard fleet (B15–B29) is heavily redundant
+### The Bug-09 guard fleet (former B15–B29) — CONSOLIDATED
 
-All fifteen scenarios (promoted from K09a–m) assert a single property — *the defer/drain + re-schedule
-mechanism converges to the oracle* — over a **single geometry** (`LampWhite` at `(31,11,24)`, the
+**Was:** fifteen scenarios (promoted from K09a–m) all asserted a single property — *the defer/drain +
+re-schedule mechanism converges to the oracle* — over a **single geometry** (`LampWhite` at `(31,11,24)`, the
 `(1,1)/(2,1)` +X border), permuting only completion/scheduling order. With **B3** declared WONTFIX
-(synchronous order-permutation exhausted) and **B40** now fuzzing geometry *and* order, most are subsumed:
+(synchronous order-permutation exhausted) and **B40** fuzzing geometry *and* order, most were subsumed:
 
 | Baseline(s)       | Distinct axis it adds                    | Subsumed by                                 | Verdict     |
 |-------------------|------------------------------------------|---------------------------------------------|-------------|
@@ -377,8 +376,15 @@ mechanism converges to the oracle* — over a **single geometry** (`LampWhite` a
 | **B26, B27, B29** | **full 5-face underwater environment**   | — (B40's fillers are single voxels)         | **keep**    |
 | **B40**           | **the geometry / corner axis**           | —                                           | **keep**    |
 
-**Collapsible set:** B15–B21 + B23–B25 (~ten single-instance order permutations) → fold into 2–3
-representative deterministic baselines. **Do not remove B22 / B26–B29** (each carries an axis B40 does not).
+**Now:** the ten single-instance permutations (former B15–B21 + B23–B25) were folded into **two deterministic
+representatives**, reusing the freed low numbers: **B15** (direct-harness break+place — single- then
+both-in-flight) and **B16** (fluid break→water→place under a held flight + single-slot budget). **B22**
+(dual-chunk both-in-flight), **B26–B29** (50-seed sweeps) and **B40** (geometry fuzz) were kept — together they
+still cover every retired axis (ContainsKey accumulate, budget, shuffled/reverse order, multi-frame held,
+both-chunks-in-flight, fluid-opacity contention, the geometry/corner space). Numbers **B17–B21** and
+**B23–B25** are intentionally retired and left unused so existing references and commit history stay valid.
+Suite count 47 → 39, all green. (Cross-refs B7/B13 already cover the direct-harness *removal*/uplift in-flight
+races, so B15's manual-flight path is not the only guard of that machinery.)
 
 ### Smaller, intentional overlaps (note, don't remove)
 
@@ -402,7 +408,7 @@ representative deterministic baselines. **Do not remove B22 / B26–B29** (each 
 | C3 | Cross-chunk sunlight removal / darkening quadrant                  | OPEN              | Medium           | small          |
 | C6 | Per-channel removal independence                                   | OPEN              | Low–Medium       | small          |
 | C7 | Deterministic corner spill / in-chunk re-shadow                    | OPEN              | Low              | small          |
-| §5 | Bug-09 fleet (B15–B25) consolidation                               | OPEN              | Low (legibility) | medium         |
+| §5 | Bug-09 fleet (B15–B25) consolidation                               | **CLOSED**        | —                | done           |
 | A3 | `ModifyVoxel` heightmap (shared) / enqueue path                    | **PARTIAL**       | Low              | heightmap done |
 | A4 | Oracle shared-assumption probes                                    | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
 | B5 | Meshing-gate coverage                                              | OPEN              | Low (by design)  | —              |
