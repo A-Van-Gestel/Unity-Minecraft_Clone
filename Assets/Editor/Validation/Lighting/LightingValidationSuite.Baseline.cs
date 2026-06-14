@@ -57,6 +57,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B39: Opaque face receives source-1 surface light but never propagates inward (oracle-independent probe)", Baseline_ProbeOpaqueSurfaceStamp));
             scenarios.Add(new Scenario("B45: Cumulative attenuation through two DimGlass layers in series — sky column + horizontal blocklight (oracle-independent probe; finding C5)", Baseline_ProbeCumulativeMultiLayerAttenuation));
 
+            // --- C4a sunlight-column persist→replay (the Sun-channel twin of B30) ---
+            scenarios.Add(new Scenario("B46: Cross-chunk sunlight toward an unloaded neighbor persists as a column and replays on load (finding C4a)", Baseline_PersistReplayCrossChunkSunlight));
+
             // --- C1 Bug-09 geometry fuzz (randomized border/source/held-chunk/budget across 50 seeds) ---
             scenarios.Add(new Scenario("B40: Bug-09 cross-chunk geometry fuzz converges to the oracle across 50 randomized seeds (Bug 09 guard)", Baseline_Bug09GeometryFuzz));
 
@@ -1477,6 +1480,64 @@ namespace Editor.Validation.Lighting
                 $"Expected (12,12,12) at x=33 after regeneration, got {world.GetBlocklightRGB(new Vector3Int(33, 11, 24))}");
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B32: re-derived field matches oracle");
+            return passed;
+        }
+
+        /// <summary>
+        /// B46: The cross-chunk SUNLIGHT persist→replay round-trip (closes finding C4a in
+        /// LIGHTING_VALIDATION_HARNESS_FIDELITY.md — the sunlight twin of B30, which only covered blocklight).
+        /// A roof slab spans the (1,1)/(2,1) border, shadowing the volume beneath. Breaking one roof block on
+        /// the (1,1) border column opens a sky shaft whose light would normally spill east into (2,1) as a
+        /// Sun-channel cross-chunk mod (the B13 mechanism) — but (2,1) is UNLOADED when the edit converges, so
+        /// that mod is routed to <c>PersistUndeliverable</c> and saved as a sunlight COLUMN recalc in the
+        /// (in-memory) <c>LightingStateManager</c> (<c>PersistMod</c> <c>Channel == Sun</c> →
+        /// <c>AddPending</c>) instead of applied. While (2,1) is unloaded its under-roof sky stays at the
+        /// pre-break shadowed value; once it is marked loaded, the persisted column replays through
+        /// <c>SunColumnRecalcQueue</c> and the recalc re-derives the spill from (1,1)'s now-lit border — so the
+        /// converged field must match the all-loaded oracle exactly. Guards that the Sun-channel persist path
+        /// (distinct from B30/B31/B32's blocklight path) neither loses nor double-applies the column.
+        /// </summary>
+        private static bool Baseline_PersistReplayCrossChunkSunlight()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+
+            // Roof at y=30 spanning the (1,1)/(2,1) border (the B13 geometry).
+            world.FillBox(new Vector3Int(26, 30, 18), new Vector3Int(38, 30, 30), TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B46: initial lighting converges");
+
+            // Deep under the roof interior in (2,1): only side-bleed reaches it, so it is shadowed (< 15) and
+            // will brighten noticeably once the shaft's spill crosses the border.
+            Vector3Int probe = new Vector3Int(32, 20, 24);
+            byte shadowed = world.GetSkyLight(probe);
+
+            // (2,1) is in-world but unloaded: the sun uplift mod emitted when the shaft opens must be persisted.
+            world.MarkChunkUnloaded(new Vector2Int(2, 1));
+            world.BreakBlock(new Vector3Int(30, 30, 24)); // open a sky shaft on the (1,1) border column
+
+            // Run (1,1)'s job explicitly to assert the Sun-channel mod was persisted (not applied).
+            LightingTestWorld.LightingRunResult aResult = world.RunLightingJob(new Vector2Int(1, 1));
+            passed &= LightingAssert.IsTrue(aResult.ModsPersisted > 0,
+                "B46: the sunlight spill mod is persisted while the neighbor is unloaded",
+                $"Expected ModsPersisted > 0, got {aResult.ModsPersisted}");
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B46: persist-while-unloaded converges");
+
+            // The spill never crossed the border — it was persisted instead of applied.
+            passed &= LightingAssert.IsTrue(world.GetSkyLight(probe) == shadowed,
+                "B46: sunlight stays out of the unloaded neighbor (persisted, not applied)",
+                $"Expected sky to stay {shadowed} at {probe} while (2,1) unloaded, got {world.GetSkyLight(probe)}");
+
+            // Reload (2,1): the persisted sunlight column replays and the recalc re-derives from (1,1)'s border.
+            world.MarkChunkLoaded(new Vector2Int(2, 1), LightingTestWorld.ChunkLoadMode.LoadFromDisk);
+            passed &= LightingAssert.Converged(world.RunToConvergence(), "B46: post-replay convergence");
+
+            passed &= LightingAssert.IsTrue(world.GetSkyLight(probe) > shadowed,
+                "B46: the replayed sunlight column brightens the shadowed region",
+                $"Expected sky > {shadowed} at {probe} after replay, got {world.GetSkyLight(probe)}");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B46: replayed field matches oracle");
             return passed;
         }
 

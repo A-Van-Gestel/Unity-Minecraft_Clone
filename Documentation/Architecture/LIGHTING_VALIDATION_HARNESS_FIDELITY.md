@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (45 baselines + frame simulator, menu item
+The lighting validation suite (46 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -288,18 +288,22 @@ there is invisible.
   re-darkens to the oracle; (b) race — the sunlight twin of B7: seal the shaft while the neighbor chunk has a
   job in flight.
 
-### C4 — Sunlight-column persist→replay and the `AddPendingBlocklight` placement-after-removal guard are unpinned ·  **OPEN · MEDIUM**
+### C4 — Sunlight-column persist→replay and the `AddPendingBlocklight` placement-after-removal guard are unpinned ·  **PARTIALLY CLOSED (2026-06-14) · remainder LOW (the guard)**
 
-- Elevated from the B1 "still NOT covered" note. **B30/B31/B32 all persist→replay *blocklight*** (torch). The
-  persist store's **sunlight-column** path (`PersistMod` `Channel == Sun` → `LightingStateManager.AddPending`
-  → `SunColumnRecalcQueue` replay on load — `LightingTestWorld.cs:859`) and the `AddPendingBlocklight`
-  placement-after-removal guard (`LightingStateManager.cs:145`) both *run* but no baseline asserts their
-  result.
-- **Needs no new harness capability** — `PersistMod` already routes sun columns.
-- **Proposed:** (a) the sunlight twin of B30 — a roof break near a border while the neighbor is
-  `MarkChunkUnloaded` → sun column persisted (stays dark while unloaded) → `MarkChunkLoaded(LoadFromDisk)` →
-  field re-derives from the loaded neighbor and matches the all-loaded oracle; (b) a persist scenario recording
-  a removal then a placement at the same unloaded-target column, asserting the guard's ordering.
+- **Was:** elevated from the B1 "still NOT covered" note. **B30/B31/B32 all persist→replay *blocklight***
+  (torch). The persist store's **sunlight-column** path (`PersistMod` `Channel == Sun` →
+  `LightingStateManager.AddPending` → `SunColumnRecalcQueue` replay on load — `LightingTestWorld.cs:859`) and
+  the `AddPendingBlocklight` placement-after-removal guard (`LightingStateManager.cs:145`) both *ran* but no
+  baseline asserted their result.
+- **Now (a — sunlight persist→replay, DONE):** baseline **B46** (`Baseline_PersistReplayCrossChunkSunlight`,
+  the Sun-channel twin of B30). A roof break on the (1,1) border opens a shaft whose spill targets (2,1) while
+  it is `MarkChunkUnloaded`; the suite asserts the emitting job's `ModsPersisted > 0` (the Sun-channel persist
+  route fired), that the under-roof sky stays at its pre-break shadowed value while unloaded, then that
+  `MarkChunkLoaded(LoadFromDisk)` replays the column, re-derives the spill from (1,1)'s lit border, brightens
+  the region, and matches the all-loaded oracle. No new harness capability was needed.
+- **Still NOT covered (b — the guard, LOW):** the `AddPendingBlocklight` placement-after-removal guard
+  (`LightingStateManager.cs:145`) is still not pinned by a dedicated baseline. **Proposed:** a persist scenario
+  recording a removal then a placement at the same unloaded-target column, asserting the guard's ordering.
 
 ### C5 — Attenuation is only ever single-layer; no cumulative multi-layer probe ·  **CLOSED (2026-06-14)**
 
@@ -388,24 +392,24 @@ representative deterministic baselines. **Do not remove B22 / B26–B29** (each 
 
 ## 6. Priority backlog (snapshot)
 
-| #  | Finding                                                | Status            | Priority         | Effort         |
-|----|--------------------------------------------------------|-------------------|------------------|----------------|
-| C4 | Sunlight persist→replay + `AddPendingBlocklight` guard | OPEN              | Medium           | small          |
-| C5 | Cumulative multi-layer attenuation probe (B45)         | **CLOSED**        | —                | done           |
-| C3 | Cross-chunk sunlight removal / darkening quadrant      | OPEN              | Medium           | small          |
-| C6 | Per-channel removal independence                       | OPEN              | Low–Medium       | small          |
-| C7 | Deterministic corner spill / in-chunk re-shadow        | OPEN              | Low              | small          |
-| §5 | Bug-09 fleet (B15–B25) consolidation                   | OPEN              | Low (legibility) | medium         |
-| A3 | `ModifyVoxel` heightmap (shared) / enqueue path        | **PARTIAL**       | Low              | heightmap done |
-| A4 | Oracle shared-assumption probes                        | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
-| B5 | Meshing-gate coverage                                  | OPEN              | Low (by design)  | —              |
-| C2 | Bug-05 dense-canopy geometry (found Bug 10)            | **CLOSED**        | —                | done           |
-| B2 | `neighborsDataReady` toggle                            | **CLOSED**        | —                | done           |
-| C1 | Bug-09 geometry fuzz (randomize geometry)              | **CLOSED**        | —                | done           |
-| B1 | Chunk-unload / persist-replay path                     | **CLOSED**        | —                | done           |
-| B4 | Pool-recycle / flag-pairing                            | **CLOSED**        | —                | done           |
-| A1 | Section / uniform-sky merge bypass                     | **CLOSED**        | —                | done           |
-| A2 | Shared mod-routing decision                            | **CLOSED**        | —                | done           |
+| #  | Finding                                                        | Status            | Priority         | Effort         |
+|----|----------------------------------------------------------------|-------------------|------------------|----------------|
+| C4 | Sunlight persist→replay (B46) ✓ / `AddPendingBlocklight` guard | **PARTIAL**       | Low (guard)      | guard remains  |
+| C5 | Cumulative multi-layer attenuation probe (B45)                 | **CLOSED**        | —                | done           |
+| C3 | Cross-chunk sunlight removal / darkening quadrant              | OPEN              | Medium           | small          |
+| C6 | Per-channel removal independence                               | OPEN              | Low–Medium       | small          |
+| C7 | Deterministic corner spill / in-chunk re-shadow                | OPEN              | Low              | small          |
+| §5 | Bug-09 fleet (B15–B25) consolidation                           | OPEN              | Low (legibility) | medium         |
+| A3 | `ModifyVoxel` heightmap (shared) / enqueue path                | **PARTIAL**       | Low              | heightmap done |
+| A4 | Oracle shared-assumption probes                                | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
+| B5 | Meshing-gate coverage                                          | OPEN              | Low (by design)  | —              |
+| C2 | Bug-05 dense-canopy geometry (found Bug 10)                    | **CLOSED**        | —                | done           |
+| B2 | `neighborsDataReady` toggle                                    | **CLOSED**        | —                | done           |
+| C1 | Bug-09 geometry fuzz (randomize geometry)                      | **CLOSED**        | —                | done           |
+| B1 | Chunk-unload / persist-replay path                             | **CLOSED**        | —                | done           |
+| B4 | Pool-recycle / flag-pairing                                    | **CLOSED**        | —                | done           |
+| A1 | Section / uniform-sky merge bypass                             | **CLOSED**        | —                | done           |
+| A2 | Shared mod-routing decision                                    | **CLOSED**        | —                | done           |
 
 ---
 
