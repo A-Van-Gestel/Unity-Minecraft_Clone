@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (40 baselines + frame simulator, menu item
+The lighting validation suite (41 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -153,13 +153,29 @@ there is invisible.
   (`LightingStateManager.cs:145`) and sunlight-column persist→replay are run by the store but not yet
   pinned by a dedicated baseline assertion.
 
-### B2 — `neighborsDataReady` is hardcoded `true` in the frame simulator ·  **OPEN · MEDIUM**
+### B2 — `neighborsDataReady` is hardcoded `true` in the frame simulator ·  **CLOSED (2026-06-14)**
 
-- `LightingFrameSimulator.RunFrame` calls
+- **Was:** `LightingFrameSimulator.RunFrame` called
   `LightingScheduleDecision.Evaluate(IsChunkInFlight(coord), neighborsDataReady: true)`. Production's
   `NeighborsNotReady` decision (set `HasLightChangesToProcess = true`, return false, **don't** schedule)
-  is never exercised — a scheduling-deferral path adjacent to Bug 09.
-- **Suggested feature:** a per-chunk "neighbors not ready" toggle on the simulator.
+  was never exercised — the third arm of the shared `LightingScheduleDecision.Evaluate` seam was dark,
+  and with it the scheduling-deferral path adjacent to Bug 09.
+- **Now:** a per-chunk neighbor-readiness toggle on the harness — `TestChunk.NeighborsReady` (default
+  true) plus `LightingTestWorld.MarkNeighborsNotReady`/`MarkNeighborsReady` and the
+  `AreNeighborsDataReady(coord)` accessor (harness analog of production's `World.AreNeighborsDataReady`).
+  `RunFrame` now passes the **real** per-chunk readiness into `Evaluate` and handles the
+  `NeighborsNotReady` arm by deferring (retaining the chunk's light work, scheduling nothing), counted in
+  the new `FrameResult.ChunksNeighborsNotReady` (kept distinct from `ChunksStarved` so budget-pressure
+  baselines stay meaningful). Baseline **B41** places a lamp on a chunk's border while its neighbors are
+  marked not-ready, asserts the chunk is deferred every frame (no job scheduled, none in flight, work
+  retained, no blocklight propagates), then marks neighbors ready and asserts the retained work runs and
+  the field converges to the all-ready oracle — proving the deferral neither loses nor double-applies the
+  work. The flag is per-chunk-being-scheduled and distinct from B1's `IsLoaded` (absent-for-mod-delivery
+  vs. own-re-lighting-blocked-on-neighbor-terrain).
+- **Still NOT covered (minor):** readiness is a hand-set toggle, not *derived* from neighbor
+  `IsPopulated`/generation-in-flight state (the harness does not model terrain generation), so a bug in
+  the readiness *computation* (`World.AreNeighborsDataReady` itself) is out of scope — only the *handling*
+  of its result is pinned. The fuzz layer (C1) still passes `neighborsDataReady: true`.
 
 ### B3 — No genuine concurrency (synchronous `.Run()` only)  ·  **WONTFIX (structural)**
 
@@ -244,11 +260,11 @@ there is invisible.
 
 | #  | Finding                                         | Status            | Priority         | Effort         |
 |----|-------------------------------------------------|-------------------|------------------|----------------|
-| B2 | `neighborsDataReady` toggle                     | OPEN              | Medium           | Low            |
 | C2 | Bug-05 dense-canopy geometry                    | OPEN              | Medium           | Medium         |
 | A3 | `ModifyVoxel` heightmap (shared) / enqueue path | **PARTIAL**       | Low              | heightmap done |
 | A4 | Oracle shared-assumption probes                 | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
 | B5 | Meshing-gate coverage                           | OPEN              | Low (by design)  | —              |
+| B2 | `neighborsDataReady` toggle                     | **CLOSED**        | —                | done           |
 | C1 | Bug-09 geometry fuzz (randomize geometry)       | **CLOSED**        | —                | done           |
 | B1 | Chunk-unload / persist-replay path              | **CLOSED**        | —                | done           |
 | B4 | Pool-recycle / flag-pairing                     | **CLOSED**        | —                | done           |

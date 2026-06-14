@@ -58,6 +58,9 @@ namespace Editor.Validation.Lighting
 
             // --- C1 Bug-09 geometry fuzz (randomized border/source/held-chunk/budget across 50 seeds) ---
             scenarios.Add(new Scenario("B40: Bug-09 cross-chunk geometry fuzz converges to the oracle across 50 randomized seeds (Bug 09 guard)", Baseline_Bug09GeometryFuzz));
+
+            // --- B2 neighbors-not-ready scheduling deferral ---
+            scenarios.Add(new Scenario("B41: Scheduling defers while neighbors' terrain data is not ready, then converges to the oracle once ready (finding B2)", Baseline_NeighborsNotReadyDefersScheduling));
         }
 
         /// <summary>
@@ -1522,6 +1525,71 @@ namespace Editor.Validation.Lighting
         {
             return LightingAssert.AssertResetClearsTransientState(
                 "B34: ChunkData.Reset() clears all transient state on pool recycle");
+        }
+
+        /// <summary>
+        /// B41: The <c>NeighborsNotReady</c> scheduling-deferral path (closes finding B2 in
+        /// LIGHTING_VALIDATION_HARNESS_FIDELITY.md — the simulator formerly hardcoded
+        /// <c>neighborsDataReady: true</c>, leaving the third arm of <see cref="LightingScheduleDecision"/>
+        /// unexercised). A lamp is placed on the +X border of chunk (1,1) while (1,1)'s neighbor terrain
+        /// data is marked NOT ready. Production's <c>WorldJobManager.ScheduleLightingUpdate</c> would set
+        /// <c>HasLightChangesToProcess = true</c> and decline to schedule; the simulator must do the same:
+        /// across several frames the chunk is deferred (no job scheduled, none in flight), its pending
+        /// light work is retained, and no blocklight propagates. Once the neighbors are marked ready, the
+        /// retained work schedules and the field must converge to the all-ready oracle — proving the
+        /// deferral neither loses nor double-applies the work.
+        /// </summary>
+        private static bool Baseline_NeighborsNotReadyDefersScheduling()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(10, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B41: initial lighting converges");
+
+            LightingFrameSimulator sim = new LightingFrameSimulator(world);
+            Vector2Int litChunk = new Vector2Int(1, 1);
+            Vector3Int lampPos = new Vector3Int(31, 11, 24);
+
+            // (1,1)'s neighbor terrain is still generating: any scheduling attempt for it must defer.
+            world.MarkNeighborsNotReady(litChunk);
+            world.PlaceBlock(lampPos, TestBlockPalette.LampWhite);
+
+            // Drive several frames: (1,1) must be deferred every frame — never scheduled, never in flight.
+            bool deferredEveryFrame = true;
+            for (int i = 0; i < 5; i++)
+            {
+                LightingFrameSimulator.FrameResult frame = sim.RunFrame();
+                deferredEveryFrame &= frame.ChunksNeighborsNotReady == 1 && frame.JobsScheduled == 0;
+            }
+
+            passed &= LightingAssert.IsTrue(deferredEveryFrame,
+                "B41: chunk is deferred (not scheduled) every frame while its neighbors are not ready",
+                "Expected each frame to report ChunksNeighborsNotReady == 1 and JobsScheduled == 0");
+            passed &= LightingAssert.IsTrue(sim.InFlightCount == 0,
+                "B41: no lighting job is in flight while deferred",
+                $"Expected InFlightCount == 0, got {sim.InFlightCount}");
+            passed &= LightingAssert.IsTrue(world.ChunkHasLightWork(litChunk),
+                "B41: the deferred chunk retains its pending light work",
+                "Expected (1,1) to still have light work while deferred");
+            passed &= LightingAssert.IsTrue(world.GetBlocklightRGB(lampPos) == (0, 0, 0),
+                "B41: no blocklight propagates while scheduling is deferred",
+                $"Expected (0,0,0) at the lamp while deferred, got {world.GetBlocklightRGB(lampPos)}");
+
+            // Neighbors are ready now: the retained work schedules and must converge to the oracle.
+            world.MarkNeighborsReady(litChunk);
+            int frames = sim.RunToConvergence();
+            passed &= LightingAssert.Converged(frames, "B41: post-ready frame convergence");
+
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B41: field matches oracle after deferral resolves");
+
+            (byte R, byte G, byte B) crossBorder = world.GetBlocklightRGB(new Vector3Int(32, 11, 24));
+            passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
+                "B41: blocklight crosses the chunk border once the deferred work runs",
+                $"Expected R >= 13 at x=32, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
         }
     }
 }

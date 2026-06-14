@@ -164,6 +164,21 @@ namespace Editor.Validation.Lighting.Framework
             /// </summary>
             public bool IsLoaded = true;
 
+            /// <summary>
+            /// Whether THIS chunk's neighbors all have populated terrain data — the harness analog of
+            /// production's <c>World.AreNeighborsDataReady</c>. When false, a scheduling attempt for this
+            /// chunk resolves to <see cref="LightingScheduleDecision.Result.NeighborsNotReady"/>: the chunk
+            /// keeps its pending light work (<see cref="HasLightWork"/> stays set) and is NOT scheduled,
+            /// to be retried on a later frame once neighbors load — mirroring
+            /// <c>WorldJobManager.ScheduleLightingUpdate</c>'s deferral arm. Distinct from
+            /// <see cref="IsLoaded"/>: that models the chunk being absent for inbound mod delivery, this
+            /// models the chunk's own re-lighting being blocked on still-generating neighbor terrain.
+            /// Toggled via <see cref="MarkNeighborsNotReady"/> / <see cref="MarkNeighborsReady"/>
+            /// (default true). Closes finding B2 in
+            /// Documentation/Architecture/LIGHTING_VALIDATION_HARNESS_FIDELITY.md.
+            /// </summary>
+            public bool NeighborsReady = true;
+
             public TestChunk(Vector2Int coord)
             {
                 Coord = coord;
@@ -239,6 +254,33 @@ namespace Editor.Validation.Lighting.Framework
         /// property (which checks <b>any</b> chunk in the grid).
         /// </summary>
         public bool ChunkHasLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).HasLightWork;
+
+        /// <summary>
+        /// Returns true when the given chunk's neighbor terrain data is ready, so a lighting job for it
+        /// may be scheduled. Harness analog of production's <c>World.AreNeighborsDataReady</c>, consumed by
+        /// <c>LightingFrameSimulator.RunFrame</c> as the second argument to
+        /// <see cref="LightingScheduleDecision.Evaluate"/>. Defaults to true; set false via
+        /// <see cref="MarkNeighborsNotReady"/> to exercise the <c>NeighborsNotReady</c> deferral arm.
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate of the chunk being considered for scheduling.</param>
+        public bool AreNeighborsDataReady(Vector2Int chunkCoord) => GetChunk(chunkCoord).NeighborsReady;
+
+        /// <summary>
+        /// Marks a chunk's neighbor terrain data as NOT ready — production's <c>AreNeighborsDataReady</c>
+        /// returning false because a neighbor is still generating. While not ready, the simulator defers
+        /// this chunk's lighting (the <c>NeighborsNotReady</c> arm): it keeps its pending light work and is
+        /// never scheduled. Reverse with <see cref="MarkNeighborsReady"/>.
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate of the chunk whose neighbors are not ready.</param>
+        public void MarkNeighborsNotReady(Vector2Int chunkCoord) => GetChunk(chunkCoord).NeighborsReady = false;
+
+        /// <summary>
+        /// Marks a chunk's neighbor terrain data as ready again (clear site for
+        /// <see cref="MarkNeighborsNotReady"/>) so the simulator may schedule its retained light work on
+        /// the next frame.
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate of the chunk whose neighbors are now ready.</param>
+        public void MarkNeighborsReady(Vector2Int chunkCoord) => GetChunk(chunkCoord).NeighborsReady = true;
 
         /// <summary>
         /// How a chunk's persisted pending light work is treated when it is marked loaded again, mirroring
