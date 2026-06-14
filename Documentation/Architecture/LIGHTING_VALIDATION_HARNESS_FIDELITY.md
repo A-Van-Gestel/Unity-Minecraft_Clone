@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (39 baselines + frame simulator, menu item
+The lighting validation suite (40 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -113,11 +113,11 @@ there is invisible.
 - **Now:** every shared oracle rule has ≥1 **independent hand-derived probe** that asserts a constant the
   oracle never produced (no `MatchesOracle` call), so a formula broken in *both* engine and oracle still
   flips a probe red. Implemented as baselines **B35–B39** in `LightingValidationSuite.OracleProbes.cs`:
-  - **B35** — vertical sunlight through open air reaches the floor at full `15` (column pass "15 above heightmap" + no depth attenuation).
-  - **B36** — vertical sunlight through a *solid* glass column (opacity 0) stays `15`: the named highest-risk vertical-transparency rule — pins that only opacity, not solidity, blocks light.
-  - **B37** — sealed shaft under a leaves cap (opacity 1) decays `14 → 10 → 6` (`−1`/voxel): PASS-2 downward attenuation + the opacity-1 step.
-  - **B38** — torch horizontal blocklight falloff `14, 13, … 10` (`−1`/air voxel on all RGB channels): the `max(1, opacity)` air step.
-  - **B39** — opaque face receives exactly `source−1` (=13) surface light but never propagates inward (enclosed center stays `0`): tighter than B9's containment-only check.
+    - **B35** — vertical sunlight through open air reaches the floor at full `15` (column pass "15 above heightmap" + no depth attenuation).
+    - **B36** — vertical sunlight through a *solid* glass column (opacity 0) stays `15`: the named highest-risk vertical-transparency rule — pins that only opacity, not solidity, blocks light.
+    - **B37** — sealed shaft under a leaves cap (opacity 1) decays `14 → 10 → 6` (`−1`/voxel): PASS-2 downward attenuation + the opacity-1 step.
+    - **B38** — torch horizontal blocklight falloff `14, 13, … 10` (`−1`/air voxel on all RGB channels): the `max(1, opacity)` air step.
+    - **B39** — opaque face receives exactly `source−1` (=13) surface light but never propagates inward (enclosed center stays `0`): tighter than B9's containment-only check.
 - **Still NOT covered (remainder, LOW):** the *optional* second, differently-implemented oracle for full
   differential testing is not built — the B35–B39 probes cover the named shared rules but are not a
   general differential check. Pre-existing independent probes (`R == 9`, `crossBorder >= 13`) and
@@ -204,13 +204,32 @@ there is invisible.
 
 ## 4. Coverage gaps (scenario authoring, not harness limits)
 
-### C1 — The whole Bug 09 fleet uses ONE geometry ·  **OPEN · HIGH ROI**
+### C1 — The whole Bug 09 fleet uses ONE geometry ·  **CLOSED (2026-06-14)**
 
-- B15–B29 all use `LampWhite` at `(31,11,24)` on the `(1,1)/(2,1)` border; the 50-seed sweeps permute only
-  *order*. A property-based **fuzz layer** over the existing simulator — randomizing border location,
-  source block type, edit sequence, and which chunk is held in-flight (reusing `FindFailingSeed`) — would
-  explore orders of magnitude more state for almost no new infrastructure. Bump iterations well past 50 for
-  a nightly run. **Highest-value cheap addition.**
+- **Was:** B15–B29 all used `LampWhite` at `(31,11,24)` on the `(1,1)/(2,1)` **+X** border; the 50-seed
+  sweeps permuted only *order* (the `worldFactory` ignored the seed, so geometry was byte-identical across
+  iterations). The other five faces, all four corners (diagonal-neighbor delivery), other source types,
+  and which chunk is held in-flight were never varied. With order-permutation exhausted (B3), the entire
+  *geometry* axis was the untested search space.
+- **Now:** a property-based geometry fuzz layer (`LightingValidationSuite.Bug09Fuzz.cs`). `Bug09FuzzCase.FromSeed`
+  randomizes — as a pure function of the seed — the **border** (4 faces + 4 corners), **source block**
+  (`LampWhite/Red/Green/Blue/Torch`), **filler block** (`Water/Glass/DimGlass`), **held-in-flight chunk**
+  (emitting vs. the possibly-diagonal target), and **per-frame budget** (`1/2/unlimited`), then runs
+  break → filler → re-emit under `CompletionOrder.Shuffled` and asserts convergence to the borderless
+  oracle. The new seeded `FindFailingSeed(Func<int,LightingTestWorld>, …)` overload threads the seed into
+  the world factory **and** scenario body, so a returned failing seed reproduces geometry *and* ordering
+  exactly. Tiered: **B40** runs 50 seeds on every suite invocation; the dedicated menu item
+  **`Minecraft Clone/Dev/Validate Lighting Engine (Bug 09 Geometry Fuzz)`** runs 2000 nightly and logs the
+  first failing seed's full `Describe()` case. Precondition was A4 — the oracle is now independently
+  pinned (B35–B39) so a fuzz mismatch is an engine/harness defect, not an oracle artifact.
+- **Result:** all 40 baselines green (B40 @ 50 seeds) and the nightly 2000-seed run all converge. This is
+  **not** a Bug-09 repro — consistent with B3, a synchronous fuzz cannot catch an async/Burst race; its
+  value is (a) broad regression coverage over the cross-chunk/corner geometry space that was dark before,
+  and (b) strong evidence Bug 09 is not synchronous cross-chunk logic.
+- **Still NOT covered (minor):** no failure **shrinker** — a failing seed is a complete repro but not a
+  *minimal* one (would need manual reduction before promotion to a dedicated baseline); the grid is fixed
+  3×3 (enough for diagonal delivery); and the fuzz still passes `neighborsDataReady: true` (see B2), so the
+  scheduling-deferral path stays unexercised even under fuzzing.
 
 ### C2 — Bug 05 needs the right geometry, not a new capability ·  **OPEN · MEDIUM**
 
@@ -223,18 +242,18 @@ there is invisible.
 
 ## 5. Priority backlog (snapshot)
 
-| #  | Finding                                         | Status      | Priority        | Effort         |
-|----|-------------------------------------------------|-------------|-----------------|----------------|
-| C1 | Bug-09 fuzz layer (randomize geometry)          | OPEN        | High (ROI)      | Low            |
-| B2 | `neighborsDataReady` toggle                     | OPEN        | Medium          | Low            |
-| C2 | Bug-05 dense-canopy geometry                    | OPEN        | Medium          | Medium         |
-| A3 | `ModifyVoxel` heightmap (shared) / enqueue path | **PARTIAL** | Low             | heightmap done |
-| A4 | Oracle shared-assumption probes                 | **MOSTLY CLOSED** | Low (2nd oracle) | probes done |
-| B5 | Meshing-gate coverage                           | OPEN        | Low (by design) | —              |
-| B1 | Chunk-unload / persist-replay path              | **CLOSED**  | —               | done           |
-| B4 | Pool-recycle / flag-pairing                     | **CLOSED**  | —               | done           |
-| A1 | Section / uniform-sky merge bypass              | **CLOSED**  | —               | done           |
-| A2 | Shared mod-routing decision                     | **CLOSED**  | —               | done           |
+| #  | Finding                                         | Status            | Priority         | Effort         |
+|----|-------------------------------------------------|-------------------|------------------|----------------|
+| B2 | `neighborsDataReady` toggle                     | OPEN              | Medium           | Low            |
+| C2 | Bug-05 dense-canopy geometry                    | OPEN              | Medium           | Medium         |
+| A3 | `ModifyVoxel` heightmap (shared) / enqueue path | **PARTIAL**       | Low              | heightmap done |
+| A4 | Oracle shared-assumption probes                 | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
+| B5 | Meshing-gate coverage                           | OPEN              | Low (by design)  | —              |
+| C1 | Bug-09 geometry fuzz (randomize geometry)       | **CLOSED**        | —                | done           |
+| B1 | Chunk-unload / persist-replay path              | **CLOSED**        | —                | done           |
+| B4 | Pool-recycle / flag-pairing                     | **CLOSED**        | —                | done           |
+| A1 | Section / uniform-sky merge bypass              | **CLOSED**        | —                | done           |
+| A2 | Shared mod-routing decision                     | **CLOSED**        | —                | done           |
 
 ---
 

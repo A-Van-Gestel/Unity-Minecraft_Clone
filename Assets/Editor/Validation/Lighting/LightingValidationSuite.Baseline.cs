@@ -55,6 +55,9 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B37: Skylight decays -1/voxel below a leaves cap in a sealed shaft (oracle-independent probe)", Baseline_ProbeSkyAttenuationBelowCanopy));
             scenarios.Add(new Scenario("B38: Horizontal blocklight falls off -1 per air voxel on all channels (oracle-independent probe)", Baseline_ProbeHorizontalBlocklightFalloff));
             scenarios.Add(new Scenario("B39: Opaque face receives source-1 surface light but never propagates inward (oracle-independent probe)", Baseline_ProbeOpaqueSurfaceStamp));
+
+            // --- C1 Bug-09 geometry fuzz (randomized border/source/held-chunk/budget across 50 seeds) ---
+            scenarios.Add(new Scenario("B40: Bug-09 cross-chunk geometry fuzz converges to the oracle across 50 randomized seeds (Bug 09 guard)", Baseline_Bug09GeometryFuzz));
         }
 
         /// <summary>

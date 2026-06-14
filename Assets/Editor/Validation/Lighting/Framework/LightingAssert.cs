@@ -27,8 +27,11 @@ namespace Editor.Validation.Lighting.Framework
         /// <param name="world">The test world after convergence.</param>
         /// <param name="expected">The oracle field for the same voxel contents.</param>
         /// <param name="testName">The scenario name used in the log output.</param>
+        /// <param name="logPass">When false, suppresses the success <c>[PASS]</c> log (the failure diff is
+        /// always logged). Use for high-iteration sweeps (e.g. the Bug-09 geometry fuzz) that would
+        /// otherwise flood the console with one PASS per iteration.</param>
         /// <returns>True when the fields match exactly.</returns>
-        public static bool MatchesOracle(LightingTestWorld world, OracleLightField expected, string testName)
+        public static bool MatchesOracle(LightingTestWorld world, OracleLightField expected, string testName, bool logPass = true)
         {
             StringBuilder report = new StringBuilder();
             int mismatches = 0;
@@ -54,7 +57,7 @@ namespace Editor.Validation.Lighting.Framework
 
             if (mismatches == 0)
             {
-                Debug.Log($"[PASS] {testName}");
+                if (logPass) Debug.Log($"[PASS] {testName}");
                 return true;
             }
 

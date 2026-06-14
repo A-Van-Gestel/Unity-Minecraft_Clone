@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Random = System.Random;
 
 namespace Editor.Validation.Lighting.Framework
 {
@@ -64,7 +65,7 @@ namespace Editor.Validation.Lighting.Framework
 
         private readonly LightingTestWorld _world;
         private readonly List<PendingFlight> _pendingFlights = new List<PendingFlight>();
-        private readonly System.Random _rng;
+        private readonly Random _rng;
         private int _currentFrame;
 
         /// <summary>
@@ -81,7 +82,7 @@ namespace Editor.Validation.Lighting.Framework
         public LightingFrameSimulator(LightingTestWorld world, int? seed = null)
         {
             _world = world ?? throw new ArgumentNullException(nameof(world));
-            _rng = seed.HasValue ? new System.Random(seed.Value) : null;
+            _rng = seed.HasValue ? new Random(seed.Value) : null;
         }
 
         /// <summary>The number of in-flight jobs currently held by the simulator (scheduled but not yet completed).</summary>
@@ -327,12 +328,50 @@ namespace Editor.Validation.Lighting.Framework
             return null;
         }
 
+        /// <summary>
+        /// Geometry-fuzzing variant of <see cref="FindFailingSeed(System.Func{LightingTestWorld},System.Func{LightingTestWorld,LightingFrameSimulator,bool},int,int)"/>:
+        /// the world factory itself receives the seed, so each iteration can randomize the GEOMETRY
+        /// (border location, source block, held-in-flight chunk, edit sequence, …) as a pure function of
+        /// the seed — not just the simulator's completion/scheduling order. The scenario body likewise
+        /// receives the seed so it can reconstruct the same case. Because both geometry and ordering are
+        /// derived deterministically from the seed, re-running a returned failing seed reproduces the
+        /// exact case (the harness blind spot called out as finding C1 in
+        /// LIGHTING_VALIDATION_HARNESS_FIDELITY.md).
+        /// </summary>
+        /// <param name="seededWorldFactory">Factory that builds a fully set-up <see cref="LightingTestWorld"/>
+        /// from the iteration's seed (terrain, initial lighting, source placement). Geometry must be a pure
+        /// function of the seed for reproducibility.</param>
+        /// <param name="scenarioBody">The scenario to run; receives the world, the seeded simulator, and the
+        /// seed (to reconstruct the case). Returns <c>true</c> on convergence-to-oracle, <c>false</c> on a
+        /// revealed failure.</param>
+        /// <param name="iterations">Number of seeds to try.</param>
+        /// <param name="startSeed">First seed value; subsequent seeds increment by 1.</param>
+        /// <returns>The first failing seed, or <c>null</c> if all seeds pass.</returns>
+        public static int? FindFailingSeed(
+            Func<int, LightingTestWorld> seededWorldFactory,
+            Func<LightingTestWorld, LightingFrameSimulator, int, bool> scenarioBody,
+            int iterations = 1000,
+            int startSeed = 0)
+        {
+            for (int i = 0; i < iterations; i++)
+            {
+                int seed = startSeed + i;
+                using LightingTestWorld world = seededWorldFactory(seed);
+                LightingFrameSimulator sim = new LightingFrameSimulator(world, seed);
+
+                if (!scenarioBody(world, sim, seed))
+                    return seed;
+            }
+
+            return null;
+        }
+
         #endregion
 
         /// <summary>
         /// In-place Fisher-Yates shuffle using the provided seeded RNG.
         /// </summary>
-        private static void FisherYatesShuffle<T>(List<T> list, System.Random rng)
+        private static void FisherYatesShuffle<T>(List<T> list, Random rng)
         {
             for (int i = list.Count - 1; i > 0; i--)
             {
