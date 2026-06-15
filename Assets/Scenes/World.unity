@@ -1371,8 +1371,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Benchmarks.MeshGenerationBenchmark
   _benchMarkEnabled: 0
   _runFullComparison: 1
-  _benchmarkRuns: 50
-  _chunksToMesh: 256
+  _benchmarkRuns: 100
+  _chunksToMesh: 156
   _mode: 1
   _dataType: 1
   _useBlockingWait: 1

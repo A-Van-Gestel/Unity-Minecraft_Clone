@@ -1,0 +1,278 @@
+using System.Text;
+using Data;
+using Unity.Collections;
+using UnityEngine;
+
+namespace Editor.Validation.Meshing.Framework
+{
+    /// <summary>
+    /// Assertion helpers for the meshing validation suite. Every method returns a pass/fail bool and
+    /// logs a single <c>[PASS]</c>/<c>[FAIL]</c> line; failures include bounded per-element diffs so a
+    /// regression is debuggable straight from the Unity console (matching the lighting suite style).
+    /// </summary>
+    public static class MeshAssert
+    {
+        /// <summary>Max position delta (block units) tolerated between engine and oracle vertices.</summary>
+        public const float VertexEpsilon = 1e-4f;
+
+        /// <summary>Max number of element diffs printed before truncation.</summary>
+        private const int MAX_DIFFS = 8;
+
+        /// <summary>
+        /// Asserts the four vertices and the normal of one emitted quad match the oracle's expectation.
+        /// </summary>
+        /// <param name="label">Scenario/quad label for logging.</param>
+        /// <param name="verts">Engine vertex list.</param>
+        /// <param name="normals">Engine normal list.</param>
+        /// <param name="startVert">Index of the first of the quad's 4 vertices.</param>
+        /// <param name="expected">Oracle vertex positions (length 4).</param>
+        /// <param name="expectedNormal">Oracle face normal.</param>
+        public static bool QuadMatchesOracle(string label, NativeList<Vector3> verts, NativeList<Vector3> normals,
+            int startVert, Vector3[] expected, Vector3 expectedNormal)
+        {
+            StringBuilder diffs = new StringBuilder();
+            int diffCount = 0;
+
+            if (startVert + 4 > verts.Length)
+            {
+                Debug.LogError($"[FAIL] {label}: expected 4 vertices at index {startVert} but list has only {verts.Length}.");
+                return false;
+            }
+
+            for (int i = 0; i < 4; i++)
+            {
+                Vector3 actual = verts[startVert + i];
+                if (Vector3.Distance(actual, expected[i]) > VertexEpsilon && diffCount < MAX_DIFFS)
+                {
+                    diffs.AppendLine($"    vert[{i}] expected {Fmt(expected[i])} actual {Fmt(actual)} (Δ={Vector3.Distance(actual, expected[i]):G4})");
+                    diffCount++;
+                }
+
+                Vector3 actualNormal = normals[startVert + i];
+                if (Vector3.Distance(actualNormal, expectedNormal) > VertexEpsilon && diffCount < MAX_DIFFS)
+                {
+                    diffs.AppendLine($"    normal[{i}] expected {Fmt(expectedNormal)} actual {Fmt(actualNormal)}");
+                    diffCount++;
+                }
+            }
+
+            if (diffCount == 0)
+            {
+                Debug.Log($"[PASS] {label}");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: {diffCount} vertex/normal mismatch(es)\n{diffs}");
+            return false;
+        }
+
+        /// <summary>Asserts the output has exactly <paramref name="expected"/> vertices.</summary>
+        public static bool VertexCount(string label, MeshDataJobOutput o, int expected)
+        {
+            if (o.Vertices.Length == expected)
+            {
+                Debug.Log($"[PASS] {label}: {expected} vertices.");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: expected {expected} vertices, got {o.Vertices.Length}.");
+            return false;
+        }
+
+        /// <summary>
+        /// Asserts the per-vertex streams are length-consistent and every triangle index is a valid,
+        /// well-formed (multiple-of-3) reference into the vertex array.
+        /// </summary>
+        public static bool StructuralInvariants(string label, MeshDataJobOutput o)
+        {
+            StringBuilder problems = new StringBuilder();
+            int n = o.Vertices.Length;
+
+            if (o.Uvs.Length != n) problems.AppendLine($"    Uvs length {o.Uvs.Length} != vertices {n}");
+            if (o.Colors.Length != n) problems.AppendLine($"    Colors length {o.Colors.Length} != vertices {n}");
+            if (o.Normals.Length != n) problems.AppendLine($"    Normals length {o.Normals.Length} != vertices {n}");
+            if (o.LightData.Length != n) problems.AppendLine($"    LightData length {o.LightData.Length} != vertices {n}");
+
+            CheckTriangleList(problems, "OpaqueTris", o.Triangles, n);
+            CheckTriangleList(problems, "TransparentTris", o.TransparentTriangles, n);
+            CheckTriangleList(problems, "FluidTris", o.FluidTriangles, n);
+
+            if (problems.Length == 0)
+            {
+                Debug.Log($"[PASS] {label}: structural invariants hold ({n} verts).");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: structural invariant violations\n{problems}");
+            return false;
+        }
+
+        /// <summary>
+        /// Asserts two outputs are element-for-element identical across every stream (determinism guard).
+        /// </summary>
+        public static bool OutputsEqual(string label, MeshDataJobOutput a, MeshDataJobOutput b)
+        {
+            StringBuilder diffs = new StringBuilder();
+            int diffCount = 0;
+
+            CompareVec3(diffs, ref diffCount, "Vertices", a.Vertices, b.Vertices);
+            CompareInt(diffs, ref diffCount, "Triangles", a.Triangles, b.Triangles);
+            CompareInt(diffs, ref diffCount, "TransparentTriangles", a.TransparentTriangles, b.TransparentTriangles);
+            CompareInt(diffs, ref diffCount, "FluidTriangles", a.FluidTriangles, b.FluidTriangles);
+            CompareVec3(diffs, ref diffCount, "Normals", a.Normals, b.Normals);
+            // UVs, vertex colors, and packed light are exactly the streams an uninitialized hoisted
+            // scratch buffer would make nondeterministic, so a determinism guard must cover them too.
+            CompareVec4(diffs, ref diffCount, "Uvs", a.Uvs, b.Uvs);
+            CompareColor(diffs, ref diffCount, "Colors", a.Colors, b.Colors);
+            CompareColor32(diffs, ref diffCount, "LightData", a.LightData, b.LightData);
+
+            if (diffCount == 0)
+            {
+                Debug.Log($"[PASS] {label}: outputs identical across runs.");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: {diffCount} difference(s) between runs\n{diffs}");
+            return false;
+        }
+
+        /// <summary>Generic boolean assertion with a descriptive detail line.</summary>
+        public static bool IsTrue(string label, bool condition, string detail)
+        {
+            if (condition)
+            {
+                Debug.Log($"[PASS] {label}: {detail}");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: {detail}");
+            return false;
+        }
+
+        private static void CheckTriangleList(StringBuilder problems, string name, NativeList<int> tris, int vertCount)
+        {
+            if (tris.Length % 3 != 0)
+                problems.AppendLine($"    {name} length {tris.Length} is not a multiple of 3");
+
+            for (int i = 0; i < tris.Length; i++)
+            {
+                if (tris[i] < 0 || tris[i] >= vertCount)
+                {
+                    problems.AppendLine($"    {name}[{i}] = {tris[i]} out of range [0,{vertCount})");
+                    break; // one example is enough
+                }
+            }
+        }
+
+        private static void CompareVec3(StringBuilder diffs, ref int diffCount, string name,
+            NativeList<Vector3> a, NativeList<Vector3> b)
+        {
+            if (a.Length != b.Length)
+            {
+                if (diffCount < MAX_DIFFS) diffs.AppendLine($"    {name} length {a.Length} != {b.Length}");
+                diffCount++;
+                return;
+            }
+
+            for (int i = 0; i < a.Length && diffCount < MAX_DIFFS; i++)
+            {
+                if (Vector3.Distance(a[i], b[i]) > VertexEpsilon)
+                {
+                    diffs.AppendLine($"    {name}[{i}] {Fmt(a[i])} vs {Fmt(b[i])}");
+                    diffCount++;
+                }
+            }
+        }
+
+        private static void CompareInt(StringBuilder diffs, ref int diffCount, string name,
+            NativeList<int> a, NativeList<int> b)
+        {
+            if (a.Length != b.Length)
+            {
+                if (diffCount < MAX_DIFFS) diffs.AppendLine($"    {name} length {a.Length} != {b.Length}");
+                diffCount++;
+                return;
+            }
+
+            for (int i = 0; i < a.Length && diffCount < MAX_DIFFS; i++)
+            {
+                if (a[i] != b[i])
+                {
+                    diffs.AppendLine($"    {name}[{i}] {a[i]} vs {b[i]}");
+                    diffCount++;
+                }
+            }
+        }
+
+        private static void CompareVec4(StringBuilder diffs, ref int diffCount, string name,
+            NativeList<Vector4> a, NativeList<Vector4> b)
+        {
+            if (a.Length != b.Length)
+            {
+                if (diffCount < MAX_DIFFS) diffs.AppendLine($"    {name} length {a.Length} != {b.Length}");
+                diffCount++;
+                return;
+            }
+
+            for (int i = 0; i < a.Length && diffCount < MAX_DIFFS; i++)
+            {
+                // Exact comparison: a determinism guard must catch any bit-level divergence.
+                Vector4 x = a[i], y = b[i];
+                // ReSharper disable CompareOfFloatsByEqualityOperator
+                if (x.x != y.x || x.y != y.y || x.z != y.z || x.w != y.w)
+                // ReSharper restore CompareOfFloatsByEqualityOperator
+                {
+                    diffs.AppendLine($"    {name}[{i}] ({x.x:F4},{x.y:F4},{x.z:F4},{x.w:F4}) vs ({y.x:F4},{y.y:F4},{y.z:F4},{y.w:F4})");
+                    diffCount++;
+                }
+            }
+        }
+
+        private static void CompareColor(StringBuilder diffs, ref int diffCount, string name,
+            NativeList<Color> a, NativeList<Color> b)
+        {
+            if (a.Length != b.Length)
+            {
+                if (diffCount < MAX_DIFFS) diffs.AppendLine($"    {name} length {a.Length} != {b.Length}");
+                diffCount++;
+                return;
+            }
+
+            for (int i = 0; i < a.Length && diffCount < MAX_DIFFS; i++)
+            {
+                // Exact comparison: a determinism guard must catch any bit-level divergence.
+                Color x = a[i], y = b[i];
+                // ReSharper disable CompareOfFloatsByEqualityOperator
+                if (x.r != y.r || x.g != y.g || x.b != y.b || x.a != y.a)
+                // ReSharper restore CompareOfFloatsByEqualityOperator
+                {
+                    diffs.AppendLine($"    {name}[{i}] ({x.r:F4},{x.g:F4},{x.b:F4},{x.a:F4}) vs ({y.r:F4},{y.g:F4},{y.b:F4},{y.a:F4})");
+                    diffCount++;
+                }
+            }
+        }
+
+        private static void CompareColor32(StringBuilder diffs, ref int diffCount, string name,
+            NativeList<Color32> a, NativeList<Color32> b)
+        {
+            if (a.Length != b.Length)
+            {
+                if (diffCount < MAX_DIFFS) diffs.AppendLine($"    {name} length {a.Length} != {b.Length}");
+                diffCount++;
+                return;
+            }
+
+            for (int i = 0; i < a.Length && diffCount < MAX_DIFFS; i++)
+            {
+                Color32 x = a[i], y = b[i];
+                if (x.r != y.r || x.g != y.g || x.b != y.b || x.a != y.a)
+                {
+                    diffs.AppendLine($"    {name}[{i}] ({x.r},{x.g},{x.b},{x.a}) vs ({y.r},{y.g},{y.b},{y.a})");
+                    diffCount++;
+                }
+            }
+        }
+
+        private static string Fmt(Vector3 v) => $"({v.x:F4}, {v.y:F4}, {v.z:F4})";
+    }
+}

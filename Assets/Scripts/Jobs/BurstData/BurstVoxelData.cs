@@ -31,6 +31,13 @@ namespace Jobs.BurstData
         /// </summary>
         public static readonly SharedStatic<NativeArray<int3>> CornerOffsets = SharedStatic<NativeArray<int3>>.GetOrCreate<BurstVoxelData, CornerOffsetsKey>();
 
+        /// <summary>
+        /// The center of a unit voxel cube — the pivot point for all block-orientation rotations.
+        /// Burst-safe (constructed from literals, no static storage); use this instead of
+        /// re-spelling <c>(0.5, 0.5, 0.5)</c> at every rotation site.
+        /// </summary>
+        public static float3 BlockCenter => new float3(0.5f, 0.5f, 0.5f);
+
         // These empty structs are just unique keys for the SharedStatic fields.
         private struct VoxelVertsKey
         {

@@ -40,13 +40,13 @@ instead of a crash.
 
 ## Legend
 
-| Field      | Values                                                                                                                                                          |
-|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Effort** | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                                              |
-| **Risk**   | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants, lighting semantics, or shaders)    |
-| **Benefit**| 🟢 High (measurable frame-time/GC win in normal play) · 🟡 Medium (situational or smaller win) · ⚪ Low (cleanliness/scalability, negligible today)              |
-| **Seed**   | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ — see entry (changes some runtime-deterministic behavior, but never terrain)                     |
-| **Save**   | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill)                  |
+| Field       | Values                                                                                                                                                        |
+|-------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                                           |
+| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants, lighting semantics, or shaders) |
+| **Benefit** | 🟢 High (measurable frame-time/GC win in normal play) · 🟡 Medium (situational or smaller win) · ⚪ Low (cleanliness/scalability, negligible today)            |
+| **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ — see entry (changes some runtime-deterministic behavior, but never terrain)                   |
+| **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill)                |
 
 > **Seed-breaking note:** None of the items in this report modify world-generation noise, biome
 > selection, structure placement, or any code in the generation jobs. **No item can change the
@@ -59,62 +59,66 @@ instead of a crash.
 
 ### Meshing & Rendering
 
-| ID    | Finding                                                            | Effort | Risk | Benefit | Seed | Save |
-|-------|--------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| MR-1  | Per-vertex `Quaternion.Euler` in standard cube face generation     | 🟢     | 🟢   | 🟢      | ✅   | ✅   |
-| MR-2  | 60-byte vertex format with a near-constant 16-byte color stream    | 🟡     | 🟡   | 🟢      | ✅   | ✅   |
-| MR-3  | `new Material[3]` + `sharedMaterials` set per section mesh update  | 🟢     | 🟢   | 🟡      | ✅   | ✅   |
-| MR-4  | `RecalculateBounds()` per section update despite known bounds      | 🟢     | 🟢   | 🟡      | ✅   | ✅   |
-| MR-5  | `MeshPostProcessJob` blocks the main thread per chunk apply        | 🟢     | 🟢   | 🟡      | ✅   | ✅   |
-| MR-6  | Mesh output `NativeList`s start at default capacity                | 🟢     | 🟢   | 🟡      | ✅   | ✅   |
-| MR-7  | Per-fluid-voxel `Allocator.Temp` arrays in the meshing job         | 🟢     | 🟢   | 🟡      | ✅   | ✅   |
-| MR-8  | Greedy meshing (coplanar quad merging)                             | 🔴     | 🔴   | 🟢      | ✅   | ✅   |
-| MR-9  | `Clouds.cs` legacy mesh API with `.ToArray()`                      | 🟢     | 🟢   | 🟡      | ✅   | ✅   |
+| ID   | Finding                                                           | Effort | Risk | Benefit | Seed | Save |
+|------|-------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| MR-1 ✅ | Per-vertex `Quaternion.Euler` in standard cube face generation |   🟢   |  🟢  |   🟡¹   |  ✅   |  ✅   |
+| MR-2 | 60-byte vertex format with a near-constant 16-byte color stream   |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| MR-3 | `new Material[3]` + `sharedMaterials` set per section mesh update |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-4 | `RecalculateBounds()` per section update despite known bounds     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-5 | `MeshPostProcessJob` blocks the main thread per chunk apply       |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-6 | Mesh output `NativeList`s start at default capacity               |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-7 | Per-fluid-voxel `Allocator.Temp` arrays in the meshing job        |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-8 | Greedy meshing (coplanar quad merging)                            |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
+| MR-9 | `Clouds.cs` legacy mesh API with `.ToArray()`                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+
+> ¹ MR-1 benefit downgraded 🟢→🟡 after measurement: implemented and suite-guarded, but the
+> throughput delta is within the benchmark's noise floor — a correctness/cleanliness win, not a
+> measurable speedup. See the MR-1 detail section for the before/after table.
 
 ### Lighting
 
-| ID    | Finding                                                            | Effort | Risk | Benefit | Seed | Save |
-|-------|--------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| LI-1  | Branchy 9-map dispatch + hashmap cache in the BFS inner loop       | 🟡     | 🟡   | 🟢      | ⚠️   | ✅   |
+| ID   | Finding                                                      | Effort | Risk | Benefit | Seed | Save |
+|------|--------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| LI-1 | Branchy 9-map dispatch + hashmap cache in the BFS inner loop |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
 
 ### Tick & Gameplay
 
-| ID    | Finding                                                            | Effort | Risk | Benefit | Seed | Save |
-|-------|--------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| TG-1  | Double voxel lookup + float-path cross-chunk queries per tick      | 🟡     | 🟡   | 🟢      | ✅   | ✅   |
-| TG-2  | `OnDataPopulated` full-chunk scan through managed `BlockType`s     | 🟢     | 🟢   | 🟡      | ✅   | ✅   |
-| TG-3  | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors     | 🟢     | 🟢   | 🟡      | ⚠️   | ✅   |
-| TG-4  | `BlockBehavior` data separation (ECS/DOTS pattern)                 | 🔴     | 🔴   | 🟢      | ✅   | ✅   |
-| TG-5  | `BlockBehavior` Burst function pointers (lighter alt. to TG-4)     | 🟡     | 🟡   | 🟡      | ✅   | ✅   |
+| ID   | Finding                                                        | Effort | Risk | Benefit | Seed | Save |
+|------|----------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| TG-1 | Double voxel lookup + float-path cross-chunk queries per tick  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| TG-2 | `OnDataPopulated` full-chunk scan through managed `BlockType`s |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| TG-3 | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
+| TG-4 | `BlockBehavior` data separation (ECS/DOTS pattern)             |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
+| TG-5 | `BlockBehavior` Burst function pointers (lighter alt. to TG-4) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 
 ### Main Thread & Miscellaneous
 
-| ID    | Finding                                                            | Effort | Risk | Benefit | Seed | Save |
-|-------|--------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| MT-1  | `List.Insert(0)` / `RemoveAt(i)` O(n) mesh priority queue          | 🟡     | 🟡   | 🟢      | ✅   | ✅   |
-| MT-2  | Light scheduler snapshots the full dirty set every frame           | 🟢     | 🟡   | 🟡      | ✅   | ✅   |
-| MT-3  | `DebugScreen` intermediate string allocations per refresh          | 🟢     | 🟢   | ⚪      | ✅   | ✅   |
-| MT-4  | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup         | 🟢     | 🟢   | ⚪      | ✅   | ✅   |
-| MT-5  | Startup `.ToArray()` intermediates feeding `NativeArray`           | 🟢     | 🟢   | ⚪      | ✅   | ✅   |
-| MT-6  | `CompressionFactory` "GZip" actually writes raw Deflate            | 🟢     | 🟢   | ⚪      | ✅   | ⚠️   |
+| ID   | Finding                                                    | Effort | Risk | Benefit | Seed | Save |
+|------|------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| MT-1 | `List.Insert(0)` / `RemoveAt(i)` O(n) mesh priority queue  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| MT-2 | Light scheduler snapshots the full dirty set every frame   |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
+| MT-3 | `DebugScreen` intermediate string allocations per refresh  |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| MT-4 | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| MT-5 | Startup `.ToArray()` intermediates feeding `NativeArray`   |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| MT-6 | `CompressionFactory` "GZip" actually writes raw Deflate    |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
 
 ### GPU & Shaders
 
-| ID    | Finding                                                            | Effort | Risk | Benefit | Seed | Save |
-|-------|--------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| GS-1  | Liquid shader: per-pixel procedural 3D simplex FBM (up to ~30 snoise calls/px) | 🟡 | 🟡 | 🟢 | ✅ | ✅ |
-| GS-2  | URP Opaque Texture required globally; `SampleSceneColor` even with refraction off | 🟢 | 🟡 | 🟢 | ✅ | ✅ |
-| GS-3  | Voxel lighting math (4× `pow`) runs per-fragment on per-vertex data | 🟢     | 🟢   | 🟡      | ✅   | ✅   |
-| GS-4  | Render pipeline tier audit: shadow variants, TwoSided casting, MSAA, render scale | 🟢 | 🟢 | 🟡 | ✅ | ✅ |
-| GS-5  | Section occlusion culling (underground sections render despite being sealed) | 🔴 | 🟡 | 🟢 | ✅ | ✅ |
+| ID   | Finding                                                                           | Effort | Risk | Benefit | Seed | Save |
+|------|-----------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| GS-1 | Liquid shader: per-pixel procedural 3D simplex FBM (up to ~30 snoise calls/px)    |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| GS-2 | URP Opaque Texture required globally; `SampleSceneColor` even with refraction off |   🟢   |  🟡  |   🟢    |  ✅   |  ✅   |
+| GS-3 | Voxel lighting math (4× `pow`) runs per-fragment on per-vertex data               |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| GS-4 | Render pipeline tier audit: shadow variants, TwoSided casting, MSAA, render scale |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| GS-5 | Section occlusion culling (underground sections render despite being sealed)      |   🔴   |  🟡  |   🟢    |  ✅   |  ✅   |
 
 ### CPU-Starved Device / OOM Hardening
 
-| ID    | Finding                                                            | Effort | Risk | Benefit | Seed | Save |
-|-------|--------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| OM-1  | All budgets/caps are desktop-tuned absolute constants — no device-tier scaling | 🟢 | 🟢 | 🟢 | ✅ | ✅ |
-| OM-2  | No memory-pressure response: `Application.lowMemory` unused, no resident-chunk budget | 🟡 | 🟡 | 🟢 | ✅ | ✅ |
-| OM-3  | Unbounded concurrent chunk saves on mass unload (one `Task` per chunk) | 🟡 | 🟡 | 🟢 | ✅ | ✅ |
+| ID   | Finding                                                                               | Effort | Risk | Benefit | Seed | Save |
+|------|---------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| OM-1 | All budgets/caps are desktop-tuned absolute constants — no device-tier scaling        |   🟢   |  🟢  |   🟢    |  ✅   |  ✅   |
+| OM-2 | No memory-pressure response: `Application.lowMemory` unused, no resident-chunk budget |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| OM-3 | Unbounded concurrent chunk saves on mass unload (one `Task` per chunk)                |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
 
 ### Chunk Pipeline (deep-dive in `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`)
 
@@ -122,20 +126,25 @@ These remain fully documented in the pipeline analysis — the table is reproduc
 is the single at-a-glance view. **Read that document (and the `chunk-lifecycle` skill) before
 implementing any of these.**
 
-| ID    | Finding (doc section)                                              | Effort | Risk | Benefit | Seed | Save |
-|-------|--------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| P-1   | Border-slab copies instead of full-volume snapshots (§1.2)         | 🟡     | 🟡   | 🟢      | ✅   | ✅   |
-| P-2   | Persistent native voxel/light storage, zero-copy jobs (§1.3)       | 🔴     | 🔴   | 🟢      | ✅   | ✅   |
-| P-3   | Jobified lighting merge in `ApplyLightingJobResult` (§2)           | 🟡     | 🟡   | 🟢      | ✅   | ✅   |
-| P-4   | Backpressure: in-flight caps, out-of-range discard, time budgets, panic gate (§3) | 🟡 | 🟡→🔴 | 🟢 | ✅ | ✅ |
-| P-5   | "Lighting stable" save bit to skip edge checks on load (§4.4)      | 🟡     | 🟡   | 🟢      | ✅   | ⚠️ Format |
-| P-6   | Smaller observations: O(n) removals, fail-safe scan counter, draw-queue trickle (§5) | 🟢 | 🟢 | 🟡 | ✅ | ✅ |
+| ID  | Finding (doc section)                                                                | Effort | Risk  | Benefit | Seed |   Save    |
+|-----|--------------------------------------------------------------------------------------|:------:|:-----:|:-------:|:----:|:---------:|
+| P-1 | Border-slab copies instead of full-volume snapshots (§1.2)                           |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
+| P-2 | Persistent native voxel/light storage, zero-copy jobs (§1.3)                         |   🔴   |  🔴   |   🟢    |  ✅   |     ✅     |
+| P-3 | Jobified lighting merge in `ApplyLightingJobResult` (§2)                             |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
+| P-4 | Backpressure: in-flight caps, out-of-range discard, time budgets, panic gate (§3)    |   🟡   | 🟡→🔴 |   🟢    |  ✅   |     ✅     |
+| P-5 | "Lighting stable" save bit to skip edge checks on load (§4.4)                        |   🟡   |  🟡   |   🟢    |  ✅   | ⚠️ Format |
+| P-6 | Smaller observations: O(n) removals, fail-safe scan counter, draw-queue trickle (§5) |   🟢   |  🟢   |   🟡    |  ✅   |     ✅     |
 
 ---
 
 ## Detailed findings — Meshing & Rendering
 
-### MR-1. Per-vertex `Quaternion.Euler` in standard cube face generation
+### MR-1. ✅ DONE (2026-06-15) — Per-vertex `Quaternion.Euler` in standard cube face generation
+
+> **Closed:** implemented, suite-guarded (`B1`/`B4`), benchmarked, and visually confirmed in-game
+> (rotated blocks orient correctly at all yaws). Outcome: **marginal — throughput delta within the
+> benchmark noise floor**; kept as a correctness/cleanliness win, not a measured speedup. Retained
+> here (not deleted) so the dead-end "hoist for a big win" idea isn't re-proposed. Full record below.
 
 **Observed:** `VoxelMeshHelper.GenerateStandardCubeFace` (`VoxelMeshHelper.cs` ~line 194) computes
 `Quaternion.Euler(0, rotation, 0)` and a quaternion-vector multiply **inside the 4-vertex loop**,
@@ -154,8 +163,44 @@ rotation variants as a Phase 2b idea for *custom meshes*; the standard-cube cost
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low — localized to one helper, mechanical change.
 > - **Risk:** 🟢 Low — verify rotated blocks (e.g. stairs/logs equivalents) still orient correctly.
-> - **Benefit:** 🟢 High — directly scales mesh job throughput; the meshing benchmark will show it.
+> - **Benefit:** 🟡 Low/measured — correctness/cleanliness win; throughput delta is below the
+>   benchmark's noise floor (see Status). The original "🟢 High — the benchmark will show it" estimate
+>   was **not borne out**: oriented blocks are a small fraction of realistic chunks and the per-vertex
+>   transcendental is tiny against total meshing cost.
 > - **Seed/Save:** ✅ / ✅.
+
+> **Status (2026-06-15): implemented, validated, and benchmarked — effect within noise.**
+> The per-vertex `Quaternion.Euler` was hoisted out of `GenerateStandardCubeFace`: `rotation == 0`
+> now takes a no-math fast path, and oriented blocks multiply by a single precomputed `float3x3`
+> built once per face. Output preservation is guarded by the new **Meshing Validation Suite**
+> (`Minecraft Clone/Dev/Validate Meshing`): `B1` asserts the rotated-vertex math is identical to the
+> `Quaternion.Euler` ground truth for all 6 faces × {0,90,180,270}°, and `B4` asserts the same
+> end-to-end through the real `MeshGenerationJob` for all 4 yaws. All baselines green before and
+> after the change.
+>
+> **Benchmark (player build, IL2CPP, i9-9900K, 156 chunks × 100 runs):** before vs after, on the two
+> rotation-exercising patterns —
+>
+> | Pattern | Before μs/chunk | After μs/chunk | Δ | Notes |
+> |---|---|---|---|---|
+> | `Solid` *(control)* | 282.1 | 275.6 | −2.3% | tiny run (43→40 ms), noisy |
+> | `Checkerboard` *(control)* | 4416.7 | 4365.4 | −1.2% | high-sample, stable |
+> | `OrientedCubes` | 288.5 | 243.6 | −15.6% | tiny run (45→38 ms), **not credible** |
+> | `OrientedCheckerboard` | 4423.1 | 4365.4 | −1.3% | high-sample, stable |
+>
+> The whole report drifted ~1–2% faster between runs (system/build variance; near-identical
+> wall-clock). The eye-catching −15.6% on `OrientedCubes` is **measurement noise, not MR-1**: (1) its
+> high-sample twin `OrientedCheckerboard` — oriented blocks *at scale* — moved only −1.3%, identical
+> to the control `Checkerboard`; (2) `OrientedCubes` is a sub-50 ms run where one 1 ms timer tick is
+> ~2.6%; (3) post-change `OrientedCubes` (243.6) reads *faster than* `Solid` (275.6), which is
+> physically impossible for the rotation path (fast path can at best tie), proving these two patterns'
+> absolute numbers aren't comparable. **Net: no reliably measurable throughput change at this
+> harness's resolution.** MR-1 is kept as a correctness/cleanliness improvement, permanently guarded
+> by `B1`/`B4` against regression.
+>
+> **Remaining:** in-game visual confirmation of rotated blocks (logs/pillars/directional). Once
+> confirmed, this entry may be removed — but note its conclusion is "marginal, keep for hygiene,"
+> not "speedup landed."
 
 ---
 
@@ -178,11 +223,11 @@ realistic target is **~32 bytes/vertex (−45%)**, which cuts `SetVertexBufferDa
 
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — vertex layout, `MeshDataJobOutput`, meshing job writers, and all three
->   shaders (opaque/transparent/fluid) change together.
+    > shaders (opaque/transparent/fluid) change together.
 > - **Risk:** 🟡 Medium — shader/layout mismatches fail visibly; smooth lighting encoding in
->   TexCoord1 must be preserved exactly.
+    > TexCoord1 must be preserved exactly.
 > - **Benefit:** 🟢 High — under chunk streaming, vertex upload is a recurring main-thread cost and
->   this nearly halves it.
+    > this nearly halves it.
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -203,7 +248,7 @@ assign `sharedMaterials` when the combination actually changed since the last up
 > - **Effort:** 🟢 Low.
 > - **Risk:** 🟢 Low — materials are global singletons from `World.Instance`.
 > - **Benefit:** 🟡 Medium — removes steady GC churn during chunk streaming (exactly the class of
->   hot-path allocation `GENERAL_OPTIMIZATION_GUIDE.md §5` forbids).
+    > hot-path allocation `GENERAL_OPTIMIZATION_GUIDE.md §5` forbids).
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -223,7 +268,7 @@ pass it through `MeshSectionStats`.
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low.
 > - **Risk:** 🟢 Low — verify no custom mesh asset exceeds the unit cell; oversized bounds are safe
->   (slightly conservative culling), undersized bounds cause visible popping.
+    > (slightly conservative culling), undersized bounds cause visible popping.
 > - **Benefit:** 🟡 Medium — removes a per-section main-thread vertex scan from the apply path.
 > - **Seed/Save:** ✅ / ✅.
 
@@ -242,9 +287,9 @@ and `ApplyMeshData` only uploads buffers.
 
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low — move the job construction; `MeshingJobData.Handle` already carries the
->   combined handle pattern.
+    > combined handle pattern.
 > - **Risk:** 🟢 Low — the post-process job only touches the output buffers, which already live
->   until `ProcessMeshJobs`.
+    > until `ProcessMeshJobs`.
 > - **Benefit:** 🟡 Medium — removes a fixed main-thread cost per mesh completion (up to 10/frame).
 > - **Seed/Save:** ✅ / ✅.
 
@@ -265,7 +310,7 @@ mesh size as the estimate. Optionally pool whole `MeshDataJobOutput` instances a
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low (pre-size) → 🟡 Medium (pool the output struct).
 > - **Risk:** 🟢 Low — over-sizing only costs memory; pooling must respect the existing
->   "dispose after `ApplyMeshData`" lifecycle.
+    > "dispose after `ApplyMeshData`" lifecycle.
 > - **Benefit:** 🟡 Medium — removes hidden reallocation/memcpy from every meshing job.
 > - **Seed/Save:** ✅ / ✅.
 
@@ -318,7 +363,7 @@ meshing baseline first (`Performance/README.md`).
 > - **Effort:** 🔴 High — mesher core, shaders, atlas pipeline.
 > - **Risk:** 🔴 High — visual regressions (lighting seams, texture tiling) are easy to introduce.
 > - **Benefit:** 🟢 High — vertex/index counts drop by more than half; helps CPU meshing time, upload
->   bandwidth, GPU vertex load, and memory simultaneously.
+    > bandwidth, GPU vertex load, and memory simultaneously.
 > - **Seed/Save:** ✅ / ✅ — purely visual; voxel data unchanged.
 
 ---
@@ -368,14 +413,14 @@ satisfy both if the persistent layout itself is halo-padded.
 
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — touches job input layout, `FillChunkLightMapForJob` fill paths, and the
->   pool (`ChunkJobArrayPool` buffer sizes change).
+    > pool (`ChunkJobArrayPool` buffer sizes change).
 > - **Risk:** 🟡 Medium — light output must be **bit-identical** before/after; validate with
->   `LightingJobBenchmark` and a fixed-seed world diff of light maps.
+    > `LightingJobBenchmark` and a fixed-seed world diff of light maps.
 > - **Benefit:** 🟢 High — directly attacks lighting job self-time, the engine's dominant background
->   cost during streaming.
+    > cost during streaming.
 > - **Seed/Save:** ⚠️ Seed-safe for terrain, but lighting results **must** remain deterministic and
->   identical — any divergence re-dirties the edge-check cascade (§4 of the pipeline doc) on old
->   saves. Treat "identical light output" as a hard acceptance criterion. / ✅ no format change.
+    > identical — any divergence re-dirties the edge-check cascade (§4 of the pipeline doc) on old
+    > saves. Treat "identical light output" as a hard acceptance criterion. / ✅ no format change.
 
 ---
 
@@ -405,11 +450,11 @@ satisfy both if the persistent layout itself is halo-padded.
 
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — `BlockBehavior` API change plus a neighbor-reference lifecycle (must be
->   cleared in `ChunkData.Reset()` per pool-reset-safety rules).
+    > cleared in `ChunkData.Reset()` per pool-reset-safety rules).
 > - **Risk:** 🟡 Medium — fluid behavior must be verified unchanged (fluid bugs have history here);
->   stale neighbor references after pool recycle would corrupt simulation.
+    > stale neighbor references after pool recycle would corrupt simulation.
 > - **Benefit:** 🟢 High whenever fluids/grass are active at scale — per-tick cost drops by roughly
->   half from item 1 alone, more near borders from item 2.
+    > half from item 1 alone, more near borders from item 2.
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -450,8 +495,8 @@ initialization code (low priority).
 > - **Risk:** 🟢 Low.
 > - **Benefit:** 🟡 Medium — removes global lock contention; unblocks Burst compilation of behaviors.
 > - **Seed/Save:** ⚠️ Seed-safe for terrain (worldgen RNG is untouched), but the **runtime RNG
->   sequence changes**: grass-spread and similar behavior patterns will differ from the old
->   implementation for the same world. Cosmetic only — no save/migration impact. / ✅.
+    > sequence changes**: grass-spread and similar behavior patterns will differ from the old
+    > implementation for the same world. Cosmetic only — no save/migration impact. / ✅.
 
 ---
 
@@ -471,7 +516,7 @@ cache-local, parallelizable, and off the main thread.
 > - **Effort:** 🔴 High — re-architects the tick pump and active-voxel registration.
 > - **Risk:** 🔴 High — touches the core world ticking engine; fluid parity testing required.
 > - **Benefit:** 🟢 High — scales across cores; the only path that gets ticking fully off the main
->   thread. Subsumes TG-1 if done wholesale (TG-1 is the incremental version).
+    > thread. Subsumes TG-1 if done wholesale (TG-1 is the incremental version).
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -533,7 +578,7 @@ and stops at the throttle. ⚠ Respect the flag-pairing invariants in
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low→🟡 Medium depending on how event-driven the ready set becomes.
 > - **Risk:** 🟡 Medium — a chunk that never enters the ready set stalls lighting (deadlock
->   history!); the fail-safe scan must remain as backstop.
+    > history!); the fail-safe scan must remain as backstop.
 > - **Benefit:** 🟡 Medium — trims fixed per-frame overhead precisely when FPS is lowest.
 > - **Seed/Save:** ✅ / ✅.
 
@@ -606,7 +651,7 @@ a **new** enum value via the AOT migration protocol.
 > - **Risk:** 🟢 Low if rename-only; 🔴 High if anyone changes the stream class — hence this entry.
 > - **Benefit:** ⚪ Low — correctness/clarity insurance, no runtime change.
 > - **Seed/Save:** ✅ / ⚠️ **Save-format sensitive** — the bytes must not change without a format
->   version bump + migration step (`serialization-migration` skill).
+    > version bump + migration step (`serialization-migration` skill).
 
 ---
 
@@ -642,7 +687,7 @@ tier system reduces octaves rather than changing the *kind* of work.
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — noise bake asset + shader change; tier macros stay.
 > - **Risk:** 🟡 Medium — visual character of water/lava will shift slightly (tile period,
->   gradient quality); needs eyes-on comparison per tier.
+    > gradient quality); needs eyes-on comparison per tier.
 > - **Benefit:** 🟢 High — largest single GPU win available; transforms the worst-case mobile frame.
 > - **Seed/Save:** ✅ / ✅.
 
@@ -672,11 +717,11 @@ refraction-on path; refracted water doesn't need full resolution.)
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low — one shader variant + a settings hook.
 > - **Risk:** 🟡 Medium — blending semantics for overlapping fluid faces must be checked (the
->   current manual composite reads pre-liquid opaque color; hardware blending composites over
->   whatever is in the framebuffer, including other transparent geometry — verify against the
->   transparent-blocks submesh ordering).
+    > current manual composite reads pre-liquid opaque color; hardware blending composites over
+    > whatever is in the framebuffer, including other transparent geometry — verify against the
+    > transparent-blocks submesh ordering).
 > - **Benefit:** 🟢 High on mobile — removes a per-frame full-screen copy + resolve; also a real
->   win on desktop at high resolutions.
+    > win on desktop at high resolutions.
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -698,7 +743,7 @@ voxel scenes, so this moves the `pow` chain to the cheap stage.
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low — shared include + V2F struct change.
 > - **Risk:** 🟢 Low — minor interpolation differences across large faces; compare side-by-side
->   with the `DEBUG_LIGHTDATA` view.
+    > with the `DEBUG_LIGHTDATA` view.
 > - **Benefit:** 🟡 Medium — meaningful fragment ALU reduction on mobile; small on desktop.
 > - **Seed/Save:** ✅ / ✅.
 
@@ -729,7 +774,7 @@ exposed as a setting, plus the GS-2 opaque-texture toggle. Desktop keeps the cur
 > - **Effort:** 🟢 Low — settings/asset configuration, no engine code.
 > - **Risk:** 🟢 Low.
 > - **Benefit:** 🟡 Medium — variant stripping (build size + load time), bandwidth savings, and a
->   render-scale escape hatch on weak GPUs.
+    > render-scale escape hatch on weak GPUs.
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -758,9 +803,9 @@ culling overhead scale with loaded sections), growing further with taller worlds
 
 > **Impact Analysis:**
 > - **Effort:** 🔴 High — dedicated system (in-job flood fill + visibility manager + ownership
->   refactor), though cleanly phased in the design doc.
+    > refactor), though cleanly phased in the design doc.
 > - **Risk:** 🟡 Medium — over-culling bugs are visible holes; §7's rules + debug overlay make
->   them testable. Conservative failure direction (over-render) is designed in.
+    > them testable. Conservative failure direction (over-render) is designed in.
 > - **Benefit:** 🟢 High — most subsurface sections stop rendering in normal play.
 > - **Seed/Save:** ✅ / ✅ — masks are derived data, never persisted.
 
@@ -797,7 +842,7 @@ P-4 enforces it per-second instead of per-frame).
 > - **Effort:** 🟢 Low — a profile struct + plumbing into existing constants.
 > - **Risk:** 🟢 Low — conservative tiers can only under-use fast devices until tuned.
 > - **Benefit:** 🟢 High on mobile — shrinks every queue and pool ceiling to what the device can
->   actually drain and hold.
+    > actually drain and hold.
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -827,11 +872,11 @@ last line of defense between "degraded" and "killed by the OS".
 
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — the budget/gate is simple; the emergency unload must respect pipeline
->   invariants, which is where the care goes.
+    > invariants, which is where the care goes.
 > - **Risk:** 🟡 Medium — interacts with the deadlock-prone unload gates; test with the benchmark
->   stress run on a memory-capped device/emulator.
+    > stress run on a memory-capped device/emulator.
 > - **Benefit:** 🟢 High — converts the observed hard crash into a visible degradation (shorter
->   view distance, slower streaming).
+    > view distance, slower streaming).
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -857,10 +902,10 @@ already models this).
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — a save-queue service in `ChunkStorageManager` + unload-path change.
 > - **Risk:** 🟡 Medium — must not lose saves on quit/crash (flush ordering), and deferred unload
->   must not fight the OM-2 emergency path (emergency mode should raise the writer count/priority,
->   not bypass the queue).
+    > must not fight the OM-2 emergency path (emergency mode should raise the writer count/priority,
+    > not bypass the queue).
 > - **Benefit:** 🟢 High on weak CPUs — caps the unload-burst memory spike and stops ThreadPool
->   oversubscription from starving the job system.
+    > oversubscription from starving the job system.
 > - **Seed/Save:** ✅ / ✅ — same bytes written, only scheduling changes.
 
 ---
@@ -871,7 +916,7 @@ Grouped into waves by value-for-effort; within a wave, order is free. Capture th
 benchmark baseline (`Performance/README.md`) before each wave that touches meshing or lighting.
 
 1. **Quick wins, near-zero risk (one sitting each):**
-   MR-1 (Euler hoist) → MR-5 (chain post-process) → MR-3 + MR-4 (SectionRenderer) → MR-6, MR-7,
+   ~~MR-1 (Euler hoist) ✅ done — marginal~~ → MR-5 (chain post-process) → MR-3 + MR-4 (SectionRenderer) → MR-6, MR-7,
    MR-9, TG-2 (bitmask variant), TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
@@ -897,6 +942,13 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 
 - **Benchmarks:** `MeshGenerationBenchmark` for MR-*, `LightingJobBenchmark` for LI-1/P-3,
   `ChunkGenerationBenchmark` as a regression canary (no item here should move it).
+- **Meshing correctness (regression guard for MR-*):** the **Meshing Validation Suite**
+  (`Minecraft Clone/Dev/Validate Meshing`, `Assets/Editor/Validation/Meshing/`) asserts that an
+  output-preserving meshing optimization does not change the generated geometry — it runs the real
+  `MeshGenerationJob` against a standard-cube geometry oracle plus structural/determinism invariants.
+  Capture-free: keep all baselines green through any MR-* change. Built test-first per the
+  `validation-driven-bugfix` skill (the lighting suite's sibling). Fluid/custom-mesh/cross-mesh and
+  UV/light *values* are not yet oracle-covered — extend the suite before optimizing those paths.
 - **GC:** Profiler GC-allocation capture during sustained streaming (fly in a straight line at max
   speed) before/after waves 1 and 3 — MR-3/MR-9/TG-3/MT-* should drive steady-state allocations to
   ~zero outside debug UI.

@@ -245,5 +245,40 @@ namespace Jobs.BurstData
         {
             return s_horizontalOnlyMatrices[math.min(yaw, 3)];
         }
+
+        /// <summary>
+        /// Returns the Y-axis rotation matrix for a legacy rotation <b>angle</b> in degrees. The
+        /// standard-cube legacy / <see cref="MetadataSchema.HorizontalOnly"/> meshing path works in
+        /// angles (via <see cref="Helpers.VoxelHelper.GetRotationAngle"/>, which only ever yields
+        /// 0/90/180/270), so this maps the angle onto the same frozen, cross-validated
+        /// <see cref="s_horizontalOnlyMatrices"/> entries as <see cref="GetHorizontalOnlyMatrix"/> —
+        /// keeping a single source of truth for the quarter-turn Y rotations. Any non-quarter angle
+        /// (not expected in practice) falls back to a computed Y rotation.
+        /// </summary>
+        /// <param name="degrees">The Y-axis rotation in degrees.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float3x3 GetYRotationMatrix(float degrees)
+        {
+            float normalized = degrees % 360f;
+            if (normalized < 0f) normalized += 360f;
+
+            // Map the angle to the matching frozen yaw matrix (0=North, 1=South, 2=West, 3=East).
+            // Exact float equality is intentional and correct here: 0/90/180/270 are all exactly
+            // representable in IEEE-754 and `% 360f` of an exact multiple preserves that, so these are
+            // a provably-correct fast path. Any non-cardinal angle deliberately falls through to the
+            // computed sincos rotation below.
+            // ReSharper disable CompareOfFloatsByEqualityOperator
+            if (normalized == 0f) return s_horizontalOnlyMatrices[0]; // 0°
+            if (normalized == 90f) return s_horizontalOnlyMatrices[2]; // 90°  -> West
+            if (normalized == 180f) return s_horizontalOnlyMatrices[1]; // 180° -> South
+            if (normalized == 270f) return s_horizontalOnlyMatrices[3]; // 270° -> East
+            // ReSharper restore CompareOfFloatsByEqualityOperator
+
+            math.sincos(math.radians(degrees), out float sin, out float cos);
+            return new float3x3(
+                cos, 0f, sin,
+                0f, 1f, 0f,
+                -sin, 0f, cos);
+        }
     }
 }

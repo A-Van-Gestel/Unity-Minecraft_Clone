@@ -184,18 +184,32 @@ namespace Helpers
             ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData, bool isTransparent)
         {
+            // MR-1: hoist the Y-rotation out of the 4-vertex loop. The rotation depends only on the
+            // block's orientation, not the vertex, so the per-vertex Quaternion.Euler (trig) +
+            // quaternion-vector multiply is wasted work — and the overwhelming majority of voxels are
+            // unrotated. Branch once per face: rotation == 0 uses the raw vertex position (no math);
+            // the rare oriented case multiplies by a single precomputed float3x3 (0/90/180/270°).
+            bool isRotated = rotation != 0f;
+            float3 center = BurstVoxelData.BlockCenter;
+            // Pull the quarter-turn Y matrix from the single frozen, cross-validated source
+            // (BurstCustomMeshRotationUtility) rather than recomputing trig per face — one rotation
+            // convention for both custom meshes and standard cubes, no drift (MR-1).
+            float3x3 yRotation = isRotated ? BurstCustomMeshRotationUtility.GetYRotationMatrix(rotation) : default;
+
+            float3 origin = new float3(position.x, position.y, position.z);
+
             // A face is a quad, which consists of 4 vertices.
             for (int i = 0; i < 4; i++)
             {
                 int vertIndex = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + i];
-                Vector3 vertPos = BurstVoxelData.VoxelVerts.Data[vertIndex];
+                float3 vertPos = BurstVoxelData.VoxelVerts.Data[vertIndex];
 
-                // Rotate the vertex around the block's center if it has an orientation.
-                Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
-                Vector3 direction = vertPos - center;
-                direction = Quaternion.Euler(0, rotation, 0) * direction;
+                // Rotate the vertex around the block's center only when the block is oriented.
+                float3 world = isRotated
+                    ? origin + math.mul(yRotation, vertPos - center) + center
+                    : origin + vertPos;
 
-                vertices.Add(position + direction + center);
+                vertices.Add(world);
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
                 colors.Add(new Color(1f, 1f, 1f, 1f));
 
@@ -327,7 +341,7 @@ namespace Helpers
             int startVertCount = vertexIndex;
 
             // Hoist constant face data out of the vertex loop.
-            Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
+            Vector3 center = BurstVoxelData.BlockCenter;
             Quaternion rot = Quaternion.Euler(0, rotation, 0);
 
             // Add vertices and their data
@@ -390,7 +404,7 @@ namespace Helpers
             int startVertCount = vertexIndex;
 
             // Hoist constant face data out of the vertex loop.
-            Vector3 center = new Vector3(0.5f, 0.5f, 0.5f);
+            Vector3 center = BurstVoxelData.BlockCenter;
             Quaternion rot = Quaternion.Euler(0, rotation, 0);
 
             for (int i = 0; i < faceData.VertCount; i++)
@@ -455,7 +469,7 @@ namespace Helpers
             CustomFaceData faceData = customFaces[meshData.FaceStartIndex + faceIndex];
 
             int startVertCount = vertexIndex;
-            float3 center = new float3(0.5f, 0.5f, 0.5f);
+            float3 center = BurstVoxelData.BlockCenter;
 
             // Rotate the face normal once (shared by all vertices on this face)
             Vector3Int fc = BurstVoxelData.FaceChecks.Data[faceIndex];
@@ -518,7 +532,7 @@ namespace Helpers
             CustomFaceData faceData = customFaces[meshData.FaceStartIndex + faceIndex];
 
             int startVertCount = vertexIndex;
-            float3 center = new float3(0.5f, 0.5f, 0.5f);
+            float3 center = BurstVoxelData.BlockCenter;
 
             Vector3Int fc = BurstVoxelData.FaceChecks.Data[faceIndex];
             float3 rotatedNormal = math.normalize(math.mul(rotationMatrix, new float3(fc.x, fc.y, fc.z)));
