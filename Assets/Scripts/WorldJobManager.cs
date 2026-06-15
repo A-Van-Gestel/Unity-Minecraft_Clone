@@ -24,6 +24,10 @@ public class WorldJobManager : IDisposable
     private readonly World _world;
     private readonly IChunkGenerator _chunkGenerator;
 
+    // Cached predicate for the cross-chunk sunlight veto: is a block id fully opaque (cannot propagate
+    // sunlight)? Allocated once so ApplyCrossChunkLightMod doesn't churn a closure per cross-chunk mod.
+    private readonly Func<ushort, bool> _isBlockFullyOpaque;
+
     #region Job Tracking Dictionaries
 
     public Dictionary<ChunkCoord, GenerationJobData> GenerationJobs { get; } = new Dictionary<ChunkCoord, GenerationJobData>();
@@ -121,6 +125,7 @@ public class WorldJobManager : IDisposable
     public WorldJobManager(World world, WorldTypeDefinition activeWorldType, JobDataManager globalJobData)
     {
         _world = world;
+        _isBlockFullyOpaque = id => _world.BlockTypes[id].IsOpaque;
 
         // Strategy Factory.
         // NOTE: This is the SINGLE intentional exception to the "zero legacy references"
@@ -990,7 +995,7 @@ public class WorldJobManager : IDisposable
             ushort targetId = BurstVoxelDataBitMapping.GetId(
                 targetChunk.GetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z));
             byte targetOpacity = _world.BlockTypes[targetId].opacity;
-            inChunkSunSupport = CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos, targetOpacity);
+            inChunkSunSupport = CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos, targetOpacity, _isBlockFullyOpaque);
         }
 
         CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, inChunkSunSupport);

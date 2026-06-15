@@ -46,6 +46,10 @@ namespace Editor.Validation.Lighting.Framework
         private NativeArray<BlockTypeJobData> _blockTypesNative;
         private bool _isDisposed;
 
+        // Cached predicate for the cross-chunk sunlight veto (mirror of WorldJobManager._isBlockFullyOpaque):
+        // is a block id fully opaque (cannot propagate sunlight)?
+        private readonly Func<ushort, bool> _isBlockFullyOpaque;
+
         // Chunks with a lighting job currently in flight (mirror of production's LightingJobs keys,
         // minus the already-processed _completedLightJobs entries).
         private readonly HashSet<Vector2Int> _inFlightCoords = new HashSet<Vector2Int>();
@@ -87,6 +91,7 @@ namespace Editor.Validation.Lighting.Framework
             GridSize = gridSize;
             _blockTypes = blockTypes ?? TestBlockPalette.CreateJobDataArray();
             _blockTypesNative = new NativeArray<BlockTypeJobData>(_blockTypes, Allocator.Persistent);
+            _isBlockFullyOpaque = id => _blockTypes[id].IsOpaque;
 
             _savedLightWorkCallback = ChunkData.OnLightWorkFlagged;
             ChunkData.OnLightWorkFlagged = null;
@@ -824,7 +829,7 @@ namespace Editor.Validation.Lighting.Framework
                 ushort targetId = BurstVoxelDataBitMapping.GetId(
                     target.Data.GetVoxel(localPos.x, localPos.y, localPos.z));
                 byte targetOpacity = _blockTypes[targetId].Opacity;
-                inChunkSunSupport = CrossChunkLightModApplier.InChunkSunlightSupport(target.Data, localPos, targetOpacity);
+                inChunkSunSupport = CrossChunkLightModApplier.InChunkSunlightSupport(target.Data, localPos, targetOpacity, _isBlockFullyOpaque);
             }
 
             CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, inChunkSunSupport);

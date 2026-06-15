@@ -1,3 +1,4 @@
+using System;
 using Data;
 using Jobs;
 using Jobs.BurstData;
@@ -90,13 +91,23 @@ namespace Helpers
         /// over-estimate support into semi-transparent media and wrongly veto a legitimate removal,
         /// leaving stale over-bright light until a full relight.
         /// </para>
+        /// <para>
+        /// Fully-opaque neighbors are skipped: a fully-opaque block cannot propagate sunlight to its
+        /// neighbors (mirror of <c>NeighborhoodLightingJob.PropagateLight</c>'s <c>IsOpaque</c> source
+        /// guard), yet it can still hold a high stored sky value (e.g. a sky-exposed roof block stores
+        /// sky-top 15). Counting that as support would over-estimate it and again veto a legitimate
+        /// removal. Semi-transparent neighbors (glass/leaves/water) DO propagate and are kept.
+        /// </para>
         /// </summary>
         /// <param name="chunk">The chunk receiving the cross-chunk modification.</param>
         /// <param name="localPos">The local voxel position the modification targets.</param>
         /// <param name="targetOpacity">The opacity of the voxel at <paramref name="localPos"/> (the light
         /// enters this voxel, so it pays this voxel's opacity — minimum 1).</param>
+        /// <param name="isBlockFullyOpaque">Predicate returning true when a block id is fully opaque
+        /// (opacity ≥ 15) and therefore cannot propagate sunlight. Supplied by the caller so this helper
+        /// stays free of any block-database dependency.</param>
         /// <returns>The maximum attenuated sky a same-chunk neighbor supports (0 if none).</returns>
-        public static byte InChunkSunlightSupport(ChunkData chunk, Vector3Int localPos, byte targetOpacity)
+        public static byte InChunkSunlightSupport(ChunkData chunk, Vector3Int localPos, byte targetOpacity, Func<ushort, bool> isBlockFullyOpaque)
         {
             byte best = 0;
             int cost = Mathf.Max(1, targetOpacity); // mirrors AttenuateLight: max(1, opacity)
@@ -109,8 +120,16 @@ namespace Helpers
                     continue; // cross-chunk (untrusted) or out of vertical range
 
                 byte s = LightBitMapping.GetSkyLight(chunk.GetLightData(n.x, n.y, n.z));
-                if (s > cost && s - cost > best)
-                    best = (byte)(s - cost);
+                if (s <= cost || s - cost <= best)
+                    continue; // can't improve the best support — skip the voxel read + opacity check
+
+                // A fully-opaque neighbor cannot propagate sunlight (mirror of PropagateLight's IsOpaque
+                // source guard), so its stored sky — possibly a high sky-top value — is not real support.
+                ushort neighborId = BurstVoxelDataBitMapping.GetId(chunk.GetVoxel(n.x, n.y, n.z));
+                if (isBlockFullyOpaque(neighborId))
+                    continue;
+
+                best = (byte)(s - cost);
             }
 
             return best;

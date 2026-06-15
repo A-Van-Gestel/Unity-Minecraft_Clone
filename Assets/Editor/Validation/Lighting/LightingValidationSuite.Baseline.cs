@@ -1422,24 +1422,24 @@ namespace Editor.Validation.Lighting
         }
 
         // --- B49 (finding 3 guard): a direct, deterministic test of the cross-chunk sunlight removal veto.
-        // We set ONE in-chunk neighbour of the probe to a known sky and read the production guard's support
+        // We set ONE in-chunk neighbor of the probe to a known sky and read the production guard's support
         // through two test affordances. A full cross-chunk-removal scenario is intentionally NOT used:
-        // removing a shaft that feeds a seam voxel with a bright in-chunk neighbour forms a cross-chunk
+        // removing a shaft that feeds a seam voxel with a bright in-chunk neighbor forms a cross-chunk
         // light loop (the seam voxels mutually support each other across the boundary), so no removal mod
         // ever reaches the target — that orphaned-loop limitation is a separate concern that would mask
         // exactly what finding 3 changed (the attenuation formula). ---
-        private const byte B49_NEIGHBOUR_SKY = 12; // the single lit in-chunk neighbour of the probe
+        private const byte B49_NEIGHBOUR_SKY = 12; // the single lit in-chunk neighbor of the probe
         private const byte B49_DIMGLASS_OPACITY = 5; // TestBlockPalette.DimGlass
 
         /// <summary>
         /// B49 (code-review finding 3, June 2026): guards that the cross-chunk sunlight removal veto
-        /// (<c>CrossChunkLightModApplier.InChunkSunlightSupport</c>) attenuates a neighbour's sky by the
+        /// (<c>CrossChunkLightModApplier.InChunkSunlightSupport</c>) attenuates a neighbor's sky by the
         /// <b>target voxel's opacity</b> (<c>max(1, opacity)</c>, matching
         /// <c>NeighborhoodLightingJob.AttenuateLight</c> and the <c>CheckEdgeVoxel</c> cross-chunk guard),
         /// not by a flat air step.
         /// <para>
-        /// One in-chunk neighbour of the probe is set to sky <see cref="B49_NEIGHBOUR_SKY"/> (all other
-        /// neighbours stay dark). The guard's support for a DimGlass (opacity 5) target must therefore be
+        /// One in-chunk neighbor of the probe is set to sky <see cref="B49_NEIGHBOUR_SKY"/> (all other
+        /// neighbors stay dark). The guard's support for a DimGlass (opacity 5) target must therefore be
         /// <c>sky − max(1,5) = sky − 5</c>, not the pre-fix flat <c>sky − 1</c>. We then drive the real
         /// decision logic (<c>ComputeSunlight</c>) for a removal of a voxel held over-bright at a value
         /// strictly between those two estimates: the opacity-aware support lets the legitimate removal
@@ -1480,6 +1480,21 @@ namespace Editor.Validation.Lighting
             passed &= LightingAssert.IsTrue(LightingTestWorld.CrossChunkSunlightRemovalVetoed(overBright, supportFlat),
                 "B49: the pre-fix flat-attenuation support WOULD have vetoed the same removal (the bug the fix prevents)",
                 $"removal of sky {overBright} with flat support {supportFlat} was expected to be vetoed");
+
+            // A FULLY-OPAQUE in-chunk neighbour cannot propagate sunlight (mirror of
+            // PropagateLight's IsOpaque source guard), so even storing a high sky-top value it must
+            // contribute ZERO support. A separate probe whose only lit neighbour is an opaque Stone block
+            // holding full sky must read 0 — otherwise the guard would over-estimate and veto a legitimate
+            // removal of a voxel under a roof/wall.
+            Vector3Int opaqueProbe = new Vector3Int(8, 70, 8);
+            Vector3Int opaqueNeighbour = new Vector3Int(7, 70, 8);
+            world.SetBlock(opaqueNeighbour, TestBlockPalette.Stone);
+            world.SetSkyLightAt(opaqueNeighbour, 15);
+            byte opaqueSupportDim = world.InChunkSunlightSupportAt(opaqueProbe, B49_DIMGLASS_OPACITY);
+            byte opaqueSupportFlat = world.InChunkSunlightSupportAt(opaqueProbe, 1);
+            passed &= LightingAssert.IsTrue(opaqueSupportDim == 0 && opaqueSupportFlat == 0,
+                "B49: a fully-opaque neighbour (cannot propagate sunlight) contributes zero support, even storing sky 15",
+                $"Expected 0 support from an opaque sky-15 neighbour, got dim={opaqueSupportDim}, flat={opaqueSupportFlat}");
 
             return passed;
         }

@@ -244,7 +244,7 @@ namespace Editor.Validation.Lighting.Framework
 
         /// <summary>
         /// Test affordance: writes a raw sky-light value directly into a single voxel's light data (no BFS
-        /// pass), so guard/probe baselines can set up a deterministic neighbour light field without
+        /// pass), so guard/probe baselines can set up a deterministic neighbor light field without
         /// relying on flood propagation or surrounding geometry.
         /// </summary>
         /// <param name="worldPos">The world-space voxel position.</param>
@@ -263,13 +263,13 @@ namespace Editor.Validation.Lighting.Framework
         /// guard charges the <b>target voxel's</b> opacity (<c>max(1, opacity)</c>) on entry rather than a
         /// flat air step.
         /// </summary>
-        /// <param name="worldPos">The world-space voxel position whose in-chunk neighbours are sampled.</param>
-        /// <param name="targetOpacity">The opacity to attenuate the neighbours' sky by (the entry cost).</param>
-        /// <returns>The strongest opacity-attenuated sky a same-chunk neighbour supplies.</returns>
+        /// <param name="worldPos">The world-space voxel position whose in-chunk neighbors are sampled.</param>
+        /// <param name="targetOpacity">The opacity to attenuate the neighbors' sky by (the entry cost).</param>
+        /// <returns>The strongest opacity-attenuated sky a same-chunk neighbor supplies.</returns>
         public byte InChunkSunlightSupportAt(Vector3Int worldPos, byte targetOpacity)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
-            return CrossChunkLightModApplier.InChunkSunlightSupport(chunk.Data, localPos, targetOpacity);
+            return CrossChunkLightModApplier.InChunkSunlightSupport(chunk.Data, localPos, targetOpacity, _isBlockFullyOpaque);
         }
 
         /// <summary>
