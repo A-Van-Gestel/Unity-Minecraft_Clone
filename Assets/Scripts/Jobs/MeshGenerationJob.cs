@@ -156,6 +156,15 @@ namespace Jobs
                 return;
             }
 
+            // MR-7: the fluid mesher's neighbor scratch is hoisted to a single allocation per Execute
+            // and reused across every fluid voxel (it was previously allocated and disposed per fluid
+            // voxel — thousands of times in an ocean chunk). GenerateVoxelMeshData overwrites every slot
+            // unconditionally each voxel, so reuse carries no stale state. Sized by the offsets array so
+            // the buffer length always matches the fill-loop bound (no hardcoded count to drift).
+            int fluidNeighborCount = s_fluidNeighborOffsets.Length;
+            NativeArray<OptionalVoxelState> fluidNeighbors = new NativeArray<OptionalVoxelState>(fluidNeighborCount, Allocator.Temp);
+            NativeArray<ushort> fluidNeighborLights = new NativeArray<ushort>(fluidNeighborCount, Allocator.Temp);
+
             for (int s = 0; s < sectionCount; s++)
             {
                 int startY = s * sectionHeight;
@@ -192,11 +201,11 @@ namespace Jobs
                 // boundary creates internal faces that the shell optimization does not cover.
                 if (section.IsFullySolid && isSectionFullyVisible && isXZFullyVisible)
                 {
-                    IterateSolidSection(startY, endY);
+                    IterateSolidSection(startY, endY, ref fluidNeighbors, ref fluidNeighborLights);
                 }
                 else
                 {
-                    IterateStandardSection(startY, endY);
+                    IterateStandardSection(startY, endY, ref fluidNeighbors, ref fluidNeighborLights);
                 }
 
                 // Store stats for this section.
@@ -212,12 +221,16 @@ namespace Jobs
                     FluidTriCount = Output.FluidTriangles.Length - startFluid,
                 };
             }
+
+            fluidNeighbors.Dispose();
+            fluidNeighborLights.Dispose();
         }
 
         /// <summary>
         /// Iterates only the boundaries of a solid section (Top, Bottom, Walls).
         /// </summary>
-        private void IterateSolidSection(int startY, int endY)
+        private void IterateSolidSection(int startY, int endY,
+            ref NativeArray<OptionalVoxelState> fluidNeighbors, ref NativeArray<ushort> fluidNeighborLights)
         {
             const int width = VoxelData.ChunkWidth;
             const int max = width - 1;
@@ -228,8 +241,8 @@ namespace Jobs
             {
                 for (int x = 0; x < width; x++)
                 {
-                    ProcessVoxel(x, startY, z); // Bottom layer
-                    ProcessVoxel(x, endY - 1, z); // Top layer
+                    ProcessVoxel(x, startY, z, ref fluidNeighbors, ref fluidNeighborLights); // Bottom layer
+                    ProcessVoxel(x, endY - 1, z, ref fluidNeighbors, ref fluidNeighborLights); // Top layer
                 }
             }
 
@@ -240,8 +253,8 @@ namespace Jobs
                 for (int y = startY + 1; y < endY - 1; y++)
                 {
                     // Check X-boundaries
-                    ProcessVoxel(0, y, z);
-                    ProcessVoxel(max, y, z);
+                    ProcessVoxel(0, y, z, ref fluidNeighbors, ref fluidNeighborLights);
+                    ProcessVoxel(max, y, z, ref fluidNeighbors, ref fluidNeighborLights);
 
                     // Check Z-boundaries (only if not already covered by X-boundaries)
                     if (z is 0 or max)
@@ -249,7 +262,7 @@ namespace Jobs
                         // We need to fill the row between 1 and max-1
                         for (int x = 1; x < max; x++)
                         {
-                            ProcessVoxel(x, y, z);
+                            ProcessVoxel(x, y, z, ref fluidNeighbors, ref fluidNeighborLights);
                         }
                     }
                 }
@@ -259,7 +272,8 @@ namespace Jobs
         /// <summary>
         /// Standard iteration over every voxel in the section.
         /// </summary>
-        private void IterateStandardSection(int startY, int endY)
+        private void IterateStandardSection(int startY, int endY,
+            ref NativeArray<OptionalVoxelState> fluidNeighbors, ref NativeArray<ushort> fluidNeighborLights)
         {
             // Loop Order Optimization: Z -> Y -> X
             // Memory Layout: Index = x + (y * 16) + (z * 256)
@@ -273,13 +287,14 @@ namespace Jobs
                 {
                     for (int x = 0; x < xEnd; x++)
                     {
-                        ProcessVoxel(x, y, z);
+                        ProcessVoxel(x, y, z, ref fluidNeighbors, ref fluidNeighborLights);
                     }
                 }
             }
         }
 
-        private void ProcessVoxel(int x, int y, int z)
+        private void ProcessVoxel(int x, int y, int z,
+            ref NativeArray<OptionalVoxelState> fluidNeighbors, ref NativeArray<ushort> fluidNeighborLights)
         {
             int mapIndex = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
             uint packedData = Map[mapIndex];
@@ -290,7 +305,7 @@ namespace Jobs
             BlockTypeJobData props = BlockTypes[id];
 
             // Dispatch to specific mesh generation logic based on block type (Fluid, Custom, or Standard)
-            GenerateVoxelMeshData(new Vector3Int(x, y, z), packedData, props);
+            GenerateVoxelMeshData(new Vector3Int(x, y, z), packedData, props, ref fluidNeighbors, ref fluidNeighborLights);
         }
 
         /// <summary>
@@ -306,7 +321,8 @@ namespace Jobs
         /// always interpret the meta byte as a fluid level via the existing <c>GenerateFluidMeshData</c>
         /// path, and cross meshes do not use orientation at all.</para>
         /// </remarks>
-        private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps)
+        private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps,
+            ref NativeArray<OptionalVoxelState> neighbors, ref NativeArray<ushort> neighborLights)
         {
             ushort id = BurstVoxelDataBitMapping.GetId(packedData);
 
@@ -316,15 +332,14 @@ namespace Jobs
                 // Select template
                 NativeArray<float> templates = voxelProps.FluidType == FluidType.WaterLike ? WaterVertexTemplates : LavaVertexTemplates;
 
-                // Collect 14 neighbors for smoothing & culling
-                NativeArray<OptionalVoxelState> neighbors = new NativeArray<OptionalVoxelState>(14, Allocator.Temp);
-                NativeArray<ushort> neighborLights = new NativeArray<ushort>(14, Allocator.Temp);
-
+                // Collect neighbors for smoothing & culling into the per-Execute scratch buffers
+                // (hoisted by MR-7). Write EVERY slot unconditionally so a reused buffer never carries
+                // a previous voxel's neighbor: `default` is HasValue=false, matching a missing neighbor.
                 for (int i = 0; i < s_fluidNeighborOffsets.Length; i++)
                 {
                     Vector3Int neighborPos = pos + s_fluidNeighborOffsets[i];
                     VoxelState? neighborState = GetVoxelStateFromLocalPos(neighborPos);
-                    if (neighborState.HasValue) neighbors[i] = new OptionalVoxelState(neighborState.Value);
+                    neighbors[i] = neighborState.HasValue ? new OptionalVoxelState(neighborState.Value) : default;
                     neighborLights[i] = GetLightDataFromLocalPos(neighborPos);
                 }
 
@@ -349,9 +364,6 @@ namespace Jobs
                     ref _vertexIndex, ref Output.Vertices, ref Output.FluidTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                     ref Output.LightData);
 
-                // Dispose the temporary native arrays.
-                neighbors.Dispose();
-                neighborLights.Dispose();
                 return; // Fluid blocks are never also a custom mesh or standard cube.
             }
 

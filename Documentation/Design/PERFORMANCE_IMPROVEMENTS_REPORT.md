@@ -59,21 +59,24 @@ instead of a crash.
 
 ### Meshing & Rendering
 
-| ID   | Finding                                                           | Effort | Risk | Benefit | Seed | Save |
-|------|-------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| MR-1 ✅ | Per-vertex `Quaternion.Euler` in standard cube face generation |   🟢   |  🟢  |   🟡¹   |  ✅   |  ✅   |
-| MR-2 | 60-byte vertex format with a near-constant 16-byte color stream   |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
-| MR-3 | `new Material[3]` + `sharedMaterials` set per section mesh update |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| MR-4 | `RecalculateBounds()` per section update despite known bounds     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| MR-5 | `MeshPostProcessJob` blocks the main thread per chunk apply       |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| MR-6 | Mesh output `NativeList`s start at default capacity               |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| MR-7 | Per-fluid-voxel `Allocator.Temp` arrays in the meshing job        |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| MR-8 | Greedy meshing (coplanar quad merging)                            |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
-| MR-9 | `Clouds.cs` legacy mesh API with `.ToArray()`                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| ID     | Finding                                                           | Effort | Risk | Benefit | Seed | Save |
+|--------|-------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| MR-1 ✅ | Per-vertex `Quaternion.Euler` in standard cube face generation    |   🟢   |  🟢  |   🟡¹   |  ✅   |  ✅   |
+| MR-2   | 60-byte vertex format with a near-constant 16-byte color stream   |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| MR-3   | `new Material[3]` + `sharedMaterials` set per section mesh update |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-4   | `RecalculateBounds()` per section update despite known bounds     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-5   | `MeshPostProcessJob` blocks the main thread per chunk apply       |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-6   | Mesh output `NativeList`s start at default capacity               |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-7 ✅ | Per-fluid-voxel `Allocator.Temp` arrays in the meshing job        |   🟢   |  🟢  |   🟢²   |  ✅   |  ✅   |
+| MR-8   | Greedy meshing (coplanar quad merging)                            |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
+| MR-9   | `Clouds.cs` legacy mesh API with `.ToArray()`                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 
 > ¹ MR-1 benefit downgraded 🟢→🟡 after measurement: implemented and suite-guarded, but the
 > throughput delta is within the benchmark's noise floor — a correctness/cleanliness win, not a
 > measurable speedup. See the MR-1 detail section for the before/after table.
+>
+> ² MR-7 benefit confirmed 🟢 by measurement: **−18% on the fluid pattern** (1365 → 1115 μs/chunk),
+> controls flat — a real fluid-path win. See the MR-7 detail section.
 
 ### Lighting
 
@@ -164,9 +167,9 @@ rotation variants as a Phase 2b idea for *custom meshes*; the standard-cube cost
 > - **Effort:** 🟢 Low — localized to one helper, mechanical change.
 > - **Risk:** 🟢 Low — verify rotated blocks (e.g. stairs/logs equivalents) still orient correctly.
 > - **Benefit:** 🟡 Low/measured — correctness/cleanliness win; throughput delta is below the
->   benchmark's noise floor (see Status). The original "🟢 High — the benchmark will show it" estimate
->   was **not borne out**: oriented blocks are a small fraction of realistic chunks and the per-vertex
->   transcendental is tiny against total meshing cost.
+    > benchmark's noise floor (see Status). The original "🟢 High — the benchmark will show it" estimate
+    > was **not borne out**: oriented blocks are a small fraction of realistic chunks and the per-vertex
+    > transcendental is tiny against total meshing cost.
 > - **Seed/Save:** ✅ / ✅.
 
 > **Status (2026-06-15): implemented, validated, and benchmarked — effect within noise.**
@@ -316,7 +319,10 @@ mesh size as the estimate. Optionally pool whole `MeshDataJobOutput` instances a
 
 ---
 
-### MR-7. Per-fluid-voxel `Allocator.Temp` arrays in the meshing job
+### MR-7. ✅ DONE (2026-06-15) — Per-fluid-voxel `Allocator.Temp` arrays in the meshing job
+
+> **Closed:** implemented, suite-guarded (`B7`/`B8`), and benchmarked with a **real measured win** —
+> **−18% on the fluid pattern** (1365 → 1115 μs/chunk). Full record below; `MR-7b` (stackalloc, no threading) logged as a deeper future option.
 
 **Observed:** `MeshGenerationJob.GenerateVoxelMeshData` (`MeshGenerationJob.cs` ~line 320) allocates
 `new NativeArray<OptionalVoxelState>(14, Allocator.Temp)` + `new NativeArray<ushort>(14, Temp)` and
@@ -332,6 +338,43 @@ allocations are cheap, but not free at that frequency.
 > - **Risk:** 🟢 Low — buffers are fully overwritten per voxel; no stale-data hazard.
 > - **Benefit:** 🟡 Medium — fluid-heavy chunks (oceans, lakes) mesh measurably faster.
 > - **Seed/Save:** ✅ / ✅.
+
+> **Status (2026-06-15): implemented, suite-green, benchmarked — measured win.**
+> The neighbor scratch arrays were hoisted from per-fluid-voxel to a single `Allocator.Temp`
+> allocation per `Execute()` (sized by `s_fluidNeighborOffsets.Length`), threaded as `ref` params
+> through `IterateStandardSection`/`IterateSolidSection` → `ProcessVoxel` → `GenerateVoxelMeshData`.
+> The fill loop now writes every slot unconditionally (`… ? new OptionalVoxelState(…) : default`) so
+> the reused buffer carries no stale neighbor — bit-identical to the old fresh-per-voxel behavior.
+> Output preservation is guarded by the **Meshing Validation Suite** `B8` (full probe-output
+> differential across a scene where wall-encased fluids prime all neighbor slots before an
+> air-surrounded probe) and `B7` (fluid determinism); all 8 baselines green before and after, so no
+> in-game visual check is needed (the differential proves byte-identical fluid output).
+>
+> **Benchmark (player build, IL2CPP, safety checks ON, i9-9900K, 156 chunks × 100 runs):** before
+> (pre-MR-7) vs after, WithDiagonals column —
+>
+> | Pattern | Before μs/chunk | After μs/chunk | Δ | Role |
+> |---|---|---|---|---|
+> | **Fluid** | 1365.4 | 1115.4 | **−18.3%** | target |
+> | Checkerboard | 4365.4 | 4391.0 | +0.6% | control (stable) |
+> | OrientedCheckerboard | 4365.4 | 4384.6 | +0.4% | control (stable) |
+> | Transparent | 5179.5 | 5205.1 | +0.5% | control (stable) |
+> | MixedTerrain | 2384.6 | 2339.7 | −1.9% | control (stable) |
+>
+> Only the fluid pattern moved; every high-sample control stayed within ±2% noise, so the −18% is a
+> genuine fluid-path win, not drift. **Caveat:** the benchmark runs with Burst **safety checks
+> enabled**, so part of the gain is `NativeArray` safety-handle setup/teardown that a shipping
+> (safety-off) build wouldn't fully pay — the real-world delta is smaller but still positive (the
+> bump-allocator calls and per-voxel churn are eliminated regardless). The noisy sub-50 ms `Solid`/
+> `OrientedCubes` micro-patterns are not used for attribution.
+>
+> **Future (deeper) option — MR-7b:** the scratch is still a `NativeArray<Allocator.Temp>` threaded as
+> `ref` through four methods, and the per-`Execute` allocation fires even on chunks with no fluid.
+> `OptionalVoxelState` is blittable and the slot count is a compile-time constant, so a `stackalloc` /
+> `FixedList` scratch local inside the fluid branch would need **zero threading** and **zero
+> allocation**. Deferred because it ripples into `VoxelMeshHelper.GenerateFluidMeshData`'s signature
+> (and its fluid-helper chain) — `in NativeArray<OptionalVoxelState>` → `ReadOnlySpan`/pointer — with
+> Burst's finicky `Span` support; a bigger, riskier change than the throughput win justifies right now.
 
 ---
 
@@ -916,7 +959,7 @@ Grouped into waves by value-for-effort; within a wave, order is free. Capture th
 benchmark baseline (`Performance/README.md`) before each wave that touches meshing or lighting.
 
 1. **Quick wins, near-zero risk (one sitting each):**
-   ~~MR-1 (Euler hoist) ✅ done — marginal~~ → MR-5 (chain post-process) → MR-3 + MR-4 (SectionRenderer) → MR-6, MR-7,
+   ~~MR-1 (Euler hoist) ✅ done — marginal~~ → MR-5 (chain post-process) → MR-3 + MR-4 (SectionRenderer) → MR-6, ~~MR-7 ✅ done — −18% fluid~~,
    MR-9, TG-2 (bitmask variant), TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
