@@ -16,11 +16,13 @@ namespace Editor.Validation.Meshing.Framework
     /// <see cref="MeshGenerationJob"/> synchronously (<c>job.Run()</c>) and exposes its
     /// <see cref="MeshDataJobOutput"/> for assertion.
     /// <para>
-    /// Mirrors the production / benchmark job wiring: light maps and the diagonal/custom/fluid input
-    /// arrays are left empty exactly as <see cref="Benchmarks.MeshGenerationBenchmark"/> leaves them,
-    /// because the standard-cube path under <see cref="SmoothLightingQuality.Off"/> reads neither.
-    /// Tests place blocks in the chunk interior so face culling only consults in-chunk neighbors and
-    /// the (empty) neighbor-chunk maps never influence the result.
+    /// Mirrors the production / benchmark job wiring: light maps and the neighbor/custom input arrays
+    /// are left empty exactly as <see cref="Benchmarks.MeshGenerationBenchmark"/> leaves them, because
+    /// the standard-cube path under <see cref="SmoothLightingQuality.Off"/> reads neither. The fluid
+    /// height templates ARE populated (16 real entries each) so the fluid meshing path — which indexes
+    /// them by fluid level — runs exactly as in production. Tests place blocks in the chunk interior so
+    /// face culling only consults in-chunk neighbors and the (empty) neighbor-chunk maps never
+    /// influence the result.
     /// </para>
     /// </summary>
     public sealed class MeshingTestWorld : IDisposable
@@ -76,12 +78,17 @@ namespace Editor.Validation.Meshing.Framework
             // Empty cardinal/diagonal neighbor maps: interior blocks never read them; border blocks
             // would treat them as "no neighbor" (face drawn), which no scenario relies on.
             NativeArray<uint> emptyMap = new NativeArray<uint>(0, Allocator.TempJob);
-            // Empty custom-mesh + fluid-template inputs (no custom or fluid blocks in the palette).
+            // Empty custom-mesh inputs (no custom-mesh blocks in the palette).
             NativeArray<CustomMeshData> customMeshes = new NativeArray<CustomMeshData>(0, Allocator.TempJob);
             NativeArray<CustomFaceData> customFaces = new NativeArray<CustomFaceData>(0, Allocator.TempJob);
             NativeArray<CustomVertData> customVerts = new NativeArray<CustomVertData>(0, Allocator.TempJob);
             NativeArray<int> customTris = new NativeArray<int>(0, Allocator.TempJob);
-            NativeArray<float> waterTemplates = new NativeArray<float>(0, Allocator.TempJob);
+            // Real 16-entry water height template (the palette's only fluid is water). The fluid path
+            // indexes this by fluid level, so an empty array would index out of range; it is built from
+            // the same shared source of truth the FluidDataGenerator editor tool bakes into the asset.
+            NativeArray<float> waterTemplates = BuildFluidTemplateArray(flowLevels: 8, decayStep: 1.0f / 8.0f, Allocator.TempJob);
+            // No lava block in the palette, so LavaVertexTemplates is never indexed — the job safety
+            // system only needs a constructed (non-default) container, which an empty array satisfies.
             NativeArray<float> lavaTemplates = new NativeArray<float>(0, Allocator.TempJob);
 
             // Light arrays must be valid (constructed) containers — the job safety system rejects
@@ -142,6 +149,21 @@ namespace Editor.Validation.Meshing.Framework
             _output = output;
             _hasOutput = true;
             return _output;
+        }
+
+        /// <summary>
+        /// Builds a 16-entry fluid vertex-height template via <see cref="FluidMeshData.BuildVertexHeightTemplate"/>
+        /// — the same source of truth the <c>FluidDataGenerator</c> editor tool bakes into the asset —
+        /// so the fluid meshing path reads exactly the heights it does in production.
+        /// </summary>
+        /// <param name="flowLevels">Horizontal flow levels (8 for water, 4 for lava).</param>
+        /// <param name="decayStep">Height decrease per flow level (1/8 for water, 1/4 for lava).</param>
+        /// <param name="allocator">Allocator for the returned array; caller owns disposal.</param>
+        private static NativeArray<float> BuildFluidTemplateArray(int flowLevels, float decayStep, Allocator allocator)
+        {
+            float[] managed = new float[16];
+            FluidMeshData.BuildVertexHeightTemplate(managed, flowLevels, decayStep);
+            return new NativeArray<float>(managed, allocator);
         }
 
         /// <summary>Ensures the shared static voxel geometry tables are allocated (no-op in play mode).</summary>

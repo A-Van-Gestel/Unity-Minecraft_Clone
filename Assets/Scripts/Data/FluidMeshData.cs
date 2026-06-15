@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace Data
@@ -21,5 +22,36 @@ namespace Data
         // We only need to store the Y-coordinate, as X and Z are fixed (0 or 1).
         // Indices 0-7: horizontal flow heights. Indices 8-15: falling (always 1.0f).
         public float[] vertexYPositions = new float[16];
+
+        /// <summary>
+        /// Source-block surface top (level 0): one fluid step below the full block height.
+        /// </summary>
+        public const float SourceTopHeight = 1.0f - 1.0f / 8.0f; // 0.875
+
+        /// <summary>
+        /// Fills a 16-entry fluid vertex-height template in place. This is the single source of truth
+        /// for the height curve, shared by the <c>FluidDataGenerator</c> editor tool (which bakes it
+        /// into the asset) and the meshing validation harness (which feeds it to the job) so the two
+        /// can never silently diverge.
+        /// <list type="bullet">
+        ///   <item><description>Indices <c>0..flowLevels-1</c>: horizontal flow, decreasing from
+        ///     <see cref="SourceTopHeight"/> by <paramref name="decayStep"/> per level.</description></item>
+        ///   <item><description>Indices <c>flowLevels..7</c>: carry the last horizontal height.</description></item>
+        ///   <item><description>Indices <c>8..15</c> (falling): full block height <c>1.0</c>.</description></item>
+        /// </list>
+        /// </summary>
+        /// <param name="target">Destination array; must have length ≥ 16.</param>
+        /// <param name="flowLevels">Horizontal flow levels (8 for water, 4 for lava). Must be ≤ 8.</param>
+        /// <param name="decayStep">Height decrease per flow level (1/8 for water, 1/4 for lava).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void BuildVertexHeightTemplate(float[] target, int flowLevels, float decayStep)
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                if (i < flowLevels) target[i] = SourceTopHeight - i * decayStep;
+                else if (i < 8) target[i] = target[flowLevels - 1]; // carry the last valid horizontal height
+                else target[i] = 1.0f; // falling indices fill the full block
+            }
+        }
     }
 }

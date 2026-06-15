@@ -11,8 +11,8 @@ namespace Editor.Validation.Meshing.Framework
     /// these IDs are test-local indices into the array returned by <see cref="CreateJobDataArray"/>,
     /// exactly like seed data / fixtures in conventional test frameworks. This keeps test outcomes
     /// deterministic when the real database is edited, and lets the suite express the exact block
-    /// shapes the mesher cares about (plain opaque cube, transparent cube, Y-rotated cube) without
-    /// depending on whichever blocks the production database happens to contain.
+    /// shapes the mesher cares about (plain opaque cube, transparent cube, Y-rotated cube, fluid
+    /// source) without depending on whichever blocks the production database happens to contain.
     /// </para>
     /// <para>
     /// The six face textures of each block are intentionally distinct (Back=0 … Right=5) so a
@@ -40,8 +40,16 @@ namespace Editor.Validation.Meshing.Framework
         /// </summary>
         public const ushort OrientedOpaque = 3;
 
+        /// <summary>
+        /// Water-like fluid source (<see cref="FluidType.WaterLike"/>, 8 flow levels). Routes through
+        /// the <c>GenerateFluidMeshData</c> path that finding <b>MR-7</b> targets (the per-fluid-voxel
+        /// <c>Allocator.Temp</c> neighbor buffers). The meta byte is interpreted as the fluid level
+        /// (0 = source). Non-solid + opacity 0 so it neither occludes nor culls neighbor faces.
+        /// </summary>
+        public const ushort WaterSource = 4;
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 4;
+        public const int Count = 5;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -60,6 +68,8 @@ namespace Editor.Validation.Meshing.Framework
                 MakeCube("TestTransparentCube", isSolid: true, opacity: 0, renderNeighborFaces: true, MetadataSchema.None));
             jobData[OrientedOpaque] = new BlockTypeJobData(
                 MakeCube("TestOrientedOpaque", isSolid: true, opacity: 15, renderNeighborFaces: false, MetadataSchema.HorizontalOnly));
+            jobData[WaterSource] = new BlockTypeJobData(
+                MakeFluid("TestWaterSource", FluidType.WaterLike, fluidShaderID: 0, fluidLevel: 0, flowLevels: 8));
             return jobData;
         }
 
@@ -73,23 +83,23 @@ namespace Editor.Validation.Meshing.Framework
             return new NativeArray<BlockTypeJobData>(managed, allocator);
         }
 
-        /// <summary>Constructs a standard-cube <see cref="BlockType"/> with six distinct face textures.</summary>
-        private static BlockType MakeCube(string name, bool isSolid, byte opacity, bool renderNeighborFaces, MetadataSchema schema)
+        /// <summary>
+        /// Builds a <see cref="BlockType"/> with the fields common to every test block — cube render
+        /// shape, no-op metadata/light defaults, and six distinct per-face textures (Back=0 … Right=5)
+        /// so face-remap bugs surface in the UV stream, not just the geometry. Callers override only
+        /// the fields that distinguish their block kind.
+        /// </summary>
+        private static BlockType MakeBaseBlock(string name)
         {
             return new BlockType
             {
                 blockName = name,
-                isSolid = isSolid,
-                opacity = opacity,
-                renderNeighborFaces = renderNeighborFaces,
                 renderShape = RenderShape.Cube,
-                metadataSchema = schema,
+                metadataSchema = MetadataSchema.None,
                 placementMetadataMode = PlacementMetadataMode.None,
                 defaultMetadata = 0,
                 lightEmission = 0,
                 lightEmissionColor = Color.white,
-                // Distinct per-face textures (Back, Front, Top, Bottom, Left, Right) so face
-                // remapping bugs surface in the UV stream, not just the geometry.
                 backFaceTexture = 0,
                 frontFaceTexture = 1,
                 topFaceTexture = 2,
@@ -97,6 +107,37 @@ namespace Editor.Validation.Meshing.Framework
                 leftFaceTexture = 4,
                 rightFaceTexture = 5,
             };
+        }
+
+        /// <summary>Constructs a standard-cube <see cref="BlockType"/> with six distinct face textures.</summary>
+        private static BlockType MakeCube(string name, bool isSolid, byte opacity, bool renderNeighborFaces, MetadataSchema schema)
+        {
+            BlockType block = MakeBaseBlock(name);
+            block.isSolid = isSolid;
+            block.opacity = opacity;
+            block.renderNeighborFaces = renderNeighborFaces;
+            block.metadataSchema = schema;
+            return block;
+        }
+
+        /// <summary>
+        /// Constructs a fluid <see cref="BlockType"/> (non-solid, transparent) that routes through the
+        /// <c>GenerateFluidMeshData</c> path. The matching 16-entry vertex-height template is supplied
+        /// separately by <see cref="MeshingTestWorld"/> (mirroring the production
+        /// <c>WaterVertexTemplates</c> / <c>LavaVertexTemplates</c> job inputs). <c>renderShape</c> stays
+        /// Cube but is irrelevant — the mesh router dispatches on <c>fluidType</c> first.
+        /// </summary>
+        private static BlockType MakeFluid(string name, FluidType fluidType, byte fluidShaderID, byte fluidLevel, byte flowLevels)
+        {
+            BlockType block = MakeBaseBlock(name);
+            block.isSolid = false;
+            block.opacity = 0;
+            block.renderNeighborFaces = false;
+            block.fluidType = fluidType;
+            block.fluidShaderID = fluidShaderID;
+            block.fluidLevel = fluidLevel;
+            block.flowLevels = flowLevels;
+            return block;
         }
     }
 }

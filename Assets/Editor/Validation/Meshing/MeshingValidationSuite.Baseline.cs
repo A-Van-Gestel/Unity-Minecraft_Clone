@@ -27,6 +27,8 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B4: oriented cube geometry matches oracle (4 yaws, end-to-end)", B4_OrientedCubeEndToEnd));
             scenarios.Add(new Scenario("B5: meshing is deterministic across runs", B5_Determinism));
             scenarios.Add(new Scenario("B6: transparent cube routes faces to the transparent submesh", B6_TransparentRouting));
+            scenarios.Add(new Scenario("B7: fluid blocks route to the fluid submesh, deterministic + structurally valid", B7_FluidRoutingAndDeterminism));
+            scenarios.Add(new Scenario("B8: air-surrounded fluid keeps a zero shore mask even after wall-adjacent fluids (MR-7 neighbor-buffer guard)", B8_FluidNeighborBufferIsolation));
         }
 
         /// <summary>
@@ -213,6 +215,259 @@ namespace Editor.Validation.Meshing
                 $"transparent triangles = {o.TransparentTriangles.Length} (expected 36)");
             passed &= MeshAssert.StructuralInvariants("B6 structural", o);
             return passed;
+        }
+
+        /// <summary>
+        /// B7 — A pure-fluid scene (a small water pool, one block stacked to exercise the
+        /// <c>hasFluidAbove</c> path) emits geometry, routes <b>all</b> of it to the fluid submesh
+        /// (opaque + transparent triangle lists stay empty), satisfies the structural invariants, and
+        /// is bit-identical across two runs. This is the fluid analog of B6/B5 and the broad regression
+        /// guard for the fluid meshing path that finding MR-7 optimizes.
+        /// </summary>
+        private static bool B7_FluidRoutingAndDeterminism()
+        {
+            using MeshingTestWorld worldA = new MeshingTestWorld();
+            using MeshingTestWorld worldB = new MeshingTestWorld();
+
+            foreach (MeshingTestWorld w in new[] { worldA, worldB })
+            {
+                // 3×3 water pool at y=6, air all around it, plus one stacked source so a block has the
+                // same fluid directly above it (top-face suppression path).
+                for (int dx = 0; dx < 3; dx++)
+                for (int dz = 0; dz < 3; dz++)
+                    w.SetBlock(6 + dx, 6, 6 + dz, TestMeshBlockPalette.WaterSource);
+                w.SetBlock(7, 7, 7, TestMeshBlockPalette.WaterSource);
+            }
+
+            MeshDataJobOutput a = worldA.Run();
+            MeshDataJobOutput b = worldB.Run();
+
+            bool passed = MeshAssert.IsTrue("B7 fluid submesh filled", a.FluidTriangles.Length > 0,
+                $"fluid triangles = {a.FluidTriangles.Length} (expected > 0)");
+            passed &= MeshAssert.IsTrue("B7 opaque submesh empty", a.Triangles.Length == 0,
+                $"opaque triangles = {a.Triangles.Length} (expected 0 for a pure-fluid scene)");
+            passed &= MeshAssert.IsTrue("B7 transparent submesh empty", a.TransparentTriangles.Length == 0,
+                $"transparent triangles = {a.TransparentTriangles.Length} (expected 0 for a pure-fluid scene)");
+            passed &= MeshAssert.StructuralInvariants("B7 structural", a);
+            passed &= MeshAssert.OutputsEqual("B7 determinism", a, b);
+            return passed;
+        }
+
+        /// <summary>
+        /// B8 — Fluid neighbor-buffer isolation guard, written test-first for finding <b>MR-7</b> (hoist
+        /// the per-fluid-voxel <c>Allocator.Temp</c> neighbor arrays out of the voxel loop).
+        /// <para>
+        /// The fluid mesher writes a neighbor slot only when that neighbor exists; air slots are left at
+        /// their default. With a fresh per-voxel buffer that default is correct, but a future
+        /// optimization that reuses one buffer across voxels <i>without resetting it</i> would leak a
+        /// prior fluid voxel's neighbors into a later air-surrounded one. This scenario makes that leak
+        /// observable in three parts:
+        /// <list type="number">
+        /// <item><b>Reference</b> — an isolated, fully air-surrounded source. Its shore mask
+        /// (<c>Color.g</c>) must be 0, and its full quad set becomes the golden reference.</item>
+        /// <item><b>Differential</b> — the same probe meshed <i>after</i> several fluid sources each
+        /// fully encased in solid (priming all 14 neighbor slots with solid state). The probe stays
+        /// air-surrounded, so its <i>entire</i> quad set must be byte-identical to the reference — this
+        /// catches a leak into <i>any</i> slot (cardinal, diagonal, above/below), not just the shore
+        /// mask. An explicit assertion pins the load-bearing invariant that every primer is meshed
+        /// before the probe (lower in-section flattened index).</item>
+        /// <item><b>Positive control</b> — a probe ringed by four solid walls <i>must</i> report a
+        /// non-zero shore mask (15/255). Without this, a silent break in the extraction/packing would
+        /// let parts 1–2 pass vacuously, leaving a dead tripwire.</item>
+        /// </list>
+        /// </para>
+        /// </summary>
+        private static bool B8_FluidNeighborBufferIsolation()
+        {
+            Vector3Int probe = new Vector3Int(8, 8, 8);
+            Vector3Int[] primers = { new Vector3Int(2, 4, 2), new Vector3Int(2, 4, 5), new Vector3Int(5, 4, 2) };
+
+            // Load-bearing invariant: each primer must be meshed BEFORE the probe (same section, lower
+            // flattened index), else a reused-but-not-reset buffer can't carry primer state into the
+            // probe and the differential below would be a false green. Voxel iteration walks the
+            // in-section flattened index, so assert ordering explicitly instead of trusting coordinates.
+            int probeIndex = ChunkMath.GetFlattenedIndexInChunk(probe.x, probe.y, probe.z);
+            int probeSection = probe.y / ChunkMath.SECTION_SIZE;
+            bool ordered = true;
+            foreach (Vector3Int p in primers)
+                ordered &= p.y / ChunkMath.SECTION_SIZE == probeSection
+                           && ChunkMath.GetFlattenedIndexInChunk(p.x, p.y, p.z) < probeIndex;
+            bool passed = MeshAssert.IsTrue("B8 primers precede probe", ordered,
+                "every primer must share the probe's section and have a lower flattened index, else the buffer-reuse leak cannot reach the probe");
+
+            // (1) Reference: isolated air-surrounded source → zero shore mask + golden quad set.
+            List<ProbeQuad> reference;
+            using (MeshingTestWorld world = new MeshingTestWorld())
+            {
+                world.SetBlock(probe.x, probe.y, probe.z, TestMeshBlockPalette.WaterSource);
+                MeshDataJobOutput o = world.Run();
+                reference = CollectProbeQuads(o, probe);
+            }
+
+            passed &= MeshAssert.IsTrue("B8 reference emits geometry", reference.Count > 0,
+                $"isolated probe emitted {reference.Count} quads (expected > 0)");
+            passed &= MeshAssert.IsTrue("B8 reference shore mask",
+                TryTopFaceShoreMask(reference, out float refMask) && Mathf.Abs(refMask) <= MeshAssert.VertexEpsilon,
+                $"air-surrounded fluid shore mask = {(reference.Count > 0 ? refMask : float.NaN):F4} (expected 0)");
+
+            // (2) Differential: same probe, preceded by solid-encased fluid primers that prime ALL 14
+            //     neighbor slots. The probe stays air-surrounded, so its full quad set must match the
+            //     reference exactly — a leak into any slot would change its geometry and trip this.
+            using (MeshingTestWorld world = new MeshingTestWorld())
+            {
+                foreach (Vector3Int p in primers) PlaceEncasedFluid(world, p);
+                world.SetBlock(probe.x, probe.y, probe.z, TestMeshBlockPalette.WaterSource);
+                MeshDataJobOutput o = world.Run();
+                List<ProbeQuad> primed = CollectProbeQuads(o, probe);
+                passed &= ProbeQuadsEqual("B8 primed probe matches isolated reference", reference, primed);
+            }
+
+            // (3) Positive control: a cardinal-walled probe MUST report a non-zero shore mask, proving
+            //     the extraction path can actually observe a wall-neighbor leak.
+            using (MeshingTestWorld world = new MeshingTestWorld())
+            {
+                PlaceCardinalWalledFluid(world, probe);
+                MeshDataJobOutput o = world.Run();
+                List<ProbeQuad> walled = CollectProbeQuads(o, probe);
+                const float fourCardinalWalls = (1f + 2f + 4f + 8f) / 255f; // wallN|S|E|W, no diagonals
+                passed &= MeshAssert.IsTrue("B8 positive control non-zero mask",
+                    TryTopFaceShoreMask(walled, out float wallMask) && Mathf.Abs(wallMask - fourCardinalWalls) <= MeshAssert.VertexEpsilon,
+                    $"wall-boxed probe shore mask = {(walled.Count > 0 ? wallMask : float.NaN):F4} (expected {fourCardinalWalls:F4})");
+            }
+
+            return passed;
+        }
+
+        /// <summary>One emitted quad's per-vertex streams, copied out of a (soon-disposed) job output.</summary>
+        private sealed class ProbeQuad
+        {
+            public readonly Vector3[] Verts = new Vector3[4];
+            public readonly Vector3[] Normals = new Vector3[4];
+            public readonly Vector4[] Uvs = new Vector4[4];
+            public readonly Color[] Colors = new Color[4];
+            public readonly Color32[] Light = new Color32[4];
+        }
+
+        /// <summary>Places a fluid source ringed by solid opaque blocks on its four horizontal sides.</summary>
+        private static void PlaceCardinalWalledFluid(MeshingTestWorld world, Vector3Int at)
+        {
+            world.SetBlock(at.x, at.y, at.z, TestMeshBlockPalette.WaterSource);
+            world.SetBlock(at.x + 1, at.y, at.z, TestMeshBlockPalette.SolidOpaque);
+            world.SetBlock(at.x - 1, at.y, at.z, TestMeshBlockPalette.SolidOpaque);
+            world.SetBlock(at.x, at.y, at.z + 1, TestMeshBlockPalette.SolidOpaque);
+            world.SetBlock(at.x, at.y, at.z - 1, TestMeshBlockPalette.SolidOpaque);
+        }
+
+        /// <summary>
+        /// Places a fluid source fully encased in solid opaque blocks (the entire 3×3×3 shell around it).
+        /// This drives solid state into <b>every</b> one of the fluid mesher's 14 neighbor slots —
+        /// cardinals, horizontal diagonals, and the above/below set — so a leak into any slot is primed.
+        /// </summary>
+        private static void PlaceEncasedFluid(MeshingTestWorld world, Vector3Int at)
+        {
+            world.SetBlock(at.x, at.y, at.z, TestMeshBlockPalette.WaterSource);
+            for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            for (int dz = -1; dz <= 1; dz++)
+            {
+                if (dx == 0 && dy == 0 && dz == 0) continue;
+                world.SetBlock(at.x + dx, at.y + dy, at.z + dz, TestMeshBlockPalette.SolidOpaque);
+            }
+        }
+
+        /// <summary>
+        /// Copies out every quad whose four vertices lie within the probe block's unit cell
+        /// [x,x+1] × [y,y+1] × [z,z+1] (all three axes, so it cannot confuse a face one block away), in
+        /// emission order. The data is copied because the owning <see cref="MeshingTestWorld"/> disposes
+        /// its output when its <c>using</c> block exits.
+        /// </summary>
+        private static List<ProbeQuad> CollectProbeQuads(MeshDataJobOutput o, Vector3Int probe)
+        {
+            List<ProbeQuad> quads = new List<ProbeQuad>();
+            int quadCount = o.Vertices.Length / 4;
+            const float e = MeshAssert.VertexEpsilon;
+
+            for (int q = 0; q < quadCount; q++)
+            {
+                int b = q * 4;
+                bool inCell = true;
+                for (int i = 0; i < 4 && inCell; i++)
+                {
+                    Vector3 v = o.Vertices[b + i];
+                    inCell = v.x >= probe.x - e && v.x <= probe.x + 1f + e
+                                                && v.y >= probe.y - e && v.y <= probe.y + 1f + e
+                                                && v.z >= probe.z - e && v.z <= probe.z + 1f + e;
+                }
+
+                if (!inCell) continue;
+
+                ProbeQuad pq = new ProbeQuad();
+                for (int i = 0; i < 4; i++)
+                {
+                    pq.Verts[i] = o.Vertices[b + i];
+                    pq.Normals[i] = o.Normals[b + i];
+                    pq.Uvs[i] = o.Uvs[b + i];
+                    pq.Colors[i] = o.Colors[b + i];
+                    pq.Light[i] = o.LightData[b + i];
+                }
+
+                quads.Add(pq);
+            }
+
+            return quads;
+        }
+
+        /// <summary>Returns the shore mask (<c>Color.g</c>) of the probe's upward-facing quad, if present.</summary>
+        private static bool TryTopFaceShoreMask(List<ProbeQuad> quads, out float shoreMask)
+        {
+            foreach (ProbeQuad q in quads)
+            {
+                if (Vector3.Distance(q.Normals[0], Vector3.up) <= MeshAssert.VertexEpsilon)
+                {
+                    shoreMask = q.Colors[0].g;
+                    return true;
+                }
+            }
+
+            shoreMask = 0f;
+            return false;
+        }
+
+        /// <summary>
+        /// Asserts two probe-quad sets are element-for-element identical across every per-vertex stream
+        /// (positions/normals within <see cref="MeshAssert.VertexEpsilon"/>; UVs, colors, and packed
+        /// light exact). The probe is meshed by the same code in both worlds, so a mismatch means an
+        /// external block leaked into its neighbor buffer.
+        /// </summary>
+        private static bool ProbeQuadsEqual(string label, List<ProbeQuad> a, List<ProbeQuad> b)
+        {
+            if (a.Count != b.Count)
+            {
+                Debug.LogError($"[FAIL] {label}: quad count {a.Count} vs {b.Count}.");
+                return false;
+            }
+
+            const float e = MeshAssert.VertexEpsilon;
+            for (int q = 0; q < a.Count; q++)
+            {
+                ProbeQuad x = a[q], y = b[q];
+                for (int i = 0; i < 4; i++)
+                {
+                    if (Vector3.Distance(x.Verts[i], y.Verts[i]) > e ||
+                        Vector3.Distance(x.Normals[i], y.Normals[i]) > e ||
+                        x.Uvs[i] != y.Uvs[i] ||
+                        x.Colors[i] != y.Colors[i] ||
+                        !x.Light[i].Equals(y.Light[i]))
+                    {
+                        Debug.LogError($"[FAIL] {label}: quad {q} vertex {i} differs " +
+                                       $"(pos {x.Verts[i]} vs {y.Verts[i]}, color {x.Colors[i]} vs {y.Colors[i]}).");
+                        return false;
+                    }
+                }
+            }
+
+            Debug.Log($"[PASS] {label}: {a.Count} probe quads identical.");
+            return true;
         }
 
         /// <summary>
