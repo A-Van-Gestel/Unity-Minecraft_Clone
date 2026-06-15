@@ -36,6 +36,54 @@ public class WorldJobManager : IDisposable
 
     #endregion
 
+    #region Lighting Diagnostics
+
+    // These counters reflect ONLY the most recent ProcessLightingJobs() call and are intended to be
+    // read immediately afterwards by the startup convergence diagnostics in
+    // World.ForceCompleteDataJobsCoroutine. They separate the two known non-convergence modes:
+    // edge-check cascade (stable but re-armed) vs. a persistent IsStable=false stability bug.
+    // See Documentation/Design/CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md §4.
+
+    /// <summary>Number of lighting job results processed in the most recent <see cref="ProcessLightingJobs"/> call.</summary>
+    public int LastProcessedJobCount { get; private set; }
+
+    /// <summary>Of the most recently processed jobs, how many reported not-stable and re-flagged
+    /// <c>HasLightChangesToProcess</c> for another pass (the §4.2 stability-bug signature).</summary>
+    public int LastUnstableJobCount { get; private set; }
+
+    /// <summary>Of the most recently processed jobs, how many were stable but consumed an edge-check
+    /// round and re-armed themselves plus neighbors (the §4.1 edge-check-cascade signature).</summary>
+    public int LastEdgeRecycleJobCount { get; private set; }
+
+    /// <summary>Cross-chunk light mods emitted by the most recently processed jobs and routed to a
+    /// loaded neighbor (<c>ApplyDirect</c>) — i.e. mods that count toward stability.</summary>
+    public int LastCrossChunkModsApplyRouted { get; private set; }
+
+    /// <summary>Of those <c>ApplyDirect</c> mods, how many actually changed the neighbor's light
+    /// (<c>decision.ShouldApply</c>). When this stays ≈0 while <see cref="LastCrossChunkModsApplyRouted"/>
+    /// is high, the chunk is held unstable by perpetual no-op emissions against stale snapshots.</summary>
+    public int LastCrossChunkModsEffective { get; private set; }
+
+    /// <summary>Effective cross-chunk applies in the most recent call, broken down by channel and
+    /// operation. A steady non-zero in a removal bucket alongside its matching placement bucket is the
+    /// signature of a stale-snapshot darkness/re-placement oscillation across a chunk seam.</summary>
+    public int LastEffSunPlacement { get; private set; }
+
+    public int LastEffSunRemoval { get; private set; }
+    public int LastEffBlockPlacement { get; private set; }
+    public int LastEffBlockRemoval { get; private set; }
+
+    // First effective cross-chunk apply captured in the most recent call — a concrete sample of the
+    // oscillating voxel (global position + old→new packed light). LastEffSampleValid gates the rest.
+    public bool LastEffSampleValid { get; private set; }
+    public bool LastEffSampleIsSun { get; private set; }
+    public bool LastEffSampleIsRemoval { get; private set; }
+    public Vector3Int LastEffSampleGlobalPos { get; private set; }
+    public ushort LastEffSampleOldLight { get; private set; }
+    public ushort LastEffSampleNewLight { get; private set; }
+
+    #endregion
+
     // --- Native Buffer Pooling ---
     // Pools the fixed-size full-chunk job input buffers (voxel + light maps) shared by lighting
     // and meshing jobs, avoiding ~1.7 MB of Persistent alloc/dispose churn per job.
@@ -704,6 +752,19 @@ public class WorldJobManager : IDisposable
     /// </summary>
     public void ProcessLightingJobs()
     {
+        // Reset startup-diagnostic counters before the early-out so a no-op call reports zeros
+        // rather than leaving stale values from the previous sweep.
+        LastProcessedJobCount = 0;
+        LastUnstableJobCount = 0;
+        LastEdgeRecycleJobCount = 0;
+        LastCrossChunkModsApplyRouted = 0;
+        LastCrossChunkModsEffective = 0;
+        LastEffSunPlacement = 0;
+        LastEffSunRemoval = 0;
+        LastEffBlockPlacement = 0;
+        LastEffBlockRemoval = 0;
+        LastEffSampleValid = false;
+
         if (LightingJobs.Count == 0) return;
 
         _chunksToRebuildMesh.Clear();
@@ -721,6 +782,7 @@ public class WorldJobManager : IDisposable
             if (jobEntry.Value.Handle.IsCompleted)
             {
                 jobEntry.Value.Handle.Complete();
+                LastProcessedJobCount++;
                 LightingJobData jobData = jobEntry.Value;
 
                 ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), false);
@@ -793,6 +855,11 @@ public class WorldJobManager : IDisposable
                                 continue;
 
                             case LightingJobProcessor.CrossChunkModRoute.ApplyDirect:
+                                // Diagnostics: an ApplyDirect mod counts toward stability regardless of
+                                // effect; ApplyCrossChunkLightMod tallies how many actually changed the
+                                // neighbor (plus channel/op breakdown + a sample) to characterize the
+                                // §4.2 non-convergence mode.
+                                LastCrossChunkModsApplyRouted++;
                                 ApplyCrossChunkLightMod(neighborChunk, in mod);
                                 continue;
                         }
@@ -830,6 +897,7 @@ public class WorldJobManager : IDisposable
                     if (chunkData != null && chunkData.RemainingEdgeCheckRounds > 0)
                     {
                         chunkData.RemainingEdgeCheckRounds--;
+                        LastEdgeRecycleJobCount++;
 
                         // Self-edge-check: re-examine this chunk's own borders with the
                         // latest neighbor snapshot data.
@@ -842,6 +910,7 @@ public class WorldJobManager : IDisposable
                 else
                 {
                     if (chunkData != null) chunkData.HasLightChangesToProcess = true;
+                    LastUnstableJobCount++;
                 }
 
                 if (chunkData != null) chunkData.IsAwaitingMainThreadProcess = false;
@@ -897,7 +966,9 @@ public class WorldJobManager : IDisposable
     /// </summary>
     /// <param name="targetChunk">The populated chunk the modification targets.</param>
     /// <param name="mod">The cross-chunk modification emitted by a neighbor's lighting job.</param>
-    private void ApplyCrossChunkLightMod(ChunkData targetChunk, in LightModification mod)
+    /// <returns>True if the modification changed the target's light (and enqueued a BFS wake-up node);
+    /// false if it was a no-op against the target's current value.</returns>
+    private bool ApplyCrossChunkLightMod(ChunkData targetChunk, in LightModification mod)
     {
         Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
@@ -906,7 +977,7 @@ public class WorldJobManager : IDisposable
 
         if (!decision.ShouldApply)
         {
-            return;
+            return false;
         }
 
         targetChunk.SetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z, decision.NewLight);
@@ -919,6 +990,46 @@ public class WorldJobManager : IDisposable
         {
             targetChunk.AddToBlockLightQueue(localVoxelPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
         }
+
+        RecordEffectiveCrossChunkMod(in mod, currentLight, decision.NewLight);
+        return true;
+    }
+
+    /// <summary>
+    /// Records diagnostic accounting for one effective cross-chunk apply (one that changed the
+    /// neighbor's light): increments the effective total, the per-channel/per-operation breakdown, and
+    /// captures the first such apply this call as a concrete sample. Sunlight removal is identified by
+    /// a zero target level; blocklight removal by the mod's <c>IsRemoval</c> flag.
+    /// </summary>
+    /// <param name="mod">The cross-chunk modification that was applied.</param>
+    /// <param name="oldLight">The target voxel's packed light before the apply.</param>
+    /// <param name="newLight">The target voxel's packed light after the apply.</param>
+    private void RecordEffectiveCrossChunkMod(in LightModification mod, ushort oldLight, ushort newLight)
+    {
+        LastCrossChunkModsEffective++;
+
+        bool isRemoval;
+        if (mod.Channel == LightChannel.Sun)
+        {
+            isRemoval = mod.LightLevel == 0;
+            if (isRemoval) LastEffSunRemoval++;
+            else LastEffSunPlacement++;
+        }
+        else
+        {
+            isRemoval = mod.IsRemoval;
+            if (isRemoval) LastEffBlockRemoval++;
+            else LastEffBlockPlacement++;
+        }
+
+        if (LastEffSampleValid) return;
+
+        LastEffSampleValid = true;
+        LastEffSampleIsSun = mod.Channel == LightChannel.Sun;
+        LastEffSampleIsRemoval = isRemoval;
+        LastEffSampleGlobalPos = mod.GlobalPosition;
+        LastEffSampleOldLight = oldLight;
+        LastEffSampleNewLight = newLight;
     }
 
     /// <summary>

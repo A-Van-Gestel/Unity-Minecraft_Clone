@@ -825,6 +825,16 @@ public class World : MonoBehaviour
         JobManager.ScheduleGeneration(chunkCoord);
     }
 
+    /// <summary>How often (in lighting sweeps) the startup convergence diagnostics emit a log line.</summary>
+    private const int LIGHTING_DIAG_LOG_INTERVAL = 250;
+
+    /// <summary>Number of final sweeps before the safety cap that always emit a diagnostic log line,
+    /// so a non-converging tail is captured even between the periodic interval logs.</summary>
+    private const int LIGHTING_DIAG_TAIL_SWEEPS = 20;
+
+    /// <summary>Maximum number of persistently-recycling chunk coords listed per diagnostic line.</summary>
+    private const int LIGHTING_DIAG_MAX_LISTED = 16;
+
     /// <summary>
     /// A startup coroutine that forces the completion of all initial generation and lighting jobs.
     /// It runs in a tight loop, processing job results and scheduling dependent jobs until the entire
@@ -887,6 +897,15 @@ public class World : MonoBehaviour
 
         int lightingLoopIterations = 0;
 
+        // --- Diagnostics: detect non-convergence of the startup lighting fixpoint (gated) ---
+        // When the loop fails to converge it spins until the safety cap; these counters let us tell
+        // the two known modes apart — edge-check cascade (stable-but-re-armed) vs. a persistent
+        // IsStable=false stability bug — and name the chunk cluster that keeps recycling.
+        // See Documentation/Design/CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md §4.
+        bool logLightingDiagnostics = settings.enableDiagnosticLogs;
+        Dictionary<ChunkCoord, int> recycleSweepCounts =
+            logLightingDiagnostics ? new Dictionary<ChunkCoord, int>() : null;
+
         if (settings.enableLighting)
         {
             // This logic is a synchronous version of what the Update() loop does asynchronously.
@@ -894,6 +913,7 @@ public class World : MonoBehaviour
                    HasPendingEdgeChecks(chunksInLoadArea) || JobManager.LightingJobs.Count > 0)
             {
                 lightingLoopIterations++;
+                int jobsScheduledThisSweep = 0;
 
                 // --- Step 2a: Trigger Initial Lighting Requests ---
                 lightingSchedulingWatch.Start();
@@ -933,8 +953,10 @@ public class World : MonoBehaviour
                     {
                         // OPTIMIZATION: Use TempJob allocator.
                         // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
-                        JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                        scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
                     }
+
+                    if (scheduled) jobsScheduledThisSweep++;
                 }
 
                 lightingSchedulingWatch.Stop();
@@ -944,12 +966,29 @@ public class World : MonoBehaviour
                 CompleteAndProcessLightingJobs();
                 lightingCompletionWatch.Stop();
 
+                // --- Step 2d: Convergence diagnostics (gated) ---
+                if (logLightingDiagnostics)
+                {
+                    LogLightingConvergenceSweep(chunksInLoadArea, recycleSweepCounts, lightingLoopIterations,
+                        safetyBreak, maxIterations, jobsScheduledThisSweep);
+                }
+
                 // --- Safety Break ---
                 safetyBreak++;
                 if (safetyBreak > maxIterations)
                 {
                     Debug.LogError($"ForceCompleteDataJobsCoroutine exceeded max iterations ({maxIterations}) during Lighting Phase. Forcing exit.");
                     Debug.LogError($"Remaining jobs: Lighting({JobManager.LightingJobs.Count}). Pending chunks: InitialLight({chunksInLoadArea.Count(c => c.NeedsInitialLighting)}), LightChanges({chunksInLoadArea.Count(c => c.HasLightChangesToProcess)}), EdgeChecks({chunksInLoadArea.Count(c => c.NeedsEdgeCheck)})");
+
+                    // Last-sweep stability outcome distinguishes the §4.2 stability bug (unstable > 0)
+                    // from the §4.1 edge-check cascade (edgeRecycle > 0). The persistent-recycler dump
+                    // (diagnostics only) names the stuck cluster. See CHUNK_PIPELINE_PERFORMANCE_ANALYSIS §4.
+                    StringBuilder tail = new StringBuilder();
+                    tail.Append($"Last sweep outcome: processed={JobManager.LastProcessedJobCount}, unstable={JobManager.LastUnstableJobCount}, edgeRecycle={JobManager.LastEdgeRecycleJobCount}, xchunkApplyRouted={JobManager.LastCrossChunkModsApplyRouted}, xchunkEffective={JobManager.LastCrossChunkModsEffective}");
+                    tail.Append($" | eff[sunPl={JobManager.LastEffSunPlacement}, sunRm={JobManager.LastEffSunRemoval}, blkPl={JobManager.LastEffBlockPlacement}, blkRm={JobManager.LastEffBlockRemoval}]");
+                    AppendEffectiveSample(tail);
+                    tail.Append(logLightingDiagnostics ? " | See [LightingDiag] tail logs above for the recycling cluster." : " | Enable settings.enableDiagnosticLogs to capture the recycling cluster.");
+                    Debug.LogError(tail.ToString());
                     yield break; // Exit the coroutine
                 }
 
@@ -1002,6 +1041,126 @@ public class World : MonoBehaviour
         }
 
         Debug.Log(report.ToString());
+    }
+
+    /// <summary>
+    /// Emits a per-sweep diagnostic line for the startup lighting convergence loop. Tallies which
+    /// load-area chunks remain dirty after the sweep and how many consecutive sweeps each has stayed
+    /// dirty, then logs the work counts plus the most persistently-recycling cluster. A line is
+    /// emitted every <see cref="LIGHTING_DIAG_LOG_INTERVAL"/> sweeps and for the final
+    /// <see cref="LIGHTING_DIAG_TAIL_SWEEPS"/> sweeps before the safety cap, so a non-converging tail
+    /// is always captured. The job-result counts (<c>processed</c>/<c>unstable</c>/<c>edgeRecycle</c>)
+    /// distinguish the §4.2 stability bug from the §4.1 edge-check cascade.
+    /// </summary>
+    /// <param name="chunksInLoadArea">The chunks whose lighting the startup loop is driving to a fixpoint.</param>
+    /// <param name="recycleSweepCounts">Accumulator mapping each still-dirty chunk to its sweep-dirty count.</param>
+    /// <param name="sweep">The current lighting sweep index (1-based).</param>
+    /// <param name="safetyBreak">The shared safety-break counter (pre-increment for this sweep).</param>
+    /// <param name="maxIterations">The dynamic safety cap that ends the loop.</param>
+    /// <param name="jobsScheduledThisSweep">Lighting jobs scheduled during this sweep.</param>
+    private void LogLightingConvergenceSweep(List<ChunkData> chunksInLoadArea,
+        Dictionary<ChunkCoord, int> recycleSweepCounts, int sweep, int safetyBreak, int maxIterations,
+        int jobsScheduledThisSweep)
+    {
+        // Tally chunks still carrying lighting work after this sweep and bump their persistence count.
+        int stillDirty = 0;
+        foreach (ChunkData chunkData in chunksInLoadArea)
+        {
+            if (!chunkData.HasLightChangesToProcess && !chunkData.NeedsEdgeCheck && !chunkData.NeedsInitialLighting)
+                continue;
+
+            stillDirty++;
+            ChunkCoord coord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
+            recycleSweepCounts.TryGetValue(coord, out int count);
+            recycleSweepCounts[coord] = count + 1;
+        }
+
+        // Throttle output: periodic samples plus every sweep in the tail window before the cap.
+        bool isIntervalSweep = (sweep % LIGHTING_DIAG_LOG_INTERVAL) == 0;
+        bool isTailSweep = (safetyBreak + 1) > (maxIterations - LIGHTING_DIAG_TAIL_SWEEPS);
+        if (!isIntervalSweep && !isTailSweep) return;
+
+        StringBuilder diag = new StringBuilder();
+        diag.Append($"[LightingDiag] sweep {sweep}: scheduled={jobsScheduledThisSweep}, " +
+                    $"processed={JobManager.LastProcessedJobCount}, unstable={JobManager.LastUnstableJobCount}, " +
+                    $"edgeRecycle={JobManager.LastEdgeRecycleJobCount}, " +
+                    $"xchunkApplyRouted={JobManager.LastCrossChunkModsApplyRouted}, " +
+                    $"xchunkEffective={JobManager.LastCrossChunkModsEffective}, stillDirty={stillDirty}");
+
+        // Effective-apply breakdown: a steady removal bucket paired with its placement bucket is the
+        // stale-snapshot darkness/re-placement oscillation signature.
+        diag.Append($" | eff[sunPl={JobManager.LastEffSunPlacement}, sunRm={JobManager.LastEffSunRemoval}, " +
+                    $"blkPl={JobManager.LastEffBlockPlacement}, blkRm={JobManager.LastEffBlockRemoval}]");
+
+        AppendEffectiveSample(diag);
+        AppendPersistentRecyclers(diag, recycleSweepCounts, sweep);
+        Debug.Log(diag.ToString());
+    }
+
+    /// <summary>
+    /// Appends a decoded sample of the first effective cross-chunk apply from the most recent
+    /// <see cref="WorldJobManager.ProcessLightingJobs"/> call — a concrete oscillating voxel (global
+    /// position, channel/op, and the relevant light value old→new). Decodes sky level for sunlight
+    /// mods and per-channel RGB for blocklight mods.
+    /// </summary>
+    /// <param name="builder">The diagnostic line under construction.</param>
+    private void AppendEffectiveSample(StringBuilder builder)
+    {
+        if (!JobManager.LastEffSampleValid)
+        {
+            builder.Append(" | sample: (none)");
+            return;
+        }
+
+        Vector3Int p = JobManager.LastEffSampleGlobalPos;
+        ushort oldLight = JobManager.LastEffSampleOldLight;
+        ushort newLight = JobManager.LastEffSampleNewLight;
+        string op = JobManager.LastEffSampleIsRemoval ? "rm" : "pl";
+
+        if (JobManager.LastEffSampleIsSun)
+        {
+            builder.Append($" | sample: Sun {op} @({p.x},{p.y},{p.z}) sky {LightBitMapping.GetSkyLight(oldLight)}->{LightBitMapping.GetSkyLight(newLight)}");
+        }
+        else
+        {
+            builder.Append($" | sample: Block {op} @({p.x},{p.y},{p.z}) rgb " +
+                           $"({LightBitMapping.GetBlocklightR(oldLight)},{LightBitMapping.GetBlocklightG(oldLight)},{LightBitMapping.GetBlocklightB(oldLight)})->" +
+                           $"({LightBitMapping.GetBlocklightR(newLight)},{LightBitMapping.GetBlocklightG(newLight)},{LightBitMapping.GetBlocklightB(newLight)})");
+        }
+    }
+
+    /// <summary>
+    /// Appends the chunk coordinates that have stayed dirty across the most sweeps — the persistently
+    /// recycling cluster preventing the startup lighting loop from converging. Only coords dirty in at
+    /// least half the sweeps so far are listed (transients are filtered out), capped at
+    /// <see cref="LIGHTING_DIAG_MAX_LISTED"/> entries to bound log size.
+    /// </summary>
+    /// <param name="builder">The diagnostic line under construction.</param>
+    /// <param name="recycleSweepCounts">Map of still-dirty chunk to sweep-dirty count.</param>
+    /// <param name="sweep">The current lighting sweep index, used to derive the persistence threshold.</param>
+    private static void AppendPersistentRecyclers(StringBuilder builder, Dictionary<ChunkCoord, int> recycleSweepCounts,
+        int sweep)
+    {
+        int threshold = Mathf.Max(2, sweep / 2);
+        int listed = 0;
+
+        builder.Append(" | persistent(coord×sweeps): ");
+        foreach (KeyValuePair<ChunkCoord, int> entry in recycleSweepCounts)
+        {
+            if (entry.Value < threshold) continue;
+
+            if (listed >= LIGHTING_DIAG_MAX_LISTED)
+            {
+                builder.Append(", …");
+                return;
+            }
+
+            if (listed > 0) builder.Append(", ");
+            builder.Append($"({entry.Key.X},{entry.Key.Z})×{entry.Value}");
+            listed++;
+        }
+
+        if (listed == 0) builder.Append("(none)");
     }
 
     /// <summary>
