@@ -189,6 +189,17 @@ After a chunk's initial lighting stabilizes, its border voxels may have incorrec
 
 **Design constraint:** The edge check only **adds** missing light (placement queue). It does not remove stale light (no removal queue entries). Removal during edge checks risks propagating false darkness inward when neighbor data is stale or incomplete.
 
+### 3.7 Why Cross-Chunk Light *Removal* Is Structurally Hard
+
+Cross-chunk light **placement** (spreading brighter values inward) is robust: the edge check (§3.6) re-adds any missing light, and a stale snapshot only ever *under*-reports brightness, which a later pass corrects upward. Cross-chunk **removal** (clearing light whose source disappeared) is the engine's recurring problem area — most open/fixed lighting bugs live here (`Documentation/Bugs/`: Bugs 05, 08, 09, 11, 12) — for three compounding reasons:
+
+1. **Jobs read stale schedule-time snapshots.** A job's neighbor maps are copied when it is scheduled (§3.3), so a removal computed against that snapshot can disagree with the neighbor's now-current light. This is the source of the cross-seam removal/re-placement oscillation (Bug 11, fixed) and of the in-flight defer logic (§3.4, Bug 08).
+2. **Edge checks only ADD, never remove** (§3.6, §4.2). Over-bright stale light at a border is *never* corrected by the edge-check pass — only too-dark light is. The "inverse artifact" (light that refuses to darken) therefore has **no automatic correction path** and persists until a full relight.
+3. **Removal needs an initiator.** `PropagateDarkness` (§1.3, Phase 1) clears a voxel by tracing the neighbors *it* lit (`neighbor == old − cost`). A light "loop" with no real source — e.g. two seam voxels on opposite sides of a chunk boundary that mutually support each other after the genuine source is removed — has no node to start removal from, so it survives as a **stable-but-wrong** over-bright field (Bug 12).
+
+**Data-model gotcha when sampling neighbor light for a removal decision:** the stored sky value of an **opaque** voxel is *not* a valid propagation source. `PropagateLight` early-returns for opaque sources (§1.3 rule 5 — opaque blocks receive surface light but never propagate it onward), yet a sky-exposed opaque surface still *stores* a high value (a roof block holds sky 15). Any heuristic that reads neighbor light to estimate "is this voxel still independently supported?" must therefore **skip opaque neighbors** and charge the destination's
+`max(1, opacity)` on entry. The cross-chunk sunlight removal veto (`CrossChunkLightModApplier.InChunkSunlightSupport`, added for Bug 11) had to learn both lessons — see its implementation and baselines B48/B49.
+
 ---
 
 ## 4. Cross-Reference: Our System vs. Starlight (Moonrise)

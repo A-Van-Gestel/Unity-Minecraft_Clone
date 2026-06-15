@@ -13,6 +13,8 @@ After running `dotnet build`, also check Unity's compilation state — Unity and
 1. `Unity_ManageEditor` -> `GetState` — check for `isCompiling` and compilation errors
 2. `Unity_ReadConsole` -> `Types: ["Error"]` — check for compile-time error messages
 
+**Newly-created `.cs` file?** `dotnet build` will report phantom `CS0103` "does not exist" for the new type — it isn't in the `.csproj` until Unity regenerates it. Run `AssetDatabase.Refresh()` (via `Unity_RunCommand`) first, then re-build. And to make the running Editor pick up *any* source edit (before executing an in-editor menu item / live tool), trigger `UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation()` and wait for `GetState` `IsCompiling == false` — a bare `dotnet build` leaves the Editor running stale code.
+
 </recipe>
 
 <recipe name="read-serialized-field">
@@ -80,5 +82,7 @@ For visual verification of UI or rendering changes:
 6. **Camera_Capture is expensive** — it renders a full frame. Only use when visual verification is genuinely needed.
 7. **ValidateScript** at `"standard"` level may produce false positives. Treat its output as hints, not hard failures.
 8. **ManageMenuItem Refresh** — set to `false` normally; only use `true` if you just added a new menu item via code, and it's not showing up.
+9. **ReadConsole can blow the token budget** on a noisy console (a full validation-suite or batch dump) — the result gets spilled to a file instead of returned, which is awkward to consume. Query narrowly: `Types: ["Error"]` is the fastest "did it pass / compile?" signal (many suites/log paths report failures via `Debug.LogError`, so 0 errors == clean); add `FilterText` + a small `Count` to target specific lines; and `Clear` before a run you intend to read so the dump contains only that run. Note that `FilterText` matches the most-recent entries of the
+   requested types — it is not a guarantee that every returned line contains the text — so don't infer "no failures" from a filtered query; use the `Types: ["Error"]` count for that.
 
 </constraints>
