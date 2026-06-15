@@ -30,7 +30,7 @@ We implemented iterative `RemainingEdgeCheckRounds = 2` to combat this, but dens
 **Additional observations (June 2026 audit):**
 
 - `CheckEdges` only validates the **4 cardinal borders**. Stale light originating in a *diagonal* neighbor can only reach the center chunk via two hops of cardinal edge checks, consuming both `RemainingEdgeCheckRounds` for a single corner correction. Dense canopies (small light pockets that depend on multi-chunk diagonal paths) are exactly the case where 2 rounds may not converge. Possible cheap mitigation: include the 4 corner voxel columns (which already have diagonal snapshot data available in the job) in `CheckEdges`.
-- `CheckEdgeVoxel` can only **add** missing light — by design it never detects over-bright stale values. That direction is fine for shadow patches, but worth remembering when debugging the inverse artifact (light patches that refuse to darken until a manual update).
+- `CheckEdgeVoxel` can only **add** missing light — by design it never detects over-bright stale values. That direction is fine for shadow patches, but worth remembering when debugging the inverse artifact (light patches that refuse to darken until a manual update). See **Bug 12** for a concrete mechanism of that inverse artifact (an over-bright cross-seam sunlight loop that survives source removal).
 
 **Validation suite (June 2026):** a minimal repro attempt — 5×5 grid, full slab with a single *diagonal* sky well, all chunks lit in one concurrent wave with stale snapshots plus the production 2 edge-check rounds — **converges to the oracle** and now guards as baseline scenario **B8**.
 
@@ -81,3 +81,39 @@ seed and ordering.
 The Bug 07/08 cross-chunk mod delivery fixes were already present when Bug 09 was last observed — the bug is either a genuine async race condition (Burst job system timing, IL2CPP memory ordering) that synchronous `.Run()` cannot reproduce, or is no longer present in the current codebase. A faithful failing repro is still TODO before this bug's fix can be test-driven; the surviving baselines serve as regression guards.
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
+
+---
+
+## Bug 12: Over-bright Cross-Seam Sunlight Loop Survives Source Removal
+
+**Severity:** Medium
+**Status:** Open — reproduced **synchronously** in the validation harness (June 2026); in-game confirmation TODO.
+
+**Description:**
+When a sunlight source that feeds a chunk-seam voxel is removed — e.g. a block placed that roofs a sky shaft, or a sky-feeding block broken near a chunk border — and that seam voxel *also* has a (weaker) in-chunk light path, the cross-seam light can fail to be removed. The seam voxel and its neighbor across the boundary end up **mutually supporting each other** (each is lit "by" the other), so the removal flood-fill never finds a real source to trace the darkness back to. The result is a **stable-but-wrong** over-bright field: the removed source's
+contribution lingers across the seam (and everything downstream of it stays correspondingly too bright) until a full world reload — or an unrelated nearby edit re-triggers the pass.
+
+This is the over-bright ("inverse") counterpart to **Bug 05**'s shadow patches, and the concrete mechanism behind the inverse-artifact note in that entry. It is the *static* form of the defect: unlike Bug 11 (which oscillated), this converges and stays converged at the wrong value.
+
+**Root Cause Suspected:**
+The sunlight removal pass (`NeighborhoodLightingJob.PropagateDarkness`) clears a voxel's light by identifying neighbors that were lit **by** it (`neighborSky == thisOldSky − cost`) and removing them. A 2-cycle that straddles a chunk boundary — voxel A (chunk X seam) lit from voxel B (chunk Y seam) and B lit from A — has, once the genuine external source is gone, **no removal initiator**: each side reads the other's still-high value as legitimate support. Because cross-chunk mods are computed against schedule-time snapshots, neither side ever observes the
+other dropping first, so each re-places the light it just removed from the other's stale value, settling into an over-bright fixed point. `CheckEdgeVoxel` cannot correct it — it only **adds** missing light, never removes over-bright (see Bug 05's note).
+
+> **Not** the Bug 11 veto. The in-chunk-support veto (`ComputeSunlight` / `InChunkSunlightSupport`) guards the opposite direction — it prevents a *spurious* removal of a genuinely-supported voxel. Bug 12 is a *legitimate* removal that never initiates. The two are independent; the veto neither causes nor fixes this.
+
+**Reproduction (observed in the lighting harness):**
+
+1. Build a 1-wide roofed corridor that crosses a chunk seam, lit by a single sky shaft on one side; arrange a weaker in-chunk path to the seam voxel as well.
+2. Run initial lighting to convergence (matches the borderless oracle).
+3. Roof the shaft (`PlaceBlock` stone over it) to remove the dominant cross-seam source, then run to convergence again.
+4. **Observed:** the seam voxel and the voxels downstream of it remain ~2 levels brighter than the borderless oracle — the removed source's contribution never clears. The field is stable ("converged") but does not match the oracle.
+
+This was discovered while building baseline **B49** (code-review finding 3): the end-to-end source-removal scenario could not isolate the opacity guard *because* this loop swallowed the removal, so B49 was implemented as a direct decision-logic test instead.
+
+**Relationship to other bugs:**
+
+- **Bug 05** — the dark counterpart (under-lit seam patches); shares the add-only `CheckEdgeVoxel` limitation as a contributing factor.
+- **Bug 09** — cross-chunk *blocklight* delivery race; different channel and mechanism (delivery drop vs. sourceless loop).
+- **Bug 11** (fixed) — cross-seam sunlight removal/re-placement *oscillation*; the in-chunk-support veto. Distinct: over-removal vs. this under-removal.
+
+**Validation suite (June 2026):** unlike Bug 05 / Bug 09 (not synchronously reproducible), this **does** reproduce deterministically in the synchronous harness — a scenario that removes the cross-seam source and asserts `MatchesOracle` is RED today. It is therefore a good candidate for a test-first **K-scenario** once a fix is designed (e.g. cross-seam removal-loop detection: seed removal from both seam columns, or a relight trigger that does not depend on a single initiator). A faithful failing repro + fix is TODO.
