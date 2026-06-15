@@ -5,6 +5,7 @@ using Data.JobData;
 using Data.WorldTypes;
 using Helpers;
 using Jobs;
+using Jobs.BurstData;
 using Jobs.Data;
 using Jobs.Generators;
 using Legacy;
@@ -59,9 +60,13 @@ public class WorldJobManager : IDisposable
     /// loaded neighbor (<c>ApplyDirect</c>) — i.e. mods that count toward stability.</summary>
     public int LastCrossChunkModsApplyRouted { get; private set; }
 
-    /// <summary>Of those <c>ApplyDirect</c> mods, how many actually changed the neighbor's light
-    /// (<c>decision.ShouldApply</c>). When this stays ≈0 while <see cref="LastCrossChunkModsApplyRouted"/>
-    /// is high, the chunk is held unstable by perpetual no-op emissions against stale snapshots.</summary>
+    /// <summary>How many cross-chunk applies in the most recent call actually changed the neighbor's
+    /// light (<c>decision.ShouldApply</c>). Counts <b>every</b> effective apply — both the
+    /// <c>ApplyDirect</c> path and the deferred-drain path (<c>DrainDeferredCrossChunkMods</c>) — so this
+    /// can exceed <see cref="LastCrossChunkModsApplyRouted"/> (which tallies ApplyDirect only) when
+    /// previously-deferred mods land this call. When this stays ≈0 while
+    /// <see cref="LastCrossChunkModsApplyRouted"/> is high, the chunk is held unstable by perpetual no-op
+    /// emissions against stale snapshots.</summary>
     public int LastCrossChunkModsEffective { get; private set; }
 
     /// <summary>Effective cross-chunk applies in the most recent call, broken down by channel and
@@ -976,9 +981,18 @@ public class WorldJobManager : IDisposable
         // Only sunlight REMOVALs (LightLevel == 0) consult in-chunk support — see
         // CrossChunkLightModApplier.ComputeSunlight. Skip the 6-neighbor scan for placements/uplifts
         // (the common case during initial-load sunlight propagation), whose decision ignores it.
-        byte inChunkSunSupport = mod.Channel == LightChannel.Sun && mod.LightLevel == 0
-            ? CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos)
-            : (byte)0;
+        byte inChunkSunSupport = 0;
+        if (mod.Channel == LightChannel.Sun && mod.LightLevel == 0)
+        {
+            // Support is attenuated by the target voxel's own opacity (the light enters it), matching
+            // NeighborhoodLightingJob.AttenuateLight — a flat air step would over-estimate support into
+            // semi-transparent media and wrongly veto a legitimate removal.
+            ushort targetId = BurstVoxelDataBitMapping.GetId(
+                targetChunk.GetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z));
+            byte targetOpacity = _world.BlockTypes[targetId].opacity;
+            inChunkSunSupport = CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos, targetOpacity);
+        }
+
         CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, inChunkSunSupport);
 
         if (!decision.ShouldApply)

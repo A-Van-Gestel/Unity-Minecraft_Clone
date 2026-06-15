@@ -77,6 +77,7 @@ namespace Editor.Validation.Lighting
 
             // --- Bug 11 (fixed June 2026, promoted from K11a): cross-seam sunlight removal oscillation on reload ---
             scenarios.Add(new Scenario("B48: Reload mid-darkness-wave at a mutually-lit seam converges to the oracle — no sunlight removal/replace oscillation (Bug 11 guard)", Baseline_ReloadSeamSunlightNoOscillation));
+            scenarios.Add(new Scenario("B49: Cross-chunk sunlight removal into a semi-transparent (DimGlass) seam voxel attenuates support by target opacity — a brighter in-chunk neighbor does not spuriously veto a legitimate removal", Baseline_CrossSeamSunlightRemovalThroughDimGlass));
         }
 
         /// <summary>
@@ -1416,6 +1417,69 @@ namespace Editor.Validation.Lighting
                 "B48: reload reconciliation converges (no removal/replace oscillation)");
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
                 "B48: reloaded seam matches the oracle field");
+
+            return passed;
+        }
+
+        // --- B49 (finding 3 guard): a direct, deterministic test of the cross-chunk sunlight removal veto.
+        // We set ONE in-chunk neighbour of the probe to a known sky and read the production guard's support
+        // through two test affordances. A full cross-chunk-removal scenario is intentionally NOT used:
+        // removing a shaft that feeds a seam voxel with a bright in-chunk neighbour forms a cross-chunk
+        // light loop (the seam voxels mutually support each other across the boundary), so no removal mod
+        // ever reaches the target — that orphaned-loop limitation is a separate concern that would mask
+        // exactly what finding 3 changed (the attenuation formula). ---
+        private const byte B49_NEIGHBOUR_SKY = 12; // the single lit in-chunk neighbour of the probe
+        private const byte B49_DIMGLASS_OPACITY = 5; // TestBlockPalette.DimGlass
+
+        /// <summary>
+        /// B49 (code-review finding 3, June 2026): guards that the cross-chunk sunlight removal veto
+        /// (<c>CrossChunkLightModApplier.InChunkSunlightSupport</c>) attenuates a neighbour's sky by the
+        /// <b>target voxel's opacity</b> (<c>max(1, opacity)</c>, matching
+        /// <c>NeighborhoodLightingJob.AttenuateLight</c> and the <c>CheckEdgeVoxel</c> cross-chunk guard),
+        /// not by a flat air step.
+        /// <para>
+        /// One in-chunk neighbour of the probe is set to sky <see cref="B49_NEIGHBOUR_SKY"/> (all other
+        /// neighbours stay dark). The guard's support for a DimGlass (opacity 5) target must therefore be
+        /// <c>sky − max(1,5) = sky − 5</c>, not the pre-fix flat <c>sky − 1</c>. We then drive the real
+        /// decision logic (<c>ComputeSunlight</c>) for a removal of a voxel held over-bright at a value
+        /// strictly between those two estimates: the opacity-aware support lets the legitimate removal
+        /// through, whereas the flat estimate would have vetoed it (pinning stale over-bright light until a
+        /// full relight).
+        /// </para>
+        /// <para>
+        /// A regression that reverts the attenuation to the flat air step flips both the support assertion
+        /// and the veto comparison red.
+        /// </para>
+        /// </summary>
+        private static bool Baseline_CrossSeamSunlightRemovalThroughDimGlass()
+        {
+            using LightingTestWorld world = new LightingTestWorld(1);
+
+            // Set a single lit in-chunk neighbour of the probe directly (no BFS / geometry), so the guard's
+            // support is a deterministic function of one known neighbour sky.
+            Vector3Int probe = new Vector3Int(8, 64, 8);
+            Vector3Int neighbour = new Vector3Int(7, 64, 8);
+            world.SetSkyLightAt(neighbour, B49_NEIGHBOUR_SKY);
+
+            // Finding 3: in-chunk support charges the TARGET voxel's opacity on entry (max(1, opacity)),
+            // so DimGlass (opacity 5) support is neighbourSky-5 — strictly below the pre-fix flat air step.
+            byte supportDim = world.InChunkSunlightSupportAt(probe, B49_DIMGLASS_OPACITY);
+            byte supportFlat = world.InChunkSunlightSupportAt(probe, 1);
+            bool passed = LightingAssert.IsTrue(
+                supportDim == B49_NEIGHBOUR_SKY - B49_DIMGLASS_OPACITY && supportFlat == B49_NEIGHBOUR_SKY - 1 && supportDim < supportFlat,
+                "B49: in-chunk support charges the target's opacity (neighbourSky-5), not the flat air step (neighbourSky-1)",
+                $"neighbourSky={B49_NEIGHBOUR_SKY}: DimGlass support={supportDim} (expected {B49_NEIGHBOUR_SKY - B49_DIMGLASS_OPACITY}), flat support={supportFlat} (expected {B49_NEIGHBOUR_SKY - 1})");
+
+            // A DimGlass voxel held over-bright at a value above its true (opacity-attenuated) support but
+            // at/below the flat estimate. The opacity-aware guard applies the legitimate removal; the
+            // pre-fix flat estimate would have spuriously vetoed it.
+            const byte overBright = B49_NEIGHBOUR_SKY - 3; // supportDim (sky-5) < overBright (sky-3) <= supportFlat (sky-1)
+            passed &= LightingAssert.IsTrue(!LightingTestWorld.CrossChunkSunlightRemovalVetoed(overBright, supportDim),
+                "B49: opacity-aware support does NOT veto the legitimate cross-chunk removal (it applies)",
+                $"removal of sky {overBright} with opacity-aware support {supportDim} was unexpectedly vetoed");
+            passed &= LightingAssert.IsTrue(LightingTestWorld.CrossChunkSunlightRemovalVetoed(overBright, supportFlat),
+                "B49: the pre-fix flat-attenuation support WOULD have vetoed the same removal (the bug the fix prevents)",
+                $"removal of sky {overBright} with flat support {supportFlat} was expected to be vetoed");
 
             return passed;
         }

@@ -76,19 +76,30 @@ namespace Helpers
 
         /// <summary>
         /// The strongest sky light an <b>in-chunk</b> neighbor of <paramref name="localPos"/> could still
-        /// supply it (best neighbor sky − 1 attenuation). Used to veto a spurious cross-chunk sunlight
-        /// removal: a voxel a neighbor inside the receiving chunk independently supports must not be
-        /// cleared to 0 by a darkness wave the emitting chunk computed against a stale snapshot — that is
-        /// the simultaneous mutual cross-seam removal/re-placement oscillation (Bug 11). Only neighbors
-        /// inside the chunk's own X/Z columns are consulted; the cross-chunk neighbors are exactly the
-        /// stale side the removal mod itself came from, so trusting them would defeat the guard.
+        /// supply it, attenuated by the cost of entering the target voxel. Used to veto a spurious
+        /// cross-chunk sunlight removal: a voxel a neighbor inside the receiving chunk independently
+        /// supports must not be cleared to 0 by a darkness wave the emitting chunk computed against a
+        /// stale snapshot — that is the simultaneous mutual cross-seam removal/re-placement oscillation
+        /// (Bug 11). Only neighbors inside the chunk's own X/Z columns are consulted; the cross-chunk
+        /// neighbors are exactly the stale side the removal mod itself came from, so trusting them would
+        /// defeat the guard.
+        /// <para>
+        /// Attenuation matches <c>NeighborhoodLightingJob.AttenuateLight</c> (and the cross-chunk
+        /// <c>CheckEdgeVoxel</c> guard): light is charged the <b>destination</b> voxel's opacity on entry,
+        /// <c>max(1, targetOpacity)</c> per step. Passing the flat air cost (opacity ≤ 1) would
+        /// over-estimate support into semi-transparent media and wrongly veto a legitimate removal,
+        /// leaving stale over-bright light until a full relight.
+        /// </para>
         /// </summary>
         /// <param name="chunk">The chunk receiving the cross-chunk modification.</param>
         /// <param name="localPos">The local voxel position the modification targets.</param>
+        /// <param name="targetOpacity">The opacity of the voxel at <paramref name="localPos"/> (the light
+        /// enters this voxel, so it pays this voxel's opacity — minimum 1).</param>
         /// <returns>The maximum attenuated sky a same-chunk neighbor supports (0 if none).</returns>
-        public static byte InChunkSunlightSupport(ChunkData chunk, Vector3Int localPos)
+        public static byte InChunkSunlightSupport(ChunkData chunk, Vector3Int localPos, byte targetOpacity)
         {
             byte best = 0;
+            int cost = Mathf.Max(1, targetOpacity); // mirrors AttenuateLight: max(1, opacity)
             for (int i = 0; i < 6; i++)
             {
                 Vector3Int n = localPos + VoxelData.FaceChecks[i];
@@ -98,8 +109,8 @@ namespace Helpers
                     continue; // cross-chunk (untrusted) or out of vertical range
 
                 byte s = LightBitMapping.GetSkyLight(chunk.GetLightData(n.x, n.y, n.z));
-                if (s > best + 1)
-                    best = (byte)(s - 1);
+                if (s > cost && s - cost > best)
+                    best = (byte)(s - cost);
             }
 
             return best;

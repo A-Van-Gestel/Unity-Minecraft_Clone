@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Data;
 using Helpers;
 using Jobs;
+using Jobs.BurstData;
 using Serialization;
 using Unity.Collections;
 using Unity.Jobs;
@@ -806,7 +807,7 @@ namespace Editor.Validation.Lighting.Framework
         /// <param name="target">The chunk the modification targets.</param>
         /// <param name="mod">The cross-chunk modification emitted by a neighbor's lighting job.</param>
         /// <returns>True when the decision resulted in an actual write + wake-up node.</returns>
-        private static bool ApplyModToChunk(TestChunk target, in LightModification mod)
+        private bool ApplyModToChunk(TestChunk target, in LightModification mod)
         {
             Vector3Int localPos = new Vector3Int(
                 mod.GlobalPosition.x - target.VoxelOrigin.x,
@@ -815,10 +816,17 @@ namespace Editor.Validation.Lighting.Framework
 
             ushort currentLight = target.Data.GetLightData(localPos.x, localPos.y, localPos.z);
 
-            // Mirror WorldJobManager: only sunlight removals (LightLevel == 0) consult in-chunk support.
-            byte inChunkSunSupport = mod.Channel == LightChannel.Sun && mod.LightLevel == 0
-                ? CrossChunkLightModApplier.InChunkSunlightSupport(target.Data, localPos)
-                : (byte)0;
+            // Mirror WorldJobManager: only sunlight removals (LightLevel == 0) consult in-chunk support,
+            // attenuated by the target voxel's own opacity (the light enters it) via the test palette.
+            byte inChunkSunSupport = 0;
+            if (mod.Channel == LightChannel.Sun && mod.LightLevel == 0)
+            {
+                ushort targetId = BurstVoxelDataBitMapping.GetId(
+                    target.Data.GetVoxel(localPos.x, localPos.y, localPos.z));
+                byte targetOpacity = _blockTypes[targetId].Opacity;
+                inChunkSunSupport = CrossChunkLightModApplier.InChunkSunlightSupport(target.Data, localPos, targetOpacity);
+            }
+
             CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, inChunkSunSupport);
             if (!decision.ShouldApply) return false;
 

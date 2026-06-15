@@ -242,6 +242,52 @@ namespace Editor.Validation.Lighting.Framework
             return (LightBitMapping.GetBlocklightR(light), LightBitMapping.GetBlocklightG(light), LightBitMapping.GetBlocklightB(light));
         }
 
+        /// <summary>
+        /// Test affordance: writes a raw sky-light value directly into a single voxel's light data (no BFS
+        /// pass), so guard/probe baselines can set up a deterministic neighbour light field without
+        /// relying on flood propagation or surrounding geometry.
+        /// </summary>
+        /// <param name="worldPos">The world-space voxel position.</param>
+        /// <param name="sky">The sky-light level (0-15) to write.</param>
+        public void SetSkyLightAt(Vector3Int worldPos, byte sky)
+        {
+            TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
+            ushort light = chunk.Data.GetLightData(localPos.x, localPos.y, localPos.z);
+            chunk.Data.SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkyLight(light, sky));
+        }
+
+        /// <summary>
+        /// Test affordance over the production cross-chunk guard: the in-chunk sunlight support
+        /// (<see cref="CrossChunkLightModApplier.InChunkSunlightSupport"/>) computed for the voxel at
+        /// <paramref name="worldPos"/>, as if it had the given opacity. Lets finding-3 baselines assert the
+        /// guard charges the <b>target voxel's</b> opacity (<c>max(1, opacity)</c>) on entry rather than a
+        /// flat air step.
+        /// </summary>
+        /// <param name="worldPos">The world-space voxel position whose in-chunk neighbours are sampled.</param>
+        /// <param name="targetOpacity">The opacity to attenuate the neighbours' sky by (the entry cost).</param>
+        /// <returns>The strongest opacity-attenuated sky a same-chunk neighbour supplies.</returns>
+        public byte InChunkSunlightSupportAt(Vector3Int worldPos, byte targetOpacity)
+        {
+            TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
+            return CrossChunkLightModApplier.InChunkSunlightSupport(chunk.Data, localPos, targetOpacity);
+        }
+
+        /// <summary>
+        /// Test affordance over the production decision logic: runs
+        /// <see cref="CrossChunkLightModApplier.ComputeSunlight"/> for a cross-chunk sunlight REMOVAL
+        /// (level 0) against a voxel currently holding <paramref name="currentSky"/>, given
+        /// <paramref name="inChunkSupport"/>. Returns true when the removal is SKIPPED (vetoed because an
+        /// in-chunk source still supports the current value).
+        /// </summary>
+        /// <param name="currentSky">The voxel's current sky light (0-15).</param>
+        /// <param name="inChunkSupport">The in-chunk support the guard was given.</param>
+        /// <returns>True when the removal is vetoed, false when it applies.</returns>
+        public static bool CrossChunkSunlightRemovalVetoed(byte currentSky, byte inChunkSupport)
+        {
+            ushort currentLight = LightBitMapping.SetSkyLight(0, currentSky);
+            return !CrossChunkLightModApplier.ComputeSunlight(currentLight, 0, inChunkSupport).ShouldApply;
+        }
+
         /// <summary>True if any chunk in the grid still has pending light work.</summary>
         public bool HasPendingLightWork
         {
