@@ -208,16 +208,24 @@ Production is unbounded while consumption is fixed-per-frame:
 - `ForceCompleteDataJobsCoroutine` (`World.cs:802`) yields one frame per sweep, so convergence takes
   many sweeps over the whole load area even when everything behaves.
 
-### 4.2 Suspected (unconfirmed) RGB-era stability bug
+### 4.2 Confirmed stability bug — sunlight, not RGB (Bug 11, fixed June 2026)
 
 The reported symptom — churn until `safetyBreak` triggers — fits a chunk (or set of chunks) whose
-lighting job persistently reports `IsStable = false`:
+lighting job persistently reports `IsStable = false`. This was **confirmed via the `[LightingDiag]`
+instrumentation** (§4.3) on a stuck reload: every sweep showed `unstable = <clusterSize>`,
+`edgeRecycle = 0`, and a perfectly balanced `eff[sunPl=K, sunRm=K]` — a **sunlight** (not RGB)
+removal/re-placement 2-cycle across chunk seams. See [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)
+Bug 11 for the full mechanism.
 
-- `ApplyLightingJobResult` overwrites the live light map from a pre-job snapshot (§2); cross-chunk
-  mods applied during the job window are lost by design and repaired by edge-check rounds.
-- The per-channel MAX guards for cross-chunk RGB mods (`WorldJobManager.cs`, ~lines 676–690) and the
-  sunlight uplift guard (~line 663) are candidates for re-enqueueing the same mods every round if
-  any RGB path computes a value that never converges.
+- Root cause: a cross-chunk sunlight **removal** mod (`CrossChunkLightModApplier.ComputeSunlight`,
+  level 0) was applied unconditionally, force-clearing a seam voxel to 0. When two adjacent chunks
+  reloaded mid-darkness-wave remove each other's shared, mutually-supported seam column in the same
+  wave, each clobbers the other's freshly re-lit value against a stale snapshot and the pair never
+  converges (settling one level below the oracle).
+- Fix: `ComputeSunlight` now skips a removal when an in-chunk neighbor independently supports the
+  current value (`InChunkSunlightSupport`). Reproduced + guarded by lighting suite scenario **K11a**.
+- (The earlier suspicion pointed at the per-channel RGB MAX guards / sunlight uplift guard; the
+  instrumentation ruled RGB out — blocklight never participated.)
 
 ### 4.3 How to separate 4.1 from 4.2 (do this first)
 

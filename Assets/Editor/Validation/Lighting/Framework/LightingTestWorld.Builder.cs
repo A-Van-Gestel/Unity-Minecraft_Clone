@@ -177,6 +177,24 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <summary>
+        /// Seeds a sunlight removal BFS node directly into the owning chunk's queue, mirroring a chunk
+        /// loaded from a save whose persisted <c>SunlightBfsQueue</c> (<c>ChunkSerializer.ReadLightQueue</c>)
+        /// still held an in-flight darkness node — i.e. the chunk was serialized mid-darkness-wave, so on
+        /// reload it carries a removal seed that the live light field has no source for. The job's
+        /// queue-seeding (<c>NeighborhoodLightingJob</c>) turns this into an actual removal pass when the
+        /// live voxel's current sky light is below <paramref name="oldLevel"/>, exactly as a loaded node does.
+        /// </summary>
+        /// <param name="worldPos">The world-space voxel position of the seeded removal node.</param>
+        /// <param name="oldLevel">The pre-removal sky level the node carries (the strength of the darkness wave);
+        /// must exceed the voxel's current sky light for the node to launch a removal.</param>
+        public void SeedLoadedSunlightRemoval(Vector3Int worldPos, byte oldLevel)
+        {
+            TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
+            chunk.SunQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLevel });
+            chunk.HasLightWork = true;
+        }
+
+        /// <summary>
         /// Enqueues all 256 columns of a chunk for sunlight recalculation — the production seeding
         /// for a freshly generated chunk's initial lighting pass (<c>RecalculateSunLightLight</c>).
         /// </summary>

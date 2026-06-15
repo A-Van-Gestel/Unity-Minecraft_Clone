@@ -31,7 +31,6 @@ namespace Editor.Validation.Lighting
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
             // No open known-bug scenarios. Bug 05 and Bug 09 still need faithful repros (see notes above);
-            // Bug 10 was fixed and its repros promoted to baselines B43/B44.
         }
     }
 }

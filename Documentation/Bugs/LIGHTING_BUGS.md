@@ -81,4 +81,3 @@ seed and ordering.
 The Bug 07/08 cross-chunk mod delivery fixes were already present when Bug 09 was last observed — the bug is either a genuine async race condition (Burst job system timing, IL2CPP memory ordering) that synchronous `.Run()` cannot reproduce, or is no longer present in the current codebase. A faithful failing repro is still TODO before this bug's fix can be test-driven; the surviving baselines serve as regression guards.
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
-

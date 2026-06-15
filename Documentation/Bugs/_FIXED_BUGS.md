@@ -255,6 +255,38 @@ Voxels just inside a chunk border ended up **over-bright** (more light than the 
 
 ---
 
+### ~~15. Initial-load sunlight removal/re-placement oscillation across chunk seams (reload non-convergence)~~
+
+**Severity:** Medium-High
+**Fixed:** June 2026 (was Bug 11 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game (the world that stalled now loads quickly with no stuck-light logging) AND via the validation suite (repro flipped red→green, all baselines green). Promoted to validation baseline **B48** from known-bug repro K11a.
+**Confidence:** Confirmed in-game and by the validation framework.
+**Found by:** a user-reported `ForceCompleteDataJobsCoroutine exceeded max iterations` error on reloading a recently-played world; root-caused with the gated `[LightingDiag]` startup-convergence instrumentation added to `World.ForceCompleteDataJobsCoroutine` / `WorldJobManager.ProcessLightingJobs`.
+**Files:** `CrossChunkLightModApplier.cs` (`ComputeSunlight`, new `InChunkSunlightSupport`), `WorldJobManager.cs` (`ApplyCrossChunkLightMod` apply site + diagnostics), `World.cs` (startup convergence diagnostics).
+
+**Description:**
+Loading a recently-played, saved world (created → moved around → saved → reload) could stall the synchronous startup lighting pass until its safety watchdog tripped:
+
+```
+ForceCompleteDataJobsCoroutine exceeded max iterations (N) during Lighting Phase. Forcing exit.
+Remaining jobs: Lighting(0). Pending chunks: InitialLight(0), LightChanges(M), EdgeChecks(0)
+```
+
+A small cluster of chunks never reached a lighting fixpoint: every sweep their `NeighborhoodLightingJob` reported `IsStable = false` and emitted cross-chunk sunlight mods, so `HasLightChangesToProcess` was re-set immediately after the jobs drained. The world still loaded (the coroutine force-exits and `Update()` continues), but the initial load was slow (tens of seconds) and the console spammed the error. Freshly generated worlds were unaffected.
+
+**Root Cause (confirmed via `[LightingDiag]` instrumentation):**
+A **stale-snapshot sunlight removal/re-placement 2-cycle** across chunk seams. Diagnostics on a stuck load showed, every sweep: `unstable = <clusterSize>`, `edgeRecycle = 0`, and a perfectly balanced `eff[sunPl=K, sunRm=K]` (blocklight uninvolved), with the same voxel flipping forever (`Sun rm @(x,y,z) sky 10->0`).
+
+Each sweep all of a chunk's neighbor lighting jobs run against **schedule-time snapshots** (the `LightN/LightE/...` maps), one sweep stale. Where skylight is **mutually supported across a seam** (both sides feed the same border column) and a chunk loads with a persisted in-flight darkness node (`ChunkSerializer.ReadLightQueue` restores `SunlightBfsQueue` — the chunk was serialized mid-darkness-wave), one chunk's `PropagateDarkness` clears the across-border voxel (`SetSunlight(..., 0)` → removal mod, which `CrossChunkLightModApplier.ComputeSunlight`
+applied **unconditionally**) while the neighbor — working from a stale snapshot where the source still looks present — re-places it and pushes back. Neither job sees the other's current state in the same sweep, so removal and placement cancel forever and the border settles one level below the oracle. The re-placement is correct (the value is genuinely supported); the removal is the spurious actor, driven by the stale view. Reload-specific because a fresh world fills skylight top-down consistently (no removal waves), whereas a reloaded world restores
+per-chunk BFS queues captured mid-propagation, giving adjacent chunks inconsistent border skylight — the seed for the stable cycle.
+
+**Fix (June 2026):**
+`CrossChunkLightModApplier.ComputeSunlight` now vetoes a cross-chunk sunlight **removal** (level 0) when a neighbor *inside the receiving chunk* independently supports the current value (`InChunkSunlightSupport(chunk, localPos) >= currentSunlight`). The in-chunk side is the only data the receiver can trust — the cross-chunk side is exactly the stale source of the bad removal. A genuinely dependent voxel (no in-chunk support) still clears, so legitimate cross-chunk darkness (B3 roof shadow, B43/B44 opaque-border) is preserved. Both apply sites —
+production `WorldJobManager.ApplyCrossChunkLightMod` and harness `LightingTestWorld.ApplyModToChunk` — compute the in-chunk support and pass it to the shared applier, so the decision is never duplicated. Guarded by baseline **B48** (two symmetric sky shafts feeding a seam, both seam chunks seeded with a stale reload removal, run wave-parallel → converges and matches the borderless oracle; before the fix it pinned the seam at sky 4 instead of 5 and never converged).
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

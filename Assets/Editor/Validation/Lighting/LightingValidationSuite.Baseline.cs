@@ -74,6 +74,9 @@ namespace Editor.Validation.Lighting
             // --- Bug 10 (fixed June 2026, promoted from K10a/K10b): opaque-border light leak ---
             scenarios.Add(new Scenario("B43: No sunlight leaks out of an opaque block across a chunk border (Bug 10 guard)", Baseline_OpaqueBorderSunlightNoLeak));
             scenarios.Add(new Scenario("B44: No surface blocklight leaks out of an opaque block across a chunk border (Bug 10 guard)", Baseline_OpaqueBorderBlocklightNoLeak));
+
+            // --- Bug 11 (fixed June 2026, promoted from K11a): cross-seam sunlight removal oscillation on reload ---
+            scenarios.Add(new Scenario("B48: Reload mid-darkness-wave at a mutually-lit seam converges to the oracle — no sunlight removal/replace oscillation (Bug 11 guard)", Baseline_ReloadSeamSunlightNoOscillation));
         }
 
         /// <summary>
@@ -1340,6 +1343,79 @@ namespace Editor.Validation.Lighting
             passed &= LightingAssert.IsTrue(crossBorder.R >= 13,
                 "B41: blocklight crosses the chunk border once the deferred work runs",
                 $"Expected R >= 13 at x=32, got ({crossBorder.R},{crossBorder.G},{crossBorder.B})");
+
+            return passed;
+        }
+
+        // --- B48 geometry (Bug 11): a horizontal sky corridor lit from two symmetric shafts that meet
+        // at a chunk seam, so the seam columns are mutually supported from both sides. ---
+        private const int B48_FLOOR_Y = 63;
+        private const int B48_CORRIDOR_Y = 64;
+        private const int B48_ROOF_Y = 65;
+        private const int B48_CORRIDOR_Z = 24;
+        private const int B48_WEST_SHAFT_X = 5; // chunk (0,1): x 0..15
+        private const int B48_EAST_SHAFT_X = 26; // chunk (1,1): x 16..31 — symmetric about the x15|16 seam
+
+        /// <summary>
+        /// B48 (promoted from K11a, Bug 11, fixed June 2026): guards against the stale-snapshot sunlight
+        /// removal/re-placement oscillation across a chunk seam that stalled the initial load of reloaded
+        /// worlds (<c>ForceCompleteDataJobsCoroutine exceeded max iterations</c>).
+        /// <para>
+        /// Builds a roofed horizontal corridor lit by two symmetric vertical sky shafts (one per seam
+        /// chunk) so the shared border columns are fed equally from both sides (each reaches the seam at
+        /// distance 10 → sky 5). After convergence, BOTH seam chunks are seeded with a stale sunlight
+        /// removal node via <see cref="LightingTestWorld.SeedLoadedSunlightRemoval"/> — the faithful
+        /// mirror of two adjacent chunks reloaded from a save written mid-darkness-wave
+        /// (<c>ChunkSerializer.ReadLightQueue</c> restores an in-flight <c>SunlightBfsQueue</c> node) —
+        /// then the grid is run <b>wave-parallel</b> (all jobs snapshot the same pre-round state).
+        /// </para>
+        /// <para>
+        /// The fix (<c>CrossChunkLightModApplier.ComputeSunlight</c> + <c>InChunkSunlightSupport</c>)
+        /// vetoes a cross-chunk sunlight removal that an in-chunk neighbor still independently supports,
+        /// so the wave converges and matches the borderless oracle. Before the fix this never converged
+        /// and pinned the two seam voxels at sky 4 instead of 5 — a regression here means the veto
+        /// weakened or the removal path again clobbers independently-supported seam light.
+        /// </para>
+        /// </summary>
+        private static bool Baseline_ReloadSeamSunlightNoOscillation()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            int width = world.GridSize * VoxelData.ChunkWidth;
+
+            // Solid floor under the whole grid; opaque roof everywhere EXCEPT the two shaft columns,
+            // which stay open so vertical skylight reaches the corridor and spreads horizontally.
+            world.FillBox(new Vector3Int(0, B48_FLOOR_Y, 0), new Vector3Int(width - 1, B48_FLOOR_Y, width - 1),
+                TestBlockPalette.Stone);
+            for (int x = 0; x < width; x++)
+            {
+                for (int z = 0; z < width; z++)
+                {
+                    bool isShaft = z == B48_CORRIDOR_Z && (x == B48_WEST_SHAFT_X || x == B48_EAST_SHAFT_X);
+                    if (!isShaft)
+                        world.SetBlock(new Vector3Int(x, B48_ROOF_Y, z), TestBlockPalette.Stone);
+                }
+            }
+
+            world.RecalculateHeightmaps();
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B48: initial lighting converges");
+
+            // The seam columns are mutually lit to sky 5 from the two shafts before the perturbation.
+            Vector3Int westSeam = new Vector3Int(15, B48_CORRIDOR_Y, B48_CORRIDOR_Z);
+            Vector3Int eastSeam = new Vector3Int(16, B48_CORRIDOR_Y, B48_CORRIDOR_Z);
+            passed &= LightingAssert.IsTrue(world.GetSkyLight(westSeam) == 5 && world.GetSkyLight(eastSeam) == 5,
+                "B48: seam columns are mutually lit to sky 5 before reload",
+                $"Expected 5/5, got {world.GetSkyLight(westSeam)}/{world.GetSkyLight(eastSeam)}");
+
+            // Reload mid-darkness-wave: both seam chunks come back carrying a stale removal seed at their
+            // shared border (strength 15, above the live value, so each launches a darkness wave back
+            // across the seam against the other's stale snapshot).
+            world.SeedLoadedSunlightRemoval(westSeam, 15);
+            world.SeedLoadedSunlightRemoval(eastSeam, 15);
+
+            passed &= LightingAssert.Converged(world.RunWaveToConvergence(),
+                "B48: reload reconciliation converges (no removal/replace oscillation)");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B48: reloaded seam matches the oracle field");
 
             return passed;
         }

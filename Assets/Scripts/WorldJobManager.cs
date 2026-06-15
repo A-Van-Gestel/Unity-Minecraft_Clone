@@ -973,7 +973,13 @@ public class WorldJobManager : IDisposable
         Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
         ushort currentLight = targetChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
-        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod);
+        // Only sunlight REMOVALs (LightLevel == 0) consult in-chunk support — see
+        // CrossChunkLightModApplier.ComputeSunlight. Skip the 6-neighbor scan for placements/uplifts
+        // (the common case during initial-load sunlight propagation), whose decision ignores it.
+        byte inChunkSunSupport = mod.Channel == LightChannel.Sun && mod.LightLevel == 0
+            ? CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos)
+            : (byte)0;
+        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, inChunkSunSupport);
 
         if (!decision.ShouldApply)
         {

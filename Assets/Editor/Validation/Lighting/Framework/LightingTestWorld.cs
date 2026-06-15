@@ -815,7 +815,11 @@ namespace Editor.Validation.Lighting.Framework
 
             ushort currentLight = target.Data.GetLightData(localPos.x, localPos.y, localPos.z);
 
-            CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod);
+            // Mirror WorldJobManager: only sunlight removals (LightLevel == 0) consult in-chunk support.
+            byte inChunkSunSupport = mod.Channel == LightChannel.Sun && mod.LightLevel == 0
+                ? CrossChunkLightModApplier.InChunkSunlightSupport(target.Data, localPos)
+                : (byte)0;
+            CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, inChunkSunSupport);
             if (!decision.ShouldApply) return false;
 
             target.Data.SetLightData(localPos.x, localPos.y, localPos.z, decision.NewLight);
