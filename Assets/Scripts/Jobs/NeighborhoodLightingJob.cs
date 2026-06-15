@@ -439,13 +439,14 @@ namespace Jobs
 
         /// <summary>
         /// Calculates the attenuated light level after passing through a block.
-        /// Uses the Starlight/Moonrise formula: attenuation = max(1, opacity).
-        /// Air (opacity 0) costs 1 level; semi-transparent blocks cost their opacity.
+        /// Forwards to the shared <see cref="LightAttenuation.Attenuate"/> (the single definition of the
+        /// Starlight/Moonrise formula <c>max(0, sourceLight - max(1, opacity))</c>) so the BFS, the
+        /// validation oracle, and the cross-chunk veto can never disagree on attenuation.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static byte AttenuateLight(int sourceLight, byte opacity)
         {
-            return (byte)math.max(0, sourceLight - math.max(1, opacity));
+            return LightAttenuation.Attenuate(sourceLight, opacity);
         }
 
         private void PropagateLight(Vector3Int pos, LightChannel channel, NativeQueue<Vector3Int> pQueue, ref NativeHashMap<long, ulong> cache)

@@ -85,9 +85,9 @@ namespace Helpers
         /// neighbors are exactly the stale side the removal mod itself came from, so trusting them would
         /// defeat the guard.
         /// <para>
-        /// Attenuation matches <c>NeighborhoodLightingJob.AttenuateLight</c> (and the cross-chunk
-        /// <c>CheckEdgeVoxel</c> guard): light is charged the <b>destination</b> voxel's opacity on entry,
-        /// <c>max(1, targetOpacity)</c> per step. Passing the flat air cost (opacity ≤ 1) would
+        /// Attenuation uses the shared <see cref="LightAttenuation.Attenuate"/> (the same definition the
+        /// BFS and the validation oracle use): light is charged the <b>destination</b> voxel's opacity on
+        /// entry, <c>max(1, targetOpacity)</c> per step. Passing the flat air cost (opacity ≤ 1) would
         /// over-estimate support into semi-transparent media and wrongly veto a legitimate removal,
         /// leaving stale over-bright light until a full relight.
         /// </para>
@@ -110,7 +110,6 @@ namespace Helpers
         public static byte InChunkSunlightSupport(ChunkData chunk, Vector3Int localPos, byte targetOpacity, Func<ushort, bool> isBlockFullyOpaque)
         {
             byte best = 0;
-            int cost = Mathf.Max(1, targetOpacity); // mirrors AttenuateLight: max(1, opacity)
             for (int i = 0; i < 6; i++)
             {
                 Vector3Int n = localPos + VoxelData.FaceChecks[i];
@@ -120,7 +119,8 @@ namespace Helpers
                     continue; // cross-chunk (untrusted) or out of vertical range
 
                 byte s = LightBitMapping.GetSkyLight(chunk.GetLightData(n.x, n.y, n.z));
-                if (s <= cost || s - cost <= best)
+                byte support = LightAttenuation.Attenuate(s, targetOpacity);
+                if (support <= best)
                     continue; // can't improve the best support — skip the voxel read + opacity check
 
                 // A fully-opaque neighbor cannot propagate sunlight (mirror of PropagateLight's IsOpaque
@@ -129,7 +129,7 @@ namespace Helpers
                 if (isBlockFullyOpaque(neighborId))
                     continue;
 
-                best = (byte)(s - cost);
+                best = support;
             }
 
             return best;

@@ -209,10 +209,14 @@ namespace Editor.Validation.Lighting.Framework
             }
         }
 
-        /// <summary>Starlight attenuation: air costs 1 level, semi-transparent blocks cost their opacity.</summary>
+        /// <summary>
+        /// Starlight attenuation: air costs 1 level, semi-transparent blocks cost their opacity. Forwards
+        /// to the shared <see cref="LightAttenuation.Attenuate"/> so the oracle's ground truth uses the
+        /// exact same formula as the production BFS and the cross-chunk veto.
+        /// </summary>
         private static byte Attenuate(int sourceLight, byte opacity)
         {
-            return (byte)Mathf.Max(0, sourceLight - Mathf.Max(1, opacity));
+            return LightAttenuation.Attenuate(sourceLight, opacity);
         }
 
         private static bool StampMax(byte[] channel, int index, byte value)
