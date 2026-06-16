@@ -7,7 +7,8 @@ description: Test-driven workflow for fixing documented engine bugs using an edi
 
 Fix documented engine bugs test-first: encode the bug as a deterministic, expected-to-fail scenario in an editor validation suite, then fix until it flips green while every baseline stays green. This turns timing-dependent, in-game-only artifacts (flicker, races, cross-chunk corruption) into assertions that run headlessly via a menu item.
 
-This protocol is **system-agnostic** within this project. The lighting suite (`Assets/Editor/Validation/Lighting/`) is the reference implementation — concrete file/API pointers live in `references/lighting-suite.md`. When building a suite for a new system (fluids, chunk pipeline, …), follow `references/building-a-new-suite.md`.
+This protocol is **system-agnostic** within this project. The lighting suite (`Assets/Editor/Validation/Lighting/`) is the reference implementation — concrete file/API pointers live in `references/lighting-suite.md`. The meshing suite (`Assets/Editor/Validation/Meshing/`, `references/meshing-suite.md`) is a second worked example with a different emphasis: a **performance-refactor regression guard** (oracle = current pre-optimization ground truth) rather than bug reproduction — copy it when guarding an output-preserving optimization. When building a suite
+for a new system (fluids, chunk pipeline, …), follow `references/building-a-new-suite.md`.
 
 ## Relationship to other skills
 
