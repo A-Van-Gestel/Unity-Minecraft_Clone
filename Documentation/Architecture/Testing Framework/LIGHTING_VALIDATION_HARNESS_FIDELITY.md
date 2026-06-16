@@ -22,7 +22,7 @@ It is **blind** wherever it *reimplements* production or *omits a pipeline stage
 
 - We don't mistake "all baselines pass" for "lighting is correct" in an un-modelled area.
 - We don't waste effort authoring a repro for a bug that lives in a structurally-unreachable layer
-  (e.g. Bug 09 — see [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)).
+  (e.g. Bug 09 — see [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)).
 - We have a prioritized backlog of harness improvements.
 
 Findings came from a June 2026 audit comparing the harness against production
@@ -425,7 +425,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 ## 7. Cross-references
 
 - Harness file map & API: `.agents/skills/validation-driven-bugfix/references/lighting-suite.md`
-- Frame simulator design: [LIGHTING_FRAME_SIMULATOR_DESIGN.md](../Design/LIGHTING_FRAME_SIMULATOR_DESIGN.md)
-- Open lighting bugs (Bug 05, Bug 09): [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)
-- Lighting system overview: [LIGHTING_SYSTEM_OVERVIEW.md](./LIGHTING_SYSTEM_OVERVIEW.md)
+- Frame simulator architecture: [LIGHTING_FRAME_SIMULATOR_DESIGN.md](LIGHTING_FRAME_SIMULATOR_DESIGN.md)
+- Open lighting bugs (Bug 05, Bug 09): [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)
+- Lighting system overview: [LIGHTING_SYSTEM_OVERVIEW.md](../LIGHTING_SYSTEM_OVERVIEW.md)
 - Pipeline invariants: `.agents/rules/chunk-pipeline.md`, `.agents/rules/pool-reset-safety.md`

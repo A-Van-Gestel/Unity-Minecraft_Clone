@@ -138,7 +138,7 @@ namespace Editor.Validation.Lighting.Framework
             /// uniform-sky compaction. The harness reads, writes, snapshots, and merges light through the
             /// same <see cref="ChunkData"/> code production uses (<c>GetLightData</c>/<c>SetLightData</c>,
             /// <c>FillJobLightMap</c>, <c>ApplyJobLightMap</c>) — closing the section-merge fidelity gap
-            /// (see Documentation/Architecture/LIGHTING_VALIDATION_HARNESS_FIDELITY.md, finding A1).
+            /// (see Documentation/Architecture/Testing Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md, finding A1).
             /// </summary>
             public readonly ChunkData Data;
 
@@ -181,7 +181,7 @@ namespace Editor.Validation.Lighting.Framework
             /// models the chunk's own re-lighting being blocked on still-generating neighbor terrain.
             /// Toggled via <see cref="MarkNeighborsNotReady"/> / <see cref="MarkNeighborsReady"/>
             /// (default true). Closes finding B2 in
-            /// Documentation/Architecture/LIGHTING_VALIDATION_HARNESS_FIDELITY.md.
+            /// Documentation/Architecture/Testing Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md.
             /// </summary>
             public bool NeighborsReady = true;
 

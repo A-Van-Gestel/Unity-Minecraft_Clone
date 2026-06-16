@@ -1,8 +1,7 @@
-# Lighting Frame Simulator — Design Draft
+# Lighting Frame Simulator
 
-**Status:** Implemented
-**Date:** June 2026
-**Purpose:** Enable deterministic reproduction of orchestration-layer lighting bugs (Bug 09, potentially Bug 05 variants) that the current `LightingTestWorld` harness cannot model.
+**Status:** Implemented (June 2026)
+**Purpose:** Deterministic reproduction of orchestration-layer lighting timing — the frame-loop scheduling decisions in `World.Update` / `WorldJobManager` (job in-flight guard, per-frame budget, mid-flight voxel edits, completion order) that the `LightingTestWorld` algebra harness alone cannot model. Built to hunt Bug 09 (cross-chunk blocklight race), which remains open/unreproduced; see §4 for current status.
 
 ---
 
@@ -25,7 +24,7 @@ Add a **`LightingFrameSimulator`** class that wraps `LightingTestWorld` and repl
 
 ```
 ┌─────────────────────────────────────────────────┐
-│              Test Scenario (B17, K09c, …)        │
+│              Test Scenario (B15, B22, …)         │
 │  Setup world → inject actions → run frames      │
 ├─────────────────────────────────────────────────┤
 │            LightingFrameSimulator                │
@@ -102,34 +101,15 @@ This is a **behavior-neutral refactor** — committed alone before any simulator
 Assets/Editor/Validation/Lighting/Framework/LightingFrameSimulator.cs
 ```
 
-#### Per-chunk state (mirrors `ChunkData` scheduling fields)
+#### Per-chunk scheduling state
 
-```csharp
-private class ChunkSchedulingState
-{
-    public bool HasLightChangesToProcess;
-    // In-flight tracking is delegated to LightingTestWorld._inFlightCoords
-}
-```
+No separate scheduling-state class is needed. The simulator reuses the harness's existing per-chunk state as the single source of truth:
 
-The `HasLightChangesToProcess` flag in the simulator mirrors the production flag. It's set when:
+- `TestChunk.HasLightWork` — "chunk has pending BFS work / should attempt to schedule" (already exists)
+- `LightingTestWorld._inFlightCoords` — "a job is in-flight for this chunk" (already exists; the simulator reads it via `IsChunkInFlight`)
 
-- A voxel modification enqueues BFS nodes (via `LightingTestWorld.Builder.PlaceBlock` / `BreakBlock` / `SetBlock`)
-- Cross-chunk mods are applied (wake-up nodes set `HasLightWork`)
-- A job completes not-stable
-
-It's cleared when a job is successfully scheduled (matching production's line 434: `chunkData.HasLightChangesToProcess = false`).
-
-**Why not reuse `TestChunk.HasLightWork`?** `HasLightWork` serves double duty in the current harness — it's both the "has pending BFS nodes" flag and the scheduling trigger. The simulator needs to separate these: `HasLightWork` drives whether there are BFS nodes to drain into a job, while `HasLightChangesToProcess` drives whether the scheduler *tries* to schedule. In production these are the same field, but the simulator needs to model the case where `HasLightChangesToProcess` is true but scheduling fails (ContainsKey guard), and then a *new* voxel edit
-sets it again redundantly.
-
-After more thought: we can keep using `TestChunk.HasLightWork` as the single source of truth (it already tracks "chunk has pending BFS work"), and the simulator's scheduling guard is simply: `HasLightWork && !InFlight`. The redundant-set case (fluid edit while in-flight re-sets `HasLightWork`) is naturally handled because `CompleteLightingJob` doesn't clear `HasLightWork` if new nodes were enqueued during the flight. This matches production: `HasLightChangesToProcess` is cleared at schedule time, but re-set by any `AddToBlockLightQueue` call during the
-flight.
-
-**Revised:** No separate `ChunkSchedulingState` class needed. The simulator uses:
-
-- `TestChunk.HasLightWork` — "should attempt to schedule" (already exists)
-- `LightingTestWorld._inFlightCoords` — "is in-flight" (already exists, needs read access)
+The scheduling guard is therefore simply `HasLightWork && !IsChunkInFlight(coord)`. This faithfully mirrors production's `HasLightChangesToProcess` lifecycle: the flag is cleared at schedule time (when `BeginLightingJob` drains the managed queues) but re-set by any `AddToBlockLightQueue` call that lands during a flight — including the redundant-set case where a fluid edit re-flags an already-in-flight chunk. `CompleteLightingJob` leaves `HasLightWork` true if new nodes were enqueued mid-flight, so the chunk re-schedules on the next frame. `HasLightWork`
+thus serves both roles (pending-BFS-nodes and scheduling-trigger) without a parallel flag.
 
 #### Core API
 
@@ -316,59 +296,30 @@ In the harness, `TestChunk.HasLightWork` and the managed queues (`SunQueue`, `Bl
 
 The only thing the simulator adds is: **when `BeginLightingJob` is skipped (ContainsKey guard), `HasLightWork` stays true and BFS nodes stay in the managed queue.** This happens naturally — the simulator simply doesn't call `BeginLightingJob` for that chunk, so nothing drains the queue or clears the flag.
 
-## 4. Test Scenarios Enabled
+## 4. Test Scenarios — Status
 
-### K09c: Single-frame break+place with ContainsKey rejection
+The simulator was built to reproduce Bug 09 (orchestration-layer cross-chunk blocklight races). A family of repro attempts (the K09 series) was authored, each layering more production pressure: ContainsKey scheduling rejection, single-slot budget starvation, fluid contention mid-flight, held multi-frame flights, and seeded shuffling of both completion and scheduling order.
 
-The simplest Bug 09 repro attempt that the current harness can't model:
+**Status so far: none of the attempts has reproduced Bug 09 — every modeled scenario converges to the oracle.** This is **not** a proof that the orchestration layer is correct; it only means the specific timing configurations modeled to date do not trigger the bug. **Bug 09 therefore remains open / unreproduced — not fixed.** Per the validation-driven-bugfix protocol, each non-reproducing attempt was promoted to a permanent baseline so the scenario it covers is guarded against future regressions. (A scenario that *did* reproduce the bug would instead
+remain in `LightingValidationSuite.KnownBugs` as a failing repro until fixed; none currently do.) Reproducing Bug 09 likely needs a configuration not yet modeled — the simulator is the tool to keep trying.
 
-```
-Setup: 3×3 grid, superflat, lamp at (31, 64, 16) — chunk A border with chunk B.
+### Regression baselines (non-reproducing Bug 09 scenarios)
 
-Frame 0: Break lamp → removal BFS nodes queued → job scheduled for chunk A.
-         Place lamp (same position) → emission BFS nodes queued.
-         ContainsKey guard prevents re-scheduling.
-         (Chunk A now has removal job in-flight + pending emission nodes in managed queue.)
+| Baseline | What it exercises                                                                                |
+|----------|--------------------------------------------------------------------------------------------------|
+| **B15**  | Direct-harness break+place race — single- then both-chunk in-flight                              |
+| **B16**  | Fluid break→water→place under a held flight + single-slot budget                                 |
+| **B22**  | Dual-chunk held flights with interleaved completion (from K09f)                                  |
+| **B26**  | "Kitchen sink": shuffled completion+scheduling with fluid contention, 50 seeds (from K09j)       |
+| **B27**  | Shuffled scheduling under extreme budget pressure, 1 job/frame, 50 seeds (from K09k)             |
+| **B28**  | Shuffled dual-chunk interleaved flights, 50 seeds (from K09l)                                    |
+| **B29**  | Combined stress — every harness layer simultaneously, 50 seeds (from K09m)                       |
+| **B40**  | Cross-chunk geometry fuzz — 50 randomized border geometries (geometry-fuzzing `FindFailingSeed`) |
 
-Frame 1: Removal job completes → cross-chunk removal mods sent to chunk B.
-         Emission job re-schedules for chunk A (HasLightWork still true).
-         Chunk B scheduled with removal mods applied.
+The authoritative list lives in `LightingValidationSuite.Baseline.cs`; the titles above summarize the registered `Scenario` descriptions. The seeded scenarios (B26–B29) sweep 50 seeds each via `LightingFrameSimulator.FindFailingSeed`, randomizing both `RunFrame`'s completion order (`CompletionOrder.Shuffled`) and the per-frame scheduling order; B40 additionally fuzzes the border geometry.
 
-Frame 2+: Convergence.
-
-Assert: Oracle comparison. The emission should propagate to chunk B.
-```
-
-### K09d: Break+place with fluid contention under budget pressure
-
-```
-Setup: Same as K09c but budget = 1 (one job per frame).
-
-Frame 0: Break lamp → job scheduled for chunk A. Budget exhausted.
-         Fluid fills broken position (InjectVoxelEdit: water at lamp pos).
-         Place lamp again → emission nodes queued. Can't schedule (in-flight + budget).
-
-Frame 1: Removal job completes. Chunk A has fluid + emission nodes pending.
-         Budget = 1: only chunk A or chunk B can schedule, not both.
-         Cross-chunk removal mods deferred for chunk B (or applied, depending on order).
-
-Frame 2+: Convergence under single-slot pressure.
-
-Assert: Oracle comparison.
-```
-
-### K09e: Completion order sensitivity
-
-```
-Setup: Same as K09c but both chunk A and chunk B have jobs in-flight.
-Run with CompletionOrder = Reverse to exercise the case where chunk B
-completes before chunk A (so A's cross-chunk mods target a completed chunk
-rather than a deferred one).
-```
-
-### B17+: Budget-pressure convergence baseline
-
-Even if K09c/d/e converge correctly (meaning the bug needs even more specific timing), the scenarios become baselines guarding that the engine converges under budget-limited scheduling — something no current baseline tests.
+**Non-linear numbering.** The original K09 series produced more promoted baselines than survive today. Because many single-instance permutations overlapped in coverage, they were **consolidated on 2026-06-14** (see `LIGHTING_VALIDATION_HARNESS_FIDELITY.md` §5) — B15 and B16 are the deterministic *representatives* the permutations folded into, backed by the seeded sweeps (B26–B29) and the geometry fuzz (B40). The retired numbers **B17–B21 / B23–B25 are intentionally unused**; every behavior they exercised is still covered by the survivors. The Bug 09
+entry in `LIGHTING_BUGS.md` is the authoritative cross-reference for this mapping. (Note: the `B9` baseline is also tagged "Bug 09" but guards a separate opaque-volume containment defect, not the orchestration race — it is not a frame-simulator scenario.)
 
 ## 5. File Layout
 
@@ -395,7 +346,7 @@ Assets/Scripts/WorldJobManager.cs     (refactor to use LightingScheduleDecision)
 
 3. **Implement `LightingFrameSimulator`** — the frame-tick loop, pending-flight management, completion-order strategies, `InjectVoxelEdit`, `RunToConvergence` with budget. Own commit. Build editor assembly.
 
-4. **Write K09c/d/e scenarios** — Bug 09 repro attempts using the simulator. If they reproduce (fail), they stay as known-bug scenarios. If they converge correctly, promote to baselines (B17+) per the validation-driven-bugfix protocol. Own commit.
+4. **Write Bug 09 repro scenarios (the K09 series)** — repro attempts using the simulator. Per the validation-driven-bugfix protocol, any that reproduce stay as known-bug scenarios; any that converge are promoted to baselines. Outcome: all converged and were promoted (B15, B16, B22, B26–B29) — see §4. Own commit.
 
 5. **Update `LIGHTING_BUGS.md`** — note the new scenario IDs and whether they reproduced. Same commit as step 4.
 
@@ -412,9 +363,10 @@ Assets/Scripts/WorldJobManager.cs     (refactor to use LightingScheduleDecision)
 
 1. **Should the simulator model `maxMeshRebuildsPerFrame` or meshing gates?** Probably not — the lighting bug is purely in the lighting scheduling layer. Meshing is downstream and doesn't feed back into lighting decisions. Keep scope minimal.
 
-2. ~~**Should the simulator model the `_chunksNeedingLightWork` HashSet iteration order?**~~ **Implemented (June 2026).** The constructor accepts an optional `int? seed` parameter. When set, Phase 2 (scheduling) shuffles the chunk iteration order via Fisher-Yates each frame, and `CompletionOrder.Shuffled` randomizes Phase 1 (completion) as well. `FindFailingSeed(worldFactory, scenarioBody, iterations)` sweeps many seeds to find any that produces an oracle mismatch. Three scenarios (B26, B27, B28) exercise shuffled ordering with 50 seeds each — all converge to the oracle.
+2. ~~**Should the simulator model the `_chunksNeedingLightWork` HashSet iteration order?**~~ **Implemented (June 2026).** The constructor accepts an optional `int? seed` parameter. When set, Phase 2 (scheduling) shuffles the chunk iteration order via Fisher-Yates each frame, and `CompletionOrder.Shuffled` randomizes Phase 1 (completion) as well. `FindFailingSeed` sweeps many seeds to find any that produces an oracle mismatch (two overloads — one also fuzzes geometry). Four scenarios (B26–B29) exercise shuffled ordering with 50 seeds each — all converge
+   to the oracle.
 
 3. **Should we model `RemainingEdgeCheckRounds` in the simulator?** Only if we're trying to reproduce Bug 05 variants. For Bug 09 (blocklight at a border), edge checks are not involved. Add later if needed.
 
-4. **Multi-frame flights**: ~~Should the simulator support holding a flight across multiple frames?~~ **Implemented (June 2026).** `RunFrame` accepts an optional `completionPredicate` (`Func<LightingJobFlight, int, bool>`) that controls which flights complete each frame. Flights rejected by the predicate carry over to the next frame with their in-flight status preserved. Static factories `MinAge(n)`, `OnlyChunks(...)`, and `ExceptChunks(...)` cover common patterns. Three scenarios (B20, B21, B22) exercise multi-frame flight lifetimes with stale-snapshot
-   interleavings — all converge to the oracle.
+4. **Multi-frame flights**: ~~Should the simulator support holding a flight across multiple frames?~~ **Implemented (June 2026).** `RunFrame` accepts an optional `completionPredicate` (`Func<LightingJobFlight, int, bool>`) that controls which flights complete each frame. Flights rejected by the predicate carry over to the next frame with their in-flight status preserved. Static factories `MinAge(n)`, `OnlyChunks(...)`, and `ExceptChunks(...)` cover common patterns. B22 exercises multi-frame held flights with stale-snapshot interleavings (B28/B29 add
+   seeded shuffling on top); B15 and B16 also hold flights across frames — all converge to the oracle.
