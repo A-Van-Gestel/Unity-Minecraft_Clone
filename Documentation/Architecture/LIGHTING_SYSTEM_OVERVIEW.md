@@ -80,7 +80,7 @@ More complex, with special optimizations. Sky light remains a monochrome scalar 
 
 **Heightmap:** Each chunk maintains a `heightMap[256]` (16x16 columns) storing the Y-level of the highest light-obstructing block per column. This enables fast sky light initialization.
 
-**Column Recalculation (`RecalculateSkylightForColumn`):**
+**Column Recalculation (`RecalculateSunlightForColumn`):**
 
 1. **Above the heightmap:** All voxels above the highest opaque block are set to sky light 15.
 2. **Horizontal shadow casting:** If the highest block is opaque, check its 4 horizontal neighbors for partial sky light (1-14). If found, set them to 0 and enqueue for darkness removal to clear stale scattered light.
@@ -98,7 +98,7 @@ When a player places or breaks a block (`ChunkData.ModifyVoxel`):
 
 1. The old sky light and blocklight RGB values are captured from `section.LightData[]` via `LightBitMapping`.
 2. The heightmap is updated if the block is light-obstructing.
-3. The modified voxel and its 6 neighbors are added to `_skylightBfsQueue` and `_blocklightBfsQueue`.
+3. The modified voxel and its 6 neighbors are added to `_sunlightBfsQueue` and `_blocklightBfsQueue`.
 4. The chunk is flagged: `HasLightChangesToProcess = true`.
 
 ### 3.2 Job Scheduling (`WorldJobManager.ScheduleLightingUpdate`)
@@ -130,7 +130,7 @@ A time-based fail-safe full scan (every ~1 second) re-populates the dirty set fr
 **Cross-chunk writes:** The job cannot write to read-only neighbor maps. Instead:
 
 - Neighbor light modifications are added to `CrossChunkLightMods` (a `NativeList<LightModification>`).
-- A **write-through cache** (`NativeHashMap<long, uint>`) ensures that subsequent reads within the same job execution see the modified values. This is critical for darkness removal: if we set a neighbor voxel to 0, the re-spreading phase must see that 0, not the stale read-only
+- A **write-through cache** (`NativeHashMap<long, ulong>`, keyed by encoded position, packing both the voxel `uint` and the light `ushort`) ensures that subsequent reads within the same job execution see the modified values. This is critical for darkness removal: if we set a neighbor voxel to 0, the re-spreading phase must see that 0, not the stale read-only
   value.
 
 **Output:** Modified center map + light map, cross-chunk modifications list, `IsStable` flag.
@@ -140,32 +140,33 @@ A time-based fail-safe full scan (every ~1 second) re-populates the dirty set fr
 Back on the main thread:
 
 1. **Merge light data** into live chunk data via `ApplyLightingJobResult` — the `ushort[] LightData` array is copied back from the job's NativeArray. Block changes made to the `uint` voxel array during job execution are preserved (TOCTOU safety).
-2. **Apply cross-chunk modifications** to loaded neighbor chunks, subject to two heightmap guards:
-    - **Guard 1 (skip false darkness):** If a voxel above the heightmap currently has sky light=15 and the mod tries to decrease it, skip. The voxel has direct sky access; the cross-chunk shadow casting doesn't see this chunk's heightmap and would incorrectly darken it.
-    - **Guard 2 (skip underground sky light increases):** If a sky light mod tries to increase light on a voxel at or below the heightmap, skip. This prevents light leakage where a neighbor's air column BFS wraps around and sets sky light on underground voxels.
-      The chunk's own BFS handles underground lighting correctly via column recalculation.
-    - If neither guard triggers: set the light value directly and enqueue the position in the neighbor's light queue for further propagation.
+2. **Apply cross-chunk modifications** to loaded neighbor chunks via the shared `LightingJobProcessor` / `CrossChunkLightModApplier` decision logic (the same code the editor lighting validation suite exercises, so production and harness cannot drift). Routing is decided first (`LightingJobProcessor.RouteCrossChunkMod`): out-of-world mods are dropped, mods for unloaded neighbors are persisted (step 3), mods for a neighbor whose own job is in flight are deferred (see In-flight defer below), and the rest are applied directly. Each applied mod is evaluated
+   per-voxel against the neighbor's *current* light (`CrossChunkLightModApplier.Compute`):
+    - **Sky light — only-increase guard:** A non-zero sky light mod *lower* than the neighbor's current sky value is skipped. Cross-chunk mods are computed against a stale schedule-time snapshot, so they may only *raise* sky light; the neighbor's own column recalculation is authoritative for decreases. (A mod equal to the current value is also a no-op.)
+    - **Sky light — Bug 11 in-chunk-support veto:** A sky light *removal* (level 0) is skipped when a voxel *inside the receiving chunk* still independently supports the current value (`InChunkSunlightSupport`). This stops two adjacent chunks that removed each other's shared seam column against stale snapshots from oscillating forever. Support is attenuated by the **target** voxel's own opacity via the shared `LightAttenuation.Attenuate`, and fully-opaque neighbors (which cannot propagate sky light) are excluded. See §3.7 and baselines B48/B49.
+    - **Blocklight — per-channel placement vs. removal:** Placement mods only ever *raise* channels (a zero channel from a stale snapshot never lowers the live value); removal mods let a genuine zero channel through while non-zero channels still MAX-merge. Wake-up nodes report old=0 for channels that did not lose light, so the neighbor's next pass re-spreads an uplift instead of misreading it as a removal (Bug 07).
+    - When a mod applies: write the new packed light value and enqueue a BFS wake-up node in the neighbor's light queue (which also sets `HasLightChangesToProcess`).
     - **In-flight defer:** If the target neighbor has its own lighting job in flight (its inputs were snapshotted before this mod existed), the mod is NOT applied — that job's full-LightMap merge would overwrite it and the surviving wake-up node would become a no-op, losing the mod permanently. Instead it is deferred (`_deferredCrossChunkMods`) and drained immediately after the target's own merge.
 3. **Handle unloaded neighbors:** If a target neighbor isn't loaded, persist the mod for recovery when the chunk eventually loads, per channel:
     - **Sunlight mods** degrade to affected column coordinates in `LightingStateManager` (`pending_lighting.bin`) — the column recalculation is authoritative for the sky channel.
     - **Blocklight mods** are persisted in full (local position + RGB + removal flag, `pending_blocklight.bin`) and replayed through `CrossChunkLightModApplier` when the chunk loads from disk — a column recalc cannot restore RGB data, so without this, removals (broken lamps) would leave permanent ghost light in the saved neighbor.
 4. **Stability check:**
-    - If `IsStable`: request mesh rebuild for this chunk and neighbors.
+    - If `IsStable`: request mesh rebuild for this chunk and neighbors, and — while `RemainingEdgeCheckRounds > 0` — re-arm the iterative edge-check rounds on this chunk and its cardinal neighbors (§3.6). Stability is first passed through `LightingJobProcessor.IsEffectivelyStable`, which treats a chunk as stable when its only outstanding mods target out-of-world positions.
     - If not stable: set `HasLightChangesToProcess = true` for another pass next frame.
 
 ### 3.5 Readiness Gates
 
-Mesh generation is gated by `AreNeighborsReadyAndLit`, which requires all 8 neighbors to:
+Mesh generation is gated by the **relaxed** `AreNeighborsMeshReady`, which requires all 8 neighbors only to:
 
 - Have finished terrain generation.
-- Have no running lighting jobs.
-- Have `HasLightChangesToProcess = false`.
-- Have `NeedsInitialLighting = false`.
-- Have `IsAwaitingMainThreadProcess = false`.
+- Have populated voxel data (`IsPopulated`).
+- Have `NeedsInitialLighting = false` (at least one lighting pass complete).
 
-> **Note:** `NeedsEdgeCheck` is intentionally NOT checked by `AreNeighborsReadyAndLit` or `ScheduleMeshing`. Edge checks are corrections that improve quality but do not block the meshing pipeline. A chunk with `NeedsEdgeCheck = true` can be meshed before the edge check runs.
+It deliberately does **not** require neighbors to have no running lighting jobs, `HasLightChangesToProcess = false`, or `IsAwaitingMainThreadProcess = false` (the stricter `AreNeighborsReadyAndLit` contract still used for edge-check scheduling). The relaxed gate was introduced to break the wave-front meshing deadlock — see [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) §3.3 and §9.3. Any stale border lighting is corrected by the automatic re-mesh that fires when the neighbor's lighting job later stabilizes.
 
-This prevents meshes from being built with incomplete lighting data.
+> **Note:** `ScheduleMeshing` still checks `HasLightChangesToProcess` / `NeedsInitialLighting` on the **center** chunk before meshing it. And `NeedsEdgeCheck` is intentionally NOT checked by either gate or by `ScheduleMeshing`. Edge checks are corrections that improve quality but do not block the meshing pipeline — a chunk with `NeedsEdgeCheck = true` can be meshed before the edge check runs.
+
+This prevents meshes from being built before their own and their neighbors' first lighting pass completes.
 
 For the complete pipeline flow including all gates, flags, and interactions, see [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md).
 
@@ -173,10 +174,11 @@ For the complete pipeline flow including all gates, flags, and interactions, see
 
 After a chunk's initial lighting stabilizes, its border voxels may have incorrect light due to neighbor load order, dropped cross-chunk modifications, or save/load inconsistencies. The edge checking system detects and corrects these issues.
 
-**Lifecycle:**
+**Lifecycle (iterative):** Edge checks now run as a small fixed number of *rounds* rather than once, because two adjacent chunks that both stabilize against each other's stale snapshot need more than one reconciliation pass.
 
-1. When `NeedsInitialLighting` is cleared (initial lighting scheduled), `NeedsEdgeCheck` is set to `true`. Also set for chunks loaded from disk with stable lighting.
-2. In the main update loop, `NeedsEdgeCheck` is checked after initial lighting but before regular updates. It requires `AreNeighborsDataReady` before scheduling.
+1. Each `ChunkData` starts with `RemainingEdgeCheckRounds = 2` (a `[NonSerialized]` counter, reset by `ChunkData.Reset()`). When a lighting job reports `IsStable` (`ProcessLightingJobs`) and rounds remain, the chunk decrements the counter and re-arms its own `NeedsEdgeCheck` + `HasLightChangesToProcess`, then propagates `NeedsEdgeCheck` to its 4 cardinal neighbors via `TriggerNeighborEdgeChecks` (only neighbors that are populated and past initial lighting). Round 1 fixes the immediate frontier; round 2 reconciles the remainder after neighbors have run
+   their own edge checks. Chunks loaded from disk with stable lighting also start with `NeedsEdgeCheck = true`.
+2. In the main update loop, `NeedsEdgeCheck` is checked after initial lighting but before regular updates. It requires `AreNeighborsReadyAndLit` to fire on the primary path, with a fallback under the weaker `AreNeighborsDataReady` gate when `HasLightChangesToProcess` is also set (see [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) §7).
 3. `WorldJobManager.ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` into the job's `PerformEdgeCheck` flag and clears it.
 4. The job's edge check runs as "Pass -1" before the normal BFS seeding.
 
@@ -217,13 +219,13 @@ This section documents how our lighting engine compares to the Starlight referen
 #### Vertical Sky Light No-Attenuation Rule
 
 **Starlight:** Sky light at level 15 traveling downward through fully transparent blocks stays at 15.
-**Our system:** Same rule in `PropagateLight` (line 204 of `NeighborhoodLightingJob.cs`).
+**Our system:** Same rule in `PropagateLight` (`NeighborhoodLightingJob.cs`).
 **Status:** Implemented correctly.
 
 #### Heightmap-Driven Column Optimization
 
 **Starlight:** Uses `heightMapBlockChange[]` to track the lowest Y that needs updating per column.
-**Our system:** Uses `heightMap[]` in `RecalculateSkylightForColumn` to skip air above the highest opaque block.
+**Our system:** Uses `heightMap[]` in `RecalculateSunlightForColumn` to skip air above the highest opaque block.
 **Status:** Implemented correctly.
 
 #### TOCTOU-Safe Light Merge
@@ -236,13 +238,13 @@ This section documents how our lighting engine compares to the Starlight referen
 
 **Starlight:** `targetLevel = propagatedLevel - max(1, opacity)`.
 **Our system:** `targetLevel = sourceLight - max(1, neighborOpacity)`.
-Both the BFS (`PropagateLight`) and column recalculation (`RecalculateSunlightForColumn`) use the same `max(1, opacity)` formula, ensuring consistent attenuation for semi-transparent blocks (e.g., water). The edge check (`CheckEdgeVoxel`) also uses this formula.
+Every attenuation site now funnels through the single shared `LightAttenuation.Attenuate` helper (`max(0, s - max(1, opacity))`): the BFS (`PropagateLight`), column recalculation (`RecalculateSunlightForColumn`), the edge check (`CheckEdgeVoxel`), the cross-chunk sunlight removal veto (`InChunkSunlightSupport`), and the validation oracle. Sharing one definition guarantees the formula cannot drift between paths (semi-transparent blocks such as water attenuate identically everywhere).
 **Status:** Implemented correctly.
 
 #### Edge Checking on Chunk Load
 
 **Starlight:** Has a dedicated `checkChunkEdges()` method that runs on chunk load. It iterates every block on the 4 horizontal chunk borders and validates that each block's light level is consistent with its neighbors.
-**Our system:** Implemented as a `PerformEdgeCheck` flag on `NeighborhoodLightingJob` with a `NeedsEdgeCheck` lifecycle flag on `ChunkData`. Runs once after initial lighting stabilizes and once for chunks loaded from disk. See Section 3.6 for details.
+**Our system:** Implemented as a `PerformEdgeCheck` flag on `NeighborhoodLightingJob` with a `NeedsEdgeCheck` lifecycle flag on `ChunkData`. Runs for a fixed number of iterative rounds (`RemainingEdgeCheckRounds`, default 2) after each lighting stabilization — re-armed on the chunk and its cardinal neighbors — and once for chunks loaded from disk. See Section 3.6 for details.
 **Difference from Starlight:** Our edge check only adds missing light (placement queue), never removes stale light. Starlight's `checkChunkEdges` does both. This is a deliberate constraint — removal during edge checks risks false darkness when neighbor data is incomplete.
 **Status:** Implemented (placement-only variant).
 
@@ -370,7 +372,7 @@ See Section 4.2 above. Pack position + level + direction bitmask into a `ulong` 
 
 **Priority: Medium** | **Complexity: Medium**
 
-**Current:** `RecalculateSkylightForColumn` writes sky light=15 to every air voxel above the heightmap via the `ushort LightData[]` array. This generates thousands of memory writes per column.
+**Current:** `RecalculateSunlightForColumn` writes sky light=15 to every air voxel above the heightmap via the `ushort LightData[]` array. This generates thousands of memory writes per column.
 
 **Starlight approach:** Treats sky-exposed air as "extruded" — the level 15 is implicit from the heightmap, never explicitly stored.
 
@@ -417,7 +419,7 @@ The disabled-lighting path is implemented via guards at specific pipeline entry 
 
 | Location                                | Guard                                                                        | Purpose                                                                                         |
 |-----------------------------------------|------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
-| `ChunkData.AddToSkyLightQueue`          | `enableLighting` check                                                       | Prevents BFS queue entries + `HasLightChangesToProcess` flag                                    |
+| `ChunkData.AddToSunLightQueue`          | `enableLighting` check                                                       | Prevents BFS queue entries + `HasLightChangesToProcess` flag                                    |
 | `ChunkData.AddToBlockLightQueue`        | `enableLighting` check                                                       | Same, for blocklight channel                                                                    |
 | `ChunkData.ModifyVoxel`                 | `lightingEnabled` local                                                      | Sets initial sky light = 15 (not 0); gates `QueueSkylightRecalculation`                         |
 | `WorldJobManager.ProcessGenerationJobs` | Stage 2: gates `LightingStateManager` recovery                               | Prevents orphaned recalculation queue entries and stale `HasLightChangesToProcess`              |
@@ -463,18 +465,21 @@ The heightmap is still maintained unconditionally (it is cheap and has no downst
 
 ## 7. Key File Reference
 
-| File                                         | Role                                                                                |
-|----------------------------------------------|-------------------------------------------------------------------------------------|
-| `Jobs/NeighborhoodLightingJob.cs`            | Core BFS flood-fill job (sky light + RGB blocklight propagation)                    |
-| `WorldJobManager.cs`                         | Schedules lighting jobs, processes results, applies cross-chunk modifications       |
-| `Data/ChunkData.cs`                          | Heightmap management, light queues, `ModifyVoxel` triggering, `NeedsEdgeCheck` flag |
-| `Data/ChunkSection.cs`                       | Section-level voxel + `LightData` storage, `IsEmpty`/`IsFullySolid` flags           |
-| `Jobs/BurstData/LightBitMapping.cs`          | Bit-packing/unpacking for light values in `ushort LightData[]`                      |
-| `Jobs/BurstData/BurstVoxelDataBitMapping.cs` | Bit-packing/unpacking for block ID and metadata in `uint`                           |
-| `Helpers/LightingHelper.cs`                  | Shared lighting utilities (`FillUniformSkyLight`, `StampFullBrightSunlight`)        |
-| `Helpers/ChunkMath.cs`                       | Coordinate → flat index conversion                                                  |
-| `Serialization/LightingStateManager.cs`      | Persists pending sky light recalculations for unloaded chunks                       |
-| `Jobs/StandardChunkGenerationJob.cs`         | Initial heightmap computation during world generation                               |
+| File                                         | Role                                                                                                                                       |
+|----------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| `Jobs/NeighborhoodLightingJob.cs`            | Core BFS flood-fill job (sky light + RGB blocklight propagation)                                                                           |
+| `WorldJobManager.cs`                         | Schedules lighting jobs, processes results, applies cross-chunk modifications                                                              |
+| `Data/ChunkData.cs`                          | Heightmap management, light queues, `ModifyVoxel` triggering, `NeedsEdgeCheck` flag                                                        |
+| `Data/ChunkSection.cs`                       | Section-level voxel + `LightData` storage, `IsEmpty`/`IsFullySolid` flags                                                                  |
+| `Jobs/BurstData/LightBitMapping.cs`          | Bit-packing/unpacking for light values in `ushort LightData[]`                                                                             |
+| `Jobs/BurstData/BurstVoxelDataBitMapping.cs` | Bit-packing/unpacking for block ID and metadata in `uint`                                                                                  |
+| `Helpers/LightingHelper.cs`                  | Shared lighting utilities (`FillUniformSkyLight`, `StampFullBrightSunlight`)                                                               |
+| `Helpers/CrossChunkLightModApplier.cs`       | Pure per-voxel cross-chunk mod decision (stale-snapshot guards, Bug 11 sky veto, wake-up node semantics); shared with the validation suite |
+| `Helpers/LightingJobProcessor.cs`            | Cross-chunk mod routing (drop / persist / defer / apply) + effective-stability override                                                    |
+| `Jobs/BurstData/LightAttenuation.cs`         | The single shared attenuation formula `max(0, s - max(1, opacity))`                                                                        |
+| `Helpers/ChunkMath.cs`                       | Coordinate → flat index conversion                                                                                                         |
+| `Serialization/LightingStateManager.cs`      | Persists pending sky light recalculations for unloaded chunks                                                                              |
+| `Jobs/StandardChunkGenerationJob.cs`         | Initial heightmap computation during world generation                                                                                      |
 
 **Starlight reference files** (Java, in `_REFERENCES/Moonrise/.../starlight/light/`):
 

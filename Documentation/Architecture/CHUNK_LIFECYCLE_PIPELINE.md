@@ -1,7 +1,7 @@
 # Chunk Lifecycle Pipeline: Generation → Lighting → Meshing
 
 **Status:** Living Document  
-**Last Updated:** April 2026  
+**Last Updated:** June 2026  
 **Purpose:** Comprehensive reference for how a chunk transitions from empty placeholder to rendered mesh, with all state flags, readiness gates, and inter-system dependencies fully mapped.
 
 ---
@@ -24,14 +24,15 @@ BFS is deterministic — but edge cases in scheduling order, throttling, and cro
 
 Each `ChunkData` instance carries the following transient flags that control pipeline progression:
 
-| Flag                          | Type | Set By                                                                                    | Cleared By                                             | Purpose                                                |
-|-------------------------------|------|-------------------------------------------------------------------------------------------|--------------------------------------------------------|--------------------------------------------------------|
-| `IsPopulated`                 | bool | `Populate()` / `PopulateFromSave()`                                                       | `Reset()` (pool recycle)                               | Voxel data exists and is valid                         |
-| `IsLoading`                   | bool | `CheckViewDistance()`                                                                     | Never explicitly cleared (reset on pool recycle)       | Prevents duplicate disk load requests                  |
-| `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`                                          | `Update()` lighting scan after scheduling initial pass | Chunk has terrain but no lighting yet                  |
-| `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling | `ScheduleLightingUpdate()` (line 286)                  | Pending light changes in managed queues                |
-| `NeedsEdgeCheck`              | bool | After initial lighting clears, or on disk load with stable lighting                       | `ScheduleLightingUpdate()` (line 287)                  | Border voxels need validation against neighbors        |
-| `IsAwaitingMainThreadProcess` | bool | `ProcessLightingJobs()` start (line 463)                                                  | `ProcessLightingJobs()` end (line 556)                 | Lighting job completed, cross-chunk mods being applied |
+| Flag                          | Type | Set By                                                                                    | Cleared By                                             | Purpose                                                                                                               |
+|-------------------------------|------|-------------------------------------------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| `IsPopulated`                 | bool | `Populate()` / `PopulateFromSave()`                                                       | `Reset()` (pool recycle)                               | Voxel data exists and is valid                                                                                        |
+| `IsLoading`                   | bool | `CheckViewDistance()`                                                                     | Never explicitly cleared (reset on pool recycle)       | Prevents duplicate disk load requests                                                                                 |
+| `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`                                          | `Update()` lighting scan after scheduling initial pass | Chunk has terrain but no lighting yet                                                                                 |
+| `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling | `ScheduleLightingUpdate()`                             | Pending light changes in managed queues                                                                               |
+| `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load     | `ScheduleLightingUpdate()`                             | Border voxels need validation against neighbors                                                                       |
+| `IsAwaitingMainThreadProcess` | bool | `ProcessLightingJobs()` start                                                             | `ProcessLightingJobs()` end                            | Lighting job completed, cross-chunk mods being applied                                                                |
+| `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()` (pool recycle)                   | Decremented in `ProcessLightingJobs()` per stable pass | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`. |
 
 ### Flag Lifecycle Diagram
 
@@ -81,7 +82,7 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal):
 
 ### 3.2 `AreNeighborsReadyAndLit(ChunkCoord)`
 
-**Used by:** Edge check scheduling, mesh scheduling (via `ScheduleMeshing`).
+**Used by:** Edge check scheduling. (Mesh scheduling formerly used this gate; it now uses the relaxed `AreNeighborsMeshReady` — see §3.3 and §9.3.)
 
 Checks all **8 horizontal neighbors** (cardinal + diagonal) with stricter requirements:
 
@@ -116,14 +117,13 @@ Checks all **8 horizontal neighbors** (cardinal + diagonal) with relaxed require
 > This gate was introduced to break the wave-front ping-pong deadlock. Chunks at the loading edge continuously reschedule lighting jobs, which caused `AreNeighborsReadyAndLit` to perpetually return false for their neighbors.
 > The relaxed gate allows meshing with "good enough" data; any stale border lighting is corrected by the automatic re-mesh triggered when the neighbor's lighting job completes.
 
-> [!WARNING]
-> ### Documentation vs. Code Discrepancy
-> `LIGHTING_SYSTEM_OVERVIEW.md` Section 3.5 states that `AreNeighborsReadyAndLit` checks `NeedsEdgeCheck = false`. However, **the actual code does NOT check `NeedsEdgeCheck` on neighbors**. This means:
-> - A neighbor with `NeedsEdgeCheck = true` does NOT block meshing of the center chunk.
-> - A neighbor with `NeedsEdgeCheck = true` does NOT block edge check scheduling of the center chunk.
-> - `NeedsEdgeCheck` is effectively "invisible" to the readiness gates.
+> [!NOTE]
+> ### `NeedsEdgeCheck` is not a readiness-gate input
+> Neither `AreNeighborsReadyAndLit` nor `AreNeighborsMeshReady` checks `NeedsEdgeCheck` on neighbors, and `ScheduleMeshing` does not check it on the center chunk. This means:
+> - A neighbor with `NeedsEdgeCheck = true` does NOT block meshing or edge-check scheduling of the center chunk.
+> - A chunk can be meshed before its own edge check runs — `NeedsEdgeCheck` is effectively "invisible" to the readiness gates.
 >
-> Similarly, **`ScheduleMeshing` does NOT check `NeedsEdgeCheck` on the center chunk itself**. A chunk can be meshed before its edge check runs.
+> This is intentional: edge checks are quality corrections, not correctness blockers. Any border light they add triggers an automatic re-mesh. See `LIGHTING_SYSTEM_OVERVIEW.md` §3.5.
 
 ---
 
@@ -198,8 +198,8 @@ foreach pos in snapshot:
 
 > [!IMPORTANT]
 > ### Critical Scheduling Detail
-> When the edge check path at line 1043 sets `HasLightChangesToProcess = true` but `ScheduleLightingUpdate()` returns `false` (e.g., job already exists — shouldn't happen due to guard on line 1013), the flag would remain set and fall through to the regular path.
-> However, because `ScheduleLightingUpdate` reads `NeedsEdgeCheck` internally (line 282) and clears it (line 287), the **fallback path effectively performs the edge check anyway**, but under the weaker `AreNeighborsDataReady` gate instead of `AreNeighborsReadyAndLit`.
+> When the edge-check path in the lighting scan sets `HasLightChangesToProcess = true` but `ScheduleLightingUpdate()` returns `false` (e.g., job already exists — shouldn't happen due to the earlier `lightingJobs.ContainsKey` guard), the flag would remain set and fall through to the regular path.
+> However, because `ScheduleLightingUpdate` reads `NeedsEdgeCheck` internally and clears it, the **fallback path effectively performs the edge check anyway**, but under the weaker `AreNeighborsDataReady` gate instead of `AreNeighborsReadyAndLit`.
 
 ---
 
@@ -313,7 +313,7 @@ flowchart TD
         M2 -- No --> M3["ScheduleMeshing(chunk)"]
         M3 --> M4{"chunk.HasLightChangesToProcess<br/>OR NeedsInitialLighting?"}
         M4 -- Yes --> M_SKIP["return false<br/>(leave in queue for next frame)"]
-        M4 -- No --> M5{"AreNeighborsReadyAndLit?"}
+        M4 -- No --> M5{"AreNeighborsMeshReady?"}
         M5 -- No --> M_SKIP
         M5 -- Yes --> M6["Snapshot center + 8 neighbor maps"]
         M6 --> M7["Schedule MeshGenerationJob"]
@@ -363,8 +363,8 @@ sequenceDiagram
         Main ->> Main: Determine target neighbor chunk
         alt Neighbor loaded & populated
             Main ->> NChunk: Read current light
-            alt Sunlight mod: level > 0 AND level < current
-                Main ->> Main: SKIP (stale cross-chunk mod)
+            alt Sunlight mod lowers light, OR removal vetoed by in-chunk support
+                Main ->> Main: SKIP (stale snapshot / Bug 11 veto)
             else Apply mod
                 Main ->> NChunk: SetVoxel(newPackedData)
                 Main ->> NChunk: AddToSunLightQueue / AddToBlockLightQueue
@@ -378,11 +378,14 @@ sequenceDiagram
 
 ### Cross-Chunk Sunlight Guard Logic
 
-The `ProcessLightingJobs` method applies two guards to cross-chunk sunlight modifications:
+`ProcessLightingJobs` routes every cross-chunk mod through `LightingJobProcessor.RouteCrossChunkMod` (drop / persist / defer / apply), then applies the per-voxel decision via `CrossChunkLightModApplier.ComputeSunlight` — shared with the editor lighting validation suite. Three rules guard sunlight, all evaluated against the neighbor's **current** value:
 
-1. **Non-zero uplift guard (line 520):** If `mod.LightLevel > 0 AND mod.LightLevel < currentSunlight` → skip. This prevents stale snapshots from **decreasing** sunlight that the neighbor's own BFS has already correctly calculated.
+1. **Only-increase guard:** If `mod.LightLevel > 0 AND mod.LightLevel < currentSunlight` → skip (and an equal value is a no-op). Cross-chunk mods are computed against a stale schedule-time snapshot, so they may only **raise** sunlight; the neighbor's own column recalculation owns decreases.
 
-2. **Darkness mods (level=0):** Always applied. These are critical for block removal/placement to propagate shadow correctly across borders.
+2. **Bug 11 in-chunk-support veto:** A removal (`mod.LightLevel == 0`) is skipped when a voxel *inside the receiving chunk* still independently supports the current value (`CrossChunkLightModApplier.InChunkSunlightSupport ≥ currentSunlight`). Support is attenuated by the target voxel's own opacity via `LightAttenuation.Attenuate`, and fully-opaque neighbors (which cannot propagate sky light) are excluded. Without this, two adjacent chunks that removed each other's shared seam column against stale snapshots oscillate forever (the reloaded-world stall).
+   See baselines B48/B49 and `LIGHTING_SYSTEM_OVERVIEW.md` §3.7.
+
+3. **Genuine darkness (level=0, unsupported):** Applied. These are critical for block removal/placement to propagate shadow correctly across borders.
 
 ---
 
@@ -392,7 +395,7 @@ The edge check system was added to correct light inconsistencies at chunk border
 
 ```mermaid
 flowchart TD
-    E3["Chunk loaded from disk with<br/>stable lighting (NeedsInitialLighting = false)"] --> E4["NeedsEdgeCheck = true<br/>(LoadOrGenerateChunk, line 647)"]
+    E3["Chunk loaded from disk with<br/>stable lighting (NeedsInitialLighting = false)"] --> E4["NeedsEdgeCheck = true<br/>(LoadOrGenerateChunk)"]
     E4 --> E5{"AreNeighborsReadyAndLit?"}
     E5 -- No --> E6["Wait. Edge check deferred.<br/>NeedsEdgeCheck remains true."]
     E6 --> E7{"HasLightChangesToProcess<br/>AND AreNeighborsDataReady?"}
@@ -406,16 +409,19 @@ flowchart TD
 ```
 
 > [!NOTE]
-> ### Doc vs. Code: When is NeedsEdgeCheck set?
-> `LIGHTING_SYSTEM_OVERVIEW.md` Section 3.6 states: *"When NeedsInitialLighting is cleared (initial lighting scheduled), NeedsEdgeCheck is set to true."*
-> However, **the actual code only sets `NeedsEdgeCheck = true` for chunks loaded from disk** (line 647 in `LoadOrGenerateChunk`). Freshly generated chunks **never** receive an edge check.
-> This is likely intentional: freshly generated chunks have all neighbors generating concurrently, so their initial BFS and cross-chunk mods suffice for border consistency. Disk-loaded chunks may have stale border lighting from a previous session.
+> ### When is NeedsEdgeCheck set?
+> There are three set sites:
+> 1. **Disk load** — `LoadOrGenerateChunk` sets `NeedsEdgeCheck = true` for chunks loaded with stable lighting (may have stale border lighting from a previous session).
+> 2. **Post-stabilization re-arm (iterative rounds)** — `ProcessLightingJobs` re-arms `NeedsEdgeCheck` (+ `HasLightChangesToProcess`) on a chunk each time its lighting job reports `IsStable`, as long as `RemainingEdgeCheckRounds > 0` (default 2). This is what gives **freshly generated** chunks their edge checks — they get them after their initial lighting stabilizes, not when `NeedsInitialLighting` clears.
+> 3. **Neighbor propagation** — when a chunk re-arms in (2) it also calls `TriggerNeighborEdgeChecks`, setting `NeedsEdgeCheck` on its 4 cardinal neighbors that are populated and past initial lighting.
+>
+> Round 1 fixes the immediate frontier against the latest neighbor data; round 2 reconciles the remainder after neighbors have run their own edge checks. The counter is `[NonSerialized]` and reset to 2 by `ChunkData.Reset()`.
 
 > [!IMPORTANT]
 > ### Edge Check Fallback Path
-> When `NeedsEdgeCheck = true` but `AreNeighborsReadyAndLit` returns `false`, the edge check path at line 1038 does NOT fire.
-> However, if the chunk ALSO has `HasLightChangesToProcess = true` (from cross-chunk mods or other sources), the **fallback path** at line 1052 fires with the weaker `AreNeighborsDataReady` gate.
-> Since `ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` directly (line 282), the job **will** perform the edge check even though the strict gate wasn't satisfied. The flag is cleared regardless.
+> When `NeedsEdgeCheck = true` but `AreNeighborsReadyAndLit` returns `false`, the dedicated edge-check path in the lighting scan does NOT fire.
+> However, if the chunk ALSO has `HasLightChangesToProcess = true` (from cross-chunk mods or other sources), the **fallback regular-lighting path** fires with the weaker `AreNeighborsDataReady` gate.
+> Since `ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` directly, the job **will** perform the edge check even though the strict gate wasn't satisfied. The flag is cleared regardless.
 >
 > This means edge checks can run with **potentially stale neighbor lighting data** — before neighbors have finished their own lighting passes. The edge check only ADDS light (never removes), which limits damage, but corrections may be incomplete.
 
@@ -423,7 +429,7 @@ flowchart TD
 
 ## 8. `IsStable` — The Convergence Signal
 
-A lighting job reports `IsStable = true` only when ALL of the following are true after the BFS completes (line 146-148):
+A lighting job reports `IsStable = true` only when ALL of the following are true after the BFS completes (in `NeighborhoodLightingJob`):
 
 1. Sunlight removal queue is empty
 2. Sunlight placement queue is empty
@@ -437,11 +443,19 @@ A lighting job reports `IsStable = true` only when ALL of the following are true
 - The first pass produces cross-chunk mods.
 - The second pass (if no new mods arrived from neighbors in the meantime) stabilizes.
 
+When `IsStable = true`:
+
+- A mesh rebuild is requested for the center chunk and its neighbors (`RequestChunkMeshRebuild` + `RequestNeighborMeshRebuilds`).
+- If `RemainingEdgeCheckRounds > 0`, the counter is decremented and the chunk re-arms `NeedsEdgeCheck` + `HasLightChangesToProcess` on itself and `NeedsEdgeCheck` on its 4 cardinal neighbors (`TriggerNeighborEdgeChecks`). So a "stable" chunk normally still runs up to two more lighting passes for iterative border convergence (see §7).
+
 When `IsStable = false`:
 
 - `HasLightChangesToProcess = true` is set on the center chunk.
 - No mesh rebuild is requested.
 - The chunk re-enters the lighting scan next frame.
+
+> [!NOTE]
+> The stability test itself is computed only from the BFS queues + raw `CrossChunkLightMods.Length` inside the job. On the main thread, `LightingJobProcessor.IsEffectivelyStable` then overrides it to `true` when the only outstanding mods target out-of-world positions (which can never be consumed) — otherwise world-boundary chunks would reschedule lighting indefinitely.
 
 ---
 
@@ -459,7 +473,7 @@ Combined with the `maxLightJobsPerFrame = 32` throttle and the `break`, certain 
 ### 9.2 Cross-Chunk Mod Ping-Pong
 
 **Mechanism:** When chunk A's lighting job produces cross-chunk mods for neighbor B, B gets `HasLightChangesToProcess = true`. B then runs its lighting job, potentially producing mods back for A. This sets A's `HasLightChangesToProcess = true` again, preventing A from being
-meshed (because `ScheduleMeshing` checks this flag on the center chunk at line 131).
+meshed (because `ScheduleMeshing` checks this flag on the center chunk).
 
 **Convergence:** Light values are bounded 0-15 and the BFS is monotonic within a pass. The cross-chunk sunlight guard (only INCREASE allowed for non-zero mods) further constrains oscillation. This should converge in 2-3 rounds.
 
@@ -503,7 +517,7 @@ check eventually fires with the weaker gate.
 
 If the chunk is not added to `_chunksToBuildMesh` (e.g., because `chunk.isActive` was false at the time, or the chunk wasn't in the `_chunkMap` yet), and no subsequent code path re-adds it, the chunk is **permanently orphaned** from the mesh queue.
 
-**Risk Level:** Medium. The guards in `RequestChunkMeshRebuild` (line 1573: `chunk == null || !chunk.isActive || _chunksToBuildMeshSet.Contains(chunk.Coord)`) can filter out valid requests if timing is unfortunate.
+**Risk Level:** Medium. The guards in `RequestChunkMeshRebuild` (`chunk == null || !chunk.IsActive || _chunksToBuildMeshSet.Contains(chunk.Coord)`) can filter out valid requests if timing is unfortunate.
 
 ### 9.6 Unload Stranding — Confirmed Deadlock Vector ⚠️
 
@@ -537,7 +551,7 @@ sequenceDiagram
 **Key Code Path:**
 
 ```csharp
-// UnloadChunks() — World.cs line 1668-1680
+// UnloadChunks() — World.cs (original pre-fix logic; see Status below)
 bool isJobRunning = JobManager.generationJobs.ContainsKey(chunkCoord)
                     || JobManager.meshJobs.ContainsKey(chunkCoord)
                     || JobManager.lightingJobs.ContainsKey(chunkCoord);
@@ -564,14 +578,17 @@ if (isJobRunning || isProcessingLight) continue; // Skip unload
 
 ## 10. Key File Reference
 
-| File                                                                                                                                                                                    | Role in Pipeline                                                               |
-|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------|
-| [World.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/World.cs)                                          | Main orchestrator: Update loop, CheckViewDistance, readiness gates, mesh queue |
-| [WorldJobManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/WorldJobManager.cs)                      | Job scheduling & result processing for generation, lighting, meshing           |
-| [ChunkData.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Data/ChunkData.cs)                             | State flags, light queues, voxel storage                                       |
-| [Chunk.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Chunk.cs)                                          | Visual representation, mesh application, pool lifecycle                        |
-| [NeighborhoodLightingJob.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Jobs/NeighborhoodLightingJob.cs) | BFS flood-fill, edge checking, IsStable computation                            |
-| [SettingsManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/SettingsManager.cs)                      | `maxLightJobsPerFrame` (32), `maxMeshRebuildsPerFrame` (10)                    |
+| File                                                                                                                                                                                    | Role in Pipeline                                                                                                   |
+|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| [World.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/World.cs)                                          | Main orchestrator: Update loop, CheckViewDistance, readiness gates, mesh queue                                     |
+| [WorldJobManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/WorldJobManager.cs)                      | Job scheduling & result processing for generation, lighting, meshing                                               |
+| [ChunkData.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Data/ChunkData.cs)                             | State flags, light queues, voxel storage                                                                           |
+| [Chunk.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Chunk.cs)                                          | Visual representation, mesh application, pool lifecycle                                                            |
+| [NeighborhoodLightingJob.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/Jobs/NeighborhoodLightingJob.cs) | BFS flood-fill, edge checking, IsStable computation                                                                |
+| `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs`                                                                                                                                   | Per-voxel cross-chunk mod decision (sunlight guards, Bug 11 veto, wake-up nodes); shared with the validation suite |
+| `Assets/Scripts/Helpers/LightingJobProcessor.cs`                                                                                                                                        | Cross-chunk mod routing (drop/persist/defer/apply) + effective-stability override                                  |
+| `Assets/Scripts/Helpers/LightingScheduleDecision.cs`                                                                                                                                    | Extracted `ScheduleLightingUpdate` guard logic (shared with frame-simulator tests)                                 |
+| [SettingsManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/SettingsManager.cs)                      | `maxLightJobsPerFrame` (32), `maxMeshRebuildsPerFrame` (10)                                                        |
 
 ---
 
