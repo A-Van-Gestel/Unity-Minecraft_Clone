@@ -12,7 +12,7 @@
 
 ## Why this baseline exists
 
-Captured before Phase 2 of the Smooth & RGB Lighting implementation (see `Documentation/Design/SMOOTH_AND_RGB_LIGHTING.md §3`). Phase 2 will:
+Captured before Phase 2 of the Smooth & RGB Lighting implementation (see `Documentation/Architecture/SMOOTH_AND_RGB_LIGHTING.md §3`). Phase 2 will:
 
 - Add a separate `NativeArray<ushort>` light storage array per section (4 bits sun + 3×4 bits block RGB).
 - Convert the blocklight BFS in `NeighborhoodLightingJob` from scalar to per-channel independent RGB propagation.

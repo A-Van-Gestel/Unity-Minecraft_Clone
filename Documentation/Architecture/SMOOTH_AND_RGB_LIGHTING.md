@@ -1,7 +1,7 @@
 # Smooth Lighting & Full RGB Light Engine
 
-- **Status:** Phase 1, Phase 2 & Phase B Implemented (2026-06-07)
-- **Current Implementation:** Per-vertex smooth lighting with per-channel RGB blocklight BFS + shader-only sky tinting. Legacy uint light bits removed; `ushort LightData[]` is sole authority.
+- **Status:** Phase 1, Phase 2, Phase B & Phase 3 (Fluid RGB) Implemented
+- **Current Implementation:** Per-vertex smooth lighting with per-channel RGB blocklight BFS + shader-only sky tinting + fluid RGB lighting via the "lit white" multiplier (§5.2). Legacy uint light bits removed; `ushort LightData[]` is sole authority.
 - **Phase 1 Target:** Smooth (ambient-occlusion-style) vertex-averaged lighting with full RGB data layout — **Implemented**
 - **Phase 2 Target:** RGB blocklight propagation (per-channel independent BFS) + shader-only sunlight sky tinting — **Implemented**
 - **Depends On:** None (can be implemented on the current codebase)
@@ -490,7 +490,7 @@ The encoding uses rounded integer arithmetic for Burst efficiency: `(byte)((sunS
 
 `GenerateStandardCubeWithLegacyOrientation` (used by `HorizontalOnly` and `Legacy` schema blocks) follows the same `SmoothLighting` branching pattern, calling `CalculateCornerLights` on the world face `p` for correct neighbor sampling, then `PermuteCornerLightsForYRotation` to align corner lights with the rotated vertex positions on top/bottom faces.
 
-Custom meshes use smooth lighting with bilinear interpolation (see Section 2.5.2). Fluids use smooth lighting via a precomputed `FluidCornerLights` struct with direct corner assignment for top/bottom faces and bilinear interpolation for side faces (see Section 2.5.3). Cross meshes use flat lighting in Phase 1 (see Section 2.5.5).
+Custom meshes use smooth lighting with bilinear interpolation (see Section 2.5.2). Fluids use smooth lighting via a precomputed `FluidCornerLights` struct with direct corner assignment for top/bottom faces and bilinear interpolation for side faces (see Section 2.5.3). Cross meshes use smooth lighting via a precomputed `CrossMeshCornerLights` struct with direct corner assignment and per-vertex Y-level mapping (see Section 2.5.1).
 
 #### 2.6.5 `Chunk.cs` — PostProcessMeshJob
 
@@ -1447,7 +1447,7 @@ The C# mesh pipeline already delivers full RGB light data to fluid vertices via 
 
 ### 5.2 Chosen Approach: Hybrid "Lit White" Multiplier (Phase 3)
 
-- **Status:** Not yet implemented
+- **Status:** Implemented (see §3.6.3). `LiquidCore.hlsl` splits `lightData` into `sunLight` (TEXCOORD4) + `blockRGB` (TEXCOORD9); `UberLiquidShader.shader` and the editor `FluidPreviewShader.shader` apply the `litWhite` multiplier to water (`final_color *= litWhite`) and skip it for self-luminous lava. Water's depth blend and opacity (`water_base_color`) are driven by `sunLight` only.
 
 #### 5.2.1 Design
 

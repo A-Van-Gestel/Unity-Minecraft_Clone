@@ -132,7 +132,7 @@ and causing the anisotropy fix to choose wrong triangulation diagonals.
 
 **Fix:**
 Added `PermuteCornerLightsForYRotation` in `MeshGenerationJob.cs` which permutes `(l0, l1, l2, l3)` for top/bottom faces based on the Y rotation step count (0°/90°/180°/270°). The permutation was derived by tracing each vertex's post-rotation world position back to the corner offset LUT index it corresponds to. Called immediately after `CalculateCornerLights` and before `GenerateStandardCubeFace` in the `GenerateStandardCubeWithLegacyOrientation` smooth-lighting branch. See
-also: [Design doc Section 2.5.4](../Design/SMOOTH_AND_RGB_LIGHTING.md#254-legacy-rotated-blocks).
+also: [Architecture doc Section 2.5.4](../Architecture/SMOOTH_AND_RGB_LIGHTING.md#254-legacy-rotated-blocks).
 
 ---
 
