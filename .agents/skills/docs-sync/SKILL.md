@@ -29,7 +29,8 @@ Documentation/
 ├── Architecture/   ← authoritative system docs; must stay accurate
 ├── Design/         ← in-progress / proposed work; status-tracked
 ├── Guides/         ← stable how-to / style references
-├── Performance/    ← phase baselines and benchmark snapshots
+├── Performance/    ← phase baselines and benchmark snapshots (append-only; never edit a past report)
+├── Release Notes/  ← dated release snapshots (historical; not synced by this skill)
 └── Bugs/, Archived/  (handled by archive-fixed-bug, not this skill)
 ```
 
@@ -39,13 +40,18 @@ Documentation/
 |----------------------------------------------------------------------------|----------------------------------------------------------------------------------|
 | `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, chunk state flags | `Architecture/CHUNK_LIFECYCLE_PIPELINE.md`                                       |
 | Voxel bit-packing, `ChunkData` layout, block ID encoding                   | `Architecture/DATA_STRUCTURES.md`                                                |
+| Packed voxel **metadata** bits, block orientation/facing, BlockDatabase metadata authoring | `Architecture/PER_BLOCK_METADATA_SCHEMAS.md`                    |
+| World-type architecture, `Data/WorldTypes/`, `IChunkGenerator` implementations, world-gen pipeline selection | `Architecture/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md`      |
+| 3D density terrain, domain warping, multi-noise (continentalness/erosion/peaks-valleys), `StandardChunkGenerationJob`; caves via `cave-tuning` skill | `Architecture/MODERN_PROCEDURAL_TERRAIN_GENERATION.md` |
 | Sub-chunk / section meshing, `SubChunkMesher`, greedy meshing              | `Architecture/SUB_CHUNK_MESHING_ARCHITECTURE.md`                                 |
 | Lighting BFS jobs, sunlight/blocklight propagation                         | `Architecture/LIGHTING_SYSTEM_OVERVIEW.md`                                       |
+| Lighting **validation suite** / harness (`Assets/Editor/Validation/Lighting/`) changes | `Architecture/LIGHTING_VALIDATION_HARNESS_FIDELITY.md` (living doc; + `validation-driven-bugfix` skill) |
 | Region files, `ChunkStorageManager`, LZ4/GZip serialization                | `Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`          |
 | Save format / on-disk schema changes                                       | `Architecture/AOT_WORLD_MIGRATION_SYSTEM.md` (+ `serialization-migration` skill) |
 | Sub-voxel collision, collision bounds                                      | `Architecture/SUB_VOXEL_COLLISION_SYSTEM.md`                                     |
 | Fluid rendering, shoreline blending                                        | `Architecture/FLUID_SHORELINE_RENDERING.md`                                      |
 | Profiler markers, performance instrumentation                              | `Architecture/PERFORMANCE_PROFILER_OVERHAUL.md` + `Performance/`                 |
+| Reflection-based settings menu, `SettingsUIGenerator`, `SettingFieldAttribute`, `Settings`/`DevSettings` fields | `Architecture/DATA_DRIVEN_SETTINGS_UI.md`                  |
 | Burst jobs, Burst-compatibility patterns                                   | `Guides/BURST_COMPILER_GUIDE.md`                                                 |
 | Optimization patterns, GC avoidance, pooling                               | `Guides/GENERAL_OPTIMIZATION_GUIDE.md`                                           |
 | Directory layout / new architectural folder                                | `Guides/PROJECT_STRUCTURE.md`                                                    |
