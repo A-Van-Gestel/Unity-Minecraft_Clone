@@ -51,11 +51,11 @@ Documentation/
 | Directory layout / new architectural folder                                | `Guides/PROJECT_STRUCTURE.md`                                                    |
 | Naming, bracing, const conventions                                         | `Guides/CODING_STYLE_GUIDE.md`                                                   |
 
-**Use the code-review-graph MCP first.** Per `CLAUDE.md`, prefer graph tools over Grep:
+**Use the CodeGraph MCP first.** Per `CLAUDE.md`, prefer graph tools over Grep:
 
 ```
-get_minimal_context(task="docs sync for <changed file or feature>")
-semantic_search_nodes(query="<feature name>")  # find related code
+codegraph_explore(query="docs sync for <changed file or feature>")
+codegraph_search(query="<feature name>")  # find related code
 ```
 
 Then grep `Documentation/` for the names of any files, classes, or concepts your change renamed or removed:

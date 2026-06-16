@@ -34,11 +34,10 @@ Before editing any pipeline code, read `@Documentation/Architecture/CHUNK_LIFECY
 
 ### Step 3 — Verify with the graph
 
-After your edit, use the code-review-graph MCP:
+After your edit, use the CodeGraph MCP:
 
-- `query_graph` pattern=`callers_of` on any flag setter you changed — every caller must still be correct.
-- `get_impact_radius` on the modified file — confirm you didn't unintentionally destabilize an adjacent pipeline stage.
-- `detect_changes` — risk score should not flag the readiness gates unless you intentionally changed them.
+- `codegraph_callers` on any flag setter you changed — every caller must still be correct.
+- `codegraph_impact` on the modified file — confirm you didn't unintentionally destabilize an adjacent pipeline stage, especially the readiness gates.
 
 ### Step 4 — Inspect live pipeline state (unity-mcp)
 
