@@ -173,3 +173,21 @@ The Sub-Chunk architecture lays the foundation for **Graph-Based Visibility Cull
 
 For the detailed design and implementation plan of this feature, please refer to:
 **[Documentation/Design/VISIBILITY_CULLING_ARCHITECTURE.md](../Design/VISIBILITY_CULLING_ARCHITECTURE.md)**
+
+---
+
+## 9. Testing & Validation
+
+The mesher has an editor validation suite at `Assets/Editor/Validation/Meshing/` (menu
+**`Minecraft Clone/Dev/Validate Meshing`**). It runs the **real** `MeshGenerationJob` over a synthetic
+single chunk and asserts the output against an independent standard-cube geometry oracle plus
+structural/determinism invariants — the regression guard that lets the `MR-*` meshing optimizations in
+[PERFORMANCE_IMPROVEMENTS_REPORT.md](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim "output-preserving"
+(it already guards MR-1 and MR-7).
+
+- **What it covers and its blind spots** (interior-only placement, `SmoothLighting.Off` so light/UV/color
+  *values* are unchecked, no `MeshPostProcessJob` stage, no custom/cross/lava), plus the phased `MH-*`
+  extension backlog keyed to each open `MR-*` item:
+  [Testing Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md](Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md).
+- **Harness file map, API cheat sheet, and the MR-* guard pattern** (for authoring scenarios):
+  `.agents/skills/validation-driven-bugfix/references/meshing-suite.md`.

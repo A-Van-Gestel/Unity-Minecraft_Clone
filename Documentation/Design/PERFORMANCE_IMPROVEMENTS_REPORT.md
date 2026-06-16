@@ -992,6 +992,11 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
   Capture-free: keep all baselines green through any MR-* change. Built test-first per the
   `validation-driven-bugfix` skill (the lighting suite's sibling). Fluid/custom-mesh/cross-mesh and
   UV/light *values* are not yet oracle-covered — extend the suite before optimizing those paths.
+  **Which harness capability each open MR-* item needs first** (and the phased build order) is
+  catalogued in
+  [`Architecture/Testing Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md):
+  e.g. MR-2 needs light/UV value oracles, MR-5 needs `MeshPostProcessJob` section-space coverage,
+  MR-3 needs a `SectionRenderer` apply-path harness, MR-8 needs a merge-invariant oracle.
 - **GC:** Profiler GC-allocation capture during sustained streaming (fly in a straight line at max
   speed) before/after waves 1 and 3 — MR-3/MR-9/TG-3/MT-* should drive steady-state allocations to
   ~zero outside debug UI.
