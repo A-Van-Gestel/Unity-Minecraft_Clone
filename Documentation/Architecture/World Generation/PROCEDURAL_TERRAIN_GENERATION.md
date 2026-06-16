@@ -1,10 +1,18 @@
-# Design Document: Modern Procedural Terrain Generation
+# Procedural Terrain Generation
 
 **Version:** 2.5 (Implemented — Cave Isolation Filter)  
 **Date:** May 2026  
 **Status:** Implemented  
 **Target:** Unity 6.4 (Standard World Gen System / Burst Compiler)  
 **Context:** Upgrading the 2D heightmap generation to a 3D volumetric density pipeline with Domain Warping and Multi-Noise (Continentalness, Erosion, Peaks & Valleys).
+
+> [!NOTE]
+> **Cave generation has its own authoritative doc.** This document covers terrain *shape*
+> (multi-noise height, 3D density, domain warping, strata, lodes, the cave isolation filter,
+> and the generation job structure). The cave *carving* system — worm carvers (trunk + local),
+> zone attenuation, noise/mask seeking, Cheese/Noodle/Spaghetti modes — is described in
+> [CAVE_GENERATION.md](CAVE_GENERATION.md). The cave-mode snippets in §1.4 and §4 below are a
+> summary; CAVE_GENERATION.md is the source of truth for cave formulas and behavior.
 
 ---
 
@@ -15,12 +23,7 @@ The legacy procedural terrain system uses a strict 2D heightmap ($y = f(x,z)$). 
 1. **Multi-Noise 2D Base (Minecraft C&C):** Terrain height is decoupled from a single noise map. Instead, we evaluate three independent noises (Continentalness, Erosion, Peaks & Valleys) mapped through **Data-Driven Splines** to determine a base terrain shape.
 2. **3D Density Fields (GPU Gems 3):** The final surface is defined by a 3D density function: $Density = BaseHeight(x,z) - y + 3DNoise(x,y,z)$.
 3. **Domain Warping (Iñigo Quílez):** The input coordinates of the 3D density noise (and optionally cave noises) are distorted using a secondary noise field ($p' = p + Warp(p)$), breaking up artificial grid-like patterns and simulating geological folding.
-4. **Cave System Modernization:** All existing cave modes are preserved. New volumetric cave modes are added:
-    - *Cheese (renamed from Blob):* Large open caverns — `noise3D > threshold`
-    - *Spaghetti2D:* 6-way 2D axis-pair average tunnel networks (highly interconnected; grid repetition at large scales)
-    - *Spaghetti3D (new):* Interconnected tunnels via dual 3D noise zero-crossing intersection — `1 - sqrt(rawA² + rawB²) > threshold`
-    - *Noodle (new):* Winding tubular corridors — `1 - |noise3D| > threshold`
-    - *WormCarver:* Organic recursive random-walk tunnels via pre-baked bitmask
+4. **Cave System:** Caves are carved into the volumetric terrain by a dedicated subsystem (Cheese, Spaghetti2D/3D, Noodle noise modes plus a two-tier trunk/local worm carver). That system has grown well beyond this document's scope and has its own authoritative doc — see **[CAVE_GENERATION.md](CAVE_GENERATION.md)**. This document covers only how the cave pass slots into the generation job (§4) and the cave isolation filter (§4.1).
 
 ---
 
@@ -149,13 +152,13 @@ We expose Domain Warping parameters so that any `FastNoiseConfig` can optionally
         public AnimationCurve peaksAndValleysCurve;
 
         [Header("3D Density (Overhangs & Arches)")]
-        public bool enable3DDensity = true;
+        public bool enable3DDensity;            // default false — opt-in per biome
         public FastNoiseConfig densityNoiseConfig;
         [Tooltip("Max height variation of 3D noise. Dynamically defines the Density Band.")]
         public float densityAmplitude = 15f;
 
         [Header("Domain Warping (Organic Distortion)")]
-        public bool enableDensityWarp = true;
+        public bool enableDensityWarp;          // default false — opt-in per biome
         public FastNoiseConfig densityWarpConfig;
 ```
 
@@ -180,34 +183,9 @@ New fields mirroring the authoring class:
         public bool EnableDensityWarp;
 ```
 
-### 3.5. Updating Cave Layer Data (New `Noodle` Mode + Warp Support)
+### 3.5. Cave Layer Data
 
-```csharp
-// Assets/Scripts/Data/WorldTypes/StandardCaveLayer.cs — new fields
-        [Tooltip("Apply domain warping to this cave layer's noise coordinates. Affects Cheese, Noodle, and Spaghetti3D modes (3D evaluation). Not applicable to Spaghetti2D (uses 2D noise pairs).")]
-        public bool enableWarp;
-        public FastNoiseConfig warpConfig;
-
-// Assets/Scripts/Data/WorldTypes/CaveMode.cs — enum values
-public enum CaveMode
-{
-    Cheese,       // Renamed from Blob — large open caverns (noise3D > threshold)
-    Spaghetti2D,  // 6-way 2D axis-pair average (interconnected; grid repetition at scale)
-    WormCarver,   // Recursive random-walk tunnels via pre-baked bitmask
-    Noodle,       // Winding tubular corridors (1 - |noise3D| > threshold)
-    Spaghetti3D,  // Dual 3D noise zero-crossing intersection tunnels (1 - sqrt(rawA² + rawB²) > threshold)
-}
-
-// Assets/Scripts/Jobs/Data/StandardCaveLayerJobData.cs — add field
-        [MarshalAs(UnmanagedType.U1)]
-        public readonly bool EnableWarp;
-```
-
-> [!NOTE]
-> **`Blob` → `Cheese` Rename Safety:** Unity serializes enum fields by their **integer value**, not by name. Since `Cheese` occupies position 0 (the same slot `Blob` occupied), existing biome assets deserialize correctly without any attribute. `[FormerlySerializedAs]` is a field-level attribute and cannot be applied to individual enum members — it is not needed here.
-
-> [!NOTE]
-> **Domain Warp and Spaghetti2D:** Cave domain warping (`EnableWarp`) applies to `Cheese`, `Noodle`, and `Spaghetti3D` modes, which all use full 3D noise evaluation. `Spaghetti2D` uses 2D noise pairs (`GetNoise(x, y)`, `GetNoise(y, z)`, etc.) — applying a 3D warp to coordinates consumed by 2D calls produces inconsistent distortion (the warped Z shift is lost in pairs that don't use Z). Spaghetti2D always evaluates with unwarped `globalX, y, globalZ` coordinates. `Spaghetti3D` uses two independent 3D noise fields and fully supports domain warping.
+Cave layer authoring (`StandardCaveLayer`, the `CaveMode` enum, per-layer domain warp, zone attenuation, depth/surface fades, and all worm-carver parameters) and its Burst `StandardCaveLayerJobData` mirror are documented in **[CAVE_GENERATION.md](CAVE_GENERATION.md)** (the `CaveMode` enum and `StandardCaveLayer` class both live in `Assets/Scripts/Data/WorldTypes/StandardBiomeAttributes.cs`). The only terrain-shape touch-point is that cave layers reuse the same domain-warp mechanism described in §2.4 / §3.1.
 
 ### 3.6. Updating `BiomeBlender`
 
@@ -241,6 +219,8 @@ public static float CalculateBlendedTerrainHeight(
     ref FastNoiseLite selectionNoise,
     ref NativeArray<StandardBiomeAttributesJobData> biomes,
     ref MultiNoiseData multiNoise,
+    bool isSingleBiomeMode,   // editor single-biome preview: skip Voronoi, force one biome
+    int forceBiomeIndex,
     out float borderFade)
 {
     // 9-cell Voronoi IDW blending with organic simplex wiggle on blend radius.
@@ -286,6 +266,9 @@ All must have corresponding `.Dispose()` calls in `StandardChunkGenerator.Dispos
 > [!NOTE]
 > **`_caveWarpNoises` Indexing:** This array is sized to `totalCaveLayerCount` and indexed by `caveIdx` (matching `_caveNoises`). Every cave layer gets an entry — including `Spaghetti` and `WormCarver` layers where warp is ignored. For layers with `enableWarp = false` or modes that don't support warping, populate the slot with a default-constructed `FastNoiseLite` instance (via `FastNoiseLite.Create(0)`). This avoids conditional indexing in the job and matches the existing pattern used by `_caveNoises` (which populates all slots regardless of mode).
 
+> [!NOTE]
+> **Cave noise tables:** `Initialize()` also allocates the cave subsystem's noise arrays — `_caveNoises` and `_caveSpaghetti3DNoises` (`totalCaveLayerCount`, the latter populated only for Spaghetti3D layers) and `_caveZoneNoises` (per-biome) — alongside `_caveWarpNoises`, all disposed in `Dispose()`. Their roles are documented in [CAVE_GENERATION.md](CAVE_GENERATION.md).
+
 The legacy `_biomeTerrainNoises` array, the `terrainNoiseConfig` field, and the `terrainAmplitude` field have been removed. All biomes must have configured Multi-Noise fields.
 
 ---
@@ -299,7 +282,7 @@ Core rewrite of the terrain generation loop. Key changes from v1.x:
 - `lastSurfaceY` tracking for correct subsurface strata under overhangs
 - Lode pass runs **before** cave carving so `PreCaveBlockIDs` captures post-lode values
 - `FluidType`-based cave carve guard
-- Preserved legacy cave modes + new `Noodle` mode
+- Cave carving pass (noise modes + worm mask) gated by `FeatureFlags` — formulas/modes documented in [CAVE_GENERATION.md](CAVE_GENERATION.md)
 - Cave isolation filter post-pass (`CaveIsolationFilterJob`) — volume-based flood fill removes small disconnected cave pockets
 
 ```csharp
@@ -422,108 +405,20 @@ for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
     // ... existing lode code ...
 
     // ----- CAVE CARVING PASS -----
-    // Guard: only carve solid, non-fluid, non-bedrock blocks.
-    // Before setting voxelValue = Air, writes to OutputCaveMask and
-    // OutputPreCaveBlockIDs for the isolation filter post-pass.
-    if (voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
+    // Guard: only carve solid, non-fluid, non-bedrock blocks. For each cave layer in the biome,
+    // evaluate the layer's mode (Cheese / Spaghetti2D / Spaghetti3D / Noodle, or the pre-baked
+    // WormMask from StandardWormCarverJob) against a depth/surface-fade + zone-attenuated
+    // threshold. On a carve: write OutputCaveMask + OutputPreCaveBlockIDs (for the isolation
+    // filter post-pass) and set voxelValue = Air.
+    //
+    // The per-mode formulas (incl. the smoothed Noodle/Spaghetti3D isobands), zone attenuation,
+    // depth/surface fades, feature-flag gating, and the worm mask are the authoritative subject
+    // of CAVE_GENERATION.md — see §4 there, not this summary.
+    if (FeatureFlags.EnableCaves &&
+        voxelValue != BlockIDs.Air && voxelValue != BlockIDs.Bedrock &&
         BlockTypes[voxelValue].FluidType == FluidType.None)
     {
-        for (int i = 0; i < biome.CaveLayerCount; i++)
-        {
-            int caveIdx = biome.CaveLayerStartIndex + i;
-            StandardCaveLayerJobData caveLayer = AllCaveLayers[caveIdx];
-
-            if (y < caveLayer.MinHeight || y > caveLayer.MaxHeight) continue;
-
-            float depthFade = StandardCaveLayerJobData.CalculateDepthFade(
-                y, caveLayer.MinHeight, caveLayer.MaxHeight,
-                caveLayer.DepthFadeMarginBottom, caveLayer.DepthFadeMarginTop);
-
-            // Surface-relative fade — suppress carving near the actual terrain surface
-            if (caveLayer.SurfaceFadeMargin > 0)
-            {
-                float surfaceFade = StandardCaveLayerJobData.CalculateSurfaceFade(
-                    y, terrainHeightFloat, caveLayer.SurfaceFadeMargin);
-                depthFade = math.min(depthFade, surfaceFade);
-            }
-
-            float effectiveThreshold = caveLayer.Threshold + (1f - depthFade) * (1f - caveLayer.Threshold);
-
-            // --- WormCarver --- random-walk pre-baked bitmask
-            if (caveLayer.Mode == CaveMode.WormCarver)
-            {
-                if (WormMask.IsSet(ChunkMath.GetFlattenedIndexInChunk(x, y, z)))
-                {
-                    int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
-                    OutputPreCaveBlockIDs[flatIdx] = (ushort)voxelValue;
-                    OutputCaveMask[flatIdx] = 1;
-                    voxelValue = (byte)BlockIDs.Air;
-                    break;
-                }
-                continue;
-            }
-
-            FastNoiseLite caveNoise = CaveNoises[caveIdx];
-
-            // --- Cheese Caves (renamed from Blob) — large open caverns ---
-            if (caveLayer.Mode == CaveMode.Cheese)
-            {
-                float cx = globalX, cy = y, cz = globalZ;
-                if (caveLayer.EnableWarp)
-                    CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
-
-                if (caveNoise.GetNoise(cx, cy, cz) > effectiveThreshold)
-                {
-                    int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
-                    OutputPreCaveBlockIDs[flatIdx] = (ushort)voxelValue;
-                    OutputCaveMask[flatIdx] = 1;
-                    voxelValue = (byte)BlockIDs.Air;
-                    break;
-                }
-            }
-            // --- Spaghetti2D — 6-way 2D axis-pair average ---
-            // Domain warp is NOT applied: 2D noise pairs would lose the Z-axis warp shift.
-            else if (caveLayer.Mode == CaveMode.Spaghetti2D)
-            {
-                // Bounding volume early-out: evaluate low-frequency 3D noise first.
-                // If far below threshold, skip the expensive 6-way evaluation.
-                float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
-                if (bound < effectiveThreshold - 0.2f) continue;
-
-                float noiseVal = (caveNoise.GetNoise(globalX, y) + caveNoise.GetNoise(y, globalZ) +
-                                  caveNoise.GetNoise(globalX, globalZ) + caveNoise.GetNoise(y, globalX) +
-                                  caveNoise.GetNoise(globalZ, y) + caveNoise.GetNoise(globalZ, globalX)) / 6f;
-
-                if (noiseVal > effectiveThreshold)
-                {
-                    int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
-                    OutputPreCaveBlockIDs[flatIdx] = (ushort)voxelValue;
-                    OutputCaveMask[flatIdx] = 1;
-                    voxelValue = (byte)BlockIDs.Air;
-                    break;
-                }
-            }
-            // --- Noodle (new) — winding tubular corridors via isoband ---
-            else if (caveLayer.Mode == CaveMode.Noodle)
-            {
-                float cx = globalX, cy = y, cz = globalZ;
-                if (caveLayer.EnableWarp)
-                    CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
-
-                // Tunnels exist where |noise| is close to 0 (the 'core' of the noise wave).
-                // Invert so center = 1.0, edges = 0.0.
-                float noiseVal = 1.0f - math.abs(caveNoise.GetNoise(cx, cy, cz));
-
-                if (noiseVal > effectiveThreshold)
-                {
-                    int flatIdx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
-                    OutputPreCaveBlockIDs[flatIdx] = (ushort)voxelValue;
-                    OutputCaveMask[flatIdx] = 1;
-                    voxelValue = (byte)BlockIDs.Air;
-                    break;
-                }
-            }
-        }
+        // ... per-layer cave evaluation — see CAVE_GENERATION.md §4 ...
     }
 
     // ...[Pack Voxel & Write to OutputMap] ...

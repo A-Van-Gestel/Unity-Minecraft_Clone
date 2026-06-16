@@ -1,10 +1,12 @@
-# Improved Cave Generation
+# Cave Generation
 
-> Design document for the next iteration of the cave generation system.
-> Captures lessons learned from the current implementation and outlines concrete improvements.
+> Authoritative architecture doc for the cave generation system. Records the experimentation
+> arc and the lessons that shaped the current (implemented) two-tier worm + noise design.
+> Promoted from a Design draft on 2026-06-16 once the full system shipped.
 
 **Created:** 2026-05-26
-**Status:** Draft
+**Status:** Implemented (2026-06-16)
+**Related:** [PROCEDURAL_TERRAIN_GENERATION.md](PROCEDURAL_TERRAIN_GENERATION.md) (terrain shape + the generation job this carving runs inside), [MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md](MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md) (world-type / biome plumbing).
 
 ---
 
@@ -78,10 +80,10 @@ The Worm Carver avoids both problems by construction: it's procedurally unique p
 - Branch children get half the parent's remaining length
 - Output: `NativeBitArray` worm mask consumed by the main generation job
 
-**Current Config (Mountain only):**
+**Config at the time of this retrospective** (Mountain was the only biome with a worm layer; see §4.4 for the shipped per-biome configs):
 `spawn=0.015 maxWorms=1 r=3 wave=0.33 len=50-200 branch=0.05 maxDepth=2 seek={interval=10, dist=10, chance=0.5}`
 
-Note: The three noise-seeking fields (`wormSeekInterval`, `wormSeekDistance`, `wormSeekChance`) are currently separate fields on `StandardCaveLayer`. Section 3.5 proposes grouping them into a `WormNoiseSeeking` config struct for clarity.
+Note: The three noise-seeking fields (`wormSeekInterval`, `wormSeekDistance`, `wormSeekChance`) were originally separate fields on `StandardCaveLayer`; they are now grouped into the `WormNoiseSeeking` struct (§3.5.1).
 
 ### 2.2 Cheese (Blob) --- Chamber Generator
 
@@ -178,11 +180,17 @@ When both rawA and rawB are near zero simultaneously, `tubeValue` approaches 1.0
 
 ---
 
-## 3. Proposed Changes
+## 3. Design Changes
+
+> [!NOTE]
+> **All changes in this section are implemented** (shipped through Phases 1–5, see §5). The
+> "Problem / Solution / Migration" framing is retained as the historical design record — read
+> it as "what was built and why," not as pending work. Where a subsection's wording lagged the
+> final implementation it has been corrected to match the code.
 
 ### 3.1 Worm Carver Improvements
 
-#### 3.1.1 Horizontal Bias
+#### 3.1.1 Horizontal Bias (Implemented)
 
 **Problem:** Worms trend vertical over long distances. The pitch perturbation is symmetric around the current pitch, and the clamp at +/-72 degrees allows sustained vertical movement.
 
@@ -195,7 +203,7 @@ pitch = math.lerp(pitch, 0f, horizontalBias * 0.1f);
 
 At `horizontalBias = 0.5`, a worm that's been going vertical for several steps will gradually level out. The effect is subtle per-step but accumulates over the worm's lifetime, producing caves that are mostly horizontal with occasional vertical sections rather than sustained vertical shafts.
 
-**New field on `StandardCaveLayer`:**
+**Implemented as** `wormHorizontalBias` on `StandardCaveLayer` (and `horizontalBias` on `TrunkWormConfig`):
 
 ```csharp
 [Range(0f, 1f)]
@@ -268,7 +276,7 @@ The `16f` denominator models a virtual target 16 blocks ahead horizontally, prod
 **Implemented as:** A `WormYAttraction` serializable struct (matching the `WormNoiseSeeking` grouping pattern) with fields `strength` (0-1, default 0 = disabled), `minY`, and `maxY`. Used as `wormYAttraction` on `StandardCaveLayer` (per-biome local worms, default band [20, 40]) and `yAttraction` on `TrunkWormConfig` (world-level trunk worms, default band [15, 35]). Per-biome override via `trunkYAttractionCenterOverride` on `StandardBiomeAttributes` --- shifts the trunk band center while preserving the global band width (same pattern as
 `trunkVerticalBiasOverride`). Job data structs keep the fields flat (`WormYAttractionStrength`, `WormYAttractionMin`, `WormYAttractionMax`) for Burst blittability. Applied in `SimulateWormStack` after horizontal bias and before noise seeking. The runtime normalizes `min <= max` via `math.min`/`math.max` to guard against inverted config. `BiomeConfigValidator` warns when the attraction band is inverted, doesn't overlap the spawn height range, or strength exceeds 0.8.
 
-### 3.2 Zone Attenuation: Per-Layer Opt-In
+### 3.2 Zone Attenuation: Per-Layer Opt-In (Implemented)
 
 **Problem:** Zone Attenuation currently applies globally to all cave layers in a biome. This makes sense for suppressing Noodle everywhere, but it also suppresses Worm Carvers and Cheese chambers that don't need it.
 
@@ -278,8 +286,8 @@ The `16f` denominator models a virtual target 16 blocks ahead horizontally, prod
 
 1. Add `zoneAttenuation` field to `StandardCaveLayer` (default 0.0 = no zone effect).
 2. Keep the biome-level `caveZoneNoiseConfig` (the noise field itself is shared across layers --- only the attenuation strength varies).
-3. Deprecate `StandardBiomeAttributes.caveZoneAttenuation`.
-4. For biomes that currently use zone attenuation, set it only on the Noodle layer (where it's actually needed).
+3. Remove `StandardBiomeAttributes.caveZoneAttenuation` entirely — the biome-level field no longer exists; zone attenuation is purely per-layer.
+4. For biomes that use zone attenuation, set it only on the Noodle layer (where it's actually needed).
 
 **Result:** Worm Carvers and Cheese chambers generate independently of zone noise. Only generators that inherently lack spatial variation (Noodle) opt into zone gating. This eliminates the "band-aid" quality of the current system.
 
@@ -482,9 +490,9 @@ The key difference: trunk worms look up the biome at each look-ahead position (c
 
 ### 3.5 Noise Seeking Rework
 
-#### 3.5.1 Config Struct Consolidation
+#### 3.5.1 Config Struct Consolidation (Implemented)
 
-**Problem:** The three noise-seeking fields (`wormSeekInterval`, `wormSeekDistance`, `wormSeekChance`) are currently separate top-level fields on `StandardCaveLayer`. They always belong together and are meaningless individually. Grouping them improves inspector readability and makes the relationship explicit.
+**Problem:** The three noise-seeking fields (`wormSeekInterval`, `wormSeekDistance`, `wormSeekChance`) were originally separate top-level fields on `StandardCaveLayer`. They always belong together and are meaningless individually. Grouping them improves inspector readability and makes the relationship explicit.
 
 **Solution:** Introduce a `WormNoiseSeeking` serializable struct:
 
@@ -508,7 +516,7 @@ public struct WormNoiseSeeking
 
 Replace the three fields on `StandardCaveLayer` with a single `wormNoiseSeeking` field of this type. Add corresponding fields to `StandardCaveLayerJobData` (flat struct, not nested — Burst requires blittable layout).
 
-#### 3.5.2 Seek Target Rework: From Hardcoded to Flag-Based
+#### 3.5.2 Seek Target Rework: From Hardcoded to Flag-Based (Implemented)
 
 **Current behavior:** The noise-seeking code in `StandardWormCarverJob` (lines 202-237) iterates *all* cave layers in the biome and seeks toward any layer whose mode is Cheese, Spaghetti2D, Spaghetti3D, or Noodle. This is hardcoded — every non-worm layer is always a seek target with no opt-out.
 
@@ -570,8 +578,8 @@ The `WorldGenPreviewWindow.BiomeEditor.cs` "Caves & Lodes" sub-tab (`DrawBeCaves
 
 **Phase 2 — Per-layer zone attenuation UI:**
 
-- The biome-level `caveZoneAttenuation` field is deprecated but kept for backwards compatibility. The BiomeEditor should show it as read-only with a note pointing to the per-layer field.
-- The new per-layer `zoneAttenuation` field renders automatically via the array drawer. Consider adding a help note in the "Cave Zone Attenuation" section explaining that attenuation is now per-layer.
+- The biome-level `caveZoneAttenuation` field has been removed entirely — zone attenuation is configured per cave layer.
+- The per-layer `zoneAttenuation` field renders automatically via the array drawer. The "Cave Zone Attenuation" section carries a help note explaining that attenuation is now per-layer.
 
 **Phase 3 — Trunk modifier fields and conditional layer UI:**
 
@@ -602,11 +610,11 @@ Cave generation logic is evaluated in four independent code paths. Any formula c
 | **Worm Seek**            | `StandardWormCarverJob.cs`              | Noise-seeking evaluation for worm steering (Burst) |
 
 > [!NOTE]
-> The **Worm Seek** path only evaluates Spaghetti2D, Spaghetti3D, and Noodle noise for steering decisions — it does not carve voxels. A formula drift here won't produce incorrect terrain, but worms will seek toward phantom features (or miss real ones), leading to tunnels that dead-end into solid rock instead of connecting to open caves. See [WORLD_GENERATION_BUGS.md](../Bugs/WORLD_GENERATION_BUGS.md) for the tracking entry.
+> The **Worm Seek** path only evaluates Spaghetti2D, Spaghetti3D, and Noodle noise for steering decisions — it does not carve voxels. A formula drift here won't produce incorrect terrain, but worms will seek toward phantom features (or miss real ones), leading to tunnels that dead-end into solid rock instead of connecting to open caves. See [WORLD_GENERATION_BUGS.md](../../Bugs/WORLD_GENERATION_BUGS.md) for the tracking entry.
 
 ### 4.2 Key Formulas
 
-**Zone threshold boost** (currently biome-level, proposed per-layer):
+**Zone threshold boost** (per-layer, applied only when `caveLayer.ZoneAttenuation > 0`):
 
 ```
 boost = (1 - zoneNoise) * 0.5 * attenuation
@@ -638,21 +646,28 @@ Peak at `raw = 0`: exactly `1.0`. Minimum at `|raw| = 1`: approximately `0.058`.
 
 Editor tool at `Assets/Editor/Dev/CaveDensityAnalyzer.cs`. Cross-chunk-aware with union-find boundary merging.
 
+> [!NOTE]
+> **All eight limitations below have been resolved** — the analyzer now implements standalone-biome
+> evaluation, a trunk-worm toggle, multi-seed averaging (`_seedCount`), per-layer-type breakdown
+> (`RunLayerBreakdown` via `GenerationFeatureFlags`), worm telemetry (`WormTelemetryEntry` +
+> `EnableTelemetry`), cheese-worm connectivity, network topology (junction/dead-end), and
+> horizontal/vertical characterization. Each **Resolved** paragraph below describes the shipped fix.
+
 **Known limitation 1 — Standalone biomes:** Cannot evaluate biomes not in the `WorldTypeDefinition`. The `StandardChunkGenerator.Initialize()` loads biomes exclusively from the WorldType array and finds the force index via reference equality. A biome loaded independently from `AssetDatabase` will never match, defaulting to biome index 0.
 
-**Fix (deferred):** Accept the biome object in `Initialize()` and, if no reference match is found, temporarily replace the array entry at `_forceBiomeIndex` with a copy whose cave config is overridden from the passed biome.
+**Resolved:** Accept the biome object in `Initialize()` and, if no reference match is found, temporarily replace the array entry at `_forceBiomeIndex` with a copy whose cave config is overridden from the passed biome.
 
 **Known limitation 2 — Trunk worms:** The analyzer currently only evaluates per-biome cave layers. Once world-level trunk worms are implemented (Phase 3), single-biome analysis mode will not capture trunk worm contributions — trunk worms use a separate world-level scatter grid and config that the analyzer doesn't know about. Multi-biome mode may partially capture them if the `StandardChunkGenerator` is updated to include trunk layer evaluation, but single-biome analysis will underreport total cave density and network connectivity.
 
-**Fix (deferred to Phase 3 or later):** Update `EditorChunkPipelineRunner` and/or `CaveDensityAnalyzer` to include trunk worm layer evaluation. The analyzer should report trunk and local cave contributions separately so tuning can distinguish world-level vs biome-level effects.
+**Resolved:** Update `EditorChunkPipelineRunner` and/or `CaveDensityAnalyzer` to include trunk worm layer evaluation. The analyzer should report trunk and local cave contributions separately so tuning can distinguish world-level vs biome-level effects.
 
 **Known limitation 3 — Single-seed instability:** Worm-based cave systems are far more seed-sensitive than noise-based systems. A single worm spawn/no-spawn decision can swing density and connectivity by 2-4x (observed during Phase 4 tuning: seed 42 showed 79% connectivity for Grasslands at spawn=0.05, while seed 1337 showed 50%). Single-seed analysis produces misleading results that cannot reliably distinguish "config is wrong" from "seed is unlucky."
 
-**Fix:** Add a multi-seed averaging mode. Run the analysis across 3-5 seeds and report mean ± standard deviation for key metrics (density, empty chunks, connectivity, max span). The UI should offer a "Multi-seed (N seeds)" toggle next to the existing seed field. The static API should accept an optional `int seedCount` parameter that defaults to 1 for backwards compatibility.
+**Resolved:** Add a multi-seed averaging mode. Run the analysis across 3-5 seeds and report mean ± standard deviation for key metrics (density, empty chunks, connectivity, max span). The UI should offer a "Multi-seed (N seeds)" toggle next to the existing seed field. The static API should accept an optional `int seedCount` parameter that defaults to 1 for backwards compatibility.
 
 **Known limitation 4 — No per-layer-type breakdown:** The analyzer reports total cave air but does not distinguish contributions from Worm Carver, Cheese, and Noodle layers. During Phase 4 tuning, it was impossible to determine how much of Desert's density came from the new worm layer vs existing Cheese vs Noodle. This makes per-layer tuning a guessing game — adjusting worm spawn rates without knowing whether the observed density change came from worms or from coincidentally co-located Cheese chambers.
 
-**Fix:** Run the analysis pipeline multiple times with individual layers enabled/disabled (via `GenerationFeatureFlags` or by temporarily zeroing layer configs), then diff the results. Report a per-layer-type breakdown table:
+**Resolved:** Run the analysis pipeline multiple times with individual layers enabled/disabled (via `GenerationFeatureFlags` or by temporarily zeroing layer configs), then diff the results. Report a per-layer-type breakdown table:
 
 ```
 Layer Breakdown:
@@ -669,11 +684,11 @@ Layer Breakdown:
 - **Individual worm chunk span:** How many chunks each individual worm passes through (separate from the union-find merged network span, which conflates "one long worm" with "many short worms that happened to intersect").
 - **Seek success rate:** How often noise seeking found a target vs fired and found nothing. A low success rate indicates seekable layers are too sparse or seek distance is too short.
 
-**Fix:** Instrument the `StandardWormCarverJob` (or an editor-only variant) to output per-worm telemetry into a `NativeList<WormTelemetry>` struct. The analyzer would collect and aggregate these across all chunks. This requires either a debug-only job variant or a compile-time telemetry toggle (to avoid performance cost in production generation).
+**Resolved:** Instrument the `StandardWormCarverJob` (or an editor-only variant) to output per-worm telemetry into a `NativeList<WormTelemetry>` struct. The analyzer would collect and aggregate these across all chunks. This requires either a debug-only job variant or a compile-time telemetry toggle (to avoid performance cost in production generation).
 
 **Known limitation 6 — No cheese-worm connection rate:** The purpose of noise seeking is to connect worm tunnels to cheese chambers. The analyzer does not measure how many cheese pockets are actually reachable from a worm tunnel vs isolated. This is the most important quality metric for validating that the seek system works — without it, worms could be wandering randomly without connecting to anything, and the analyzer wouldn't detect it.
 
-**Fix:** After the union-find merge pass, classify each network by which layer types contributed to it. A network containing both worm-carved and cheese-carved blocks is a "connected" network; a cheese-only network is "isolated." Report:
+**Resolved:** After the union-find merge pass, classify each network by which layer types contributed to it. A network containing both worm-carved and cheese-carved blocks is a "connected" network; a cheese-only network is "isolated." Report:
 
 ```
 Cheese-Worm Connectivity:
@@ -688,11 +703,11 @@ Cheese-Worm Connectivity:
 - **Junction count:** Blocks where 3+ passages meet — these are exploration decision points.
 - **Longest path through network:** The maximum distance a player can travel without backtracking. Measures exploration depth.
 
-**Fix:** After flood fill, run a graph analysis pass on the network's block connectivity. Identify junction blocks (3+ air neighbors in non-coplanar directions) and dead-end blocks (1 air neighbor). Compute longest path via BFS from each dead-end. Report per-network and aggregate topology stats.
+**Resolved:** After flood fill, run a graph analysis pass on the network's block connectivity. Identify junction blocks (3+ air neighbors in non-coplanar directions) and dead-end blocks (1 air neighbor). Compute longest path via BFS from each dead-end. Report per-network and aggregate topology stats.
 
 **Known limitation 8 — No horizontal/vertical tunnel characterization:** The analyzer reports network Y-span but cannot distinguish horizontal tunnels from vertical shafts. During Phase 4, `horizontalBias` was tuned from 0.5 to 0.2 for Mountain to encourage vertical shafts, but the only validation was the Y-span metric (which measures extent, not direction). A strongly horizontal tunnel that happens to descend gradually over many chunks can produce the same Y-span as a vertical shaft.
 
-**Fix:** For each cave air block, classify the local passage direction by examining the distribution of air neighbors. A block surrounded by air primarily on the X/Z plane is in a horizontal passage; a block with air primarily above/below is in a vertical shaft. Report the horizontal/vertical ratio per network.
+**Resolved:** For each cave air block, classify the local passage direction by examining the distribution of air neighbors. A block surrounded by air primarily on the X/Z plane is in a horizontal passage; a block with air primarily above/below is in a vertical shaft. Report the horizontal/vertical ratio per network.
 
 ### 4.4 Current Biome Cave Configs (as of 2026-05-28, Phase 4)
 
@@ -725,6 +740,11 @@ Trunk modifiers:  Desert trunkSpawnSuppression=0.5 | Mountain trunkVerticalBiasO
 ---
 
 ## 5. Implementation Plan
+
+> [!NOTE]
+> **All phases (1–5) are complete.** This plan is retained as the historical rollout record;
+> the strikethroughs in Phase 5 mark the optional enhancements as they landed. The current
+> shipped configuration is captured in §4.4.
 
 ### Phase 1: Worm Carver Improvements
 
