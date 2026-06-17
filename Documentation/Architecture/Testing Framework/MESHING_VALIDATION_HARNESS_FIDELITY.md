@@ -1,7 +1,8 @@
 # Meshing Validation Harness — Fidelity Boundary & Extension Backlog
 
-**Status:** 🚧 **DRAFT planning note** (not yet an accepted backlog — pending review)
-**Created:** 2026-06-16
+**Status:** ✅ **Active backlog** — Wave 1 executed 2026-06-17 (MH-1/MH-4/MH-9 closed); see §6 for the
+forward wave plan (Wave 2 = MH-5 → MH-3, next).
+**Created:** 2026-06-16 · **Last updated:** 2026-06-17
 **Scope:** `Assets/Editor/Validation/Meshing/` — the `MeshingValidationSuite` + `MeshingTestWorld` +
 `MeshOracle` + `MeshAssert` + `TestMeshBlockPalette` harness (menu item
 **`Minecraft Clone/Dev/Validate Meshing`**).
@@ -272,7 +273,87 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 
 ---
 
-## 6. Cross-references
+## 6. Execution waves (sequencing plan)
+
+This is the recommended order to build the remaining gaps, grouped into **waves** — each wave is a coherent set
+that leaves the suite green and unblocks a named optimization. A wave is a *sequencing* layer on top of the
+phases in §3; phases say "what depends on what", waves say "do these next, in this order". Build every item
+**test-first** per the `validation-driven-bugfix` skill, one **commit per MH-#**, with **all baselines green**
+after each commit and a final docs-sync commit flipping the closed items' status here + in the skill ref.
+
+> **Cold-start checklist for any wave** (matches how Wave 1 was executed):
+> 1. `dotnet build "Assembly-CSharp-Editor.csproj"` after edits.
+> 2. In the live Editor: `CompilationPipeline.RequestScriptCompilation()` (via `Unity_RunCommand`, fully
+>    qualify the type — the MCP wrapper namespace shadows `CompilationPipeline`), then poll
+>    `Unity_ManageEditor → GetState` until `IsCompiling == false`. A bare `dotnet build` does **not** make the
+>    Editor re-run the menu suite (stale-code trap — see [[feedback-editor-validation-workflow]]).
+> 3. Run `Minecraft Clone/Dev/Validate Meshing` (menu item), read the console, confirm
+>    `ALL N MESHING BASELINE TESTS PASSED`.
+> 4. Every new differential/value baseline needs a **positive control** so it can't pass vacuously (the B8/B9
+>    pattern). Editor-test code is exempt from the `Assets/Scripts/Jobs/` Burst rules.
+
+### Wave 1 — derivable-from-output guards · ✅ DONE (2026-06-17)
+
+MH-9 (`SectionStats` tiling), MH-1 (bounds extent), MH-4 (UV value oracle). One commit each, baselines
+**B1–B9** green. These needed **no** harness-infrastructure change — all derivable from the existing
+chunk-space `MeshGenerationJob` output. Wave 2 onward is different: each item needs a **new run path or a
+second job** before a baseline can exist.
+
+### Wave 2 — unblock MR-2 + MR-5 (job-suite depth) · NEXT
+
+Theme: make the two most-blocked job-side optimizations baselinable. Order: **MH-5 first** (lower risk, wider
+unblock), **MH-3 second** (riskiest; completes MR-2).
+
+1. **MH-5 — run `MeshPostProcessJob` + light up `InterleavedStream3`** (gates MR-5; half of MR-2).
+   - *Investigate first:* read `MeshPostProcessJob` + `Chunk.ApplyMeshData`'s `Schedule().Complete()` wiring to
+     learn its exact inputs / in-place semantics (this is the one real unknown).
+   - *Build:* opt-in flag on `MeshingTestWorld.Run(...)` (e.g. `runPostProcess: true`) that chains
+     `MeshGenerationJob` → `MeshPostProcessJob` and exposes the post-processed output.
+   - *Baseline (≈B10):* (a) section-space coord == chunk-space coord − section origin; (b) `InterleavedStream3[i]`
+     == interleave of `Normals[i]` + `LightData[i]`; (c) **chained-vs-separate equality** (the MR-5 guard:
+     worker-handle chain vs. blocking `Complete()` produce byte-identical output — MR-7/B8-style differential).
+   - *Risk:* 🟢 low (equality/structural, no hand-derived value oracle).
+2. **MH-3 — smooth-lighting *value* oracle** (completes MR-2; prereq MR-8).
+   - *Investigate first:* read `CalculateCornerLights` + the AO/light-averaging path — **do not copy it** into
+     the oracle (A4-class shared-assumption trap, called out in §3 MH-3).
+   - *Build:* populate `MeshingTestWorld`'s in-chunk light map + expose `Run(SmoothLightingQuality.High)`; add
+     `MeshAssert.LightDataMatches` + a **hand-derived** corner-light oracle.
+   - *Baseline:* a deliberately trivial, hand-computable lit config (e.g. one sky-exposed top face = full
+     sunlight; a face against a lamp = known blocklight) so expected values are derivable by hand.
+   - *Risk:* 🔴 highest in the wave — keep the lit config simple enough to derive independently.
+
+   **After Wave 2, MR-2 is fully baselinable** (MH-3 + MH-4 ✅ + MH-5) and **MR-5 is unblocked** (MH-5).
+
+### Wave 3 — renderer apply-path (separate harness) · LATER / parallelizable
+
+3. **MH-6 — `SectionRenderer` apply-path fixture** (gates MR-3; renderer side of MR-4).
+   - A **different** harness from the job suite: a lightweight `MonoBehaviour` fixture, not bolted onto
+     `MeshingTestWorld`. Asserts (a) material-bitmask → `sharedMaterials` selection + no-reassign-when-unchanged
+     (MR-3), and (b) the constant `Mesh.bounds` assignment (MR-4 renderer side; MH-1 already proved the
+     geometry premise from job output).
+   - Independent of Wave 2 — can run in parallel or be built alongside whoever tackles MR-3. 🟡 medium.
+
+### Build-alongside-the-optimization (not standalone waves)
+
+- **MH-2 — pooled-output stale-data guard** (MR-6 pool variant). 🟢 trivial, but **cannot be built until the
+  MR-6 pool API exists** to test against. Build it in the same PR as that optimization. Reuses `OutputsEqual`.
+- **MH-7 — custom/cross-mesh + lava palette & oracle** (MR-4 caveat; named blind spot). 🟡 medium (custom-mesh
+  oracle is the bulk). No open MR *blocks* on it beyond MR-4's "custom mesh exceeds the unit cell" caveat —
+  build it alongside the custom/cross/lava work it guards.
+
+### Gated — do not start yet
+
+- **MH-8 — merge-invariant geometry oracle** (MR-8 greedy meshing). 🔴 high — a new oracle model (decompose
+  merged quads back to unit-face coverage), **not** an extension of the existing one. **Blocked on the MR-8
+  design doc** (`PERFORMANCE_IMPROVEMENTS_REPORT.md` MR-8). Needs MH-3 + MH-4 (✅) as well.
+
+### Out of scope
+
+`Clouds.cs` (MR-9), cross-chunk border culling, and true concurrency/Burst races — see §4.
+
+---
+
+## 7. Cross-references
 
 - Optimization backlog the gaps gate: [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) (§Meshing & Rendering, §Verification)
 - Sibling harness doc & status-tag conventions: [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md)

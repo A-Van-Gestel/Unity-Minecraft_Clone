@@ -38,8 +38,9 @@ arrays are constructed-but-empty just as the benchmark leaves them; the water he
 > only checked for run-to-run *determinism*, never against an expected value — UVs **are** now value-checked,
 > MH-4), stops at the **chunk-space** `MeshGenerationJob` output (`MeshPostProcessJob`'s section-space rewrite
 > is never run), and has no custom/cross-mesh block or lava in the palette. Wave 1 (2026-06-17) closed MH-1
-> (bounds), MH-4 (UV values), MH-9 (`SectionStats` tiling). The phased plan to close the rest (`MH-2/3/5/6/7/8`,
-> keyed to which `MR-*` item each gates) is in
+> (bounds), MH-4 (UV values), MH-9 (`SectionStats` tiling). The forward **execution-wave plan** (§6 — Wave 2
+> = MH-5 → MH-3 next; MH-6 a parallel renderer track; MH-2/MH-7 build-alongside; MH-8 gated) and the per-gap
+> detail (`MH-2/3/5/6/7/8`) are in
 > [MESHING_VALIDATION_HARNESS_FIDELITY.md](../../../../Documentation/Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md).
 
 ## Harness API cheat sheet
