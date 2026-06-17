@@ -36,7 +36,59 @@ namespace Editor.Validation.Lighting.Framework
         public static bool MatchesOracle(LightingTestWorld world, OracleLightField expected, string testName, bool logPass = true)
         {
             StringBuilder report = new StringBuilder();
+            int mismatches = CompareToOracle(world, expected, report, out _, out _);
+
+            if (mismatches == 0)
+            {
+                if (logPass) Debug.Log($"[PASS] {testName}");
+                return true;
+            }
+
+            if (mismatches > MAX_REPORTED_MISMATCHES)
+                report.AppendLine($"... and {mismatches - MAX_REPORTED_MISMATCHES} more.");
+
+            Debug.LogError($"[FAIL] {testName}\n{mismatches} voxel(s) differ from the oracle field:\n{report}");
+            return false;
+        }
+
+        /// <summary>
+        /// Quiet oracle comparison for known-bug scenarios whose mismatch is the EXPECTED reproduction:
+        /// returns whether the field matches WITHOUT logging a <c>[FAIL]</c>/<c>LogError</c> (which the
+        /// runner reserves for baseline regressions, so a logged error there would be indistinguishable from
+        /// a real regression), and yields a short console-readable summary of the worst over-bright
+        /// discrepancy for the scenario's own warning log. Shares the comparison loop with
+        /// <see cref="MatchesOracle"/> so both paths can never drift on what "matches the oracle" means.
+        /// </summary>
+        /// <param name="world">The test world after convergence.</param>
+        /// <param name="expected">The oracle field for the same voxel contents.</param>
+        /// <param name="summary">A short description of the largest discrepancy (mismatch count + worst voxel).</param>
+        /// <returns>True when the field matches the oracle exactly.</returns>
+        public static bool MatchesOracleQuiet(LightingTestWorld world, OracleLightField expected, out string summary)
+        {
+            int mismatches = CompareToOracle(world, expected, null, out int worstSkyDelta, out Vector3Int worstPos);
+            summary = mismatches == 0
+                ? "no mismatches"
+                : $"{mismatches} voxel(s) differ; worst +{worstSkyDelta} sky at {worstPos}";
+            return mismatches == 0;
+        }
+
+        /// <summary>
+        /// Shared oracle-comparison loop. Counts voxels whose packed light differs from the oracle,
+        /// appending a bounded per-voxel diff to <paramref name="report"/> when it is non-null and tracking
+        /// the worst (most over-bright) sky delta. Backs both <see cref="MatchesOracle"/> (detailed report)
+        /// and <see cref="MatchesOracleQuiet"/> (summary only).
+        /// </summary>
+        /// <param name="world">The test world after convergence.</param>
+        /// <param name="expected">The oracle field for the same voxel contents.</param>
+        /// <param name="report">A builder to receive bounded per-voxel diffs, or null to skip detailing.</param>
+        /// <param name="worstSkyDelta">The largest positive (actual − expected) sky delta found.</param>
+        /// <param name="worstPos">The voxel position of <paramref name="worstSkyDelta"/>.</param>
+        /// <returns>The total number of mismatching voxels.</returns>
+        private static int CompareToOracle(LightingTestWorld world, OracleLightField expected, StringBuilder report, out int worstSkyDelta, out Vector3Int worstPos)
+        {
             int mismatches = 0;
+            worstSkyDelta = 0;
+            worstPos = default;
             int width = world.GridSize * VoxelData.ChunkWidth;
 
             for (int y = 0; y < VoxelData.ChunkHeight; y++)
@@ -51,23 +103,20 @@ namespace Editor.Validation.Lighting.Framework
                         if (actual == exp) continue;
 
                         mismatches++;
-                        if (mismatches <= MAX_REPORTED_MISMATCHES)
+                        if (report != null && mismatches <= MAX_REPORTED_MISMATCHES)
                             AppendMismatch(report, pos, exp, actual);
+
+                        int skyDelta = LightBitMapping.GetSkyLight(actual) - LightBitMapping.GetSkyLight(exp);
+                        if (skyDelta > worstSkyDelta)
+                        {
+                            worstSkyDelta = skyDelta;
+                            worstPos = pos;
+                        }
                     }
                 }
             }
 
-            if (mismatches == 0)
-            {
-                if (logPass) Debug.Log($"[PASS] {testName}");
-                return true;
-            }
-
-            if (mismatches > MAX_REPORTED_MISMATCHES)
-                report.AppendLine($"... and {mismatches - MAX_REPORTED_MISMATCHES} more.");
-
-            Debug.LogError($"[FAIL] {testName}\n{mismatches} voxel(s) differ from the oracle field:\n{report}");
-            return false;
+            return mismatches;
         }
 
         /// <summary>

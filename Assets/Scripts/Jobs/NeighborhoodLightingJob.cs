@@ -123,6 +123,15 @@ namespace Jobs
             // Packed as ulong: upper 32 bits = voxel uint, lower 16 bits = light ushort.
             NativeHashMap<long, ulong> neighborWriteCache = new NativeHashMap<long, ulong>(64, Allocator.Temp);
 
+            // Dedup set for Bug-12 cross-seam sunlight removal mods: a darkness wave can reach the same
+            // cross-chunk neighbor from many removal nodes, and EmitCrossChunkSunlightRemoval (unlike
+            // SetSunlight) writes neither the cache nor the light array, so nothing else suppresses a
+            // revisit. One removal mod per neighbor is sufficient (the main-thread apply is idempotent),
+            // so we record emitted neighbor keys here and skip duplicates — keeping CrossChunkLightMods
+            // from growing by O(wavefront) redundant entries (and the matching redundant apply-side
+            // in-chunk-support scans). Keyed by EncodeNeighborKey, like neighborWriteCache.
+            NativeHashMap<long, byte> emittedSunRemovals = new NativeHashMap<long, byte>(16, Allocator.Temp);
+
             // --- PASS -2: SYNC EMISSION TO LIGHT ARRAY ---
             // The uint packed data has emission baked in by generation/placement, but the ushort
             // light array may be uninitialized. Scan center chunk blocks, write emission RGB so the
@@ -209,12 +218,12 @@ namespace Jobs
             // --- LIGHTING PASSES ---
             // The propagation logic now seamlessly crosses chunk borders within the 3x3 grid.
             while (sunlightRemovalQueue.TryDequeue(out LightRemovalNode node))
-                PropagateDarkness(node, LightChannel.Sun, sunlightPlacementQueue, sunlightRemovalQueue, ref neighborWriteCache);
+                PropagateDarkness(node, LightChannel.Sun, sunlightPlacementQueue, sunlightRemovalQueue, ref neighborWriteCache, ref emittedSunRemovals);
             while (sunlightPlacementQueue.TryDequeue(out Vector3Int pos))
                 PropagateLight(pos, LightChannel.Sun, sunlightPlacementQueue, ref neighborWriteCache);
 
             while (blocklightRemovalQueue.TryDequeue(out LightRemovalNode node))
-                PropagateDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue, ref neighborWriteCache);
+                PropagateDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue, ref neighborWriteCache, ref emittedSunRemovals);
             while (blocklightPlacementQueue.TryDequeue(out Vector3Int pos))
                 PropagateLight(pos, LightChannel.Block, blocklightPlacementQueue, ref neighborWriteCache);
 
@@ -230,6 +239,7 @@ namespace Jobs
             blocklightRemovalQueue.Dispose();
             blocklightPlacementQueue.Dispose();
             neighborWriteCache.Dispose();
+            emittedSunRemovals.Dispose();
         }
 
         /// <summary>
@@ -312,7 +322,7 @@ namespace Jobs
                    pos.z >= 0 && pos.z < VoxelData.ChunkWidth;
         }
 
-        private void PropagateDarkness(LightRemovalNode node, LightChannel channel, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, ulong> cache)
+        private void PropagateDarkness(LightRemovalNode node, LightChannel channel, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, ulong> cache, ref NativeHashMap<long, byte> emittedSunRemovals)
         {
             if (channel == LightChannel.Block)
             {
@@ -353,6 +363,29 @@ namespace Jobs
                             CheckEdgeVoxel(node.Pos, centerPacked, GetLightData(node.Pos, ref cache),
                                 neighborPacked, neighborLightData, pQueue, ref cache);
                         }
+
+                        // Bug 12: a cross-seam neighbor sitting at EXACTLY the removed level, whose own
+                        // column is NOT independently sky-lit, is the signature of a mutually-supporting
+                        // 2-cycle straddling the boundary — voxel A (here) and voxel B (the neighbor) each
+                        // lit "by" the other. Once the genuine external source is gone, the pull-back above
+                        // re-lights this voxel from the neighbor's still-high (possibly stale) value, and the
+                        // neighbor's own job does the same from this one, so the removal never initiates and
+                        // the pair settles one level below the source forever (an over-bright stable-but-wrong
+                        // field). Emit a cross-chunk sunlight removal mod so the neighbor re-evaluates: the
+                        // Bug 11 veto (CrossChunkLightModApplier.InChunkSunlightSupport) KEEPS it when an
+                        // in-chunk source still independently supports the value (e.g. a horizontal shaft) and
+                        // CLEARS it when it was only the stale loop. The guards keep this surgical: a strictly
+                        // brighter neighbor (> the removed level) is a genuine source, and a neighbor that is
+                        // directly sky-exposed (receiving full vertical sunlight) is independently lit — both
+                        // are left alone. A fully-opaque neighbor is also skipped: it cannot propagate
+                        // sunlight (it only stores surface light), so it is never a participant in a
+                        // light-propagation loop, and clearing its cross-seam surface value here would
+                        // perturb a sky-exposed wall/floor. Without these guards this would spuriously clear
+                        // ordinary sky-lit border voxels whenever a shadow's darkness wave reaches a seam.
+                        if (neighborLight == node.LightLevel
+                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque
+                            && !IsVerticallySkyLit(neighborPos, neighborPacked, ref cache))
+                            EmitCrossChunkSunlightRemoval(neighborPos, ref emittedSunRemovals);
                     }
                 }
             }
@@ -996,6 +1029,74 @@ namespace Jobs
         }
 
         /// <summary>
+        /// Maps a position in this job's 3x3-grid local space to its world-space voxel position. The chunk's
+        /// horizontal origin <see cref="ChunkPosition"/> (a 2D X/Z offset) is added to X and Z; the voxel Y
+        /// is already global and passes through unchanged. Single definition of the local→global mapping
+        /// shared by every cross-chunk emitter (<see cref="SetSunlight"/>, <see cref="SetBlocklightRGB"/>,
+        /// <see cref="EmitCrossChunkSunlightRemoval"/>).
+        /// </summary>
+        /// <param name="localPos">The position in the 3x3 grid's local space.</param>
+        /// <returns>The world-space voxel position.</returns>
+        private Vector3Int LocalToGlobal(Vector3Int localPos)
+        {
+            return new Vector3Int(localPos.x + ChunkPosition.x, localPos.y, localPos.z + ChunkPosition.y);
+        }
+
+        /// <summary>
+        /// Returns true when the voxel at <paramref name="pos"/> receives full vertical sunlight — it is
+        /// fully transparent and the voxel directly above it is fully transparent and holds full sky (15).
+        /// Encodes the same vertical-sunlight rule that <see cref="PropagateLight"/>'s
+        /// <c>isVerticalSunlight</c> relies on (a fully-transparent voxel directly below a fully-transparent
+        /// sky-15 voxel is lit to 15 with no attenuation), but evaluated standalone for a single voxel
+        /// rather than across a source→neighbor downward step — the two are independent code paths, so a
+        /// change to the vertical-sunlight rule must be mirrored in both. Used by
+        /// <see cref="PropagateDarkness"/> to recognize a genuinely sky-exposed cross-seam neighbor (which
+        /// is independently lit and must NOT be sent a Bug-12 cross-seam removal mod) versus a roofed seam
+        /// voxel (which can only be the stale mutual-support side of a 2-cycle).
+        /// </summary>
+        /// <param name="pos">The voxel position in the 3x3 grid's local space.</param>
+        /// <param name="packed">The voxel's already-fetched packed data (avoids a redundant lookup).</param>
+        /// <param name="cache">The write-through cache for cross-chunk modifications.</param>
+        /// <returns>True if the voxel is directly lit by vertical sunlight.</returns>
+        private bool IsVerticallySkyLit(Vector3Int pos, uint packed, ref NativeHashMap<long, ulong> cache)
+        {
+            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(packed)].IsFullyTransparentToLight) return false;
+
+            Vector3Int above = new Vector3Int(pos.x, pos.y + 1, pos.z);
+            uint abovePacked = GetPackedData(above, ref cache);
+            if (abovePacked == uint.MaxValue) return false;
+            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(abovePacked)].IsFullyTransparentToLight) return false;
+
+            return LightBitMapping.GetSkyLight(GetLightData(above, ref cache)) == 15;
+        }
+
+        /// <summary>
+        /// Emits a cross-chunk sunlight REMOVAL mod (level 0) for a neighbor-chunk voxel WITHOUT touching
+        /// this job's write-through cache or light arrays — the neighbor's value is left untouched in-job so
+        /// the pull-back re-spread reads the unchanged snapshot, and the actual decision is deferred to the
+        /// main-thread cross-chunk apply (<see cref="Helpers.CrossChunkLightModApplier.ComputeSunlight"/> +
+        /// its in-chunk-support veto). Used by <see cref="PropagateDarkness"/> to break the Bug 12
+        /// over-bright cross-seam loop: the neighbor re-evaluates and clears only if it was solely the stale
+        /// mutual support. Unlike <see cref="SetSunlight"/>, this neither writes the cache nor seeds a local
+        /// BFS node — it only appends the modification. A darkness wave can reach the same neighbor from
+        /// many removal nodes, so <paramref name="emittedSunRemovals"/> dedups: only the first emission per
+        /// neighbor is appended (the apply is idempotent), keeping the mod list from growing by O(wavefront).
+        /// </summary>
+        /// <param name="neighborPos">The neighbor-chunk voxel position in the 3x3 grid's local space.</param>
+        /// <param name="emittedSunRemovals">Per-job set of neighbor keys already sent a removal mod.</param>
+        private void EmitCrossChunkSunlightRemoval(Vector3Int neighborPos, ref NativeHashMap<long, byte> emittedSunRemovals)
+        {
+            // TryAdd returns false when the key is already present — one removal mod per neighbor suffices.
+            if (!emittedSunRemovals.TryAdd(EncodeNeighborKey(neighborPos.x, neighborPos.y, neighborPos.z), 0))
+                return;
+
+            CrossChunkLightMods.Add(new LightModification
+            {
+                GlobalPosition = LocalToGlobal(neighborPos), LightLevel = 0, Channel = LightChannel.Sun,
+            });
+        }
+
+        /// <summary>
         /// Sets sunlight level in the ushort light array.
         /// For blocklight, use <see cref="SetBlocklightRGB"/> instead.
         /// </summary>
@@ -1010,10 +1111,9 @@ namespace Jobs
             }
             else
             {
-                Vector3Int globalPos = new Vector3Int(localPos.x + ChunkPosition.x, localPos.y, localPos.z + ChunkPosition.y);
                 CrossChunkLightMods.Add(new LightModification
                 {
-                    GlobalPosition = globalPos, LightLevel = lightLevel, Channel = LightChannel.Sun,
+                    GlobalPosition = LocalToGlobal(localPos), LightLevel = lightLevel, Channel = LightChannel.Sun,
                 });
 
                 long cacheKey = EncodeNeighborKey(localPos.x, localPos.y, localPos.z);
@@ -1058,10 +1158,9 @@ namespace Jobs
             else
             {
                 byte legacyScalar = (byte)math.max(r, math.max(g, (int)b));
-                Vector3Int globalPos = new Vector3Int(localPos.x + ChunkPosition.x, localPos.y, localPos.z + ChunkPosition.y);
                 CrossChunkLightMods.Add(new LightModification
                 {
-                    GlobalPosition = globalPos, LightLevel = legacyScalar, Channel = LightChannel.Block,
+                    GlobalPosition = LocalToGlobal(localPos), LightLevel = legacyScalar, Channel = LightChannel.Block,
                     BlockR = r, BlockG = g, BlockB = b, IsRemoval = isRemovalContext,
                 });
 

@@ -78,7 +78,16 @@ namespace Editor.Validation.Lighting
             // --- Bug 11 (fixed June 2026, promoted from K11a): cross-seam sunlight removal oscillation on reload ---
             scenarios.Add(new Scenario("B48: Reload mid-darkness-wave at a mutually-lit seam converges to the oracle — no sunlight removal/replace oscillation (Bug 11 guard)", Baseline_ReloadSeamSunlightNoOscillation));
             scenarios.Add(new Scenario("B49: Cross-chunk sunlight removal into a semi-transparent (DimGlass) seam voxel attenuates support by target opacity — a brighter in-chunk neighbor does not spuriously veto a legitimate removal", Baseline_CrossSeamSunlightRemovalThroughDimGlass));
+
+            // --- Bug 12 family (B50 tripwire, B51/B52 completeness, B53 promoted repro) lives in its own
+            // partial file (Baselines/LightingValidationSuite.Baseline.Bug12.cs) and self-registers here.
+            // First of the planned Baselines/ split; future groups follow the same Add*BaselineScenarios hook. ---
+            AddBug12BaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug12BaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1: A torch placed mid-air in an empty world. Exercises in-chunk RGB placement BFS and
