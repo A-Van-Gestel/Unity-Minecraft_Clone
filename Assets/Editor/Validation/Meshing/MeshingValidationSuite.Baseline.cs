@@ -101,7 +101,8 @@ namespace Editor.Validation.Meshing
             passed &= MeshAssert.StructuralInvariants("B2 structural", o);
             if (o.Vertices.Length != 24) return false; // per-face compare would be meaningless
 
-            passed &= CompareCubeFacesToOracle("B2", o, pos, orientation: VoxelOrientation.North, rotation: 0f);
+            BlockTypeJobData solidData = TestMeshBlockPalette.CreateJobDataArray()[TestMeshBlockPalette.SolidOpaque];
+            passed &= CompareCubeFacesToOracle("B2", o, pos, orientation: VoxelOrientation.North, rotation: 0f, in solidData);
 
             // MH-1: every emitted vertex must lie inside the block's section cell — the premise behind
             // MR-4's proposed constant section bounds.
@@ -155,6 +156,7 @@ namespace Editor.Validation.Meshing
         {
             using MeshingTestWorld world = new MeshingTestWorld();
             Vector3Int pos = new Vector3Int(8, 8, 8);
+            BlockTypeJobData orientedData = TestMeshBlockPalette.CreateJobDataArray()[TestMeshBlockPalette.OrientedOpaque];
             bool allPassed = true;
 
             for (byte yaw = 0; yaw < 4; yaw++)
@@ -174,7 +176,7 @@ namespace Editor.Validation.Meshing
                 {
                     byte orientation = MeshOracle.LegacyOrientationForYaw(yaw);
                     float rotation = MeshOracle.RotationForYaw(yaw);
-                    passed &= CompareCubeFacesToOracle($"B4 yaw {yaw}", o, pos, orientation, rotation);
+                    passed &= CompareCubeFacesToOracle($"B4 yaw {yaw}", o, pos, orientation, rotation, in orientedData);
                 }
                 else
                 {
@@ -538,9 +540,10 @@ namespace Editor.Validation.Meshing
         /// isolated cube emits 6 quads with 6 distinct axis normals, so the match is unique).
         /// </summary>
         private static bool CompareCubeFacesToOracle(string label, MeshDataJobOutput o, Vector3Int pos,
-            byte orientation, float rotation)
+            byte orientation, float rotation, in BlockTypeJobData blockData)
         {
             Vector3[] expected = new Vector3[4];
+            Vector4[] expectedUVs = new Vector4[4];
             bool allPassed = true;
             int quadCount = o.Vertices.Length / 4;
 
@@ -559,6 +562,14 @@ namespace Editor.Validation.Meshing
 
                 allPassed &= MeshAssert.QuadMatchesOracle(
                     $"{label} face {worldFace} (geom {faceIndex})", o.Vertices, o.Normals, matchStart, expected, normal);
+
+                // MH-4: the same matched quad must carry the atlas UVs of the texture this geometry face
+                // is assigned. The palette gives each face a distinct texture (Back=0 … Right=5), so a
+                // face-translation or atlas-math regression shows up here as wrong UVs.
+                int textureID = MeshOracle.ExpectedTextureIDForFace(blockData, faceIndex);
+                MeshOracle.ExpectedFaceUVs(textureID, expectedUVs);
+                allPassed &= MeshAssert.UVsMatch(
+                    $"{label} face {worldFace} (geom {faceIndex}) UVs (tex {textureID})", o.Uvs, matchStart, expectedUVs);
             }
 
             return allPassed;

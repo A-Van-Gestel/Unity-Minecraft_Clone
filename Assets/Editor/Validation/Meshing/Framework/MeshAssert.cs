@@ -107,6 +107,50 @@ namespace Editor.Validation.Meshing.Framework
             return false;
         }
 
+        /// <summary>
+        /// MH-4 — asserts the four UVs of one emitted quad match the oracle's expected atlas coordinates
+        /// (per-vertex, within <see cref="VertexEpsilon"/>). Pairs with
+        /// <see cref="MeshOracle.ExpectedFaceUVs"/> to pin that a face shows the correct texture's atlas
+        /// cell — the encoding finding MR-2 must preserve.
+        /// </summary>
+        /// <param name="label">Scenario/quad label for logging.</param>
+        /// <param name="uvs">Engine UV stream.</param>
+        /// <param name="startVert">Index of the first of the quad's 4 vertices.</param>
+        /// <param name="expected">Oracle UVs (length 4).</param>
+        public static bool UVsMatch(string label, NativeList<Vector4> uvs, int startVert, Vector4[] expected)
+        {
+            if (startVert + 4 > uvs.Length)
+            {
+                Debug.LogError($"[FAIL] {label}: expected 4 UVs at index {startVert} but list has only {uvs.Length}.");
+                return false;
+            }
+
+            StringBuilder diffs = new StringBuilder();
+            int diffCount = 0;
+
+            for (int i = 0; i < 4; i++)
+            {
+                Vector4 a = uvs[startVert + i];
+                Vector4 e = expected[i];
+                if ((Mathf.Abs(a.x - e.x) > VertexEpsilon || Mathf.Abs(a.y - e.y) > VertexEpsilon ||
+                     Mathf.Abs(a.z - e.z) > VertexEpsilon || Mathf.Abs(a.w - e.w) > VertexEpsilon)
+                    && diffCount < MAX_DIFFS)
+                {
+                    diffs.AppendLine($"    uv[{i}] expected ({e.x:F4},{e.y:F4},{e.z:F4},{e.w:F4}) actual ({a.x:F4},{a.y:F4},{a.z:F4},{a.w:F4})");
+                    diffCount++;
+                }
+            }
+
+            if (diffCount == 0)
+            {
+                Debug.Log($"[PASS] {label}");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: {diffCount} UV mismatch(es)\n{diffs}");
+            return false;
+        }
+
         /// <summary>Asserts the output has exactly <paramref name="expected"/> vertices.</summary>
         public static bool VertexCount(string label, MeshDataJobOutput o, int expected)
         {
