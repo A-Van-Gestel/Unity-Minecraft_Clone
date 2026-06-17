@@ -29,6 +29,7 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B6: transparent cube routes faces to the transparent submesh", B6_TransparentRouting));
             scenarios.Add(new Scenario("B7: fluid blocks route to the fluid submesh, deterministic + structurally valid", B7_FluidRoutingAndDeterminism));
             scenarios.Add(new Scenario("B8: air-surrounded fluid keeps a zero shore mask even after wall-adjacent fluids (MR-7 neighbor-buffer guard)", B8_FluidNeighborBufferIsolation));
+            scenarios.Add(new Scenario("B9: multi-section scene tiles SectionStats ranges contiguously (MH-9 per-section partition guard)", B9_MultiSectionStatsTiling));
         }
 
         /// <summary>
@@ -334,6 +335,44 @@ namespace Editor.Validation.Meshing
                     TryTopFaceShoreMask(walled, out float wallMask) && Mathf.Abs(wallMask - fourCardinalWalls) <= MeshAssert.VertexEpsilon,
                     $"wall-boxed probe shore mask = {(walled.Count > 0 ? wallMask : float.NaN):F4} (expected {fourCardinalWalls:F4})");
             }
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B9 — Multi-section <c>SectionStats</c> tiling guard (finding <b>MH-9</b>). Three isolated
+        /// opaque cubes are placed one per section (y=8/24/40 → sections 0/1/2) so more than one section
+        /// emits geometry. <see cref="MeshAssert.StructuralInvariants"/> now asserts the per-section
+        /// vertex/triangle ranges are contiguous, non-overlapping, and sum to each stream's length — a
+        /// refactor that mis-partitions sections (the kind MR-5/MR-6 per-section work risks) passes the
+        /// global length/index checks but fails here.
+        /// <para>
+        /// B2/B4 touch only one section, so their tiling check is satisfied by a single range; this
+        /// scenario adds a positive control asserting that at least two sections actually emitted
+        /// geometry, so the contiguity check cannot pass vacuously.
+        /// </para>
+        /// </summary>
+        private static bool B9_MultiSectionStatsTiling()
+        {
+            using MeshingTestWorld world = new MeshingTestWorld();
+
+            // One isolated cube per section: 16 blocks apart vertically so each is fully air-surrounded
+            // and emits its own 24 vertices. y=8 → section 0, y=24 → section 1, y=40 → section 2.
+            Vector3Int[] cubes = { new Vector3Int(8, 8, 8), new Vector3Int(8, 24, 8), new Vector3Int(8, 40, 8) };
+            foreach (Vector3Int c in cubes)
+                world.SetBlock(c.x, c.y, c.z, TestMeshBlockPalette.SolidOpaque);
+            MeshDataJobOutput o = world.Run();
+
+            bool passed = MeshAssert.VertexCount("B9 vertex count", o, cubes.Length * 24);
+            passed &= MeshAssert.StructuralInvariants("B9 structural (incl. section tiling)", o);
+
+            // Positive control: the tiling check is only meaningful with >= 2 emitting sections. Verify
+            // the scene actually produced that, so a future fixture change can't silently make B9 vacuous.
+            int emittingSections = 0;
+            for (int s = 0; s < o.SectionStats.Length; s++)
+                if (o.SectionStats[s].VertexCount > 0) emittingSections++;
+            passed &= MeshAssert.IsTrue("B9 multi-section coverage", emittingSections == cubes.Length,
+                $"sections emitting geometry = {emittingSections} (expected {cubes.Length}, else the tiling check is vacuous)");
 
             return passed;
         }

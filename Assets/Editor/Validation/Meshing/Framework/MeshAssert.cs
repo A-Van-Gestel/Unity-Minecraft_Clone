@@ -1,3 +1,4 @@
+using System;
 using System.Text;
 using Data;
 using Unity.Collections;
@@ -97,6 +98,21 @@ namespace Editor.Validation.Meshing.Framework
             CheckTriangleList(problems, "TransparentTris", o.TransparentTriangles, n);
             CheckTriangleList(problems, "FluidTris", o.FluidTriangles, n);
 
+            // MH-9: the per-section ranges the job writes into SectionStats must tile each stream
+            // exactly — walking sections in order, every geometry-emitting section's [start, start+count)
+            // range must be contiguous, non-overlapping, and the ranges must sum to the stream's length.
+            // The global checks above pass even if a refactor mis-partitions sections (wrong start/count);
+            // this catches that. Sections that emit nothing carry no meaningful start index (a skipped
+            // section is written as `default`, i.e. start 0 / count 0) and are correctly ignored.
+            CheckSectionTiling(problems, "Vertices", o.SectionStats,
+                static s => s.VertexStartIndex, static s => s.VertexCount, n);
+            CheckSectionTiling(problems, "OpaqueTris", o.SectionStats,
+                static s => s.OpaqueTriStartIndex, static s => s.OpaqueTriCount, o.Triangles.Length);
+            CheckSectionTiling(problems, "TransparentTris", o.SectionStats,
+                static s => s.TransparentTriStartIndex, static s => s.TransparentTriCount, o.TransparentTriangles.Length);
+            CheckSectionTiling(problems, "FluidTris", o.SectionStats,
+                static s => s.FluidTriStartIndex, static s => s.FluidTriCount, o.FluidTriangles.Length);
+
             if (problems.Length == 0)
             {
                 Debug.Log($"[PASS] {label}: structural invariants hold ({n} verts).");
@@ -147,6 +163,55 @@ namespace Editor.Validation.Meshing.Framework
 
             Debug.LogError($"[FAIL] {label}: {detail}");
             return false;
+        }
+
+        /// <summary>
+        /// MH-9 — asserts the per-section ranges of one stream tile it exactly. Walking the sections in
+        /// order, every section that emitted geometry (<paramref name="count"/> &gt; 0) must start where
+        /// the previous emitting section ended (no gap, no overlap), and the ranges must sum to
+        /// <paramref name="total"/>. Sections with a zero count carry no meaningful start index (a skipped
+        /// section is written as <c>default</c>), so they are skipped rather than checked.
+        /// </summary>
+        /// <param name="problems">Accumulator for violation messages.</param>
+        /// <param name="name">Stream name for diagnostics.</param>
+        /// <param name="stats">Per-section start/count ranges written by the meshing job.</param>
+        /// <param name="start">Selector for this stream's per-section start index.</param>
+        /// <param name="count">Selector for this stream's per-section element count.</param>
+        /// <param name="total">Expected total element count (the stream's length).</param>
+        private static void CheckSectionTiling(StringBuilder problems, string name,
+            NativeArray<MeshSectionStats> stats, Func<MeshSectionStats, int> start,
+            Func<MeshSectionStats, int> count, int total)
+        {
+            if (!stats.IsCreated)
+            {
+                problems.AppendLine($"    SectionStats not created (cannot validate {name} tiling)");
+                return;
+            }
+
+            int running = 0;
+            for (int s = 0; s < stats.Length; s++)
+            {
+                int c = count(stats[s]);
+                if (c < 0)
+                {
+                    problems.AppendLine($"    {name} section {s} has negative count {c}");
+                    return;
+                }
+
+                if (c == 0) continue; // skipped/empty section: start index is meaningless
+
+                int st = start(stats[s]);
+                if (st != running)
+                {
+                    problems.AppendLine($"    {name} section {s} start {st} != expected {running} (non-contiguous tiling)");
+                    return;
+                }
+
+                running += c;
+            }
+
+            if (running != total)
+                problems.AppendLine($"    {name} section ranges sum to {running} but stream length is {total}");
         }
 
         private static void CheckTriangleList(StringBuilder problems, string name, NativeList<int> tris, int vertCount)
