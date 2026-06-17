@@ -12,7 +12,7 @@ document shape; the meshing suite was built test-first as that suite's younger s
 
 ## 1. Why this document exists
 
-The meshing validation suite (baselines **B1–B8**, all green) runs **real production code**: it executes
+The meshing validation suite (baselines **B1–B9**, all green) runs **real production code**: it executes
 the actual `Jobs.MeshGenerationJob` synchronously (`job.Run()`) over a synthetic single chunk and asserts
 its `MeshDataJobOutput`. It is the regression guard that lets the `MR-*` performance findings in
 [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim
@@ -61,11 +61,17 @@ So the blind spots below are read against a clear baseline of what *is* covered:
   guard.
 - **Fluid neighbor-buffer isolation.** B8 — the differential guard that closed MR-7 (shore-mask + full
   per-vertex quad equality between an isolated and a primer-preceded probe).
+- **UV value oracle (Wave 1, MH-4).** `MeshOracle.ExpectedFaceUVs` + `MeshAssert.UVsMatch` pin every
+  standard-cube face's 4 UVs to its texture's independently-derived atlas cell (B2 all 6 faces, B4 all 4 yaws).
+- **`SectionStats` tiling (Wave 1, MH-9).** `StructuralInvariants` asserts the per-section ranges tile each
+  stream contiguously; B9 (one cube per section) exercises it across 3 emitting sections.
+- **Bounds extent (Wave 1, MH-1).** `MeshAssert.BoundsWithin` asserts every vertex lies inside its section
+  cell (B2/B4) — the premise behind MR-4's constant bounds.
 
-> **Two output members are *not* in the trusted core.** `MeshDataJobOutput.SectionStats` (per-section
-> vertex/triangle index ranges) is written by the job but checked by neither `StructuralInvariants` nor
-> `OutputsEqual` (→ **MH-9**), and `InterleavedStream3` (the Normals+light GPU-upload vertex stream) is built
-> by `MeshPostProcessJob`, so it is **empty** in the harness and therefore unobservable here (→ **MH-5**).
+> **One output member is still *not* in the trusted core.** `InterleavedStream3` (the Normals+light
+> GPU-upload vertex stream) is built by `MeshPostProcessJob`, so it is **empty** in the harness and therefore
+> unobservable here (→ **MH-5**). `MeshDataJobOutput.SectionStats` (per-section vertex/triangle index ranges)
+> *was* in this list but is now tile-checked by `StructuralInvariants` (→ **MH-9**, CLOSED 2026-06-17).
 
 ---
 
@@ -80,7 +86,7 @@ items unblock the optimization wave that depends on them.
 These are small enough to land in the same PR as the optimization they guard. Listed so they aren't mistaken
 for blockers.
 
-#### MH-1 — No bounds-extent assertion · **IN-PR** · gates **MR-4**
+#### MH-1 — No bounds-extent assertion · **CLOSED** (2026-06-17) · gates **MR-4**
 
 - **Blind:** the suite never checks the spatial extent of the emitted geometry. `MR-4` replaces the
   per-section `RecalculateBounds()` with a constant `Bounds`; its correctness criterion is "every emitted
@@ -88,8 +94,11 @@ for blockers.
   no assertion today.
 - **Build:** `MeshAssert.BoundsWithin(label, o, min, max)` — compute the vertex AABB, assert it is contained
   in the section's unit-cell-derived box. Add to B2/B4 and any custom-mesh scenario.
-- **Effort:** 🟢 trivial. **Note:** the MR-4 *change* lives in `SectionRenderer`, not the job — this assertion
-  proves the *premise* (geometry fits the constant bounds); the renderer-side change still needs MH-6.
+- **Closed by:** `MeshAssert.BoundsWithin` + a `SectionCellBounds(pos)` helper in the baseline suite, wired
+  into B2 and B4 (every vertex of the cube must lie inside its section's 16³ cell). The MR-4 *change* still
+  lives in `SectionRenderer`, so this assertion proves only the *premise* (geometry fits the constant
+  bounds); the renderer-side assignment still needs MH-6.
+- **Effort:** 🟢 trivial.
 
 #### MH-2 — No pooled-output stale-data guard · **IN-PR** · gates **MR-6** (pooling variant)
 
@@ -101,15 +110,19 @@ for blockers.
   result is byte-identical to a fresh-buffer B run. Reuses existing `OutputsEqual`.
 - **Effort:** 🟢 trivial (once the pooling API exists to test against).
 
-#### MH-9 — `SectionStats` per-section ranges are never asserted · **IN-PR** · gates per-section refactors, **MR-4** (bounds-in-stats)
+#### MH-9 — `SectionStats` per-section ranges are never asserted · **CLOSED** (2026-06-17) · gates per-section refactors, **MR-4** (bounds-in-stats)
 
 - **Blind:** `MeshGenerationJob` writes `MeshDataJobOutput.SectionStats` — the per-section vertex/triangle
   start+count ranges `SectionRenderer` uses to slice submeshes — but `StructuralInvariants` checks only global
   stream lengths and triangle-index ranges, never that the section ranges tile the streams without gap or
   overlap. A refactor that mis-partitions sections (MR-5/MR-6 work, or MR-4's proposed per-section bounds added
   to `MeshSectionStats`) passes green.
-- **Build:** extend `MeshAssert.StructuralInvariants` to assert the `SectionStats` ranges are contiguous,
-  non-overlapping, and sum to the stream lengths.
+- **Closed by:** `MeshAssert.StructuralInvariants` now walks `SectionStats` per stream (vertices + all three
+  triangle lists) via `CheckSectionTiling`, asserting every emitting section's `[start, start+count)` range is
+  contiguous, non-overlapping, and sums to the stream length. Zero-count sections (skipped → written as
+  `default`) are ignored, matching the job's actual contract. New baseline **B9** places one isolated cube per
+  section (3 emitting sections) so the tiling check is non-vacuous, with a positive control asserting ≥2
+  sections emitted.
 - **Effort:** 🟢 trivial.
 
 ### Phase 1 — Value oracles (unblock MR-2; prerequisite for MR-8)
@@ -130,14 +143,21 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 - **Effort:** 🟡 medium. **Risk note:** the light-value oracle must be hand-derived, not a copy of the
   engine's packing, or it inherits the A4-class shared-assumption blind spot the lighting suite documents.
 
-#### MH-4 — No UV / texture *value* oracle · **OPEN** · gates **MR-2**, prereq for **MR-8**
+#### MH-4 — No UV / texture *value* oracle · **CLOSED** (2026-06-17) · gates **MR-2**, prereq for **MR-8**
 
 - **Blind:** UVs are compared only by `OutputsEqual` (determinism). The palette gives each face a distinct
   texture index (Back=0 … Right=5) *so a regression could surface*, but nothing asserts the emitted UV equals
   the expected atlas coordinate for a given face/texture. `MR-2` may shift the UV layout; `MR-8` (greedy)
   requires `Texture2DArray` UV.z layer + `frac()` tiling semantics that have no oracle.
-- **Build:** `MeshOracle.ExpectedFaceUVs(face, textureID, uvQuarterTurnsCW)` + `MeshAssert.UVsMatch`, extending
-  the existing per-face compare in `CompareCubeFacesToOracle` to also check the UV stream.
+- **Closed by:** `MeshOracle.ExpectedFaceUVs(textureID, expectedUVs)` independently re-derives the atlas-cell
+  placement (the math MR-2 may restructure) from the atlas dimensions, and `MeshOracle.ExpectedTextureIDForFace`
+  independently re-states the geometry-face → texture selection (a hardcoded copy of the engine's `GetTextureID`
+  convention, so a divergence is caught). `MeshAssert.UVsMatch` pins the 4 per-vertex UVs; `CompareCubeFacesToOracle`
+  now checks them for all 6 faces of B2 and all 4 yaws of B4 (30 face-UV checks total).
+- **Scope note:** the palette emits no UV quarter-turn rotation, so `uvQuarterTurnsCW` is not modelled — a
+  rotated-texture fixture would need its own oracle extension (and the engine's `RotateUvQuarterTurnsCW`
+  re-derived independently). The corner-within-cell pattern is hand-defined (BL/TL/BR/TR), not read from the
+  engine's `VoxelUvs` table, so a corruption of that table is caught rather than mirrored.
 - **Effort:** 🟡 medium.
 
 ### Phase 2 — Pipeline-stage coverage (unblock MR-5; enable MR-3/MR-4 renderer side)
@@ -218,33 +238,37 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 
 ## 5. Phased backlog snapshot
 
-| Phase | Gap  | Finding                                              | Gates                       | Status | Effort |
-|-------|------|------------------------------------------------------|-----------------------------|--------|--------|
-| 0     | MH-1 | Bounds-extent assertion                              | MR-4 (premise)              | IN-PR  | 🟢     |
-| 0     | MH-2 | Pooled-output stale-data guard                       | MR-6 (pool variant)         | IN-PR  | 🟢     |
-| 0     | MH-9 | `SectionStats` per-section ranges asserted           | per-section refactors; MR-4 | IN-PR  | 🟢     |
-| 1     | MH-3 | Smooth-lighting *value* coverage                     | MR-2; prereq MR-8           | OPEN   | 🟡     |
-| 1     | MH-4 | UV / texture *value* oracle                          | MR-2; prereq MR-8           | OPEN   | 🟡     |
-| 2     | MH-5 | `MeshPostProcessJob` / section-space output coverage | MR-5                        | OPEN   | 🟡     |
-| 2     | MH-6 | `SectionRenderer` apply-path harness                 | MR-3; MR-4 (renderer)       | OPEN   | 🟡     |
-| 3     | MH-7 | Custom/cross-mesh + lava palette & oracle            | MR-4 caveat; blind spot     | OPEN   | 🟡     |
-| 4     | MH-8 | Merge-invariant geometry oracle                      | MR-8                        | OPEN   | 🔴     |
+| Phase | Gap  | Finding                                              | Gates                       | Status         | Effort |
+|-------|------|------------------------------------------------------|-----------------------------|----------------|--------|
+| 0     | MH-1 | Bounds-extent assertion                              | MR-4 (premise)              | CLOSED         | 🟢     |
+| 0     | MH-2 | Pooled-output stale-data guard                       | MR-6 (pool variant)         | IN-PR          | 🟢     |
+| 0     | MH-9 | `SectionStats` per-section ranges asserted           | per-section refactors; MR-4 | CLOSED         | 🟢     |
+| 1     | MH-3 | Smooth-lighting *value* coverage                     | MR-2; prereq MR-8           | OPEN           | 🟡     |
+| 1     | MH-4 | UV / texture *value* oracle                          | MR-2; prereq MR-8           | CLOSED         | 🟡     |
+| 2     | MH-5 | `MeshPostProcessJob` / section-space output coverage | MR-5                        | OPEN           | 🟡     |
+| 2     | MH-6 | `SectionRenderer` apply-path harness                 | MR-3; MR-4 (renderer)       | OPEN           | 🟡     |
+| 3     | MH-7 | Custom/cross-mesh + lava palette & oracle            | MR-4 caveat; blind spot     | OPEN           | 🟡     |
+| 4     | MH-8 | Merge-invariant geometry oracle                      | MR-8                        | OPEN           | 🔴     |
+
+> **Wave 1 (2026-06-17):** MH-9, MH-1, MH-4 closed (baselines B1–B9 green, one commit each). The remaining
+> hard prerequisites are MH-3 + MH-5 (to finish MR-2), MH-5 (MR-5), MH-6 (MR-3), and MH-8 (MR-8). MH-2 stays
+> deferred until the MR-6 pool API exists; MH-7 is best built alongside the custom/cross/lava work it guards.
 
 ### MR-item readiness at a glance
 
-| MR item                   | Baselinable today?   | Needs first                                                                                        |
-|---------------------------|----------------------|----------------------------------------------------------------------------------------------------|
-| MR-2 (vertex format)      | ❌                    | MH-3 + MH-4 + MH-5 (`InterleavedStream3` is post-process-built)                                    |
-| MR-3 (material caching)   | ❌                    | MH-6                                                                                               |
-| MR-4 (constant bounds)    | ⚠️ partial           | MH-1 (premise) + MH-6 (renderer); MH-7 custom-mesh caveat; MH-9 if bounds move into `SectionStats` |
-| MR-5 (chain post-process) | ❌                    | MH-5                                                                                               |
-| MR-6 (pre-size / pool)    | ✅ pre-size / ⚠️ pool | MH-2 (pool variant only)                                                                           |
-| MR-8 (greedy meshing)     | ❌                    | MH-8 + MH-3 + MH-4 (and its own design doc)                                                        |
-| MR-9 (clouds)             | ❌                    | out of scope (separate harness)                                                                    |
+| MR item                   | Baselinable today?   | Needs first                                                                                            |
+|---------------------------|----------------------|--------------------------------------------------------------------------------------------------------|
+| MR-2 (vertex format)      | ❌                    | MH-3 + MH-5 (`InterleavedStream3` is post-process-built); ~~MH-4~~ ✅ done                              |
+| MR-3 (material caching)   | ❌                    | MH-6                                                                                                   |
+| MR-4 (constant bounds)    | ⚠️ partial           | ~~MH-1 (premise)~~ ✅ done + MH-6 (renderer); MH-7 custom-mesh caveat; ~~MH-9~~ ✅ if bounds move into stats |
+| MR-5 (chain post-process) | ❌                    | MH-5                                                                                                   |
+| MR-6 (pre-size / pool)    | ✅ pre-size / ⚠️ pool | MH-2 (pool variant only)                                                                               |
+| MR-8 (greedy meshing)     | ❌                    | MH-8 + MH-3 (and its own design doc); ~~MH-4~~ ✅ done                                                  |
+| MR-9 (clouds)             | ❌                    | out of scope (separate harness)                                                                        |
 
-> Only MH-3/MH-4/MH-5 (MR-2), MH-5 (MR-5), MH-6 (MR-3), and MH-8 (MR-8) are **hard prerequisites** — a baseline
-> cannot be written without them. MH-1, MH-2, MH-7, and MH-9 are better built *alongside* their optimization
-> than ahead of it.
+> After Wave 1, the remaining **hard prerequisites** are MH-3 + MH-5 (MR-2), MH-5 (MR-5), MH-6 (MR-3), and
+> MH-8 (MR-8) — a baseline cannot be written without them. MH-2 and MH-7 are still better built *alongside*
+> their optimization than ahead of it. (MH-1, MH-4, MH-9 are now CLOSED.)
 
 ---
 

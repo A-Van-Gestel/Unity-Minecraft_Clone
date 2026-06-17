@@ -15,7 +15,7 @@ Everything lives under `Assets/Editor/Validation/Meshing/`. Menu item: **`Minecr
 | File                                 | Role                                                                                                                                                         |
 |--------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `MeshingValidationSuite.cs`          | Runner: `Scenario` struct (`Name`, `Func<bool> Run`, `KnownBugId`), partial-method registration, try/catch per scenario, categorized summary                 |
-| `MeshingValidationSuite.Baseline.cs` | `B1`–`B8` regression scenarios (must stay green) + probe helpers (`CollectProbeQuads`, `CompareCubeFacesToOracle`, `FindQuadByNormal`)                       |
+| `MeshingValidationSuite.Baseline.cs` | `B1`–`B9` regression scenarios (must stay green) + probe helpers (`CollectProbeQuads`, `CompareCubeFacesToOracle`, `FindQuadByNormal`, `SectionCellBounds`) |
 | `Framework/MeshingTestWorld.cs`      | Harness core: a single synthetic chunk (`uint` voxel map + test palette), runs the **real** `MeshGenerationJob` via `job.Run()`, exposes `MeshDataJobOutput` |
 | `Framework/MeshOracle.cs`            | Independent spec for standard-cube face geometry (4 verts + normal) per face × rotation; reuses `VoxelHelper` face-translation tables                        |
 | `Framework/MeshAssert.cs`            | `QuadMatchesOracle`, `VertexCount`, `StructuralInvariants`, `OutputsEqual`, `IsTrue` — all with bounded per-element diffs; `VertexEpsilon = 1e-4f`           |
@@ -34,11 +34,12 @@ arrays are constructed-but-empty just as the benchmark leaves them; the water he
 
 > ⚠️ **Before authoring a scenario, know the harness's blind spots.** A green suite does NOT prove an
 > un-modelled area is correct. The harness runs **interior blocks only** (neighbor chunk maps are empty, so
-> border-face culling is untested), defaults to `SmoothLightingQuality.Off` (so UV/color/**light values** are
-> only checked for run-to-run *determinism*, never against an expected value), stops at the **chunk-space**
-> `MeshGenerationJob` output (`MeshPostProcessJob`'s section-space rewrite is never run), and has no
-> custom/cross-mesh block or lava in the palette. The phased plan to close these (`MH-1..MH-8`, keyed to which
-> `MR-*` item each gates) is in
+> border-face culling is untested), defaults to `SmoothLightingQuality.Off` (so **color/light values** are
+> only checked for run-to-run *determinism*, never against an expected value — UVs **are** now value-checked,
+> MH-4), stops at the **chunk-space** `MeshGenerationJob` output (`MeshPostProcessJob`'s section-space rewrite
+> is never run), and has no custom/cross-mesh block or lava in the palette. Wave 1 (2026-06-17) closed MH-1
+> (bounds), MH-4 (UV values), MH-9 (`SectionStats` tiling). The phased plan to close the rest (`MH-2/3/5/6/7/8`,
+> keyed to which `MR-*` item each gates) is in
 > [MESHING_VALIDATION_HARNESS_FIDELITY.md](../../../../Documentation/Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md).
 
 ## Harness API cheat sheet
@@ -59,12 +60,16 @@ MeshDataJobOutput o = world.Run();                                  // defaults 
 //   o.InterleavedStream3 (Normals+LightData for GPU upload) — built by MeshPostProcessJob, so EMPTY here
 // Assertions:
 MeshAssert.VertexCount("label", o, 24);
-MeshAssert.StructuralInvariants("label", o);                        // stream lengths consistent, tris in range & %3
+MeshAssert.StructuralInvariants("label", o);                        // stream lengths consistent, tris in range & %3, + SectionStats tile each stream (MH-9)
 MeshAssert.OutputsEqual("label", a, b);                             // full byte-for-byte determinism guard
-CompareCubeFacesToOracle("label", o, pos, orientation, rotation);   // matches each of 6 faces to MeshOracle by normal
+MeshAssert.BoundsWithin("label", o, min, max);                      // every vertex inside the box (MH-1; use SectionCellBounds(pos) for a section cell)
+MeshAssert.UVsMatch("label", o.Uvs, startVert, expectedUVs);        // 4 face UVs vs MeshOracle.ExpectedFaceUVs (MH-4)
+CompareCubeFacesToOracle("label", o, pos, orientation, rotation, in blockData); // matches each of 6 faces to MeshOracle by normal, checks geometry + UVs
 ```
 
 `MeshOracle` helpers: `ExpectedStandardCubeFace(face, rotation, pos, verts, out normal)`,
+`ExpectedFaceUVs(textureID, expectedUVs)` (MH-4, independent atlas-cell math),
+`ExpectedTextureIDForFace(in blockData, faceIndex)` (MH-4, independent `GetTextureID` convention copy),
 `LegacyOrientationForYaw(yaw)`, `RotationForYaw(yaw)`, `TranslatedFace(worldFace, orientation)`.
 
 ## Worked examples to copy from
@@ -88,9 +93,9 @@ CompareCubeFacesToOracle("label", o, pos, orientation, rotation);   // matches e
 ## Meshing-specific gotchas
 
 - **Interior placement only.** Neighbor chunk maps are empty (`Length == 0` = "no neighbor" = face drawn). A block on a chunk border would have its border faces drawn unconditionally; no scenario should rely on cross-chunk culling until that's modelled (MH blind spot).
-- **`SmoothLightingQuality.Off` is the default** and zeroes the light map — geometry is light-independent there, but it means `o.LightData` / `o.Colors` / `o.Uvs` *values* are meaningless to assert. `OutputsEqual` only proves they're *deterministic*, not *correct*. Validating values needs the MH-3/MH-4 oracles.
+- **`SmoothLightingQuality.Off` is the default** and zeroes the light map, so `o.LightData` / `o.Colors` *values* are still meaningless to assert (only `OutputsEqual` determinism). UVs are **not** light-dependent and **are** now value-checked via the MH-4 oracle (`MeshOracle.ExpectedFaceUVs`); per-corner light values still need the MH-3 oracle.
 - **Test palette IDs are local array indices, NOT `BlockIDs`.** This is deliberate (deterministic under `BlockDatabase.asset` edits, can express shapes the real DB lacks) and does not violate the `BlockIDs`-constants rule — same exemption as the lighting suite's `TestBlockPalette`.
 - **Compare faces by normal, not emission order** (`FindQuadByNormal`): an isolated cube emits 6 quads with 6 distinct axis normals, so a future reorder of the face loop can't silently misalign the comparison. (This same assumption is exactly what greedy meshing / MR-8 breaks — see MH-8.)
 - **Fluid needs the real height template.** `MeshingTestWorld` builds the 16-entry water template; an empty array would index out of range in the fluid path. There is no lava template (MH-7).
 - **`MeshPostProcessJob` is not run** — the suite asserts chunk-space coordinates. Don't assume section-space output is guarded; the interleaved GPU-upload stream is built there too, so `o.InterleavedStream3` is **empty** in the harness (MH-5).
-- **`o.SectionStats` is populated but unasserted.** `MeshGenerationJob` writes per-section vert/tri start+count ranges, but neither `StructuralInvariants` nor `OutputsEqual` checks them — a refactor that mis-partitions sections passes green (MH-9).
+- **`o.SectionStats` is now tile-checked (MH-9).** `StructuralInvariants` walks the per-section vert/tri start+count ranges and asserts they tile each stream contiguously (B9 exercises multi-section). A refactor that mis-partitions sections now fails. Note skipped/empty sections are written as `default` (start 0 / count 0) and are correctly ignored — the check chains only count > 0 sections.
