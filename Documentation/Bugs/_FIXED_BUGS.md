@@ -287,6 +287,55 @@ production `WorldJobManager.ApplyCrossChunkLightMod` and harness `LightingTestWo
 
 ---
 
+### ~~16. Over-bright cross-seam sunlight loop survives source removal~~
+
+**Severity:** Medium
+**Fixed:** June 2026 (was Bug 12 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed via the validation suite (repro flipped red→green, all baselines green). Promoted to validation baseline **B53** from known-bug repro K12a, with over-correction tripwire **B50** and completeness baselines **B51** (asymmetric two-shaft) / **B52** (multi-hop ring), grouped in `Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug12.cs`.
+**Confidence:** Oracle-confirmed (validation framework). **Never observed in-game** — the artifact was identified from a harness oracle mismatch, not a player report — so confirmation rests on the borderless oracle rather than an in-game sighting.
+**Found by:** a harness oracle mismatch while building baseline **B49** (code-review finding 3): the end-to-end source-removal scenario could not isolate the opacity guard *because* this loop swallowed the removal, so B49 was implemented as a direct decision-logic test instead.
+**Files:** `NeighborhoodLightingJob.cs` (`PropagateDarkness` cross-seam removal emit + `IsVerticallySkyLit`, `EmitCrossChunkSunlightRemoval`, `LocalToGlobal`, per-job dedup); adjudicated by the reused Bug-11 veto `CrossChunkLightModApplier.ComputeSunlight` / `InChunkSunlightSupport`.
+
+**Description:**
+When a sunlight source that feeds a chunk-seam voxel is removed — e.g. a block placed that roofs a sky shaft, or a sky-feeding block broken near a chunk border — and that seam voxel *also* has a (weaker) in-chunk light path, the cross-seam light can fail to be removed. The seam voxel and its neighbor across the boundary end up **mutually supporting each other** (each is lit "by" the other), so the removal flood-fill never finds a real source to trace the darkness back to. The result is a **stable-but-wrong** over-bright field: the removed source's
+contribution lingers across the seam (and everything downstream of it stays correspondingly too bright) until a full world reload — or an unrelated nearby edit re-triggers the pass.
+
+This is the over-bright ("inverse") counterpart to **Bug 05**'s shadow patches, and the concrete mechanism behind the inverse-artifact note in that entry. It is the *static* form of the defect: unlike Bug 11 (which oscillated), this converges and stays converged at the wrong value.
+
+**Root Cause:**
+The sunlight removal pass (`NeighborhoodLightingJob.PropagateDarkness`) clears a voxel's light by identifying neighbors that were lit **by** it (`neighborSky == thisOldSky − cost`) and removing them. A 2-cycle that straddles a chunk boundary — voxel A (chunk X seam) lit from voxel B (chunk Y seam) and B lit from A — has, once the genuine external source is gone, **no removal initiator**: each side reads the other's still-high value as legitimate support. Because cross-chunk mods are computed against schedule-time snapshots, neither side ever observes the
+other dropping first, so each re-places the light it just removed from the other's stale value, settling into an over-bright fixed point. `CheckEdgeVoxel` cannot correct it — it only **adds** missing light, never removes over-bright (see Bug 05's note).
+
+> **Not** the Bug 11 veto. The in-chunk-support veto (`ComputeSunlight` / `InChunkSunlightSupport`) guards the opposite direction — it prevents a *spurious* removal of a genuinely-supported voxel. Bug 12 is a *legitimate* removal that never initiates. The two are independent: the veto is not the **cause**. (The fix below does *reuse* the existing veto as the safe adjudicator for the new cross-seam removal it emits — but the veto alone, without that emission, never fired here because no removal mod was ever sent across the seam.)
+
+**Reproduction (observed in the lighting harness):**
+
+1. Build a 1-wide roofed corridor that crosses a chunk seam, lit by a single sky shaft on one side; arrange a weaker in-chunk path to the seam voxel as well.
+2. Run initial lighting to convergence (matches the borderless oracle).
+3. Roof the shaft (`PlaceBlock` stone over it) to remove the dominant cross-seam source, then run to convergence again.
+4. **Observed:** the seam voxel and the voxels downstream of it remain ~2 levels brighter than the borderless oracle — the removed source's contribution never clears. The field is stable ("converged") but does not match the oracle.
+
+**Relationship to other bugs:**
+
+- **Bug 05** — the dark counterpart (under-lit seam patches); shares the add-only `CheckEdgeVoxel` limitation as a contributing factor.
+- **Bug 09** — cross-chunk *blocklight* delivery race; different channel and mechanism (delivery drop vs. sourceless loop).
+- **Bug 11** (fixed) — cross-seam sunlight removal/re-placement *oscillation*; the in-chunk-support veto. Distinct: over-removal vs. this under-removal.
+
+**Validation suite (June 2026):** unlike Bug 05 / Bug 09 (not synchronously reproducible), this **does** reproduce deterministically in the synchronous harness, captured test-first as known-bug scenario K12a and now promoted to baseline **B53** (`Baselines/LightingValidationSuite.Baseline.Bug12.cs`, run via `Minecraft Clone/Dev/Validate Lighting Engine`). B53 builds a 1-wide roofed corridor straddling the `x15|16` seam, lit by a single sky shaft that opens **both** shared seam columns (so the two seam voxels are mutually equal at sky 15 — each appears
+lit "by" the other). After initial
+convergence (matches the oracle), it roofs both seam columns — one `PlaceBlock` per chunk, so both seam chunks carry a sunlight column recalc into the **same** wave — and runs the grid **wave-parallel** (`RunWaveToConvergence`, production's concurrent-job / schedule-time-snapshot model). Before the fix the field converged to a **stable** state (the static defect, not Bug 11's oscillation) that did **not** match the oracle: the seam pinned at its pre-roof value minus one (14) and stayed bright downstream while the borderless oracle was dark. (A
+single-side shaft + single roof edit, or sequential `RunToConvergence`, does **not** reproduce — the simultaneous same-wave perturbation of both seam chunks is required, mirroring how B48 forces the sibling Bug 11.)
+
+**Fix (June 2026):** the missing removal *initiator* is now supplied across the seam. In `NeighborhoodLightingJob.PropagateDarkness` (sunlight), when a darkness wave reaches a cross-chunk neighbor sitting at **exactly** the removed level — the 2-cycle signature — the job now emits a cross-chunk sunlight **removal mod** for that neighbor (in addition to the existing Bug-07 pull-back re-light). The neighbor's chunk re-evaluates the removal through the existing Bug-11 veto (`CrossChunkLightModApplier.ComputeSunlight` / `InChunkSunlightSupport`): an in-chunk
+source that still independently supports the value (e.g. a horizontal shaft) **keeps** it, while a value that was only the stale mutual-support loop **clears** — so the two seam voxels collapse to the oracle within a couple of waves instead of pinning over-bright. Two guards keep it surgical and prevent over-correction (caught in development by **B50**): the emission fires only when the neighbor is **neither fully opaque** (an opaque wall/floor only stores non-propagating surface light, never participates in a light loop) **nor directly sky-exposed** (
+`IsVerticallySkyLit` — a voxel receiving full vertical sunlight is independently lit). Without those, an ordinary sky-lit border voxel would be spuriously cleared whenever any shadow's darkness wave reached a chunk seam. The emit-only helper appends the modification without touching the job's write-through cache, so the in-job pull-back still reads the unchanged snapshot, and dedups per job (a darkness wave can reach the same neighbor from many removal nodes; one mod suffices, so duplicates are skipped to keep the mod list from growing by O(wavefront)).
+No save-format or veto-signature change.
+
+**Scope (June 2026 completeness investigation):** the `== removed level` emit targets specifically the **symmetric mutually-equal** seam — the only configuration that stalls, because neither side has a removal initiator. Asymmetric and multi-hop cross-seam loops were probed (two shafts at unequal distance; a ring corridor crossing the seam twice) and **converge correctly even with the fix neutered**: any level gradient has a strictly-lower side, which the existing `PropagateDarkness` "neighbor `<` removed level" branch already removes (it emits a removal
+via `SetSunlight`'s cross-chunk path). These are pinned as completeness baselines **B51**/**B52** (general convergence guards, not fix tripwires — they stay green pre-fix).
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~
