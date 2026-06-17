@@ -67,6 +67,46 @@ namespace Editor.Validation.Meshing.Framework
             return false;
         }
 
+        /// <summary>
+        /// MH-1 — asserts every emitted vertex lies within the axis-aligned box
+        /// [<paramref name="min"/>, <paramref name="max"/>] (a section's unit-cell-derived bounds). This
+        /// proves the premise behind MR-4 — replacing the per-section <c>RecalculateBounds()</c> with a
+        /// constant, section-sized <c>Bounds</c> — namely that emitted geometry never spills outside the
+        /// section cell it belongs to. A regression that emitted a vertex beyond the cell would make the
+        /// proposed constant bounds wrongly cull visible geometry.
+        /// </summary>
+        /// <param name="label">Scenario label for logging.</param>
+        /// <param name="o">Meshing job output to inspect.</param>
+        /// <param name="min">Inclusive lower corner of the allowed box (block units).</param>
+        /// <param name="max">Inclusive upper corner of the allowed box (block units).</param>
+        public static bool BoundsWithin(string label, MeshDataJobOutput o, Vector3 min, Vector3 max)
+        {
+            StringBuilder diffs = new StringBuilder();
+            int diffCount = 0;
+            const float e = VertexEpsilon;
+
+            for (int i = 0; i < o.Vertices.Length && diffCount < MAX_DIFFS; i++)
+            {
+                Vector3 v = o.Vertices[i];
+                if (v.x < min.x - e || v.x > max.x + e ||
+                    v.y < min.y - e || v.y > max.y + e ||
+                    v.z < min.z - e || v.z > max.z + e)
+                {
+                    diffs.AppendLine($"    vert[{i}] {Fmt(v)} outside [{Fmt(min)} .. {Fmt(max)}]");
+                    diffCount++;
+                }
+            }
+
+            if (diffCount == 0)
+            {
+                Debug.Log($"[PASS] {label}: all {o.Vertices.Length} vertices within [{Fmt(min)} .. {Fmt(max)}].");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: {diffCount} vertex/vertices outside bounds\n{diffs}");
+            return false;
+        }
+
         /// <summary>Asserts the output has exactly <paramref name="expected"/> vertices.</summary>
         public static bool VertexCount(string label, MeshDataJobOutput o, int expected)
         {

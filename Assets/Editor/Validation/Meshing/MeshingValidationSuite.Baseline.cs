@@ -102,6 +102,11 @@ namespace Editor.Validation.Meshing
             if (o.Vertices.Length != 24) return false; // per-face compare would be meaningless
 
             passed &= CompareCubeFacesToOracle("B2", o, pos, orientation: VoxelOrientation.North, rotation: 0f);
+
+            // MH-1: every emitted vertex must lie inside the block's section cell — the premise behind
+            // MR-4's proposed constant section bounds.
+            SectionCellBounds(pos, out Vector3 min, out Vector3 max);
+            passed &= MeshAssert.BoundsWithin("B2 bounds", o, min, max);
             return passed;
         }
 
@@ -160,6 +165,11 @@ namespace Editor.Validation.Meshing
 
                 bool passed = MeshAssert.VertexCount($"B4 yaw {yaw} vertex count", o, 24);
                 passed &= MeshAssert.StructuralInvariants($"B4 yaw {yaw} structural", o);
+
+                // MH-1: a rotated cube's vertices must still fall inside its section cell.
+                SectionCellBounds(pos, out Vector3 min, out Vector3 max);
+                passed &= MeshAssert.BoundsWithin($"B4 yaw {yaw} bounds", o, min, max);
+
                 if (o.Vertices.Length == 24)
                 {
                     byte orientation = MeshOracle.LegacyOrientationForYaw(yaw);
@@ -507,6 +517,18 @@ namespace Editor.Validation.Meshing
 
             Debug.Log($"[PASS] {label}: {a.Count} probe quads identical.");
             return true;
+        }
+
+        /// <summary>
+        /// The axis-aligned bounds of the 16×16×16 section cell containing <paramref name="pos"/>, in
+        /// chunk-local block units — the box MR-4's proposed constant section bounds would assign. X/Z
+        /// span the full chunk width; Y spans the one section the block sits in.
+        /// </summary>
+        private static void SectionCellBounds(Vector3Int pos, out Vector3 min, out Vector3 max)
+        {
+            int section = pos.y / ChunkMath.SECTION_SIZE;
+            min = new Vector3(0f, section * ChunkMath.SECTION_SIZE, 0f);
+            max = new Vector3(VoxelData.ChunkWidth, (section + 1) * ChunkMath.SECTION_SIZE, VoxelData.ChunkWidth);
         }
 
         /// <summary>
