@@ -54,6 +54,7 @@ namespace Editor.Validation.Meshing
 
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
+            AddRendererScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
 
             int baselinePassed = 0;
@@ -112,6 +113,13 @@ namespace Editor.Validation.Meshing
 
         /// <summary>Registers the baseline regression scenarios (implemented in MeshingValidationSuite.Baseline.cs).</summary>
         static partial void AddBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>
+        /// Registers the renderer apply-path baselines (MH-6, implemented in MeshingValidationSuite.Renderer.cs).
+        /// These exercise <see cref="SectionRenderer.UpdateMeshNative"/> via a separate fixture, not the
+        /// meshing-job <see cref="Framework.MeshingTestWorld"/>; they count as baselines (must stay green).
+        /// </summary>
+        static partial void AddRendererScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);
