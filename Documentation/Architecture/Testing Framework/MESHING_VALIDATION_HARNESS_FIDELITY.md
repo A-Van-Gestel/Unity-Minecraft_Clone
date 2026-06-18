@@ -1,7 +1,7 @@
 # Meshing Validation Harness — Fidelity Boundary & Extension Backlog
 
 **Status:** ✅ **Active backlog** — Wave 1 executed 2026-06-17 (MH-1/MH-4/MH-9 closed), Wave 2 executed
-2026-06-18 (MH-5/MH-3 closed); see §6 for the forward wave plan (Wave 3 = MH-6, next/parallelizable).
+2026-06-18 (MH-5/MH-3 closed), Wave 3 executed 2026-06-18 (MH-6 closed — buildable-now portion); see §6.
 **Created:** 2026-06-16 · **Last updated:** 2026-06-18
 **Scope:** `Assets/Editor/Validation/Meshing/` — the `MeshingValidationSuite` + `MeshingTestWorld` +
 `MeshOracle` + `MeshAssert` + `TestMeshBlockPalette` harness (menu item
@@ -76,6 +76,12 @@ So the blind spots below are read against a clear baseline of what *is* covered:
 - **Smooth-lighting *values* (Wave 2, MH-3).** `MeshingTestWorld.FillLight` + `Run(SmoothLightingQuality.High)`
   populate a uniform light field; `MeshOracle.ExpectedUniformCornerLight` (hand-derived `17·V`, LUT-independent)
   + `MeshAssert.LightDataMatches` pin the smooth-light encoding (B11: full sun 255, intermediate 119/51).
+- **Renderer apply-path (Wave 3, MH-6).** A *separate* fixture (`Framework/SectionRendererTestFixture`) drives the
+  real `SectionRenderer.UpdateMeshNative` in edit mode (reflection-stub `World.Instance` + 3 distinct stub
+  materials) and observes through the public `GameObject`; **B12** pins material-combination selection per
+  submesh-presence bitmask (all 7 combos, opaque→transparent→fluid order), **B13** the empty-section deactivate +
+  no-assign short-circuit, **B14** that `Mesh.bounds` *contain* every emitted vertex (`RendererAssert`). This is a
+  different harness from the job suite — see §3 MH-6.
 
 > **The trusted core is now whole for the job + post-process stages.** `InterleavedStream3` (the Normals+light
 > GPU-upload vertex stream) *was* empty here because it is built by `MeshPostProcessJob`; it is now produced
@@ -203,15 +209,38 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
   section sits above section 0 (so the y-offset is non-identity).
 - **Effort:** 🟡 medium.
 
-#### MH-6 — No `SectionRenderer` apply-path harness · **OPEN** · gates **MR-3**, renderer side of **MR-4**
+#### MH-6 — No `SectionRenderer` apply-path harness · **CLOSED** (2026-06-18, buildable-now portion) · gates **MR-3**, renderer side of **MR-4**
 
 - **Blind:** `MR-3` (cache 7 material-combination arrays, assign `sharedMaterials` only on change) and the
   *applied* side of `MR-4` (assign constant `Mesh.bounds`) live in `SectionRenderer.UpdateMeshNative`, a
-  `MonoBehaviour` path the meshing-*job* suite never instantiates. They are structurally unreachable from the
-  current harness.
-- **Build:** a separate, lightweight renderer fixture asserting (a) material-bitmask → `sharedMaterials`
-  selection and the no-reassign-when-unchanged behavior, and (b) the constant bounds assignment. This is a
-  different harness from the job suite — flag it as such so it isn't bolted onto `MeshingTestWorld`.
+  `MonoBehaviour` path the meshing-*job* suite never instantiates. They were structurally unreachable from the
+  job harness.
+- **Closed by:** a *separate* fixture `Framework/SectionRendererTestFixture` (NOT bolted onto `MeshingTestWorld`)
+  that instantiates the real `SectionRenderer` and drives `UpdateMeshNative` with tiny synthetic `NativeArray`s
+  (material selection + the active/inactive decision depend only on the three submesh `count` args — no real mesh
+  job needed), observing through the public `GameObject` (`sharedMaterials`, `sharedMesh.bounds`, `activeSelf`).
+  `Framework/RendererAssert` adds `MaterialsEqual` + a `BoundsContainAll(Verts)` containment check. Three baselines
+  in `MeshingValidationSuite.Renderer.cs`: **B12** asserts the material array equals the correct combination per
+  submesh-presence bitmask, in opaque → transparent → fluid order, across all 7 non-empty combinations (the
+  load-bearing MR-3 guard); **B13** asserts the empty section (`vertexCount==0`) deactivates the GameObject and
+  leaves `sharedMaterials` untouched; **B14** asserts `Mesh.bounds` *contain* every emitted vertex (a containment
+  invariant — stable across MR-4; MH-1 already proved geometry fits the section cell — explicitly **NOT** a
+  tight-AABB equality). Positive controls: B12 proves the 3 stub materials are distinct + two bitmasks yield
+  different arrays; B13 proves a non-empty update activates + assigns (so "inactive + untouched" isn't vacuous);
+  B14 a tripwire proving the containment predicate observes an out-of-bounds vertex.
+- **Seam (the blocker):** `UpdateMeshNative` reaches into `World.Instance.{Opaque,Transparent,Liquid}Material`
+  (null in edit mode → NRE). Resolved with **option (a) reflection-stub** — reflect the private `World.Instance`
+  setter onto an `AddComponent`'d `World` (a plain `MonoBehaviour`, so no `Awake`/`OnEnable`/`OnValidate` runs in
+  edit mode; the setter is driven directly, bypassing `World.Awake`) with a stub `BlockDatabase` holding 3 distinct
+  dummy materials. **Zero production change** (B1–B11 untouched).
+- **Build-alongside follow-ups** (NOT baselinable pre-optimization — land them in the MR-3/MR-4 PR, B8/B9/B11
+  positive-control style): (1) **no-reassign-when-bitmask-unchanged** — MR-3's new postcondition (assert
+  `sharedMaterials` is not reassigned across two updates with the same present-submesh bitmask) once the 7
+  combinations are cached; (2) **bounds == constant section cell** — MR-4's new postcondition (assert `Mesh.bounds`
+  equals the constant section-cell box) once `RecalculateBounds()` is replaced; (3) **upgrade the seam to option
+  (b)** — inject `UpdateMeshNative`'s materials (or a cached material-set) instead of reaching into the singleton,
+  the long-term cleaner architecture this reflection stub stands in for (do it when MR-3 / the MR-6 pooling work
+  touches the signature anyway).
 - **Effort:** 🟡 medium. **Note:** MH-1 covers MR-4's *geometry* premise from job output; MH-6 covers the
   renderer assignment itself.
 
@@ -270,31 +299,33 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 | 1     | MH-3 | Smooth-lighting *value* coverage (uniform)           | MR-2; prereq MR-8           | CLOSED         | 🟡     |
 | 1     | MH-4 | UV / texture *value* oracle                          | MR-2; prereq MR-8           | CLOSED         | 🟡     |
 | 2     | MH-5 | `MeshPostProcessJob` / section-space output coverage | MR-5                        | CLOSED         | 🟡     |
-| 2     | MH-6 | `SectionRenderer` apply-path harness                 | MR-3; MR-4 (renderer)       | OPEN           | 🟡     |
+| 2     | MH-6 | `SectionRenderer` apply-path harness                 | MR-3; MR-4 (renderer)       | CLOSED         | 🟡     |
 | 3     | MH-7 | Custom/cross-mesh + lava palette & oracle            | MR-4 caveat; blind spot     | OPEN           | 🟡     |
 | 4     | MH-8 | Merge-invariant geometry oracle                      | MR-8                        | OPEN           | 🔴     |
 
 > **Wave 1 (2026-06-17):** MH-9, MH-1, MH-4 closed (baselines B1–B9 green, one commit each).
-> **Wave 2 (2026-06-18):** MH-5 (B10) + MH-3 (B11) closed (baselines B1–B11 green, one commit each). The
-> remaining open prerequisites are **MH-6** (MR-3; renderer side of MR-4) and **MH-8** (MR-8). MH-2 stays
-> deferred until the MR-6 pool API exists; MH-7 is best built alongside the custom/cross/lava work it guards.
+> **Wave 2 (2026-06-18):** MH-5 (B10) + MH-3 (B11) closed (baselines B1–B11 green, one commit each).
+> **Wave 3 (2026-06-18):** MH-6 (B12–B14) closed — buildable-now portion (baselines B1–B14 green, one commit).
+> The only remaining hard prerequisite is **MH-8** (MR-8). MH-2 stays deferred until the MR-6 pool API exists;
+> MH-7 is best built alongside the custom/cross/lava work it guards.
 
 ### MR-item readiness at a glance
 
 | MR item                   | Baselinable today?   | Needs first                                                                                            |
 |---------------------------|----------------------|--------------------------------------------------------------------------------------------------------|
 | MR-2 (vertex format)      | ✅                    | ~~MH-3 + MH-4 + MH-5~~ ✅ all done (encoding pinned; distinct-corner light is a future MH-3 extension)  |
-| MR-3 (material caching)   | ❌                    | MH-6                                                                                                   |
-| MR-4 (constant bounds)    | ⚠️ partial           | ~~MH-1 (premise)~~ ✅ done + MH-6 (renderer); MH-7 custom-mesh caveat; ~~MH-9~~ ✅ if bounds move into stats |
+| MR-3 (material caching)   | ✅                    | ~~MH-6~~ ✅ done (B12 material-combo guard; no-reassign postcondition is build-alongside)                |
+| MR-4 (constant bounds)    | ✅                    | ~~MH-1 (premise)~~ ✅ + ~~MH-6 (renderer)~~ ✅ done (B14 containment); constant-cell-bounds postcondition build-alongside; MH-7 custom-mesh caveat |
 | MR-5 (chain post-process) | ✅                    | ~~MH-5~~ ✅ done (B10 chained-vs-separate equality)                                                     |
 | MR-6 (pre-size / pool)    | ✅ pre-size / ⚠️ pool | MH-2 (pool variant only)                                                                               |
 | MR-8 (greedy meshing)     | ❌                    | MH-8 + a per-corner MH-3 extension (and its own design doc); ~~MH-4~~ ✅ done                           |
 | MR-9 (clouds)             | ❌                    | out of scope (separate harness)                                                                        |
 
-> After Wave 2, **MR-2 is fully baselinable** (MH-3 + MH-4 + MH-5 ✅) and **MR-5 is unblocked** (MH-5 ✅). The
-> remaining **hard prerequisites** are MH-6 (MR-3) and MH-8 (MR-8) — a baseline cannot be written without them.
-> MH-2 and MH-7 are still better built *alongside* their optimization than ahead of it. (MH-1, MH-3, MH-4,
-> MH-5, MH-9 are now CLOSED; MH-8/MR-8 additionally want a per-corner light oracle beyond MH-3's uniform case.)
+> After Wave 3, **MR-2 is fully baselinable** (MH-3 + MH-4 + MH-5 ✅), **MR-5 is unblocked** (MH-5 ✅), and
+> **MR-3 + the renderer side of MR-4 are baselinable** (MH-6 ✅ — B12/B14). The only remaining **hard
+> prerequisite** is MH-8 (MR-8) — a baseline cannot be written without it. MH-2 and MH-7 are still better built
+> *alongside* their optimization than ahead of it. (MH-1, MH-3, MH-4, MH-5, MH-6, MH-9 are now CLOSED; MH-8/MR-8
+> additionally want a per-corner light oracle beyond MH-3's uniform case.)
 
 ---
 
@@ -351,14 +382,16 @@ commit each, baselines **B1–B11** green after each. MH-3 landed the **uniform-
 
    **After Wave 2, MR-2 is fully baselinable** (MH-3 + MH-4 ✅ + MH-5) and **MR-5 is unblocked** (MH-5).
 
-### Wave 3 — renderer apply-path (separate harness) · NEXT / parallelizable
+### Wave 3 — renderer apply-path (separate harness) · ✅ DONE (2026-06-18)
 
-3. **MH-6 — `SectionRenderer` apply-path fixture** (gates MR-3; renderer side of MR-4).
-   - A **different** harness from the job suite: a lightweight `MonoBehaviour` fixture, not bolted onto
-     `MeshingTestWorld`. Asserts (a) material-bitmask → `sharedMaterials` selection + no-reassign-when-unchanged
-     (MR-3), and (b) the constant `Mesh.bounds` assignment (MR-4 renderer side; MH-1 already proved the
-     geometry premise from job output).
-   - Independent of Wave 2 — can run in parallel or be built alongside whoever tackles MR-3. 🟡 medium.
+3. **MH-6 — `SectionRenderer` apply-path fixture** (gates MR-3; renderer side of MR-4) · **CLOSED** (buildable-now
+   portion). A **separate** fixture `SectionRendererTestFixture` (reflection-stub `World.Instance` seam, zero
+   production change), NOT bolted onto `MeshingTestWorld`. Baselines **B12–B14** green: material-combination per
+   submesh-presence bitmask (the MR-3 guard), empty-section deactivate + no-assign, and `Mesh.bounds`-contain-all
+   (the MR-4 renderer containment premise; MH-1 proved the geometry premise from job output). The
+   **no-reassign-when-unchanged** (MR-3) and **constant-cell-bounds** (MR-4) postconditions — plus upgrading the
+   seam to option (b) production injection — are **build-alongside** follow-ups for the MR-3/MR-4 PR (see §3 MH-6),
+   since they assert the post-optimization behavior and cannot be baselined ahead of it.
 
 ### Build-alongside-the-optimization (not standalone waves)
 
