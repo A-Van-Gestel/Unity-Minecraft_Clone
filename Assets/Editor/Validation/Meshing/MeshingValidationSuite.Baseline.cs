@@ -385,7 +385,8 @@ namespace Editor.Validation.Meshing
             // the scene actually produced that, so a future fixture change can't silently make B9 vacuous.
             int emittingSections = 0;
             for (int s = 0; s < o.SectionStats.Length; s++)
-                if (o.SectionStats[s].VertexCount > 0) emittingSections++;
+                if (o.SectionStats[s].VertexCount > 0)
+                    emittingSections++;
             passed &= MeshAssert.IsTrue("B9 multi-section coverage", emittingSections == cubes.Length,
                 $"sections emitting geometry = {emittingSections} (expected {cubes.Length}, else the tiling check is vacuous)");
 
@@ -461,7 +462,8 @@ namespace Editor.Validation.Meshing
             // above section 0, so its y-offset is non-zero and section-space ≠ chunk-space for those verts.
             int highestEmittingSection = -1;
             for (int s = 0; s < separate.SectionStats.Length; s++)
-                if (separate.SectionStats[s].VertexCount > 0) highestEmittingSection = s;
+                if (separate.SectionStats[s].VertexCount > 0)
+                    highestEmittingSection = s;
             passed &= MeshAssert.IsTrue("B10 non-identity offset", highestEmittingSection >= 1,
                 $"highest emitting section = {highestEmittingSection} (expected ≥ 1 so the section-space y-offset is non-zero)");
 

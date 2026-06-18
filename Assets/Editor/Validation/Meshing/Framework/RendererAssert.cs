@@ -55,14 +55,11 @@ namespace Editor.Validation.Meshing.Framework
         public static bool BoundsContainAll(Bounds bounds, Vector3[] verts, out int firstOutside)
         {
             Vector3 min = bounds.min, max = bounds.max;
-            const float e = MeshAssert.VertexEpsilon;
 
             for (int i = 0; i < verts.Length; i++)
             {
-                Vector3 v = verts[i];
-                if (v.x < min.x - e || v.x > max.x + e ||
-                    v.y < min.y - e || v.y > max.y + e ||
-                    v.z < min.z - e || v.z > max.z + e)
+                // Single source of truth for the containment math — see MeshAssert.IsWithin.
+                if (!MeshAssert.IsWithin(verts[i], min, max, MeshAssert.VertexEpsilon))
                 {
                     firstOutside = i;
                     return false;

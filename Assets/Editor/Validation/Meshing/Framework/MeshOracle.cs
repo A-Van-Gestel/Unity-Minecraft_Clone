@@ -98,8 +98,8 @@ namespace Editor.Validation.Meshing.Framework
         /// <param name="expectedUVs">Output array (length 4) of expected UVs (xy = atlas coord, zw = 0).</param>
         public static void ExpectedFaceUVs(int textureID, Vector4[] expectedUVs)
         {
-            int atlas = VoxelData.TextureAtlasSizeInBlocks;
-            float norm = VoxelData.NormalizedBlockTextureSize;
+            const int atlas = VoxelData.TextureAtlasSizeInBlocks;
+            const float norm = VoxelData.NormalizedBlockTextureSize;
             int cellX = textureID % atlas;
             int cellY = textureID / atlas;
             float uBase = cellX * norm;

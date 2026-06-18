@@ -83,14 +83,11 @@ namespace Editor.Validation.Meshing.Framework
         {
             StringBuilder diffs = new StringBuilder();
             int diffCount = 0;
-            const float e = VertexEpsilon;
 
             for (int i = 0; i < o.Vertices.Length && diffCount < MAX_DIFFS; i++)
             {
                 Vector3 v = o.Vertices[i];
-                if (v.x < min.x - e || v.x > max.x + e ||
-                    v.y < min.y - e || v.y > max.y + e ||
-                    v.z < min.z - e || v.z > max.z + e)
+                if (!IsWithin(v, min, max, VertexEpsilon))
                 {
                     diffs.AppendLine($"    vert[{i}] {Fmt(v)} outside [{Fmt(min)} .. {Fmt(max)}]");
                     diffCount++;
@@ -105,6 +102,24 @@ namespace Editor.Validation.Meshing.Framework
 
             Debug.LogError($"[FAIL] {label}: {diffCount} vertex/vertices outside bounds\n{diffs}");
             return false;
+        }
+
+        /// <summary>
+        /// Per-vertex containment test (the single source of truth shared by <see cref="BoundsWithin"/> on job
+        /// output and <see cref="RendererAssert.BoundsContainAll"/> on renderer mesh bounds): true iff
+        /// <paramref name="v"/> lies within the inclusive box [<paramref name="min"/>, <paramref name="max"/>]
+        /// expanded by <paramref name="epsilon"/> on each axis. Keeping one copy means the epsilon and the
+        /// inclusive-boundary convention can never silently diverge between the two callers.
+        /// </summary>
+        /// <param name="v">The point to test.</param>
+        /// <param name="min">Inclusive lower corner.</param>
+        /// <param name="max">Inclusive upper corner.</param>
+        /// <param name="epsilon">Per-axis tolerance added outside the box.</param>
+        public static bool IsWithin(Vector3 v, Vector3 min, Vector3 max, float epsilon)
+        {
+            return v.x >= min.x - epsilon && v.x <= max.x + epsilon
+                                          && v.y >= min.y - epsilon && v.y <= max.y + epsilon
+                                          && v.z >= min.z - epsilon && v.z <= max.z + epsilon;
         }
 
         /// <summary>
@@ -560,7 +575,7 @@ namespace Editor.Validation.Meshing.Framework
                 Vector4 x = a[i], y = b[i];
                 // ReSharper disable CompareOfFloatsByEqualityOperator
                 if (x.x != y.x || x.y != y.y || x.z != y.z || x.w != y.w)
-                // ReSharper restore CompareOfFloatsByEqualityOperator
+                    // ReSharper restore CompareOfFloatsByEqualityOperator
                 {
                     diffs.AppendLine($"    {name}[{i}] ({x.x:F4},{x.y:F4},{x.z:F4},{x.w:F4}) vs ({y.x:F4},{y.y:F4},{y.z:F4},{y.w:F4})");
                     diffCount++;
@@ -584,7 +599,7 @@ namespace Editor.Validation.Meshing.Framework
                 Color x = a[i], y = b[i];
                 // ReSharper disable CompareOfFloatsByEqualityOperator
                 if (x.r != y.r || x.g != y.g || x.b != y.b || x.a != y.a)
-                // ReSharper restore CompareOfFloatsByEqualityOperator
+                    // ReSharper restore CompareOfFloatsByEqualityOperator
                 {
                     diffs.AppendLine($"    {name}[{i}] ({x.r:F4},{x.g:F4},{x.b:F4},{x.a:F4}) vs ({y.r:F4},{y.g:F4},{y.b:F4},{y.a:F4})");
                     diffCount++;

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Editor.Validation.Meshing.Framework;
 using UnityEngine;
@@ -36,6 +37,15 @@ namespace Editor.Validation.Meshing
             new Vector3(2f, 8f, 4f),
             new Vector3(9f, 1f, 6f),
         };
+
+        /// <summary>B14 tripwire box edge length — small enough to exclude every probe vertex except the one it is centered on.</summary>
+        private const float TRIPWIRE_BOX_SIZE = 0.02f;
+
+        /// <summary>B14 generous control box edge length — large enough to contain every probe vertex.</summary>
+        private const float GENEROUS_BOX_SIZE = 100f;
+
+        /// <summary>B14 generous control box center coordinate (each axis), roughly centered on the probe spread.</summary>
+        private const float GENEROUS_BOX_CENTER = 5f;
 
         static partial void AddRendererScenarios(List<Scenario> scenarios)
         {
@@ -96,8 +106,8 @@ namespace Editor.Validation.Meshing
             // Positive control (b): two different bitmasks produce genuinely different material arrays.
             allPassed &= MeshAssert.IsTrue("B12 control: opaque-only != fluid-only material array",
                 opaqueOnly != null && fluidOnly != null
-                && opaqueOnly.Length == 1 && fluidOnly.Length == 1
-                && !ReferenceEquals(opaqueOnly[0], fluidOnly[0]),
+                                   && opaqueOnly.Length == 1 && fluidOnly.Length == 1
+                                   && !ReferenceEquals(opaqueOnly[0], fluidOnly[0]),
                 "bitmask 1 → [opaque] and bitmask 4 → [fluid] differ (selection is bitmask-sensitive)");
 
             return allPassed;
@@ -127,7 +137,7 @@ namespace Editor.Validation.Meshing
                 fixture.IsActive, "non-empty update activated the GameObject");
 
             // Empty update: must deactivate and must NOT reassign materials.
-            fixture.RunUpdate(new Vector3[0], opaqueCount: 0, transparentCount: 0, fluidCount: 0);
+            fixture.RunUpdate(Array.Empty<Vector3>(), opaqueCount: 0, transparentCount: 0, fluidCount: 0);
             allPassed &= MeshAssert.IsTrue("B13: empty section deactivates the renderer",
                 !fixture.IsActive, "vertexCount==0 set the GameObject inactive");
             allPassed &= RendererAssert.MaterialsEqual("B13: empty section left materials untouched",
@@ -166,15 +176,15 @@ namespace Editor.Validation.Meshing
             // Positive control / tripwire: a box around only the first vertex (size 0.02) must NOT contain
             // the others — proving the containment check observes out-of-bounds vertices rather than always
             // passing — while a generous box around the same set must contain them all.
-            Bounds tooSmall = new Bounds(s_rendererProbeVerts[0], new Vector3(0.02f, 0.02f, 0.02f));
+            Bounds tooSmall = new Bounds(s_rendererProbeVerts[0], Vector3.one * TRIPWIRE_BOX_SIZE);
             bool tripwireFires = !RendererAssert.BoundsContainAll(tooSmall, s_rendererProbeVerts, out int firstOutside);
             allPassed &= MeshAssert.IsTrue("B14 control: too-small bounds excludes a vertex (tripwire)",
-                tripwireFires, $"a 0.02-unit box around vert[0] reports vert[{firstOutside}] outside");
+                tripwireFires, $"a {TRIPWIRE_BOX_SIZE}-unit box around vert[0] reports vert[{firstOutside}] outside");
 
-            Bounds generous = new Bounds(new Vector3(5f, 5f, 5f), new Vector3(100f, 100f, 100f));
+            Bounds generous = new Bounds(Vector3.one * GENEROUS_BOX_CENTER, Vector3.one * GENEROUS_BOX_SIZE);
             bool generousContains = RendererAssert.BoundsContainAll(generous, s_rendererProbeVerts, out _);
             allPassed &= MeshAssert.IsTrue("B14 control: generous bounds contains all vertices",
-                generousContains, "a 100-unit box reports every vertex inside (predicate isn't constant-false)");
+                generousContains, $"a {GENEROUS_BOX_SIZE}-unit box reports every vertex inside (predicate isn't constant-false)");
 
             return allPassed;
         }

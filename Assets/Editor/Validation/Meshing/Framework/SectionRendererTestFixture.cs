@@ -66,32 +66,53 @@ namespace Editor.Validation.Meshing.Framework
         /// <param name="sectionIndex">Section index passed to the renderer (controls only its local Y offset).</param>
         public SectionRendererTestFixture(int sectionIndex = 0)
         {
-            // Three DISTINCT materials so submesh-order assertions can never pass with aliased materials.
-            // "Hidden/Internal-Colored" is a built-in shader that is always present in the editor; the
-            // actual shader is irrelevant — only the three Material object identities matter.
-            Shader shader = Shader.Find("Hidden/Internal-Colored");
-            OpaqueMaterial = new Material(shader) { name = "MH6_Opaque" };
-            TransparentMaterial = new Material(shader) { name = "MH6_Transparent" };
-            LiquidMaterial = new Material(shader) { name = "MH6_Liquid" };
-
-            _stubDatabase = ScriptableObject.CreateInstance<BlockDatabase>();
-            _stubDatabase.opaqueMaterial = OpaqueMaterial;
-            _stubDatabase.transparentMaterial = TransparentMaterial;
-            _stubDatabase.liquidMaterial = LiquidMaterial;
-
-            _worldGo = new GameObject("MH6_StubWorld");
-            // AddComponent on a plain MonoBehaviour does NOT invoke Awake/OnEnable/OnValidate in edit mode,
-            // so no World initialization runs — we only need the component as the typed Instance target.
-            World world = _worldGo.AddComponent<World>();
-            world.blockDatabase = _stubDatabase;
-
-            // Drive the private `World.Instance` setter directly (bypassing Awake), saving the previous
-            // value so Dispose can restore it (defensive — it is null in a normal edit-mode session).
+            // Capture the previous instance up front so the failure-cleanup path can always restore it.
             _previousInstance = World.Instance;
-            SetWorldInstance(world);
 
-            _parentGo = new GameObject("MH6_SectionParent");
-            Renderer = new SectionRenderer(_parentGo.transform, sectionIndex);
+            try
+            {
+                // Three DISTINCT materials so submesh-order assertions can never pass with aliased materials.
+                // "Hidden/Internal-Colored" is a built-in shader that is always present in the editor; the
+                // actual shader is irrelevant — only the three Material object identities matter.
+                Shader shader = Shader.Find("Hidden/Internal-Colored");
+                if (shader == null)
+                    throw new InvalidOperationException(
+                        "MH-6 fixture: built-in shader 'Hidden/Internal-Colored' was not found; cannot build stub materials.");
+
+                OpaqueMaterial = new Material(shader) { name = "MH6_Opaque" };
+                TransparentMaterial = new Material(shader) { name = "MH6_Transparent" };
+                LiquidMaterial = new Material(shader) { name = "MH6_Liquid" };
+
+                _stubDatabase = ScriptableObject.CreateInstance<BlockDatabase>();
+                _stubDatabase.opaqueMaterial = OpaqueMaterial;
+                _stubDatabase.transparentMaterial = TransparentMaterial;
+                _stubDatabase.liquidMaterial = LiquidMaterial;
+
+                _worldGo = new GameObject("MH6_StubWorld");
+                // AddComponent on a plain MonoBehaviour does NOT invoke Awake/OnEnable/OnValidate in edit mode,
+                // so no World initialization runs — we only need the component as the typed Instance target.
+                World world = _worldGo.AddComponent<World>();
+                world.blockDatabase = _stubDatabase;
+
+                _parentGo = new GameObject("MH6_SectionParent");
+
+                // Construct the renderer BEFORE claiming the World.Instance singleton: the ctor does not read
+                // Instance (only UpdateMeshNative does), so doing it first means a renderer-ctor failure can
+                // never strand a stub world in the global singleton. The try/catch below is the second line of
+                // defense — the caller's `using` does NOT run Dispose on a constructor that threw (the variable
+                // was never assigned), so any partial-construction failure must be torn down here, restoring
+                // World.Instance and destroying whatever was already created before the exception escapes.
+                Renderer = new SectionRenderer(_parentGo.transform, sectionIndex);
+
+                // Drive the private `World.Instance` setter directly (bypassing Awake). It is null in a normal
+                // edit-mode session; _previousInstance (captured above) is restored on Dispose.
+                SetWorldInstance(world);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
         }
 
         /// <summary>The renderer GameObject's current shared materials (a fresh copy per Unity's getter).</summary>
