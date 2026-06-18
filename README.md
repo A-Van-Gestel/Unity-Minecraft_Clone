@@ -1,6 +1,6 @@
 # Voxel Engine Project (Minecraft Clone)
 
-![Unity Version](https://img.shields.io/badge/Unity-6000.4-black?logo=unity)
+![Unity Version](https://img.shields.io/badge/Unity-6000.5-black?logo=unity)
 
 A high-performance voxel sandbox engine built in Unity, inspired by Minecraft. This project leverages modern Unity technologies, including the **Job System** and **Burst Compiler**, to create a flexible and efficient procedural world.
 
@@ -52,7 +52,7 @@ This project is built around a data-oriented and multi-threaded philosophy to ha
 ### Prerequisites
 
 * **Unity Hub**
-* **Unity 6.4** (6000.4.11f1 at time of writing)
+* **Unity 6.5** (6000.5.0f1 at time of writing)
 * A code editor like **Visual Studio** or **JetBrains Rider**.
 
 ### Setup
