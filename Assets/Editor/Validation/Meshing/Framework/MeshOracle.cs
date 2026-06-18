@@ -116,6 +116,36 @@ namespace Editor.Validation.Meshing.Framework
         }
 
         /// <summary>
+        /// MH-3 — the per-vertex smooth-light <see cref="Color32"/> the engine must emit for a face whose
+        /// entire sampled neighborhood holds one uniform light level per channel (each 0-15). This is the
+        /// <i>limiting case</i> of the engine's corner averaging: when all four samples a corner reads
+        /// (direct + sideA + sideB + diagonal) are equal, the result is independent of <b>which</b>
+        /// neighbors are sampled, so the oracle never references the engine's <c>CornerOffsets</c> LUT —
+        /// deliberately, to avoid mirroring the engine's own sampling assumption (the A4 shared-assumption
+        /// trap). The encoding is re-derived by hand: average of four equal values <c>V</c> is <c>V</c>,
+        /// and the engine's UNorm8 map <c>(4V*17 + 2)/4</c> reduces to exactly <c>17V</c> (<c>68V</c> is
+        /// always divisible by 4, so the <c>+2</c> rounding never carries). The output channel order
+        /// matches the engine's <c>LightData</c>: <c>(sun, blockR, blockG, blockB)</c>.
+        /// <para>
+        /// <b>Scope:</b> only the uniform (all-corners-equal) case is modelled, which pins the smooth-light
+        /// <i>encoding</i> MR-2 must preserve. Distinct-per-corner values and AO darkening (a corner whose
+        /// diagonal is dropped because both its sides are opaque) are NOT modelled here — predicting which
+        /// corner darkens requires re-deriving <c>CornerOffsets</c>, the A4 trap. A future extension should
+        /// add a per-corner oracle (needed to fully guard MR-8's "merge only equal-corner-light faces"
+        /// predicate); see the MH-3 entry in <c>MESHING_VALIDATION_HARNESS_FIDELITY.md</c>.
+        /// </para>
+        /// </summary>
+        /// <param name="sky">Uniform sky-light level across the neighborhood (0-15).</param>
+        /// <param name="blockR">Uniform red blocklight level (0-15).</param>
+        /// <param name="blockG">Uniform green blocklight level (0-15).</param>
+        /// <param name="blockB">Uniform blue blocklight level (0-15).</param>
+        /// <returns>The <see cref="Color32"/> every emitted vertex must carry in <c>LightData</c>.</returns>
+        public static Color32 ExpectedUniformCornerLight(byte sky, byte blockR, byte blockG, byte blockB)
+        {
+            return new Color32((byte)(17 * sky), (byte)(17 * blockR), (byte)(17 * blockG), (byte)(17 * blockB));
+        }
+
+        /// <summary>
         /// Maps a <see cref="MetadataSchema.HorizontalOnly"/> yaw (0=N,1=S,2=W,3=E) to the legacy
         /// orientation index the meshing job converts it to, mirroring
         /// <c>GenerateStandardCubeMesh_HorizontalOnly</c>.

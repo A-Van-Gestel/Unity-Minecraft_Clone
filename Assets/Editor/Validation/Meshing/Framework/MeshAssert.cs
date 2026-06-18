@@ -295,6 +295,53 @@ namespace Editor.Validation.Meshing.Framework
             return false;
         }
 
+        /// <summary>
+        /// MH-3 — asserts every emitted vertex carries the same expected smooth-light <see cref="Color32"/>
+        /// in <see cref="MeshDataJobOutput.LightData"/> (exact per-channel). Pairs with
+        /// <see cref="MeshOracle.ExpectedUniformCornerLight"/> for a uniform-light fixture: the oracle gives
+        /// the single value all corners must equal, this checks the whole stream against it. A zeroed or
+        /// saturated read, a wrong UNorm8 scale, or a channel swap all fail.
+        /// </summary>
+        /// <param name="label">Scenario label for logging.</param>
+        /// <param name="o">The meshing output to inspect.</param>
+        /// <param name="expected">The light value every vertex must carry.</param>
+        public static bool LightDataMatches(string label, MeshDataJobOutput o, Color32 expected)
+        {
+            if (o.LightData.Length != o.Vertices.Length)
+            {
+                Debug.LogError($"[FAIL] {label}: LightData length {o.LightData.Length} != vertices {o.Vertices.Length}.");
+                return false;
+            }
+
+            if (o.LightData.Length == 0)
+            {
+                Debug.LogError($"[FAIL] {label}: no LightData to check (empty output).");
+                return false;
+            }
+
+            StringBuilder diffs = new StringBuilder();
+            int diffCount = 0;
+
+            for (int i = 0; i < o.LightData.Length && diffCount < MAX_DIFFS; i++)
+            {
+                Color32 a = o.LightData[i];
+                if (a.r != expected.r || a.g != expected.g || a.b != expected.b || a.a != expected.a)
+                {
+                    diffs.AppendLine($"    LightData[{i}] expected ({expected.r},{expected.g},{expected.b},{expected.a}) actual ({a.r},{a.g},{a.b},{a.a})");
+                    diffCount++;
+                }
+            }
+
+            if (diffCount == 0)
+            {
+                Debug.Log($"[PASS] {label}: all {o.LightData.Length} verts carry ({expected.r},{expected.g},{expected.b},{expected.a}).");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: {diffCount} LightData mismatch(es)\n{diffs}");
+            return false;
+        }
+
         /// <summary>Asserts the output has exactly <paramref name="expected"/> vertices.</summary>
         public static bool VertexCount(string label, MeshDataJobOutput o, int expected)
         {

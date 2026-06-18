@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Data.Enums;
 using Editor.Validation.Meshing.Framework;
 using Helpers;
 using Jobs.BurstData;
@@ -31,6 +32,7 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B8: air-surrounded fluid keeps a zero shore mask even after wall-adjacent fluids (MR-7 neighbor-buffer guard)", B8_FluidNeighborBufferIsolation));
             scenarios.Add(new Scenario("B9: multi-section scene tiles SectionStats ranges contiguously (MH-9 per-section partition guard)", B9_MultiSectionStatsTiling));
             scenarios.Add(new Scenario("B10: post-process rewrites to section-space + interleaves stream 3, chained==separate (MH-5 / MR-5 guard)", B10_PostProcessSectionSpaceAndInterleave));
+            scenarios.Add(new Scenario("B11: smooth lighting encodes uniform corner light to the right UNorm8 values (MH-3 / MR-2 guard)", B11_SmoothLightingUniformCornerValues));
         }
 
         /// <summary>
@@ -468,6 +470,74 @@ namespace Editor.Validation.Meshing
 
             return passed;
         }
+
+        /// <summary>
+        /// B11 — Smooth-lighting <i>value</i> guard (finding <b>MH-3</b>; completes the prerequisite set for
+        /// <b>MR-2</b>, whose acceptance criterion is "the smooth-lighting encoding in TexCoord1 must be
+        /// preserved exactly"). The suite otherwise runs <c>SmoothLightingQuality.Off</c> over a zeroed light
+        /// map, so <c>LightData</c> values are meaningless. This populates the in-chunk light map with a
+        /// <i>spatially uniform</i> field and meshes an isolated opaque cube under
+        /// <see cref="SmoothLightingQuality.High"/>, then pins every emitted vertex's corner light against a
+        /// hand-derived oracle.
+        /// <para>
+        /// The oracle (<see cref="MeshOracle.ExpectedUniformCornerLight"/>) is the limiting case of the
+        /// engine's 4-sample corner averaging: when every sampled neighbor holds the same level, the result
+        /// is <c>17 × level</c> per channel regardless of <i>which</i> neighbors are sampled — so it is
+        /// derived without copying the engine's <c>CornerOffsets</c> sampling LUT (the A4 shared-assumption
+        /// trap). Two configs are checked: full sunlight (→ 255 sun) and an intermediate, multi-channel
+        /// blocklight (R=7→119, G=3→51) that proves the averaging + UNorm8 rounding + channel order rather
+        /// than passing vacuously on an all-zero or saturated read.
+        /// </para>
+        /// <para>
+        /// Positive control: the two configs must produce <i>different</i> <c>LightData</c>, proving the
+        /// populated light map demonstrably drives the output (a path that ignored the map could not yield
+        /// both). <b>Out of scope (future MH-3 extension):</b> distinct-per-corner values and AO darkening —
+        /// see <see cref="MeshOracle.ExpectedUniformCornerLight"/>.
+        /// </para>
+        /// </summary>
+        private static bool B11_SmoothLightingUniformCornerValues()
+        {
+            Vector3Int pos = new Vector3Int(8, 8, 8); // interior, so every sampled neighbor is in-chunk
+
+            // Config A — uniform full sunlight. Every corner averages 4× sky=15 → 17×15 = 255.
+            Color32 valueA;
+            using (MeshingTestWorld world = new MeshingTestWorld())
+            {
+                world.SetBlock(pos.x, pos.y, pos.z, TestMeshBlockPalette.SolidOpaque);
+                world.FillLight(LightBitMapping.PackLightData(sky: 15, blockR: 0, blockG: 0, blockB: 0));
+                MeshDataJobOutput o = world.Run(SmoothLightingQuality.High);
+
+                bool ok = MeshAssert.VertexCount("B11-A vertex count", o, 24);
+                ok &= MeshAssert.StructuralInvariants("B11-A structural", o);
+                valueA = MeshOracle.ExpectedUniformCornerLight(15, 0, 0, 0); // (255,0,0,0)
+                ok &= MeshAssert.LightDataMatches("B11-A full sunlight", o, valueA);
+                if (!ok) return false;
+            }
+
+            // Config B — uniform intermediate blocklight (no sky). R=7→(28·17+2)/4=119, G=3→51, B=0.
+            Color32 valueB;
+            using (MeshingTestWorld world = new MeshingTestWorld())
+            {
+                world.SetBlock(pos.x, pos.y, pos.z, TestMeshBlockPalette.SolidOpaque);
+                world.FillLight(LightBitMapping.PackLightData(sky: 0, blockR: 7, blockG: 3, blockB: 0));
+                MeshDataJobOutput o = world.Run(SmoothLightingQuality.High);
+
+                bool ok = MeshAssert.VertexCount("B11-B vertex count", o, 24);
+                ok &= MeshAssert.StructuralInvariants("B11-B structural", o);
+                valueB = MeshOracle.ExpectedUniformCornerLight(0, 7, 3, 0); // (0,119,51,0)
+                ok &= MeshAssert.LightDataMatches("B11-B intermediate blocklight", o, valueB);
+                if (!ok) return false;
+            }
+
+            // Positive control: the two lit configs must differ, so the assertions above cannot pass on a
+            // light value that ignores the populated map (e.g. a hardcoded constant or an unread stream).
+            bool differ = !(valueA.r == valueB.r && valueA.g == valueB.g && valueA.b == valueB.b && valueA.a == valueB.a);
+            return MeshAssert.IsTrue("B11 configs drive distinct light", differ,
+                $"config A {FmtColor(valueA)} vs B {FmtColor(valueB)} (must differ, else the map isn't driving LightData)");
+        }
+
+        /// <summary>Formats a <see cref="Color32"/> as <c>(r,g,b,a)</c> for assertion diagnostics.</summary>
+        private static string FmtColor(Color32 c) => $"({c.r},{c.g},{c.b},{c.a})";
 
         /// <summary>One emitted quad's per-vertex streams, copied out of a (soon-disposed) job output.</summary>
         private sealed class ProbeQuad

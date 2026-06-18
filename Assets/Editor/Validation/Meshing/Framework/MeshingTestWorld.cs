@@ -47,22 +47,24 @@ namespace Editor.Validation.Meshing.Framework
         private const int MAP_SIZE = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
 
         private NativeArray<uint> _map;
+        private NativeArray<ushort> _lightMap;
         private NativeArray<BlockTypeJobData> _blockTypes;
         private MeshDataJobOutput _output;
         private bool _hasOutput;
 
-        /// <summary>Creates an all-air chunk and the test block palette job data.</summary>
+        /// <summary>Creates an all-air chunk (zeroed light map) and the test block palette job data.</summary>
         public MeshingTestWorld()
         {
             EnsureBurstGeometryInitialized();
             _map = new NativeArray<uint>(MAP_SIZE, Allocator.Persistent); // zero == all Air
+            _lightMap = new NativeArray<ushort>(MAP_SIZE, Allocator.Persistent); // zero == fully dark
             _blockTypes = TestMeshBlockPalette.CreateJobDataNativeArray(Allocator.Persistent);
         }
 
         /// <summary>The output of the most recent <see cref="Run"/> call.</summary>
         public MeshDataJobOutput Output => _output;
 
-        /// <summary>Resets every voxel back to Air.</summary>
+        /// <summary>Resets every voxel back to Air. Does not touch the light map (use <see cref="FillLight"/>).</summary>
         public void Clear()
         {
             for (int i = 0; i < _map.Length; i++) _map[i] = 0;
@@ -73,6 +75,29 @@ namespace Editor.Validation.Meshing.Framework
         {
             int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
             _map[idx] = BurstVoxelDataBitMapping.PackVoxelData(id, meta);
+        }
+
+        /// <summary>
+        /// Fills the entire in-chunk light map with one packed value (MH-3). A spatially uniform field lets
+        /// the smooth-light corner oracle be hand-derived without the engine's sampling LUT: every sample a
+        /// corner reads is identical, so the averaged result is independent of which neighbors are picked
+        /// (see <see cref="MeshOracle.ExpectedUniformCornerLight"/>). Pack values with
+        /// <c>LightBitMapping.PackLightData</c>.
+        /// </summary>
+        /// <param name="packed">Packed <c>ushort</c> light value (sky + blocklight RGB, each 0-15).</param>
+        public void FillLight(ushort packed)
+        {
+            for (int i = 0; i < _lightMap.Length; i++) _lightMap[i] = packed;
+        }
+
+        /// <summary>Writes a packed light value at a single chunk-local position.</summary>
+        /// <param name="x">Chunk-local X.</param>
+        /// <param name="y">Chunk-local Y.</param>
+        /// <param name="z">Chunk-local Z.</param>
+        /// <param name="packed">Packed <c>ushort</c> light value (sky + blocklight RGB, each 0-15).</param>
+        public void SetLight(int x, int y, int z, ushort packed)
+        {
+            _lightMap[ChunkMath.GetFlattenedIndexInChunk(x, y, z)] = packed;
         }
 
         /// <summary>
@@ -121,9 +146,9 @@ namespace Editor.Validation.Meshing.Framework
             NativeArray<float> lavaTemplates = new NativeArray<float>(0, Allocator.TempJob);
 
             // Light arrays must be valid (constructed) containers — the job safety system rejects
-            // unassigned NativeArrays at schedule/Run time. Geometry is light-independent under
-            // SmoothLightingQuality.Off, so a zeroed in-chunk map + empty neighbor light maps suffice.
-            NativeArray<ushort> lightMap = new NativeArray<ushort>(MAP_SIZE, Allocator.TempJob);
+            // unassigned NativeArrays at schedule/Run time. The in-chunk map is the persistent _lightMap
+            // (zeroed by default; populated via FillLight/SetLight for the smooth-light MH-3 tests).
+            // Empty neighbor light maps suffice because interior blocks only read the in-chunk map.
             NativeArray<ushort> emptyLight = new NativeArray<ushort>(0, Allocator.TempJob);
 
             MeshDataJobOutput output = new MeshDataJobOutput(Allocator.Persistent);
@@ -151,7 +176,7 @@ namespace Editor.Validation.Meshing.Framework
                 LavaVertexTemplates = lavaTemplates,
                 SmoothLighting = lighting,
                 Output = output,
-                LightMap = lightMap,
+                LightMap = _lightMap,
                 LightBack = emptyLight,
                 LightFront = emptyLight,
                 LightLeft = emptyLight,
@@ -193,7 +218,6 @@ namespace Editor.Validation.Meshing.Framework
             customTris.Dispose();
             waterTemplates.Dispose();
             lavaTemplates.Dispose();
-            lightMap.Dispose();
             emptyLight.Dispose();
 
             _output = output;
@@ -259,6 +283,7 @@ namespace Editor.Validation.Meshing.Framework
         {
             DisposeOutput();
             if (_map.IsCreated) _map.Dispose();
+            if (_lightMap.IsCreated) _lightMap.Dispose();
             if (_blockTypes.IsCreated) _blockTypes.Dispose();
         }
     }
