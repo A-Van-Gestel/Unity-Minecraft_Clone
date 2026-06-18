@@ -30,6 +30,7 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B7: fluid blocks route to the fluid submesh, deterministic + structurally valid", B7_FluidRoutingAndDeterminism));
             scenarios.Add(new Scenario("B8: air-surrounded fluid keeps a zero shore mask even after wall-adjacent fluids (MR-7 neighbor-buffer guard)", B8_FluidNeighborBufferIsolation));
             scenarios.Add(new Scenario("B9: multi-section scene tiles SectionStats ranges contiguously (MH-9 per-section partition guard)", B9_MultiSectionStatsTiling));
+            scenarios.Add(new Scenario("B10: post-process rewrites to section-space + interleaves stream 3, chained==separate (MH-5 / MR-5 guard)", B10_PostProcessSectionSpaceAndInterleave));
         }
 
         /// <summary>
@@ -385,6 +386,85 @@ namespace Editor.Validation.Meshing
                 if (o.SectionStats[s].VertexCount > 0) emittingSections++;
             passed &= MeshAssert.IsTrue("B9 multi-section coverage", emittingSections == cubes.Length,
                 $"sections emitting geometry = {emittingSections} (expected {cubes.Length}, else the tiling check is vacuous)");
+
+            return passed;
+        }
+
+        /// <summary>
+        /// B10 — Post-process stage guard (finding <b>MH-5</b>; the prerequisite for <b>MR-5</b> and half of
+        /// MR-2). The job suite otherwise stops at the chunk-space <see cref="Jobs.MeshGenerationJob"/> output;
+        /// this runs the real <see cref="Jobs.MeshPostProcessJob"/> after it and asserts the three properties an
+        /// output-preserving move of that stage (MR-5) must keep:
+        /// <list type="number">
+        /// <item><b>Section-space coords</b> — every post-processed vertex equals its chunk-space original
+        /// with <c>y</c> shifted down by its section's <c>index × SECTION_SIZE</c> (x/z unchanged).</item>
+        /// <item><b>InterleavedStream3</b> — equals the element-wise interleave of <c>Normals</c> +
+        /// <c>LightData</c> (the GPU-upload vertex stream MR-2 restructures, empty in the gen-only suite).</item>
+        /// <item><b>Chained == separate</b> — running the post job chained on the gen handle off-thread
+        /// (the MR-5 shape) produces byte-identical output to the production blocking
+        /// <c>Schedule().Complete()</c> path. MR-7/B8-style differential.</item>
+        /// </list>
+        /// Fixture: two isolated opaque cubes in <i>non-zero</i> sections (y=24 → section 1, y=40 → section 2)
+        /// so the y-offset transform is non-identity and per-section index relativization spans two sections.
+        /// Two positive controls keep it from passing vacuously: (i) the gen-only run's
+        /// <c>InterleavedStream3</c> is empty while the post run's is full (so the post stage is what fills it),
+        /// and (ii) at least one emitting section has index ≥ 1 (so section-space genuinely differs from
+        /// chunk-space rather than the offset being a no-op).
+        /// </summary>
+        private static bool B10_PostProcessSectionSpaceAndInterleave()
+        {
+            // Two cubes, one per non-zero section, fully air-surrounded so each emits its own 24 verts.
+            Vector3Int[] cubes = { new Vector3Int(8, 24, 8), new Vector3Int(8, 40, 8) }; // sections 1 and 2
+
+            // (Reference) Gen-only run: capture chunk-space vertices + confirm InterleavedStream3 is empty.
+            Vector3[] chunkVerts;
+            bool passed;
+            using (MeshingTestWorld refWorld = new MeshingTestWorld())
+            {
+                foreach (Vector3Int c in cubes) refWorld.SetBlock(c.x, c.y, c.z, TestMeshBlockPalette.SolidOpaque);
+                MeshDataJobOutput refOut = refWorld.Run(); // PostProcessMode.Off
+
+                passed = MeshAssert.VertexCount("B10 reference vertex count", refOut, cubes.Length * 24);
+                // Positive control (i): the gen-only stage must NOT populate InterleavedStream3 — proving the
+                // post-process is solely responsible for it, so the interleave assertion below isn't vacuous.
+                passed &= MeshAssert.IsTrue("B10 gen-only InterleavedStream3 empty", refOut.InterleavedStream3.Length == 0,
+                    $"InterleavedStream3 length = {refOut.InterleavedStream3.Length} (expected 0 before post-process)");
+
+                chunkVerts = new Vector3[refOut.Vertices.Length];
+                for (int i = 0; i < chunkVerts.Length; i++) chunkVerts[i] = refOut.Vertices[i];
+            }
+
+            // Two worlds so both post-processed outputs stay live for the chained-vs-separate comparison.
+            using MeshingTestWorld separateWorld = new MeshingTestWorld();
+            using MeshingTestWorld chainedWorld = new MeshingTestWorld();
+            foreach (Vector3Int c in cubes)
+            {
+                separateWorld.SetBlock(c.x, c.y, c.z, TestMeshBlockPalette.SolidOpaque);
+                chainedWorld.SetBlock(c.x, c.y, c.z, TestMeshBlockPalette.SolidOpaque);
+            }
+
+            MeshDataJobOutput separate = separateWorld.Run(postProcess: PostProcessMode.Separate);
+            MeshDataJobOutput chained = chainedWorld.Run(postProcess: PostProcessMode.Chained);
+
+            // (a) Section-space coordinate rewrite.
+            passed &= MeshAssert.SectionSpaceVertices("B10 section-space coords", separate, chunkVerts, ChunkMath.SECTION_SIZE);
+
+            // Positive control (ii): the rewrite must be non-identity — at least one emitting section sits
+            // above section 0, so its y-offset is non-zero and section-space ≠ chunk-space for those verts.
+            int highestEmittingSection = -1;
+            for (int s = 0; s < separate.SectionStats.Length; s++)
+                if (separate.SectionStats[s].VertexCount > 0) highestEmittingSection = s;
+            passed &= MeshAssert.IsTrue("B10 non-identity offset", highestEmittingSection >= 1,
+                $"highest emitting section = {highestEmittingSection} (expected ≥ 1 so the section-space y-offset is non-zero)");
+
+            // (b) InterleavedStream3 == interleave(Normals, LightData), and is now non-empty.
+            passed &= MeshAssert.IsTrue("B10 post InterleavedStream3 filled", separate.InterleavedStream3.Length == separate.Vertices.Length,
+                $"InterleavedStream3 length = {separate.InterleavedStream3.Length} (expected {separate.Vertices.Length})");
+            passed &= MeshAssert.InterleavedMatches("B10 interleave", separate);
+
+            // (c) Chained (MR-5 shape) == separate (production shape), across every stream incl. stream 3.
+            passed &= MeshAssert.OutputsEqual("B10 chained==separate base streams", separate, chained);
+            passed &= MeshAssert.InterleavedStreamsEqual("B10 chained==separate interleaved", separate, chained);
 
             return passed;
         }

@@ -11,6 +11,22 @@ using UnityEngine;
 namespace Editor.Validation.Meshing.Framework
 {
     /// <summary>
+    /// Selects whether (and how) <see cref="MeshingTestWorld.Run"/> chains the
+    /// <see cref="MeshPostProcessJob"/> after the <see cref="MeshGenerationJob"/> (gap MH-5).
+    /// </summary>
+    public enum PostProcessMode
+    {
+        /// <summary>Gen-only: assert the chunk-space output, leave <c>InterleavedStream3</c> empty (B1–B9 default).</summary>
+        Off,
+
+        /// <summary>Mirror production <see cref="Chunk.ApplyMeshData"/>: <c>genJob.Run()</c> then <c>postJob.Schedule().Complete()</c>.</summary>
+        Separate,
+
+        /// <summary>MR-5 shape: <c>postJob.Schedule(genJob.Schedule())</c> — post-process chained on the gen handle off the calling thread.</summary>
+        Chained,
+    }
+
+    /// <summary>
     /// Single-chunk meshing harness for the validation suite. Owns a synthetic voxel map and the
     /// synthetic <see cref="TestMeshBlockPalette"/>, then runs the <b>real</b>
     /// <see cref="MeshGenerationJob"/> synchronously (<c>job.Run()</c>) and exposes its
@@ -63,10 +79,23 @@ namespace Editor.Validation.Meshing.Framework
         /// Runs the real <see cref="MeshGenerationJob"/> over the current voxel map and stores the
         /// result in <see cref="Output"/> (disposing any previous output). The returned struct is
         /// owned by this harness — do not dispose it directly.
+        /// <para>
+        /// When <paramref name="postProcess"/> is not <see cref="PostProcessMode.Off"/>, the real
+        /// <see cref="MeshPostProcessJob"/> is chained after the gen job (gap MH-5), rewriting the
+        /// output in place to section-space coordinates, relativizing per-section triangle indices, and
+        /// populating <c>InterleavedStream3</c> — the post-process stage that is otherwise unguarded.
+        /// <see cref="PostProcessMode.Separate"/> mirrors production (<see cref="Chunk.ApplyMeshData"/>):
+        /// a synchronous gen run followed by a blocking <c>Schedule().Complete()</c>;
+        /// <see cref="PostProcessMode.Chained"/> instead chains the post job on the gen job's handle off
+        /// the calling thread (the MR-5 proposal). Both must produce byte-identical output.
+        /// </para>
         /// </summary>
         /// <param name="lighting">Smooth-lighting quality; defaults to <see cref="SmoothLightingQuality.Off"/>
         /// so geometry is independent of (absent) light data.</param>
-        public MeshDataJobOutput Run(SmoothLightingQuality lighting = SmoothLightingQuality.Off)
+        /// <param name="postProcess">Whether/how to chain <see cref="MeshPostProcessJob"/>; defaults to
+        /// <see cref="PostProcessMode.Off"/> so the gen-only chunk-space output is preserved unchanged.</param>
+        public MeshDataJobOutput Run(SmoothLightingQuality lighting = SmoothLightingQuality.Off,
+            PostProcessMode postProcess = PostProcessMode.Off)
         {
             DisposeOutput();
 
@@ -133,7 +162,28 @@ namespace Editor.Validation.Meshing.Framework
                 LightFrontLeft = emptyLight,
             };
 
-            job.Run();
+            // Execute the gen job, optionally chaining the real MeshPostProcessJob (MH-5). The post job
+            // rewrites `output` in place (section-space verts, relativized indices, InterleavedStream3),
+            // reading the SectionStats the gen job wrote. Both modes block before disposal so the
+            // TempJob inputs the gen job reads stay alive until it (and any chained post job) completes.
+            switch (postProcess)
+            {
+                case PostProcessMode.Off:
+                    job.Run();
+                    break;
+
+                case PostProcessMode.Separate:
+                    // Production shape: synchronous gen, then a blocking Schedule().Complete() post pass.
+                    job.Run();
+                    BuildPostProcessJob(output).Schedule().Complete();
+                    break;
+
+                case PostProcessMode.Chained:
+                    // MR-5 shape: post chained on the gen handle, both off the calling thread.
+                    JobHandle genHandle = job.Schedule();
+                    BuildPostProcessJob(output).Schedule(genHandle).Complete();
+                    break;
+            }
 
             sectionData.Dispose();
             emptyMap.Dispose();
@@ -149,6 +199,28 @@ namespace Editor.Validation.Meshing.Framework
             _output = output;
             _hasOutput = true;
             return _output;
+        }
+
+        /// <summary>
+        /// Builds the real <see cref="MeshPostProcessJob"/> over an existing gen output, wired exactly as
+        /// <see cref="Chunk.ApplyMeshData"/> does (same field mapping, <c>SectionHeight =
+        /// ChunkMath.SECTION_SIZE</c>). The job rewrites <paramref name="output"/> in place.
+        /// </summary>
+        /// <param name="output">The gen-job output to post-process (mutated in place).</param>
+        private static MeshPostProcessJob BuildPostProcessJob(MeshDataJobOutput output)
+        {
+            return new MeshPostProcessJob
+            {
+                Vertices = output.Vertices,
+                OpaqueTris = output.Triangles,
+                TransparentTris = output.TransparentTriangles,
+                FluidTris = output.FluidTriangles,
+                Stats = output.SectionStats,
+                Normals = output.Normals,
+                LightData = output.LightData,
+                InterleavedStream3 = output.InterleavedStream3,
+                SectionHeight = ChunkMath.SECTION_SIZE,
+            };
         }
 
         /// <summary>

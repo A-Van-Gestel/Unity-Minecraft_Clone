@@ -151,6 +151,150 @@ namespace Editor.Validation.Meshing.Framework
             return false;
         }
 
+        /// <summary>
+        /// MH-5 (assertion a) — asserts the post-processed output is the chunk-space geometry rewritten to
+        /// section-space: per emitting section <c>s</c> (read from <see cref="MeshDataJobOutput.SectionStats"/>),
+        /// every vertex equals its chunk-space original with <c>y</c> shifted down by
+        /// <c>s * <paramref name="sectionHeight"/></c> and <c>x</c>/<c>z</c> unchanged. The section a vertex
+        /// belongs to is derived from <c>SectionStats</c> (the same ranges the job uses, MH-9/B9-guarded), so
+        /// this re-derives only the trivial offset arithmetic — not the engine's transform code.
+        /// </summary>
+        /// <param name="label">Scenario label for logging.</param>
+        /// <param name="sectionSpace">The post-processed (section-space) output to inspect.</param>
+        /// <param name="chunkSpaceVerts">The chunk-space vertices captured from a gen-only run (same fixture).</param>
+        /// <param name="sectionHeight">The section height the post-process subtracts per section index.</param>
+        public static bool SectionSpaceVertices(string label, MeshDataJobOutput sectionSpace,
+            Vector3[] chunkSpaceVerts, int sectionHeight)
+        {
+            if (sectionSpace.Vertices.Length != chunkSpaceVerts.Length)
+            {
+                Debug.LogError($"[FAIL] {label}: section-space vertex count {sectionSpace.Vertices.Length} != chunk-space {chunkSpaceVerts.Length}.");
+                return false;
+            }
+
+            if (!sectionSpace.SectionStats.IsCreated)
+            {
+                Debug.LogError($"[FAIL] {label}: SectionStats not created (cannot map vertices to sections).");
+                return false;
+            }
+
+            StringBuilder diffs = new StringBuilder();
+            int diffCount = 0;
+
+            for (int s = 0; s < sectionSpace.SectionStats.Length && diffCount < MAX_DIFFS; s++)
+            {
+                MeshSectionStats stats = sectionSpace.SectionStats[s];
+                if (stats.VertexCount == 0) continue;
+
+                float yOffset = s * sectionHeight;
+                for (int v = 0; v < stats.VertexCount && diffCount < MAX_DIFFS; v++)
+                {
+                    int idx = stats.VertexStartIndex + v;
+                    Vector3 expected = new Vector3(chunkSpaceVerts[idx].x, chunkSpaceVerts[idx].y - yOffset, chunkSpaceVerts[idx].z);
+                    Vector3 actual = sectionSpace.Vertices[idx];
+                    if (Vector3.Distance(actual, expected) > VertexEpsilon)
+                    {
+                        diffs.AppendLine($"    section {s} vert[{idx}] expected {Fmt(expected)} actual {Fmt(actual)} (chunk-space {Fmt(chunkSpaceVerts[idx])}, yOffset {yOffset})");
+                        diffCount++;
+                    }
+                }
+            }
+
+            if (diffCount == 0)
+            {
+                Debug.Log($"[PASS] {label}: all {sectionSpace.Vertices.Length} vertices match chunk-space − section origin.");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: {diffCount} section-space coordinate mismatch(es)\n{diffs}");
+            return false;
+        }
+
+        /// <summary>
+        /// MH-5 (assertion b) — asserts <see cref="MeshDataJobOutput.InterleavedStream3"/> is the
+        /// element-wise interleave of <c>Normals</c> + <c>LightData</c> the post-process builds: same length
+        /// as the vertex stream, and each entry's <c>Normal</c>/<c>LightData</c> equal the source streams at
+        /// that index. (Normals/LightData are read-only inputs to the post job, so they are still the truth.)
+        /// </summary>
+        /// <param name="label">Scenario label for logging.</param>
+        /// <param name="o">The post-processed output to inspect.</param>
+        public static bool InterleavedMatches(string label, MeshDataJobOutput o)
+        {
+            int n = o.Vertices.Length;
+            if (o.InterleavedStream3.Length != n)
+            {
+                Debug.LogError($"[FAIL] {label}: InterleavedStream3 length {o.InterleavedStream3.Length} != vertices {n}.");
+                return false;
+            }
+
+            StringBuilder diffs = new StringBuilder();
+            int diffCount = 0;
+
+            for (int i = 0; i < n && diffCount < MAX_DIFFS; i++)
+            {
+                NormalLightVertex packed = o.InterleavedStream3[i];
+                Vector3 normal = o.Normals[i];
+                Color32 light = o.LightData[i];
+                bool normalOk = Vector3.Distance(packed.Normal, normal) <= VertexEpsilon;
+                bool lightOk = packed.LightData.r == light.r && packed.LightData.g == light.g
+                                                             && packed.LightData.b == light.b && packed.LightData.a == light.a;
+                if (!normalOk || !lightOk)
+                {
+                    diffs.AppendLine($"    [{i}] interleaved (N {Fmt(packed.Normal)}, L ({packed.LightData.r},{packed.LightData.g},{packed.LightData.b},{packed.LightData.a})) != source (N {Fmt(normal)}, L ({light.r},{light.g},{light.b},{light.a}))");
+                    diffCount++;
+                }
+            }
+
+            if (diffCount == 0)
+            {
+                Debug.Log($"[PASS] {label}: InterleavedStream3 == interleave(Normals, LightData) over {n} verts.");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: {diffCount} interleave mismatch(es)\n{diffs}");
+            return false;
+        }
+
+        /// <summary>
+        /// MH-5 (assertion c) — asserts two outputs' <see cref="MeshDataJobOutput.InterleavedStream3"/> are
+        /// element-for-element identical (<c>Normal</c> within <see cref="VertexEpsilon"/>, <c>LightData</c>
+        /// exact). Pairs with <see cref="OutputsEqual"/> to make the chained-vs-separate post-process guard
+        /// total: <c>OutputsEqual</c> covers the base streams, this covers the interleaved stream it omits.
+        /// </summary>
+        public static bool InterleavedStreamsEqual(string label, MeshDataJobOutput a, MeshDataJobOutput b)
+        {
+            if (a.InterleavedStream3.Length != b.InterleavedStream3.Length)
+            {
+                Debug.LogError($"[FAIL] {label}: InterleavedStream3 length {a.InterleavedStream3.Length} != {b.InterleavedStream3.Length}.");
+                return false;
+            }
+
+            StringBuilder diffs = new StringBuilder();
+            int diffCount = 0;
+
+            for (int i = 0; i < a.InterleavedStream3.Length && diffCount < MAX_DIFFS; i++)
+            {
+                NormalLightVertex x = a.InterleavedStream3[i], y = b.InterleavedStream3[i];
+                bool normalOk = Vector3.Distance(x.Normal, y.Normal) <= VertexEpsilon;
+                bool lightOk = x.LightData.r == y.LightData.r && x.LightData.g == y.LightData.g
+                                                              && x.LightData.b == y.LightData.b && x.LightData.a == y.LightData.a;
+                if (!normalOk || !lightOk)
+                {
+                    diffs.AppendLine($"    [{i}] (N {Fmt(x.Normal)}, L ({x.LightData.r},{x.LightData.g},{x.LightData.b},{x.LightData.a})) vs (N {Fmt(y.Normal)}, L ({y.LightData.r},{y.LightData.g},{y.LightData.b},{y.LightData.a}))");
+                    diffCount++;
+                }
+            }
+
+            if (diffCount == 0)
+            {
+                Debug.Log($"[PASS] {label}: InterleavedStream3 identical across runs ({a.InterleavedStream3.Length} verts).");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: {diffCount} InterleavedStream3 difference(s)\n{diffs}");
+            return false;
+        }
+
         /// <summary>Asserts the output has exactly <paramref name="expected"/> vertices.</summary>
         public static bool VertexCount(string label, MeshDataJobOutput o, int expected)
         {
