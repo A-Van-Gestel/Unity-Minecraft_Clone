@@ -1,8 +1,8 @@
 # Meshing Validation Harness — Fidelity Boundary & Extension Backlog
 
-**Status:** ✅ **Active backlog** — Wave 1 executed 2026-06-17 (MH-1/MH-4/MH-9 closed); see §6 for the
-forward wave plan (Wave 2 = MH-5 → MH-3, next).
-**Created:** 2026-06-16 · **Last updated:** 2026-06-17
+**Status:** ✅ **Active backlog** — Wave 1 executed 2026-06-17 (MH-1/MH-4/MH-9 closed), Wave 2 executed
+2026-06-18 (MH-5/MH-3 closed); see §6 for the forward wave plan (Wave 3 = MH-6, next/parallelizable).
+**Created:** 2026-06-16 · **Last updated:** 2026-06-18
 **Scope:** `Assets/Editor/Validation/Meshing/` — the `MeshingValidationSuite` + `MeshingTestWorld` +
 `MeshOracle` + `MeshAssert` + `TestMeshBlockPalette` harness (menu item
 **`Minecraft Clone/Dev/Validate Meshing`**).
@@ -13,9 +13,10 @@ document shape; the meshing suite was built test-first as that suite's younger s
 
 ## 1. Why this document exists
 
-The meshing validation suite (baselines **B1–B9**, all green) runs **real production code**: it executes
+The meshing validation suite (baselines **B1–B11**, all green) runs **real production code**: it executes
 the actual `Jobs.MeshGenerationJob` synchronously (`job.Run()`) over a synthetic single chunk and asserts
-its `MeshDataJobOutput`. It is the regression guard that lets the `MR-*` performance findings in
+its `MeshDataJobOutput` — and, since Wave 2 (MH-5), optionally chains the real `Jobs.MeshPostProcessJob`. It
+is the regression guard that lets the `MR-*` performance findings in
 [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim
 "output-preserving" — it already closed **MR-1** (per-vertex `Quaternion.Euler` hoist, guarded by B1/B4)
 and **MR-7** (per-fluid-voxel `Allocator.Temp` arrays, guarded by B7/B8).
@@ -68,11 +69,20 @@ So the blind spots below are read against a clear baseline of what *is* covered:
   stream contiguously; B9 (one cube per section) exercises it across 3 emitting sections.
 - **Bounds extent (Wave 1, MH-1).** `MeshAssert.BoundsWithin` asserts every vertex lies inside its section
   cell (B2/B4) — the premise behind MR-4's constant bounds.
+- **Post-process / section-space output (Wave 2, MH-5).** `MeshingTestWorld.Run(PostProcessMode.Separate|Chained)`
+  chains the real `MeshPostProcessJob`; B10 asserts the chunk-space → section-space coordinate rewrite
+  (`MeshAssert.SectionSpaceVertices`), that `InterleavedStream3` is the interleave of `Normals`+`LightData`
+  (`MeshAssert.InterleavedMatches`), and chained-vs-separate byte equality (the MR-5 guard).
+- **Smooth-lighting *values* (Wave 2, MH-3).** `MeshingTestWorld.FillLight` + `Run(SmoothLightingQuality.High)`
+  populate a uniform light field; `MeshOracle.ExpectedUniformCornerLight` (hand-derived `17·V`, LUT-independent)
+  + `MeshAssert.LightDataMatches` pin the smooth-light encoding (B11: full sun 255, intermediate 119/51).
 
-> **One output member is still *not* in the trusted core.** `InterleavedStream3` (the Normals+light
-> GPU-upload vertex stream) is built by `MeshPostProcessJob`, so it is **empty** in the harness and therefore
-> unobservable here (→ **MH-5**). `MeshDataJobOutput.SectionStats` (per-section vertex/triangle index ranges)
-> *was* in this list but is now tile-checked by `StructuralInvariants` (→ **MH-9**, CLOSED 2026-06-17).
+> **The trusted core is now whole for the job + post-process stages.** `InterleavedStream3` (the Normals+light
+> GPU-upload vertex stream) *was* empty here because it is built by `MeshPostProcessJob`; it is now produced
+> and asserted via the MH-5 opt-in path (→ **MH-5**, CLOSED 2026-06-18). `MeshDataJobOutput.SectionStats`
+> (per-section vertex/triangle index ranges) is tile-checked by `StructuralInvariants` (→ **MH-9**, CLOSED
+> 2026-06-17). Smooth-light values are oracle-covered for the *uniform* case (→ **MH-3**, CLOSED 2026-06-18);
+> distinct-per-corner / AO values remain a future extension (see §3 MH-3).
 
 ---
 
@@ -131,18 +141,28 @@ for blockers.
 The suite checks UV / color / light streams **only for run-to-run equality**, never against an expected value,
 and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encodes are therefore unvalidated.
 
-#### MH-3 — No smooth-lighting *value* coverage · **OPEN** · gates **MR-2**, prereq for **MR-8**
+#### MH-3 — No smooth-lighting *value* coverage · **CLOSED** (2026-06-18) · gates **MR-2**, prereq for **MR-8**
 
-- **Blind:** `MeshingTestWorld.Run()` defaults to `SmoothLightingQuality.Off` with a zeroed light map, so the
-  `LightData` (`Color32`, the `TexCoord1` smooth-light stream) carries no meaningful value. `MR-2`'s explicit
-  acceptance criterion is "the smooth-lighting encoding in TexCoord1 must be preserved exactly" — there is no
-  way to assert that today. `MR-8`'s merge predicate ("merge only faces with identical corner light") also
-  needs real per-corner light values to test.
-- **Build:** (a) populate the in-chunk light map and expose a `Run(SmoothLightingQuality.High)` path in the
-  harness; (b) a per-vertex light-value oracle/assertion (`MeshAssert.LightDataMatches`) pinning expected
-  corner light for a known lit configuration. Pairs naturally with placing a lamp/sky-exposed column.
-- **Effort:** 🟡 medium. **Risk note:** the light-value oracle must be hand-derived, not a copy of the
-  engine's packing, or it inherits the A4-class shared-assumption blind spot the lighting suite documents.
+- **Blind:** `MeshingTestWorld.Run()` defaulted to `SmoothLightingQuality.Off` with a zeroed light map, so the
+  `LightData` (`Color32`, the `TexCoord1` smooth-light stream) carried no meaningful value. `MR-2`'s explicit
+  acceptance criterion is "the smooth-lighting encoding in TexCoord1 must be preserved exactly" — there was no
+  way to assert that. `MR-8`'s merge predicate ("merge only faces with identical corner light") also needs
+  real per-corner light values to test.
+- **Closed by:** `MeshingTestWorld.FillLight`/`SetLight` populate the in-chunk light map and `Run(SmoothLightingQuality.High)`
+  exercises the corner-averaging path. `MeshOracle.ExpectedUniformCornerLight` is a **hand-derived** oracle:
+  for a spatially *uniform* light field every one of a corner's 4 samples is equal, so the averaged result is
+  `17·V` per channel **independent of which neighbors are sampled** — deriving it never references the engine's
+  `CornerOffsets` LUT, avoiding the A4 shared-assumption trap. `MeshAssert.LightDataMatches` + **B11** pin two
+  configs: full sunlight (→ 255 sun) and an intermediate, multi-channel blocklight (R=7→119, G=3→51, proving
+  averaging + UNorm8 rounding + channel order, not a vacuous all-zero/saturated read), with an A≠B positive
+  control proving the populated map drives the output.
+- **Scope / future extension:** only the **uniform** (all-corners-equal) case is modelled, which pins the
+  encoding `MR-2` must preserve. **Distinct-per-corner values and AO darkening** (a corner whose diagonal is
+  dropped because both its sides are opaque) are **not yet** covered — predicting which corner darkens requires
+  re-deriving `CornerOffsets`, the A4 trap. A follow-up should add a per-corner oracle that mirrors the
+  side/side/diagonal sampling + AO rule independently (needed to *fully* guard MR-8's equal-corner-light merge
+  predicate). Until then MR-8 stays gated on MH-8 + its design doc regardless.
+- **Effort:** 🟡 medium.
 
 #### MH-4 — No UV / texture *value* oracle · **CLOSED** (2026-06-17) · gates **MR-2**, prereq for **MR-8**
 
@@ -163,21 +183,24 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 
 ### Phase 2 — Pipeline-stage coverage (unblock MR-5; enable MR-3/MR-4 renderer side)
 
-#### MH-5 — `MeshPostProcessJob` / section-space output is never run · **OPEN** · gates **MR-5**, prereq for **MR-2**
+#### MH-5 — `MeshPostProcessJob` / section-space output is never run · **CLOSED** (2026-06-18) · gates **MR-5**, prereq for **MR-2**
 
-- **Blind:** the harness asserts the **chunk-space** `MeshGenerationJob` output and stops there. The
+- **Blind:** the harness asserted the **chunk-space** `MeshGenerationJob` output and stopped there. The
   chunk-space → section-space coordinate rewrite (`MeshPostProcessJob`, run via `Schedule().Complete()` in
-  `Chunk.ApplyMeshData`) is entirely unguarded. `MR-5` moves *where* that job runs (chained on the mesh handle
+  `Chunk.ApplyMeshData`) was entirely unguarded. `MR-5` moves *where* that job runs (chained on the mesh handle
   on a worker thread vs. a blocking main-thread `Complete()`); proving "where" doesn't change "what" requires a
-  baseline on the post-processed section-space output, which does not exist.
-- **Also gates MR-2:** `MeshPostProcessJob` is where `InterleavedStream3` (the interleaved Normal+light
+  baseline on the post-processed section-space output.
+- **Also gated MR-2:** `MeshPostProcessJob` is where `InterleavedStream3` (the interleaved Normal+light
   `NormalLightVertex` GPU-upload stream) is assembled — so the very vertex format MR-2 restructures is partly
-  built in this unguarded stage and is **empty** in the harness today. MR-2 cannot be fully baselined until this
-  stream is produced and asserted here, on top of MH-3/MH-4.
-- **Build:** extend `MeshingTestWorld.Run()` with an opt-in flag that chains and runs `MeshPostProcessJob`,
-  plus assertions on section-space coordinates, on `InterleavedStream3` (= the interleave of `Normals` +
-  `LightData`), and an equality check (chained vs. separate run produce identical output). This also
-  retroactively closes the currently-dark post-process stage.
+  built in this stage and was **empty** in the harness.
+- **Closed by:** `MeshingTestWorld.Run(postProcess: PostProcessMode.Separate|Chained)` chains the real
+  `MeshPostProcessJob` wired exactly as `Chunk.ApplyMeshData` (`Separate` mirrors production's
+  `genJob.Run()` → `postJob.Schedule().Complete()`; `Chained` is the MR-5 shape `postJob.Schedule(genJob.Schedule())`).
+  **B10** asserts (a) section-space coord == chunk-space coord − section origin (`MeshAssert.SectionSpaceVertices`),
+  (b) `InterleavedStream3[i]` == interleave of `Normals[i]`+`LightData[i]` (`MeshAssert.InterleavedMatches`), and
+  (c) chained-vs-separate byte equality (`OutputsEqual` + `MeshAssert.InterleavedStreamsEqual`) — the MR-5 guard.
+  Positive controls: the gen-only run's `InterleavedStream3` is empty (the post stage fills it) and ≥1 emitting
+  section sits above section 0 (so the y-offset is non-identity).
 - **Effort:** 🟡 medium.
 
 #### MH-6 — No `SectionRenderer` apply-path harness · **OPEN** · gates **MR-3**, renderer side of **MR-4**
@@ -244,32 +267,34 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 | 0     | MH-1 | Bounds-extent assertion                              | MR-4 (premise)              | CLOSED         | 🟢     |
 | 0     | MH-2 | Pooled-output stale-data guard                       | MR-6 (pool variant)         | IN-PR          | 🟢     |
 | 0     | MH-9 | `SectionStats` per-section ranges asserted           | per-section refactors; MR-4 | CLOSED         | 🟢     |
-| 1     | MH-3 | Smooth-lighting *value* coverage                     | MR-2; prereq MR-8           | OPEN           | 🟡     |
+| 1     | MH-3 | Smooth-lighting *value* coverage (uniform)           | MR-2; prereq MR-8           | CLOSED         | 🟡     |
 | 1     | MH-4 | UV / texture *value* oracle                          | MR-2; prereq MR-8           | CLOSED         | 🟡     |
-| 2     | MH-5 | `MeshPostProcessJob` / section-space output coverage | MR-5                        | OPEN           | 🟡     |
+| 2     | MH-5 | `MeshPostProcessJob` / section-space output coverage | MR-5                        | CLOSED         | 🟡     |
 | 2     | MH-6 | `SectionRenderer` apply-path harness                 | MR-3; MR-4 (renderer)       | OPEN           | 🟡     |
 | 3     | MH-7 | Custom/cross-mesh + lava palette & oracle            | MR-4 caveat; blind spot     | OPEN           | 🟡     |
 | 4     | MH-8 | Merge-invariant geometry oracle                      | MR-8                        | OPEN           | 🔴     |
 
-> **Wave 1 (2026-06-17):** MH-9, MH-1, MH-4 closed (baselines B1–B9 green, one commit each). The remaining
-> hard prerequisites are MH-3 + MH-5 (to finish MR-2), MH-5 (MR-5), MH-6 (MR-3), and MH-8 (MR-8). MH-2 stays
+> **Wave 1 (2026-06-17):** MH-9, MH-1, MH-4 closed (baselines B1–B9 green, one commit each).
+> **Wave 2 (2026-06-18):** MH-5 (B10) + MH-3 (B11) closed (baselines B1–B11 green, one commit each). The
+> remaining open prerequisites are **MH-6** (MR-3; renderer side of MR-4) and **MH-8** (MR-8). MH-2 stays
 > deferred until the MR-6 pool API exists; MH-7 is best built alongside the custom/cross/lava work it guards.
 
 ### MR-item readiness at a glance
 
 | MR item                   | Baselinable today?   | Needs first                                                                                            |
 |---------------------------|----------------------|--------------------------------------------------------------------------------------------------------|
-| MR-2 (vertex format)      | ❌                    | MH-3 + MH-5 (`InterleavedStream3` is post-process-built); ~~MH-4~~ ✅ done                              |
+| MR-2 (vertex format)      | ✅                    | ~~MH-3 + MH-4 + MH-5~~ ✅ all done (encoding pinned; distinct-corner light is a future MH-3 extension)  |
 | MR-3 (material caching)   | ❌                    | MH-6                                                                                                   |
 | MR-4 (constant bounds)    | ⚠️ partial           | ~~MH-1 (premise)~~ ✅ done + MH-6 (renderer); MH-7 custom-mesh caveat; ~~MH-9~~ ✅ if bounds move into stats |
-| MR-5 (chain post-process) | ❌                    | MH-5                                                                                                   |
+| MR-5 (chain post-process) | ✅                    | ~~MH-5~~ ✅ done (B10 chained-vs-separate equality)                                                     |
 | MR-6 (pre-size / pool)    | ✅ pre-size / ⚠️ pool | MH-2 (pool variant only)                                                                               |
-| MR-8 (greedy meshing)     | ❌                    | MH-8 + MH-3 (and its own design doc); ~~MH-4~~ ✅ done                                                  |
+| MR-8 (greedy meshing)     | ❌                    | MH-8 + a per-corner MH-3 extension (and its own design doc); ~~MH-4~~ ✅ done                           |
 | MR-9 (clouds)             | ❌                    | out of scope (separate harness)                                                                        |
 
-> After Wave 1, the remaining **hard prerequisites** are MH-3 + MH-5 (MR-2), MH-5 (MR-5), MH-6 (MR-3), and
-> MH-8 (MR-8) — a baseline cannot be written without them. MH-2 and MH-7 are still better built *alongside*
-> their optimization than ahead of it. (MH-1, MH-4, MH-9 are now CLOSED.)
+> After Wave 2, **MR-2 is fully baselinable** (MH-3 + MH-4 + MH-5 ✅) and **MR-5 is unblocked** (MH-5 ✅). The
+> remaining **hard prerequisites** are MH-6 (MR-3) and MH-8 (MR-8) — a baseline cannot be written without them.
+> MH-2 and MH-7 are still better built *alongside* their optimization than ahead of it. (MH-1, MH-3, MH-4,
+> MH-5, MH-9 are now CLOSED; MH-8/MR-8 additionally want a per-corner light oracle beyond MH-3's uniform case.)
 
 ---
 
@@ -299,10 +324,12 @@ MH-9 (`SectionStats` tiling), MH-1 (bounds extent), MH-4 (UV value oracle). One 
 chunk-space `MeshGenerationJob` output. Wave 2 onward is different: each item needs a **new run path or a
 second job** before a baseline can exist.
 
-### Wave 2 — unblock MR-2 + MR-5 (job-suite depth) · NEXT
+### Wave 2 — unblock MR-2 + MR-5 (job-suite depth) · ✅ DONE (2026-06-18)
 
 Theme: make the two most-blocked job-side optimizations baselinable. Order: **MH-5 first** (lower risk, wider
-unblock), **MH-3 second** (riskiest; completes MR-2).
+unblock), **MH-3 second** (riskiest; completes MR-2). Executed in that order — MH-5 (B10) then MH-3 (B11), one
+commit each, baselines **B1–B11** green after each. MH-3 landed the **uniform-field** corner-light oracle only
+(the encoding MR-2 needs); the per-corner/AO extension is deferred (see §3 MH-3).
 
 1. **MH-5 — run `MeshPostProcessJob` + light up `InterleavedStream3`** (gates MR-5; half of MR-2).
    - *Investigate first:* read `MeshPostProcessJob` + `Chunk.ApplyMeshData`'s `Schedule().Complete()` wiring to
@@ -324,7 +351,7 @@ unblock), **MH-3 second** (riskiest; completes MR-2).
 
    **After Wave 2, MR-2 is fully baselinable** (MH-3 + MH-4 ✅ + MH-5) and **MR-5 is unblocked** (MH-5).
 
-### Wave 3 — renderer apply-path (separate harness) · LATER / parallelizable
+### Wave 3 — renderer apply-path (separate harness) · NEXT / parallelizable
 
 3. **MH-6 — `SectionRenderer` apply-path fixture** (gates MR-3; renderer side of MR-4).
    - A **different** harness from the job suite: a lightweight `MonoBehaviour` fixture, not bolted onto
@@ -345,7 +372,8 @@ unblock), **MH-3 second** (riskiest; completes MR-2).
 
 - **MH-8 — merge-invariant geometry oracle** (MR-8 greedy meshing). 🔴 high — a new oracle model (decompose
   merged quads back to unit-face coverage), **not** an extension of the existing one. **Blocked on the MR-8
-  design doc** (`PERFORMANCE_IMPROVEMENTS_REPORT.md` MR-8). Needs MH-3 + MH-4 (✅) as well.
+  design doc** (`PERFORMANCE_IMPROVEMENTS_REPORT.md` MR-8). Needs MH-4 ✅ and MH-3 ✅ (but MR-8's equal-corner-light
+  merge predicate additionally wants the **per-corner / AO** MH-3 extension, beyond the uniform case shipped in B11).
 
 ### Out of scope
 
