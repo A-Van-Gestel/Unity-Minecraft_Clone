@@ -451,6 +451,12 @@ namespace Editor.Validation.Meshing
             // (a) Section-space coordinate rewrite.
             passed &= MeshAssert.SectionSpaceVertices("B10 section-space coords", separate, chunkVerts, ChunkMath.SECTION_SIZE);
 
+            // The post-process relativizes per-section triangle indices in place; independently assert the
+            // post-processed output is still structurally valid (indices in range & %3, SectionStats tile each
+            // stream). chained==separate alone can't catch a deterministic relativization bug — both paths run
+            // the same code — so this is the only guard that the rewritten indices remain well-formed.
+            passed &= MeshAssert.StructuralInvariants("B10 post-process structural", separate);
+
             // Positive control (ii): the rewrite must be non-identity — at least one emitting section sits
             // above section 0, so its y-offset is non-zero and section-space ≠ chunk-space for those verts.
             int highestEmittingSection = -1;
@@ -500,7 +506,8 @@ namespace Editor.Validation.Meshing
             Vector3Int pos = new Vector3Int(8, 8, 8); // interior, so every sampled neighbor is in-chunk
 
             // Config A — uniform full sunlight. Every corner averages 4× sky=15 → 17×15 = 255.
-            Color32 valueA;
+            // `engineA` captures the ACTUAL emitted light (vert 0) for the cross-config positive control below.
+            Color32 engineA;
             using (MeshingTestWorld world = new MeshingTestWorld())
             {
                 world.SetBlock(pos.x, pos.y, pos.z, TestMeshBlockPalette.SolidOpaque);
@@ -509,13 +516,14 @@ namespace Editor.Validation.Meshing
 
                 bool ok = MeshAssert.VertexCount("B11-A vertex count", o, 24);
                 ok &= MeshAssert.StructuralInvariants("B11-A structural", o);
-                valueA = MeshOracle.ExpectedUniformCornerLight(15, 0, 0, 0); // (255,0,0,0)
-                ok &= MeshAssert.LightDataMatches("B11-A full sunlight", o, valueA);
+                Color32 expectedA = MeshOracle.ExpectedUniformCornerLight(15, 0, 0, 0); // (255,0,0,0)
+                ok &= MeshAssert.LightDataMatches("B11-A full sunlight", o, expectedA);
                 if (!ok) return false;
+                engineA = o.LightData[0];
             }
 
             // Config B — uniform intermediate blocklight (no sky). R=7→(28·17+2)/4=119, G=3→51, B=0.
-            Color32 valueB;
+            Color32 engineB;
             using (MeshingTestWorld world = new MeshingTestWorld())
             {
                 world.SetBlock(pos.x, pos.y, pos.z, TestMeshBlockPalette.SolidOpaque);
@@ -524,16 +532,18 @@ namespace Editor.Validation.Meshing
 
                 bool ok = MeshAssert.VertexCount("B11-B vertex count", o, 24);
                 ok &= MeshAssert.StructuralInvariants("B11-B structural", o);
-                valueB = MeshOracle.ExpectedUniformCornerLight(0, 7, 3, 0); // (0,119,51,0)
-                ok &= MeshAssert.LightDataMatches("B11-B intermediate blocklight", o, valueB);
+                Color32 expectedB = MeshOracle.ExpectedUniformCornerLight(0, 7, 3, 0); // (0,119,51,0)
+                ok &= MeshAssert.LightDataMatches("B11-B intermediate blocklight", o, expectedB);
                 if (!ok) return false;
+                engineB = o.LightData[0];
             }
 
-            // Positive control: the two lit configs must differ, so the assertions above cannot pass on a
-            // light value that ignores the populated map (e.g. a hardcoded constant or an unread stream).
-            bool differ = !(valueA.r == valueB.r && valueA.g == valueB.g && valueA.b == valueB.b && valueA.a == valueB.a);
+            // Positive control: the two configs' ACTUAL emitted light must differ, proving the populated map
+            // drives the output — a path that ignored the light map (or hardcoded a constant) would emit the
+            // same value for both. Comparing engine output (not the oracle constants, which trivially differ).
+            bool differ = !(engineA.r == engineB.r && engineA.g == engineB.g && engineA.b == engineB.b && engineA.a == engineB.a);
             return MeshAssert.IsTrue("B11 configs drive distinct light", differ,
-                $"config A {FmtColor(valueA)} vs B {FmtColor(valueB)} (must differ, else the map isn't driving LightData)");
+                $"engine A {FmtColor(engineA)} vs B {FmtColor(engineB)} (must differ, else the map isn't driving LightData)");
         }
 
         /// <summary>Formats a <see cref="Color32"/> as <c>(r,g,b,a)</c> for assertion diagnostics.</summary>
