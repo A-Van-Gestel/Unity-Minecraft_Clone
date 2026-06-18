@@ -1,3 +1,4 @@
+using System;
 using TMPro;
 using UI.Tooltip;
 using UnityEngine;
@@ -7,7 +8,10 @@ using UnityEngine.UI;
 public class UIItemSlot : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IPointerClickHandler
 {
     public bool isLinked;
-    public ItemSlot ItemSlot;
+
+    [NonSerialized]
+    public ItemSlot ItemSlot; // Runtime-linked via Link(); never Inspector-authored.
+
     public Image slotImage;
     public Image slotIcon;
     public TextMeshProUGUI slotAmount;

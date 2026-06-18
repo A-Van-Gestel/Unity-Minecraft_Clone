@@ -80,7 +80,10 @@ public class World : MonoBehaviour
     private readonly Dictionary<ChunkCoord, Chunk> _chunkMap = new Dictionary<ChunkCoord, Chunk>();
 
     private readonly HashSet<ChunkCoord> _activeChunks = new HashSet<ChunkCoord>();
+
+    [NonSerialized]
     public ChunkCoord PlayerChunkCoord;
+
     private ChunkCoord _playerLastChunkCoord = new ChunkCoord(int.MinValue, int.MinValue);
 
     private readonly List<Chunk> _chunksToBuildMesh = new List<Chunk>();
@@ -111,6 +114,7 @@ public class World : MonoBehaviour
     [Header("World Data")]
     public WorldData worldData;
 
+    [NonSerialized]
     public WorldJobManager JobManager;
 
     [Header("Paths")]
@@ -132,9 +136,15 @@ public class World : MonoBehaviour
     private Vector3 _lastVisualizerPlayerPos;
 
     // --- Storage & Serialization ---
+    [NonSerialized]
     public ChunkStorageManager StorageManager;
+
+    [NonSerialized]
     public ModificationManager ModManager;
+
+    [NonSerialized]
     public LightingStateManager LightingStateManager;
+
     public bool IsVolatileMode { get; private set; }
 
     // --- Chunk Pooling ---
@@ -147,9 +157,11 @@ public class World : MonoBehaviour
     private static readonly int s_shaderSkyLightColor = Shader.PropertyToID("SkyLightColor");
 
     // --- Fluid Vertex Data ---
+    [NonSerialized]
     public FluidVertexTemplatesNativeData FluidVertexTemplates;
 
     // --- Job Management Data ---
+    [NonSerialized]
     public JobDataManager JobDataManager;
 
     // --- Chunk Border Visualization ---

@@ -20,6 +20,8 @@ namespace Data.WorldTypes
         /// <summary>
         /// The chunk this position resides in.
         /// </summary>
+        // Reconstructed in OnAfterDeserialize from the serialized _chunkX/_chunkZ ints; never serialized directly.
+        [NonSerialized]
         public ChunkCoord Chunk;
 
         /// <summary>
