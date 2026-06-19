@@ -8,6 +8,7 @@ using Helpers;
 using Jobs;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -94,6 +95,26 @@ namespace Benchmarks
         [Tooltip("The number of chunk meshes to generate for each individual run.")]
         [SerializeField]
         private int _chunksToMesh = 256;
+
+
+        [Header("Upload Benchmark (MR-2 vertex-format win)")]
+        [Tooltip("If checked, the full comparison also times the GPU vertex upload path " +
+                 "(SectionRenderer.UpdateMeshNative → Mesh.SetVertexBufferData) for one chunk's worth " +
+                 "of sections. This is the path the MR-2 vertex-format packing targets; the generation " +
+                 "loop above does not touch it.")]
+        [SerializeField]
+        private bool _runUploadBenchmark = true;
+
+        [Tooltip("The voxel pattern whose generated mesh is repeatedly re-uploaded to measure upload " +
+                 "throughput. Denser patterns (Checkerboard) give a stronger, more stable bandwidth signal.")]
+        [SerializeField]
+        private ChunkDataType _uploadPattern = ChunkDataType.Checkerboard;
+
+        [Tooltip("How many times the full set of section meshes is re-uploaded inside the timed loop. " +
+                 "Higher = more stable per-upload average.")]
+        [SerializeField]
+        [Min(1)]
+        private int _uploadRepeats = 200;
 
 
         [Header("Single Run Settings (Used if Full Comparison is false)")]
@@ -229,10 +250,17 @@ namespace Benchmarks
                 }
             }
 
+            // Time the GPU upload path separately (the generation loop above never touches it).
+            UploadBenchmarkResult uploadResult = default;
+            if (_runUploadBenchmark)
+            {
+                yield return StartCoroutine(RunUploadBenchmark(result => uploadResult = result));
+            }
+
             totalStopwatch.Stop();
 
             Debug.Log("--- All Benchmark Runs Complete. Generating Report... ---");
-            GenerateReport(results, totalStopwatch.Elapsed);
+            GenerateReport(results, totalStopwatch.Elapsed, uploadResult);
             _isBenchmarking = false;
         }
 
@@ -526,7 +554,7 @@ namespace Benchmarks
         /// </summary>
         /// <param name="results">A dictionary containing the average ms-per-run for each test configuration.</param>
         /// <param name="totalElapsed">Wall-clock time of the full <c>RunFullComparisonBenchmark</c> coroutine, including warm-ups and cleanup.</param>
-        private void GenerateReport(Dictionary<string, long> results, TimeSpan totalElapsed)
+        private void GenerateReport(Dictionary<string, long> results, TimeSpan totalElapsed, UploadBenchmarkResult uploadResult)
         {
             // Build the system/build/Burst header once. Goes into both console and on-disk file
             // so a captured baseline can be cross-referenced with the build it was captured against.
@@ -553,6 +581,8 @@ namespace Benchmarks
                 AppendWinner(report, withDiagonals, cardinalsOnly, BenchmarkMode.WithDiagonals, BenchmarkMode.CardinalsOnly);
                 report.AppendLine();
             }
+
+            AppendUploadReport(report, uploadResult);
 
             string fullReport = report.ToString();
             Debug.Log(fullReport);
@@ -591,6 +621,184 @@ namespace Benchmarks
             float percentage = loserTime == 0 ? 0f : difference / (float)loserTime * 100f;
 
             sb.AppendLine($"  - <color=cyan>Winner: {winnerName} by {difference} ms ({percentage:F1}% faster)</color>");
+        }
+
+        #endregion
+
+        #region Upload Benchmark
+
+        /// <summary>Result of the GPU vertex-upload timing pass (MR-2). <see cref="Ran"/> is false when the upload benchmark is disabled.</summary>
+        private struct UploadBenchmarkResult
+        {
+            public bool Ran;
+            public ChunkDataType Pattern;
+            public int Repeats;
+            public int SectionsUploaded; // non-empty sections uploaded per pass
+            public int VerticesPerPass;
+            public long VertexBytesPerPass;
+            public int BytesPerVertex;
+            public double MsPerPass; // average wall-clock ms to upload one chunk's sections
+        }
+
+        /// <summary>
+        /// Times the production GPU upload path (<see cref="SectionRenderer.UpdateMeshNative"/> →
+        /// <c>Mesh.SetVertexBufferData</c>) by generating one chunk of <see cref="_uploadPattern"/>, running the
+        /// real <see cref="MeshPostProcessJob"/>, then re-uploading its section meshes <see cref="_uploadRepeats"/>
+        /// times against a reused renderer pool. This is the path MR-2's vertex-format packing shrinks; the
+        /// generation loop never touches it. Reuses the production apply method so the measurement tracks any
+        /// layout change automatically.
+        /// </summary>
+        /// <param name="onComplete">Callback receiving the measured upload result.</param>
+        private IEnumerator RunUploadBenchmark(Action<UploadBenchmarkResult> onComplete)
+        {
+            Debug.Log($"--- Running Upload Benchmark: {_uploadPattern} ({_uploadRepeats} repeats) ---");
+
+            // All native/GameObject allocations happen INSIDE the try so a throw during setup
+            // (job scheduling, SectionRenderer construction) still hits the finally and cannot leak
+            // Persistent NativeArrays or orphan scene objects.
+            BenchmarkVoxelData data = default;
+            MeshDataJobOutput output = default;
+            GameObject parent = null;
+            SectionRenderer[] renderers = null;
+            UploadBenchmarkResult result = default;
+            try
+            {
+                // 1. Generate one chunk and complete meshing.
+                data = GenerateBenchmarkData(_uploadPattern, Allocator.Persistent);
+                (JobHandle handle, MeshDataJobOutput meshOutput) = ScheduleBenchmarkMeshing(data, BenchmarkMode.WithDiagonals);
+                output = meshOutput;
+                handle.Complete();
+
+                // 2. Run the real post-process so vertices are section-local and InterleavedStream3 is built
+                //    (mirrors WorldJobManager.ScheduleMeshing → Chunk.ApplyMeshData).
+                MeshPostProcessJob postJob = new MeshPostProcessJob
+                {
+                    Vertices = output.Vertices,
+                    OpaqueTris = output.Triangles,
+                    TransparentTris = output.TransparentTriangles,
+                    FluidTris = output.FluidTriangles,
+                    Stats = output.SectionStats,
+                    Normals = output.Normals,
+                    LightData = output.LightData,
+                    InterleavedStream3 = output.InterleavedStream3,
+                    SectionHeight = ChunkMath.SECTION_SIZE,
+                };
+                postJob.Schedule().Complete();
+
+                // 3. Build a reusable section-renderer pool under a temp parent.
+                parent = new GameObject("UploadBenchmarkParent");
+                int sectionCount = output.SectionStats.Length;
+                renderers = new SectionRenderer[sectionCount];
+                for (int i = 0; i < sectionCount; i++) renderers[i] = new SectionRenderer(parent.transform, i);
+
+                NativeArray<Vector3> verts = output.Vertices.AsArray();
+                NativeArray<Vector4> uvs = output.Uvs.AsArray();
+                NativeArray<Color> colors = output.Colors.AsArray();
+                NativeArray<NormalLightVertex> stream3 = output.InterleavedStream3.AsArray();
+                NativeArray<int> opaque = output.Triangles.AsArray();
+                NativeArray<int> trans = output.TransparentTriangles.AsArray();
+                NativeArray<int> fluid = output.FluidTriangles.AsArray();
+                NativeArray<MeshSectionStats> stats = output.SectionStats;
+
+                int sectionsUploaded = 0;
+                for (int i = 0; i < stats.Length; i++)
+                {
+                    if (stats[i].VertexCount > 0) sectionsUploaded++;
+                }
+
+                // Warm-up upload (absorbs first-touch buffer allocation + MR-3 material-cache build).
+                UploadPass(renderers, stats, verts, uvs, colors, stream3, opaque, trans, fluid);
+
+                Stopwatch sw = Stopwatch.StartNew();
+                for (int r = 0; r < _uploadRepeats; r++)
+                {
+                    UploadPass(renderers, stats, verts, uvs, colors, stream3, opaque, trans, fluid);
+                }
+
+                sw.Stop();
+
+                // Per-vertex byte total is summed from the actual stream element types, so it auto-updates
+                // from 60 B to ~32 B once MR-2 repacks these buffers — no hardcoded sizes to keep in sync.
+                int bytesPerVertex = UnsafeUtility.SizeOf<Vector3>() + UnsafeUtility.SizeOf<Vector4>()
+                                                                     + UnsafeUtility.SizeOf<Color>() + UnsafeUtility.SizeOf<NormalLightVertex>();
+                int verticesPerPass = output.Vertices.Length;
+
+                result = new UploadBenchmarkResult
+                {
+                    Ran = true,
+                    Pattern = _uploadPattern,
+                    Repeats = _uploadRepeats,
+                    SectionsUploaded = sectionsUploaded,
+                    VerticesPerPass = verticesPerPass,
+                    VertexBytesPerPass = (long)verticesPerPass * bytesPerVertex,
+                    BytesPerVertex = bytesPerVertex,
+                    MsPerPass = sw.Elapsed.TotalMilliseconds / Mathf.Max(1, _uploadRepeats),
+                };
+            }
+            finally
+            {
+                if (renderers != null)
+                {
+                    foreach (SectionRenderer renderer in renderers)
+                        renderer?.Destroy();
+                }
+
+                if (parent != null) Destroy(parent);
+                if (output.Vertices.IsCreated) output.Dispose();
+                data.Dispose(); // BenchmarkVoxelData.Dispose guards each array with IsCreated, safe on default.
+            }
+
+            onComplete(result);
+            yield break;
+        }
+
+        /// <summary>Uploads every section of one generated chunk via the production apply path (mirrors <c>Chunk.ApplyMeshData</c>).</summary>
+        private static void UploadPass(
+            SectionRenderer[] renderers,
+            NativeArray<MeshSectionStats> stats,
+            NativeArray<Vector3> verts, NativeArray<Vector4> uvs, NativeArray<Color> colors,
+            NativeArray<NormalLightVertex> stream3,
+            NativeArray<int> opaque, NativeArray<int> trans, NativeArray<int> fluid)
+        {
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                MeshSectionStats s = stats[i];
+                if (s.VertexCount == 0)
+                {
+                    renderers[i].UpdateMeshNative(default, default, default, default, 0, 0,
+                        default, 0, 0, default, 0, 0, default, 0, 0);
+                    continue;
+                }
+
+                renderers[i].UpdateMeshNative(
+                    verts, uvs, colors, stream3, s.VertexStartIndex, s.VertexCount,
+                    opaque, s.OpaqueTriStartIndex, s.OpaqueTriCount,
+                    trans, s.TransparentTriStartIndex, s.TransparentTriCount,
+                    fluid, s.FluidTriStartIndex, s.FluidTriCount);
+            }
+        }
+
+        /// <summary>Appends the upload-benchmark section to the report (a "(disabled)" note when it did not run).</summary>
+        private static void AppendUploadReport(StringBuilder sb, UploadBenchmarkResult r)
+        {
+            sb.AppendLine("<b>=== Upload benchmark (MR-2 vertex format) ===</b>");
+            if (!r.Ran)
+            {
+                sb.AppendLine("  - (disabled)");
+                sb.AppendLine();
+                return;
+            }
+
+            double usPerPass = r.MsPerPass * 1000.0;
+            double vertexMB = r.VertexBytesPerPass / (1024.0 * 1024.0);
+            double vertexMBs = r.MsPerPass > 0 ? vertexMB / (r.MsPerPass / 1000.0) : 0.0;
+
+            sb.AppendLine($"  - Pattern                : {r.Pattern} ({r.SectionsUploaded} non-empty sections, {r.Repeats} repeats)");
+            sb.AppendLine($"  - Vertex format          : {r.BytesPerVertex} B/vertex");
+            sb.AppendLine($"  - Vertices per upload    : {r.VerticesPerPass,8:N0}  ({vertexMB:F2} MB vertex data/chunk)");
+            sb.AppendLine($"  - Upload time per chunk  : {usPerPass,8:F1} μs  ({r.MsPerPass:F3} ms)");
+            sb.AppendLine($"  - Vertex upload rate     : {vertexMBs,8:F0} MB/s");
+            sb.AppendLine();
         }
 
         #endregion
