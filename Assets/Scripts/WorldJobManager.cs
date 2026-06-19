@@ -307,9 +307,30 @@ public class WorldJobManager : IDisposable
                 Output = jobData.Output,
             };
 
+            // MR-5: chain the chunk-space → section-space post-process onto the mesh job so the rewrite +
+            // stream-3 interleave run on a worker thread instead of blocking the main thread inside
+            // Chunk.ApplyMeshData. It only touches the output buffers (which live until ProcessMeshJobs),
+            // so by the time the combined handle reports completed the post-process has already run.
+            MeshPostProcessJob postJob = new MeshPostProcessJob
+            {
+                Vertices = jobData.Output.Vertices,
+                OpaqueTris = jobData.Output.Triangles,
+                TransparentTris = jobData.Output.TransparentTriangles,
+                FluidTris = jobData.Output.FluidTriangles,
+                Stats = jobData.Output.SectionStats,
+                Normals = jobData.Output.Normals,
+                LightData = jobData.Output.LightData,
+                InterleavedStream3 = jobData.Output.InterleavedStream3,
+                SectionHeight = ChunkMath.SECTION_SIZE,
+            };
+
             // POOLING: Input buffers are returned to _jobArrayPool in ProcessMeshJobs after
             // Handle.Complete() — never dispose or return them while the job may be running.
+            // Stage the handle: store the mesh-job handle BEFORE scheduling the chained post-process,
+            // so if postJob.Schedule throws, the catch's Handle.Complete() still drains the already-live
+            // mesh job before its output buffers are disposed (avoids a write-after-free race).
             jobData.Handle = job.Schedule();
+            jobData.Handle = postJob.Schedule(jobData.Handle);
             MeshJobs.Add(chunkCoord, jobData);
         }
         catch

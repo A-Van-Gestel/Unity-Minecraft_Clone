@@ -316,24 +316,12 @@ public class Chunk
     /// <param name="meshData">The structured mesh data buffer produced by the <see cref="Jobs.MeshGenerationJob"/>.</param>
     public void ApplyMeshData(MeshDataJobOutput meshData)
     {
-        // 1. Run a fast Burst job on the main thread to adjust coordinate spaces from Chunk-Space to Section-Space.
-        // This modifies the data in-place efficiently.
-        MeshPostProcessJob postProcessJob = new MeshPostProcessJob
-        {
-            Vertices = meshData.Vertices,
-            OpaqueTris = meshData.Triangles,
-            TransparentTris = meshData.TransparentTriangles,
-            FluidTris = meshData.FluidTriangles,
-            Stats = meshData.SectionStats,
-            Normals = meshData.Normals,
-            LightData = meshData.LightData,
-            InterleavedStream3 = meshData.InterleavedStream3,
-            SectionHeight = ChunkMath.SECTION_SIZE,
-        };
+        // MR-5: the chunk-space → section-space rewrite + stream-3 interleave (MeshPostProcessJob) is no
+        // longer run here. It is now chained onto the mesh job at schedule time in
+        // WorldJobManager.ScheduleMeshing, so it has already run on a worker thread by the time
+        // ProcessMeshJobs completes the handle and calls this method — ApplyMeshData only uploads buffers.
 
-        postProcessJob.Schedule().Complete();
-
-        // 2. Pass the data to the renderers using zero-allocation NativeArray views.
+        // 1. Pass the data to the renderers using zero-allocation NativeArray views.
         NativeArray<MeshSectionStats> stats = meshData.SectionStats;
 
         // Obtain raw NativeArray views from the lists

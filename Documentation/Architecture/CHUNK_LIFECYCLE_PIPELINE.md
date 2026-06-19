@@ -323,10 +323,10 @@ flowchart TD
         M7 --> MJ1["Iterate 16×16×16 sections"]
         MJ1 --> MJ2["Cull empty/fully-solid sections"]
         MJ2 --> MJ3["Generate vertices, triangles,<br/>UVs, colors, normals per section"]
+        MJ3 --> MP1["PostProcessMeshJob (chained, MR-5)<br/>(adjust Y coords to section-local)"]
     end
 
     subgraph "ProcessMeshJobs (Main Thread, next frame)"
-        MJ3 --> MP1["PostProcessMeshJob<br/>(adjust Y coords to section-local)"]
         MP1 --> MP2["Apply to SectionRenderers<br/>via native mesh API"]
         MP2 --> MP3["ChunksToDraw.Enqueue()"]
     end

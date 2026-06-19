@@ -494,7 +494,7 @@ Custom meshes use smooth lighting with bilinear interpolation (see Section 2.5.2
 
 #### 2.6.5 `Chunk.cs` — PostProcessMeshJob
 
-A Burst-compiled `PostProcessMeshJob : IJob` in `Chunk.cs` runs on the main thread (via `Schedule().Complete()`) after the mesh generation job completes. It performs two tasks:
+A Burst-compiled `MeshPostProcessJob : IJob` (`Jobs/MeshPostProcessJob.cs`) runs after the mesh generation job. As of **MR-5** it is **chained onto the mesh job handle at schedule time** in `WorldJobManager.ScheduleMeshing` (`postJob.Schedule(meshJobHandle)`) so it executes on a worker thread; by the time `ProcessMeshJobs` completes the combined handle the rewrite has already run, and `Chunk.ApplyMeshData` only uploads buffers. (Previously it ran on the main thread via `Schedule().Complete()` inside `ApplyMeshData`.) It performs two tasks:
 
 1. **Interleaves Normal + LightData** into `InterleavedStream3` for the GPU stream 3 upload:
    ```csharp
