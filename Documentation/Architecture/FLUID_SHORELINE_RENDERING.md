@@ -84,9 +84,15 @@ Instead of interpolating a scalar, we:
    ```
    mask = wallN*1 + wallS*2 + wallE*4 + wallW*8
         + diagNE*16 + diagNW*32 + diagSE*64 + diagSW*128
-   color.g = mask / 255.0
+   color.g = mask        // stored as a raw byte; GPU delivers mask / 255.0 (see MR-2 note)
    ```
    This value is **identical at all 4 vertices** of the quad, so the GPU passes it through unchanged.
+
+   > **MR-2 note:** the vertex `color` is a `UNorm8×4` channel (packed format, ~32 B/vertex). The CPU
+   > now writes the raw bytes — `color.g` = the integer `mask`, `color.r` = the raw `FluidShaderID`. The
+   > GPU normalizes both to `[0,1]` on read, so the shader sees the same values as before for `g`
+   > (`GetShoreData` still does `round(color.g * 255)`), while `LiquidCore.hlsl` recovers the liquid type
+   > with `color.r * 255`. The shader-visible contract above is unchanged.
 
 3. **Decode and compute distance per-pixel** in the fragment shader:
    ```hlsl

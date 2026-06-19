@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using Data;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Editor.Validation.Meshing.Framework
@@ -16,8 +17,24 @@ namespace Editor.Validation.Meshing.Framework
         /// <summary>Max position delta (block units) tolerated between engine and oracle vertices.</summary>
         public const float VertexEpsilon = 1e-4f;
 
+        /// <summary>
+        /// MR-2: UVs are stored as <c>Float16×4</c> (half). Half has ~10 mantissa bits, so atlas/flow
+        /// coordinates carry up to ~1e-3 absolute rounding error — far above <see cref="VertexEpsilon"/>.
+        /// UV-value asserts use this looser tolerance (still tight enough to pin the correct atlas cell).
+        /// </summary>
+        public const float UvHalfEpsilon = 2e-3f;
+
+        /// <summary>
+        /// MR-2: normals are stored as <c>SNorm8×4</c>, quantized to 1/127 ≈ 0.0079 per component.
+        /// Comparisons against the unpacked packed normal use this tolerance (one quantization step + slack).
+        /// </summary>
+        public const float NormalSNorm8Epsilon = 0.02f;
+
         /// <summary>Max number of element diffs printed before truncation.</summary>
         private const int MAX_DIFFS = 8;
+
+        /// <summary>Unpacks a <see cref="PackedNormal"/> (SNorm8×4) back to a <see cref="Vector3"/> in [-1, 1].</summary>
+        private static Vector3 UnpackNormal(PackedNormal p) => p.ToFloat3(); // implicit float3 → Vector3
 
         /// <summary>
         /// Asserts the four vertices and the normal of one emitted quad match the oracle's expectation.
@@ -132,7 +149,7 @@ namespace Editor.Validation.Meshing.Framework
         /// <param name="uvs">Engine UV stream.</param>
         /// <param name="startVert">Index of the first of the quad's 4 vertices.</param>
         /// <param name="expected">Oracle UVs (length 4).</param>
-        public static bool UVsMatch(string label, NativeList<Vector4> uvs, int startVert, Vector4[] expected)
+        public static bool UVsMatch(string label, NativeList<half4> uvs, int startVert, Vector4[] expected)
         {
             if (startVert + 4 > uvs.Length)
             {
@@ -145,10 +162,10 @@ namespace Editor.Validation.Meshing.Framework
 
             for (int i = 0; i < 4; i++)
             {
-                Vector4 a = uvs[startVert + i];
+                float4 a = uvs[startVert + i]; // MR-2: half4 widened to float4 for comparison
                 Vector4 e = expected[i];
-                if ((Mathf.Abs(a.x - e.x) > VertexEpsilon || Mathf.Abs(a.y - e.y) > VertexEpsilon ||
-                     Mathf.Abs(a.z - e.z) > VertexEpsilon || Mathf.Abs(a.w - e.w) > VertexEpsilon)
+                if ((Mathf.Abs(a.x - e.x) > UvHalfEpsilon || Mathf.Abs(a.y - e.y) > UvHalfEpsilon ||
+                     Mathf.Abs(a.z - e.z) > UvHalfEpsilon || Mathf.Abs(a.w - e.w) > UvHalfEpsilon)
                     && diffCount < MAX_DIFFS)
                 {
                     diffs.AppendLine($"    uv[{i}] expected ({e.x:F4},{e.y:F4},{e.z:F4},{e.w:F4}) actual ({a.x:F4},{a.y:F4},{a.z:F4},{a.w:F4})");
@@ -250,12 +267,15 @@ namespace Editor.Validation.Meshing.Framework
                 NormalLightVertex packed = o.InterleavedStream3[i];
                 Vector3 normal = o.Normals[i];
                 Color32 light = o.LightData[i];
-                bool normalOk = Vector3.Distance(packed.Normal, normal) <= VertexEpsilon;
+                // MR-2: the interleave packs the source normal to SNorm8×4, so compare the unpacked
+                // value within the quantization tolerance (LightData is still exact).
+                Vector3 unpackedNormal = UnpackNormal(packed.Normal);
+                bool normalOk = Vector3.Distance(unpackedNormal, normal) <= NormalSNorm8Epsilon;
                 bool lightOk = packed.LightData.r == light.r && packed.LightData.g == light.g
                                                              && packed.LightData.b == light.b && packed.LightData.a == light.a;
                 if (!normalOk || !lightOk)
                 {
-                    diffs.AppendLine($"    [{i}] interleaved (N {Fmt(packed.Normal)}, L ({packed.LightData.r},{packed.LightData.g},{packed.LightData.b},{packed.LightData.a})) != source (N {Fmt(normal)}, L ({light.r},{light.g},{light.b},{light.a}))");
+                    diffs.AppendLine($"    [{i}] interleaved (N {Fmt(unpackedNormal)}, L ({packed.LightData.r},{packed.LightData.g},{packed.LightData.b},{packed.LightData.a})) != source (N {Fmt(normal)}, L ({light.r},{light.g},{light.b},{light.a}))");
                     diffCount++;
                 }
             }
@@ -290,12 +310,14 @@ namespace Editor.Validation.Meshing.Framework
             for (int i = 0; i < a.InterleavedStream3.Length && diffCount < MAX_DIFFS; i++)
             {
                 NormalLightVertex x = a.InterleavedStream3[i], y = b.InterleavedStream3[i];
-                bool normalOk = Vector3.Distance(x.Normal, y.Normal) <= VertexEpsilon;
+                // MR-2: determinism guard — the packed normal is 4 signed bytes, so compare them exactly.
+                bool normalOk = x.Normal.X == y.Normal.X && x.Normal.Y == y.Normal.Y
+                                                         && x.Normal.Z == y.Normal.Z && x.Normal.W == y.Normal.W;
                 bool lightOk = x.LightData.r == y.LightData.r && x.LightData.g == y.LightData.g
                                                               && x.LightData.b == y.LightData.b && x.LightData.a == y.LightData.a;
                 if (!normalOk || !lightOk)
                 {
-                    diffs.AppendLine($"    [{i}] (N {Fmt(x.Normal)}, L ({x.LightData.r},{x.LightData.g},{x.LightData.b},{x.LightData.a})) vs (N {Fmt(y.Normal)}, L ({y.LightData.r},{y.LightData.g},{y.LightData.b},{y.LightData.a}))");
+                    diffs.AppendLine($"    [{i}] (N {Fmt(UnpackNormal(x.Normal))}, L ({x.LightData.r},{x.LightData.g},{x.LightData.b},{x.LightData.a})) vs (N {Fmt(UnpackNormal(y.Normal))}, L ({y.LightData.r},{y.LightData.g},{y.LightData.b},{y.LightData.a}))");
                     diffCount++;
                 }
             }
@@ -428,8 +450,9 @@ namespace Editor.Validation.Meshing.Framework
             CompareVec3(diffs, ref diffCount, "Normals", a.Normals, b.Normals);
             // UVs, vertex colors, and packed light are exactly the streams an uninitialized hoisted
             // scratch buffer would make nondeterministic, so a determinism guard must cover them too.
-            CompareVec4(diffs, ref diffCount, "Uvs", a.Uvs, b.Uvs);
-            CompareColor(diffs, ref diffCount, "Colors", a.Colors, b.Colors);
+            // MR-2: Uvs are half4 and Colors are Color32 now — both compared exactly (byte/bit level).
+            CompareHalf4(diffs, ref diffCount, "Uvs", a.Uvs, b.Uvs);
+            CompareColor32(diffs, ref diffCount, "Colors", a.Colors, b.Colors);
             CompareColor32(diffs, ref diffCount, "LightData", a.LightData, b.LightData);
 
             if (diffCount == 0)
@@ -559,8 +582,8 @@ namespace Editor.Validation.Meshing.Framework
             }
         }
 
-        private static void CompareVec4(StringBuilder diffs, ref int diffCount, string name,
-            NativeList<Vector4> a, NativeList<Vector4> b)
+        private static void CompareHalf4(StringBuilder diffs, ref int diffCount, string name,
+            NativeList<half4> a, NativeList<half4> b)
         {
             if (a.Length != b.Length)
             {
@@ -572,36 +595,12 @@ namespace Editor.Validation.Meshing.Framework
             for (int i = 0; i < a.Length && diffCount < MAX_DIFFS; i++)
             {
                 // Exact comparison: a determinism guard must catch any bit-level divergence.
-                Vector4 x = a[i], y = b[i];
+                float4 x = a[i], y = b[i];
                 // ReSharper disable CompareOfFloatsByEqualityOperator
                 if (x.x != y.x || x.y != y.y || x.z != y.z || x.w != y.w)
                     // ReSharper restore CompareOfFloatsByEqualityOperator
                 {
                     diffs.AppendLine($"    {name}[{i}] ({x.x:F4},{x.y:F4},{x.z:F4},{x.w:F4}) vs ({y.x:F4},{y.y:F4},{y.z:F4},{y.w:F4})");
-                    diffCount++;
-                }
-            }
-        }
-
-        private static void CompareColor(StringBuilder diffs, ref int diffCount, string name,
-            NativeList<Color> a, NativeList<Color> b)
-        {
-            if (a.Length != b.Length)
-            {
-                if (diffCount < MAX_DIFFS) diffs.AppendLine($"    {name} length {a.Length} != {b.Length}");
-                diffCount++;
-                return;
-            }
-
-            for (int i = 0; i < a.Length && diffCount < MAX_DIFFS; i++)
-            {
-                // Exact comparison: a determinism guard must catch any bit-level divergence.
-                Color x = a[i], y = b[i];
-                // ReSharper disable CompareOfFloatsByEqualityOperator
-                if (x.r != y.r || x.g != y.g || x.b != y.b || x.a != y.a)
-                    // ReSharper restore CompareOfFloatsByEqualityOperator
-                {
-                    diffs.AppendLine($"    {name}[{i}] ({x.r:F4},{x.g:F4},{x.b:F4},{x.a:F4}) vs ({y.r:F4},{y.g:F4},{y.b:F4},{y.a:F4})");
                     diffCount++;
                 }
             }

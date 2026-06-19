@@ -65,8 +65,8 @@ namespace Editor.BlockEditor.Helpers
             NativeList<int> nativeOpaqueTris = new NativeList<int>(Allocator.Temp);
             NativeList<int> nativeTransparentTris = new NativeList<int>(Allocator.Temp);
             NativeList<int> nativeFluidTris = new NativeList<int>(Allocator.Temp);
-            NativeList<Vector4> nativeUvs = new NativeList<Vector4>(Allocator.Temp);
-            NativeList<Color> nativeColors = new NativeList<Color>(Allocator.Temp);
+            NativeList<half4> nativeUvs = new NativeList<half4>(Allocator.Temp); // MR-2: helper now emits Float16×4
+            NativeList<Color32> nativeColors = new NativeList<Color32>(Allocator.Temp); // MR-2: helper now emits UNorm8×4
             NativeList<Vector3> nativeNormals = new NativeList<Vector3>(Allocator.Temp);
             NativeList<Color32> nativeLightData = new NativeList<Color32>(Allocator.Temp);
             int vertexIndex = 0;
@@ -308,8 +308,23 @@ namespace Editor.BlockEditor.Helpers
                 transparentTriangles.AddRange(nativeTransparentTris.AsArray());
                 // Add fluid triangles to the transparent sub-mesh for rendering
                 transparentTriangles.AddRange(nativeFluidTris.AsArray());
-                uvs.AddRange(nativeUvs.AsArray());
-                colors.AddRange(nativeColors.AsArray());
+
+                // MR-2: the helper now emits packed half4 UVs / Color32 colors, but this editor preview
+                // builds a default-layout (Float32) managed Mesh — widen each back. Color32→Color and
+                // half4→float4 are lossless here, and the fluid color/×255 shader change round-trips
+                // (FluidShaderID byte → /255 on conversion → ×255 in LiquidCore.hlsl).
+                NativeArray<half4> nativeUvsArray = nativeUvs.AsArray();
+                foreach (float4 uv in nativeUvsArray)
+                {
+                    uvs.Add(new Vector4(uv.x, uv.y, uv.z, uv.w));
+                }
+
+                NativeArray<Color32> nativeColorsArray = nativeColors.AsArray();
+                foreach (Color32 color in nativeColorsArray)
+                {
+                    colors.Add(color); // implicit Color32 → Color
+                }
+
                 normals.AddRange(nativeNormals.AsArray());
             }
 

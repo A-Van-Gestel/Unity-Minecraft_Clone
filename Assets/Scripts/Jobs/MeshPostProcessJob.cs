@@ -38,13 +38,15 @@ namespace Jobs
         {
             // Build interleaved Normal + LightData for GPU stream 3 upload.
             // Done here (Burst-compiled) instead of on the main thread.
+            // MR-2: the full-precision working normal is packed to SNorm8×4 here, so the writers
+            // keep emitting plain Vector3 normals and the packing cost stays off the main thread.
             int totalVerts = Vertices.Length;
             InterleavedStream3.ResizeUninitialized(totalVerts);
             for (int v = 0; v < totalVerts; v++)
             {
                 InterleavedStream3[v] = new NormalLightVertex
                 {
-                    Normal = Normals[v],
+                    Normal = PackedNormal.FromFloat3(Normals[v]),
                     LightData = LightData[v],
                 };
             }

@@ -2,19 +2,59 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Helpers;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Data
 {
     /// <summary>
-    /// Interleaved struct for mesh stream 3: Normal (12 bytes) + LightData (4 bytes) = 16 bytes.
+    /// MR-2: a unit normal packed into 4 signed bytes (GPU <see cref="UnityEngine.Rendering.VertexAttributeFormat.SNorm8"/>×4).
+    /// Each component stores <c>round(clamp(n, -1, 1) * 127)</c>; the GPU unpacks it back to [-1, 1].
+    /// Replaces the former <c>Float32×3</c> (12-byte) normal — voxel normals are axis-aligned or
+    /// 45° cross/custom-mesh directions, all well within 8-bit signed precision.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct PackedNormal
+    {
+        public sbyte X, Y, Z, W;
+
+        /// <summary>
+        /// Packs a (typically unit) normal into <see cref="PackedNormal"/> (SNorm8×4). Burst-safe.
+        /// </summary>
+        /// <param name="n">The normal to pack; clamped to [-1, 1] per component before quantization.</param>
+        /// <returns>The packed normal with <c>W = 0</c>.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static PackedNormal FromFloat3(float3 n)
+        {
+            float3 c = math.clamp(n, -1f, 1f) * 127f;
+            return new PackedNormal
+            {
+                X = (sbyte)math.round(c.x),
+                Y = (sbyte)math.round(c.y),
+                Z = (sbyte)math.round(c.z),
+                W = 0,
+            };
+        }
+
+        /// <summary>
+        /// Unpacks this <see cref="PackedNormal"/> back to a <see cref="float3"/> in [-1, 1] — the exact
+        /// inverse of <see cref="FromFloat3"/>. Co-located with the pack so the 1/127 scale can never drift.
+        /// </summary>
+        /// <returns>The unpacked normal (the result of quantization, not necessarily unit length).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public readonly float3 ToFloat3() => new float3(X, Y, Z) / 127f;
+    }
+
+    /// <summary>
+    /// Interleaved struct for mesh stream 3: Normal (4 bytes, SNorm8×4) + LightData (4 bytes, UNorm8×4) = 8 bytes.
     /// Packs both attributes into a single stream to stay within Unity's 4-stream limit.
     /// Built by <see cref="Jobs.MeshPostProcessJob"/> (Burst-compiled) to avoid main-thread interleaving.
+    /// MR-2 repacked the normal from <c>Float32×3</c> (12 B) to <see cref="PackedNormal"/> (4 B).
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct NormalLightVertex
     {
-        public Vector3 Normal;
+        public PackedNormal Normal;
         public Color32 LightData;
     }
 
@@ -428,11 +468,11 @@ namespace Data
         public NativeList<int> Triangles;
         public NativeList<int> TransparentTriangles;
         public NativeList<int> FluidTriangles;
-        public NativeList<Vector4> Uvs; // xy = flow/atlas UV, zw = shore push (fluid top face) or (0,0)
-        public NativeList<Color> Colors;
-        public NativeList<Vector3> Normals;
+        public NativeList<half4> Uvs; // MR-2: Float16×4. xy = flow/atlas UV, zw = shore push (fluid top face) or (0,0)
+        public NativeList<Color32> Colors; // MR-2: UNorm8×4. White for blocks; fluid encodes (FluidShaderID, shoreMask, shadowMul, 0)
+        public NativeList<Vector3> Normals; // Full-precision working buffer; packed to SNorm8×4 in MeshPostProcessJob
         public NativeList<Color32> LightData; // TexCoord1 UNorm8: (sunlight, reserved, reserved, blocklight)
-        public NativeList<NormalLightVertex> InterleavedStream3; // Normals + LightData interleaved for GPU upload
+        public NativeList<NormalLightVertex> InterleavedStream3; // Packed Normal + LightData interleaved for GPU upload
 
         // Track stats per section (Index 0 = Section 0, Index 1 = Section 1, etc.)
         public NativeArray<MeshSectionStats> SectionStats;
@@ -443,8 +483,8 @@ namespace Data
             Triangles = new NativeList<int>(allocator);
             TransparentTriangles = new NativeList<int>(allocator);
             FluidTriangles = new NativeList<int>(allocator);
-            Uvs = new NativeList<Vector4>(allocator);
-            Colors = new NativeList<Color>(allocator);
+            Uvs = new NativeList<half4>(allocator);
+            Colors = new NativeList<Color32>(allocator);
             Normals = new NativeList<Vector3>(allocator);
             LightData = new NativeList<Color32>(allocator);
             InterleavedStream3 = new NativeList<NormalLightVertex>(allocator);

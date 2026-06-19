@@ -183,7 +183,7 @@ The mesher has an editor validation suite at `Assets/Editor/Validation/Meshing/`
 single chunk and asserts the output against an independent standard-cube geometry oracle plus
 structural/determinism invariants — the regression guard that lets the `MR-*` meshing optimizations in
 [PERFORMANCE_IMPROVEMENTS_REPORT.md](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim "output-preserving"
-(it already guards MR-1, MR-3, MR-4, MR-5, and MR-7).
+(it already guards MR-1, MR-2, MR-3, MR-4, MR-5, and MR-7).
 
 - **What it covers and its remaining blind spots** (interior-only placement; no custom/cross-mesh block
   or lava in the palette; smooth-light *values* covered only for the uniform-field case — distinct-per-corner

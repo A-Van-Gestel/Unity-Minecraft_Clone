@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using Data;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -140,8 +141,8 @@ namespace Editor.Validation.Meshing.Framework
             int vertexCount = verts.Length;
 
             NativeArray<Vector3> v = new NativeArray<Vector3>(verts, Allocator.Temp);
-            NativeArray<Vector4> uvs = new NativeArray<Vector4>(vertexCount, Allocator.Temp);
-            NativeArray<Color> colors = new NativeArray<Color>(vertexCount, Allocator.Temp);
+            NativeArray<half4> uvs = new NativeArray<half4>(vertexCount, Allocator.Temp); // MR-2 packed layout
+            NativeArray<Color32> colors = new NativeArray<Color32>(vertexCount, Allocator.Temp);
             NativeArray<NormalLightVertex> stream3 = new NativeArray<NormalLightVertex>(vertexCount, Allocator.Temp);
 
             NativeArray<int> opaqueTris = new NativeArray<int>(Mathf.Max(opaqueCount, 0), Allocator.Temp);

@@ -112,7 +112,7 @@ namespace Helpers
         /// <param name="uv">The local UV offset for the current vertex.</param>
         /// <param name="uvs">The native list of UVs to append to.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void AddTexture(int textureID, Vector2 uv, ref NativeList<Vector4> uvs)
+        private static void AddTexture(int textureID, Vector2 uv, ref NativeList<half4> uvs)
         {
             float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
             float x = textureID - y * VoxelData.TextureAtlasSizeInBlocks;
@@ -125,7 +125,7 @@ namespace Helpers
             x += VoxelData.NormalizedBlockTextureSize * uv.x;
             y += VoxelData.NormalizedBlockTextureSize * uv.y;
 
-            uvs.Add(new Vector4(x, y, 0f, 0f)); // zw = 0; shore push is fluid-only
+            uvs.Add((half4)new float4(x, y, 0f, 0f)); // MR-2: Float16×4. zw = 0; shore push is fluid-only
         }
 
         /// <summary>
@@ -138,7 +138,7 @@ namespace Helpers
             int faceIndex, int textureID, float lightLevel, in Vector3Int position, float rotation,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData, bool isTransparent)
         {
             byte light = (byte)math.min(255, (int)math.round(lightLevel * 16f) * 17);
@@ -159,7 +159,7 @@ namespace Helpers
             int faceIndex, int textureID, float lightLevel, in Vector3Int position, float rotation, int uvQuarterTurnsCW,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData, bool isTransparent)
         {
             byte light = (byte)math.min(255, (int)math.round(lightLevel * 16f) * 17);
@@ -181,7 +181,7 @@ namespace Helpers
             Color32 light0, Color32 light1, Color32 light2, Color32 light3,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData, bool isTransparent)
         {
             // MR-1: hoist the Y-rotation out of the 4-vertex loop. The rotation depends only on the
@@ -211,7 +211,7 @@ namespace Helpers
 
                 vertices.Add(world);
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color(1f, 1f, 1f, 1f));
+                colors.Add(new Color32(255, 255, 255, 255));
 
                 // Use the FaceUvOrder array to get the correct UV for this vertex.
                 int uvIndex = s_faceUvOrder[faceIndex * 4 + i];
@@ -332,7 +332,7 @@ namespace Helpers
             [ReadOnly] in NativeArray<int> customTris,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData, bool isTransparent)
         {
             CustomMeshData meshData = customMeshes[customMeshIndex];
@@ -354,7 +354,7 @@ namespace Helpers
                 vertices.Add(position + direction + center);
 
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color(1f, 1f, 1f, 1f));
+                colors.Add(new Color32(255, 255, 255, 255));
                 lightData.Add(flatLight);
                 AddTexture(textureID, vertData.UV, ref uvs);
             }
@@ -395,7 +395,7 @@ namespace Helpers
             [ReadOnly] in NativeArray<int> customTris,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData, bool isTransparent)
         {
             CustomMeshData meshData = customMeshes[customMeshIndex];
@@ -416,7 +416,7 @@ namespace Helpers
 
                 vertices.Add(position + direction + center);
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color(1f, 1f, 1f, 1f));
+                colors.Add(new Color32(255, 255, 255, 255));
 
                 GetCornerUV(worldFaceIndex, blockLocal, out float u, out float v);
                 lightData.Add(BilinearLerpLight(l0, l1, l2, l3, u, v));
@@ -462,7 +462,7 @@ namespace Helpers
             [ReadOnly] in NativeArray<int> customTris,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData, bool isTransparent)
         {
             CustomMeshData meshData = customMeshes[customMeshIndex];
@@ -484,7 +484,7 @@ namespace Helpers
                 vertices.Add(position + (Vector3)rotated);
 
                 normals.Add(rotatedNormal);
-                colors.Add(new Color(1f, 1f, 1f, 1f));
+                colors.Add(new Color32(255, 255, 255, 255));
                 lightData.Add(flatLight);
                 AddTexture(textureID, vertData.UV, ref uvs);
             }
@@ -525,7 +525,7 @@ namespace Helpers
             [ReadOnly] in NativeArray<int> customTris,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData, bool isTransparent)
         {
             CustomMeshData meshData = customMeshes[customMeshIndex];
@@ -545,7 +545,7 @@ namespace Helpers
                 vertices.Add(position + (Vector3)rotated);
 
                 normals.Add(rotatedNormal);
-                colors.Add(new Color(1f, 1f, 1f, 1f));
+                colors.Add(new Color32(255, 255, 255, 255));
 
                 GetCornerUV(worldFaceIndex, rotated, out float u, out float v);
                 lightData.Add(BilinearLerpLight(l0, l1, l2, l3, u, v));
@@ -569,10 +569,10 @@ namespace Helpers
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddCrossQuad(
-            Vector3 bl, Vector3 tl, Vector3 br, Vector3 tr, Vector3 normal, int textureID, Color vertexColor,
+            Vector3 bl, Vector3 tl, Vector3 br, Vector3 tr, Vector3 normal, int textureID, Color32 vertexColor,
             Color32 lightBL, Color32 lightTL, Color32 lightBR, Color32 lightTR, in Vector3Int position,
             ref int vertexIndex, ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
         {
             vertices.Add(position + bl);
@@ -618,10 +618,10 @@ namespace Helpers
             in Vector3Int position,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
         {
-            Color vertexColor = new Color(1f, 1f, 1f, 1f);
+            Color32 vertexColor = new Color32(255, 255, 255, 255);
 
             // Resolve per-vertex light values from the precomputed struct.
             // Corner layout: L0=(x=0,z=0), L1=(x=0,z=1), L2=(x=1,z=0), L3=(x=1,z=1).
@@ -693,7 +693,7 @@ namespace Helpers
             in FluidCornerLights cornerLights,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> fluidTriangles,
-            ref NativeList<Vector4> uvs, ref NativeList<Color> colors, ref NativeList<Vector3> normals,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
         {
             // Unpack neighbor states
@@ -703,7 +703,9 @@ namespace Helpers
             OptionalVoxelState above_N = neighbors[10], above_E = neighbors[11], above_S = neighbors[12], above_W = neighbors[13];
 
             // --- 1. DETERMINE SHADER FLAGS ---
-            float liquidType = props.FluidShaderID;
+            // MR-2: stored as the raw FluidShaderID byte in Color32.r (UNorm8). The shader recovers it
+            // via `color.r * 255` (LiquidCore.hlsl), so water (0) and lava (1) survive the byte format.
+            byte liquidTypeByte = props.FluidShaderID;
 
             // --- 2. GET HEIGHT DATA ---
             // First, get the LOGICAL top height based on the fluid level. This is ONLY used for face culling logic.
@@ -771,13 +773,14 @@ namespace Helpers
                 }
 
                 // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
-                // v.color.r = liquidType
-                // v.color.g = packedShoreMask — 8-bit wall neighbor flags packed into one float.
-                //             Encoding: (wallN*1 + wallS*2 + wallE*4 + wallW*8 +
-                //                        diagNE*16 + diagNW*32 + diagSE*64 + diagSW*128) / 255.0
+                // v.color.r = liquidType (raw FluidShaderID byte; shader recovers via color.r*255)
+                // v.color.g = packedShoreMask — 8-bit wall neighbor flags. MR-2: stored as the raw byte
+                //             sum (UNorm8); the GPU normalizes /255 on read and the shader recovers it
+                //             via round(color.g*255). Encoding: wallN*1 + wallS*2 + wallE*4 + wallW*8 +
+                //             diagNE*16 + diagNW*32 + diagSE*64 + diagSW*128.
                 //             Identical at all 4 vertices so the GPU does not interpolate it.
                 //             The shader decodes and computes per-pixel min-distance to the nearest wall.
-                // v.color.b = Isometric Shadow Multiplier (1.0f at runtime)
+                // v.color.b = Isometric Shadow Multiplier (byte 255 → 1.0 at runtime)
                 // v.color.a = unused (light moved to TexCoord1)
                 // v.uv.xy   = localFlowVector
                 // v.uv.zw   = shorePush (normalized direction for displacement)
@@ -791,29 +794,28 @@ namespace Helpers
                 bool diagSE = !wallS && !wallE && IsSolidWall(n_SE, in blockTypes);
                 bool diagSW = !wallS && !wallW && IsSolidWall(n_SW, in blockTypes);
 
-                float packedShoreMask = (
-                    (wallN ? 1f : 0f) + (wallS ? 2f : 0f) + (wallE ? 4f : 0f) + (wallW ? 8f : 0f) +
-                    (diagNE ? 16f : 0f) + (diagNW ? 32f : 0f) + (diagSE ? 64f : 0f) + (diagSW ? 128f : 0f)
-                ) / 255f;
+                int shoreMaskSum =
+                    (wallN ? 1 : 0) + (wallS ? 2 : 0) + (wallE ? 4 : 0) + (wallW ? 8 : 0) +
+                    (diagNE ? 16 : 0) + (diagNW ? 32 : 0) + (diagSE ? 64 : 0) + (diagSW ? 128 : 0);
 
-                Color c = new Color(liquidType, packedShoreMask, 1.0f, 0f);
+                Color32 c = new Color32(liquidTypeByte, (byte)shoreMaskSum, 255, 0);
 
                 normals.Add(Vector3.up);
                 colors.Add(c);
                 lightData.Add(topLight0);
-                uvs.Add(new Vector4(flow_bl.x, flow_bl.y, shore_push_bl.x, shore_push_bl.y));
+                uvs.Add((half4)new float4(flow_bl.x, flow_bl.y, shore_push_bl.x, shore_push_bl.y));
                 normals.Add(Vector3.up);
                 colors.Add(c);
                 lightData.Add(topLight1);
-                uvs.Add(new Vector4(flow_tl.x, flow_tl.y, shore_push_tl.x, shore_push_tl.y));
+                uvs.Add((half4)new float4(flow_tl.x, flow_tl.y, shore_push_tl.x, shore_push_tl.y));
                 normals.Add(Vector3.up);
                 colors.Add(c);
                 lightData.Add(topLight2);
-                uvs.Add(new Vector4(flow_br.x, flow_br.y, shore_push_br.x, shore_push_br.y));
+                uvs.Add((half4)new float4(flow_br.x, flow_br.y, shore_push_br.x, shore_push_br.y));
                 normals.Add(Vector3.up);
                 colors.Add(c);
                 lightData.Add(topLight3);
-                uvs.Add(new Vector4(flow_tr.x, flow_tr.y, shore_push_tr.x, shore_push_tr.y));
+                uvs.Add((half4)new float4(flow_tr.x, flow_tr.y, shore_push_tr.x, shore_push_tr.y));
 
                 EmitQuadTriangles(topLight0, topLight1, topLight2, topLight3, vertexIndex, ref fluidTriangles);
 
@@ -949,14 +951,14 @@ namespace Helpers
                 }
 
                 // Side faces carry no shore data — g=0 (no walls), zw = 0
-                Color sideColor = new Color(liquidType, 0.0f, 1.0f, 0f);
+                Color32 sideColor = new Color32(liquidTypeByte, 0, 255, 0);
 
-                Vector4 uv1, uv2, uv3, uv4;
+                float4 uv1, uv2, uv3, uv4;
 
                 if (fluidLevel >= 8) // Waterfall (Falling Fluid)
                 {
                     // Force a strict downward flow at higher speed (V-axis)
-                    uv1 = uv2 = uv3 = uv4 = new Vector4(0f, 1.5f, 0f, 0f);
+                    uv1 = uv2 = uv3 = uv4 = new float4(0f, 1.5f, 0f, 0f);
                 }
                 else // Horizontal Spreading Fluid
                 {
@@ -972,28 +974,28 @@ namespace Helpers
                     Vector2 p_uv3 = ProjectFlowToSideFace(f3, faceIndex);
                     Vector2 p_uv4 = ProjectFlowToSideFace(f4, faceIndex);
 
-                    uv1 = new Vector4(p_uv1.x, p_uv1.y, 0f, 0f);
-                    uv2 = new Vector4(p_uv2.x, p_uv2.y, 0f, 0f);
-                    uv3 = new Vector4(p_uv3.x, p_uv3.y, 0f, 0f);
-                    uv4 = new Vector4(p_uv4.x, p_uv4.y, 0f, 0f);
+                    uv1 = new float4(p_uv1.x, p_uv1.y, 0f, 0f);
+                    uv2 = new float4(p_uv2.x, p_uv2.y, 0f, 0f);
+                    uv3 = new float4(p_uv3.x, p_uv3.y, 0f, 0f);
+                    uv4 = new float4(p_uv4.x, p_uv4.y, 0f, 0f);
                 }
 
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
                 colors.Add(sideColor);
                 lightData.Add(sideLight1);
-                uvs.Add(uv1);
+                uvs.Add((half4)uv1);
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
                 colors.Add(sideColor);
                 lightData.Add(sideLight2);
-                uvs.Add(uv2);
+                uvs.Add((half4)uv2);
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
                 colors.Add(sideColor);
                 lightData.Add(sideLight3);
-                uvs.Add(uv3);
+                uvs.Add((half4)uv3);
                 normals.Add(VoxelData.FaceChecks[faceIndex]);
                 colors.Add(sideColor);
                 lightData.Add(sideLight4);
-                uvs.Add(uv4);
+                uvs.Add((half4)uv4);
 
                 EmitQuadTriangles(sideLight1, sideLight2, sideLight3, sideLight4, vertexIndex, ref fluidTriangles);
 
@@ -1033,27 +1035,27 @@ namespace Helpers
                     botLight0 = botLight1 = botLight2 = botLight3 = flat;
                 }
 
-                // Bottom faces are internal. Hardcode shore mask (g) to 0.0f (no walls).
-                // Use 1.0f for the b-channel so bottom faces default to full brightness (unshadowed) in game
-                Color bottomColor = new Color(liquidType, 0.0f, 1.0f, 0f);
+                // Bottom faces are internal. Hardcode shore mask (g) to 0 (no walls).
+                // Use byte 255 for the b-channel so bottom faces default to full brightness (unshadowed) in game
+                Color32 bottomColor = new Color32(liquidTypeByte, 0, 255, 0);
 
                 // Add vertices/normals/colors/uvs specifically matching winding order: BL, TL, BR, TR
                 normals.Add(Vector3.down);
                 colors.Add(bottomColor);
                 lightData.Add(botLight0);
-                uvs.Add(new Vector4(flow_bl.x, flow_bl.y, 0f, 0f));
+                uvs.Add((half4)new float4(flow_bl.x, flow_bl.y, 0f, 0f));
                 normals.Add(Vector3.down);
                 colors.Add(bottomColor);
                 lightData.Add(botLight1);
-                uvs.Add(new Vector4(flow_tl.x, flow_tl.y, 0f, 0f));
+                uvs.Add((half4)new float4(flow_tl.x, flow_tl.y, 0f, 0f));
                 normals.Add(Vector3.down);
                 colors.Add(bottomColor);
                 lightData.Add(botLight2);
-                uvs.Add(new Vector4(flow_br.x, flow_br.y, 0f, 0f));
+                uvs.Add((half4)new float4(flow_br.x, flow_br.y, 0f, 0f));
                 normals.Add(Vector3.down);
                 colors.Add(bottomColor);
                 lightData.Add(botLight3);
-                uvs.Add(new Vector4(flow_tr.x, flow_tr.y, 0f, 0f));
+                uvs.Add((half4)new float4(flow_tr.x, flow_tr.y, 0f, 0f));
 
                 EmitQuadTriangles(botLight0, botLight1, botLight2, botLight3, vertexIndex, ref fluidTriangles, reverseWinding: true);
 

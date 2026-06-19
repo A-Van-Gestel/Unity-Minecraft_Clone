@@ -56,7 +56,7 @@ struct LiquidAppdata
     float4 vertex : POSITION;
     float3 normal : NORMAL;
     float4 uv : TEXCOORD0; // xy = localFlowVector, zw = shorePush (normalized direction)
-    half4 color : COLOR; // r=LiquidType, g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier, a=unused
+    half4 color : COLOR; // MR-2 UNorm8: r=LiquidType/255 (×255 below), g=PackedShoreMask (8-bit wall flags), b=ShadowMultiplier, a=unused
     half4 lightData : TEXCOORD1; // UNorm8: (skyLight, blocklightR, blocklightG, blocklightB)
 };
 
@@ -108,7 +108,9 @@ LiquidV2F LiquidVert(LiquidAppdata v)
     o.worldPos = TransformObjectToWorld(v.vertex.xyz);
     o.screenPos = ComputeScreenPos(o.vertex);
     o.worldNormal = TransformObjectToWorldNormal(v.normal);
-    o.liquidType = v.color.r;
+    // MR-2: liquidType (FluidShaderID) now rides in a UNorm8 color channel, so the GPU delivers it as
+    // id/255. Multiply back to the raw id (water=0, lava=1) — the frag's `> 0.5` branch needs this.
+    o.liquidType = v.color.r * 255.0;
     o.sunLight = v.lightData.r;
     o.blockRGB = v.lightData.gba;
     o.shadowMultiplier = v.color.b;

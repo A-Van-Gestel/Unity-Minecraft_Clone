@@ -1,6 +1,7 @@
 using Data;
 using Helpers;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
@@ -11,13 +12,22 @@ public class SectionRenderer
     private readonly MeshRenderer _meshRenderer;
     private readonly Mesh _mesh;
 
-    private static readonly VertexAttributeDescriptor[] s_layout =
+    // MR-2: packed vertex format — 60 B → 32 B/vertex. Position stays full Float32×3 (fluid surface
+    // heights need the precision); TexCoord0 → Float16×4, Color → UNorm8×4, Normal → SNorm8×4. The GPU
+    // unpacks half/unorm/snorm back to floats in the shader, so only LiquidCore.hlsl's liquidType read
+    // (color.r * 255) had to change. TexCoord1 (smooth light) is unchanged (byte-identical, B11-pinned).
+    /// <summary>
+    /// The single source of truth for the section mesh vertex layout. Public so the editor chunk-preview
+    /// window (<c>ChunkPreview3DWindow</c>) uploads the same <see cref="Data.MeshDataJobOutput"/> buffers
+    /// against the identical descriptor — a second copy would silently drift on the next format change.
+    /// </summary>
+    public static readonly VertexAttributeDescriptor[] Layout =
     {
-        new VertexAttributeDescriptor(VertexAttribute.Position),
-        new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 4, stream: 1),
-        new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, stream: 2),
-        new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 3),
-        new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.UNorm8, 4, stream: 3),
+        new VertexAttributeDescriptor(VertexAttribute.Position), // Float32×3, 12B
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float16, 4, stream: 1), // 8B
+        new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.UNorm8, 4, stream: 2), // 4B
+        new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.SNorm8, 4, stream: 3), // 4B
+        new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.UNorm8, 4, stream: 3), // 4B
     };
 
     /// <summary>
@@ -82,7 +92,7 @@ public class SectionRenderer
     /// </para>
     /// </summary>
     public void UpdateMeshNative(
-        NativeArray<Vector3> verts, NativeArray<Vector4> uvs, NativeArray<Color> colors,
+        NativeArray<Vector3> verts, NativeArray<half4> uvs, NativeArray<Color32> colors,
         NativeArray<NormalLightVertex> stream3, int vertexStart, int vertexCount,
         NativeArray<int> opaqueTris, int opaqueStart, int opaqueCount,
         NativeArray<int> transparentTris, int transparentStart, int transparentCount,
@@ -101,7 +111,7 @@ public class SectionRenderer
         const MeshUpdateFlags flags = MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
         // --- 1. Setup Vertex Buffer ---
-        _mesh.SetVertexBufferParams(vertexCount, s_layout);
+        _mesh.SetVertexBufferParams(vertexCount, Layout);
         _mesh.SetVertexBufferData(verts, vertexStart, 0, vertexCount, 0, flags);
         _mesh.SetVertexBufferData(uvs, vertexStart, 0, vertexCount, 1, flags);
         _mesh.SetVertexBufferData(colors, vertexStart, 0, vertexCount, 2, flags);

@@ -10,14 +10,9 @@ namespace Editor.WorldTools
 {
     public partial class ChunkPreview3DWindow
     {
-        private static readonly VertexAttributeDescriptor[] s_vertexLayout =
-        {
-            new VertexAttributeDescriptor(VertexAttribute.Position),
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 4, stream: 1),
-            new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, stream: 2),
-            new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 3),
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.UNorm8, 4, stream: 3),
-        };
+        // MR-2: reuse SectionRenderer.Layout — this window uploads the same MeshDataJobOutput buffers
+        // (half4 UVs, Color32 colors, packed SNorm8 normals) raw, so a second copy would silently drift.
+        private static VertexAttributeDescriptor[] VertexLayout => SectionRenderer.Layout;
 
         /// <summary>
         /// Converts a <see cref="MeshDataJobOutput"/> into Unity <see cref="Mesh"/> objects, one per
@@ -65,7 +60,7 @@ namespace Editor.WorldTools
                     MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
                 // --- Vertex buffer ---
-                mesh.SetVertexBufferParams(stats.VertexCount, s_vertexLayout);
+                mesh.SetVertexBufferParams(stats.VertexCount, VertexLayout);
                 mesh.SetVertexBufferData(output.Vertices.AsArray(), stats.VertexStartIndex, 0,
                     stats.VertexCount, 0, flags);
                 mesh.SetVertexBufferData(output.Uvs.AsArray(), stats.VertexStartIndex, 0,

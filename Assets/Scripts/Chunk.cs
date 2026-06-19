@@ -1,10 +1,9 @@
 using System.Collections.Generic;
 using Data;
 using Helpers;
-using Jobs;
 using Jobs.BurstData;
 using Unity.Collections;
-using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Pool;
 using Object = UnityEngine.Object;
@@ -326,8 +325,8 @@ public class Chunk
 
         // Obtain raw NativeArray views from the lists
         NativeArray<Vector3> allVerts = meshData.Vertices.AsArray();
-        NativeArray<Vector4> allUvs = meshData.Uvs.AsArray(); // Vector4: xy=flow/atlas, zw=shorePush
-        NativeArray<Color> allColors = meshData.Colors.AsArray();
+        NativeArray<half4> allUvs = meshData.Uvs.AsArray(); // MR-2 half4: xy=flow/atlas, zw=shorePush
+        NativeArray<Color32> allColors = meshData.Colors.AsArray();
         NativeArray<NormalLightVertex> allStream3 = meshData.InterleavedStream3.AsArray();
         NativeArray<int> allOpaqueTris = meshData.Triangles.AsArray();
         NativeArray<int> allTransTris = meshData.TransparentTriangles.AsArray();

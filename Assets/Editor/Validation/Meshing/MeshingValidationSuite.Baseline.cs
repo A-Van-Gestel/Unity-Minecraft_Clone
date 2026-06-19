@@ -5,6 +5,7 @@ using Editor.Validation.Meshing.Framework;
 using Helpers;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Editor.Validation.Meshing
@@ -57,8 +58,8 @@ namespace Editor.Validation.Meshing
                     NativeList<Vector3> verts = new NativeList<Vector3>(4, Allocator.Temp);
                     NativeList<int> tris = new NativeList<int>(6, Allocator.Temp);
                     NativeList<int> transTris = new NativeList<int>(0, Allocator.Temp);
-                    NativeList<Vector4> uvs = new NativeList<Vector4>(4, Allocator.Temp);
-                    NativeList<Color> colors = new NativeList<Color>(4, Allocator.Temp);
+                    NativeList<half4> uvs = new NativeList<half4>(4, Allocator.Temp);
+                    NativeList<Color32> colors = new NativeList<Color32>(4, Allocator.Temp);
                     NativeList<Vector3> normals = new NativeList<Vector3>(4, Allocator.Temp);
                     NativeList<Color32> lightData = new NativeList<Color32>(4, Allocator.Temp);
                     int vertexIndex = 0;
@@ -619,8 +620,8 @@ namespace Editor.Validation.Meshing
                 {
                     pq.Verts[i] = o.Vertices[b + i];
                     pq.Normals[i] = o.Normals[b + i];
-                    pq.Uvs[i] = o.Uvs[b + i];
-                    pq.Colors[i] = o.Colors[b + i];
+                    pq.Uvs[i] = (float4)o.Uvs[b + i]; // MR-2: half4 → float4 → Vector4
+                    pq.Colors[i] = o.Colors[b + i]; // MR-2: Color32 → Color (implicit)
                     pq.Light[i] = o.LightData[b + i];
                 }
 

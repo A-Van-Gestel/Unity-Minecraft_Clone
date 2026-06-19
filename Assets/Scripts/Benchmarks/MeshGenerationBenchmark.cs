@@ -10,6 +10,7 @@ using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
@@ -692,8 +693,8 @@ namespace Benchmarks
                 for (int i = 0; i < sectionCount; i++) renderers[i] = new SectionRenderer(parent.transform, i);
 
                 NativeArray<Vector3> verts = output.Vertices.AsArray();
-                NativeArray<Vector4> uvs = output.Uvs.AsArray();
-                NativeArray<Color> colors = output.Colors.AsArray();
+                NativeArray<half4> uvs = output.Uvs.AsArray();
+                NativeArray<Color32> colors = output.Colors.AsArray();
                 NativeArray<NormalLightVertex> stream3 = output.InterleavedStream3.AsArray();
                 NativeArray<int> opaque = output.Triangles.AsArray();
                 NativeArray<int> trans = output.TransparentTriangles.AsArray();
@@ -719,8 +720,8 @@ namespace Benchmarks
 
                 // Per-vertex byte total is summed from the actual stream element types, so it auto-updates
                 // from 60 B to ~32 B once MR-2 repacks these buffers — no hardcoded sizes to keep in sync.
-                int bytesPerVertex = UnsafeUtility.SizeOf<Vector3>() + UnsafeUtility.SizeOf<Vector4>()
-                                                                     + UnsafeUtility.SizeOf<Color>() + UnsafeUtility.SizeOf<NormalLightVertex>();
+                int bytesPerVertex = UnsafeUtility.SizeOf<Vector3>() + UnsafeUtility.SizeOf<half4>()
+                                                                     + UnsafeUtility.SizeOf<Color32>() + UnsafeUtility.SizeOf<NormalLightVertex>();
                 int verticesPerPass = output.Vertices.Length;
 
                 result = new UploadBenchmarkResult
@@ -756,7 +757,7 @@ namespace Benchmarks
         private static void UploadPass(
             SectionRenderer[] renderers,
             NativeArray<MeshSectionStats> stats,
-            NativeArray<Vector3> verts, NativeArray<Vector4> uvs, NativeArray<Color> colors,
+            NativeArray<Vector3> verts, NativeArray<half4> uvs, NativeArray<Color32> colors,
             NativeArray<NormalLightVertex> stream3,
             NativeArray<int> opaque, NativeArray<int> trans, NativeArray<int> fluid)
         {
