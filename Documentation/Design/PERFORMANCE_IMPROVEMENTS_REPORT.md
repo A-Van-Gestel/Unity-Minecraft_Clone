@@ -62,7 +62,7 @@ instead of a crash.
 | ID     | Finding                                                           | Effort | Risk | Benefit | Seed | Save |
 |--------|-------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | MR-1 ✅ | Per-vertex `Quaternion.Euler` in standard cube face generation    |   🟢   |  🟢  |   🟡¹   |  ✅   |  ✅   |
-| MR-2   | 60-byte vertex format with a near-constant 16-byte color stream   |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| MR-2 ✅ | 60-byte vertex format with a near-constant 16-byte color stream   |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
 | MR-3 ✅ | `new Material[3]` + `sharedMaterials` set per section mesh update |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | MR-4 ✅ | `RecalculateBounds()` per section update despite known bounds     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | MR-5 ✅ | `MeshPostProcessJob` blocks the main thread per chunk apply       |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
@@ -207,7 +207,29 @@ rotation variants as a Phase 2b idea for *custom meshes*; the standard-cube cost
 
 ---
 
-### MR-2. 60-byte vertex format with a near-constant color stream
+### MR-2. ✅ DONE (2026-06-20) — 60-byte vertex format with a near-constant color stream
+
+> **Closed:** implemented, suite-guarded, in-game confirmed, and measured. The packed layout keeps
+> Position at `Float32x3` (fluids carry sub-block surface heights; half precision risked visible
+> cracks) and repacks the rest: TexCoord0 → `Float16x4` (8 B), Color → `UNorm8x4` (4 B), Normal →
+> `SNorm8x4` (4 B); TexCoord1 (smooth light) is **unchanged** (B11-pinned, byte-identical). **60 B → 32 B
+> /vertex.** The GPU unpacks half/unorm/snorm to floats transparently, so the only shader change was
+> `LiquidCore.hlsl` recovering the fluid type via `color.r * 255` (it now rides a UNorm8 channel). The
+> normal is packed off the main thread in `MeshPostProcessJob` via `PackedNormal` (the writers still emit
+> full-precision `Vector3` normals). `SectionRenderer.Layout` is the single shared source of truth for
+> the descriptor (the editor preview window references it). Guarded by the full `Validate Meshing` suite
+> (B11 proves TexCoord1 stayed byte-identical; B2/B4 UVs under a half tolerance; B5/B10 determinism on
+> the packed normal).
+>
+> **Measured (IL2CPP, before [`MESHING_MR2_2026_06_19_BASELINE.md`](../Performance/MESHING_MR2_2026_06_19_BASELINE.md)
+> `0e453e0` → after [`MESHING_MR2_2026_06_20_AFTER_BASELINE.md`](../Performance/MESHING_MR2_2026_06_20_AFTER_BASELINE.md)
+> `0e82130`):** vertex **upload −57 %** (1576 → 676 µs/chunk; bytes 15.94 → 8.50 MB; rate 10113 →
+> 12571 MB/s — the stride shrink also lifted throughput, so it beat the −47 % byte ratio). **Bonus:** the
+> smaller writer buffers (`Uvs` 16→8 B, `Colors` 16→4 B) cut *generation* 25–30 % on the dense
+> patterns (Checkerboard/Transparent/MixedTerrain), wall-clock −25 %. **Trade-off:** Fluid generation
+> **+6.4 %** (over the 5 % budget, accepted) — the fluid mesher computes UVs per-vertex and now does
+> `float→half` conversions; ~74 µs/chunk, dwarfed by the ~900 µs/chunk upload win. Budget for the Fluid
+> pattern is treated as intentionally moved for MR-2 (see the after-baseline doc).
 
 **Observed:** `SectionRenderer.s_layout` declares Position `Float32x3` (12 B) + TexCoord0
 `Float32x4` (16 B) + Color `Float32x4` (16 B) + Normal `Float32x3` (12 B) + TexCoord1 `UNorm8x4`
