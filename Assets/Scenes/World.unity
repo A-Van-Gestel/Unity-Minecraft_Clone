@@ -1369,10 +1369,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c21ea255961f4b50a20211c8f5dd7e49, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Benchmarks.MeshGenerationBenchmark
-  _benchMarkEnabled: 0
+  _benchMarkEnabled: 1
   _runFullComparison: 1
   _benchmarkRuns: 100
   _chunksToMesh: 156
+  _runUploadBenchmark: 1
+  _uploadPattern: 1
+  _uploadRepeats: 200
   _mode: 1
   _dataType: 1
   _useBlockingWait: 1
