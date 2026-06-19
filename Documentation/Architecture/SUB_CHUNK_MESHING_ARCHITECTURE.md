@@ -183,11 +183,11 @@ The mesher has an editor validation suite at `Assets/Editor/Validation/Meshing/`
 single chunk and asserts the output against an independent standard-cube geometry oracle plus
 structural/determinism invariants — the regression guard that lets the `MR-*` meshing optimizations in
 [PERFORMANCE_IMPROVEMENTS_REPORT.md](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim "output-preserving"
-(it already guards MR-1 and MR-7).
+(it already guards MR-1, MR-3, MR-4, MR-5, and MR-7).
 
-- **What it covers and its blind spots** (interior-only placement, `SmoothLighting.Off` so light/UV/color
-  *values* are unchecked, no `MeshPostProcessJob` stage, no custom/cross/lava), plus the phased `MH-*`
-  extension backlog keyed to each open `MR-*` item:
+- **What it covers and its remaining blind spots** (interior-only placement; no custom/cross-mesh block
+  or lava in the palette; smooth-light *values* covered only for the uniform-field case — distinct-per-corner
+  / AO darkening still un-modelled), plus the phased `MH-*` extension backlog keyed to each open `MR-*` item:
   [Testing Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md](Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md).
 - **Harness file map, API cheat sheet, and the MR-* guard pattern** (for authoring scenarios):
   `.agents/skills/validation-driven-bugfix/references/meshing-suite.md`.

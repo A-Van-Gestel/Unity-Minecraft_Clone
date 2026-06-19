@@ -63,9 +63,9 @@ instead of a crash.
 |--------|-------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | MR-1 ✅ | Per-vertex `Quaternion.Euler` in standard cube face generation    |   🟢   |  🟢  |   🟡¹   |  ✅   |  ✅   |
 | MR-2   | 60-byte vertex format with a near-constant 16-byte color stream   |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
-| MR-3   | `new Material[3]` + `sharedMaterials` set per section mesh update |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| MR-4   | `RecalculateBounds()` per section update despite known bounds     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| MR-5   | `MeshPostProcessJob` blocks the main thread per chunk apply       |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-3 ✅ | `new Material[3]` + `sharedMaterials` set per section mesh update |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-4 ✅ | `RecalculateBounds()` per section update despite known bounds     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-5 ✅ | `MeshPostProcessJob` blocks the main thread per chunk apply       |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | MR-6   | Mesh output `NativeList`s start at default capacity               |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | MR-7 ✅ | Per-fluid-voxel `Allocator.Temp` arrays in the meshing job        |   🟢   |  🟢  |   🟢²   |  ✅   |  ✅   |
 | MR-8   | Greedy meshing (coplanar quad merging)                            |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
@@ -235,7 +235,16 @@ realistic target is **~32 bytes/vertex (−45%)**, which cuts `SetVertexBufferDa
 
 ---
 
-### MR-3. Managed allocations per section mesh update
+### MR-3. ✅ DONE (2026-06-18) — Managed allocations per section mesh update
+
+> **Closed:** implemented and suite-guarded. `UpdateMeshNative` now picks from 8 cached `Material[]`
+> combinations by submesh-presence bitmask (`EnsureMaterialCacheCurrent`) and assigns
+> `sharedMaterials` **only when the bitmask or cache version changed** since the section's last update —
+> no per-update `Material[]` allocation, no redundant renderer-state write. A static cache-version
+> counter covers a global material swap; the per-section `_lastMaterialMask`/`_lastMaterialCacheVersion`
+> are reset in `Clear()` (pool-reset-safety). Guarded by **B12** (combination-per-bitmask) and the new
+> **B15** (no-reassign-when-bitmask-unchanged, sentinel-survival). All baselines green; in-game render
+> confirmed.
 
 **Observed:** `SectionRenderer.UpdateMeshNative` (`SectionRenderer.cs` ~line 84) allocates
 `new Material[3]`, potentially `Array.Resize`s it, and assigns `_meshRenderer.sharedMaterials` on
@@ -256,7 +265,14 @@ assign `sharedMaterials` when the combination actually changed since the last up
 
 ---
 
-### MR-4. `RecalculateBounds()` per section update despite known bounds
+### MR-4. ✅ DONE (2026-06-18) — `RecalculateBounds()` per section update despite known bounds
+
+> **Closed:** implemented and suite-guarded. `UpdateMeshNative`'s per-update `_mesh.RecalculateBounds()`
+> vertex scan is replaced by a constant `s_sectionBounds` (16³ section cell, center (8,8,8)) assigned
+> each update — O(1) instead of O(verts). Guarded by **B14** (bounds contain all emitted vertices —
+> survives the change) and the new **B16** (bounds *equal* the constant section cell). The "custom mesh
+> exceeds the unit cell" caveat is still open via **MH-7** (no custom/cross/lava block in the palette
+> yet) — current blocks all stay inside the cell, confirmed in-game. All baselines green.
 
 **Observed:** `UpdateMeshNative` passes `MeshUpdateFlags.DontRecalculateBounds` to every buffer
 upload, then ends with `_mesh.RecalculateBounds()` (`SectionRenderer.cs` ~line 110) — a full
@@ -277,7 +293,14 @@ pass it through `MeshSectionStats`.
 
 ---
 
-### MR-5. `MeshPostProcessJob` blocks the main thread per chunk apply
+### MR-5. ✅ DONE (2026-06-18) — `MeshPostProcessJob` blocks the main thread per chunk apply
+
+> **Closed:** implemented and suite-guarded. The chunk-space → section-space rewrite + `InterleavedStream3`
+> assembly now chains onto the mesh job at schedule time in `WorldJobManager.ScheduleMeshing`
+> (`postJob.Schedule(job.Schedule())`) instead of `Schedule().Complete()` inside `Chunk.ApplyMeshData`.
+> By the time `ProcessMeshJobs` completes the combined handle the post-process has already run on a
+> worker thread; `ApplyMeshData` only uploads buffers. Guarded by **B10** (chained-vs-separate byte
+> equality, incl. `InterleavedStream3`). All baselines green; in-game render confirmed.
 
 **Observed:** `Chunk.ApplyMeshData` (`Chunk.cs` ~line 334) runs
 `postProcessJob.Schedule().Complete()` — a synchronous main-thread stall for the chunk-space →

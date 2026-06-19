@@ -88,6 +88,33 @@ namespace Editor.Validation.Meshing.Framework
             return false;
         }
 
+        /// <summary>
+        /// MR-4 postcondition — asserts the mesh <paramref name="actual"/> bounds EQUAL the expected
+        /// constant section-cell box (center and size, within <see cref="MeshAssert.VertexEpsilon"/>).
+        /// Stronger than <see cref="BoundsContainAllVerts"/>: it pins the exact constant produced once
+        /// <c>RecalculateBounds()</c> is replaced, so it can only be baselined after MR-4 ships.
+        /// </summary>
+        public static bool BoundsEqual(string label, Bounds actual, Bounds expected)
+        {
+            const float eps = MeshAssert.VertexEpsilon;
+            bool ok =
+                Mathf.Abs(actual.center.x - expected.center.x) <= eps &&
+                Mathf.Abs(actual.center.y - expected.center.y) <= eps &&
+                Mathf.Abs(actual.center.z - expected.center.z) <= eps &&
+                Mathf.Abs(actual.size.x - expected.size.x) <= eps &&
+                Mathf.Abs(actual.size.y - expected.size.y) <= eps &&
+                Mathf.Abs(actual.size.z - expected.size.z) <= eps;
+
+            if (ok)
+            {
+                Debug.Log($"[PASS] {label}: bounds (center {actual.center}, size {actual.size}) == expected (center {expected.center}, size {expected.size}).");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] {label}: bounds (center {actual.center}, size {actual.size}) != expected (center {expected.center}, size {expected.size}).");
+            return false;
+        }
+
         private static string Name(Material m) => m == null ? "null" : m.name;
 
         private static string Names(Material[] mats)

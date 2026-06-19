@@ -52,6 +52,8 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B12: renderer assigns the correct material combination per submesh-presence bitmask (MH-6 / MR-3 guard)", B12_MaterialCombinationPerBitmask));
             scenarios.Add(new Scenario("B13: empty section deactivates the renderer and assigns no materials (MH-6)", B13_EmptySectionNoAssignment));
             scenarios.Add(new Scenario("B14: mesh bounds contain every emitted vertex (MH-6 / MR-4 containment premise)", B14_BoundsContainVertices));
+            scenarios.Add(new Scenario("B15: unchanged submesh bitmask does not reassign sharedMaterials (MR-3 postcondition)", B15_NoReassignWhenBitmaskUnchanged));
+            scenarios.Add(new Scenario("B16: mesh bounds equal the constant section cell (MR-4 postcondition)", B16_BoundsEqualConstantSectionCell));
         }
 
         /// <summary>
@@ -187,6 +189,94 @@ namespace Editor.Validation.Meshing
                 generousContains, $"a {GENEROUS_BOX_SIZE}-unit box reports every vertex inside (predicate isn't constant-false)");
 
             return allPassed;
+        }
+
+        /// <summary>
+        /// B15 — MR-3 postcondition: once the material combinations are cached, two consecutive updates
+        /// with the SAME submesh-presence bitmask must NOT reassign <c>sharedMaterials</c>. Observed
+        /// black-box: prime opaque-only, externally stomp <c>sharedMaterials</c> with a sentinel the
+        /// renderer would never produce, then issue a same-bitmask update and assert the sentinel
+        /// survived (no reassignment). Positive control: a DIFFERENT bitmask after re-stomping the
+        /// sentinel must overwrite it — proving the test can actually observe a reassignment.
+        /// </summary>
+        private static bool B15_NoReassignWhenBitmaskUnchanged()
+        {
+            bool allPassed = true;
+
+            using SectionRendererTestFixture fixture = new SectionRendererTestFixture();
+
+            // First update: opaque-only (bitmask 1) → sharedMaterials == [opaque].
+            fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 0, fluidCount: 0);
+            allPassed &= RendererAssert.MaterialsEqual("B15 setup: opaque-only assigned",
+                fixture.SharedMaterials, new[] { fixture.OpaqueMaterial });
+
+            MeshRenderer meshRenderer = fixture.Renderer.GameObject.GetComponent<MeshRenderer>();
+
+            Shader shader = Shader.Find("Hidden/Internal-Colored");
+            Material sentinel = new Material(shader) { name = "B15_Sentinel" };
+            try
+            {
+                // Externally stomp sharedMaterials with a sentinel the renderer would never assign.
+                meshRenderer.sharedMaterials = new[] { sentinel };
+
+                // Same bitmask (opaque-only again): MR-3 must skip the assignment, so the sentinel survives.
+                fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 0, fluidCount: 0);
+                Material[] afterSameMask = meshRenderer.sharedMaterials;
+                allPassed &= MeshAssert.IsTrue("B15: unchanged bitmask does not reassign sharedMaterials",
+                    afterSameMask.Length == 1 && ReferenceEquals(afterSameMask[0], sentinel),
+                    "the externally-set sentinel survived a same-bitmask update (no redundant reassignment)");
+
+                // Positive control: a CHANGED bitmask (add transparent) must reassign, overwriting the sentinel.
+                meshRenderer.sharedMaterials = new[] { sentinel };
+                fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 3, fluidCount: 0);
+                allPassed &= RendererAssert.MaterialsEqual("B15 control: changed bitmask reassigns sharedMaterials",
+                    fixture.SharedMaterials, new[] { fixture.OpaqueMaterial, fixture.TransparentMaterial });
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(sentinel);
+            }
+
+            return allPassed;
+        }
+
+        /// <summary>
+        /// B16 — MR-4 postcondition: after a non-empty update, <see cref="Mesh.bounds"/> must EQUAL the
+        /// constant 16³ section-cell box (center (8,8,8), size (16,16,16)), independent of the actual
+        /// geometry extent. Positive control: the probe verts' tight AABB is strictly smaller than the
+        /// cell, so a <c>RecalculateBounds()</c>-style tight result would fail this equality — proving
+        /// the assertion is not vacuously satisfied by whatever bounds the geometry happens to produce.
+        /// </summary>
+        private static bool B16_BoundsEqualConstantSectionCell()
+        {
+            bool allPassed = true;
+
+            using SectionRendererTestFixture fixture = new SectionRendererTestFixture();
+            fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 0, fluidCount: 0);
+
+            const float size = Helpers.ChunkMath.SECTION_SIZE;
+            const float half = size * 0.5f;
+            Bounds expected = new Bounds(new Vector3(half, half, half), new Vector3(size, size, size));
+
+            allPassed &= RendererAssert.BoundsEqual("B16: mesh bounds equal the constant section cell",
+                fixture.MeshBounds, expected);
+
+            // Positive control: the probe AABB is smaller than the section cell, so the equality above
+            // could not pass if bounds tracked the geometry (the pre-MR-4 RecalculateBounds behavior).
+            Bounds tight = TightBounds(s_rendererProbeVerts);
+            allPassed &= MeshAssert.IsTrue("B16 control: probe AABB differs from the constant section cell",
+                tight.size != expected.size,
+                $"tight probe AABB size {tight.size} != constant cell size {expected.size}");
+
+            return allPassed;
+        }
+
+        /// <summary>Computes the tight axis-aligned bounding box of a vertex set (control helper for B16).</summary>
+        private static Bounds TightBounds(Vector3[] verts)
+        {
+            Bounds b = new Bounds(verts[0], Vector3.zero);
+            for (int i = 1; i < verts.Length; i++) b.Encapsulate(verts[i]);
+            return b;
         }
     }
 }
