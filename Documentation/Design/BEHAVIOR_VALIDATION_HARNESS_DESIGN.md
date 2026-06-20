@@ -290,6 +290,26 @@ two cells write the same neighbor. The driver must replicate production's order:
   directly exercises the TG-3 seeding.
 - **Effort:** 🟢 trivial (run twice, `OutputsEqual`-style compare).
 
+### BH-7 — apply-path fidelity is replicated but **unguarded** · **OPEN** · gates faithful golden masters
+
+- **Context (from the 2026-06-20 code review):** `BehaviorTestWorld.ApplyMod` now faithfully mirrors the
+  state-affecting half of `World.ApplyModifications` + `ChunkData.ModifyVoxel` — the `oldPacked == newPacked`
+  no-op early-out, the `BlockTagUtility.CanReplace` / `ReplacementRule` placement gate (rejected mods dropped),
+  and the `REQUIRES_SUPPORT` break-cascade (FIFO re-enqueue). The original `SetVoxel`-only version silently
+  bypassed all three; that hole is closed.
+- **Blind spot:** **no baseline exercises any of it.** BH-B1 (water→air) is applied identically with or
+  without the gate/cascade, so a regression that re-breaks the apply path — drops the `CanReplace` check,
+  removes the cascade, or loses the no-op guard — would still pass green. The fidelity is asserted by code, not
+  by a test.
+- **Build:** two small scenarios (see §4 BH-B9/BH-B10) whose *outcome differs* with vs. without the apply-path
+  logic: (a) a `REQUIRES_SUPPORT` block sitting on a fluid/support that drains away, so the cascade must break
+  it (golden differs if the cascade is missing); (b) a mod targeting a non-replaceable tagged block (requires
+  giving the palette realistic `tags`/`canReplaceTags` — note the BH-3 caveat that tagging fluids `LIQUID`
+  breaks self-replacement, so scope tags per-fixture). Each needs a positive control proving the gate/cascade
+  actually fired.
+- **Effort:** 🟡 medium (the support-cascade scenario is straightforward; the `CanReplace`-rejection scenario
+  needs careful per-fixture tagging).
+
 ---
 
 ## 4. Baseline scenarios (proposed BH-series)
@@ -300,14 +320,16 @@ B8/B9 pattern — e.g. prove the snapshot is non-empty and that a deliberately a
 
 | ID | Scenario | Leg | Guards |
 |----|----------|-----|--------|
-| **BH-B1** | Single water source on a flat floor, 6 ticks → spreads to level-7 ring | golden-master + invariants | core horizontal spread |
+| **BH-B1** ✅ | Single water source on a flat floor, **3 ticks** → symmetric level-1→3 spread (28 mods) | golden-master + determinism + non-vacuity | core horizontal spread — **shipped 2026-06-20** |
 | **BH-B2** | Water over a 1-block cliff edge → falling column + waterfall reset | golden-master | gravity + `MakeFalling` + waterfall max-spread |
 | **BH-B3** | Two sources 2 apart over solid → infinite-source regeneration fills the gap | golden-master | `infiniteSourceRegeneration` path |
-| **BH-B4** | Source removed → flow decays back to air over N ticks → all voxels `Active==false` | golden-master + termination (BH-5) | decay + drainage + termination |
+| **BH-B4** | Source removed → flow decays back to air over N ticks → all voxels `Active==false` | golden-master + termination (per-scenario) | decay + drainage + termination |
 | **BH-B5** | Lava (low `spreadChance`) → viscosity staggering over many ticks | golden-master + determinism (BH-6) | TG-3 per-tick reseed (the staggering must *progress*, not freeze) |
 | **BH-B6** | Grass next to convertible dirt → spreads over ticks (seeded RNG) | golden-master + determinism | grass reservoir-sampling + spread roll |
 | **BH-B7** | Grass with solid block on top → turns to dirt | golden-master | grass→dirt branch |
-| **BH-B8** | `Active`/`Behave` contract + determinism over **all** above fixtures | invariants (BH-5/BH-6) | universal, no golden master |
+| ~~**BH-B8**~~ | ~~contract over all fixtures~~ — **retired** (BH-5 retracted; determinism is per-scenario via BH-6) | — | — |
+| **BH-B9** | A `REQUIRES_SUPPORT` block on a draining support → cascade must break it | golden-master + positive control | apply-path support cascade (**BH-7**) |
+| **BH-B10** | Mod targeting a non-replaceable tagged block → production drops it, harness must too | golden-master + positive control | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags |
 | **BH-D1** | **Differential:** every BH-B# scenario run through old `switch` vs new TG-4/TG-5 dispatch → identical snapshots | A/B | **the load-bearing TG-4/TG-5 parity guard** |
 
 BH-D1 is added **in the TG-4/TG-5 PR itself** (it needs both code paths to exist), exactly as MR-5's
