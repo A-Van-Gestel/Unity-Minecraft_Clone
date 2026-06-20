@@ -34,6 +34,7 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B9: multi-section scene tiles SectionStats ranges contiguously (MH-9 per-section partition guard)", B9_MultiSectionStatsTiling));
             scenarios.Add(new Scenario("B10: post-process rewrites to section-space + interleaves stream 3, chained==separate (MH-5 / MR-5 guard)", B10_PostProcessSectionSpaceAndInterleave));
             scenarios.Add(new Scenario("B11: smooth lighting encodes uniform corner light to the right UNorm8 values (MH-3 / MR-2 guard)", B11_SmoothLightingUniformCornerValues));
+            scenarios.Add(new Scenario("B17: a pooled output reused across scenes equals a fresh buffer (MH-2 / MR-6 stale-reuse guard)", B17_PooledOutputStaleDataGuard));
         }
 
         /// <summary>
@@ -547,6 +548,91 @@ namespace Editor.Validation.Meshing
             bool differ = !(engineA.r == engineB.r && engineA.g == engineB.g && engineA.b == engineB.b && engineA.a == engineB.a);
             return MeshAssert.IsTrue("B11 configs drive distinct light", differ,
                 $"engine A {FmtColor(engineA)} vs B {FmtColor(engineB)} (must differ, else the map isn't driving LightData)");
+        }
+
+        /// <summary>
+        /// B17 (MH-2) — guards the MR-6 output-pooling reset. A pooled <see cref="MeshDataJobOutput"/>
+        /// reused across two <i>different</i> scenes must produce byte-identical output to a fresh buffer
+        /// running the second scene. The hazard: <see cref="Jobs.MeshGenerationJob"/> <b>appends</b> to
+        /// its output lists (and writes triangle indices from a job-local vertex counter that starts at
+        /// 0) and never clears them, so a reused buffer that was not cleared on return would carry the
+        /// first scene's vertices into the second — silent corruption.
+        /// <para>
+        /// This drives the <b>real</b> <see cref="MeshOutputPool"/> reset path: rent → run scene A →
+        /// <c>Return</c> (which clears) → rent the same instance back → run scene B, then compare against
+        /// a fresh-buffer scene B via <see cref="MeshAssert.OutputsEqual"/> (the same differential B5/B7
+        /// use). Without the <c>ClearForReuse</c> in <c>MeshOutputPool.Return</c> this is expected to fail
+        /// (scene A's verts leak in), so it is a genuine regression guard, not a tautology.
+        /// </para>
+        /// <para>
+        /// Positive control: scene A and scene B emit a <i>different</i> vertex count, so the reused
+        /// buffer genuinely held foreign data before reuse — a no-op reset could not pass both the
+        /// positive control and the equality check.
+        /// </para>
+        /// </summary>
+        private static bool B17_PooledOutputStaleDataGuard()
+        {
+            MeshOutputPool pool = new MeshOutputPool();
+            try
+            {
+                // Scene A primes the pooled buffer with real geometry (a structured opaque/oriented/
+                // transparent mix — the densest of the two scenes).
+                MeshDataJobOutput pooled = pool.Rent();
+                using (MeshingTestWorld worldA = new MeshingTestWorld())
+                {
+                    BuildSceneA(worldA);
+                    worldA.Run(reuseOutput: pooled);
+                }
+
+                int sceneAVerts = pooled.Vertices.Length;
+
+                // Return (clears, retains capacity) then rent the same instance straight back — the MR-6
+                // reset is the only thing between scene A's data and scene B's run.
+                pool.Return(pooled);
+                MeshDataJobOutput reused = pool.Rent();
+
+                using (MeshingTestWorld worldB = new MeshingTestWorld())
+                {
+                    BuildSceneB(worldB);
+                    worldB.Run(reuseOutput: reused);
+                }
+
+                // Fresh-buffer scene B is the equality oracle.
+                using MeshingTestWorld worldFresh = new MeshingTestWorld();
+                BuildSceneB(worldFresh);
+                MeshDataJobOutput fresh = worldFresh.Run();
+
+                bool passed = MeshAssert.IsTrue("B17 reused buffer emitted scene B", reused.Vertices.Length > 0,
+                    $"reused verts = {reused.Vertices.Length} (expected > 0)");
+                passed &= MeshAssert.IsTrue("B17 scenes differ (positive control)", sceneAVerts != fresh.Vertices.Length,
+                    $"scene A verts {sceneAVerts} vs scene B verts {fresh.Vertices.Length} (must differ so the buffer truly held foreign data)");
+                passed &= MeshAssert.OutputsEqual("B17 reused==fresh", reused, fresh);
+
+                pool.Return(reused); // return before the pool is disposed
+                return passed;
+            }
+            finally
+            {
+                pool.Dispose();
+            }
+        }
+
+        /// <summary>Scene A for B17: a spaced opaque/oriented/transparent mix (the B5 structured set).</summary>
+        private static void BuildSceneA(MeshingTestWorld world)
+        {
+            world.SetBlock(4, 6, 4, TestMeshBlockPalette.SolidOpaque);
+            world.SetBlock(6, 6, 4, TestMeshBlockPalette.OrientedOpaque, meta: 2); // West
+            world.SetBlock(8, 6, 4, TestMeshBlockPalette.TransparentCube);
+        }
+
+        /// <summary>
+        /// Scene B for B17: a different, smaller set (one opaque + one transparent cube) so its vertex
+        /// count differs from scene A — making the stale-reuse positive control non-vacuous.
+        /// </summary>
+        private static void BuildSceneB(MeshingTestWorld world)
+        {
+            world.SetBlock(8, 8, 8, TestMeshBlockPalette.SolidOpaque);
+            world.SetBlock(10, 8, 8, TestMeshBlockPalette.TransparentCube);
         }
 
         /// <summary>Formats a <see cref="Color32"/> as <c>(r,g,b,a)</c> for assertion diagnostics.</summary>

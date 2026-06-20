@@ -119,8 +119,14 @@ namespace Editor.Validation.Meshing.Framework
         /// so geometry is independent of (absent) light data.</param>
         /// <param name="postProcess">Whether/how to chain <see cref="MeshPostProcessJob"/>; defaults to
         /// <see cref="PostProcessMode.Off"/> so the gen-only chunk-space output is preserved unchanged.</param>
+        /// <param name="reuseOutput">MH-2: when supplied, the job writes into this caller-owned output
+        /// instead of a fresh one, and the harness does NOT take ownership of it (it is neither stored as
+        /// <see cref="Output"/> nor disposed by <see cref="Dispose"/>). Used to drive a pooled, reused
+        /// buffer through the real meshing path so a stale-data leak can be detected. The buffer must be
+        /// empty (length 0) on entry — the job appends and never clears.</param>
         public MeshDataJobOutput Run(SmoothLightingQuality lighting = SmoothLightingQuality.Off,
-            PostProcessMode postProcess = PostProcessMode.Off)
+            PostProcessMode postProcess = PostProcessMode.Off,
+            MeshDataJobOutput? reuseOutput = null)
         {
             DisposeOutput();
 
@@ -151,7 +157,9 @@ namespace Editor.Validation.Meshing.Framework
             // Empty neighbor light maps suffice because interior blocks only read the in-chunk map.
             NativeArray<ushort> emptyLight = new NativeArray<ushort>(0, Allocator.TempJob);
 
-            MeshDataJobOutput output = new MeshDataJobOutput(Allocator.Persistent);
+            // MH-2: write into the caller-owned reuse buffer when provided (the harness will not dispose
+            // it); otherwise allocate a fresh harness-owned output.
+            MeshDataJobOutput output = reuseOutput ?? new MeshDataJobOutput(Allocator.Persistent);
 
             MeshGenerationJob job = new MeshGenerationJob
             {
@@ -220,9 +228,15 @@ namespace Editor.Validation.Meshing.Framework
             lavaTemplates.Dispose();
             emptyLight.Dispose();
 
-            _output = output;
-            _hasOutput = true;
-            return _output;
+            // Only take ownership of a harness-allocated output. A caller-supplied reuse buffer (MH-2)
+            // stays owned by the caller, so it is never stored as _output nor disposed by this harness.
+            if (reuseOutput == null)
+            {
+                _output = output;
+                _hasOutput = true;
+            }
+
+            return output;
         }
 
         /// <summary>

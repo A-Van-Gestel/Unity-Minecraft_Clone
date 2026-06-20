@@ -356,8 +356,10 @@ public class Chunk
             );
         }
 
-        // Dispose native memory
-        meshData.Dispose();
+        // MR-6: the mesh output's native memory is no longer released here. The buffers are uploaded
+        // synchronously above (SetVertex/IndexBufferData copy), and WorldJobManager.ProcessMeshJobs
+        // returns the output to its pool (or disposes it) immediately after this call — so the meshing
+        // job's output buffers are pooled and reused instead of allocated/freed per chunk.
 
         // Add to the draw queue to be enabled on the main thread
         World.Instance.ChunksToDraw.Enqueue(this);

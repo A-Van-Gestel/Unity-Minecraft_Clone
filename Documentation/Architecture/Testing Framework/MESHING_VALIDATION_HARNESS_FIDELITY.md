@@ -121,15 +121,20 @@ for blockers.
   bounds); the renderer-side assignment still needs MH-6.
 - **Effort:** 🟢 trivial.
 
-#### MH-2 — No pooled-output stale-data guard · **IN-PR** · gates **MR-6** (pooling variant)
+#### MH-2 — No pooled-output stale-data guard · **CLOSED** (2026-06-20) · gated **MR-6** (pooling variant)
 
 - **Blind:** every `Run()` allocates a fresh `MeshDataJobOutput`. The `MR-6` *pre-size* variant is already
   covered (vertex-count + `OutputsEqual` prove output unchanged), but the *pool the output struct* variant
   introduces a reuse-across-jobs lifecycle where a `Clear()`-but-not-fully-reset buffer could leak stale
   vertices — exactly the failure class B8 guards for the fluid neighbor buffer.
-- **Build:** a scenario that runs scene A then scene B through **one** reused output instance and asserts B's
-  result is byte-identical to a fresh-buffer B run. Reuses existing `OutputsEqual`.
-- **Effort:** 🟢 trivial (once the pooling API exists to test against).
+- **Closed by:** baseline **B17** drives the real `MeshOutputPool` reset path — rent → run scene A →
+  `Return` (which `ClearForReuse()`s) → rent the same instance back → run scene B — then asserts the reused
+  buffer is byte-identical (`MeshAssert.OutputsEqual`) to a fresh-buffer scene B run. The hazard is concrete:
+  `MeshGenerationJob` *appends* to its output lists and writes triangle indices from a job-local counter that
+  starts at 0, so an uncleared buffer leaks the prior scene's vertices (verified: with the reset disabled B17
+  fails `Vertices length 120 != 48`). A positive control (scene A's 72 verts ≠ scene B's 48) keeps it
+  non-vacuous. `SectionStats` needs no reset — the job overwrites every section index each run (skipped → `default`).
+- **Effort:** 🟢 trivial (built alongside the MR-6 pooling API).
 
 #### MH-9 — `SectionStats` per-section ranges are never asserted · **CLOSED** (2026-06-17) · gates per-section refactors, **MR-4** (bounds-in-stats)
 
@@ -299,7 +304,7 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 | Phase | Gap  | Finding                                              | Gates                       | Status | Effort |
 |-------|------|------------------------------------------------------|-----------------------------|--------|--------|
 | 0     | MH-1 | Bounds-extent assertion                              | MR-4 (premise)              | CLOSED | 🟢     |
-| 0     | MH-2 | Pooled-output stale-data guard                       | MR-6 (pool variant)         | IN-PR  | 🟢     |
+| 0     | MH-2 | Pooled-output stale-data guard                       | MR-6 (pool variant)         | CLOSED | 🟢     |
 | 0     | MH-9 | `SectionStats` per-section ranges asserted           | per-section refactors; MR-4 | CLOSED | 🟢     |
 | 1     | MH-3 | Smooth-lighting *value* coverage (uniform)           | MR-2; prereq MR-8           | CLOSED | 🟡     |
 | 1     | MH-4 | UV / texture *value* oracle                          | MR-2; prereq MR-8           | CLOSED | 🟡     |
@@ -313,8 +318,11 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 > **Wave 3 (2026-06-18):** MH-6 (B12–B14) closed — buildable-now portion (baselines B1–B14 green, one commit).
 > **MR-* implementation phase, Wave 1 (2026-06-18):** MR-3 + MR-4 + MR-5 landed against this suite; MR-3/MR-4
 > added the build-alongside postconditions **B15** (no-reassign) + **B16** (constant-cell-bounds) → baselines
-> **B1–B16** green. The only remaining hard *harness* prerequisite is **MH-8** (MR-8). MH-2 stays deferred until
-> the MR-6 pool API exists; MH-7 is best built alongside the custom/cross/lava work it guards.
+> **B1–B16** green. The only remaining hard *harness* prerequisite is **MH-8** (MR-8). MH-7 is best built
+> alongside the custom/cross/lava work it guards.
+> **MR-6 (2026-06-20):** pre-size + pool the `MeshDataJobOutput` buffers landed against this suite; **MH-2**
+> closed with build-alongside baseline **B17** (a pooled output reused across two scenes == a fresh buffer) →
+> baselines **B1–B17** green.
 
 ### MR-item readiness at a glance
 
@@ -324,7 +332,7 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 | MR-3 (material caching)   | ✅ **IMPLEMENTED 2026-06-18** | ~~MH-6~~ ✅ (B12 material-combo) + ~~no-reassign postcondition~~ ✅ **B15**                                                                            |
 | MR-4 (constant bounds)    | ✅ **IMPLEMENTED 2026-06-18** | ~~MH-1 (premise)~~ ✅ + ~~MH-6 (renderer, B14 containment)~~ ✅ + ~~constant-cell-bounds postcondition~~ ✅ **B16**; MH-7 custom-mesh caveat still open |
 | MR-5 (chain post-process) | ✅ **IMPLEMENTED 2026-06-18** | ~~MH-5~~ ✅ done (B10 chained-vs-separate equality)                                                                                                   |
-| MR-6 (pre-size / pool)    | ✅ pre-size / ⚠️ pool         | MH-2 (pool variant only)                                                                                                                             |
+| MR-6 (pre-size / pool)    | ✅ **IMPLEMENTED 2026-06-20** | ~~MH-2 (pool variant)~~ ✅ **B17** (reused==fresh stale-data guard)                                                                                   |
 | MR-8 (greedy meshing)     | ❌                            | MH-8 + a per-corner MH-3 extension (and its own design doc); ~~MH-4~~ ✅ done                                                                         |
 | MR-9 (clouds)             | ❌                            | out of scope (separate harness)                                                                                                                      |
 
@@ -407,12 +415,20 @@ The first wave of actually *implementing* the MR-* optimizations against the now
 (material-combination caching, guarded by B12 + new B15), **MR-4** (constant section-cell bounds, guarded by
 B14 + new B16), **MR-5** (chain `MeshPostProcessJob` at schedule time, guarded by B10). All land in
 `SectionRenderer.cs` / `WorldJobManager.cs` / `Chunk.cs`; baselines **B1–B16** green; in-game render confirmed.
-Next: **MR-6** (pre-size mesh output lists; pool variant needs MH-2) then **MR-2** (vertex format).
+
+### MR-* implementation phase — Wave 2 (mesh-output buffers) · ✅ DONE (2026-06-20)
+
+**MR-2** (32 B/vertex packed format, 2026-06-20) then **MR-6** (pre-size + pool the `MeshDataJobOutput`
+buffers, 2026-06-20). MR-6 lands in `Data/JobData.cs` (pre-size ctor + `FromPool` flag + `ClearForReuse`),
+`Helpers/MeshOutputPool.cs` (new, mirrors `ChunkJobArrayPool`), `WorldJobManager.cs` (rent at `ScheduleMeshing`,
+return centrally in `ProcessMeshJobs` — symmetric with the input release, so `Chunk` stays pool-agnostic), and
+`Chunk.cs` (`ApplyMeshData` no longer disposes the output). Build-alongside guard **MH-2** closed as **B17** →
+baselines **B1–B17** green.
 
 ### Build-alongside-the-optimization (not standalone waves)
 
-- **MH-2 — pooled-output stale-data guard** (MR-6 pool variant). 🟢 trivial, but **cannot be built until the
-  MR-6 pool API exists** to test against. Build it in the same PR as that optimization. Reuses `OutputsEqual`.
+- **MH-2 — pooled-output stale-data guard** (MR-6 pool variant). ✅ **CLOSED 2026-06-20** as **B17** — built in
+  the MR-6 PR against the live `MeshOutputPool` API. Reuses `OutputsEqual`.
 - **MH-7 — custom/cross-mesh + lava palette & oracle** (MR-4 caveat; named blind spot). 🟡 medium (custom-mesh
   oracle is the bulk). No open MR *blocks* on it beyond MR-4's "custom mesh exceeds the unit cell" caveat —
   build it alongside the custom/cross/lava work it guards.

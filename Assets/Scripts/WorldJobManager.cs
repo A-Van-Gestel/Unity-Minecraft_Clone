@@ -98,6 +98,12 @@ public class WorldJobManager : IDisposable
     // and meshing jobs, avoiding ~1.7 MB of Persistent alloc/dispose churn per job.
     private readonly ChunkJobArrayPool _jobArrayPool = new ChunkJobArrayPool();
 
+    // MR-6: pools whole MeshDataJobOutput instances for the runtime meshing path. The output is rented
+    // at ScheduleMeshing and returned in ProcessMeshJobs after the data is uploaded — never while the
+    // job may still be running. NativeList retains capacity across Clear(), so after warm-up no meshing
+    // job reallocates its output buffers.
+    private readonly MeshOutputPool _meshOutputPool = new MeshOutputPool();
+
     // --- Cached Collections for GC Optimization ---
     private readonly List<ChunkCoord> _completedGenJobs = new List<ChunkCoord>();
     private readonly List<ChunkCoord> _completedMeshJobs = new List<ChunkCoord>();
@@ -271,7 +277,7 @@ public class WorldJobManager : IDisposable
             jobData.Map = RentAndFillVoxelMap(chunkCoord.ToVoxelOrigin());
             jobData.LightMap = RentAndFillLightMap(chunkCoord.ToVoxelOrigin());
             jobData.Neighbors = AcquireNeighborMaps(chunkCoord, pooled: true, Allocator.Persistent);
-            jobData.Output = new MeshDataJobOutput(Allocator.Persistent);
+            jobData.Output = _meshOutputPool.Rent(); // MR-6: pooled, pre-sized output (returned in ProcessMeshJobs)
 
             MeshGenerationJob job = new MeshGenerationJob
             {
@@ -338,7 +344,7 @@ public class WorldJobManager : IDisposable
             // A scheduled-but-untracked job must finish before its buffers can be released
             // (Complete() on a default handle is a no-op).
             jobData.Handle.Complete();
-            if (jobData.Output.Vertices.IsCreated) jobData.Output.Dispose();
+            _meshOutputPool.Return(jobData.Output); // MR-6: return-or-dispose (Return no-ops on uncreated)
             ReleaseMeshingJobInputs(jobData);
             throw;
         }
@@ -713,12 +719,15 @@ public class WorldJobManager : IDisposable
                 Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
                 if (chunk != null)
                 {
+                    // ApplyMeshData uploads the buffers synchronously (SetVertex/IndexBufferData copy);
+                    // it no longer owns the output's lifecycle — the pool is returned to centrally below.
                     chunk.ApplyMeshData(jobEntry.Value.Output);
                 }
-                else
-                {
-                    jobEntry.Value.Output.Dispose();
-                }
+
+                // MR-6: single output-release site for both branches, symmetric with the input release.
+                // The upload above (or the discarded result when the chunk is gone) is done, so the
+                // pooled buffers can be cleared and reused (or disposed if not pooled).
+                _meshOutputPool.Return(jobEntry.Value.Output);
 
                 // POOLING: Return the input buffers for reuse.
                 ReleaseMeshingJobInputs(jobEntry.Value);
@@ -736,8 +745,9 @@ public class WorldJobManager : IDisposable
     /// <summary>
     /// Returns a completed meshing job's pooled input buffers to <see cref="_jobArrayPool"/> and
     /// disposes its per-job section data. Must only be called after <c>Handle.Complete()</c>.
-    /// Does NOT touch <see cref="MeshingJobData.Output"/> — ownership of the output transfers to
-    /// <c>Chunk.ApplyMeshData</c> (or is disposed by the caller when no chunk exists).
+    /// Does NOT touch <see cref="MeshingJobData.Output"/> — the output is returned to
+    /// <see cref="_meshOutputPool"/> separately (MR-6: centrally in <c>ProcessMeshJobs</c>, after
+    /// <c>Chunk.ApplyMeshData</c> has uploaded it).
     /// </summary>
     /// <param name="jobData">The completed meshing job data.</param>
     private void ReleaseMeshingJobInputs(in MeshingJobData jobData)
@@ -1179,7 +1189,7 @@ public class WorldJobManager : IDisposable
         foreach (MeshingJobData job in MeshJobs.Values)
         {
             job.Handle.Complete();
-            job.Output.Dispose();
+            _meshOutputPool.Return(job.Output); // returned then freed by _meshOutputPool.Dispose() below
             ReleaseMeshingJobInputs(job);
         }
 
@@ -1204,6 +1214,7 @@ public class WorldJobManager : IDisposable
 
         // POOLING: Dispose retained buffers last — all jobs above have returned theirs by now.
         _jobArrayPool.Dispose();
+        _meshOutputPool.Dispose();
 
         _chunkGenerator?.Dispose();
     }

@@ -66,7 +66,7 @@ instead of a crash.
 | MR-3 ✅ | `new Material[3]` + `sharedMaterials` set per section mesh update |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | MR-4 ✅ | `RecalculateBounds()` per section update despite known bounds     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | MR-5 ✅ | `MeshPostProcessJob` blocks the main thread per chunk apply       |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| MR-6   | Mesh output `NativeList`s start at default capacity               |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-6 ✅ | Mesh output `NativeList`s start at default capacity               |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | MR-7 ✅ | Per-fluid-voxel `Allocator.Temp` arrays in the meshing job        |   🟢   |  🟢  |   🟢²   |  ✅   |  ✅   |
 | MR-8   | Greedy meshing (coplanar quad merging)                            |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
 | MR-9   | `Clouds.cs` legacy mesh API with `.ToArray()`                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
@@ -343,11 +343,26 @@ and `ApplyMeshData` only uploads buffers.
 
 ---
 
-### MR-6. Mesh output `NativeList`s start at default capacity
+### MR-6. ✅ IMPLEMENTED (2026-06-20) — Mesh output `NativeList`s start at default capacity
 
-**Observed:** `MeshDataJobOutput` (`JobData.cs` ~line 442) creates all 9 output lists with the
+> **Closed:** pre-size **and** pool implemented in one PR, suite-guarded by **B17** (MH-2 pooled-output
+> stale-data guard), built against MR-2's final 32 B/vertex layout. Benchmarked (IL2CPP) — see
+> [`MESHING_MR6_2026_06_20_AFTER_BASELINE.md`](../Performance/MESHING_MR6_2026_06_20_AFTER_BASELINE.md).
+> **Generation: no regression on any pattern** (0 to −5 %, high-vertex patterns moving most as expected
+> from reduced realloc — but the upload pass, which MR-6 does not touch, drifted +12 % run-to-run, so the
+> generation deltas sit within this run's noise floor; the firm result is "flat, no regression," and the
+> Fluid path returned to its pre-MR-2 level, absorbing the ~6 % MR-2 had moved). The **pre-size table**
+> shows a **bimodal** output distribution (light ~2 048 verts vs dense 163 k–393 k), so the
+> `DefaultVertexCapacity = 24576` hint was **kept low on purpose** — pooling retention self-tunes each
+> buffer to its densest chunk, making the constant a cold-start hint and the low value memory-optimal.
+> **Pooling's actual win** (eliminating ~10 Persistent native alloc/frees per chunk in steady state) is a
+> runtime allocation-rate reduction the per-iteration-allocating benchmark does not measure — confirm via
+> in-game profiler GC capture.
+
+**Observed:** `MeshDataJobOutput` (`JobData.cs`) creates all 9 output lists with the
 default initial capacity. A typical surface chunk emits tens of thousands of vertices, so every
-meshing job pays a chain of grow → reallocate → memcpy cycles inside the job.
+meshing job pays a chain of grow → reallocate → memcpy cycles inside the job; and the whole struct is
+allocated then disposed (Persistent) per chunk, adding native alloc/free churn.
 
 **Recommendation:** Pre-size with a sensible initial capacity (e.g. vertices ≈ 16–24k, triangles
 proportional — derive from the meshing benchmark's median), or carry forward the chunk's previous
@@ -361,6 +376,27 @@ mesh size as the estimate. Optionally pool whole `MeshDataJobOutput` instances a
     > "dispose after `ApplyMeshData`" lifecycle.
 > - **Benefit:** 🟡 Medium — removes hidden reallocation/memcpy from every meshing job.
 > - **Seed/Save:** ✅ / ✅.
+
+> **Status (2026-06-20): implemented, suite-green (B1–B17).**
+> **(a) Pre-size.** `MeshDataJobOutput`'s constructor now seeds every per-vertex / per-triangle
+> `NativeList` from named capacity constants (`DefaultVertexCapacity = 24576`, opaque tris ×1.5,
+> secondary tris 4096) — a typical surface chunk no longer reallocates inside the job. The benchmark and
+> editor/preview paths get this for free (a clean pre-size measurement, no pooling involved). The hint
+> targets the median, not the dense-Checkerboard worst case (~278k verts); pooling amortizes the rest.
+>
+> **(b) Pool.** New `Helpers/MeshOutputPool.cs` (mirrors `ChunkJobArrayPool`: `Rent`/`Return(in …)` +
+> a `MeshDataJobOutput.FromPool` flag) pools whole output structs for the runtime path.
+> `WorldJobManager.ScheduleMeshing` rents instead of `new`-ing; the output is returned **centrally in
+> `ProcessMeshJobs`** right after `Chunk.ApplyMeshData` uploads it — symmetric with the existing input
+> release (`ReleaseMeshingJobInputs`), so `Chunk` stays pool-agnostic and `ApplyMeshData` no longer owns
+> native-memory lifecycle. `NativeList` retains capacity across `Clear()`, so after warm-up no meshing
+> job reallocates its output buffers and the per-chunk Persistent alloc/free is eliminated.
+>
+> **(c) Reset safety.** `MeshOutputPool.Return` calls `MeshDataJobOutput.ClearForReuse()` (clears the 9
+> lists, retains capacity) before re-pooling — mandatory because `MeshGenerationJob` *appends* and never
+> clears. `SectionStats` is intentionally not reset (overwritten every run). Guarded by **B17** (a
+> pooled buffer reused across two scenes == a fresh buffer); verified red→green (reset off → B17 fails
+> `Vertices length 120 != 48`; reset on → all 17 green).
 
 ---
 
@@ -1004,7 +1040,7 @@ Grouped into waves by value-for-effort; within a wave, order is free. Capture th
 benchmark baseline (`Performance/README.md`) before each wave that touches meshing or lighting.
 
 1. **Quick wins, near-zero risk (one sitting each):**
-   ~~MR-1 (Euler hoist) ✅ done — marginal~~ → MR-5 (chain post-process) → MR-3 + MR-4 (SectionRenderer) → MR-6, ~~MR-7 ✅ done — −18% fluid~~,
+   ~~MR-1 (Euler hoist) ✅ done — marginal~~ → MR-5 (chain post-process) → MR-3 + MR-4 (SectionRenderer) → ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
    MR-9, TG-2 (bitmask variant), TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**

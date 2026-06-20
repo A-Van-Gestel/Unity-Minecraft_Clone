@@ -156,6 +156,15 @@ namespace Benchmarks
         private World _world;
         private bool _isBenchmarking;
 
+        /// <summary>
+        /// Per-pattern mesh output sizes (vertex + per-submesh triangle-index counts), captured once
+        /// from each scenario's warm-up job. These are the surface-chunk medians the MR-6 pre-size
+        /// constants (<see cref="MeshDataJobOutput"/> capacity hints) are derived from. Keyed by the
+        /// same <c>"{dataType}_{mode}"</c> string the timing results use.
+        /// </summary>
+        private readonly Dictionary<string, MeshOutputCounts> _meshOutputCounts =
+            new Dictionary<string, MeshOutputCounts>();
+
         #endregion
 
         #region Unity Lifecycle Methods
@@ -292,6 +301,18 @@ namespace Benchmarks
                 warmupInput.CopyFrom(benchmarkData);
                 (JobHandle warmupHandle, MeshDataJobOutput warmupOutput) = ScheduleBenchmarkMeshing(warmupInput, mode);
                 warmupHandle.Complete();
+
+                // Capture this pattern's mesh output sizes before disposal — the warm-up job already
+                // produced the exact buffers a real chunk of this pattern emits, so its lengths are the
+                // pre-size reference for MR-6 (vertex counts are backend-independent and deterministic).
+                _meshOutputCounts[$"{dataType}_{mode}"] = new MeshOutputCounts
+                {
+                    Vertices = warmupOutput.Vertices.Length,
+                    OpaqueTris = warmupOutput.Triangles.Length,
+                    TransparentTris = warmupOutput.TransparentTriangles.Length,
+                    FluidTris = warmupOutput.FluidTriangles.Length,
+                };
+
                 warmupOutput.Dispose();
                 warmupInput.Dispose();
             }
@@ -583,6 +604,7 @@ namespace Benchmarks
                 report.AppendLine();
             }
 
+            AppendMeshOutputSizes(report);
             AppendUploadReport(report, uploadResult);
 
             string fullReport = report.ToString();
@@ -592,6 +614,29 @@ namespace Benchmarks
             {
                 BenchmarkEnvironment.WriteReportToDisk(fullReport, "MeshGenerationBenchmark");
             }
+        }
+
+        /// <summary>
+        /// Appends the per-pattern mesh output sizes captured during warm-up (vertex + per-submesh
+        /// triangle counts). This is the MR-6 pre-size reference: the typical surface-chunk vertex
+        /// count to seed <see cref="MeshDataJobOutput"/> capacities with, versus the dense worst case.
+        /// Uses the WithDiagonals capture (full neighbor context = production face culling).
+        /// </summary>
+        /// <param name="sb">The report builder to append to.</param>
+        private void AppendMeshOutputSizes(StringBuilder sb)
+        {
+            sb.AppendLine("=== Mesh output sizes (MR-6 pre-size reference) ===");
+            sb.AppendLine("  Per chunk (all sections), WithDiagonals: verts | opaque | transparent | fluid tri-indices");
+
+            foreach (ChunkDataType dataType in Enum.GetValues(typeof(ChunkDataType)))
+            {
+                if (!_meshOutputCounts.TryGetValue($"{dataType}_{BenchmarkMode.WithDiagonals}", out MeshOutputCounts c))
+                    continue;
+
+                sb.AppendLine($"  - {dataType,-22}: {c.Vertices,7} verts | {c.OpaqueTris,7} | {c.TransparentTris,7} | {c.FluidTris,7}");
+            }
+
+            sb.AppendLine();
         }
 
         /// <summary>Formats one row of the report with both ms-per-run and μs-per-chunk.</summary>
@@ -627,6 +672,25 @@ namespace Benchmarks
         #endregion
 
         #region Upload Benchmark
+
+        /// <summary>
+        /// One pattern's mesh output sizes, captured from its warm-up job. The vertex count is the
+        /// surface-chunk pre-size reference for MR-6; the triangle counts show the per-submesh split.
+        /// </summary>
+        private struct MeshOutputCounts
+        {
+            /// <summary>Total vertices emitted (all sections of one chunk).</summary>
+            public int Vertices;
+
+            /// <summary>Opaque submesh triangle-index count.</summary>
+            public int OpaqueTris;
+
+            /// <summary>Transparent submesh triangle-index count.</summary>
+            public int TransparentTris;
+
+            /// <summary>Fluid submesh triangle-index count.</summary>
+            public int FluidTris;
+        }
 
         /// <summary>Result of the GPU vertex-upload timing pass (MR-2). <see cref="Ran"/> is false when the upload benchmark is disabled.</summary>
         private struct UploadBenchmarkResult
