@@ -104,6 +104,17 @@ public class World : MonoBehaviour
     private readonly Queue<VoxelMod> _modifications = new Queue<VoxelMod>();
     private float _tickTimer;
 
+    // Monotonically increasing tick counter, advanced once per tick pass in ProcessTickUpdates.
+    // Used to salt per-voxel RNG seeds in BlockBehavior so rolls vary per tick (TG-3).
+    private int _tickCounter;
+
+    /// <summary>
+    /// The number of tick passes processed since world load. Increments once per fixed tick
+    /// in <see cref="ProcessTickUpdates"/>. Used by block behaviors to salt local RNG seeds so
+    /// per-voxel random rolls vary across ticks (preventing a voxel from rolling the same result forever).
+    /// </summary>
+    public int TickCounter => _tickCounter;
+
     // Lighting dirty-set: tracks only chunks with pending lighting work instead of scanning all loaded chunks.
     // The ConcurrentQueue is the thread-safe staging buffer written to by the callback (which may fire
     // from background deserialization threads). It is drained into the HashSet on the main thread each frame.
@@ -630,6 +641,7 @@ public class World : MonoBehaviour
 
         Debug.Log("Starting world tick...");
         _tickTimer = 0f;
+        _tickCounter = 0;
 
         Debug.Log("World initialization complete.");
         Debug.Log("--- Startup complete ---");
@@ -1284,6 +1296,7 @@ public class World : MonoBehaviour
         _tickTimer += Time.deltaTime;
         if (_tickTimer < VoxelData.TickLength) return;
         _tickTimer -= VoxelData.TickLength;
+        _tickCounter++;
 
         // Snapshot _activeChunks to prevent InvalidOperationException if
         // CheckViewDistance modifies the set during iteration.

@@ -2,8 +2,9 @@ using System;
 using Data;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
-using Random = UnityEngine.Random;
+using Random = Unity.Mathematics.Random;
 
 public static partial class BlockBehavior
 {
@@ -153,7 +154,13 @@ public static partial class BlockBehavior
         // Lava Viscosity Randomization (Bug 08)
         // If a fluid has a spread chance less than 1.0, it will randomly skip horizontal spreading ticks.
         // E.g., Lava at 0.25 only flows 25% of the time, resulting in thick, blob-like staggering.
-        if (Random.value > props.spreadChance)
+        // TG-3: Local Unity.Mathematics.Random seeded per voxel per tick. The per-tick salt
+        // (World.TickCounter) is essential — seeding by position alone would make the viscosity skip
+        // deterministic-stuck, freezing lava flow forever. Seed of 0 is illegal, so clamp with math.max.
+        int tickSalt = World.Instance.TickCounter;
+        uint fluidSeed = math.max(1u, math.hash(new int3(globalPos.x, globalPos.y, globalPos.z)) ^ (uint)(tickSalt * 0x9E3779B1u));
+        Random rng = new Random(fluidSeed);
+        if (rng.NextFloat() > props.spreadChance)
         {
             if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} Random Viscosity Skip (Chance={props.spreadChance}).");
             return;

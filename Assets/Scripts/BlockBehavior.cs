@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using Data;
 using JetBrains.Annotations;
+using Unity.Mathematics;
 using UnityEngine;
-using Random = UnityEngine.Random;
+using Random = Unity.Mathematics.Random;
 
 /// <summary>
 /// Contains the static logic for all special block behaviors in the world,
@@ -142,6 +143,16 @@ public static partial class BlockBehavior
         // --- Grass Block ---
         if (id == BlockIDs.Grass)
         {
+            // TG-3: Seed a local Unity.Mathematics.Random per voxel per tick. The seed combines the
+            // voxel's global position (per-voxel variation) with a per-tick salt (World.TickCounter)
+            // so a voxel that rolls "don't spread" this tick re-rolls next tick instead of freezing.
+            // A seed of 0 is illegal, so clamp with math.max(1u, ...). The single rng is reused for
+            // the reservoir sampling and the spread roll, keeping them correlated within the tick.
+            int tickSalt = World.Instance.TickCounter;
+            Vector3Int grassGlobalPos = new Vector3Int(localPos.x + chunkData.Position.x, localPos.y, localPos.z + chunkData.Position.y);
+            uint grassSeed = math.max(1u, math.hash(new int3(grassGlobalPos.x, grassGlobalPos.y, grassGlobalPos.z)) ^ (uint)(tickSalt * 0x9E3779B1u));
+            Random rng = new Random(grassSeed);
+
             // Condition 1: If there is a solid block on top, grass turns to dirt.
             VoxelState? topNeighbour = chunkData.GetState(localPos + VoxelData.FaceChecks[2]);
             if (topNeighbour.HasValue && topNeighbour.Value.Properties.isSolid)
@@ -164,7 +175,7 @@ public static partial class BlockBehavior
                 {
                     candidateCount++;
                     // Reservoir sampling: for the k-th item, replace choice with probability 1/k
-                    if (Random.Range(0, candidateCount) == 0)
+                    if (rng.NextInt(0, candidateCount) == 0)
                     {
                         chosenCandidateLocalPos = checkPos;
                     }
@@ -178,7 +189,7 @@ public static partial class BlockBehavior
                 if (IsDirtNextToAir(chunkData, checkPos))
                 {
                     candidateCount++;
-                    if (Random.Range(0, candidateCount) == 0)
+                    if (rng.NextInt(0, candidateCount) == 0)
                     {
                         // The actual dirt block is below the air block
                         chosenCandidateLocalPos = checkPos + VoxelData.FaceChecks[3];
@@ -190,7 +201,7 @@ public static partial class BlockBehavior
             if (candidateCount > 0)
             {
                 // Roll the dice to see if we spread this tick.
-                if (Random.Range(0f, 1f) <= VoxelData.GrassSpreadChance)
+                if (rng.NextFloat() <= VoxelData.GrassSpreadChance)
                 {
                     // Modify the single, randomly chosen candidate.
                     Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.Position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.Position.y);

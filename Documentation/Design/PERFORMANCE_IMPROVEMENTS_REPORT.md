@@ -92,7 +92,7 @@ instead of a crash.
 |--------|----------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | TG-1   | Double voxel lookup + float-path cross-chunk queries per tick  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
 | TG-2 ✅ | `OnDataPopulated` full-chunk scan through managed `BlockType`s |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TG-3   | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
+| TG-3 ✅ | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
 | TG-4   | `BlockBehavior` data separation (ECS/DOTS pattern)             |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
 | TG-5   | `BlockBehavior` Burst function pointers (lighter alt. to TG-4) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 
@@ -639,16 +639,16 @@ satisfy both if the persistent layout itself is halo-padded.
 > | `T_job` (Burst, off main thread) | 87.7 µs | 112.7 µs |
 >
 > - **Part A (generation path) — main-thread cost.** A normal land chunk previously spent **~37.7 µs**
->   iterating all 32 768 voxels on the main thread to find ~0 active blocks (pure overhead); that is
->   now **~0.04 µs** — the scan moved to a Burst job that overlaps the generation jobs already in
->   flight. The reduction is largest exactly where it matters in normal play (sparse actives).
+    > iterating all 32 768 voxels on the main thread to find ~0 active blocks (pure overhead); that is
+    > now **~0.04 µs** — the scan moved to a Burst job that overlaps the generation jobs already in
+    > flight. The reduction is largest exactly where it matters in normal play (sparse actives).
 > - **Part B (load/replay path).** Flat `bool[]` vs the managed deref is **~13 % faster** on the scan
->   itself (37.7 → 33.3 µs); free, and the only path available for saves (actives aren't persisted).
+    > itself (37.7 → 33.3 µs); free, and the only path available for saves (actives aren't persisted).
 > - **Honest caveat.** For *active-heavy* chunks the Part A main-thread reduction shrinks to ~10 %
->   (400.7 → 366.7 µs) because the bottleneck there is `Chunk.AddActiveVoxel` — the
->   `HashSet<Vector3Int>` inserts (~366 µs for 12k actives), which **both** versions pay. The scan
->   over all 32k voxels is only ~32 µs. So if active-heavy chunks ever profile hot, the next target is
->   the active-voxel *container/population* (cf. TG-1, TG-4), not the scan.
+    > (400.7 → 366.7 µs) because the bottleneck there is `Chunk.AddActiveVoxel` — the
+    > `HashSet<Vector3Int>` inserts (~366 µs for 12k actives), which **both** versions pay. The scan
+    > over all 32k voxels is only ~32 µs. So if active-heavy chunks ever profile hot, the next target is
+    > the active-voxel *container/population* (cf. TG-1, TG-4), not the scan.
 
 **Observed:** `Chunk.OnDataPopulated` (`Chunk.cs` ~lines 177–205) scans every voxel of every
 non-empty section on the main thread when a chunk's data arrives, dereferencing
@@ -668,9 +668,21 @@ the main thread only copies a short list.
 
 ---
 
-### TG-3. `UnityEngine.Random` → `Unity.Mathematics.Random` in block behaviors
+### TG-3. ✅ DONE (2026-06-20) — `UnityEngine.Random` → `Unity.Mathematics.Random` in block behaviors
 
 *(Absorbed from `CODEBASE_IMPROVEMENTS.md` §2.3.)*
+
+> **Closed:** Replaced `UnityEngine.Random` with a **local** seeded `Unity.Mathematics.Random` struct
+> at every behavior-tick call site (no shared/static RNG state → inherently thread-safe and Burst-ready).
+> Seeds are nonzero via `math.max(1u, math.hash(new int3(globalPos)) ^ (uint)(tickSalt * 0x9E3779B1u))`,
+> salted by a new monotonic `World._tickCounter` (exposed as `World.TickCounter`, incremented once per
+> tick pass in `ProcessTickUpdates`, reset on world load) so rolls vary **per voxel AND per tick** — a
+> position-only seed would freeze grass spread / lock lava viscosity forever. BOTH paths were converted:
+> grass spread (`BlockBehavior.cs`, three rolls sharing one rng) and lava viscosity / Bug 08 staggering
+> (`BlockBehavior.Fluids.cs`, `HandleFluidSpread`). This **unblocks TG-4/TG-5** (jobifying behaviors).
+> ⚠️ **Seed note:** the **runtime RNG sequence changes** — grass-spread and lava patterns differ from the
+> old implementation for the same world. Cosmetic only; terrain worldgen RNG is untouched; no
+> save/migration impact.
 
 **Observed:** `BlockBehavior.cs` uses `UnityEngine.Random` (globally locked, not Burst-compatible)
 in the grass-spread tick path. `ChunkLoadAnimation.cs` / `Toolbar.cs` also use it, but only in cold
@@ -1106,7 +1118,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 
 1. **Quick wins, near-zero risk (one sitting each):**
    ~~MR-1 (Euler hoist) ✅ done — marginal~~, ~~MR-5 ✅ done — chain post-process~~, ~~MR-3 + MR-4 ✅ done — SectionRenderer~~, ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
-   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~. Remaining: TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
+   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~. Remaining: MT-4, MT-5, MT-3. MT-6 (doc/rename only).
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side) →
