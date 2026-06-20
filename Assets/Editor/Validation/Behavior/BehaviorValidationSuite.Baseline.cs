@@ -101,6 +101,32 @@ T3
   (7,11,8) active=0 mods=[]
 ";
 
+        // --- BH-B3 fixture geometry: two water sources two cells apart (a 1-cell gap between) in a walled,
+        // floored 3-cell channel. The sources fill the gap, then the gap — with two adjacent sources over a
+        // solid floor — regenerates into a new source (infiniteSourceRegeneration). Everything then stabilizes
+        // to sources and goes inactive (termination). Walls confine the flow to the gap; interior (Tier-1).
+        private const int REGEN_FLOOR_Y = 10;
+        private const int REGEN_LEFT_X = 6; // left source
+        private const int REGEN_RIGHT_X = 8; // right source (gap at x=7)
+        private const int REGEN_Z = 8;
+        private const int BH_B3_TICKS = 3;
+
+        /// <summary>
+        /// BH-B3 golden master (see <see cref="Bh3_InfiniteSourceRegeneration"/>), compared via
+        /// <see cref="GoldenMaster.AssertOrCapture"/>. Null/empty → capture mode.
+        /// </summary>
+        private const string BH_B3_GOLDEN =
+            @"T1
+  (6,11,8) active=1 mods=[19@(7,11,8):01:0]
+  (8,11,8) active=1 mods=[19@(7,11,8):01:0]
+T2
+  (6,11,8) active=0 mods=[]
+  (8,11,8) active=0 mods=[]
+  (7,11,8) active=1 mods=[19@(7,11,8):00:1]
+T3
+  (7,11,8) active=0 mods=[]
+";
+
         /// <summary>Registers the baseline regression scenarios.</summary>
         static partial void AddBaselineScenarios(List<Scenario> scenarios)
         {
@@ -108,6 +134,7 @@ T3
             scenarios.Add(new Scenario("BH-B1: single water source spreads on a flat floor", Bh1_SingleWaterSourceSpread));
             scenarios.Add(new Scenario("BH-B4: unsupported water decays to air → termination", Bh4_UnsupportedWaterDecays));
             scenarios.Add(new Scenario("BH-B2: water falls over a 1-block cliff (gravity + waterfall reset)", Bh2_WaterFallsOverCliff));
+            scenarios.Add(new Scenario("BH-B3: two sources regenerate a source in the gap (infinite water)", Bh3_InfiniteSourceRegeneration));
         }
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
@@ -345,6 +372,88 @@ T3
             world.SetBlock(CLIFF_SRC_X, flowY, CLIFF_Z + 1, BlockIDs.Stone); // south wall
             world.SetBlock(CLIFF_EDGE_X, CLIFF_LOWER_FLOOR_Y, CLIFF_Z, BlockIDs.Stone); // lower floor (1 block down)
             world.SetBlock(CLIFF_SRC_X, flowY, CLIFF_Z, BlockIDs.Water, meta: 0); // source, level 0
+            return world;
+        }
+
+        /// <summary>
+        /// BH-B3: two sources one gap apart in a walled channel regenerate a new source in the gap. Asserts
+        /// determinism (BH-6), non-vacuous activity, termination (everything stabilizes to inactive sources),
+        /// and byte-equality with <see cref="BH_B3_GOLDEN"/>. Exercises the `infiniteSourceRegeneration` branch
+        /// of `CalculateExpectedFluidLevel`.
+        /// </summary>
+        private static bool Bh3_InfiniteSourceRegeneration()
+        {
+            string s1, s2;
+            int totalMods;
+            int activeAtEnd;
+
+            using (BehaviorTestWorld world = BuildBh3World())
+            {
+                BehaviorSnapshot snap = world.RunTicks(BH_B3_TICKS);
+                s1 = snap.Serialize();
+                totalMods = snap.TotalModCount;
+                activeAtEnd = world.ActiveVoxelCount;
+            }
+
+            using (BehaviorTestWorld world = BuildBh3World())
+            {
+                s2 = world.RunTicks(BH_B3_TICKS).Serialize();
+            }
+
+            bool ok = true;
+
+            if (s1 != s2)
+            {
+                Debug.LogError("[FAIL] BH-B3: non-deterministic — two identical runs produced different snapshots.");
+                ok = false;
+            }
+
+            if (totalMods == 0)
+            {
+                Debug.LogError("[FAIL] BH-B3: vacuous — the sources emitted no mods.");
+                ok = false;
+            }
+
+            // Termination: once the gap regenerates to a source, all three cells are stable sources and drop out.
+            if (activeAtEnd != 0)
+            {
+                Debug.LogError($"[FAIL] BH-B3: did not terminate — expected empty active set, got {activeAtEnd}.");
+                ok = false;
+            }
+
+            if (!GoldenMaster.AssertOrCapture("BH-B3", s1, BH_B3_GOLDEN))
+                ok = false;
+
+            if (ok) Debug.Log($"[PASS] BH-B3: deterministic, {totalMods} mod(s) over {BH_B3_TICKS} ticks, terminated, golden master matched.");
+            return ok;
+        }
+
+        /// <summary>
+        /// Builds the BH-B3 fixture: a solid floor under a 3-cell channel
+        /// [<see cref="REGEN_LEFT_X"/>..<see cref="REGEN_RIGHT_X"/>] at z=<see cref="REGEN_Z"/>, walled on the
+        /// two ends and both z-sides at the flow level so flow is confined to the gap, with a
+        /// <see cref="BlockIDs.Water"/> source at each end (a 1-cell gap between them).
+        /// </summary>
+        private static BehaviorTestWorld BuildBh3World()
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld();
+            const int flowY = REGEN_FLOOR_Y + 1; // 11
+
+            // Floor + north/south walls along the whole channel.
+            for (int x = REGEN_LEFT_X; x <= REGEN_RIGHT_X; x++)
+            {
+                world.SetBlock(x, REGEN_FLOOR_Y, REGEN_Z, BlockIDs.Stone); // floor
+                world.SetBlock(x, flowY, REGEN_Z - 1, BlockIDs.Stone); // north wall
+                world.SetBlock(x, flowY, REGEN_Z + 1, BlockIDs.Stone); // south wall
+            }
+
+            // End walls beyond each source.
+            world.SetBlock(REGEN_LEFT_X - 1, flowY, REGEN_Z, BlockIDs.Stone); // west end
+            world.SetBlock(REGEN_RIGHT_X + 1, flowY, REGEN_Z, BlockIDs.Stone); // east end
+
+            // The two sources (gap at the middle cell).
+            world.SetBlock(REGEN_LEFT_X, flowY, REGEN_Z, BlockIDs.Water, meta: 0);
+            world.SetBlock(REGEN_RIGHT_X, flowY, REGEN_Z, BlockIDs.Water, meta: 0);
             return world;
         }
     }

@@ -4,9 +4,9 @@
 **`Minecraft Clone/Dev/Validate Behavior`**, sources under `Assets/Editor/Validation/Behavior/`
 (`Framework/{TestBehaviorBlockPalette,BehaviorTestWorld,BehaviorSnapshot}.cs` +
 `BehaviorValidationSuite{,.Baseline}.cs`). Baselines: **Smoke** (rig), **BH-B1**
-(water spread), **BH-B4** (unsupported water → decay + termination), and **BH-B2** (water over a 1-block cliff →
-gravity + waterfall reset). BH-7 (apply-path fidelity) closed as accepted defensive parity. Remaining scenarios
-(BH-B3/B5 fluid, BH-B6/B7 grass, BH-D1) per §4 are still to build. Promote this doc to `Documentation/Architecture/Testing Framework/` once the fluid/grass
+(water spread), **BH-B4** (decay + termination), **BH-B2** (1-block cliff → gravity + waterfall reset), and
+**BH-B3** (infinite-source regeneration). BH-7 (apply-path fidelity) closed as accepted defensive parity.
+Remaining scenarios (BH-B5 lava, BH-B6/B7 grass, BH-D1) per §4 are still to build. Promote this doc to `Documentation/Architecture/Testing Framework/` once the fluid/grass
 golden masters (Waves 1–2) land.
 **Created:** 2026-06-20
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
@@ -326,7 +326,7 @@ B8/B9 pattern — e.g. prove the snapshot is non-empty and that a deliberately a
 |---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------|-----------------------------------------------------------------------------------------------|
 | **BH-B1** ✅   | Single water source on a flat floor, **3 ticks** → symmetric level-1→3 spread (28 mods)                                                                              | golden-master + determinism + non-vacuity | core horizontal spread — **shipped 2026-06-20**                                               |
 | **BH-B2** ✅   | Boxed source flows east over a 1-block cliff → falls one block → waterfall reset on landing (3-tick golden, 5 mods; in-game confirmed before freeze)                 | golden-master + determinism               | gravity + `MakeFalling` + optimal-flow-toward-drop + waterfall reset — **shipped 2026-06-21** |
-| **BH-B3**     | Two sources 2 apart over solid → infinite-source regeneration fills the gap                                                                                          | golden-master                             | `infiniteSourceRegeneration` path                                                             |
+| **BH-B3** ✅   | Two sources one gap apart in a walled channel → gap fills then regenerates to a source; all stabilize (3-tick golden, 3 mods, terminates)                            | golden-master + determinism + termination | `infiniteSourceRegeneration` path — **shipped 2026-06-21**                                    |
 | **BH-B4** ✅   | Unsupported (sourceless) water cell → drains to air in 1 tick; active set empties (the decay mod replaces water→air, so the apply-step active-removal terminates it) | golden-master + determinism + termination | decay-to-air + termination + `ImmediateUpdate` — **shipped 2026-06-20**                       |
 | **BH-B5**     | Lava (low `spreadChance`) → viscosity staggering over many ticks                                                                                                     | golden-master + determinism (BH-6)        | TG-3 per-tick reseed (the staggering must *progress*, not freeze)                             |
 | **BH-B6**     | Grass next to convertible dirt → spreads over ticks (seeded RNG)                                                                                                     | golden-master + determinism               | grass reservoir-sampling + spread roll                                                        |
@@ -367,9 +367,10 @@ Recommended order (most-bug-prone / highest-invariant-value first):
 2. ✅ **BH-B2 — water over a 1-block cliff** (DONE 2026-06-21): gravity + `MakeFalling` + optimal-flow-toward-drop
     + waterfall reset. Boxed source → 3-tick golden; **confirmed in-game before freeze** (the falling-fluid
       dynamics warranted it).
-3. **BH-B3 — two sources over solid** (NEXT): `infiniteSourceRegeneration`.
-4. **BH-B5 — lava (low `spreadChance`)**: TG-3 per-tick reseed; the golden must show staggering that
-   *progresses*, not freezes.
+3. ✅ **BH-B3 — two sources over solid** (DONE 2026-06-21): `infiniteSourceRegeneration` — gap regenerates to a
+   source; deterministic, so frozen after a code-trace match (terminates too).
+4. **BH-B5 — lava (low `spreadChance`)** (NEXT, completes Wave 1): TG-3 per-tick reseed; the golden must show
+   staggering that *progresses*, not freezes — the scenario that actually exercises the seeded RNG path.
 
 ### Wave 2 — Grass golden masters
 
