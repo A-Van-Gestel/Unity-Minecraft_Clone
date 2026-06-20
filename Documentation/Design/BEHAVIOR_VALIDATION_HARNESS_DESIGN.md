@@ -3,9 +3,10 @@
 **Status:** 🟢 **Wave 0 + BH-B1 shipped & green (2026-06-20).** The harness exists and runs: menu item
 **`Minecraft Clone/Dev/Validate Behavior`**, sources under `Assets/Editor/Validation/Behavior/`
 (`Framework/{TestBehaviorBlockPalette,BehaviorTestWorld,BehaviorSnapshot}.cs` +
-`BehaviorValidationSuite{,.Baseline}.cs`). Baselines: **Smoke** (rig + determinism) and **BH-B1**
-(single water source, 3-tick golden master, 28 mods). Remaining scenarios (BH-B2…BH-B7, BH-D1) per §4 are
-still to build. Promote this doc to `Documentation/Architecture/Testing Framework/` once the fluid/grass
+`BehaviorValidationSuite{,.Baseline}.cs`). Baselines: **Smoke** (rig), **BH-B1**
+(single water source, 3-tick golden, 28 mods), and **BH-B4** (unsupported water → decay-to-air + termination).
+BH-7 (apply-path fidelity) closed as accepted defensive parity. Remaining scenarios (BH-B2/B3/B5 fluid,
+BH-B6/B7 grass, BH-D1) per §4 are still to build. Promote this doc to `Documentation/Architecture/Testing Framework/` once the fluid/grass
 golden masters (Waves 1–2) land.
 **Created:** 2026-06-20
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
@@ -321,19 +322,19 @@ Test-first, one commit per scenario, all baselines green after each (the `valida
 lifecycle). Each golden-master scenario pairs with a **positive control** so it can't pass vacuously (the
 B8/B9 pattern — e.g. prove the snapshot is non-empty and that a deliberately altered palette changes it).
 
-| ID            | Scenario                                                                                                                           | Leg                                        | Guards                                                            |
-|---------------|------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------|-------------------------------------------------------------------|
-| **BH-B1** ✅   | Single water source on a flat floor, **3 ticks** → symmetric level-1→3 spread (28 mods)                                            | golden-master + determinism + non-vacuity  | core horizontal spread — **shipped 2026-06-20**                   |
-| **BH-B2**     | Water over a 1-block cliff edge → falling column + waterfall reset                                                                 | golden-master                              | gravity + `MakeFalling` + waterfall max-spread                    |
-| **BH-B3**     | Two sources 2 apart over solid → infinite-source regeneration fills the gap                                                        | golden-master                              | `infiniteSourceRegeneration` path                                 |
-| **BH-B4**     | Source removed → flow decays back to air over N ticks → all voxels `Active==false`                                                 | golden-master + termination (per-scenario) | decay + drainage + termination                                    |
-| **BH-B5**     | Lava (low `spreadChance`) → viscosity staggering over many ticks                                                                   | golden-master + determinism (BH-6)         | TG-3 per-tick reseed (the staggering must *progress*, not freeze) |
-| **BH-B6**     | Grass next to convertible dirt → spreads over ticks (seeded RNG)                                                                   | golden-master + determinism                | grass reservoir-sampling + spread roll                            |
-| **BH-B7**     | Grass with solid block on top → turns to dirt                                                                                      | golden-master                              | grass→dirt branch                                                 |
-| ~~**BH-B8**~~ | ~~contract over all fixtures~~ — **retired** (BH-5 retracted; determinism is per-scenario via BH-6)                                | —                                          | —                                                                 |
-| **BH-B9**     | **GATED** (BH-7 unreachable via `Behave`) — `REQUIRES_SUPPORT` on a draining support → cascade; revisit via direct `ApplyMod` test | golden-master + positive control           | apply-path support cascade (**BH-7**)                             |
-| **BH-B10**    | **GATED** (BH-7 unreachable via `Behave`) — mod a `CanReplace`-rejected block; revisit via direct `ApplyMod` test                  | golden-master + positive control           | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags   |
-| **BH-D1**     | **Differential:** every BH-B# scenario run through old `switch` vs new TG-4/TG-5 dispatch → identical snapshots                    | A/B                                        | **the load-bearing TG-4/TG-5 parity guard**                       |
+| ID            | Scenario                                                                                                                                                             | Leg                                       | Guards                                                                  |
+|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------|-------------------------------------------------------------------------|
+| **BH-B1** ✅   | Single water source on a flat floor, **3 ticks** → symmetric level-1→3 spread (28 mods)                                                                              | golden-master + determinism + non-vacuity | core horizontal spread — **shipped 2026-06-20**                         |
+| **BH-B2**     | Water over a 1-block cliff edge → falling column + waterfall reset                                                                                                   | golden-master                             | gravity + `MakeFalling` + waterfall max-spread                          |
+| **BH-B3**     | Two sources 2 apart over solid → infinite-source regeneration fills the gap                                                                                          | golden-master                             | `infiniteSourceRegeneration` path                                       |
+| **BH-B4** ✅   | Unsupported (sourceless) water cell → drains to air in 1 tick; active set empties (the decay mod replaces water→air, so the apply-step active-removal terminates it) | golden-master + determinism + termination | decay-to-air + termination + `ImmediateUpdate` — **shipped 2026-06-20** |
+| **BH-B5**     | Lava (low `spreadChance`) → viscosity staggering over many ticks                                                                                                     | golden-master + determinism (BH-6)        | TG-3 per-tick reseed (the staggering must *progress*, not freeze)       |
+| **BH-B6**     | Grass next to convertible dirt → spreads over ticks (seeded RNG)                                                                                                     | golden-master + determinism               | grass reservoir-sampling + spread roll                                  |
+| **BH-B7**     | Grass with solid block on top → turns to dirt                                                                                                                        | golden-master                             | grass→dirt branch                                                       |
+| ~~**BH-B8**~~ | ~~contract over all fixtures~~ — **retired** (BH-5 retracted; determinism is per-scenario via BH-6)                                                                  | —                                         | —                                                                       |
+| **BH-B9**     | **GATED** (BH-7 unreachable via `Behave`) — `REQUIRES_SUPPORT` on a draining support → cascade; revisit via direct `ApplyMod` test                                   | golden-master + positive control          | apply-path support cascade (**BH-7**)                                   |
+| **BH-B10**    | **GATED** (BH-7 unreachable via `Behave`) — mod a `CanReplace`-rejected block; revisit via direct `ApplyMod` test                                                    | golden-master + positive control          | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags         |
+| **BH-D1**     | **Differential:** every BH-B# scenario run through old `switch` vs new TG-4/TG-5 dispatch → identical snapshots                                                      | A/B                                       | **the load-bearing TG-4/TG-5 parity guard**                             |
 
 BH-D1 is added **in the TG-4/TG-5 PR itself** (it needs both code paths to exist), exactly as MR-5's
 chained-vs-separate equality baseline (B10) was the guard for MR-5.
@@ -354,15 +355,16 @@ apply, hardened post-review to mirror the `CanReplace` gate + support cascade + 
 + `GoldenMaster` helper + the `Validate Behavior` runner. **Smoke** + **BH-B1** green. The `HashSet`
   iteration-order determinism question was settled empirically (CoreCLR + Mono).
 
-### Wave 1 — Fluid golden masters (Tier-1, interior only) · 🔜 NEXT
+### Wave 1 — Fluid golden masters (Tier-1, interior only) · 🟡 IN PROGRESS
 
 Freeze current fluid behavior so TG-4/TG-5 can be proven behavior-preserving. **Confirm each scenario in-game
 before freezing its golden** — a golden master of buggy behavior is worse than none (`validation-driven-bugfix`).
 Recommended order (most-bug-prone / highest-invariant-value first):
 
-1. **BH-B4 — source removed → decay to air** (FIRST): establishes the per-scenario **termination** check and
-   exercises the most bug-prone fluid path (decay/drainage).
-2. **BH-B2 — water over a cliff edge**: gravity + `MakeFalling` + waterfall reset.
+1. ✅ **BH-B4 — unsupported water → decay to air** (DONE 2026-06-20): established the per-scenario
+   **termination** assertion (`ActiveVoxelCount == 0`) + the decay-to-air path. Captured-and-frozen; the
+   behavior is textbook (sourceless flow drains immediately) and was cross-checked against a code trace.
+2. **BH-B2 — water over a cliff edge** (NEXT): gravity + `MakeFalling` + waterfall reset.
 3. **BH-B3 — two sources over solid**: `infiniteSourceRegeneration`.
 4. **BH-B5 — lava (low `spreadChance`)**: TG-3 per-tick reseed; the golden must show staggering that
    *progresses*, not freezes.

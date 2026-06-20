@@ -53,11 +53,33 @@ T3
   (6,11,8) active=1 mods=[19@(5,11,8):03:0]
 ";
 
+        // --- BH-B4 fixture geometry: a single unsupported (sourceless) water cell on one solid block.
+        // Models "source removed" in its simplest form — a flow cell with no level-0 source feeding it. With a
+        // solid floor below (no downflow) and no fluid neighbors, HandleFluidDecay drains it to air in 1 tick;
+        // the now-air slot is then dropped from the active set on tick 2 → ActiveVoxelCount returns to 0
+        // (termination). Interior placement keeps every neighbor query in-chunk (Tier-1).
+        private const int DECAY_FLOOR_Y = 10;
+        private const int DECAY_XZ = 8;
+        private const byte DECAY_START_LEVEL = 1; // non-source level (a level-0 cell would never decay)
+        private const int BH_B4_TICKS = 2;
+
+        /// <summary>
+        /// BH-B4 golden master (see <see cref="Bh4_UnsupportedWaterDecays"/>), compared via
+        /// <see cref="GoldenMaster.AssertOrCapture"/>. Null/empty → capture mode (determinism, non-vacuity, and
+        /// termination are still asserted, so it is never a vacuous pass).
+        /// </summary>
+        private const string BH_B4_GOLDEN =
+            @"T1
+  (8,11,8) active=1 mods=[0@(8,11,8):00:1]
+T2
+";
+
         /// <summary>Registers the baseline regression scenarios.</summary>
         static partial void AddBaselineScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("Smoke: rig stands up and ticks without throwing", Smoke_RigBoots));
             scenarios.Add(new Scenario("BH-B1: single water source spreads on a flat floor", Bh1_SingleWaterSourceSpread));
+            scenarios.Add(new Scenario("BH-B4: unsupported water decays to air → termination", Bh4_UnsupportedWaterDecays));
         }
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
@@ -160,6 +182,76 @@ T3
                 world.SetBlock(x, FLOOR_Y, z, BlockIDs.Stone);
 
             world.SetBlock(SOURCE_XZ, FLOOR_Y + 1, SOURCE_XZ, BlockIDs.Water, meta: 0); // source: fluid level 0
+            return world;
+        }
+
+        /// <summary>
+        /// BH-B4: a single unsupported (sourceless) water cell on a solid block. Asserts run-to-run determinism
+        /// (BH-6), non-vacuous decay, **termination** (the active set empties once the cell drains to air), and
+        /// byte-equality with <see cref="BH_B4_GOLDEN"/>. Exercises the `HandleFluidDecay` drain-to-air branch
+        /// and the active-voxel drop — the first scenario that asserts termination.
+        /// </summary>
+        private static bool Bh4_UnsupportedWaterDecays()
+        {
+            string s1, s2;
+            int totalMods;
+            int activeAtEnd;
+
+            using (BehaviorTestWorld world = BuildBh4World())
+            {
+                BehaviorSnapshot snap = world.RunTicks(BH_B4_TICKS);
+                s1 = snap.Serialize();
+                totalMods = snap.TotalModCount;
+                activeAtEnd = world.ActiveVoxelCount;
+            }
+
+            using (BehaviorTestWorld world = BuildBh4World())
+            {
+                s2 = world.RunTicks(BH_B4_TICKS).Serialize();
+            }
+
+            bool ok = true;
+
+            // BH-6: determinism.
+            if (s1 != s2)
+            {
+                Debug.LogError("[FAIL] BH-B4: non-deterministic — two identical runs produced different snapshots.");
+                ok = false;
+            }
+
+            // Non-vacuity positive control: the cell must actually emit a decay mod.
+            if (totalMods == 0)
+            {
+                Debug.LogError("[FAIL] BH-B4: vacuous — the unsupported cell emitted no mods.");
+                ok = false;
+            }
+
+            // Termination: once the cell drains to air, the tick pump drops it and the active set empties.
+            if (activeAtEnd != 0)
+            {
+                Debug.LogError($"[FAIL] BH-B4: did not terminate — expected empty active set, got {activeAtEnd}.");
+                ok = false;
+            }
+
+            // Golden master (normalization + capture-mode handled by the shared helper).
+            if (!GoldenMaster.AssertOrCapture("BH-B4", s1, BH_B4_GOLDEN))
+                ok = false;
+
+            if (ok) Debug.Log($"[PASS] BH-B4: deterministic, {totalMods} mod(s), terminated (active set empty), golden master matched.");
+            return ok;
+        }
+
+        /// <summary>
+        /// Builds the BH-B4 fixture: one solid <see cref="BlockIDs.Stone"/> block at
+        /// (<see cref="DECAY_XZ"/>, <see cref="DECAY_FLOOR_Y"/>, <see cref="DECAY_XZ"/>) with a single
+        /// unsupported <see cref="BlockIDs.Water"/> cell at level <see cref="DECAY_START_LEVEL"/> directly above
+        /// it — no level-0 source anywhere, so the cell has no support and must drain.
+        /// </summary>
+        private static BehaviorTestWorld BuildBh4World()
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld();
+            world.SetBlock(DECAY_XZ, DECAY_FLOOR_Y, DECAY_XZ, BlockIDs.Stone); // solid floor blocks downflow
+            world.SetBlock(DECAY_XZ, DECAY_FLOOR_Y + 1, DECAY_XZ, BlockIDs.Water, meta: DECAY_START_LEVEL);
             return world;
         }
     }
