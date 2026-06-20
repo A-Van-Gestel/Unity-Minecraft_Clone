@@ -621,6 +621,34 @@ satisfy both if the persistent layout itself is halo-padded.
 > plus a synthetic placed-vs-emitted round-trip (6/6, exact). No existing validation suite covers
 > active voxels, so the check was a throwaway `[MenuItem]` (RunCommand execution is currently down on
 > the dev machine; the bridge `Unity_ManageMenuItem` was used instead) and removed afterward.
+>
+> **Measured** (editor A/B microbenchmark — `Assets/Editor/Dev/ActiveVoxelScanBenchmark.cs`,
+> menu `Minecraft Clone/Dev/Benchmark Active-Voxel Scan (TG-2)`; 100 chunks × 5 batches, seed 1337,
+> Standard world type; best batch-mean µs/chunk over the *same* finalized voxel data). Four scans:
+> `T_old` = original managed-deref full scan; `T_bitmask` = current `OnDataPopulated` flat-`bool[]`
+> scan (load/replay path); `T_register` = `RegisterActiveVoxelsFromJob` unpacking the job's list
+> (new generation main-thread cost); `T_job` = `ActiveVoxelScanJob` Burst time (now off the main
+> thread). `T_job` is measured via `.Run()` so it carries scheduling overhead and **overstates** the
+> real per-chunk worker cost — the point is only that it is *off* the main thread, not added to it.
+>
+> | Scan | Land chunk (0 actives) | Flooded chunk (~12k actives) |
+> |---|--:|--:|
+> | `T_old` (managed deref, all 32k voxels) | 37.7 µs | 400.7 µs |
+> | `T_bitmask` (flat `bool[]`, all 32k voxels) | 33.3 µs | 396.0 µs |
+> | `T_register` (unpack job list only) | **0.04 µs** | 366.7 µs |
+> | `T_job` (Burst, off main thread) | 87.7 µs | 112.7 µs |
+>
+> - **Part A (generation path) — main-thread cost.** A normal land chunk previously spent **~37.7 µs**
+>   iterating all 32 768 voxels on the main thread to find ~0 active blocks (pure overhead); that is
+>   now **~0.04 µs** — the scan moved to a Burst job that overlaps the generation jobs already in
+>   flight. The reduction is largest exactly where it matters in normal play (sparse actives).
+> - **Part B (load/replay path).** Flat `bool[]` vs the managed deref is **~13 % faster** on the scan
+>   itself (37.7 → 33.3 µs); free, and the only path available for saves (actives aren't persisted).
+> - **Honest caveat.** For *active-heavy* chunks the Part A main-thread reduction shrinks to ~10 %
+>   (400.7 → 366.7 µs) because the bottleneck there is `Chunk.AddActiveVoxel` — the
+>   `HashSet<Vector3Int>` inserts (~366 µs for 12k actives), which **both** versions pay. The scan
+>   over all 32k voxels is only ~32 µs. So if active-heavy chunks ever profile hot, the next target is
+>   the active-voxel *container/population* (cf. TG-1, TG-4), not the scan.
 
 **Observed:** `Chunk.OnDataPopulated` (`Chunk.cs` ~lines 177–205) scans every voxel of every
 non-empty section on the main thread when a chunk's data arrives, dereferencing
