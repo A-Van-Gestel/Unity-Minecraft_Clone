@@ -196,6 +196,11 @@ namespace Editor.Validation.Behavior.Framework
 
             // Placement-rule gate — matches World.ApplyModifications. A rejected mod is dropped, exactly as in
             // production, so the harness never applies a placement the engine would refuse.
+            // DEFENSIVE PARITY (BH-7, verified 2026-06-20): no current block behavior emits a CanReplace-rejected
+            // mod (every emission targets Air / a non-solid-or-REPLACEABLE cell / the same fluid / convertible
+            // dirt — all placements the live engine performs). This gate is kept faithful so the apply path stays
+            // correct if TG-4/TG-5 or a new behavior changes emission; it is therefore unreachable through Behave
+            // and intentionally unguarded by a scenario. Do not remove without re-checking reachability.
             if (!CanPlace(mod, oldId, oldProps, newProps))
                 return;
 
@@ -210,6 +215,9 @@ namespace Editor.Validation.Behavior.Framework
 
             // Support-break cascade — matches World.ApplyModifications: if a support block became non-solid,
             // break the REQUIRES_SUPPORT block above it (enqueued into the same drain, ImmediateUpdate carried).
+            // DEFENSIVE PARITY (BH-7, verified 2026-06-20): no current behavior emits a solid→non-solid mod
+            // (grass↔dirt are solid→solid; all fluid mods replace non-solid cells), so this branch is unreachable
+            // through Behave. Kept for faithfulness if TG-4/TG-5 or a new behavior changes emission.
             if (oldProvidedSupport && !newProps.ProvidesSupport)
             {
                 VoxelState? above = ChunkData.GetState(new Vector3Int(lx, ly + 1, lz));

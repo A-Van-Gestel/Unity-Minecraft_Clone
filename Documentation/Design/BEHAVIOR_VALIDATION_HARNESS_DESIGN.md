@@ -290,25 +290,28 @@ two cells write the same neighbor. The driver must replicate production's order:
   directly exercises the TG-3 seeding.
 - **Effort:** 🟢 trivial (run twice, `OutputsEqual`-style compare).
 
-### BH-7 — apply-path fidelity is replicated but **unguarded** · **OPEN** · gates faithful golden masters
+### BH-7 — apply-path fidelity · **RESOLVED — accepted defensive parity (2026-06-20)**
 
-- **Context (from the 2026-06-20 code review):** `BehaviorTestWorld.ApplyMod` now faithfully mirrors the
+- **Context (from the 2026-06-20 code review):** `BehaviorTestWorld.ApplyMod` faithfully mirrors the
   state-affecting half of `World.ApplyModifications` + `ChunkData.ModifyVoxel` — the `oldPacked == newPacked`
   no-op early-out, the `BlockTagUtility.CanReplace` / `ReplacementRule` placement gate (rejected mods dropped),
   and the `REQUIRES_SUPPORT` break-cascade (FIFO re-enqueue). The original `SetVoxel`-only version silently
   bypassed all three; that hole is closed.
-- **Blind spot:** **no baseline exercises any of it.** BH-B1 (water→air) is applied identically with or
-  without the gate/cascade, so a regression that re-breaks the apply path — drops the `CanReplace` check,
-  removes the cascade, or loses the no-op guard — would still pass green. The fidelity is asserted by code, not
-  by a test.
-- **Build:** two small scenarios (see §4 BH-B9/BH-B10) whose *outcome differs* with vs. without the apply-path
-  logic: (a) a `REQUIRES_SUPPORT` block sitting on a fluid/support that drains away, so the cascade must break
-  it (golden differs if the cascade is missing); (b) a mod targeting a non-replaceable tagged block (requires
-  giving the palette realistic `tags`/`canReplaceTags` — note the BH-3 caveat that tagging fluids `LIQUID`
-  breaks self-replacement, so scope tags per-fixture). Each needs a positive control proving the gate/cascade
-  actually fired.
-- **Effort:** 🟡 medium (the support-cascade scenario is straightforward; the `CanReplace`-rejection scenario
-  needs careful per-fixture tagging).
+- **Reachability check (done):** enumerated **all 6** behavior-emitted mod sites (grass→dirt, dirt→grass in
+  `BlockBehavior.cs`; decay-to-air, level-update, gravity, horizontal-spread in `BlockBehavior.Fluids.cs`).
+  Result: **none triggers the gate or the cascade.** No behavior emits a *solid → non-solid* mod (grass↔dirt
+  are solid→solid; every fluid mod replaces a non-solid/Air/same-fluid cell), so the `REQUIRES_SUPPORT`
+  cascade is **unreachable through `Behave`**. And every emitted mod is a placement the live engine performs,
+  so `CanReplace` **never rejects** one. The no-op guard *is* reachable (BH-B1's T2 double-writes a cell) but
+  its effect is idempotent on state and the active set, so it never changes a snapshot.
+- **Disposition:** the gate + cascade are kept as **defensive parity** — they cost nothing, mirror production
+  exactly, and keep the apply path correct if **TG-4/TG-5 (or a new behavior) changes mod emission**. They are
+  **intentionally unguarded** because no behavior scenario can exercise them. Marked with a dated
+  `DEFENSIVE PARITY (BH-7)` comment at both code sites so they are not "simplified" away or mistaken for tested.
+- **If reachability ever changes** (a behavior that removes a solid support, or emits a `CanReplace`-rejected
+  mod): close with a **direct `ApplyMod` unit test** driven by crafted mods (the harness would need to expose
+  the apply path for testing) — *not* a `Behave`-driven scenario. BH-B9/BH-B10 in §4 are gated on that.
+- **Effort:** ✅ closed (reachability analysis only; no scenario built — none is constructible today).
 
 ---
 
@@ -318,19 +321,19 @@ Test-first, one commit per scenario, all baselines green after each (the `valida
 lifecycle). Each golden-master scenario pairs with a **positive control** so it can't pass vacuously (the
 B8/B9 pattern — e.g. prove the snapshot is non-empty and that a deliberately altered palette changes it).
 
-| ID            | Scenario                                                                                                        | Leg                                        | Guards                                                            |
-|---------------|-----------------------------------------------------------------------------------------------------------------|--------------------------------------------|-------------------------------------------------------------------|
-| **BH-B1** ✅   | Single water source on a flat floor, **3 ticks** → symmetric level-1→3 spread (28 mods)                         | golden-master + determinism + non-vacuity  | core horizontal spread — **shipped 2026-06-20**                   |
-| **BH-B2**     | Water over a 1-block cliff edge → falling column + waterfall reset                                              | golden-master                              | gravity + `MakeFalling` + waterfall max-spread                    |
-| **BH-B3**     | Two sources 2 apart over solid → infinite-source regeneration fills the gap                                     | golden-master                              | `infiniteSourceRegeneration` path                                 |
-| **BH-B4**     | Source removed → flow decays back to air over N ticks → all voxels `Active==false`                              | golden-master + termination (per-scenario) | decay + drainage + termination                                    |
-| **BH-B5**     | Lava (low `spreadChance`) → viscosity staggering over many ticks                                                | golden-master + determinism (BH-6)         | TG-3 per-tick reseed (the staggering must *progress*, not freeze) |
-| **BH-B6**     | Grass next to convertible dirt → spreads over ticks (seeded RNG)                                                | golden-master + determinism                | grass reservoir-sampling + spread roll                            |
-| **BH-B7**     | Grass with solid block on top → turns to dirt                                                                   | golden-master                              | grass→dirt branch                                                 |
-| ~~**BH-B8**~~ | ~~contract over all fixtures~~ — **retired** (BH-5 retracted; determinism is per-scenario via BH-6)             | —                                          | —                                                                 |
-| **BH-B9**     | A `REQUIRES_SUPPORT` block on a draining support → cascade must break it                                        | golden-master + positive control           | apply-path support cascade (**BH-7**)                             |
-| **BH-B10**    | Mod targeting a non-replaceable tagged block → production drops it, harness must too                            | golden-master + positive control           | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags   |
-| **BH-D1**     | **Differential:** every BH-B# scenario run through old `switch` vs new TG-4/TG-5 dispatch → identical snapshots | A/B                                        | **the load-bearing TG-4/TG-5 parity guard**                       |
+| ID            | Scenario                                                                                                                           | Leg                                        | Guards                                                            |
+|---------------|------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------|-------------------------------------------------------------------|
+| **BH-B1** ✅   | Single water source on a flat floor, **3 ticks** → symmetric level-1→3 spread (28 mods)                                            | golden-master + determinism + non-vacuity  | core horizontal spread — **shipped 2026-06-20**                   |
+| **BH-B2**     | Water over a 1-block cliff edge → falling column + waterfall reset                                                                 | golden-master                              | gravity + `MakeFalling` + waterfall max-spread                    |
+| **BH-B3**     | Two sources 2 apart over solid → infinite-source regeneration fills the gap                                                        | golden-master                              | `infiniteSourceRegeneration` path                                 |
+| **BH-B4**     | Source removed → flow decays back to air over N ticks → all voxels `Active==false`                                                 | golden-master + termination (per-scenario) | decay + drainage + termination                                    |
+| **BH-B5**     | Lava (low `spreadChance`) → viscosity staggering over many ticks                                                                   | golden-master + determinism (BH-6)         | TG-3 per-tick reseed (the staggering must *progress*, not freeze) |
+| **BH-B6**     | Grass next to convertible dirt → spreads over ticks (seeded RNG)                                                                   | golden-master + determinism                | grass reservoir-sampling + spread roll                            |
+| **BH-B7**     | Grass with solid block on top → turns to dirt                                                                                      | golden-master                              | grass→dirt branch                                                 |
+| ~~**BH-B8**~~ | ~~contract over all fixtures~~ — **retired** (BH-5 retracted; determinism is per-scenario via BH-6)                                | —                                          | —                                                                 |
+| **BH-B9**     | **GATED** (BH-7 unreachable via `Behave`) — `REQUIRES_SUPPORT` on a draining support → cascade; revisit via direct `ApplyMod` test | golden-master + positive control           | apply-path support cascade (**BH-7**)                             |
+| **BH-B10**    | **GATED** (BH-7 unreachable via `Behave`) — mod a `CanReplace`-rejected block; revisit via direct `ApplyMod` test                  | golden-master + positive control           | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags   |
+| **BH-D1**     | **Differential:** every BH-B# scenario run through old `switch` vs new TG-4/TG-5 dispatch → identical snapshots                    | A/B                                        | **the load-bearing TG-4/TG-5 parity guard**                       |
 
 BH-D1 is added **in the TG-4/TG-5 PR itself** (it needs both code paths to exist), exactly as MR-5's
 chained-vs-separate equality baseline (B10) was the guard for MR-5.
@@ -369,15 +372,13 @@ Recommended order (most-bug-prone / highest-invariant-value first):
 **BH-B6** (spread to convertible dirt, seeded RNG) + **BH-B7** (solid-on-top → dirt). Lower-traffic, but TG-4
 splits grass into its own collection, so it needs the same guard.
 
-### Interleaved — close the BH-7 apply-path-fidelity gap
+### Interleaved — close the BH-7 apply-path-fidelity gap · ✅ DONE (2026-06-20)
 
-The `CanReplace` gate + `REQUIRES_SUPPORT` cascade are replicated in `ApplyMod` but **unguarded** (BH-7).
-**First do the reachability check** (≈10 min): confirm whether any current behavior emits a *solid → non-solid*
-mod (cascade trigger) or a mod `CanReplace` would reject (gate trigger). Current reading suggests **neither is
-reachable through `Behave`** (fluid/grass emission is already aligned with `CanReplace`; no behavior removes a
-solid support). If confirmed, close BH-7 with a **direct `ApplyMod` unit test** (BH-B9/BH-B10 driven by crafted
-mods, not via `Behave`) or downgrade it to "accepted defensive parity." Only build BH-B9/BH-B10 as *behavior*
-scenarios if the reachability check finds a real trigger.
+Reachability check complete: enumerated all 6 behavior-emitted mod sites — **neither the `CanReplace` gate nor
+the `REQUIRES_SUPPORT` cascade is reachable through `Behave`** (no behavior emits a solid→non-solid mod; every
+emission is a placement the engine performs, so `CanReplace` never rejects one). BH-7 is closed as **accepted
+defensive parity** (§3): the code is kept faithful + dated-commented, BH-B9/BH-B10 are gated on reachability
+ever changing (then via a direct `ApplyMod` test, not a `Behave`-driven scenario).
 
 ### Wave 3 — Differential mode · built **with** the TG-4/TG-5 PR (not before)
 
