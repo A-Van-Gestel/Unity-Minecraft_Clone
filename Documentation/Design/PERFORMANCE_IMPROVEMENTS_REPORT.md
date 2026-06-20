@@ -8,6 +8,8 @@
 > Status: **Open backlog.** Items are removed (archived) when implemented and verified.
 
 **Last audited:** 2026-06-12, at commit `39c92ef` (branch `feat/Modular-World-Generation-&-World-Types`).
+**Implementation status synced:** 2026-06-20, at commit `ea2aec0` — all Meshing & Rendering items
+except MR-8 (greedy meshing) are now closed and in-game confirmed (MR-1 through MR-7, MR-9).
 Findings are from static code review unless stated otherwise — capture a baseline per
 `Documentation/Performance/README.md` before implementing the larger items.
 
@@ -1047,8 +1049,8 @@ Grouped into waves by value-for-effort; within a wave, order is free. Capture th
 benchmark baseline (`Performance/README.md`) before each wave that touches meshing or lighting.
 
 1. **Quick wins, near-zero risk (one sitting each):**
-   ~~MR-1 (Euler hoist) ✅ done — marginal~~ → MR-5 (chain post-process) → MR-3 + MR-4 (SectionRenderer) → ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
-   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, TG-2 (bitmask variant), TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
+   ~~MR-1 (Euler hoist) ✅ done — marginal~~, ~~MR-5 ✅ done — chain post-process~~, ~~MR-3 + MR-4 ✅ done — SectionRenderer~~, ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
+   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~. Remaining: TG-2 (bitmask variant), TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side) →
@@ -1057,11 +1059,12 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 3. **Pipeline stabilization (from the pipeline doc, already ordered there):**
    P-5 stable-save bit (⚠️ save migration) → P-3 jobified merge.
 4. **Benchmark-gated structural work:**
+   ~~MR-2 ✅ done — vertex format (60 B → 32 B/vertex, upload −57%)~~.
    GS-1 (baked-noise liquid shader) →
    LI-1 (padded lighting volume — benchmark against P-1, acceptance: bit-identical light output) →
-   MR-2 (vertex format) → TG-1 (tick path) or directly TG-4 if committing to the full split.
+   TG-1 (tick path) or directly TG-4 if committing to the full split.
    The GS-5 §7.3 ownership split (`forceRenderingOff` vs `SetActive`) is a small, independently
-   harmless PR that can land any time after MR-3/MR-4 — do it early so GS-5 stays unblocked.
+   harmless PR — now unblocked (MR-3/MR-4 done); do it early so GS-5 stays unblocked.
 5. **Long-horizon architecture:**
    P-2 (persistent native chunk storage — design it halo-padded so it subsumes LI-1) →
    GS-5 (section occlusion culling — phased plan in `VISIBILITY_CULLING_ARCHITECTURE.md` §5+§7) →
@@ -1091,8 +1094,9 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 - **Determinism:** For LI-1 and P-3: dump light maps for a fixed-seed test world before/after and
   diff — must be byte-identical. For TG-3: confirm worldgen output unchanged (it must be — the
   change is runtime-only); grass-spread pattern differences are expected and acceptable.
-- **Visual:** MR-2/MR-4/MR-8 need eyes-on checks: section culling correctness (bounds), fluid
-  rendering, smooth-lighting gradients, rotated blocks (MR-1). GS-1/GS-3 need side-by-side
+- **Visual:** MR-1/MR-2/MR-4 visual checks (rotated blocks, fluid rendering, section-culling
+  bounds, smooth-lighting gradients) are **confirmed in-game**. MR-8 still needs eyes-on checks
+  when implemented (merged-quad lighting seams, texture tiling). GS-1/GS-3 need side-by-side
   comparisons per quality tier (water/lava character, lighting gradients via `DEBUG_LIGHTDATA`).
 - **GPU:** For GS-*: profile with the Frame Debugger + platform GPU profiler (Android GPU
   Inspector / Snapdragon Profiler on device) — record liquid-pass GPU time over a water-heavy view
