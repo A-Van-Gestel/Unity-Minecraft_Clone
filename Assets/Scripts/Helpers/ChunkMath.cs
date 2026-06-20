@@ -52,5 +52,26 @@ namespace Helpers
             // 4. Calculate the index within the section and add the offset.
             return sectionOffset + GetFlattenedIndexInSection(x, localY, z);
         }
+
+        /// <summary>
+        /// Inverse of <see cref="GetFlattenedIndexInChunk"/>: decodes a flat chunk index back into
+        /// its local 3D coordinate. Used to unpack job-emitted active-voxel indices on the main thread.
+        /// </summary>
+        /// <param name="index">The flattened index (0..ChunkVolume-1) produced by <see cref="GetFlattenedIndexInChunk"/>.</param>
+        /// <param name="x">Decoded local X (0-15).</param>
+        /// <param name="y">Decoded local Y (0-ChunkHeight).</param>
+        /// <param name="z">Decoded local Z (0-15).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void GetLocalPositionFromFlattenedIndex(int index, out int x, out int y, out int z)
+        {
+            // Mirror of the section-aware packing in GetFlattenedIndexInChunk / GetFlattenedIndexInSection.
+            int sectionIdx = index / SECTION_VOLUME;
+            int withinSection = index % SECTION_VOLUME;
+
+            x = withinSection % CHUNK_WIDTH;
+            int localY = withinSection / CHUNK_WIDTH % SECTION_SIZE;
+            z = withinSection / (CHUNK_WIDTH * SECTION_SIZE);
+            y = sectionIdx * SECTION_SIZE + localY;
+        }
     }
 }

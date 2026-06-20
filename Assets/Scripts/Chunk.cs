@@ -173,8 +173,17 @@ public class Chunk
     /// Scans the newly populated chunk data for voxels that possess active behaviors (e.g., grass spreading)
     /// and registers them to the active voxel list for continuous tick processing.
     /// </summary>
+    /// <remarks>
+    /// Fallback scan used by the load-from-save (<see cref="World"/>) and pool-recycle replay
+    /// (<see cref="Reset"/>) paths, where no generation job runs and active voxels are not persisted.
+    /// The freshly-generated path instead consumes <see cref="RegisterActiveVoxelsFromJob"/>, which is
+    /// emitted by <see cref="Jobs.ActiveVoxelScanJob"/>. This scan reads the precomputed flat
+    /// <see cref="World.IsActiveById"/> table instead of dereferencing managed <c>BlockType</c> objects.
+    /// </remarks>
     public void OnDataPopulated()
     {
+        bool[] isActiveById = World.Instance.IsActiveById;
+
         // Now that the data is here, we can scan for active voxels.
         // Optimization: Iterate through sections first to skip empty ones.
         for (int s = 0; s < ChunkData.sections.Length; s++)
@@ -190,7 +199,7 @@ public class Chunk
                 uint packedData = section.voxels[i];
                 ushort id = BurstVoxelDataBitMapping.GetId(packedData);
 
-                if (World.Instance.BlockTypes[id].isActive)
+                if (isActiveById[id])
                 {
                     // Convert section index back to 3D position
                     int x = i % ChunkMath.SECTION_SIZE;
@@ -200,6 +209,22 @@ public class Chunk
                     AddActiveVoxel(new Vector3Int(x, startY + yOffset, z));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Registers the active voxels emitted by the generation job's <see cref="Jobs.ActiveVoxelScanJob"/>,
+    /// unpacking each flat chunk index back into a local position. Used on the freshly-generated path
+    /// in place of <see cref="OnDataPopulated"/> — the job has already done the per-voxel scan, so the
+    /// main thread only copies a short list.
+    /// </summary>
+    /// <param name="packedIndices">Flat chunk indices (<see cref="ChunkMath.GetFlattenedIndexInChunk"/> convention) of active voxels.</param>
+    public void RegisterActiveVoxelsFromJob(NativeList<int> packedIndices)
+    {
+        foreach (int i in packedIndices)
+        {
+            ChunkMath.GetLocalPositionFromFlattenedIndex(i, out int x, out int y, out int z);
+            AddActiveVoxel(new Vector3Int(x, y, z));
         }
     }
 

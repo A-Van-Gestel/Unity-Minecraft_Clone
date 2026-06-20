@@ -570,7 +570,13 @@ public class WorldJobManager : IDisposable
                 if (!chunkData.IsPopulated)
                 {
                     chunkData.Populate(jobEntry.Value.Map, jobEntry.Value.HeightMap);
-                    chunkData.Chunk?.OnDataPopulated();
+
+                    // Prefer the jobified active-voxel list (generation path). Generators that do not
+                    // run the scan pass (e.g. legacy) leave it uncreated → fall back to the bitmask scan.
+                    if (jobEntry.Value.ActiveVoxels.IsCreated)
+                        chunkData.Chunk?.RegisterActiveVoxelsFromJob(jobEntry.Value.ActiveVoxels);
+                    else
+                        chunkData.Chunk?.OnDataPopulated();
                 }
 
                 bool jobFullyProcessed = true;

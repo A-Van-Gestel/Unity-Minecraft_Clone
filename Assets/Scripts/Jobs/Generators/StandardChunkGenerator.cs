@@ -457,6 +457,21 @@ namespace Jobs.Generators
             caveMask.Dispose(handle);
             preCaveBlockIDs.Dispose(handle);
 
+            // --- Active-Voxel Emission (final pass) ---
+            // Single-threaded Burst scan of the finalized voxel map. Emits flat indices of voxels
+            // with active behavior so the main thread copies a short list instead of dereferencing
+            // managed BlockType objects up to ChunkVolume times in Chunk.OnDataPopulated.
+            // Pre-size for water-heavy chunks (oceans/lakes register thousands of active source
+            // voxels) to avoid repeated Persistent realloc+copy growth inside the scan job.
+            NativeList<int> activeVoxels = new NativeList<int>(2048, Allocator.Persistent);
+            ActiveVoxelScanJob activeVoxelScanJob = new ActiveVoxelScanJob
+            {
+                VoxelMap = outputMap,
+                BlockTypes = _blockTypesJobData,
+                ActiveVoxels = activeVoxels,
+            };
+            handle = activeVoxelScanJob.Schedule(handle);
+
             return new GenerationJobData
             {
                 Handle = handle,
@@ -465,6 +480,7 @@ namespace Jobs.Generators
                 Mods = modificationsQueue,
                 StructureSpawns = structureSpawnsQueue,
                 WormTelemetry = wormTelemetry,
+                ActiveVoxels = activeVoxels,
             };
         }
 

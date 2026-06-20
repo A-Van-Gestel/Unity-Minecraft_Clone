@@ -73,6 +73,15 @@ public class World : MonoBehaviour
     public BlockDatabase blockDatabase;
 
     public BlockType[] BlockTypes => blockDatabase.blockTypes;
+
+    /// <summary>
+    /// Precomputed flat lookup of <see cref="BlockType.isActive"/> indexed by block id, built once in
+    /// <see cref="PrepareGlobalJobData"/>. Lets the fallback active-voxel scan
+    /// (<see cref="Chunk.OnDataPopulated"/>) avoid dereferencing managed <see cref="BlockType"/> objects.
+    /// </summary>
+    [NonSerialized]
+    public bool[] IsActiveById;
+
     public Material OpaqueMaterial => blockDatabase.opaqueMaterial;
     public Material TransparentMaterial => blockDatabase.transparentMaterial;
     public Material LiquidMaterial => blockDatabase.liquidMaterial;
@@ -1592,6 +1601,10 @@ public class World : MonoBehaviour
         // --- Step 4: Populate blockTypesJobData, including the custom mesh index
         NativeArray<BlockTypeJobData> blockTypesJobData =
             new NativeArray<BlockTypeJobData>(blockDatabase.blockTypes.Length, Allocator.Persistent);
+
+        // Precomputed flat isActive lookup for the fallback active-voxel scan (load / pool-replay paths).
+        IsActiveById = new bool[blockDatabase.blockTypes.Length];
+
         for (int i = 0; i < blockDatabase.blockTypes.Length; i++)
         {
             int customMeshIndex = -1;
@@ -1601,6 +1614,7 @@ public class World : MonoBehaviour
             }
 
             blockTypesJobData[i] = new BlockTypeJobData(blockDatabase.blockTypes[i], customMeshIndex);
+            IsActiveById[i] = blockDatabase.blockTypes[i].isActive;
         }
 
         // --- Step 5: Create the final JobDataManager ---

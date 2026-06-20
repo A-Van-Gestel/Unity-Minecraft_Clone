@@ -88,13 +88,13 @@ instead of a crash.
 
 ### Tick & Gameplay
 
-| ID   | Finding                                                        | Effort | Risk | Benefit | Seed | Save |
-|------|----------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| TG-1 | Double voxel lookup + float-path cross-chunk queries per tick  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
-| TG-2 | `OnDataPopulated` full-chunk scan through managed `BlockType`s |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TG-3 | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
-| TG-4 | `BlockBehavior` data separation (ECS/DOTS pattern)             |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
-| TG-5 | `BlockBehavior` Burst function pointers (lighter alt. to TG-4) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| ID     | Finding                                                        | Effort | Risk | Benefit | Seed | Save |
+|--------|----------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| TG-1   | Double voxel lookup + float-path cross-chunk queries per tick  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| TG-2 ✅ | `OnDataPopulated` full-chunk scan through managed `BlockType`s |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| TG-3   | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
+| TG-4   | `BlockBehavior` data separation (ECS/DOTS pattern)             |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
+| TG-5   | `BlockBehavior` Burst function pointers (lighter alt. to TG-4) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 
 ### Main Thread & Miscellaneous
 
@@ -592,7 +592,35 @@ satisfy both if the persistent layout itself is halo-padded.
 
 ---
 
-### TG-2. `OnDataPopulated` full-chunk scan through managed `BlockType` objects
+### TG-2. ✅ DONE (2026-06-20) — `OnDataPopulated` full-chunk scan through managed `BlockType` objects
+
+> **Closed:** implemented and differential-verified. Both halves of the recommendation shipped:
+> - **Jobified emission (generation path).** A new single-threaded Burst `ActiveVoxelScanJob`
+    > (`Assets/Scripts/Jobs/ActiveVoxelScanJob.cs`) runs as the *final* generation pass — scheduled
+    > after the cave-isolation filter in `StandardChunkGenerator.ScheduleGeneration` so it reads the
+    > finalized voxel map. It walks the map once and appends the flat chunk index
+    > (`ChunkMath.GetFlattenedIndexInChunk` convention) of every voxel whose `BlockTypeJobData.IsActive`
+    > is set into a new `GenerationJobData.ActiveVoxels` (`NativeList<int>`). On the main thread,
+    > `WorldJobManager.ProcessGenerationJobs` STAGE 1 calls `Chunk.RegisterActiveVoxelsFromJob`, which
+    > unpacks each index (`ChunkMath.GetLocalPositionFromFlattenedIndex`, the new inverse helper) and
+    > registers it — copying a short list instead of dereferencing managed `BlockType` objects up to
+    > 32k times per chunk.
+> - **Bitmask fallback scan (load + reset-replay paths).** `World.PrepareGlobalJobData` now builds a
+    > flat `bool[] World.IsActiveById`. `Chunk.OnDataPopulated` keeps its section-skipping scan but
+    > indexes that array instead of `World.Instance.BlockTypes[id].isActive` — a flat read, no object
+    > deref. This path serves only **load-from-save** (`World.LoadOrGenerateChunk` → `PopulateFromSave`)
+    > and **pool-recycle replay** (`Chunk.Reset` when `ChunkData.IsPopulated`), where no generation job
+    > runs. Active voxels are deliberately **not persisted** (see the serialization architecture doc),
+    > so these paths must always rescan — the jobified list is unavailable there. Generators that do not
+    > run the scan pass (e.g. the legacy generator) leave `ActiveVoxels` uncreated, and STAGE 1 falls
+    > back to this scan.
+>
+> **Verified:** a differential editor check generated chunks (sea level raised to flood them with
+> active water) and confirmed the jobified active set is identical — same local positions — to a
+> managed full scan of the same finalized map (10k–13k active voxels/chunk, zero set difference),
+> plus a synthetic placed-vs-emitted round-trip (6/6, exact). No existing validation suite covers
+> active voxels, so the check was a throwaway `[MenuItem]` (RunCommand execution is currently down on
+> the dev machine; the bridge `Unity_ManageMenuItem` was used instead) and removed afterward.
 
 **Observed:** `Chunk.OnDataPopulated` (`Chunk.cs` ~lines 177–205) scans every voxel of every
 non-empty section on the main thread when a chunk's data arrives, dereferencing
@@ -1050,7 +1078,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 
 1. **Quick wins, near-zero risk (one sitting each):**
    ~~MR-1 (Euler hoist) ✅ done — marginal~~, ~~MR-5 ✅ done — chain post-process~~, ~~MR-3 + MR-4 ✅ done — SectionRenderer~~, ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
-   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~. Remaining: TG-2 (bitmask variant), TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
+   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~. Remaining: TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side) →

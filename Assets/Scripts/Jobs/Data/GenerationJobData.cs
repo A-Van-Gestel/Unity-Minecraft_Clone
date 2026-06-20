@@ -24,6 +24,14 @@ namespace Jobs.Data
         /// </summary>
         public NativeList<WormTelemetryEntry> WormTelemetry;
 
+        /// <summary>
+        /// Flat chunk indices (<see cref="Helpers.ChunkMath.GetFlattenedIndexInChunk"/> convention) of
+        /// voxels with active behavior, emitted by <see cref="Jobs.ActiveVoxelScanJob"/> for the
+        /// generation path. Default (not created) for generators that do not run the scan pass
+        /// (e.g. the legacy generator), in which case the caller falls back to the bitmask scan.
+        /// </summary>
+        public NativeList<int> ActiveVoxels;
+
         /// A helper to dispose all the containers at once
         public void Dispose()
         {
@@ -32,6 +40,7 @@ namespace Jobs.Data
             if (Mods.IsCreated) Mods.Dispose();
             if (StructureSpawns.IsCreated) StructureSpawns.Dispose();
             if (WormTelemetry.IsCreated) WormTelemetry.Dispose();
+            if (ActiveVoxels.IsCreated) ActiveVoxels.Dispose();
         }
     }
 }
