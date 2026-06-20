@@ -69,7 +69,7 @@ instead of a crash.
 | MR-6 ✅ | Mesh output `NativeList`s start at default capacity               |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | MR-7 ✅ | Per-fluid-voxel `Allocator.Temp` arrays in the meshing job        |   🟢   |  🟢  |   🟢²   |  ✅   |  ✅   |
 | MR-8   | Greedy meshing (coplanar quad merging)                            |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
-| MR-9   | `Clouds.cs` legacy mesh API with `.ToArray()`                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| MR-9 ✅ | `Clouds.cs` legacy mesh API with `.ToArray()`                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 
 > ¹ MR-1 benefit downgraded 🟢→🟡 after measurement: implemented and suite-guarded, but the
 > throughput delta is within the benchmark's noise floor — a correctness/cleanliness win, not a
@@ -492,9 +492,16 @@ meshing baseline first (`Performance/README.md`).
 
 ---
 
-### MR-9. `Clouds.cs` — legacy mesh API with `.ToArray()`
+### MR-9. `Clouds.cs` — legacy mesh API with `.ToArray()` — ✅ IMPLEMENTED (2026-06-20)
 
 *(Absorbed from `CODEBASE_IMPROVEMENTS.md` §2.2.)*
+
+> **Implemented:** Both mesh-build sites (`CreateFastCloudMesh`, `CreateFancyCloudMesh`) now assign
+> via `mesh.SetVertices(list)` / `mesh.SetTriangles(list, 0)` / `mesh.SetNormals(list)` instead of
+> the three `.ToArray()` round-trips — no temporary managed arrays per cloud-tile (re)generation,
+> byte-identical mesh output. The `new List<>()` allocations were left in place: the build methods
+> run only at init and on cloud-style change (via `Initialize`/`Reinitialize`), not per frame
+> (`UpdateClouds` only moves transforms), so hoisting them to fields buys no steady-state GC win.
 
 **Observed:** Cloud mesh generation builds `List<Vector3>`/`List<int>` and assigns via
 `mesh.vertices = vertices.ToArray()` etc. (`Clouds.cs` ~lines 210–212, 266–268) — three temporary
@@ -1041,7 +1048,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 
 1. **Quick wins, near-zero risk (one sitting each):**
    ~~MR-1 (Euler hoist) ✅ done — marginal~~ → MR-5 (chain post-process) → MR-3 + MR-4 (SectionRenderer) → ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
-   MR-9, TG-2 (bitmask variant), TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
+   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, TG-2 (bitmask variant), TG-3, MT-4, MT-5, MT-3. MT-6 (doc/rename only).
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side) →
