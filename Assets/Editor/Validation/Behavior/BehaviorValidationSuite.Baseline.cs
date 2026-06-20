@@ -74,12 +74,40 @@ T3
 T2
 ";
 
+        // --- BH-B2 fixture geometry: a water source boxed on 3 sides (west/north/south walls) on an upper
+        // floor, open to the east over a 1-block cliff (no upper floor at the edge; a lower floor one block
+        // down). Flow is forced east, over the edge, and falls one block — exercising gravity (MakeFalling),
+        // optimal-flow-toward-drop, and the waterfall reset on landing. Interior placement (Tier-1).
+        private const int CLIFF_UPPER_FLOOR_Y = 10; // source rests at +1 (y=11)
+        private const int CLIFF_LOWER_FLOOR_Y = 9; // the cliff is one block deep
+        private const int CLIFF_SRC_X = 6;
+        private const int CLIFF_EDGE_X = 7; // the cliff cell: no upper floor, lower floor below
+        private const int CLIFF_Z = 8;
+        private const int BH_B2_TICKS = 3; // through source-spread → fall → land+waterfall-reset (T4+ just spills off the minimal lower floor)
+
+        /// <summary>
+        /// BH-B2 golden master (see <see cref="Bh2_WaterFallsOverCliff"/>), compared via
+        /// <see cref="GoldenMaster.AssertOrCapture"/>. <b>Capture mode</b> until confirmed in-game — falling-fluid
+        /// dynamics are intricate, so the snapshot must be eyeballed against real behavior before freezing.
+        /// </summary>
+        private const string BH_B2_GOLDEN =
+            @"T1
+  (6,11,8) active=1 mods=[19@(7,11,8):01:0]
+T2
+  (6,11,8) active=0 mods=[]
+  (7,11,8) active=1 mods=[19@(7,10,8):09:0]
+T3
+  (7,10,8) active=1 mods=[19@(7,10,9):01:0, 19@(7,10,7):01:0, 19@(8,10,8):01:0]
+  (7,11,8) active=0 mods=[]
+";
+
         /// <summary>Registers the baseline regression scenarios.</summary>
         static partial void AddBaselineScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("Smoke: rig stands up and ticks without throwing", Smoke_RigBoots));
             scenarios.Add(new Scenario("BH-B1: single water source spreads on a flat floor", Bh1_SingleWaterSourceSpread));
             scenarios.Add(new Scenario("BH-B4: unsupported water decays to air → termination", Bh4_UnsupportedWaterDecays));
+            scenarios.Add(new Scenario("BH-B2: water falls over a 1-block cliff (gravity + waterfall reset)", Bh2_WaterFallsOverCliff));
         }
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
@@ -252,6 +280,71 @@ T2
             BehaviorTestWorld world = new BehaviorTestWorld();
             world.SetBlock(DECAY_XZ, DECAY_FLOOR_Y, DECAY_XZ, BlockIDs.Stone); // solid floor blocks downflow
             world.SetBlock(DECAY_XZ, DECAY_FLOOR_Y + 1, DECAY_XZ, BlockIDs.Water, meta: DECAY_START_LEVEL);
+            return world;
+        }
+
+        /// <summary>
+        /// BH-B2: a boxed water source flows east over a 1-block cliff and falls. Asserts run-to-run determinism
+        /// (BH-6) and non-vacuous flow, and compares the captured fall/reset sequence against
+        /// <see cref="BH_B2_GOLDEN"/>. No termination assertion — this is gravity/waterfall characterization, and
+        /// the run is short, so the post-fall puddle is not driven to a stable state.
+        /// </summary>
+        private static bool Bh2_WaterFallsOverCliff()
+        {
+            string s1, s2;
+            int totalMods;
+
+            using (BehaviorTestWorld world = BuildBh2World())
+            {
+                BehaviorSnapshot snap = world.RunTicks(BH_B2_TICKS);
+                s1 = snap.Serialize();
+                totalMods = snap.TotalModCount;
+            }
+
+            using (BehaviorTestWorld world = BuildBh2World())
+            {
+                s2 = world.RunTicks(BH_B2_TICKS).Serialize();
+            }
+
+            bool ok = true;
+
+            if (s1 != s2)
+            {
+                Debug.LogError("[FAIL] BH-B2: non-deterministic — two identical runs produced different snapshots.");
+                ok = false;
+            }
+
+            if (totalMods == 0)
+            {
+                Debug.LogError("[FAIL] BH-B2: vacuous — the source emitted no mods.");
+                ok = false;
+            }
+
+            if (!GoldenMaster.AssertOrCapture("BH-B2", s1, BH_B2_GOLDEN))
+                ok = false;
+
+            if (ok) Debug.Log($"[PASS] BH-B2: deterministic, {totalMods} mod(s) over {BH_B2_TICKS} ticks, golden master matched.");
+            return ok;
+        }
+
+        /// <summary>
+        /// Builds the BH-B2 fixture: an upper floor block under a <see cref="BlockIDs.Water"/> source at
+        /// (<see cref="CLIFF_SRC_X"/>, <see cref="CLIFF_UPPER_FLOOR_Y"/>+1, <see cref="CLIFF_Z"/>), walled to the
+        /// west/north/south at the flow level so flow is forced east, with a 1-block cliff at
+        /// <see cref="CLIFF_EDGE_X"/> (no upper floor; a single lower-floor block one level down) for the water
+        /// to fall onto.
+        /// </summary>
+        private static BehaviorTestWorld BuildBh2World()
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld();
+            const int flowY = CLIFF_UPPER_FLOOR_Y + 1; // 11
+
+            world.SetBlock(CLIFF_SRC_X, CLIFF_UPPER_FLOOR_Y, CLIFF_Z, BlockIDs.Stone); // floor under the source
+            world.SetBlock(CLIFF_SRC_X - 1, flowY, CLIFF_Z, BlockIDs.Stone); // west wall
+            world.SetBlock(CLIFF_SRC_X, flowY, CLIFF_Z - 1, BlockIDs.Stone); // north wall
+            world.SetBlock(CLIFF_SRC_X, flowY, CLIFF_Z + 1, BlockIDs.Stone); // south wall
+            world.SetBlock(CLIFF_EDGE_X, CLIFF_LOWER_FLOOR_Y, CLIFF_Z, BlockIDs.Stone); // lower floor (1 block down)
+            world.SetBlock(CLIFF_SRC_X, flowY, CLIFF_Z, BlockIDs.Water, meta: 0); // source, level 0
             return world;
         }
     }
