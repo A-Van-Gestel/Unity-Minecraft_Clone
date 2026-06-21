@@ -136,8 +136,13 @@ namespace Editor.Validation.Lighting
 
             SealCrossChunkDarkeningShaft(world);
             LightingTestWorld.LightingRunResult aResult = world.RunLightingJob(s_c3DarkChunkA);
+            // Coarse liveness check that the defer route fired at all (the darkness wave emits several
+            // cross-chunk removal mods along the seam, so the exact count is not pinned here — it would be a
+            // brittle magic number). This only proves the in-flight defer path was exercised; the ACTUAL
+            // correctness guard is the post-reconciliation GetSkyLight(observe) == 0 + MatchesOracle below,
+            // which a lost/dropped removal cannot satisfy regardless of how many mods were deferred.
             passed &= LightingAssert.IsTrue(aResult.ModsDeferred > 0,
-                "B54: (1,1)'s cross-seam sunlight removal mod is deferred while (2,1) is in flight",
+                "B54: the cross-seam sunlight removal defer route fired while (2,1) was in flight",
                 $"Expected ModsDeferred > 0 (the Sun/removal defer route), got {aResult.ModsDeferred}");
 
             // The merge that would have overwritten a live-applied removal; the deferred removal drains right

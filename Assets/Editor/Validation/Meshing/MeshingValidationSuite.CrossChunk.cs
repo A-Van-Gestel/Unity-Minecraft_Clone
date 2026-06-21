@@ -72,9 +72,16 @@ namespace Editor.Validation.Meshing
 
         /// <summary>
         /// B18 (MH-10) — an opaque cube on the +X border with the across-seam neighbor cell populated as
-        /// <b>air</b> draws all six faces. Populating the neighbor map (rather than leaving it empty) proves
-        /// the job actually <i>consults</i> it and that a non-occluding neighbor does not cull — distinct
-        /// from the empty-array "no neighbor → draw" the suite relied on before.
+        /// <b>air</b> draws all six faces (24 verts). This is the <b>positive-control reference count</b> for
+        /// B19's culled-face delta, and pins that an air (non-occluding) neighbor does <b>not</b> cull (an
+        /// inverted predicate where air culls would drop it to 20 and red this).
+        /// <para>
+        /// <b>Note:</b> B18 does <i>not</i> by itself prove the job consults <c>NeighborRight</c> — an air
+        /// neighbor (0), the all-zero map, and the legacy empty-array (null → draw) path all yield 24, so this
+        /// count is the same whether or not the map is read. <b>B19/B21</b> (opaque neighbor → 20) are the
+        /// baselines that actually exercise the consumption path; the prove-red severing the neighbor reds
+        /// only B19/B21, never B18.
+        /// </para>
         /// </summary>
         private static bool B18_BorderFaceDrawnWhenNeighborAir()
         {

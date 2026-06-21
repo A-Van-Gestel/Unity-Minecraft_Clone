@@ -33,12 +33,15 @@ namespace Editor.Validation.Meshing.Framework
     /// <see cref="MeshDataJobOutput"/> for assertion.
     /// <para>
     /// Mirrors the production / benchmark job wiring: light maps and the neighbor/custom input arrays
-    /// are left empty exactly as <see cref="Benchmarks.MeshGenerationBenchmark"/> leaves them, because
-    /// the standard-cube path under <see cref="SmoothLightingQuality.Off"/> reads neither. The fluid
-    /// height templates ARE populated (16 real entries each) so the fluid meshing path — which indexes
-    /// them by fluid level — runs exactly as in production. Tests place blocks in the chunk interior so
-    /// face culling only consults in-chunk neighbors and the (empty) neighbor-chunk maps never
-    /// influence the result.
+    /// are left empty <b>by default</b>, exactly as <see cref="Benchmarks.MeshGenerationBenchmark"/> leaves
+    /// them, because the standard-cube path under <see cref="SmoothLightingQuality.Off"/> reads neither. The
+    /// fluid height templates ARE populated (16 real entries each) so the fluid meshing path — which indexes
+    /// them by fluid level — runs exactly as in production. Most tests place blocks in the chunk interior so
+    /// face culling only consults in-chunk neighbors and the empty neighbor-chunk maps never influence the
+    /// result. <b>Exception:</b> the cross-chunk border-culling baselines (MH-10/MH-11) opt in to a populated
+    /// +X neighbor via <see cref="SetNeighborRightBlock"/> / <see cref="SetNeighborRightBlockViaProductionFill"/>,
+    /// which <see cref="Run"/> then passes for the <c>NeighborRight</c> slot so the job's border-face culling
+    /// consults it.
     /// </para>
     /// </summary>
     public sealed class MeshingTestWorld : IDisposable
