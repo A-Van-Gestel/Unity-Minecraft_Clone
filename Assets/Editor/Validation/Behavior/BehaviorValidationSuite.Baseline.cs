@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Data;
 using Editor.Validation.Behavior.Framework;
@@ -193,6 +194,86 @@ T11
         }
 
         /// <summary>
+        /// Runs a golden-master behavior scenario with the universal invariants every <c>Bh*</c> scenario shares,
+        /// so each scenario declares only what makes it distinct (build delegate, tick count, golden, optional
+        /// termination, and per-scenario extra checks) instead of re-spelling the boilerplate:
+        /// <list type="bullet">
+        /// <item>run-to-run determinism (BH-6 — a single golden-equality check cannot prove it);</item>
+        /// <item>non-vacuity (≥1 mod emitted, so the scenario can never pass vacuously);</item>
+        /// <item>optional termination (the active set empties) when <paramref name="expectTermination"/> is set;</item>
+        /// <item>byte-equality with <paramref name="golden"/> via <see cref="GoldenMaster.AssertOrCapture"/>
+        /// (capture mode when null/empty); and a single <c>[PASS]</c> log.</item>
+        /// </list>
+        /// Centralizing the wording here means a new universal invariant (or a format change from TG-4/TG-5) is
+        /// edited once, not hand-copied into seven scenarios where a missed copy would silently weaken a guard.
+        /// </summary>
+        /// <param name="label">Scenario tag (e.g. <c>"BH-B1"</c>) used in every log line and as the golden key.</param>
+        /// <param name="build">Factory for a fresh fixture world; invoked once per run (twice total, for determinism).</param>
+        /// <param name="ticks">Number of behavior ticks to run.</param>
+        /// <param name="golden">The frozen golden snapshot, or null/empty for capture mode.</param>
+        /// <param name="expectTermination">When true, asserts the active set is empty after the run.</param>
+        /// <param name="extraChecks">
+        /// Optional per-scenario assertions evaluated over the first run's (world, snapshot). Invoked inside the
+        /// first run's <c>using</c> block, so the world's final voxel state is still live (pre-<c>Dispose</c>). The
+        /// delegate logs its own <c>[FAIL]</c> detail and returns false on failure.
+        /// </param>
+        /// <returns>True iff every universal invariant and the extra checks passed.</returns>
+        private static bool RunGoldenScenario(string label, Func<BehaviorTestWorld> build, int ticks,
+            string golden, bool expectTermination = false,
+            Func<BehaviorTestWorld, BehaviorSnapshot, bool> extraChecks = null)
+        {
+            string s1, s2;
+            int totalMods;
+            int activeAtEnd;
+            bool ok = true;
+
+            using (BehaviorTestWorld world = build())
+            {
+                BehaviorSnapshot snap = world.RunTicks(ticks);
+                s1 = snap.Serialize();
+                totalMods = snap.TotalModCount;
+                activeAtEnd = world.ActiveVoxelCount;
+
+                // Per-scenario assertions run while the world's final state is still live (before Dispose).
+                if (extraChecks != null && !extraChecks(world, snap))
+                    ok = false;
+            }
+
+            using (BehaviorTestWorld world = build())
+                s2 = world.RunTicks(ticks).Serialize();
+
+            // BH-6: determinism (the one universal invariant a single golden-equality check cannot prove).
+            if (s1 != s2)
+            {
+                Debug.LogError($"[FAIL] {label}: non-deterministic — two identical runs produced different snapshots.");
+                ok = false;
+            }
+
+            // Non-vacuity positive control: the scenario must actually do something.
+            if (totalMods == 0)
+            {
+                Debug.LogError($"[FAIL] {label}: vacuous — no mods emitted over {ticks} tick(s).");
+                ok = false;
+            }
+
+            // Optional termination: the active set must empty once the scenario quiesces.
+            if (expectTermination && activeAtEnd != 0)
+            {
+                Debug.LogError($"[FAIL] {label}: did not terminate — expected empty active set, got {activeAtEnd}.");
+                ok = false;
+            }
+
+            // Golden master (normalization + capture-mode handled by the shared helper).
+            if (!GoldenMaster.AssertOrCapture(label, s1, golden))
+                ok = false;
+
+            if (ok)
+                Debug.Log($"[PASS] {label}: deterministic, {totalMods} mod(s) over {ticks} tick(s)" +
+                          $"{(expectTermination ? ", terminated" : "")}, golden master matched.");
+            return ok;
+        }
+
+        /// <summary>
         /// Smoke canary: the harness stands up (World stub + ChunkData), the water source is registered active,
         /// and one tick runs without throwing. The earliest-failure signal for rig breakage; determinism and
         /// behavior are covered by BH-B1, so this deliberately does not re-run or re-assert them.
@@ -231,46 +312,8 @@ T11
         /// run-to-run determinism (BH-6), non-vacuous spread (the water actually emits mods), and byte-equality
         /// with the <see cref="BH_B1_GOLDEN"/> characterization baseline.
         /// </summary>
-        private static bool Bh1_SingleWaterSourceSpread()
-        {
-            string s1, s2;
-            int totalMods;
-
-            using (BehaviorTestWorld world = BuildBh1World())
-            {
-                BehaviorSnapshot snap = world.RunTicks(BH_B1_TICKS);
-                s1 = snap.Serialize();
-                totalMods = snap.TotalModCount;
-            }
-
-            using (BehaviorTestWorld world = BuildBh1World())
-            {
-                s2 = world.RunTicks(BH_B1_TICKS).Serialize();
-            }
-
-            bool ok = true;
-
-            // BH-6: determinism (the one universal invariant — a single golden-equality check cannot prove it).
-            if (s1 != s2)
-            {
-                Debug.LogError("[FAIL] BH-B1: non-deterministic — two identical runs produced different snapshots.");
-                ok = false;
-            }
-
-            // Non-vacuity positive control: the source must actually spread.
-            if (totalMods == 0)
-            {
-                Debug.LogError("[FAIL] BH-B1: vacuous — the water source emitted no mods over 3 ticks.");
-                ok = false;
-            }
-
-            // Golden master (normalization + capture-mode handled by the shared helper).
-            if (!GoldenMaster.AssertOrCapture("BH-B1", s1, BH_B1_GOLDEN))
-                ok = false;
-
-            if (ok) Debug.Log($"[PASS] BH-B1: deterministic, {totalMods} mod(s) over {BH_B1_TICKS} ticks, golden master matched.");
-            return ok;
-        }
+        private static bool Bh1_SingleWaterSourceSpread() =>
+            RunGoldenScenario("BH-B1", BuildBh1World, BH_B1_TICKS, BH_B1_GOLDEN);
 
         /// <summary>
         /// Builds the shared BH-B1 fixture: a solid <see cref="BlockIDs.Stone"/> floor at <see cref="FLOOR_Y"/>
@@ -296,55 +339,8 @@ T11
         /// byte-equality with <see cref="BH_B4_GOLDEN"/>. Exercises the `HandleFluidDecay` drain-to-air branch
         /// and the active-voxel drop — the first scenario that asserts termination.
         /// </summary>
-        private static bool Bh4_UnsupportedWaterDecays()
-        {
-            string s1, s2;
-            int totalMods;
-            int activeAtEnd;
-
-            using (BehaviorTestWorld world = BuildBh4World())
-            {
-                BehaviorSnapshot snap = world.RunTicks(BH_B4_TICKS);
-                s1 = snap.Serialize();
-                totalMods = snap.TotalModCount;
-                activeAtEnd = world.ActiveVoxelCount;
-            }
-
-            using (BehaviorTestWorld world = BuildBh4World())
-            {
-                s2 = world.RunTicks(BH_B4_TICKS).Serialize();
-            }
-
-            bool ok = true;
-
-            // BH-6: determinism.
-            if (s1 != s2)
-            {
-                Debug.LogError("[FAIL] BH-B4: non-deterministic — two identical runs produced different snapshots.");
-                ok = false;
-            }
-
-            // Non-vacuity positive control: the cell must actually emit a decay mod.
-            if (totalMods == 0)
-            {
-                Debug.LogError("[FAIL] BH-B4: vacuous — the unsupported cell emitted no mods.");
-                ok = false;
-            }
-
-            // Termination: once the cell drains to air, the tick pump drops it and the active set empties.
-            if (activeAtEnd != 0)
-            {
-                Debug.LogError($"[FAIL] BH-B4: did not terminate — expected empty active set, got {activeAtEnd}.");
-                ok = false;
-            }
-
-            // Golden master (normalization + capture-mode handled by the shared helper).
-            if (!GoldenMaster.AssertOrCapture("BH-B4", s1, BH_B4_GOLDEN))
-                ok = false;
-
-            if (ok) Debug.Log($"[PASS] BH-B4: deterministic, {totalMods} mod(s), terminated (active set empty), golden master matched.");
-            return ok;
-        }
+        private static bool Bh4_UnsupportedWaterDecays() =>
+            RunGoldenScenario("BH-B4", BuildBh4World, BH_B4_TICKS, BH_B4_GOLDEN, expectTermination: true);
 
         /// <summary>
         /// Builds the BH-B4 fixture: one solid <see cref="BlockIDs.Stone"/> block at
@@ -366,43 +362,8 @@ T11
         /// <see cref="BH_B2_GOLDEN"/>. No termination assertion — this is gravity/waterfall characterization, and
         /// the run is short, so the post-fall puddle is not driven to a stable state.
         /// </summary>
-        private static bool Bh2_WaterFallsOverCliff()
-        {
-            string s1, s2;
-            int totalMods;
-
-            using (BehaviorTestWorld world = BuildBh2World())
-            {
-                BehaviorSnapshot snap = world.RunTicks(BH_B2_TICKS);
-                s1 = snap.Serialize();
-                totalMods = snap.TotalModCount;
-            }
-
-            using (BehaviorTestWorld world = BuildBh2World())
-            {
-                s2 = world.RunTicks(BH_B2_TICKS).Serialize();
-            }
-
-            bool ok = true;
-
-            if (s1 != s2)
-            {
-                Debug.LogError("[FAIL] BH-B2: non-deterministic — two identical runs produced different snapshots.");
-                ok = false;
-            }
-
-            if (totalMods == 0)
-            {
-                Debug.LogError("[FAIL] BH-B2: vacuous — the source emitted no mods.");
-                ok = false;
-            }
-
-            if (!GoldenMaster.AssertOrCapture("BH-B2", s1, BH_B2_GOLDEN))
-                ok = false;
-
-            if (ok) Debug.Log($"[PASS] BH-B2: deterministic, {totalMods} mod(s) over {BH_B2_TICKS} ticks, golden master matched.");
-            return ok;
-        }
+        private static bool Bh2_WaterFallsOverCliff() =>
+            RunGoldenScenario("BH-B2", BuildBh2World, BH_B2_TICKS, BH_B2_GOLDEN);
 
         /// <summary>
         /// Builds the BH-B2 fixture: an upper floor block under a <see cref="BlockIDs.Water"/> source at
@@ -431,52 +392,8 @@ T11
         /// and byte-equality with <see cref="BH_B3_GOLDEN"/>. Exercises the `infiniteSourceRegeneration` branch
         /// of `CalculateExpectedFluidLevel`.
         /// </summary>
-        private static bool Bh3_InfiniteSourceRegeneration()
-        {
-            string s1, s2;
-            int totalMods;
-            int activeAtEnd;
-
-            using (BehaviorTestWorld world = BuildBh3World())
-            {
-                BehaviorSnapshot snap = world.RunTicks(BH_B3_TICKS);
-                s1 = snap.Serialize();
-                totalMods = snap.TotalModCount;
-                activeAtEnd = world.ActiveVoxelCount;
-            }
-
-            using (BehaviorTestWorld world = BuildBh3World())
-            {
-                s2 = world.RunTicks(BH_B3_TICKS).Serialize();
-            }
-
-            bool ok = true;
-
-            if (s1 != s2)
-            {
-                Debug.LogError("[FAIL] BH-B3: non-deterministic — two identical runs produced different snapshots.");
-                ok = false;
-            }
-
-            if (totalMods == 0)
-            {
-                Debug.LogError("[FAIL] BH-B3: vacuous — the sources emitted no mods.");
-                ok = false;
-            }
-
-            // Termination: once the gap regenerates to a source, all three cells are stable sources and drop out.
-            if (activeAtEnd != 0)
-            {
-                Debug.LogError($"[FAIL] BH-B3: did not terminate — expected empty active set, got {activeAtEnd}.");
-                ok = false;
-            }
-
-            if (!GoldenMaster.AssertOrCapture("BH-B3", s1, BH_B3_GOLDEN))
-                ok = false;
-
-            if (ok) Debug.Log($"[PASS] BH-B3: deterministic, {totalMods} mod(s) over {BH_B3_TICKS} ticks, terminated, golden master matched.");
-            return ok;
-        }
+        private static bool Bh3_InfiniteSourceRegeneration() =>
+            RunGoldenScenario("BH-B3", BuildBh3World, BH_B3_TICKS, BH_B3_GOLDEN, expectTermination: true);
 
         /// <summary>
         /// Builds the BH-B3 fixture: a solid floor under a 3-cell channel
@@ -517,82 +434,41 @@ T11
         /// </summary>
         private static bool Bh5_LavaViscosityStaggers()
         {
-            string s1, s2;
-            int totalMods;
-            int sourceSpreadTicks, sourceSkipTicks;
-            bool advancedBeyondNeighbor;
-            int activeAtEnd;
-
             Vector3Int sourcePos = new Vector3Int(LAVA_SRC_X, LAVA_FLOOR_Y + 1, LAVA_Z);
 
-            using (BehaviorTestWorld world = BuildBh5World())
-            {
-                BehaviorSnapshot snap = world.RunTicks(BH_B5_TICKS);
-                s1 = snap.Serialize();
-                totalMods = snap.TotalModCount;
-                activeAtEnd = world.ActiveVoxelCount;
-                CountSourceSpreadVsSkip(snap, sourcePos, out sourceSpreadTicks, out sourceSkipTicks);
+            return RunGoldenScenario("BH-B5", BuildBh5World, BH_B5_TICKS, BH_B5_GOLDEN, expectTermination: true,
+                extraChecks: (world, snap) =>
+                {
+                    bool ok = true;
+                    CountSourceSpreadVsSkip(snap, sourcePos, out int sourceSpreadTicks, out int sourceSkipTicks);
 
-                // Progression past the first hop: the cell two out from the source (x+2) is lava at the end. This
-                // needs the gate to be passed at two distinct cells/ticks, so it cannot be satisfied by a frozen
-                // (never-advancing) flow — the TG-3 failure mode.
-                advancedBeyondNeighbor = BurstVoxelDataBitMapping.GetId(
-                    world.ChunkData.GetVoxel(LAVA_SRC_X + 2, LAVA_FLOOR_Y + 1, LAVA_Z)) == BlockIDs.Lava;
-            }
+                    // Progression past the first hop: the cell two out from the source (x+2) is lava at the end.
+                    // This needs the gate to be passed at two distinct cells/ticks, so it cannot be satisfied by a
+                    // frozen (never-advancing) flow — the TG-3 failure mode.
+                    bool advancedBeyondNeighbor = BurstVoxelDataBitMapping.GetId(
+                        world.ChunkData.GetVoxel(LAVA_SRC_X + 2, LAVA_FLOOR_Y + 1, LAVA_Z)) == BlockIDs.Lava;
 
-            using (BehaviorTestWorld world = BuildBh5World())
-                s2 = world.RunTicks(BH_B5_TICKS).Serialize();
+                    // Anti-freeze (progression): the always-active level-0 source must spread on ≥1 tick AND the
+                    // front must advance beyond the first neighbor. A position-only seed (the TG-3 bug) freezes a
+                    // source whose single NextFloat lands above spreadChance, so it would never spread/advance.
+                    if (sourceSpreadTicks == 0 || !advancedBeyondNeighbor)
+                    {
+                        Debug.LogError($"[FAIL] BH-B5: lava did not progress — source spread on {sourceSpreadTicks} tick(s), " +
+                                       $"reached x+2={advancedBeyondNeighbor}. Expected the viscosity gate to pass and the front to advance.");
+                        ok = false;
+                    }
 
-            bool ok = true;
+                    // Staggering (viscosity engaged): while still active (open air neighbor), the source must SKIP
+                    // on ≥1 tick. Water (spreadChance 1.0) never skips; only the per-tick reseed makes both spread
+                    // and skip outcomes appear at one fixed source position.
+                    if (sourceSkipTicks == 0)
+                    {
+                        Debug.LogError("[FAIL] BH-B5: no viscosity staggering — the active source spread on every tick (behaving like water, not lava).");
+                        ok = false;
+                    }
 
-            // BH-6: determinism — the core TG-3 reproducibility guard. The viscosity seed mixes the per-tick salt
-            // (World.TickCounter), so two identical runs must reproduce the same spread/skip pattern exactly.
-            if (s1 != s2)
-            {
-                Debug.LogError("[FAIL] BH-B5: non-deterministic — two identical runs produced different snapshots.");
-                ok = false;
-            }
-
-            if (totalMods == 0)
-            {
-                Debug.LogError("[FAIL] BH-B5: vacuous — the lava source emitted no mods.");
-                ok = false;
-            }
-
-            // Anti-freeze (progression): the always-active level-0 source must spread on ≥1 tick AND the front must
-            // advance beyond the first neighbor. A position-only seed (the TG-3 bug) freezes a source whose single
-            // NextFloat lands above spreadChance, so it would never spread and the front would never advance.
-            if (sourceSpreadTicks == 0 || !advancedBeyondNeighbor)
-            {
-                Debug.LogError($"[FAIL] BH-B5: lava did not progress — source spread on {sourceSpreadTicks} tick(s), " +
-                               $"reached x+2={advancedBeyondNeighbor}. Expected the viscosity gate to pass and the front to advance.");
-                ok = false;
-            }
-
-            // Staggering (viscosity engaged): while still active (open air neighbor), the source must SKIP on ≥1
-            // tick. Water (spreadChance 1.0) never skips; only the per-tick reseed makes both spread and skip
-            // outcomes appear at one fixed source position.
-            if (sourceSkipTicks == 0)
-            {
-                Debug.LogError("[FAIL] BH-B5: no viscosity staggering — the active source spread on every tick (behaving like water, not lava).");
-                ok = false;
-            }
-
-            // Termination: once the front reaches the farthest cell (level 3, which cannot spread further), every
-            // cell stabilizes and the active set empties — the staggering must converge, not churn forever.
-            if (activeAtEnd != 0)
-            {
-                Debug.LogError($"[FAIL] BH-B5: did not terminate — expected empty active set, got {activeAtEnd}.");
-                ok = false;
-            }
-
-            if (!GoldenMaster.AssertOrCapture("BH-B5", s1, BH_B5_GOLDEN))
-                ok = false;
-
-            if (ok)
-                Debug.Log($"[PASS] BH-B5: deterministic, {totalMods} mod(s) over {BH_B5_TICKS} ticks, " +
-                          $"source spread {sourceSpreadTicks}× / skipped {sourceSkipTicks}× (viscosity staggers + progresses), terminated, golden master matched.");
-            return ok;
+                    return ok;
+                });
         }
 
         /// <summary>
@@ -690,61 +566,26 @@ T6
         /// one of the two candidates (the reservoir picked a real candidate), and byte-equality with
         /// <see cref="BH_B6_GOLDEN"/>. The second grass seeded-RNG path (the first is BH-B5 lava).
         /// </summary>
-        private static bool Bh6_GrassSpreadsToDirt()
-        {
-            string s1, s2;
-            int totalMods;
-            bool leftConverted, rightConverted;
+        private static bool Bh6_GrassSpreadsToDirt() =>
+            RunGoldenScenario("BH-B6", () => BuildBh6World(GRASS_X, GRASS_Z), BH_B6_TICKS, BH_B6_GOLDEN,
+                extraChecks: (world, snap) =>
+                {
+                    // A spread converts one chosen candidate dirt → grass. Confirm via final state that exactly the
+                    // reservoir-chosen cell flipped (the apply path actually placed the emitted mod).
+                    bool leftConverted = BurstVoxelDataBitMapping.GetId(
+                        world.ChunkData.GetVoxel(GRASS_X - 1, GRASS_Y, GRASS_Z)) == BlockIDs.Grass;
+                    bool rightConverted = BurstVoxelDataBitMapping.GetId(
+                        world.ChunkData.GetVoxel(GRASS_X + 1, GRASS_Y, GRASS_Z)) == BlockIDs.Grass;
 
-            using (BehaviorTestWorld world = BuildBh6World(GRASS_X, GRASS_Z))
-            {
-                BehaviorSnapshot snap = world.RunTicks(BH_B6_TICKS);
-                s1 = snap.Serialize();
-                totalMods = snap.TotalModCount;
+                    // The spread must land on exactly one of the two reservoir candidates (the apply path placed it).
+                    if (leftConverted == rightConverted)
+                    {
+                        Debug.LogError($"[FAIL] BH-B6: expected exactly one candidate to convert to grass, got left={leftConverted} right={rightConverted}.");
+                        return false;
+                    }
 
-                // A spread converts one chosen candidate dirt → grass. Confirm via final state that exactly the
-                // reservoir-chosen cell flipped (the apply path actually placed the emitted mod).
-                leftConverted = BurstVoxelDataBitMapping.GetId(
-                    world.ChunkData.GetVoxel(GRASS_X - 1, GRASS_Y, GRASS_Z)) == BlockIDs.Grass;
-                rightConverted = BurstVoxelDataBitMapping.GetId(
-                    world.ChunkData.GetVoxel(GRASS_X + 1, GRASS_Y, GRASS_Z)) == BlockIDs.Grass;
-            }
-
-            using (BehaviorTestWorld world = BuildBh6World(GRASS_X, GRASS_Z))
-                s2 = world.RunTicks(BH_B6_TICKS).Serialize();
-
-            bool ok = true;
-
-            // BH-6: determinism — the TG-3 reproducibility guard (reservoir draws + spread roll share one seeded rng).
-            if (s1 != s2)
-            {
-                Debug.LogError("[FAIL] BH-B6: non-deterministic — two identical runs produced different snapshots.");
-                ok = false;
-            }
-
-            // Non-vacuity / anti-freeze: the grass must actually spread within the window. A position-only seed (the
-            // TG-3 bug) would freeze the 2% roll, so a grass that idles forever would never emit.
-            if (totalMods == 0)
-            {
-                Debug.LogError("[FAIL] BH-B6: vacuous — the grass emitted no spread mod within the window.");
-                ok = false;
-            }
-
-            // The spread must land on exactly one of the two reservoir candidates (the apply path placed it).
-            if (leftConverted == rightConverted)
-            {
-                Debug.LogError($"[FAIL] BH-B6: expected exactly one candidate to convert to grass, got left={leftConverted} right={rightConverted}.");
-                ok = false;
-            }
-
-            if (!GoldenMaster.AssertOrCapture("BH-B6", s1, BH_B6_GOLDEN))
-                ok = false;
-
-            if (ok)
-                Debug.Log($"[PASS] BH-B6: deterministic, {totalMods} mod(s) over {BH_B6_TICKS} ticks, " +
-                          $"spread to {(leftConverted ? "left" : "right")} candidate, golden master matched.");
-            return ok;
-        }
+                    return true;
+                });
 
         /// <summary>
         /// Builds the BH-B6 fixture at the given grass column: a <see cref="BlockIDs.Grass"/> block at
@@ -789,61 +630,21 @@ T2
         /// active set), that the grass cell actually became <see cref="BlockIDs.Dirt"/>, and byte-equality with
         /// <see cref="BH_B7_GOLDEN"/>. Exercises the grass→dirt branch — the one grass path with no RNG gate.
         /// </summary>
-        private static bool Bh7_GrassUnderSolidTurnsToDirt()
-        {
-            string s1, s2;
-            int totalMods;
-            int activeAtEnd;
-            bool becameDirt;
+        private static bool Bh7_GrassUnderSolidTurnsToDirt() =>
+            RunGoldenScenario("BH-B7", BuildBh7World, BH_B7_TICKS, BH_B7_GOLDEN, expectTermination: true,
+                extraChecks: (world, snap) =>
+                {
+                    // The grass cell must actually have flipped to dirt (the apply path placed the emitted mod).
+                    bool becameDirt = BurstVoxelDataBitMapping.GetId(
+                        world.ChunkData.GetVoxel(CAP_GRASS_XZ, CAP_GRASS_Y, CAP_GRASS_XZ)) == BlockIDs.Dirt;
+                    if (!becameDirt)
+                    {
+                        Debug.LogError("[FAIL] BH-B7: the capped grass cell did not become dirt.");
+                        return false;
+                    }
 
-            using (BehaviorTestWorld world = BuildBh7World())
-            {
-                BehaviorSnapshot snap = world.RunTicks(BH_B7_TICKS);
-                s1 = snap.Serialize();
-                totalMods = snap.TotalModCount;
-                activeAtEnd = world.ActiveVoxelCount;
-                becameDirt = BurstVoxelDataBitMapping.GetId(
-                    world.ChunkData.GetVoxel(CAP_GRASS_XZ, CAP_GRASS_Y, CAP_GRASS_XZ)) == BlockIDs.Dirt;
-            }
-
-            using (BehaviorTestWorld world = BuildBh7World())
-                s2 = world.RunTicks(BH_B7_TICKS).Serialize();
-
-            bool ok = true;
-
-            if (s1 != s2)
-            {
-                Debug.LogError("[FAIL] BH-B7: non-deterministic — two identical runs produced different snapshots.");
-                ok = false;
-            }
-
-            if (totalMods == 0)
-            {
-                Debug.LogError("[FAIL] BH-B7: vacuous — the capped grass emitted no conversion mod.");
-                ok = false;
-            }
-
-            // The grass cell must actually have flipped to dirt (the apply path placed the emitted mod).
-            if (!becameDirt)
-            {
-                Debug.LogError("[FAIL] BH-B7: the capped grass cell did not become dirt.");
-                ok = false;
-            }
-
-            // Termination: dirt is inactive, so once the grass converts the active set empties.
-            if (activeAtEnd != 0)
-            {
-                Debug.LogError($"[FAIL] BH-B7: did not terminate — expected empty active set, got {activeAtEnd}.");
-                ok = false;
-            }
-
-            if (!GoldenMaster.AssertOrCapture("BH-B7", s1, BH_B7_GOLDEN))
-                ok = false;
-
-            if (ok)
-                Debug.Log($"[PASS] BH-B7: deterministic, {totalMods} mod(s), grass→dirt, terminated, golden master matched.");
-            return ok;
-        }
+                    return true;
+                });
 
         /// <summary>
         /// Builds the BH-B7 fixture: a <see cref="BlockIDs.Grass"/> block at
