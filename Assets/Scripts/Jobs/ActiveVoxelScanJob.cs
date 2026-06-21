@@ -19,6 +19,13 @@ namespace Jobs
     /// The emitted indices use the <see cref="ChunkMath.GetFlattenedIndexInChunk"/> convention and
     /// are unpacked back to local positions on the main thread by
     /// <see cref="Chunk.RegisterActiveVoxelsFromJob"/>.
+    /// <para><b>Parity invariant:</b> this Burst job (fresh-gen path) and the managed
+    /// <see cref="Chunk.OnDataPopulated"/> bitmask scan (load-from-save / pool-recycle path) are two
+    /// implementations of the same "which voxels are active" decision and MUST agree on both (1) the active
+    /// criterion and (2) the flat-index/section convention. The criterion is drift-proof by construction —
+    /// this job's <see cref="BlockTypeJobData.IsActive"/> and OnDataPopulated's <see cref="World.IsActiveById"/>
+    /// are built in one loop from <c>BlockType.isActive</c> in <c>World</c> init. If you change either the
+    /// criterion or the index convention, change both paths.</para>
     /// </remarks>
     [BurstCompile]
     public struct ActiveVoxelScanJob : IJob

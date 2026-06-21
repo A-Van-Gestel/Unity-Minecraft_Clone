@@ -1616,6 +1616,9 @@ public class World : MonoBehaviour
             new NativeArray<BlockTypeJobData>(blockDatabase.blockTypes.Length, Allocator.Persistent);
 
         // Precomputed flat isActive lookup for the fallback active-voxel scan (load / pool-replay paths).
+        // Co-built in the loop below with blockTypesJobData[i].IsActive from the same BlockType.isActive source,
+        // so the two active-voxel scan paths (Chunk.OnDataPopulated vs Jobs.ActiveVoxelScanJob) cannot disagree
+        // on the active criterion — keep them built together.
         IsActiveById = new bool[blockDatabase.blockTypes.Length];
 
         for (int i = 0; i < blockDatabase.blockTypes.Length; i++)

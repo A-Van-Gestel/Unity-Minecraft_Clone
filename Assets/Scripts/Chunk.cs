@@ -179,6 +179,11 @@ public class Chunk
     /// The freshly-generated path instead consumes <see cref="RegisterActiveVoxelsFromJob"/>, which is
     /// emitted by <see cref="Jobs.ActiveVoxelScanJob"/>. This scan reads the precomputed flat
     /// <see cref="World.IsActiveById"/> table instead of dereferencing managed <c>BlockType</c> objects.
+    /// <para><b>Parity invariant:</b> this managed scan and the Burst <see cref="Jobs.ActiveVoxelScanJob"/>
+    /// must register the same active set — they MUST agree on both the active criterion
+    /// (<see cref="World.IsActiveById"/> here vs <c>BlockTypeJobData.IsActive</c> there, co-built in one loop
+    /// in <c>World</c> init, so drift-proof) and the section/index convention. Change one path's criterion or
+    /// convention and you must change the other.</para>
     /// </remarks>
     public void OnDataPopulated()
     {

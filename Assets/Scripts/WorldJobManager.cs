@@ -573,6 +573,10 @@ public class WorldJobManager : IDisposable
 
                     // Prefer the jobified active-voxel list (generation path). Generators that do not
                     // run the scan pass (e.g. legacy) leave it uncreated → fall back to the bitmask scan.
+                    // Contract: IsCreated ⟺ the scan pass ran. An empty *created* list means genuinely zero
+                    // active voxels (NOT a signal to fall back) — a generator that allocates ActiveVoxels must
+                    // run ActiveVoxelScanJob to fill it. Both branches register the same active set; see the
+                    // parity invariant on ActiveVoxelScanJob / Chunk.OnDataPopulated.
                     if (jobEntry.Value.ActiveVoxels.IsCreated)
                         chunkData.Chunk?.RegisterActiveVoxelsFromJob(jobEntry.Value.ActiveVoxels);
                     else
