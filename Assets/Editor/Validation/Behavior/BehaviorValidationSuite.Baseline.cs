@@ -184,6 +184,7 @@ T11
             scenarios.Add(new Scenario("BH-B3: two sources regenerate a source in the gap (infinite water)", Bh3_InfiniteSourceRegeneration));
             scenarios.Add(new Scenario("BH-B5: lava viscosity staggers via the seeded-RNG gate (TG-3)", Bh5_LavaViscosityStaggers));
             scenarios.Add(new Scenario("BH-B6: grass spreads to convertible dirt (reservoir sampling + spread roll)", Bh6_GrassSpreadsToDirt));
+            scenarios.Add(new Scenario("BH-B7: grass turns to dirt under a solid block (deterministic)", Bh7_GrassUnderSolidTurnsToDirt));
         }
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
@@ -758,6 +759,102 @@ T6
             world.SetBlock(gx, GRASS_Y, gz, BlockIDs.Grass);
             world.SetBlock(gx - 1, GRASS_Y, gz, BlockIDs.Dirt); // convertible (air above by default)
             world.SetBlock(gx + 1, GRASS_Y, gz, BlockIDs.Dirt); // convertible
+            return world;
+        }
+
+        // --- BH-B7 fixture geometry: a single GRASS block with a solid STONE block directly on top of it, on an
+        // otherwise empty (all-air) chunk. Grass's Behave "Condition 1" (solid block above → turn to dirt) fires
+        // and RETURNS before any rng draw, so this scenario is DETERMINISTIC — no seed probe, no staggering. The
+        // grass starts active (palette isActive=true → SetBlock registers it, mirroring production's neighbor
+        // activation when the cap is placed). Interior placement (Tier-1).
+        private const int CAP_GRASS_Y = 11;
+        private const int CAP_GRASS_XZ = 8;
+        private const int BH_B7_TICKS = 2; // T1: grass → dirt + drop from active set; T2: empty (termination)
+
+        /// <summary>
+        /// BH-B7 golden master (see <see cref="Bh7_GrassUnderSolidTurnsToDirt"/>), compared via
+        /// <see cref="GoldenMaster.AssertOrCapture"/>. Frozen after a code-trace match (deterministic — the
+        /// solid-on-top branch returns before any seeded-RNG use): the grass emits a single Dirt mod onto itself
+        /// and immediately goes inactive, and the now-inactive dirt empties the active set on T2 (termination).
+        /// </summary>
+        private const string BH_B7_GOLDEN =
+            @"T1
+  (8,11,8) active=0 mods=[3@(8,11,8):00:0]
+T2
+";
+
+        /// <summary>
+        /// BH-B7: a grass block capped by a solid block turns to dirt. Asserts run-to-run determinism (BH-6),
+        /// non-vacuous conversion (a Dirt mod is emitted), **termination** (the now-inactive dirt empties the
+        /// active set), that the grass cell actually became <see cref="BlockIDs.Dirt"/>, and byte-equality with
+        /// <see cref="BH_B7_GOLDEN"/>. Exercises the grass→dirt branch — the one grass path with no RNG gate.
+        /// </summary>
+        private static bool Bh7_GrassUnderSolidTurnsToDirt()
+        {
+            string s1, s2;
+            int totalMods;
+            int activeAtEnd;
+            bool becameDirt;
+
+            using (BehaviorTestWorld world = BuildBh7World())
+            {
+                BehaviorSnapshot snap = world.RunTicks(BH_B7_TICKS);
+                s1 = snap.Serialize();
+                totalMods = snap.TotalModCount;
+                activeAtEnd = world.ActiveVoxelCount;
+                becameDirt = BurstVoxelDataBitMapping.GetId(
+                    world.ChunkData.GetVoxel(CAP_GRASS_XZ, CAP_GRASS_Y, CAP_GRASS_XZ)) == BlockIDs.Dirt;
+            }
+
+            using (BehaviorTestWorld world = BuildBh7World())
+                s2 = world.RunTicks(BH_B7_TICKS).Serialize();
+
+            bool ok = true;
+
+            if (s1 != s2)
+            {
+                Debug.LogError("[FAIL] BH-B7: non-deterministic — two identical runs produced different snapshots.");
+                ok = false;
+            }
+
+            if (totalMods == 0)
+            {
+                Debug.LogError("[FAIL] BH-B7: vacuous — the capped grass emitted no conversion mod.");
+                ok = false;
+            }
+
+            // The grass cell must actually have flipped to dirt (the apply path placed the emitted mod).
+            if (!becameDirt)
+            {
+                Debug.LogError("[FAIL] BH-B7: the capped grass cell did not become dirt.");
+                ok = false;
+            }
+
+            // Termination: dirt is inactive, so once the grass converts the active set empties.
+            if (activeAtEnd != 0)
+            {
+                Debug.LogError($"[FAIL] BH-B7: did not terminate — expected empty active set, got {activeAtEnd}.");
+                ok = false;
+            }
+
+            if (!GoldenMaster.AssertOrCapture("BH-B7", s1, BH_B7_GOLDEN))
+                ok = false;
+
+            if (ok)
+                Debug.Log($"[PASS] BH-B7: deterministic, {totalMods} mod(s), grass→dirt, terminated, golden master matched.");
+            return ok;
+        }
+
+        /// <summary>
+        /// Builds the BH-B7 fixture: a <see cref="BlockIDs.Grass"/> block at
+        /// (<see cref="CAP_GRASS_XZ"/>, <see cref="CAP_GRASS_Y"/>, <see cref="CAP_GRASS_XZ"/>) with a solid
+        /// <see cref="BlockIDs.Stone"/> block directly above it (the cap that triggers the grass→dirt conversion).
+        /// </summary>
+        private static BehaviorTestWorld BuildBh7World()
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld();
+            world.SetBlock(CAP_GRASS_XZ, CAP_GRASS_Y, CAP_GRASS_XZ, BlockIDs.Grass);
+            world.SetBlock(CAP_GRASS_XZ, CAP_GRASS_Y + 1, CAP_GRASS_XZ, BlockIDs.Stone); // solid cap
             return world;
         }
     }

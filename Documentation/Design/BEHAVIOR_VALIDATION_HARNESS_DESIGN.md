@@ -1,27 +1,27 @@
 # Behavior (Tick) Validation Harness — Draft Implementation Design
 
-**Status:** 🟢 **Wave 0 + Wave 1 (all fluid golden masters) + half of Wave 2 shipped & green (2026-06-21).** The
-harness exists and runs: menu item **`Minecraft Clone/Dev/Validate Behavior`**, sources under
-`Assets/Editor/Validation/Behavior/` (`Framework/{TestBehaviorBlockPalette,BehaviorTestWorld,BehaviorSnapshot}.cs`
-
-+ `BehaviorValidationSuite{,.Baseline}.cs`). 7 baselines green: **Smoke** (rig), **BH-B1**
-  (water spread), **BH-B4** (decay + termination), **BH-B2** (1-block cliff → gravity + waterfall reset),
-  **BH-B3** (infinite-source regeneration), **BH-B5** (lava viscosity staggering — TG-3 seeded-RNG gate #1), and
-  **BH-B6** (grass spread to convertible dirt — TG-3 seeded-RNG gate #2: reservoir sampling + 2% roll; in-game
-  confirmed before freezing). BH-7 (apply-path fidelity) closed as accepted defensive parity. Remaining: **BH-B7**
-  (grass→dirt under solid — deterministic, completes Wave 2) + **BH-D1** (the old-vs-new differential, built in
-  the TG-4/TG-5 PR). Promote this doc to `Documentation/Architecture/Testing Framework/` once BH-B7 lands.
-  **Created:** 2026-06-20
-  **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
-  (Burst function-pointer dispatch) optimizations in
-  [PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md) claim *behavior-preserving* — the
-  same role the Meshing suite plays for `MR-*` and the Lighting suite plays for the lighting engine.
-  **Proposed scope:** `Assets/Editor/Validation/Behavior/` — a new `BehaviorValidationSuite` +
-  `BehaviorTestWorld` + `BehaviorOracle`/`BehaviorAssert` + `TestBehaviorBlockPalette` harness, menu item
-  **`Minecraft Clone/Dev/Validate Behavior`**.
-  **Siblings (same document shape & conventions):**
-  [MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md),
-  [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md).
+**Status:** 🟢 **Waves 0–2 complete — the entire fluid + grass behavior surface is baselined & green (2026-06-21).**
+The harness exists and runs: menu item **`Minecraft Clone/Dev/Validate Behavior`**, sources under
+`Assets/Editor/Validation/Behavior/` (`Framework/{TestBehaviorBlockPalette,BehaviorTestWorld,BehaviorSnapshot}.cs`,
+`BehaviorValidationSuite{,.Baseline}.cs`). 8 baselines green: **Smoke** (rig), **BH-B1**
+(water spread), **BH-B4** (decay + termination), **BH-B2** (1-block cliff → gravity + waterfall reset),
+**BH-B3** (infinite-source regeneration), **BH-B5** (lava viscosity staggering — TG-3 seeded-RNG gate #1),
+**BH-B6** (grass spread to convertible dirt — TG-3 seeded-RNG gate #2: reservoir sampling + 2% roll; in-game
+confirmed), and **BH-B7** (grass→dirt under a solid block — deterministic). BH-7 (apply-path fidelity) closed as
+accepted defensive parity. Remaining: **(a)** promote this doc to `Documentation/Architecture/Testing Framework/`
+(now due — Waves 1–2 have landed); **(b)** **BH-D1**, the old-vs-new differential — the load-bearing TG-4/TG-5
+parity test, built in that PR since it needs both code paths to exist.
+**Created:** 2026-06-20
+**Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
+(Burst function-pointer dispatch) optimizations in
+[PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md) claim *behavior-preserving* — the
+same role the Meshing suite plays for `MR-*` and the Lighting suite plays for the lighting engine.
+**Proposed scope:** `Assets/Editor/Validation/Behavior/` — a new `BehaviorValidationSuite` +
+`BehaviorTestWorld` + `BehaviorOracle`/`BehaviorAssert` + `TestBehaviorBlockPalette` harness, menu item
+**`Minecraft Clone/Dev/Validate Behavior`**.
+**Siblings (same document shape & conventions):**
+[MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md),
+[LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md).
 
 ---
 
@@ -333,7 +333,7 @@ B8/B9 pattern — e.g. prove the snapshot is non-empty and that a deliberately a
 | **BH-B4** ✅   | Unsupported (sourceless) water cell → drains to air in 1 tick; active set empties (the decay mod replaces water→air, so the apply-step active-removal terminates it)                                                                                               | golden-master + determinism + termination                            | decay-to-air + termination + `ImmediateUpdate` — **shipped 2026-06-20**                       |
 | **BH-B5** ✅   | Lava (low `spreadChance`) in a walled 1-D channel, **11 ticks** → viscosity staggering (source skip,skip,spread; x8 skip×4,spread) → full channel (level 3) → quiesces (3 mods, terminates; in-game confirmed before freeze)                                       | golden-master + determinism + progression + staggering + termination | TG-3 per-tick reseed (staggering *progresses*, not freezes) — **shipped 2026-06-21**          |
 | **BH-B6** ✅   | Grass flanked by two convertible-dirt cells, **6 ticks** → idles 4 ticks (fails the 2% roll) then spreads to the reservoir-chosen right cell (x=9 over x=7, so candidate-scan order is frozen); position picked so the seed fires early (1 mod; in-game confirmed) | golden-master + determinism + non-vacuity + chosen-candidate         | grass reservoir-sampling + spread roll (seeded RNG) — **shipped 2026-06-21**                  |
-| **BH-B7**     | Grass with solid block on top → turns to dirt                                                                                                                                                                                                                      | golden-master                                                        | grass→dirt branch                                                                             |
+| **BH-B7** ✅   | Grass capped by a solid block, **2 ticks** → emits one Dirt mod onto itself, drops from the active set, terminates. Deterministic — the solid-on-top branch returns before any RNG use; frozen after a code-trace match (1 mod)                                    | golden-master + determinism + termination + became-dirt              | grass→dirt branch (no RNG gate) — **shipped 2026-06-21**                                      |
 | ~~**BH-B8**~~ | ~~contract over all fixtures~~ — **retired** (BH-5 retracted; determinism is per-scenario via BH-6)                                                                                                                                                                | —                                                                    | —                                                                                             |
 | **BH-B9**     | **GATED** (BH-7 unreachable via `Behave`) — `REQUIRES_SUPPORT` on a draining support → cascade; revisit via direct `ApplyMod` test                                                                                                                                 | golden-master + positive control                                     | apply-path support cascade (**BH-7**)                                                         |
 | **BH-B10**    | **GATED** (BH-7 unreachable via `Behave`) — mod a `CanReplace`-rejected block; revisit via direct `ApplyMod` test                                                                                                                                                  | golden-master + positive control                                     | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags                               |
@@ -380,7 +380,7 @@ Recommended order (most-bug-prone / highest-invariant-value first):
    active source skips ≥1 tick — unlike water at 1.0), and **termination**. **Confirmed in-game before freeze**
    (the 25% staggering eyeballed). This validates the determinism precondition the whole harness rests on.
 
-### Wave 2 — Grass golden masters · 🟡 IN PROGRESS
+### Wave 2 — Grass golden masters · ✅ DONE (2026-06-21)
 
 Lower-traffic, but TG-4 splits grass into its own collection, so it needs the same guard.
 
@@ -391,10 +391,12 @@ Lower-traffic, but TG-4 splits grass into its own collection, so it needs the sa
    showing the idle→spread staggering. Two candidates make the reservoir **choice** observable (x=9 over x=7),
    so a candidate-scan-order change in TG-4/TG-5 breaks the golden. Asserts determinism, non-vacuity,
    exactly-one-candidate-converted, golden. **In-game confirmed before freeze.**
-2. **BH-B7 — grass turns to dirt under a solid block** (NEXT, completes Wave 2): the grass→dirt branch fires
-   *before* any RNG use (it returns on the solid-on-top check), so it is **deterministic** — golden-master +
-   determinism, no staggering. Completes the behavior surface; then promote the doc (below) and BH-D1 lands in
-   the TG-4/TG-5 PR.
+2. ✅ **BH-B7 — grass turns to dirt under a solid block** (DONE 2026-06-21, completes Wave 2): the grass→dirt
+   branch fires *before* any RNG use (it returns on the solid-on-top check), so it is **deterministic** — frozen
+   after a code-trace match, no seed probe. A grass cell capped by stone emits one Dirt mod onto itself, drops
+   from the active set, and terminates. Asserts determinism, non-vacuity, became-dirt, termination, golden. This
+   completes the behavior surface (all fluid + grass paths baselined). **Remaining: promote the doc (below); BH-D1
+   lands in the TG-4/TG-5 PR.**
 
 ### Interleaved — close the BH-7 apply-path-fidelity gap · ✅ DONE (2026-06-20)
 
