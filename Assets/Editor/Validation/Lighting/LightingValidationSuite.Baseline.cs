@@ -83,11 +83,19 @@ namespace Editor.Validation.Lighting
             // partial file (Baselines/LightingValidationSuite.Baseline.Bug12.cs) and self-registers here.
             // First of the planned Baselines/ split; future groups follow the same Add*BaselineScenarios hook. ---
             AddBug12BaselineScenarios(scenarios);
+
+            // --- C3 cross-chunk sunlight darkening family (B54 in-flight race, B55 steady-state) lives in
+            // Baselines/LightingValidationSuite.Baseline.C3Darkening.cs and self-registers here. ---
+            AddCrossChunkDarkeningBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug12BaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the C3 cross-chunk sunlight darkening baselines (implemented in Baselines/LightingValidationSuite.Baseline.C3Darkening.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddCrossChunkDarkeningBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1: A torch placed mid-air in an empty world. Exercises in-chunk RGB placement BFS and

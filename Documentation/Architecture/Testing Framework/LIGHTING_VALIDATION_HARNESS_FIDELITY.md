@@ -274,39 +274,38 @@ there is invisible.
   synchronous (it cannot catch an async/Burst race). A faithful Bug-05 repro, if the bug is real, likely
   needs in-build instrumentation (see B3), not another synchronous geometry layer.
 
-### C3 — Cross-chunk *sunlight removal / darkening* is the untested race quadrant ·  **OPEN · MEDIUM · PREREQUISITE for LI-1 → P-2**
+### C3 — Cross-chunk *sunlight removal / darkening* race quadrant ·  **CLOSED (2026-06-21) · was a PREREQUISITE for LI-1 → P-2**
 
-- The dynamic cross-chunk matrix is lopsided. **B7** covers blocklight *removal* across a border with the
+- The dynamic cross-chunk matrix was lopsided. **B7** covers blocklight *removal* across a border with the
   neighbor in flight; **B13** covers sunlight *uplift* (addition) across a border in flight; **B12** covers
-  blocklight cross-border *re-spread* after a removal. The fourth quadrant — sunlight *darkening* crossing a
-  border — has **no** scenario, neither steady-state nor racing. Placing an opaque block that re-shadows a
-  near-border column drives `PropagateDarkness`/the sunlight-column recalc into the neighbor; nothing asserts
-  it converges (B3 only ever *opens* a shaft via break). This is also the exact neighborhood
+  blocklight cross-border *re-spread* after a removal. The *steady-state* sunlight-darkening-across-a-border
+  half was subsequently covered by the Bug-12 family (**B51** asymmetric two-shaft, **B53** mutually-lit seam
+  loop, **B52** multi-hop ring), but the **race** quadrant — a sunlight *removal* deferred into an **in-flight**
+  neighbor (the sunlight twin of B7) — still had no scenario. This is also the exact neighborhood
   [Bug 11](../../Bugs/LIGHTING_BUGS.md) lived in (`CrossChunkLightModApplier.ComputeSunlight` removal path),
-  so closing it doubles as a Bug-11 regression guard.
-- **Why this is now a prerequisite, not a backlog nicety.** **LI-1** (single halo-padded lighting volume —
+  so it doubles as a Bug-11 regression guard.
+- **Why it was a prerequisite.** **LI-1** (single halo-padded lighting volume —
   [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) Lighting §) and the
   **P-2** substrate it seeds change *how the BFS reads across chunk borders* (halo array reads replacing the
   9-map/hashmap dispatch). LI-1's acceptance criterion is **bit-identical light output**, and **TG-4** Phase 4
   rides the same halo substrate (option (a) = P-2). A halo that under-reads or mis-indexes the seam on the
-  *darkening* path would produce wrong light there — but with no darkening-across-border baseline, every
-  existing field-comparison goes green. C1/C2 (B40–B44) assert cross-chunk *brightening* fuzz; C3 is the
-  missing *darkening* half of that guard. **C3 must be green before LI-1 freezes any halo-vs-9-map diff.**
-- **Needs no new harness capability:** reuses `PlaceBlock`, `BeginLightingJob`/`CompleteLightingJob`,
-  `MarkChunkUnloaded`/`MarkChunkLoaded`, `GetSkyLight`, the borderless oracle, and `CompletionOrder.Shuffled`
-  exactly as B7/B13/B40.
-- **Planned baselines (next free IDs; suite is at B47):**
-    - **B48 — steady-state darkening (C3a).** On the canonical 3×3 grid `(1,1)/(2,1)` +X border: open a
-      vertical sky shaft in `(1,1)`'s near-border column so sky light spills sideways across the border into
-      `(2,1)`; light to convergence (sanity pre-state: `(2,1)` near-border region is side-lit). `PlaceBlock`
-      an opaque cap sealing the shaft; re-light to convergence. **Assert** `(2,1)` `MatchesOracle` for the
-      *sealed* configuration — specifically a voxel that read bright pre-seal now equals its shadowed oracle
-      value, proving the darkness wave *crossed the border* and converged (not merely that a from-scratch
-      solve is right).
-    - **B49 — racing twin (C3b), the sunlight analog of B7.** `BeginLightingJob((2,1))` → `PlaceBlock` the
-      seal in `(1,1)` → `CompleteLightingJob` so `(2,1)` merges against a pre-darkening snapshot; assert
-      convergence to the same sealed oracle. Run the completion sequence under `CompletionOrder.Shuffled` for
-      order-independence (B40 discipline).
+  *darkening* path would produce wrong light there. C1/C2 (B40–B44) assert cross-chunk *brightening* fuzz; C3
+  closes the *darkening* half. **C3 is now green and must stay green before LI-1 freezes any halo-vs-9-map diff.**
+- **No new harness capability was needed:** reuses `PlaceBlock`, `BeginLightingJob`/`CompleteLightingJob`,
+  `GetSkyLight`, the borderless oracle, and `RunToConvergence`/`RunWaveToConvergence` exactly as B7/B13/B53.
+- **Closed by** (`Baselines/LightingValidationSuite.Baseline.C3Darkening.cs`, suite was at B53; prove-red
+  confirmed 2026-06-21 — neutering the cross-chunk sunlight-removal apply reds B54/B55 with the (2,1) side
+  stuck at the stale spill, restored → all green):
+    - **B54 — in-flight race (the genuinely-missing quadrant).** A single sky shaft at x28 in `(1,1)` spills
+      across the `(1,1)/(2,1)` seam into `(2,1)`. `BeginLightingJob((2,1))` (snapshots the bright pre-seal
+      state) → seal the shaft in `(1,1)` → run `(1,1)`'s job: it emits a cross-chunk sunlight **removal** mod
+      toward in-flight `(2,1)`, which **must be deferred** (asserted `ModsDeferred > 0`) and drained after
+      `(2,1)`'s merge. `RunWaveToConvergence` → the previously-lit `(2,1)` voxel re-darkens to 0 and the field
+      matches the borderless oracle. Without the defer/drain the removal is lost and `(2,1)` stays brighter
+      than the oracle (the Bug-08-class failure, on the previously-untested sunlight-removal route).
+    - **B55 — steady-state canonical representative.** Same geometry; seal under sequential
+      `RunToConvergence`; the darkness crosses the seam and the corridor (incl. the `(2,1)` side) matches the
+      oracle. A simpler explicit representative than the Bug-12 loop geometries (B51/B53).
 
 ### C4 — Sunlight-column persist→replay and the `AddPendingBlocklight` placement-after-removal guard are unpinned ·  **CLOSED (2026-06-14)**
 
@@ -425,7 +424,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 |----|-------------------------------------------------------------------------------------------|-------------------|------------------|----------------|
 | C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                        | **CLOSED**        | —                | done           |
 | C5 | Cumulative multi-layer attenuation probe (B45)                                            | **CLOSED**        | —                | done           |
-| C3 | Cross-chunk sunlight darkening quadrant (B48/B49) — **prereq for LI-1 → P-2 / TG-4 Ph.4** | **SPEC'D · OPEN** | Medium (prereq)  | small          |
+| C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4 | **CLOSED**        | —                | done           |
 | C6 | Per-channel removal independence                                                          | OPEN              | Low–Medium       | small          |
 | C7 | Deterministic corner spill / in-chunk re-shadow                                           | OPEN              | Low              | small          |
 | §5 | Bug-09 fleet (B15–B25) consolidation                                                      | **CLOSED**        | —                | done           |

@@ -76,10 +76,10 @@ disposed one frame later — this is simultaneously the frame-time cost and the 
 > **Validation prerequisite for recs 2–3 (border slabs = P-1, persistent halo = P-2).** Both change
 > *what neighbor data each job receives*, so their "output-preserving" claim hinges on the seam being
 > guarded on both consumer paths:
-> - **Lighting:** the fill path is already exercised (A1), and cross-chunk *brightening* is covered
-    > (C1/C2) — but cross-chunk *darkening* is an open gap. Close
+> - **Lighting:** the fill path is already exercised (A1), cross-chunk *brightening* is covered (C1/C2),
+    > and cross-chunk *darkening* is now covered by
     > [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
-    > **C3 (B48/B49)** first.
+    > **C3 (B54/B55, CLOSED 2026-06-21)** — keep green.
 > - **Meshing:** border-face culling never consults a neighbor today — the suite leaves the neighbor
     > maps empty. Close
     > [MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md)
