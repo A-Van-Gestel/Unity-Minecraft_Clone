@@ -95,6 +95,7 @@ instead of a crash.
 | TG-3 ✅ | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
 | TG-4   | `BlockBehavior` data separation (ECS/DOTS pattern)             |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
 | TG-5   | `BlockBehavior` Burst function pointers (lighter alt. to TG-4) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| TG-6   | Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 
 ### Main Thread & Miscellaneous
 
@@ -622,8 +623,8 @@ satisfy both if the persistent layout itself is halo-padded.
 > active voxels, so the check was a throwaway `[MenuItem]` (RunCommand execution is currently down on
 > the dev machine; the bridge `Unity_ManageMenuItem` was used instead) and removed afterward.
 >
-> **Measured** (editor A/B microbenchmark — `Assets/Editor/Dev/ActiveVoxelScanBenchmark.cs`,
-> menu `Minecraft Clone/Dev/Benchmark Active-Voxel Scan (TG-2)`; 100 chunks × 5 batches, seed 1337,
+> **Measured** (editor A/B microbenchmark — `Assets/Editor/Benchmarking/ActiveVoxelScanBenchmark.cs`,
+> menu `Minecraft Clone/Benchmarks/Active-Voxel Scan (TG-2)`; 100 chunks × 5 batches, seed 1337,
 > Standard world type; best batch-mean µs/chunk over the *same* finalized voxel data). Four scans:
 > `T_old` = original managed-deref full scan; `T_bitmask` = current `OnDataPopulated` flat-`bool[]`
 > scan (load/replay path); `T_register` = `RegisterActiveVoxelsFromJob` unpacking the job's list
@@ -747,6 +748,57 @@ collection while decoupling behavior logic and enabling Burst-compiled dispatch.
 harness ([BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md))
 and the BH-D1 old-vs-new differential. Decoupling the `switch` into a registry must produce a byte-identical `VoxelMod`
 stream tick-for-tick.
+
+---
+
+### TG-6. Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up)
+
+*(Surfaced by the 2026-06-21 behavior-suite review, finding #4.)*
+
+**Observed:** TG-2's jobified emission allocates a fresh `NativeList<int>` per chunk generation —
+`new NativeList<int>(StandardChunkGenerator.ActiveVoxelPresizeCapacity, Allocator.Persistent)` (2048 ⇒
+8 KB) in `StandardChunkGenerator.ScheduleGeneration`, stored in `GenerationJobData.ActiveVoxels`, and
+freed per chunk in `GenerationJobData.Dispose`. During streaming this is per-chunk Persistent
+allocate-and-free churn — exactly the repeated-allocation pattern CLAUDE.md says to pool — and the 8 KB
+is reserved up front even for the common sparse-actives chunk (which emits ~0 indices).
+
+**Recommendation:** Pool the list, mirroring **MR-6**'s `MeshOutputPool`. `NativeList` retains its
+allocated capacity across `Clear()`, so a warmed pool also removes the realloc-and-copy growth a
+water-heavy chunk (thousands of source voxels) otherwise pays inside the scan. Rent in
+`ScheduleGeneration`; at the consume site (`WorldJobManager.ProcessGenerationJobs` STAGE 1, after
+`RegisterActiveVoxelsFromJob`) return the list (cleared, capacity-retained) to the pool **instead of**
+letting `GenerationJobData.Dispose` free it — the same split `MeshingJobData.Output` / `_meshOutputPool`
+already uses. At shutdown, return each in-flight job's list, then dispose the pool.
+
+**Wiring considerations (why this is its own change, not a quick edit):**
+- The pool reference must reach the generator, so `IChunkGenerator.ScheduleGeneration` (a
+  multi-implementer surface — `StandardChunkGenerator` + the legacy generator, which leaves the list
+  *uncreated* and so never rents) gains a pool dependency.
+- `GenerationJobData.Dispose` must stop disposing `ActiveVoxels` once it is pool-owned; the central
+  return site becomes the sole release path. This interacts with the dispose-path no-leak invariant now
+  documented on `GenerationJobData.Dispose` — the pooled list's lifecycle moves to the pool.
+- Native-container lifetime is the risk surface: a list returned before its generation `JobHandle` has
+  `Complete()`d is a use-after-free. The return must sit strictly after STAGE-1 consumption (it already
+  does, post-`Complete()`).
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — pool type + threading it through the generator interface + the dispose-path split.
+> - **Risk:** 🟡 Medium — native-container lifetime / use-after-free; the pipeline has deadlock history
+    > (see the chunk-lifecycle invariants), so the return site must be exact.
+> - **Benefit:** 🟡 Medium — removes per-chunk 8 KB Persistent alloc/free during streaming and the
+    > realloc growth on active-heavy chunks once the pool warms; no main-thread tick cost change.
+> - **Seed/Save:** ✅ / ✅ — active voxels are not persisted; pooling is an internal allocation concern.
+
+**Measurement gate (per MR-6 discipline):** ship this only with a before/after benchmark — the
+`ActiveVoxelScanBenchmark` (menu `Minecraft Clone/Benchmarks/Active-Voxel Scan (TG-2)`) already exists
+and its `LIST_CAPACITY` is pinned to `ActiveVoxelPresizeCapacity` — plus an IL2CPP re-capture, exactly as
+MR-6's pooling was validated.
+
+**Already closed (the rest of review finding #4):** the `2048` magic number is extracted to
+`StandardChunkGenerator.ActiveVoxelPresizeCapacity` (the benchmark pins to it, no drift), and the
+dispose-path audit found only two `GenerationJobs` eviction sites (completion drain + shutdown), both of
+which `Dispose` — now guarded by the no-leak invariant comment on `GenerationJobData.Dispose`. Pooling is
+the sole remaining open item.
 
 ---
 
@@ -1140,6 +1192,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
    P-5 stable-save bit (⚠️ save migration) → P-3 jobified merge.
 4. **Benchmark-gated structural work:**
    ~~MR-2 ✅ done — vertex format (60 B → 32 B/vertex, upload −57%)~~.
+   TG-6 (pool the per-chunk `ActiveVoxels` `NativeList` — small, independent; benchmark via `ActiveVoxelScanBenchmark`) →
    GS-1 (baked-noise liquid shader) →
    LI-1 (padded lighting volume — benchmark against P-1, acceptance: bit-identical light output) →
    TG-1 (tick path) or directly TG-4 if committing to the full split.
