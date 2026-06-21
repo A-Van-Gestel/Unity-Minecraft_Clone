@@ -407,6 +407,36 @@ public class WorldJobManager : IDisposable
     }
 
     /// <summary>
+    /// Acquires a halo-padded voxel volume buffer (length <see cref="ChunkJobArrayPool.PaddedBufferLength"/>):
+    /// pooled when <paramref name="pooled"/> is true, otherwise a fresh allocation. Contents are undefined —
+    /// the caller fills every element via <see cref="ChunkMath.GatherPaddedVoxels"/> (LI-1).
+    /// </summary>
+    /// <param name="pooled">Whether to rent from the pool instead of allocating.</param>
+    /// <param name="allocator">The allocator for the non-pooled path.</param>
+    /// <returns>An uninitialized padded voxel buffer.</returns>
+    private NativeArray<uint> AcquirePaddedVoxels(bool pooled, Allocator allocator)
+    {
+        return pooled
+            ? _jobArrayPool.RentPaddedVoxels()
+            : new NativeArray<uint>(ChunkJobArrayPool.PaddedBufferLength, allocator, NativeArrayOptions.UninitializedMemory);
+    }
+
+    /// <summary>
+    /// Acquires a halo-padded light volume buffer (length <see cref="ChunkJobArrayPool.PaddedBufferLength"/>):
+    /// pooled when <paramref name="pooled"/> is true, otherwise a fresh allocation. Contents are undefined —
+    /// the caller fills every element via <see cref="ChunkMath.GatherPaddedLight"/> (LI-1).
+    /// </summary>
+    /// <param name="pooled">Whether to rent from the pool instead of allocating.</param>
+    /// <param name="allocator">The allocator for the non-pooled path.</param>
+    /// <returns>An uninitialized padded light buffer.</returns>
+    private NativeArray<ushort> AcquirePaddedLight(bool pooled, Allocator allocator)
+    {
+        return pooled
+            ? _jobArrayPool.RentPaddedLight()
+            : new NativeArray<ushort>(ChunkJobArrayPool.PaddedBufferLength, allocator, NativeArrayOptions.UninitializedMemory);
+    }
+
+    /// <summary>
     /// Acquires the filled neighbor map set (8 voxel + 8 light maps) for the given center chunk:
     /// pooled when <paramref name="pooled"/> is true, otherwise fresh allocations with the given
     /// allocator (startup/TempJob path). This is the single authoritative fill site for
@@ -481,6 +511,20 @@ public class WorldJobManager : IDisposable
             };
             jobData.Map = AcquireVoxelMap(chunkData.Position, usePooledBuffers, allocator);
             jobData.LightMap = AcquireLightMap(chunkData.Position, usePooledBuffers, allocator);
+
+            // LI-1: gather the center + 8 neighbor full-chunk maps into the halo-padded volumes the job
+            // reads/writes. Missing neighbors are sentinel-filled inside GatherPadded* (uint/ushort
+            // MaxValue), reproducing the old per-neighbor !IsCreated||Length==0 guard.
+            NeighborMapSet neighbors = jobData.Input.Neighbors;
+            jobData.PaddedVoxels = AcquirePaddedVoxels(usePooledBuffers, allocator);
+            jobData.PaddedLight = AcquirePaddedLight(usePooledBuffers, allocator);
+            ChunkMath.GatherPaddedVoxels(jobData.PaddedVoxels, jobData.Map,
+                neighbors.NeighborW, neighbors.NeighborE, neighbors.NeighborS, neighbors.NeighborN,
+                neighbors.NeighborSW, neighbors.NeighborNW, neighbors.NeighborSE, neighbors.NeighborNE);
+            ChunkMath.GatherPaddedLight(jobData.PaddedLight, jobData.LightMap,
+                neighbors.LightW, neighbors.LightE, neighbors.LightS, neighbors.LightN,
+                neighbors.LightSW, neighbors.LightNW, neighbors.LightSE, neighbors.LightNE);
+
             jobData.Mods = new NativeList<LightModification>(allocator);
             jobData.IsStable = new NativeArray<bool>(1, allocator);
             jobData.SunLightQueue = chunkData.GetSunlightQueueForJob(allocator);
@@ -500,21 +544,13 @@ public class WorldJobManager : IDisposable
 
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
-                Map = jobData.Map,
-                LightMap = jobData.LightMap,
+                PaddedVoxels = jobData.PaddedVoxels,
+                PaddedLight = jobData.PaddedLight,
                 ChunkPosition = chunkData.Position,
                 SunlightBfsQueue = jobData.SunLightQueue,
                 BlocklightBfsQueue = jobData.BlockLightQueue,
                 SunlightColumnRecalcQueue = jobData.SunLightRecalcQueue,
                 Heightmap = jobData.Input.Heightmap,
-                NeighborN = jobData.Input.Neighbors.NeighborN, NeighborE = jobData.Input.Neighbors.NeighborE,
-                NeighborS = jobData.Input.Neighbors.NeighborS, NeighborW = jobData.Input.Neighbors.NeighborW,
-                NeighborNE = jobData.Input.Neighbors.NeighborNE, NeighborSE = jobData.Input.Neighbors.NeighborSE,
-                NeighborSW = jobData.Input.Neighbors.NeighborSW, NeighborNW = jobData.Input.Neighbors.NeighborNW,
-                LightN = jobData.Input.Neighbors.LightN, LightE = jobData.Input.Neighbors.LightE,
-                LightS = jobData.Input.Neighbors.LightS, LightW = jobData.Input.Neighbors.LightW,
-                LightNE = jobData.Input.Neighbors.LightNE, LightSE = jobData.Input.Neighbors.LightSE,
-                LightSW = jobData.Input.Neighbors.LightSW, LightNW = jobData.Input.Neighbors.LightNW,
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = jobData.Mods,
                 IsStable = jobData.IsStable,
@@ -792,6 +828,10 @@ public class WorldJobManager : IDisposable
         _jobArrayPool.Return(jobData.Map);
         _jobArrayPool.Return(jobData.LightMap);
         _jobArrayPool.Return(in jobData.Input.Neighbors);
+
+        // LI-1 padded volumes (distinct length — returned to their own retained stacks)
+        _jobArrayPool.ReturnPaddedVoxels(jobData.PaddedVoxels);
+        _jobArrayPool.ReturnPaddedLight(jobData.PaddedLight);
 
         // Per-job containers
         if (jobData.Input.Heightmap.IsCreated) jobData.Input.Heightmap.Dispose();
@@ -1184,6 +1224,11 @@ public class WorldJobManager : IDisposable
     /// </summary>
     private void ApplyLightingJobResult(ChunkData chunkData, LightingJobData jobData)
     {
+        // LI-1: the job wrote light only into the center [2,18) region of the padded volume — extract it
+        // back into the section-contiguous center LightMap, then merge through the same ApplyJobLightMap.
+        // Voxels are never modified in-job, so jobData.Map (the unchanged center voxel snapshot) is still
+        // the correct merge reference.
+        ChunkMath.ExtractCenterLight(jobData.PaddedLight, jobData.LightMap);
         chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes);
     }
 

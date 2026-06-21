@@ -205,6 +205,14 @@ namespace Editor.Validation.Lighting.Framework
             internal NeighborhoodLightingJob Job;
             internal NativeArray<bool> IsStable;
             internal NativeList<LightModification> Mods;
+
+            // LI-1: the center voxel snapshot + center light buffer (the ApplyJobLightMap merge reference
+            // and readback target) and the padded light volume the job wrote. Held on the flight so
+            // CompleteLightingJob can extract the center region of PaddedLight into CenterLight, then merge.
+            internal NativeArray<uint> CenterVoxels;
+            internal NativeArray<ushort> CenterLight;
+            internal NativeArray<ushort> PaddedLight;
+
             internal readonly List<IDisposable> OwnedContainers = new List<IDisposable>();
             internal bool Completed;
 
@@ -398,6 +406,39 @@ namespace Editor.Validation.Lighting.Framework
             chunk.Data.FillJobLightMap(lightMap);
             NativeArray<ushort> heightmap = NewOwned(flight, new NativeArray<ushort>(chunk.Data.heightMap, Allocator.Persistent));
 
+            // Center snapshot + readback target are retained on the flight; the job no longer takes them.
+            flight.CenterVoxels = map;
+            flight.CenterLight = lightMap;
+
+            // LI-1: snapshot the 8 neighbors as section-contiguous full-chunk maps (the SnapshotNeighbor*
+            // helpers replay the production fill, and hand a missing neighbor a zero-length array — which
+            // GatherPadded* sentinel-fills exactly like production). Then gather center + 8 into the
+            // halo-padded volumes the job actually reads/writes. This mirrors WorldJobManager's gather so
+            // the harness stays a faithful production replay.
+            NativeArray<uint> nW = SnapshotNeighborVoxels(flight, chunkCoord, -1, 0);
+            NativeArray<uint> nE = SnapshotNeighborVoxels(flight, chunkCoord, 1, 0);
+            NativeArray<uint> nS = SnapshotNeighborVoxels(flight, chunkCoord, 0, -1);
+            NativeArray<uint> nN = SnapshotNeighborVoxels(flight, chunkCoord, 0, 1);
+            NativeArray<uint> nSW = SnapshotNeighborVoxels(flight, chunkCoord, -1, -1);
+            NativeArray<uint> nNW = SnapshotNeighborVoxels(flight, chunkCoord, -1, 1);
+            NativeArray<uint> nSE = SnapshotNeighborVoxels(flight, chunkCoord, 1, -1);
+            NativeArray<uint> nNE = SnapshotNeighborVoxels(flight, chunkCoord, 1, 1);
+
+            NativeArray<ushort> lW = SnapshotNeighborLight(flight, chunkCoord, -1, 0);
+            NativeArray<ushort> lE = SnapshotNeighborLight(flight, chunkCoord, 1, 0);
+            NativeArray<ushort> lS = SnapshotNeighborLight(flight, chunkCoord, 0, -1);
+            NativeArray<ushort> lN = SnapshotNeighborLight(flight, chunkCoord, 0, 1);
+            NativeArray<ushort> lSW = SnapshotNeighborLight(flight, chunkCoord, -1, -1);
+            NativeArray<ushort> lNW = SnapshotNeighborLight(flight, chunkCoord, -1, 1);
+            NativeArray<ushort> lSE = SnapshotNeighborLight(flight, chunkCoord, 1, -1);
+            NativeArray<ushort> lNE = SnapshotNeighborLight(flight, chunkCoord, 1, 1);
+
+            NativeArray<uint> paddedVoxels = NewOwned(flight, new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory));
+            NativeArray<ushort> paddedLight = NewOwned(flight, new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory));
+            ChunkMath.GatherPaddedVoxels(paddedVoxels, map, nW, nE, nS, nN, nSW, nNW, nSE, nNE);
+            ChunkMath.GatherPaddedLight(paddedLight, lightMap, lW, lE, lS, lN, lSW, lNW, lSE, lNE);
+            flight.PaddedLight = paddedLight;
+
             // Seed queues: drain the chunk's managed queues into native ones (production flushes
             // ChunkData's queues into the job the same way; the chunk-side flag clears on schedule).
             NativeQueue<LightQueueNode> sunQueue = NewOwned(flight, new NativeQueue<LightQueueNode>(Allocator.Persistent));
@@ -416,29 +457,13 @@ namespace Editor.Validation.Lighting.Framework
 
             flight.Job = new NeighborhoodLightingJob
             {
-                Map = map,
-                LightMap = lightMap,
+                PaddedVoxels = paddedVoxels,
+                PaddedLight = paddedLight,
                 ChunkPosition = chunk.VoxelOrigin,
                 SunlightBfsQueue = sunQueue,
                 BlocklightBfsQueue = blockQueue,
                 SunlightColumnRecalcQueue = sunColumnQueue,
                 Heightmap = heightmap,
-                NeighborN = SnapshotNeighborVoxels(flight, chunkCoord, 0, 1),
-                NeighborE = SnapshotNeighborVoxels(flight, chunkCoord, 1, 0),
-                NeighborS = SnapshotNeighborVoxels(flight, chunkCoord, 0, -1),
-                NeighborW = SnapshotNeighborVoxels(flight, chunkCoord, -1, 0),
-                NeighborNE = SnapshotNeighborVoxels(flight, chunkCoord, 1, 1),
-                NeighborSE = SnapshotNeighborVoxels(flight, chunkCoord, 1, -1),
-                NeighborSW = SnapshotNeighborVoxels(flight, chunkCoord, -1, -1),
-                NeighborNW = SnapshotNeighborVoxels(flight, chunkCoord, -1, 1),
-                LightN = SnapshotNeighborLight(flight, chunkCoord, 0, 1),
-                LightE = SnapshotNeighborLight(flight, chunkCoord, 1, 0),
-                LightS = SnapshotNeighborLight(flight, chunkCoord, 0, -1),
-                LightW = SnapshotNeighborLight(flight, chunkCoord, -1, 0),
-                LightNE = SnapshotNeighborLight(flight, chunkCoord, 1, 1),
-                LightSE = SnapshotNeighborLight(flight, chunkCoord, 1, -1),
-                LightSW = SnapshotNeighborLight(flight, chunkCoord, -1, -1),
-                LightNW = SnapshotNeighborLight(flight, chunkCoord, -1, 1),
                 BlockTypes = _blockTypesNative,
                 CrossChunkLightMods = flight.Mods,
                 IsStable = flight.IsStable,
@@ -495,7 +520,10 @@ namespace Editor.Validation.Lighting.Framework
                 // harness does not mesh, and section counts are meshing-only (light-irrelevant).
                 // Mods applied to live data during the flight would be overwritten here — which is why mods
                 // targeting in-flight chunks are DEFERRED and drained right after this merge (Bug 08 path-2).
-                chunk.Data.ApplyJobLightMap(job.Map, job.LightMap, null);
+                // LI-1: extract the job's center light from the padded volume into the center light buffer
+                // first (mirror of WorldJobManager.ApplyLightingJobResult), then merge; voxels are unchanged.
+                ChunkMath.ExtractCenterLight(flight.PaddedLight, flight.CenterLight);
+                chunk.Data.ApplyJobLightMap(flight.CenterVoxels, flight.CenterLight, null);
 
                 // Drain mods deferred for this chunk while its job was in flight
                 // (mirror of WorldJobManager.DrainDeferredCrossChunkMods).

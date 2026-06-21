@@ -449,6 +449,10 @@ namespace Benchmarks
                 Map = new NativeArray<uint>(sourceData.Center, allocator),
                 LightMap = new NativeArray<ushort>(sourceData.CenterLight, allocator),
 
+                // LI-1: gather the 9 source maps into the halo-padded volumes the job consumes.
+                PaddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, allocator, NativeArrayOptions.UninitializedMemory),
+                PaddedLight = new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, allocator, NativeArrayOptions.UninitializedMemory),
+
                 SunLightQueue = new NativeQueue<LightQueueNode>(allocator),
                 BlockLightQueue = new NativeQueue<LightQueueNode>(allocator),
                 SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator),
@@ -466,6 +470,16 @@ namespace Benchmarks
             foreach (Vector2Int vector2Int in sourceData.SourceSunRecalcQueue)
                 jobData.SunLightRecalcQueue.Enqueue(vector2Int);
 
+            // LI-1: gather the just-copied center + 8 neighbor maps into the padded volumes. Argument
+            // order matches ChunkMath.GatherPadded* (center, W, E, S, N, SW, NW, SE, NE).
+            NeighborMapSet n = jobData.Input.Neighbors;
+            ChunkMath.GatherPaddedVoxels(jobData.PaddedVoxels, jobData.Map,
+                n.NeighborW, n.NeighborE, n.NeighborS, n.NeighborN,
+                n.NeighborSW, n.NeighborNW, n.NeighborSE, n.NeighborNE);
+            ChunkMath.GatherPaddedLight(jobData.PaddedLight, jobData.LightMap,
+                n.LightW, n.LightE, n.LightS, n.LightN,
+                n.LightSW, n.LightNW, n.LightSE, n.LightNE);
+
             return jobData;
         }
 
@@ -478,30 +492,14 @@ namespace Benchmarks
         {
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
-                Map = data.Map,
-                LightMap = data.LightMap,
+                PaddedVoxels = data.PaddedVoxels,
+                PaddedLight = data.PaddedLight,
                 ChunkPosition = new Vector2Int(0, 0),
                 SunlightBfsQueue = data.SunLightQueue,
                 BlocklightBfsQueue = data.BlockLightQueue,
                 SunlightColumnRecalcQueue = data.SunLightRecalcQueue,
 
                 Heightmap = data.Input.Heightmap,
-                NeighborN = data.Input.Neighbors.NeighborN,
-                NeighborE = data.Input.Neighbors.NeighborE,
-                NeighborS = data.Input.Neighbors.NeighborS,
-                NeighborW = data.Input.Neighbors.NeighborW,
-                NeighborNE = data.Input.Neighbors.NeighborNE,
-                NeighborSE = data.Input.Neighbors.NeighborSE,
-                NeighborSW = data.Input.Neighbors.NeighborSW,
-                NeighborNW = data.Input.Neighbors.NeighborNW,
-                LightN = data.Input.Neighbors.LightN,
-                LightE = data.Input.Neighbors.LightE,
-                LightS = data.Input.Neighbors.LightS,
-                LightW = data.Input.Neighbors.LightW,
-                LightNE = data.Input.Neighbors.LightNE,
-                LightSE = data.Input.Neighbors.LightSE,
-                LightSW = data.Input.Neighbors.LightSW,
-                LightNW = data.Input.Neighbors.LightNW,
 
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = data.Mods,
@@ -528,6 +526,10 @@ namespace Benchmarks
             {
                 JobHandle handle = ScheduleJob(preLight);
                 handle.Complete();
+
+                // LI-1: the job wrote light into the padded volume's center region — extract it back into
+                // the center light map (mirror of WorldJobManager.ApplyLightingJobResult) before copying.
+                ChunkMath.ExtractCenterLight(preLight.PaddedLight, preLight.LightMap);
 
                 // Copy the now-lit center map and light map back into the source data.
                 NativeArray<uint>.Copy(preLight.Map, sourceData.Center);

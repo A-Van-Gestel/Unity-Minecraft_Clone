@@ -185,31 +185,27 @@ namespace Editor.WorldTools.Libraries
                 SunLightRecalcQueue = sunlightRecalcQueue,
             };
 
+            // LI-1: gather the center + 8 neighbor maps into the halo-padded volumes the job consumes.
+            // Missing neighbors are sentinel-filled inside GatherPadded* (uint/ushort MaxValue).
+            NeighborMapSet nbrs = jobData.Input.Neighbors;
+            jobData.PaddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            jobData.PaddedLight = new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            ChunkMath.GatherPaddedVoxels(jobData.PaddedVoxels, jobData.Map,
+                nbrs.NeighborW, nbrs.NeighborE, nbrs.NeighborS, nbrs.NeighborN,
+                nbrs.NeighborSW, nbrs.NeighborNW, nbrs.NeighborSE, nbrs.NeighborNE);
+            ChunkMath.GatherPaddedLight(jobData.PaddedLight, jobData.LightMap,
+                nbrs.LightW, nbrs.LightE, nbrs.LightS, nbrs.LightN,
+                nbrs.LightSW, nbrs.LightNW, nbrs.LightSE, nbrs.LightNE);
+
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
-                Map = jobData.Map,
-                LightMap = jobData.LightMap,
+                PaddedVoxels = jobData.PaddedVoxels,
+                PaddedLight = jobData.PaddedLight,
                 ChunkPosition = voxelOrigin,
                 SunlightBfsQueue = jobData.SunLightQueue,
                 BlocklightBfsQueue = jobData.BlockLightQueue,
                 SunlightColumnRecalcQueue = jobData.SunLightRecalcQueue,
                 Heightmap = jobData.Input.Heightmap,
-                NeighborN = jobData.Input.Neighbors.NeighborN,
-                NeighborE = jobData.Input.Neighbors.NeighborE,
-                NeighborS = jobData.Input.Neighbors.NeighborS,
-                NeighborW = jobData.Input.Neighbors.NeighborW,
-                NeighborNE = jobData.Input.Neighbors.NeighborNE,
-                NeighborSE = jobData.Input.Neighbors.NeighborSE,
-                NeighborSW = jobData.Input.Neighbors.NeighborSW,
-                NeighborNW = jobData.Input.Neighbors.NeighborNW,
-                LightN = jobData.Input.Neighbors.LightN,
-                LightE = jobData.Input.Neighbors.LightE,
-                LightS = jobData.Input.Neighbors.LightS,
-                LightW = jobData.Input.Neighbors.LightW,
-                LightNE = jobData.Input.Neighbors.LightNE,
-                LightSE = jobData.Input.Neighbors.LightSE,
-                LightSW = jobData.Input.Neighbors.LightSW,
-                LightNW = jobData.Input.Neighbors.LightNW,
                 BlockTypes = _jobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = jobData.Mods,
                 IsStable = jobData.IsStable,
