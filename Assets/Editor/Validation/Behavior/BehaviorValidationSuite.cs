@@ -13,7 +13,7 @@ namespace Editor.Validation.Behavior
     /// Scenario categories mirror the lighting/meshing suites: <b>baseline</b> (regression) scenarios must
     /// always pass; <b>known-bug</b> scenarios reproduce documented bugs test-first and are expected to fail
     /// until fixed. Behavior parity rests on three legs (see
-    /// <c>Documentation/Design/BEHAVIOR_VALIDATION_HARNESS_DESIGN.md</c>): golden-master snapshots,
+    /// <c>Documentation/Architecture/Testing Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md</c>): golden-master snapshots,
     /// behavioral invariants (determinism, non-vacuity), and — once both code paths exist — the BH-D1
     /// old-vs-new differential.
     /// </para>

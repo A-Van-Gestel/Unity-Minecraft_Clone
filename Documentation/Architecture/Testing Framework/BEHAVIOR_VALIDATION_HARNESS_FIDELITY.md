@@ -1,4 +1,4 @@
-# Behavior (Tick) Validation Harness — Draft Implementation Design
+# Behavior (Tick) Validation Harness — Fidelity Boundary & Extension Backlog
 
 **Status:** 🟢 **Waves 0–2 complete — the entire fluid + grass behavior surface is baselined & green (2026-06-21).**
 The harness exists and runs: menu item **`Minecraft Clone/Dev/Validate Behavior`**, sources under
@@ -8,20 +8,21 @@ The harness exists and runs: menu item **`Minecraft Clone/Dev/Validate Behavior`
 **BH-B3** (infinite-source regeneration), **BH-B5** (lava viscosity staggering — TG-3 seeded-RNG gate #1),
 **BH-B6** (grass spread to convertible dirt — TG-3 seeded-RNG gate #2: reservoir sampling + 2% roll; in-game
 confirmed), and **BH-B7** (grass→dirt under a solid block — deterministic). BH-7 (apply-path fidelity) closed as
-accepted defensive parity. Remaining: **(a)** promote this doc to `Documentation/Architecture/Testing Framework/`
-(now due — Waves 1–2 have landed); **(b)** **BH-D1**, the old-vs-new differential — the load-bearing TG-4/TG-5
-parity test, built in that PR since it needs both code paths to exist.
-**Created:** 2026-06-20
+accepted defensive parity. Promoted from `Design/` to `Architecture/Testing Framework/` on 2026-06-21 (an
+implemented suite, sibling to the meshing/lighting fidelity docs). Remaining: **BH-D1**, the old-vs-new
+differential — the load-bearing TG-4/TG-5 parity test, built in that PR since it needs both code paths to exist.
+**Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
 (Burst function-pointer dispatch) optimizations in
-[PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md) claim *behavior-preserving* — the
-same role the Meshing suite plays for `MR-*` and the Lighting suite plays for the lighting engine.
-**Proposed scope:** `Assets/Editor/Validation/Behavior/` — a new `BehaviorValidationSuite` +
-`BehaviorTestWorld` + `BehaviorOracle`/`BehaviorAssert` + `TestBehaviorBlockPalette` harness, menu item
+[PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim *behavior-preserving* —
+the same role the Meshing suite plays for `MR-*` and the Lighting suite plays for the lighting engine.
+**Scope:** `Assets/Editor/Validation/Behavior/` — the `BehaviorValidationSuite` (+ `.Baseline`) +
+`BehaviorTestWorld` + `BehaviorSnapshot` + `TestBehaviorBlockPalette`, atop the shared
+`Editor.Validation.Framework.{GoldenMaster,ValidationReflection}` helpers, menu item
 **`Minecraft Clone/Dev/Validate Behavior`**.
 **Siblings (same document shape & conventions):**
-[MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md),
-[LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md).
+[MESHING_VALIDATION_HARNESS_FIDELITY.md](MESHING_VALIDATION_HARNESS_FIDELITY.md),
+[LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md).
 
 ---
 
@@ -418,11 +419,12 @@ optimization** — it needs both code paths to exist, so it lands in the TG-4/TG
 "void"); a real two-chunk fixture is only needed when a scenario must model cross-chunk flow. Build alongside
 whatever first needs border-fluid coverage.
 
-### Promotion
+### Promotion · ✅ DONE (2026-06-21)
 
-Once Wave 1 (+ Wave 2) lands, this doc is no longer "proposed" — **move it to
-`Documentation/Architecture/Testing Framework/`** as a sibling fidelity doc (per the status header) and update
-the cross-references.
+Waves 1–2 landed, so this doc is no longer "proposed": it was moved from `Documentation/Design/` to
+`Documentation/Architecture/Testing Framework/` (renamed `…_DESIGN.md` → `…_FIDELITY.md`) as a sibling fidelity
+doc, and the inbound cross-references were updated (`PERFORMANCE_IMPROVEMENTS_REPORT.md` TG-4/TG-5 entries +
+`BehaviorValidationSuite.cs`'s doc-comment path).
 
 ---
 
@@ -441,12 +443,12 @@ the cross-references.
 
 ## 7. Cross-references
 
-- Optimizations this harness gates: [PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md)
+- Optimizations this harness gates: [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md)
   §Tick & Gameplay (TG-4, TG-5), and the TG-3 entry (the determinism precondition).
 - Sibling harness docs & status-tag / wave conventions:
-  [MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md)
+  [MESHING_VALIDATION_HARNESS_FIDELITY.md](MESHING_VALIDATION_HARNESS_FIDELITY.md)
   (esp. MH-6 reflection-stub seam, B10 differential pattern, B8/B9 positive-control rule),
-  [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
+  [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
   (esp. A1 logic-move-not-fake pattern, A4 shared-assumption trap).
 - Production tick path being modeled: `Chunk.TickUpdate` (`Chunk.cs:237`),
   `World.ProcessTickUpdates` (`World.cs:1294`), `BlockBehavior.Active`/`Behave` (`BlockBehavior.cs`),

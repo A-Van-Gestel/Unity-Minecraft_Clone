@@ -721,10 +721,11 @@ cache-local, parallelizable, and off the main thread.
 > - **Seed/Save:** ✅ / ✅.
 
 **Parity guard (prerequisite):** the "fluid parity testing required" note above is satisfied by the
-behavior-tick validation harness specified in
-[BEHAVIOR_VALIDATION_HARNESS_DESIGN.md](BEHAVIOR_VALIDATION_HARNESS_DESIGN.md) — build it (Waves 0–2) before
-attempting this refactor, then land the old-vs-new differential baseline (BH-D1) in the TG-4 PR itself. The
-harness's seam table (S1–S5) also enumerates the exact `World.Instance` couplings this split must sever.
+behavior-tick validation harness in
+[BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md)
+— **built (Waves 0–2, 8 baselines green, 2026-06-21)**; land the old-vs-new differential baseline (BH-D1) in the
+TG-4 PR itself. The harness's seam table (S1–S5) also enumerates the exact `World.Instance` couplings this split
+must sever.
 
 ---
 
@@ -743,8 +744,8 @@ collection while decoupling behavior logic and enabling Burst-compiled dispatch.
 > - **Seed/Save:** ✅ / ✅.
 
 **Parity guard (prerequisite):** same as TG-4 — guard the function-pointer dispatch swap with the behavior-tick
-harness ([BEHAVIOR_VALIDATION_HARNESS_DESIGN.md](BEHAVIOR_VALIDATION_HARNESS_DESIGN.md)) and the BH-D1
-old-vs-new differential. Decoupling the `switch` into a registry must produce a byte-identical `VoxelMod`
+harness ([BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md))
+and the BH-D1 old-vs-new differential. Decoupling the `switch` into a registry must produce a byte-identical `VoxelMod`
 stream tick-for-tick.
 
 ---
