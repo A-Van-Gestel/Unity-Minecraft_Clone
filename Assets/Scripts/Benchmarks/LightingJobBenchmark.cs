@@ -166,6 +166,15 @@ namespace Benchmarks
         [SerializeField]
         private bool _useBlockingWait = true;
 
+        [Tooltip("If true, every job's input is built (PrepareJob — including the LI-1 padded-volume " +
+                 "gather) BEFORE the stopwatch starts, so the measured time reflects only schedule + " +
+                 "in-job BFS execution (the self-time LI-1 targets). If false, the stopwatch also covers " +
+                 "PrepareJob — i.e. the full per-chunk schedule-time cost paid in production (the copy " +
+                 "budget of CHUNK_PIPELINE_PERFORMANCE_ANALYSIS §1.2). Both are real and measure " +
+                 "different things; isolate to value the in-job change, include to value total cost.")]
+        [SerializeField]
+        private bool _excludePrepareFromTiming = true;
+
         [Tooltip("If checked, the benchmark will run automatically when the scene starts.")]
         [SerializeField]
         private bool _runOnStart = true;
@@ -339,13 +348,34 @@ namespace Benchmarks
 
                     try
                     {
+                        // --- Prepare Phase (optionally untimed) ---
+                        // Building each job's input — which for LI-1 includes the per-job padded-volume
+                        // gather — is main-thread setup. When _excludePrepareFromTiming is true we build
+                        // every job here, BEFORE the stopwatch, so the measurement isolates schedule +
+                        // in-job BFS execution from the gather cost. When false, PrepareJob stays inside
+                        // the timed region below (full schedule-time cost).
+                        if (_excludePrepareFromTiming)
+                        {
+                            for (int i = 0; i < _jobsToRun; i++)
+                                activeJobDataList.Add(PrepareJob(sourceData, Allocator.Persistent));
+                        }
+
                         stopwatch.Start();
 
                         // --- Scheduling Phase ---
                         for (int i = 0; i < _jobsToRun; i++)
                         {
-                            LightingJobData jobData = PrepareJob(sourceData, Allocator.Persistent);
-                            activeJobDataList.Add(jobData);
+                            LightingJobData jobData;
+                            if (_excludePrepareFromTiming)
+                            {
+                                jobData = activeJobDataList[i];
+                            }
+                            else
+                            {
+                                jobData = PrepareJob(sourceData, Allocator.Persistent);
+                                activeJobDataList.Add(jobData);
+                            }
+
                             jobHandles[i] = ScheduleJob(jobData, edgeCheck);
                         }
 
@@ -950,6 +980,9 @@ namespace Benchmarks
             report.AppendLine("<color=cyan><b>--- NEIGHBORHOOD LIGHTING BENCHMARK REPORT ---</b></color>");
             report.AppendLine($"Test configuration: {_jobsToRun} jobs per run, averaged over {_benchmarkRuns} runs.");
             report.AppendLine($"All numbers are: <i>ms per run</i> ({_jobsToRun} jobs) | <i>μs per job</i> (derived).");
+            report.AppendLine(_excludePrepareFromTiming
+                ? "Timing scope: <b>schedule + in-job BFS only</b> (PrepareJob/gather EXCLUDED — isolates in-job self-time)."
+                : "Timing scope: <b>full schedule-time</b> (PrepareJob/gather INCLUDED — total per-chunk cost).");
             report.AppendLine($"Total wall-clock runtime: {BenchmarkEnvironment.FormatDuration(totalElapsed)}");
             report.AppendLine();
             report.Append(systemInfo);
