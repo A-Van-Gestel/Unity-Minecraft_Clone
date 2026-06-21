@@ -29,7 +29,8 @@ namespace Editor.Validation.Behavior.Framework
     /// through <see cref="ApplyMod"/>, which faithfully mirrors the state-affecting half of
     /// <c>World.ApplyModifications</c> + <c>ChunkData.ModifyVoxel</c>: the <c>oldPacked == newPacked</c> no-op
     /// early-out, the <see cref="BlockTagUtility.CanReplace"/> / <see cref="ReplacementRule"/> placement gate,
-    /// the active-set add/remove contract, and the <see cref="BlockTags.REQUIRES_SUPPORT"/> break cascade. It
+    /// the active-set add/remove contract, the <see cref="BlockTags.REQUIRES_SUPPORT"/> break cascade, and the
+    /// Step-4 six-neighbour re-activation. It
     /// deliberately omits the lighting/meshing/notify side effects (irrelevant to behavior parity) via
     /// <c>SetVoxel</c> instead of <c>ModifyVoxel</c>. Interior-only (Tier-1): with the empty <c>worldData</c>,
     /// a border-reaching neighbor query reads as "void" rather than crashing.
@@ -168,8 +169,9 @@ namespace Editor.Validation.Behavior.Framework
 
         /// <summary>
         /// Applies a single mod, mirroring the state-affecting logic of <c>World.ApplyModifications</c> +
-        /// <c>ChunkData.ModifyVoxel</c>: no-op early-out, placement-rule gate, active-set maintenance, and the
-        /// support-break cascade. Cross-chunk targets are skipped (Tier-1). Lighting/meshing/notify side effects
+        /// <c>ChunkData.ModifyVoxel</c>: no-op early-out, placement-rule gate, active-set maintenance, the
+        /// support-break cascade, and the Step-4 six-neighbour re-activation. Cross-chunk targets (and
+        /// out-of-chunk neighbours) are skipped (Tier-1). Lighting/meshing/notify side effects
         /// are intentionally omitted (not part of the behavior surface under test).
         /// </summary>
         /// <param name="mod">The modification to apply.</param>
@@ -226,6 +228,27 @@ namespace Editor.Validation.Behavior.Framework
                     Vector3Int aboveGlobal = new Vector3Int(mod.GlobalPosition.x, mod.GlobalPosition.y + 1, mod.GlobalPosition.z);
                     pending.Enqueue(new VoxelMod(aboveGlobal, BlockIDs.Air) { ImmediateUpdate = mod.ImmediateUpdate });
                 }
+            }
+
+            // Six-neighbour re-activation — matches World.ApplyModifications Step 4: after any applied mod, the
+            // World re-wakes every isActive neighbour of the modified cell. This is the parity-critical half — a
+            // cell that quiesced and dropped from the active set is re-evaluated once an adjacent cell changes
+            // (e.g. a fluid source re-woken by a freshly-placed flow neighbour). Without it the harness would
+            // freeze behaviour the live engine never produces (a false-confidence golden). Interior-only (Tier-1):
+            // a neighbour outside the chunk degrades to "void" here exactly as a cross-chunk read returns null in
+            // production, so it is skipped rather than woken.
+            foreach (Vector3Int offset in VoxelData.FaceChecks)
+            {
+                int nx = lx + offset.x;
+                int ny = ly + offset.y;
+                int nz = lz + offset.z;
+
+                if (!ChunkData.IsVoxelInChunk(nx, ny, nz))
+                    continue;
+
+                ushort neighborId = BurstVoxelDataBitMapping.GetId(ChunkData.GetVoxel(nx, ny, nz));
+                if (PaletteOf(neighborId).isActive)
+                    _activeVoxels.Add(new Vector3Int(nx, ny, nz));
             }
         }
 

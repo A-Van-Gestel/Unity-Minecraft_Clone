@@ -236,6 +236,16 @@ is the faithful path but couples far beyond the behavior surface:
   replicated. The BH-B1 golden master is byte-identical before and after (water→air is applied by both paths),
   confirming the hardening changed fidelity, not behavior. Palette tags stay `NONE` (so `CanReplace` stays
   permissive and fluid self-replacement works); per-scenario tag fidelity can be added as scenarios need it.
+- **Step-4 six-neighbour re-activation — CLOSED (2026-06-21):** a follow-up review found `ApplyMod` still
+  omitted production's **Step 4** (`World.ApplyModifications`, `World.cs:2025-2044`): after every applied mod,
+  the World re-wakes the modified cell's six `isActive` neighbours. Without it the harness could freeze a state
+  the live engine never produces (a cell that quiesced and dropped from the active set, sitting next to a
+  freshly-placed flow/regeneration cell, is re-evaluated in production but not in the harness) — a
+  false-confidence baseline, defeating the suite's parity purpose. `ApplyMod` now mirrors Step 4 (interior-only:
+  out-of-chunk neighbours degrade to "void" and are skipped, consistent with Tier-1). The fix moved exactly one
+  golden — **BH-B3** at T3, where applying the gap-regeneration mod now re-wakes its two flanking-source
+  neighbours (all three then quiesce); every other baseline plus all extra-checks/terminations held byte-for-byte,
+  confirming the change is precisely the added parity behaviour and nothing else.
 
 **Decision 2 — apply order (the subtle correctness question).** Ordering across voxels within a tick matters when
 two cells write the same neighbor. The driver must replicate production's order: iterate active voxels as

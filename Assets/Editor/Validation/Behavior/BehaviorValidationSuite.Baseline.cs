@@ -115,7 +115,9 @@ T3
 
         /// <summary>
         /// BH-B3 golden master (see <see cref="Bh3_InfiniteSourceRegeneration"/>), compared via
-        /// <see cref="GoldenMaster.AssertOrCapture"/>. Null/empty → capture mode.
+        /// <see cref="GoldenMaster.AssertOrCapture"/>. Null/empty → capture mode. At T3 all three cells re-appear:
+        /// applying the T2 gap-regeneration mod re-wakes its two flanking-source neighbors via the Step-4
+        /// six-neighbor re-activation (<see cref="BehaviorTestWorld.ApplyMod"/>), and all three then quiesce.
         /// </summary>
         private const string BH_B3_GOLDEN =
             @"T1
@@ -126,6 +128,8 @@ T2
   (8,11,8) active=0 mods=[]
   (7,11,8) active=1 mods=[19@(7,11,8):00:1]
 T3
+  (8,11,8) active=0 mods=[]
+  (6,11,8) active=0 mods=[]
   (7,11,8) active=0 mods=[]
 ";
 
