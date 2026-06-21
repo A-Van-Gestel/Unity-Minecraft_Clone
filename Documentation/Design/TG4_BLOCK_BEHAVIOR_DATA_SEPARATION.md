@@ -288,7 +288,7 @@ The pooling *concern* is not superseded (per-chunk native-list churn persists an
       [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
       **C3 (B54/B55, CLOSED 2026-06-21)** (cross-border sunlight darkening) and
       [MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md)
-      **MH-10/MH-11 (B18–B21, still OPEN)** (border-face culling never consults a neighbor today). These guard the
+      **MH-10/MH-11 (B18–B21, CLOSED 2026-06-21)** (border-face culling consumption + production-fill faithful). These guard the
       *substrate*; **BH-D1** (§6) separately guards the *tick path* — both are Phase-4 gates.
 - **Tier-2 fixtures (BH-4)** — currently deferred in the harness; must be built for Phase 4.
 - **TG-5 relationship** — if Phases 3–4 prove too costly, TG-5 (function-pointer dispatch, same BH-D1

@@ -52,6 +52,13 @@ namespace Editor.Validation.Meshing.Framework
         private MeshDataJobOutput _output;
         private bool _hasOutput;
 
+        // Opt-in +X (East / NeighborRight) neighbor voxel map for the cross-chunk border-face-culling
+        // baselines (MH-10/MH-11). Left uncreated by default so every existing baseline keeps the
+        // original empty-neighbor behavior (border faces drawn as "no neighbor"); created lazily the
+        // first time a test populates it. Only the Right slot is modeled — the +X seam the lighting
+        // suite also standardizes on; the other 7 neighbor slots stay empty.
+        private NativeArray<uint> _neighborRight;
+
         /// <summary>Creates an all-air chunk (zeroed light map) and the test block palette job data.</summary>
         public MeshingTestWorld()
         {
@@ -75,6 +82,55 @@ namespace Editor.Validation.Meshing.Framework
         {
             int idx = ChunkMath.GetFlattenedIndexInChunk(x, y, z);
             _map[idx] = BurstVoxelDataBitMapping.PackVoxelData(id, meta);
+        }
+
+        /// <summary>
+        /// MH-10: writes a block into the +X (East / <c>NeighborRight</c>) neighbor chunk at
+        /// <b>neighbor-local</b> coordinates, lazily creating the neighbor map (all-Air) on first use.
+        /// Once created, <see cref="Run"/> passes this map for the Right slot, so the meshing job's
+        /// border-face culling actually consults it: a face on this chunk's +X border (local x = 15)
+        /// reads <c>NeighborRight[(0, y, z)]</c> via the job's <c>GetVoxelStateFromLocalPos</c> wrap.
+        /// This is a <b>direct</b> write — the consumption-gap test (does the job read + cull correctly).
+        /// For the fill-faithful variant see <see cref="SetNeighborRightBlockViaProductionFill"/>.
+        /// </summary>
+        /// <param name="x">Neighbor-local X (0–15); the +X border reads x = 0.</param>
+        /// <param name="y">Neighbor-local Y.</param>
+        /// <param name="z">Neighbor-local Z.</param>
+        /// <param name="id">The palette block ID to write into the neighbor.</param>
+        /// <param name="meta">Optional metadata byte.</param>
+        public void SetNeighborRightBlock(int x, int y, int z, ushort id, byte meta = 0)
+        {
+            EnsureNeighborRight();
+            _neighborRight[ChunkMath.GetFlattenedIndexInChunk(x, y, z)] =
+                BurstVoxelDataBitMapping.PackVoxelData(id, meta);
+        }
+
+        /// <summary>
+        /// MH-11: builds the +X (<c>NeighborRight</c>) neighbor map through the <b>production</b> fill
+        /// path (<see cref="ChunkData.FillJobVoxelMap"/>) instead of writing the flat array directly —
+        /// the exact code a halo/border-slab substrate (P-1/P-2) rewrites. A throwaway
+        /// <see cref="ChunkData"/> gets the block at neighbor-local coords, then its sections are filled
+        /// into the neighbor map exactly as <c>WorldData.FillChunkMapForJob</c> does in production. If the
+        /// fill ever under-copies or mis-indexes the border plane, the border-culling baseline (B21) reds.
+        /// </summary>
+        /// <param name="x">Neighbor-local X (0–15); the +X border reads x = 0.</param>
+        /// <param name="y">Neighbor-local Y.</param>
+        /// <param name="z">Neighbor-local Z.</param>
+        /// <param name="id">The palette block ID to write into the neighbor.</param>
+        /// <param name="meta">Optional metadata byte.</param>
+        public void SetNeighborRightBlockViaProductionFill(int x, int y, int z, ushort id, byte meta = 0)
+        {
+            EnsureNeighborRight();
+            ChunkData neighbor = new ChunkData(Vector2Int.zero);
+            neighbor.SetVoxel(x, y, z, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
+            neighbor.FillJobVoxelMap(_neighborRight);
+        }
+
+        /// <summary>Lazily allocates the persistent all-Air +X neighbor map (idempotent).</summary>
+        private void EnsureNeighborRight()
+        {
+            if (!_neighborRight.IsCreated)
+                _neighborRight = new NativeArray<uint>(MAP_SIZE, Allocator.Persistent); // zero == all Air
         }
 
         /// <summary>
@@ -138,6 +194,9 @@ namespace Editor.Validation.Meshing.Framework
             // Empty cardinal/diagonal neighbor maps: interior blocks never read them; border blocks
             // would treat them as "no neighbor" (face drawn), which no scenario relies on.
             NativeArray<uint> emptyMap = new NativeArray<uint>(0, Allocator.TempJob);
+            // MH-10/MH-11: when a test populated the +X neighbor, pass that persistent map for the Right
+            // slot so border-face culling consults it; otherwise behave exactly as before (empty = void).
+            NativeArray<uint> rightMap = _neighborRight.IsCreated ? _neighborRight : emptyMap;
             // Empty custom-mesh inputs (no custom-mesh blocks in the palette).
             NativeArray<CustomMeshData> customMeshes = new NativeArray<CustomMeshData>(0, Allocator.TempJob);
             NativeArray<CustomFaceData> customFaces = new NativeArray<CustomFaceData>(0, Allocator.TempJob);
@@ -171,7 +230,7 @@ namespace Editor.Validation.Meshing.Framework
                 NeighborBack = emptyMap,
                 NeighborFront = emptyMap,
                 NeighborLeft = emptyMap,
-                NeighborRight = emptyMap,
+                NeighborRight = rightMap,
                 NeighborFrontRight = emptyMap,
                 NeighborBackRight = emptyMap,
                 NeighborBackLeft = emptyMap,
@@ -299,6 +358,7 @@ namespace Editor.Validation.Meshing.Framework
             if (_map.IsCreated) _map.Dispose();
             if (_lightMap.IsCreated) _lightMap.Dispose();
             if (_blockTypes.IsCreated) _blockTypes.Dispose();
+            if (_neighborRight.IsCreated) _neighborRight.Dispose();
         }
     }
 }

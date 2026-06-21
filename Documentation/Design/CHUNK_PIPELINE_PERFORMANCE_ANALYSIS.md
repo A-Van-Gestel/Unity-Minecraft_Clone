@@ -80,11 +80,10 @@ disposed one frame later — this is simultaneously the frame-time cost and the 
     > and cross-chunk *darkening* is now covered by
     > [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
     > **C3 (B54/B55, CLOSED 2026-06-21)** — keep green.
-> - **Meshing:** border-face culling never consults a neighbor today — the suite leaves the neighbor
-    > maps empty. Close
+> - **Meshing:** border-face culling is now covered by
     > [MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md)
-    > **MH-10/MH-11 (B18–B21)** first; MH-11 routes the harness through the production `FillChunkMapForJob`
-    > so a slab/halo under-copy actually flips a baseline red.
+    > **MH-10/MH-11 (B18–B21, CLOSED 2026-06-21)** — keep green; MH-11 (B21) routes the harness through the
+    > production `ChunkData.FillJobVoxelMap` so a slab/halo under-copy of the border plane flips it red.
 
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low (pooling) → 🔴 High (persistent native storage).

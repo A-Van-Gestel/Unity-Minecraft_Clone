@@ -35,7 +35,15 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B10: post-process rewrites to section-space + interleaves stream 3, chained==separate (MH-5 / MR-5 guard)", B10_PostProcessSectionSpaceAndInterleave));
             scenarios.Add(new Scenario("B11: smooth lighting encodes uniform corner light to the right UNorm8 values (MH-3 / MR-2 guard)", B11_SmoothLightingUniformCornerValues));
             scenarios.Add(new Scenario("B17: a pooled output reused across scenes equals a fresh buffer (MH-2 / MR-6 stale-reuse guard)", B17_PooledOutputStaleDataGuard));
+
+            // --- Cross-chunk border-face-culling family (B18–B21, MH-10/MH-11) lives in its own partial
+            // file (MeshingValidationSuite.CrossChunk.cs) and self-registers here. ---
+            AddCrossChunkBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the cross-chunk border-culling baselines (implemented in MeshingValidationSuite.CrossChunk.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddCrossChunkBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1 — Direct, isolated differential test of <see cref="VoxelMeshHelper.GenerateStandardCubeFace"/>:
