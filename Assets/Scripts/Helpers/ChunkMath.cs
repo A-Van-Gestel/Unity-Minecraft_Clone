@@ -61,161 +61,119 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Copies a contiguous run of voxels from a section-contiguous full-chunk source into the padded
-        /// volume, or fills the destination run with <c>uint.MaxValue</c> when the source is missing (an
+        /// Copies a contiguous run from a section-contiguous full-chunk source into the padded volume, or
+        /// fills the destination run with <paramref name="sentinel"/> when the source is missing (an
         /// uncreated/empty array — the LI-1 sentinel that reproduces the old per-cell
         /// <c>!IsCreated || Length == 0</c> missing-neighbor guard). The run is contiguous in BOTH layouts
         /// because X is the fastest axis (stride 1) in each, so a fixed-(y,z) span of consecutive X is a
         /// flat block in the section-aware source AND in the linear padded volume — letting the gather move
         /// a whole row segment with one bulk
         /// <see cref="NativeArray{T}.Copy(NativeArray{T},int,NativeArray{T},int,int)"/> instead of a branchy
-        /// per-cell scatter (LI-1 follow-up #3).
+        /// per-cell scatter (LI-1 follow-up #3). Generic over the element type so the voxel (uint) and light
+        /// (ushort) gathers share one implementation — this is main-thread <c>Helpers</c> code, not Burst,
+        /// so the generic carries no Burst constraint.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void CopyVoxelRun(NativeArray<uint> src, int srcStart, NativeArray<uint> padded, int dstStart, int length)
+        private static void CopyRun<T>(NativeArray<T> src, int srcStart, NativeArray<T> padded, int dstStart, int length, T sentinel)
+            where T : unmanaged
         {
             if (src.IsCreated && src.Length > 0)
             {
-                NativeArray<uint>.Copy(src, srcStart, padded, dstStart, length);
+                NativeArray<T>.Copy(src, srcStart, padded, dstStart, length);
                 return;
             }
 
-            for (int k = 0; k < length; k++) padded[dstStart + k] = uint.MaxValue;
-        }
-
-        /// <summary>
-        /// Light counterpart of <see cref="CopyVoxelRun"/>: a missing source fills the run with
-        /// <c>ushort.MaxValue</c>. Voxel and light runs for the same region are copied in lock-step, so the
-        /// two sentinels co-occur and the consuming job's twin <c>uint.MaxValue</c>/<c>ushort.MaxValue</c>
-        /// bounds checks stay in agreement.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void CopyLightRun(NativeArray<ushort> src, int srcStart, NativeArray<ushort> padded, int dstStart, int length)
-        {
-            if (src.IsCreated && src.Length > 0)
-            {
-                NativeArray<ushort>.Copy(src, srcStart, padded, dstStart, length);
-                return;
-            }
-
-            for (int k = 0; k < length; k++) padded[dstStart + k] = ushort.MaxValue;
+            for (int k = 0; k < length; k++) padded[dstStart + k] = sentinel;
         }
 
         /// <summary>
         /// Scatters the center chunk + its 8 horizontal neighbors (each a section-contiguous full-chunk
-        /// voxel buffer) into the halo-padded linear volume consumed by the <c>NeighborhoodLightingJob</c>.
-        /// A missing neighbor (uncreated/empty array) fills its region with <c>uint.MaxValue</c>,
+        /// buffer) into the halo-padded linear volume consumed by the <c>NeighborhoodLightingJob</c>. A
+        /// missing neighbor (uncreated/empty array) fills its region with <paramref name="sentinel"/>,
         /// reproducing the job's old per-neighbor missing-source sentinel. Writes EVERY padded cell.
         /// <para>
         /// Each padded horizontal row (fixed py, pz — 20 cells of X) is built as three contiguous runs: the
         /// 2-wide West halo, the 16-wide center span, and the 2-wide East halo, each copied in bulk from one
-        /// source chunk via <see cref="CopyVoxelRun"/>. The pz band picks the source row (<c>lz</c>) and the
+        /// source chunk via <see cref="CopyRun{T}"/>. The pz band picks the source row (<c>lz</c>) and the
         /// West/center/East source chunks once per row — pz∈[0,2)→south side (SW/S/SE), pz∈[18,20)→north
         /// side (NW/N/NE), else the center row (W/Center/E) — the same 3×3 dispatch the old per-cell
         /// <c>PaddedSourceIndex</c> performed, hoisted out of the inner loop. Bit-identical to the per-cell
         /// scatter it replaces (X is the fastest axis in both layouts, so the run order is preserved).
+        /// Generic over the element type so the voxel and light gathers share one body and cannot silently
+        /// diverge; the public <see cref="GatherPaddedVoxels"/>/<see cref="GatherPaddedLight"/> wrappers
+        /// bind <c>T</c> and the matching sentinel.
         /// </para>
+        /// </summary>
+        private static void GatherPadded<T>(NativeArray<T> padded,
+            NativeArray<T> center, NativeArray<T> w, NativeArray<T> e, NativeArray<T> s, NativeArray<T> n,
+            NativeArray<T> sw, NativeArray<T> nw, NativeArray<T> se, NativeArray<T> ne, T sentinel)
+            where T : unmanaged
+        {
+            for (int py = 0; py < CHUNK_HEIGHT; py++)
+            {
+                for (int pz = 0; pz < PADDED_CHUNK_WIDTH; pz++)
+                {
+                    // Resolve the pz band once per row: source-local Z + the West/center/East source chunks.
+                    int lz;
+                    NativeArray<T> west, mid, east;
+                    if (pz < LIGHTING_HALO) // South side
+                    {
+                        lz = pz + CHUNK_WIDTH - LIGHTING_HALO;
+                        west = sw;
+                        mid = s;
+                        east = se;
+                    }
+                    else if (pz >= CHUNK_WIDTH + LIGHTING_HALO) // North side
+                    {
+                        lz = pz - CHUNK_WIDTH - LIGHTING_HALO;
+                        west = nw;
+                        mid = n;
+                        east = ne;
+                    }
+                    else // Center row
+                    {
+                        lz = pz - LIGHTING_HALO;
+                        west = w;
+                        mid = center;
+                        east = e;
+                    }
+
+                    int rowBase = GetPaddedLightingIndex(0, py, pz);
+
+                    // West halo: padded px[0,2) <- west-side chunk local x[14,16).
+                    CopyRun(west, GetFlattenedIndexInChunk(CHUNK_WIDTH - LIGHTING_HALO, py, lz),
+                        padded, rowBase, LIGHTING_HALO, sentinel);
+                    // Center span: padded px[2,18) <- center-side chunk local x[0,16).
+                    CopyRun(mid, GetFlattenedIndexInChunk(0, py, lz),
+                        padded, rowBase + LIGHTING_HALO, CHUNK_WIDTH, sentinel);
+                    // East halo: padded px[18,20) <- east-side chunk local x[0,2).
+                    CopyRun(east, GetFlattenedIndexInChunk(0, py, lz),
+                        padded, rowBase + CHUNK_WIDTH + LIGHTING_HALO, LIGHTING_HALO, sentinel);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Voxel gather: fills the padded voxel volume from the center + 8 neighbor voxel buffers, missing
+        /// sources stamped <c>uint.MaxValue</c>. Thin typed wrapper over <see cref="GatherPadded{T}"/>.
         /// </summary>
         public static void GatherPaddedVoxels(NativeArray<uint> padded,
             NativeArray<uint> center, NativeArray<uint> w, NativeArray<uint> e, NativeArray<uint> s, NativeArray<uint> n,
             NativeArray<uint> sw, NativeArray<uint> nw, NativeArray<uint> se, NativeArray<uint> ne)
         {
-            for (int py = 0; py < CHUNK_HEIGHT; py++)
-            {
-                for (int pz = 0; pz < PADDED_CHUNK_WIDTH; pz++)
-                {
-                    // Resolve the pz band once per row: source-local Z + the West/center/East source chunks.
-                    int lz;
-                    NativeArray<uint> west, mid, east;
-                    if (pz < LIGHTING_HALO) // South side
-                    {
-                        lz = pz + CHUNK_WIDTH - LIGHTING_HALO;
-                        west = sw;
-                        mid = s;
-                        east = se;
-                    }
-                    else if (pz >= CHUNK_WIDTH + LIGHTING_HALO) // North side
-                    {
-                        lz = pz - CHUNK_WIDTH - LIGHTING_HALO;
-                        west = nw;
-                        mid = n;
-                        east = ne;
-                    }
-                    else // Center row
-                    {
-                        lz = pz - LIGHTING_HALO;
-                        west = w;
-                        mid = center;
-                        east = e;
-                    }
-
-                    int rowBase = GetPaddedLightingIndex(0, py, pz);
-
-                    // West halo: padded px[0,2) <- west-side chunk local x[14,16).
-                    CopyVoxelRun(west, GetFlattenedIndexInChunk(CHUNK_WIDTH - LIGHTING_HALO, py, lz),
-                        padded, rowBase, LIGHTING_HALO);
-                    // Center span: padded px[2,18) <- center-side chunk local x[0,16).
-                    CopyVoxelRun(mid, GetFlattenedIndexInChunk(0, py, lz),
-                        padded, rowBase + LIGHTING_HALO, CHUNK_WIDTH);
-                    // East halo: padded px[18,20) <- east-side chunk local x[0,2).
-                    CopyVoxelRun(east, GetFlattenedIndexInChunk(0, py, lz),
-                        padded, rowBase + CHUNK_WIDTH + LIGHTING_HALO, LIGHTING_HALO);
-                }
-            }
+            GatherPadded(padded, center, w, e, s, n, sw, nw, se, ne, uint.MaxValue);
         }
 
         /// <summary>
-        /// Light counterpart of <see cref="GatherPaddedVoxels"/>: scatters center + 8 neighbor light
-        /// buffers into the padded volume as three bulk row runs (see <see cref="CopyLightRun"/>), missing
-        /// sources filled with <c>ushort.MaxValue</c>. The pz-band → source-chunk dispatch and run layout
-        /// mirror <see cref="GatherPaddedVoxels"/> exactly so a voxel/light pair always agrees.
+        /// Light gather: fills the padded light volume from the center + 8 neighbor light buffers, missing
+        /// sources stamped <c>ushort.MaxValue</c>. Thin typed wrapper over <see cref="GatherPadded{T}"/>; the
+        /// voxel/light pair always agrees because both route through the same generic body.
         /// </summary>
         public static void GatherPaddedLight(NativeArray<ushort> padded,
             NativeArray<ushort> center, NativeArray<ushort> w, NativeArray<ushort> e, NativeArray<ushort> s, NativeArray<ushort> n,
             NativeArray<ushort> sw, NativeArray<ushort> nw, NativeArray<ushort> se, NativeArray<ushort> ne)
         {
-            for (int py = 0; py < CHUNK_HEIGHT; py++)
-            {
-                for (int pz = 0; pz < PADDED_CHUNK_WIDTH; pz++)
-                {
-                    // Resolve the pz band once per row: source-local Z + the West/center/East source chunks.
-                    int lz;
-                    NativeArray<ushort> west, mid, east;
-                    if (pz < LIGHTING_HALO) // South side
-                    {
-                        lz = pz + CHUNK_WIDTH - LIGHTING_HALO;
-                        west = sw;
-                        mid = s;
-                        east = se;
-                    }
-                    else if (pz >= CHUNK_WIDTH + LIGHTING_HALO) // North side
-                    {
-                        lz = pz - CHUNK_WIDTH - LIGHTING_HALO;
-                        west = nw;
-                        mid = n;
-                        east = ne;
-                    }
-                    else // Center row
-                    {
-                        lz = pz - LIGHTING_HALO;
-                        west = w;
-                        mid = center;
-                        east = e;
-                    }
-
-                    int rowBase = GetPaddedLightingIndex(0, py, pz);
-
-                    // West halo: padded px[0,2) <- west-side chunk local x[14,16).
-                    CopyLightRun(west, GetFlattenedIndexInChunk(CHUNK_WIDTH - LIGHTING_HALO, py, lz),
-                        padded, rowBase, LIGHTING_HALO);
-                    // Center span: padded px[2,18) <- center-side chunk local x[0,16).
-                    CopyLightRun(mid, GetFlattenedIndexInChunk(0, py, lz),
-                        padded, rowBase + LIGHTING_HALO, CHUNK_WIDTH);
-                    // East halo: padded px[18,20) <- east-side chunk local x[0,2).
-                    CopyLightRun(east, GetFlattenedIndexInChunk(0, py, lz),
-                        padded, rowBase + CHUNK_WIDTH + LIGHTING_HALO, LIGHTING_HALO);
-                }
-            }
+            GatherPadded(padded, center, w, e, s, n, sw, nw, se, ne, ushort.MaxValue);
         }
 
         /// <summary>
