@@ -2,7 +2,6 @@ using System;
 using Data;
 using Jobs.BurstData;
 using Unity.Collections;
-using Unity.Mathematics;
 using UnityEngine;
 using Random = Unity.Mathematics.Random;
 
@@ -152,18 +151,19 @@ public static partial class BlockBehavior
         if (newLevel >= props.flowLevels) return;
 
         // Lava Viscosity Randomization (Bug 08)
-        // If a fluid has a spread chance less than 1.0, it will randomly skip horizontal spreading ticks.
-        // E.g., Lava at 0.25 only flows 25% of the time, resulting in thick, blob-like staggering.
-        // TG-3: Local Unity.Mathematics.Random seeded per voxel per tick. The per-tick salt
-        // (World.TickCounter) is essential — seeding by position alone would make the viscosity skip
-        // deterministic-stuck, freezing lava flow forever. Seed of 0 is illegal, so clamp with math.max.
-        int tickSalt = World.Instance.TickCounter;
-        uint fluidSeed = math.max(1u, math.hash(new int3(globalPos.x, globalPos.y, globalPos.z)) ^ (uint)(tickSalt * 0x9E3779B1u));
-        Random rng = new Random(fluidSeed);
-        if (rng.NextFloat() > props.spreadChance)
+        // A fluid with spreadChance < 1.0 randomly skips horizontal spreading ticks (e.g. lava at 0.25 flows
+        // ~25% of ticks, producing thick, blob-like staggering). Water (1.0) can never skip, so the RNG is
+        // pointless there — guarding on spreadChance < 1 avoids a per-voxel hash + Random construction every
+        // tick for the dominant fluid. TG-3: SeededVoxelRandom mixes a per-tick salt (World.TickCounter) so a
+        // skipped voxel re-rolls next tick instead of freezing forever; seeding by position alone would stick.
+        if (props.spreadChance < 1f)
         {
-            if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} Random Viscosity Skip (Chance={props.spreadChance}).");
-            return;
+            Random rng = SeededVoxelRandom(globalPos);
+            if (rng.NextFloat() > props.spreadChance)
+            {
+                if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} Random Viscosity Skip (Chance={props.spreadChance}).");
+                return;
+            }
         }
 
         // Pathfind for the optimal flow direction (drops within 4 blocks)

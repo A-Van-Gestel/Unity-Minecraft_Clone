@@ -10,6 +10,7 @@ using Helpers;
 using Jobs;
 using Jobs.BurstData;
 using Jobs.Data;
+using Jobs.Generators;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEditor;
@@ -39,7 +40,7 @@ namespace Editor.Benchmarking
         private const int CHUNK_COUNT = 100;
         private const int REPEATS = 5; // repeat the whole batch; report the best (least-noisy) batch mean
         private const int FLOODED_SEA_LEVEL = 110; // raised sea level → chunks fill with active water source voxels
-        private const int LIST_CAPACITY = 2048; // matches StandardChunkGenerator's ActiveVoxels pre-size
+        private const int LIST_CAPACITY = StandardChunkGenerator.ActiveVoxelPresizeCapacity; // single source of truth for the pre-size
 
         private const string WORLD_TYPE_PATH = "Assets/Data/WorldGen/WorldTypes/Standard.asset";
         private const string BLOCK_DB_PATH = "Assets/Resources/Data/BlockDatabase.asset";

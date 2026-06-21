@@ -21,6 +21,14 @@ namespace Jobs.Generators
     /// </summary>
     public class StandardChunkGenerator : IChunkGenerator
     {
+        /// <summary>
+        /// Pre-size capacity for the per-chunk active-voxel <see cref="NativeList{T}"/> emitted by the
+        /// generation scan. Sized for water-heavy chunks (oceans/lakes register thousands of active source
+        /// voxels) to avoid repeated Persistent realloc+copy growth inside the scan job. The
+        /// active-voxel-scan benchmark mirrors this value via this constant.
+        /// </summary>
+        public const int ActiveVoxelPresizeCapacity = 2048;
+
         private int _seed;
         private int _seaLevel;
         private NativeArray<StandardBiomeAttributesJobData> _biomesJobData;
@@ -463,7 +471,7 @@ namespace Jobs.Generators
             // managed BlockType objects up to ChunkVolume times in Chunk.OnDataPopulated.
             // Pre-size for water-heavy chunks (oceans/lakes register thousands of active source
             // voxels) to avoid repeated Persistent realloc+copy growth inside the scan job.
-            NativeList<int> activeVoxels = new NativeList<int>(2048, Allocator.Persistent);
+            NativeList<int> activeVoxels = new NativeList<int>(ActiveVoxelPresizeCapacity, Allocator.Persistent);
             ActiveVoxelScanJob activeVoxelScanJob = new ActiveVoxelScanJob
             {
                 VoxelMap = outputMap,

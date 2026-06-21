@@ -1,6 +1,6 @@
 using System;
-using System.Reflection;
 using Data;
+using Editor.Validation.Framework;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
@@ -107,7 +107,7 @@ namespace Editor.Validation.Meshing.Framework
 
                 // Drive the private `World.Instance` setter directly (bypassing Awake). It is null in a normal
                 // edit-mode session; _previousInstance (captured above) is restored on Dispose.
-                SetWorldInstance(world);
+                ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), world);
             }
             catch
             {
@@ -175,7 +175,7 @@ namespace Editor.Validation.Meshing.Framework
             if (_disposed) return;
             _disposed = true;
 
-            SetWorldInstance(_previousInstance);
+            ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _previousInstance);
 
             // Destroy the renderer's mesh (a bare Object, not a child of any GameObject) before the GO,
             // then the section GO (a child of _parentGo) via its parent, then the stub world + assets.
@@ -191,18 +191,6 @@ namespace Editor.Validation.Meshing.Framework
             if (OpaqueMaterial != null) Object.DestroyImmediate(OpaqueMaterial);
             if (TransparentMaterial != null) Object.DestroyImmediate(TransparentMaterial);
             if (LiquidMaterial != null) Object.DestroyImmediate(LiquidMaterial);
-        }
-
-        /// <summary>Sets the private static <see cref="World.Instance"/> auto-property via reflection.</summary>
-        private static void SetWorldInstance(World value)
-        {
-            PropertyInfo prop = typeof(World).GetProperty(
-                nameof(World.Instance), BindingFlags.Public | BindingFlags.Static);
-            MethodInfo setter = prop?.GetSetMethod(nonPublic: true);
-            if (setter == null)
-                throw new InvalidOperationException("Could not locate the private World.Instance setter via reflection.");
-
-            setter.Invoke(null, new object[] { value });
         }
     }
 }

@@ -48,6 +48,25 @@ public static partial class BlockBehavior
         VoxelData.FaceChecks[5],
     };
 
+    /// <summary>32-bit golden-ratio constant used to mix the per-tick salt into the voxel-position hash.</summary>
+    private const uint TICK_SALT_HASH_MULTIPLIER = 0x9E3779B1u;
+
+    /// <summary>
+    /// Builds a local <see cref="Random"/> seeded per voxel <b>and</b> per tick for behavior randomness
+    /// (grass spread, fluid viscosity). The seed mixes the voxel's global position (per-voxel variation) with
+    /// a per-tick salt (<see cref="World.TickCounter"/>) so a voxel that rolls one way this tick re-rolls next
+    /// tick instead of freezing in place. A seed of 0 is illegal for <see cref="Random"/>, so it is clamped to
+    /// 1 via <c>math.max</c>. Shared by the grass and fluid paths so their seeding schemes cannot drift apart.
+    /// </summary>
+    /// <param name="globalPos">The voxel's global (world-space) position.</param>
+    /// <returns>A freshly seeded <see cref="Random"/> for this voxel and tick.</returns>
+    private static Random SeededVoxelRandom(Vector3Int globalPos)
+    {
+        int tickSalt = World.Instance.TickCounter;
+        uint seed = math.max(1u, math.hash(new int3(globalPos.x, globalPos.y, globalPos.z)) ^ (uint)(tickSalt * TICK_SALT_HASH_MULTIPLIER));
+        return new Random(seed);
+    }
+
     // --- Public Methods ---
 
     #region Public Methods
@@ -143,16 +162,6 @@ public static partial class BlockBehavior
         // --- Grass Block ---
         if (id == BlockIDs.Grass)
         {
-            // TG-3: Seed a local Unity.Mathematics.Random per voxel per tick. The seed combines the
-            // voxel's global position (per-voxel variation) with a per-tick salt (World.TickCounter)
-            // so a voxel that rolls "don't spread" this tick re-rolls next tick instead of freezing.
-            // A seed of 0 is illegal, so clamp with math.max(1u, ...). The single rng is reused for
-            // the reservoir sampling and the spread roll, keeping them correlated within the tick.
-            int tickSalt = World.Instance.TickCounter;
-            Vector3Int grassGlobalPos = new Vector3Int(localPos.x + chunkData.Position.x, localPos.y, localPos.z + chunkData.Position.y);
-            uint grassSeed = math.max(1u, math.hash(new int3(grassGlobalPos.x, grassGlobalPos.y, grassGlobalPos.z)) ^ (uint)(tickSalt * 0x9E3779B1u));
-            Random rng = new Random(grassSeed);
-
             // Condition 1: If there is a solid block on top, grass turns to dirt.
             VoxelState? topNeighbour = chunkData.GetState(localPos + VoxelData.FaceChecks[2]);
             if (topNeighbour.HasValue && topNeighbour.Value.Properties.isSolid)
@@ -164,6 +173,11 @@ public static partial class BlockBehavior
             }
 
             // Condition 2: Attempt to spread, using a GC-friendly method.
+            // TG-3: seed the per-voxel/per-tick RNG here — below the solid-on-top early-out (which never
+            // touches it, so buried grass pays nothing) and before the reservoir loops, which consume rng
+            // via NextInt as candidates are found. The same rng then drives the spread roll, keeping the
+            // reservoir choice and the roll correlated within the tick. See SeededVoxelRandom.
+            Random rng = SeededVoxelRandom(new Vector3Int(localPos.x + chunkData.Position.x, localPos.y, localPos.z + chunkData.Position.y));
             int candidateCount = 0;
             Vector3Int chosenCandidateLocalPos = Vector3Int.zero; // A default value
 
