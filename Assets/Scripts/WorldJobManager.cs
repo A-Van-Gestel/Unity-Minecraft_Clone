@@ -708,6 +708,10 @@ public class WorldJobManager : IDisposable
             }
         }
 
+        // Each entry here was already Complete()+Dispose()'d at its STAGE-3 completion above, so removing it
+        // only drops the (now-empty) dictionary slot. Any future path that evicts a still-pending job (e.g. an
+        // early removal on view-distance change before it completes) MUST Complete()+Dispose() it first — see
+        // GenerationJobData.Dispose — or its per-chunk native buffers leak.
         foreach (ChunkCoord chunkCoord in _completedGenJobs)
         {
             GenerationJobs.Remove(chunkCoord);

@@ -32,7 +32,14 @@ namespace Jobs.Data
         /// </summary>
         public NativeList<int> ActiveVoxels;
 
-        /// A helper to dispose all the containers at once
+        /// <summary>
+        /// Releases every native container owned by this job in one call. This is the <b>sole</b> release path
+        /// for a <see cref="GenerationJobData"/>: any code that removes an entry from
+        /// <c>WorldJobManager.GenerationJobs</c> — the completion drain, shutdown, or a future early eviction on
+        /// view-distance change — MUST call this first (and after <c>Handle.Complete()</c>), or the per-chunk
+        /// Persistent buffers (<see cref="Map"/>, <see cref="HeightMap"/>, <see cref="ActiveVoxels"/>, …) leak
+        /// per abandoned chunk.
+        /// </summary>
         public void Dispose()
         {
             if (Map.IsCreated) Map.Dispose();
