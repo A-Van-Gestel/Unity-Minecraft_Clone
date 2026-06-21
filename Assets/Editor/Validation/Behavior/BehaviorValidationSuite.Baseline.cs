@@ -183,6 +183,7 @@ T11
             scenarios.Add(new Scenario("BH-B2: water falls over a 1-block cliff (gravity + waterfall reset)", Bh2_WaterFallsOverCliff));
             scenarios.Add(new Scenario("BH-B3: two sources regenerate a source in the gap (infinite water)", Bh3_InfiniteSourceRegeneration));
             scenarios.Add(new Scenario("BH-B5: lava viscosity staggers via the seeded-RNG gate (TG-3)", Bh5_LavaViscosityStaggers));
+            scenarios.Add(new Scenario("BH-B6: grass spreads to convertible dirt (reservoir sampling + spread roll)", Bh6_GrassSpreadsToDirt));
         }
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
@@ -640,6 +641,123 @@ T11
             world.SetBlock(LAVA_END_X + 1, flowY, LAVA_Z, BlockIDs.Stone); // east end
 
             world.SetBlock(LAVA_SRC_X, flowY, LAVA_Z, BlockIDs.Lava, meta: 0); // lava source, level 0
+            return world;
+        }
+
+        // --- BH-B6 fixture geometry: a single GRASS block flanked by two convertible DIRT cells (one to each
+        // horizontal side, air above each), on an otherwise empty (all-air) chunk. Grass's Behave reservoir-samples
+        // the candidate dirt cells then rolls the seeded-RNG spread gate (VoxelData.GrassSpreadChance = 0.02 — very
+        // low, so the grass idles most ticks and spreads rarely). The grass position is chosen (via a one-off seed
+        // probe) so the per-tick reseed lands a spread within a few ticks, keeping the golden tight while still
+        // showing staggering (idle ticks before the spread). Two candidates make the reservoir *choice* observable:
+        // a TG-4/TG-5 change to the candidate scan order would pick the other cell and break this golden. Interior
+        // placement (Tier-1). No solid block sits above the grass, so the grass→dirt branch (BH-B7) never fires here.
+        private const int GRASS_Y = 11;
+        private const int GRASS_X = 8; // chosen so the per-tick reseed lands a spread at T5 (early, interior); see BH_B6_TICKS
+        private const int GRASS_Z = 8;
+        private const int BH_B6_TICKS = 6; // T1–T4 idle, T5 spread to the chosen candidate, T6 aftermath (new grass drops)
+
+        /// <summary>
+        /// BH-B6 golden master (see <see cref="Bh6_GrassSpreadsToDirt"/>), compared via
+        /// <see cref="GoldenMaster.AssertOrCapture"/>. Frozen after in-game confirmation — like BH-B5 the snapshot
+        /// depends on the per-voxel/per-tick RNG (TG-3). Read it as: the grass idles four ticks (fails the 2% spread
+        /// roll) then on T5 spreads to the reservoir-chosen **right** candidate (x=9) — the seed picks x=9 over x=7,
+        /// so a change to the candidate scan order would break this golden — after which the new grass (no
+        /// convertible neighbor) drops out on T6 while the original grass stays active for the remaining dirt.
+        /// </summary>
+        private const string BH_B6_GOLDEN =
+            @"T1
+  (8,11,8) active=1 mods=[]
+T2
+  (8,11,8) active=1 mods=[]
+T3
+  (8,11,8) active=1 mods=[]
+T4
+  (8,11,8) active=1 mods=[]
+T5
+  (8,11,8) active=1 mods=[2@(9,11,8):00:0]
+T6
+  (8,11,8) active=1 mods=[]
+  (9,11,8) active=0 mods=[]
+";
+
+        /// <summary>
+        /// BH-B6: a grass block flanked by two convertible-dirt cells spreads to one of them, gated by the seeded
+        /// reservoir-sampling + 2% spread roll. Asserts run-to-run determinism (BH-6 — the TG-3 reproducibility
+        /// guard; the seed mixes <c>World.TickCounter</c>), non-vacuous spread (a grass mod is emitted within the
+        /// window — proving the reseed lets the rare gate eventually fire, not freeze), that the chosen target is
+        /// one of the two candidates (the reservoir picked a real candidate), and byte-equality with
+        /// <see cref="BH_B6_GOLDEN"/>. The second grass seeded-RNG path (the first is BH-B5 lava).
+        /// </summary>
+        private static bool Bh6_GrassSpreadsToDirt()
+        {
+            string s1, s2;
+            int totalMods;
+            bool leftConverted, rightConverted;
+
+            using (BehaviorTestWorld world = BuildBh6World(GRASS_X, GRASS_Z))
+            {
+                BehaviorSnapshot snap = world.RunTicks(BH_B6_TICKS);
+                s1 = snap.Serialize();
+                totalMods = snap.TotalModCount;
+
+                // A spread converts one chosen candidate dirt → grass. Confirm via final state that exactly the
+                // reservoir-chosen cell flipped (the apply path actually placed the emitted mod).
+                leftConverted = BurstVoxelDataBitMapping.GetId(
+                    world.ChunkData.GetVoxel(GRASS_X - 1, GRASS_Y, GRASS_Z)) == BlockIDs.Grass;
+                rightConverted = BurstVoxelDataBitMapping.GetId(
+                    world.ChunkData.GetVoxel(GRASS_X + 1, GRASS_Y, GRASS_Z)) == BlockIDs.Grass;
+            }
+
+            using (BehaviorTestWorld world = BuildBh6World(GRASS_X, GRASS_Z))
+                s2 = world.RunTicks(BH_B6_TICKS).Serialize();
+
+            bool ok = true;
+
+            // BH-6: determinism — the TG-3 reproducibility guard (reservoir draws + spread roll share one seeded rng).
+            if (s1 != s2)
+            {
+                Debug.LogError("[FAIL] BH-B6: non-deterministic — two identical runs produced different snapshots.");
+                ok = false;
+            }
+
+            // Non-vacuity / anti-freeze: the grass must actually spread within the window. A position-only seed (the
+            // TG-3 bug) would freeze the 2% roll, so a grass that idles forever would never emit.
+            if (totalMods == 0)
+            {
+                Debug.LogError("[FAIL] BH-B6: vacuous — the grass emitted no spread mod within the window.");
+                ok = false;
+            }
+
+            // The spread must land on exactly one of the two reservoir candidates (the apply path placed it).
+            if (leftConverted == rightConverted)
+            {
+                Debug.LogError($"[FAIL] BH-B6: expected exactly one candidate to convert to grass, got left={leftConverted} right={rightConverted}.");
+                ok = false;
+            }
+
+            if (!GoldenMaster.AssertOrCapture("BH-B6", s1, BH_B6_GOLDEN))
+                ok = false;
+
+            if (ok)
+                Debug.Log($"[PASS] BH-B6: deterministic, {totalMods} mod(s) over {BH_B6_TICKS} ticks, " +
+                          $"spread to {(leftConverted ? "left" : "right")} candidate, golden master matched.");
+            return ok;
+        }
+
+        /// <summary>
+        /// Builds the BH-B6 fixture at the given grass column: a <see cref="BlockIDs.Grass"/> block at
+        /// (<paramref name="gx"/>, <see cref="GRASS_Y"/>, <paramref name="gz"/>) with a convertible
+        /// <see cref="BlockIDs.Dirt"/> cell on each horizontal side (air above each — the all-air chunk supplies it).
+        /// </summary>
+        /// <param name="gx">Grass column X (chunk-local).</param>
+        /// <param name="gz">Grass column Z (chunk-local).</param>
+        private static BehaviorTestWorld BuildBh6World(int gx, int gz)
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld();
+            world.SetBlock(gx, GRASS_Y, gz, BlockIDs.Grass);
+            world.SetBlock(gx - 1, GRASS_Y, gz, BlockIDs.Dirt); // convertible (air above by default)
+            world.SetBlock(gx + 1, GRASS_Y, gz, BlockIDs.Dirt); // convertible
             return world;
         }
     }
