@@ -14,17 +14,27 @@ namespace Helpers
         public const int CHUNK_VOLUME = SECTION_VOLUME * (CHUNK_HEIGHT / SECTION_SIZE); // 32768 (8 sections × 4096)
 
         // --- Halo-padded lighting volume (LI-1) ---------------------------------------------------
-        // The NeighborhoodLightingJob reads/writes a single padded volume instead of 9 separate
-        // neighbor maps. The widest read the job performs reaches 2 voxels into a neighbor on every
-        // horizontal axis (the sunlight column-recalc darkness path enqueues neighbor nodes at the
-        // ±1 rim, and PropagateDarkness then reads THEIR face neighbors at ±2 — symmetric on all four
-        // sides, plus the four diagonal corners). So the volume needs a 2-voxel halo on X and Z; Y is
-        // full height with no padding (out-of-range Y reads are sentinel-guarded in the job, not
-        // padded). Unlike the section-aware chunk layout above, the padded volume uses a plain linear
-        // layout (X fastest, then Z, then Y) — it is a transient per-job scratch buffer, so fill and
-        // read only have to agree with each other, and a contiguous horizontal slab favors the BFS's
-        // horizontal spread.
-        public const int LIGHTING_HALO = 2;
+        // The NeighborhoodLightingJob reads/writes a single padded volume instead of 9 separate neighbor
+        // maps. Unlike the section-aware chunk layout above, the padded volume uses a plain linear layout
+        // (X fastest, then Z, then Y) — it is a transient per-job scratch buffer, so fill and read only
+        // have to agree with each other, and a contiguous horizontal slab favors the BFS's horizontal
+        // spread.
+        //
+        // MAX_LIGHTING_BFS_REACH is the widest distance (in voxels) any lighting BFS read reaches PAST a
+        // chunk seam, and is the load-bearing invariant of the whole optimization: LIGHTING_HALO MUST be
+        // >= this reach, or a seam read silently falls off the padded volume, gets the MaxValue sentinel
+        // (treated as out-of-world), and drops that voxel's light contribution -> non-bit-identical seams
+        // with NO error raised. The reach is bounded at 2 by the BFS itself: the sunlight column-recalc
+        // darkness path enqueues neighbor nodes only at the ±1 rim, PropagateDarkness then reads THEIR ±1
+        // face neighbors (= ±2), and the IsInCenterChunk re-enqueue gate in NeighborhoodLightingJob blocks
+        // anything deeper (symmetric on all four sides, plus the four diagonal corners). If a future change
+        // ever lets the BFS read at ±3, bump THIS constant (LIGHTING_HALO and the volume size follow) and
+        // re-verify the cross-seam baselines (Validate Lighting Engine: B5/B10/B40-B44/B48/B50-B55).
+        public const int MAX_LIGHTING_BFS_REACH = 2;
+
+        // Halo width on X/Z = the max BFS reach (single source of truth). Y is full height with no padding
+        // (out-of-range Y reads are sentinel-guarded in the job, not padded).
+        public const int LIGHTING_HALO = MAX_LIGHTING_BFS_REACH;
         public const int PADDED_CHUNK_WIDTH = CHUNK_WIDTH + 2 * LIGHTING_HALO; // 20
         public const int PADDED_HORIZONTAL_AREA = PADDED_CHUNK_WIDTH * PADDED_CHUNK_WIDTH; // 400
         public const int PADDED_LIGHTING_VOLUME = PADDED_HORIZONTAL_AREA * CHUNK_HEIGHT; // 51,200
@@ -119,15 +129,24 @@ namespace Helpers
                     NativeArray<uint> west, mid, east;
                     if (pz < LIGHTING_HALO) // South side
                     {
-                        lz = pz + CHUNK_WIDTH - LIGHTING_HALO; west = sw; mid = s; east = se;
+                        lz = pz + CHUNK_WIDTH - LIGHTING_HALO;
+                        west = sw;
+                        mid = s;
+                        east = se;
                     }
                     else if (pz >= CHUNK_WIDTH + LIGHTING_HALO) // North side
                     {
-                        lz = pz - CHUNK_WIDTH - LIGHTING_HALO; west = nw; mid = n; east = ne;
+                        lz = pz - CHUNK_WIDTH - LIGHTING_HALO;
+                        west = nw;
+                        mid = n;
+                        east = ne;
                     }
                     else // Center row
                     {
-                        lz = pz - LIGHTING_HALO; west = w; mid = center; east = e;
+                        lz = pz - LIGHTING_HALO;
+                        west = w;
+                        mid = center;
+                        east = e;
                     }
 
                     int rowBase = GetPaddedLightingIndex(0, py, pz);
@@ -164,15 +183,24 @@ namespace Helpers
                     NativeArray<ushort> west, mid, east;
                     if (pz < LIGHTING_HALO) // South side
                     {
-                        lz = pz + CHUNK_WIDTH - LIGHTING_HALO; west = sw; mid = s; east = se;
+                        lz = pz + CHUNK_WIDTH - LIGHTING_HALO;
+                        west = sw;
+                        mid = s;
+                        east = se;
                     }
                     else if (pz >= CHUNK_WIDTH + LIGHTING_HALO) // North side
                     {
-                        lz = pz - CHUNK_WIDTH - LIGHTING_HALO; west = nw; mid = n; east = ne;
+                        lz = pz - CHUNK_WIDTH - LIGHTING_HALO;
+                        west = nw;
+                        mid = n;
+                        east = ne;
                     }
                     else // Center row
                     {
-                        lz = pz - LIGHTING_HALO; west = w; mid = center; east = e;
+                        lz = pz - LIGHTING_HALO;
+                        west = w;
+                        mid = center;
+                        east = e;
                     }
 
                     int rowBase = GetPaddedLightingIndex(0, py, pz);

@@ -215,16 +215,6 @@ namespace Jobs
         #region Core Logic
 
         /// <summary>
-        /// Flat index into the halo-padded light/voxel volume for a position in the 3x3 grid's local
-        /// space. Grid-local <c>(x, y, z)</c> is shifted by <see cref="ChunkMath.LIGHTING_HALO"/> on X/Z;
-        /// callers must have already validated the X/Z range (the padded volume only spans grid-local
-        /// [-2,17]). The single conversion point shared by every cache-free accessor/setter.
-        /// </summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private int Padded(Vector3Int p) =>
-            ChunkMath.GetPaddedLightingIndex(p.x + ChunkMath.LIGHTING_HALO, p.y, p.z + ChunkMath.LIGHTING_HALO);
-
-        /// <summary>
         /// Synchronizes the ushort light array with data from the uint packed map.
         /// Ensures sunlight and blocklight emission values (baked into the uint by generation/placement)
         /// are reflected in the ushort light array so BFS and edge checks read consistent data.
