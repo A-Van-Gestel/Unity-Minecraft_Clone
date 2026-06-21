@@ -1,13 +1,15 @@
 # Behavior (Tick) Validation Harness — Draft Implementation Design
 
-**Status:** 🟢 **Wave 0 + BH-B1 shipped & green (2026-06-20).** The harness exists and runs: menu item
-**`Minecraft Clone/Dev/Validate Behavior`**, sources under `Assets/Editor/Validation/Behavior/`
+**Status:** 🟢 **Wave 0 + Wave 1 (all fluid golden masters) shipped & green (2026-06-21).** The harness exists
+and runs: menu item **`Minecraft Clone/Dev/Validate Behavior`**, sources under `Assets/Editor/Validation/Behavior/`
 (`Framework/{TestBehaviorBlockPalette,BehaviorTestWorld,BehaviorSnapshot}.cs` +
-`BehaviorValidationSuite{,.Baseline}.cs`). Baselines: **Smoke** (rig), **BH-B1**
-(water spread), **BH-B4** (decay + termination), **BH-B2** (1-block cliff → gravity + waterfall reset), and
-**BH-B3** (infinite-source regeneration). BH-7 (apply-path fidelity) closed as accepted defensive parity.
-Remaining scenarios (BH-B5 lava, BH-B6/B7 grass, BH-D1) per §4 are still to build. Promote this doc to `Documentation/Architecture/Testing Framework/` once the fluid/grass
-golden masters (Waves 1–2) land.
+`BehaviorValidationSuite{,.Baseline}.cs`). 6 baselines green: **Smoke** (rig), **BH-B1**
+(water spread), **BH-B4** (decay + termination), **BH-B2** (1-block cliff → gravity + waterfall reset),
+**BH-B3** (infinite-source regeneration), and **BH-B5** (lava viscosity staggering via the seeded-RNG gate —
+the only scenario exercising the TG-3 per-tick reseed; in-game confirmed before freezing). BH-7 (apply-path
+fidelity) closed as accepted defensive parity. Remaining: **Wave 2** (BH-B6/B7 grass) + **BH-D1** (the
+old-vs-new differential, built in the TG-4/TG-5 PR). Promote this doc to `Documentation/Architecture/Testing
+Framework/` once the grass golden masters (Wave 2) land.
 **Created:** 2026-06-20
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
 (Burst function-pointer dispatch) optimizations in
@@ -322,19 +324,19 @@ Test-first, one commit per scenario, all baselines green after each (the `valida
 lifecycle). Each golden-master scenario pairs with a **positive control** so it can't pass vacuously (the
 B8/B9 pattern — e.g. prove the snapshot is non-empty and that a deliberately altered palette changes it).
 
-| ID            | Scenario                                                                                                                                                             | Leg                                       | Guards                                                                                        |
-|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------|-----------------------------------------------------------------------------------------------|
-| **BH-B1** ✅   | Single water source on a flat floor, **3 ticks** → symmetric level-1→3 spread (28 mods)                                                                              | golden-master + determinism + non-vacuity | core horizontal spread — **shipped 2026-06-20**                                               |
-| **BH-B2** ✅   | Boxed source flows east over a 1-block cliff → falls one block → waterfall reset on landing (3-tick golden, 5 mods; in-game confirmed before freeze)                 | golden-master + determinism               | gravity + `MakeFalling` + optimal-flow-toward-drop + waterfall reset — **shipped 2026-06-21** |
-| **BH-B3** ✅   | Two sources one gap apart in a walled channel → gap fills then regenerates to a source; all stabilize (3-tick golden, 3 mods, terminates)                            | golden-master + determinism + termination | `infiniteSourceRegeneration` path — **shipped 2026-06-21**                                    |
-| **BH-B4** ✅   | Unsupported (sourceless) water cell → drains to air in 1 tick; active set empties (the decay mod replaces water→air, so the apply-step active-removal terminates it) | golden-master + determinism + termination | decay-to-air + termination + `ImmediateUpdate` — **shipped 2026-06-20**                       |
-| **BH-B5**     | Lava (low `spreadChance`) → viscosity staggering over many ticks                                                                                                     | golden-master + determinism (BH-6)        | TG-3 per-tick reseed (the staggering must *progress*, not freeze)                             |
-| **BH-B6**     | Grass next to convertible dirt → spreads over ticks (seeded RNG)                                                                                                     | golden-master + determinism               | grass reservoir-sampling + spread roll                                                        |
-| **BH-B7**     | Grass with solid block on top → turns to dirt                                                                                                                        | golden-master                             | grass→dirt branch                                                                             |
-| ~~**BH-B8**~~ | ~~contract over all fixtures~~ — **retired** (BH-5 retracted; determinism is per-scenario via BH-6)                                                                  | —                                         | —                                                                                             |
-| **BH-B9**     | **GATED** (BH-7 unreachable via `Behave`) — `REQUIRES_SUPPORT` on a draining support → cascade; revisit via direct `ApplyMod` test                                   | golden-master + positive control          | apply-path support cascade (**BH-7**)                                                         |
-| **BH-B10**    | **GATED** (BH-7 unreachable via `Behave`) — mod a `CanReplace`-rejected block; revisit via direct `ApplyMod` test                                                    | golden-master + positive control          | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags                               |
-| **BH-D1**     | **Differential:** every BH-B# scenario run through old `switch` vs new TG-4/TG-5 dispatch → identical snapshots                                                      | A/B                                       | **the load-bearing TG-4/TG-5 parity guard**                                                   |
+| ID            | Scenario                                                                                                                                                                                                                     | Leg                                                                  | Guards                                                                                        |
+|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
+| **BH-B1** ✅   | Single water source on a flat floor, **3 ticks** → symmetric level-1→3 spread (28 mods)                                                                                                                                      | golden-master + determinism + non-vacuity                            | core horizontal spread — **shipped 2026-06-20**                                               |
+| **BH-B2** ✅   | Boxed source flows east over a 1-block cliff → falls one block → waterfall reset on landing (3-tick golden, 5 mods; in-game confirmed before freeze)                                                                         | golden-master + determinism                                          | gravity + `MakeFalling` + optimal-flow-toward-drop + waterfall reset — **shipped 2026-06-21** |
+| **BH-B3** ✅   | Two sources one gap apart in a walled channel → gap fills then regenerates to a source; all stabilize (3-tick golden, 3 mods, terminates)                                                                                    | golden-master + determinism + termination                            | `infiniteSourceRegeneration` path — **shipped 2026-06-21**                                    |
+| **BH-B4** ✅   | Unsupported (sourceless) water cell → drains to air in 1 tick; active set empties (the decay mod replaces water→air, so the apply-step active-removal terminates it)                                                         | golden-master + determinism + termination                            | decay-to-air + termination + `ImmediateUpdate` — **shipped 2026-06-20**                       |
+| **BH-B5** ✅   | Lava (low `spreadChance`) in a walled 1-D channel, **11 ticks** → viscosity staggering (source skip,skip,spread; x8 skip×4,spread) → full channel (level 3) → quiesces (3 mods, terminates; in-game confirmed before freeze) | golden-master + determinism + progression + staggering + termination | TG-3 per-tick reseed (staggering *progresses*, not freezes) — **shipped 2026-06-21**          |
+| **BH-B6**     | Grass next to convertible dirt → spreads over ticks (seeded RNG)                                                                                                                                                             | golden-master + determinism                                          | grass reservoir-sampling + spread roll                                                        |
+| **BH-B7**     | Grass with solid block on top → turns to dirt                                                                                                                                                                                | golden-master                                                        | grass→dirt branch                                                                             |
+| ~~**BH-B8**~~ | ~~contract over all fixtures~~ — **retired** (BH-5 retracted; determinism is per-scenario via BH-6)                                                                                                                          | —                                                                    | —                                                                                             |
+| **BH-B9**     | **GATED** (BH-7 unreachable via `Behave`) — `REQUIRES_SUPPORT` on a draining support → cascade; revisit via direct `ApplyMod` test                                                                                           | golden-master + positive control                                     | apply-path support cascade (**BH-7**)                                                         |
+| **BH-B10**    | **GATED** (BH-7 unreachable via `Behave`) — mod a `CanReplace`-rejected block; revisit via direct `ApplyMod` test                                                                                                            | golden-master + positive control                                     | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags                               |
+| **BH-D1**     | **Differential:** every BH-B# scenario run through old `switch` vs new TG-4/TG-5 dispatch → identical snapshots                                                                                                              | A/B                                                                  | **the load-bearing TG-4/TG-5 parity guard**                                                   |
 
 BH-D1 is added **in the TG-4/TG-5 PR itself** (it needs both code paths to exist), exactly as MR-5's
 chained-vs-separate equality baseline (B10) was the guard for MR-5.
@@ -355,7 +357,7 @@ apply, hardened post-review to mirror the `CanReplace` gate + support cascade + 
 + `GoldenMaster` helper + the `Validate Behavior` runner. **Smoke** + **BH-B1** green. The `HashSet`
   iteration-order determinism question was settled empirically (CoreCLR + Mono).
 
-### Wave 1 — Fluid golden masters (Tier-1, interior only) · 🟡 IN PROGRESS
+### Wave 1 — Fluid golden masters (Tier-1, interior only) · ✅ DONE (2026-06-21)
 
 Freeze current fluid behavior so TG-4/TG-5 can be proven behavior-preserving. **Confirm each scenario in-game
 before freezing its golden** — a golden master of buggy behavior is worse than none (`validation-driven-bugfix`).
@@ -369,8 +371,13 @@ Recommended order (most-bug-prone / highest-invariant-value first):
       dynamics warranted it).
 3. ✅ **BH-B3 — two sources over solid** (DONE 2026-06-21): `infiniteSourceRegeneration` — gap regenerates to a
    source; deterministic, so frozen after a code-trace match (terminates too).
-4. **BH-B5 — lava (low `spreadChance`)** (NEXT, completes Wave 1): TG-3 per-tick reseed; the golden must show
-   staggering that *progresses*, not freezes — the scenario that actually exercises the seeded RNG path.
+4. ✅ **BH-B5 — lava (low `spreadChance`)** (DONE 2026-06-21, completes Wave 1): the only scenario exercising
+   the TG-3 per-tick reseed. A single source in a walled 1-D channel; the seeded gate makes the *same* position
+   skip then spread across ticks (source skip,skip,spread; the level-2 cell skip×4 then spread), advancing the
+   front cell-by-cell to level 3 before quiescing. Asserts determinism (the core TG-3 reproducibility guard),
+   non-vacuity, **progression** (front reaches x+2 — a position-only seed would freeze it), **staggering** (the
+   active source skips ≥1 tick — unlike water at 1.0), and **termination**. **Confirmed in-game before freeze**
+   (the 25% staggering eyeballed). This validates the determinism precondition the whole harness rests on.
 
 ### Wave 2 — Grass golden masters
 

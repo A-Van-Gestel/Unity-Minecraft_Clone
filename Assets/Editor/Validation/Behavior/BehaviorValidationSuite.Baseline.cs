@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Data;
 using Editor.Validation.Behavior.Framework;
 using Editor.Validation.Framework;
+using Jobs.BurstData;
 using UnityEngine;
 
 namespace Editor.Validation.Behavior
@@ -127,6 +128,52 @@ T3
   (7,11,8) active=0 mods=[]
 ";
 
+        // --- BH-B5 fixture geometry: a single LAVA source at one end of a walled, floored 1-D channel, open to
+        // the east. Lava's spreadChance (0.25) routes flow through the seeded-RNG viscosity gate in
+        // HandleFluidSpread (the ONLY scenario that does — water's 1.0 never branches), and flowLevels=4 caps the
+        // reach at 3 cells (source level 0 → x+1 level 1 → x+2 level 2 → x+3 level 3; level 4 ≥ flowLevels stops).
+        // The 1-D channel makes the per-tick staggering legible: each successful spread advances the front by one
+        // cell, and skipped ticks leave the (still-active) source emitting nothing. Interior placement (Tier-1).
+        private const int LAVA_FLOOR_Y = 10;
+        private const int LAVA_SRC_X = 6; // source (level 0)
+        private const int LAVA_END_X = 9; // farthest cell lava can reach (level 3); flowLevels=4 stops the next
+        private const int LAVA_Z = 8;
+        private const int BH_B5_TICKS = 11; // long enough to extend the full channel despite skips, then quiesce
+
+        /// <summary>
+        /// BH-B5 golden master (see <see cref="Bh5_LavaViscosityStaggers"/>), compared via
+        /// <see cref="GoldenMaster.AssertOrCapture"/>. The 25% viscosity staggering was confirmed in-game before
+        /// freezing — this is the one scenario whose snapshot depends on the per-voxel/per-tick RNG (TG-3). Read
+        /// the pattern as: source rolls skip,skip,spread (T1–T3); the level-2 cell at x8 rolls skip×4 then spread
+        /// (T5–T9); the front reaches level 3 at x9 and stops (level 4 ≥ flowLevels), then everything quiesces.
+        /// </summary>
+        private const string BH_B5_GOLDEN =
+            @"T1
+  (6,11,8) active=1 mods=[]
+T2
+  (6,11,8) active=1 mods=[]
+T3
+  (6,11,8) active=1 mods=[20@(7,11,8):01:0]
+T4
+  (6,11,8) active=0 mods=[]
+  (7,11,8) active=1 mods=[20@(8,11,8):02:0]
+T5
+  (8,11,8) active=1 mods=[]
+  (7,11,8) active=0 mods=[]
+T6
+  (8,11,8) active=1 mods=[]
+T7
+  (8,11,8) active=1 mods=[]
+T8
+  (8,11,8) active=1 mods=[]
+T9
+  (8,11,8) active=1 mods=[20@(9,11,8):03:0]
+T10
+  (8,11,8) active=0 mods=[]
+  (9,11,8) active=0 mods=[]
+T11
+";
+
         /// <summary>Registers the baseline regression scenarios.</summary>
         static partial void AddBaselineScenarios(List<Scenario> scenarios)
         {
@@ -135,6 +182,7 @@ T3
             scenarios.Add(new Scenario("BH-B4: unsupported water decays to air → termination", Bh4_UnsupportedWaterDecays));
             scenarios.Add(new Scenario("BH-B2: water falls over a 1-block cliff (gravity + waterfall reset)", Bh2_WaterFallsOverCliff));
             scenarios.Add(new Scenario("BH-B3: two sources regenerate a source in the gap (infinite water)", Bh3_InfiniteSourceRegeneration));
+            scenarios.Add(new Scenario("BH-B5: lava viscosity staggers via the seeded-RNG gate (TG-3)", Bh5_LavaViscosityStaggers));
         }
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
@@ -454,6 +502,144 @@ T3
             // The two sources (gap at the middle cell).
             world.SetBlock(REGEN_LEFT_X, flowY, REGEN_Z, BlockIDs.Water, meta: 0);
             world.SetBlock(REGEN_RIGHT_X, flowY, REGEN_Z, BlockIDs.Water, meta: 0);
+            return world;
+        }
+
+        /// <summary>
+        /// BH-B5: a single lava source flows down a walled 1-D channel, gated by the seeded-RNG viscosity skip
+        /// (<c>spreadChance</c> 0.25). Asserts run-to-run determinism (BH-6 — the core TG-3 guard, since the seed
+        /// mixes <c>World.TickCounter</c>), non-vacuous flow, **progression** (the front advances — a position-only
+        /// seed would freeze a source whose single roll lands above <c>spreadChance</c>), **staggering** (the
+        /// still-active source skips on at least one tick — viscosity genuinely engages, unlike water at 1.0), and
+        /// byte-equality with <see cref="BH_B5_GOLDEN"/>. The lone scenario exercising the seeded-RNG path.
+        /// </summary>
+        private static bool Bh5_LavaViscosityStaggers()
+        {
+            string s1, s2;
+            int totalMods;
+            int sourceSpreadTicks, sourceSkipTicks;
+            bool advancedBeyondNeighbor;
+            int activeAtEnd;
+
+            Vector3Int sourcePos = new Vector3Int(LAVA_SRC_X, LAVA_FLOOR_Y + 1, LAVA_Z);
+
+            using (BehaviorTestWorld world = BuildBh5World())
+            {
+                BehaviorSnapshot snap = world.RunTicks(BH_B5_TICKS);
+                s1 = snap.Serialize();
+                totalMods = snap.TotalModCount;
+                activeAtEnd = world.ActiveVoxelCount;
+                CountSourceSpreadVsSkip(snap, sourcePos, out sourceSpreadTicks, out sourceSkipTicks);
+
+                // Progression past the first hop: the cell two out from the source (x+2) is lava at the end. This
+                // needs the gate to be passed at two distinct cells/ticks, so it cannot be satisfied by a frozen
+                // (never-advancing) flow — the TG-3 failure mode.
+                advancedBeyondNeighbor = BurstVoxelDataBitMapping.GetId(
+                    world.ChunkData.GetVoxel(LAVA_SRC_X + 2, LAVA_FLOOR_Y + 1, LAVA_Z)) == BlockIDs.Lava;
+            }
+
+            using (BehaviorTestWorld world = BuildBh5World())
+                s2 = world.RunTicks(BH_B5_TICKS).Serialize();
+
+            bool ok = true;
+
+            // BH-6: determinism — the core TG-3 reproducibility guard. The viscosity seed mixes the per-tick salt
+            // (World.TickCounter), so two identical runs must reproduce the same spread/skip pattern exactly.
+            if (s1 != s2)
+            {
+                Debug.LogError("[FAIL] BH-B5: non-deterministic — two identical runs produced different snapshots.");
+                ok = false;
+            }
+
+            if (totalMods == 0)
+            {
+                Debug.LogError("[FAIL] BH-B5: vacuous — the lava source emitted no mods.");
+                ok = false;
+            }
+
+            // Anti-freeze (progression): the always-active level-0 source must spread on ≥1 tick AND the front must
+            // advance beyond the first neighbor. A position-only seed (the TG-3 bug) freezes a source whose single
+            // NextFloat lands above spreadChance, so it would never spread and the front would never advance.
+            if (sourceSpreadTicks == 0 || !advancedBeyondNeighbor)
+            {
+                Debug.LogError($"[FAIL] BH-B5: lava did not progress — source spread on {sourceSpreadTicks} tick(s), " +
+                               $"reached x+2={advancedBeyondNeighbor}. Expected the viscosity gate to pass and the front to advance.");
+                ok = false;
+            }
+
+            // Staggering (viscosity engaged): while still active (open air neighbor), the source must SKIP on ≥1
+            // tick. Water (spreadChance 1.0) never skips; only the per-tick reseed makes both spread and skip
+            // outcomes appear at one fixed source position.
+            if (sourceSkipTicks == 0)
+            {
+                Debug.LogError("[FAIL] BH-B5: no viscosity staggering — the active source spread on every tick (behaving like water, not lava).");
+                ok = false;
+            }
+
+            // Termination: once the front reaches the farthest cell (level 3, which cannot spread further), every
+            // cell stabilizes and the active set empties — the staggering must converge, not churn forever.
+            if (activeAtEnd != 0)
+            {
+                Debug.LogError($"[FAIL] BH-B5: did not terminate — expected empty active set, got {activeAtEnd}.");
+                ok = false;
+            }
+
+            if (!GoldenMaster.AssertOrCapture("BH-B5", s1, BH_B5_GOLDEN))
+                ok = false;
+
+            if (ok)
+                Debug.Log($"[PASS] BH-B5: deterministic, {totalMods} mod(s) over {BH_B5_TICKS} ticks, " +
+                          $"source spread {sourceSpreadTicks}× / skipped {sourceSkipTicks}× (viscosity staggers + progresses), terminated, golden master matched.");
+            return ok;
+        }
+
+        /// <summary>
+        /// Counts, over a whole run, the ticks on which the lava source at <paramref name="sourcePos"/> emitted a
+        /// spread mod versus the ticks on which it was still active (an open neighbor remained) yet emitted
+        /// nothing — a viscosity skip. The source never decays (level 0) and cannot fall (solid floor), so its
+        /// only possible mod is a horizontal spread; thus "active and mod-less" is unambiguously a skipped spread.
+        /// </summary>
+        /// <param name="snap">The recorded run.</param>
+        /// <param name="sourcePos">Chunk-local position of the lava source.</param>
+        /// <param name="spreadTicks">Out: ticks on which the source emitted ≥1 spread mod.</param>
+        /// <param name="skipTicks">Out: ticks on which the source was active but emitted no mod (a viscosity skip).</param>
+        private static void CountSourceSpreadVsSkip(BehaviorSnapshot snap, Vector3Int sourcePos,
+            out int spreadTicks, out int skipTicks)
+        {
+            spreadTicks = 0;
+            skipTicks = 0;
+            foreach (TickRecord tick in snap.Ticks)
+            foreach (VoxelEval eval in tick.Evals)
+            {
+                if (eval.Pos != sourcePos) continue;
+                if (eval.Mods != null && eval.Mods.Count > 0) spreadTicks++;
+                else if (eval.Active) skipTicks++; // active (open neighbor) but emitted nothing ⇒ viscosity skip
+            }
+        }
+
+        /// <summary>
+        /// Builds the BH-B5 fixture: a solid floor under a 1-D channel [<see cref="LAVA_SRC_X"/>..<see cref="LAVA_END_X"/>]
+        /// at z=<see cref="LAVA_Z"/>, walled on both z-sides and both ends at the flow level so flow is confined to
+        /// the channel, with a single <see cref="BlockIDs.Lava"/> source (level 0) at the west end.
+        /// </summary>
+        private static BehaviorTestWorld BuildBh5World()
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld();
+            const int flowY = LAVA_FLOOR_Y + 1; // 11
+
+            // Floor + north/south walls along the whole channel.
+            for (int x = LAVA_SRC_X; x <= LAVA_END_X; x++)
+            {
+                world.SetBlock(x, LAVA_FLOOR_Y, LAVA_Z, BlockIDs.Stone); // floor
+                world.SetBlock(x, flowY, LAVA_Z - 1, BlockIDs.Stone); // north wall
+                world.SetBlock(x, flowY, LAVA_Z + 1, BlockIDs.Stone); // south wall
+            }
+
+            // End walls beyond the source and beyond the farthest reachable cell.
+            world.SetBlock(LAVA_SRC_X - 1, flowY, LAVA_Z, BlockIDs.Stone); // west end
+            world.SetBlock(LAVA_END_X + 1, flowY, LAVA_Z, BlockIDs.Stone); // east end
+
+            world.SetBlock(LAVA_SRC_X, flowY, LAVA_Z, BlockIDs.Lava, meta: 0); // lava source, level 0
             return world;
         }
     }
