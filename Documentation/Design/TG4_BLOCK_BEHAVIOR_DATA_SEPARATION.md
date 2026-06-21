@@ -282,6 +282,14 @@ The pooling *concern* is not superseded (per-chunk native-list churn persists an
     - **Escape hatch:** if P-2 slips, Phase 4 falls back to **option (b)** — a TG-4-local per-tick halo
       gather (the P-1 *mechanic* on the tick path). More per-tick copying, no P-2 dependency. So P-2 is
       the *preferred* substrate, never a hard gate.
+    - **Validation prerequisite for the substrate (whichever lands).** Phase 4's halo neighbor view shares
+      a seam with LI-1/P-2: the lighting and meshing jobs must read correct cross-chunk neighbor data. Both
+      consumer paths have an open coverage gap that must close before the substrate is trusted —
+      [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
+      **C3 (B48/B49)** (cross-border sunlight darkening) and
+      [MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md)
+      **MH-10/MH-11 (B18–B21)** (border-face culling never consults a neighbor today). These guard the
+      *substrate*; **BH-D1** (§6) separately guards the *tick path* — both are Phase-4 gates.
 - **Tier-2 fixtures (BH-4)** — currently deferred in the harness; must be built for Phase 4.
 - **TG-5 relationship** — if Phases 3–4 prove too costly, TG-5 (function-pointer dispatch, same BH-D1
   gate, no parallel re-architecture) is the documented lighter finish. The two share Phases 0–1.

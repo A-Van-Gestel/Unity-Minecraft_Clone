@@ -284,15 +284,81 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 - **Effort:** 🔴 high — a new oracle model, not an extension of the existing one. Do **not** start before the
   MR-8 design doc exists.
 
+### Phase 5 — Cross-chunk substrate prerequisite (gate **LI-1 → P-2** & **TG-4** Phase 4)
+
+This phase is a different axis from Phases 0–4: it gates not an `MR-*` item but the **halo-padded
+neighbor-data substrate** shared by **LI-1** (single padded lighting volume), **P-2** (persistent native
+voxel/light storage, zero-copy jobs — both in
+[PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md)), and **TG-4** Phase 4
+(the cross-chunk neighbor view — [TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md](../../Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) §4.2).
+All three change *how the meshing job receives neighbor voxel data*. The job's border-face culling (cull a
+boundary face when the neighbor across the border is solid) is the meshing-side consumer of that data — and
+it is **completely untested today**, so a substrate that under-copies or mis-indexes a neighbor border plane
+would produce seam holes / doubled faces with every baseline green. (P-1, the border-slab variant, is the
+*same* risk surface but is **not** the chosen substrate — see TG-4 §10 "skip P-1"; these baselines guard
+whichever substrate lands.)
+
+The lighting suite already closed its half of this loop: A1 routes harness input through the shared
+`ChunkData.FillJobVoxelMap`/`FillJobLightMap` that `WorldData.FillChunk*ForJob` delegates to, and C1/C2/C3
+assert cross-chunk fields against a borderless oracle. The meshing suite closes **neither** sub-gap below.
+
+> **No vertical concern:** `MeshGenerationJob` has only 4 cardinal + 4 diagonal neighbor maps, no top/bottom —
+> chunks are full 128-high columns, so vertical borders are world edges (always drawn). The halo substrate has
+> no vertical-slab case on the meshing side; only the horizontal cardinal/diagonal planes need guarding.
+
+#### MH-10 — Border-face culling never consults a neighbor (consumption gap) · **OPEN** · gates LI-1 / P-2 / TG-4 Ph.4
+
+- **Blind:** `MeshingTestWorld.Run` hard-wires all 8 neighbor voxel maps (`NeighborBack/Front/Left/Right` +
+  4 diagonals) to a length-0 `emptyMap`, and every fixture places blocks in the chunk interior so culling
+  never reads a neighbor. The job's "cull this boundary face because the neighbor across the border is solid"
+  logic — the meshing-side consumer of all neighbor data — has zero coverage. This is the bullet formerly in
+  §4 "out of scope" (promoted here because LI-1/P-2/TG-4 now depend on it).
+- **Build:**
+    1. **Harness capability** — add cardinal-neighbor population to `MeshingTestWorld` (start with
+       `NeighborRight`, the +X face, matching the lighting suite's canonical border): allocate the neighbor
+       map at full `MAP_SIZE` (mirrors current production input shape) + `SetNeighborBlock(dir, x, y, z, id)`.
+    2. **Independent culling oracle** — `MeshOracle` predicts cull/draw from the neighbor block's solidity in
+       `TestMeshBlockPalette`, **hand-derived** (not by calling the job's predicate — the A4 trap). Use a
+       **face-count delta** assertion so no full-geometry oracle is needed.
+    3. **Baselines (next free IDs; suite is at B17):**
+        - **B18 — neighbor air ⇒ border face drawn.** Opaque block at `(15, y, z)`; `NeighborRight` populated
+          but *air* at `(0, y, z)` → +X face present. (Distinguishes a populated-air neighbor from the
+          length-0 empty array the harness conflates with "no neighbor" today.)
+        - **B19 — neighbor solid ⇒ border face culled.** Same block; `NeighborRight` *opaque* at `(0, y, z)`
+          → exactly **one face fewer** than B18 (−4 verts / −6 indices). The core culling assertion.
+        - **B20 — transparent-neighbor predicate.** Pin the engine's transparent/same-type rule (e.g. glass
+          next to opaque draws; glass next to glass culls the shared face) so a substrate change can't
+          silently flip it.
+- **Effort:** 🟡 medium (harness capability + culling oracle; Phase-1 of the two sub-gaps).
+
+#### MH-11 — Neighbor input never routed through the production fill path (fill-faithful gap) · **OPEN** · gates LI-1 / P-2 / TG-4 Ph.4
+
+- **Blind:** even with MH-10's culling baselines, `MeshingTestWorld` builds `_map` (and would build the
+  neighbor maps) *directly* — it never calls the production `WorldData.FillChunkMapForJob` /
+  `ChunkData.FillJobVoxelMap` that the halo/slab substrate actually rewrites. So MH-10 alone guards the job's
+  *consumption contract*, not the *fill* that produces the neighbor planes. This is the meshing analog of the
+  lighting A1 fix (which routes its input through `FillChunk*ForJob`); without it the substrate's
+  copy-correctness on the meshing path has no guard.
+- **Build:** wire `MeshingTestWorld`'s neighbor-map construction to go through the shared production fill
+  helper (the exact method LI-1/P-2 narrow), then add:
+    - **B21 — fill-faithful repeat of B19.** Build `NeighborRight` via the production fill path and assert
+      B19's culling still holds. **This is the baseline that flips red if the halo/slab substrate under-copies
+      or mis-indexes the border plane** — the actual substrate guard.
+- **Scope note:** the 4 *diagonal* neighbor maps feed only smooth-lighting AO, not culling; their fill-faithful
+  analog is a `SmoothLightingQuality.On` corner test with a populated diagonal map (defer as a follow-up tied
+  to MH-3's per-corner oracle extension).
+- **Effort:** 🟡 medium (the fill wiring is the bulk; the baseline reuses B19's geometry).
+
 ---
 
 ## 4. Out of scope (by design)
 
 - **`Clouds.cs` mesh (MR-9).** Cloud meshing is a separate system, not chunk meshing; it would need its own
   tiny harness. Low value — likely not worth building. **WONTFIX (here)** — track under MR-9 directly.
-- **Cross-chunk border-face culling.** Neighbor chunk maps are intentionally empty (`MeshingTestWorld` places
-  blocks in the interior so culling only consults in-chunk neighbors). No open `MR-*` item depends on border
-  culling; revisit only if one does. **OPEN · LOW.**
+- **Cross-chunk border-face culling.** ~~No open `MR-*` item depends on border culling; revisit only if one
+  does.~~ **PROMOTED out of "out of scope" → §3 Phase 5 (MH-10/MH-11)** — LI-1, P-2, and TG-4 Phase 4 all
+  change how the meshing job receives neighbor voxel data, so border culling is now a substrate prerequisite,
+  not an optional extension.
 - **True concurrency / Burst scheduling races.** Synchronous `job.Run()` only — mirrors the lighting suite's
   B3 **WONTFIX (structural)**. MR-5's value (off-main-thread scheduling) is about *where* work runs; the
   harness verifies output equivalence (MH-5), not the threading itself.
@@ -301,17 +367,19 @@ and runs with `SmoothLighting.Off` (light map zeroed). The streams MR-2 re-encod
 
 ## 5. Phased backlog snapshot
 
-| Phase | Gap  | Finding                                              | Gates                       | Status | Effort |
-|-------|------|------------------------------------------------------|-----------------------------|--------|--------|
-| 0     | MH-1 | Bounds-extent assertion                              | MR-4 (premise)              | CLOSED | 🟢     |
-| 0     | MH-2 | Pooled-output stale-data guard                       | MR-6 (pool variant)         | CLOSED | 🟢     |
-| 0     | MH-9 | `SectionStats` per-section ranges asserted           | per-section refactors; MR-4 | CLOSED | 🟢     |
-| 1     | MH-3 | Smooth-lighting *value* coverage (uniform)           | MR-2; prereq MR-8           | CLOSED | 🟡     |
-| 1     | MH-4 | UV / texture *value* oracle                          | MR-2; prereq MR-8           | CLOSED | 🟡     |
-| 2     | MH-5 | `MeshPostProcessJob` / section-space output coverage | MR-5                        | CLOSED | 🟡     |
-| 2     | MH-6 | `SectionRenderer` apply-path harness                 | MR-3; MR-4 (renderer)       | CLOSED | 🟡     |
-| 3     | MH-7 | Custom/cross-mesh + lava palette & oracle            | MR-4 caveat; blind spot     | OPEN   | 🟡     |
-| 4     | MH-8 | Merge-invariant geometry oracle                      | MR-8                        | OPEN   | 🔴     |
+| Phase | Gap   | Finding                                              | Gates                       | Status | Effort |
+|-------|-------|------------------------------------------------------|-----------------------------|--------|--------|
+| 0     | MH-1  | Bounds-extent assertion                              | MR-4 (premise)              | CLOSED | 🟢     |
+| 0     | MH-2  | Pooled-output stale-data guard                       | MR-6 (pool variant)         | CLOSED | 🟢     |
+| 0     | MH-9  | `SectionStats` per-section ranges asserted           | per-section refactors; MR-4 | CLOSED | 🟢     |
+| 1     | MH-3  | Smooth-lighting *value* coverage (uniform)           | MR-2; prereq MR-8           | CLOSED | 🟡     |
+| 1     | MH-4  | UV / texture *value* oracle                          | MR-2; prereq MR-8           | CLOSED | 🟡     |
+| 2     | MH-5  | `MeshPostProcessJob` / section-space output coverage | MR-5                        | CLOSED | 🟡     |
+| 2     | MH-6  | `SectionRenderer` apply-path harness                 | MR-3; MR-4 (renderer)       | CLOSED | 🟡     |
+| 3     | MH-7  | Custom/cross-mesh + lava palette & oracle            | MR-4 caveat; blind spot     | OPEN   | 🟡     |
+| 4     | MH-8  | Merge-invariant geometry oracle                      | MR-8                        | OPEN   | 🔴     |
+| 5     | MH-10 | Border-face culling consumption (B18–B20)            | **LI-1 / P-2 / TG-4 Ph.4**  | OPEN   | 🟡     |
+| 5     | MH-11 | Neighbor fill-faithful via production path (B21)     | **LI-1 / P-2 / TG-4 Ph.4**  | OPEN   | 🟡     |
 
 > **Wave 1 (2026-06-17):** MH-9, MH-1, MH-4 closed (baselines B1–B9 green, one commit each).
 > **Wave 2 (2026-06-18):** MH-5 (B10) + MH-3 (B11) closed (baselines B1–B11 green, one commit each).

@@ -274,19 +274,39 @@ there is invisible.
   synchronous (it cannot catch an async/Burst race). A faithful Bug-05 repro, if the bug is real, likely
   needs in-build instrumentation (see B3), not another synchronous geometry layer.
 
-### C3 — Cross-chunk *sunlight removal / darkening* is the untested race quadrant ·  **OPEN · MEDIUM**
+### C3 — Cross-chunk *sunlight removal / darkening* is the untested race quadrant ·  **OPEN · MEDIUM · PREREQUISITE for LI-1 → P-2**
 
 - The dynamic cross-chunk matrix is lopsided. **B7** covers blocklight *removal* across a border with the
   neighbor in flight; **B13** covers sunlight *uplift* (addition) across a border in flight; **B12** covers
   blocklight cross-border *re-spread* after a removal. The fourth quadrant — sunlight *darkening* crossing a
   border — has **no** scenario, neither steady-state nor racing. Placing an opaque block that re-shadows a
   near-border column drives `PropagateDarkness`/the sunlight-column recalc into the neighbor; nothing asserts
-  it converges (B3 only ever *opens* a shaft via break).
-- **Needs no new harness capability:** the in-flight twin reuses `BeginLightingJob`/`CompleteLightingJob`
-  exactly as B7/B13.
-- **Proposed:** (a) steady-state — seal a near-border sky shaft, assert the neighbor's side-lit region
-  re-darkens to the oracle; (b) race — the sunlight twin of B7: seal the shaft while the neighbor chunk has a
-  job in flight.
+  it converges (B3 only ever *opens* a shaft via break). This is also the exact neighborhood
+  [Bug 11](../../Bugs/LIGHTING_BUGS.md) lived in (`CrossChunkLightModApplier.ComputeSunlight` removal path),
+  so closing it doubles as a Bug-11 regression guard.
+- **Why this is now a prerequisite, not a backlog nicety.** **LI-1** (single halo-padded lighting volume —
+  [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) Lighting §) and the
+  **P-2** substrate it seeds change *how the BFS reads across chunk borders* (halo array reads replacing the
+  9-map/hashmap dispatch). LI-1's acceptance criterion is **bit-identical light output**, and **TG-4** Phase 4
+  rides the same halo substrate (option (a) = P-2). A halo that under-reads or mis-indexes the seam on the
+  *darkening* path would produce wrong light there — but with no darkening-across-border baseline, every
+  existing field-comparison goes green. C1/C2 (B40–B44) assert cross-chunk *brightening* fuzz; C3 is the
+  missing *darkening* half of that guard. **C3 must be green before LI-1 freezes any halo-vs-9-map diff.**
+- **Needs no new harness capability:** reuses `PlaceBlock`, `BeginLightingJob`/`CompleteLightingJob`,
+  `MarkChunkUnloaded`/`MarkChunkLoaded`, `GetSkyLight`, the borderless oracle, and `CompletionOrder.Shuffled`
+  exactly as B7/B13/B40.
+- **Planned baselines (next free IDs; suite is at B47):**
+    - **B48 — steady-state darkening (C3a).** On the canonical 3×3 grid `(1,1)/(2,1)` +X border: open a
+      vertical sky shaft in `(1,1)`'s near-border column so sky light spills sideways across the border into
+      `(2,1)`; light to convergence (sanity pre-state: `(2,1)` near-border region is side-lit). `PlaceBlock`
+      an opaque cap sealing the shaft; re-light to convergence. **Assert** `(2,1)` `MatchesOracle` for the
+      *sealed* configuration — specifically a voxel that read bright pre-seal now equals its shadowed oracle
+      value, proving the darkness wave *crossed the border* and converged (not merely that a from-scratch
+      solve is right).
+    - **B49 — racing twin (C3b), the sunlight analog of B7.** `BeginLightingJob((2,1))` → `PlaceBlock` the
+      seal in `(1,1)` → `CompleteLightingJob` so `(2,1)` merges against a pre-darkening snapshot; assert
+      convergence to the same sealed oracle. Run the completion sequence under `CompletionOrder.Shuffled` for
+      order-independence (B40 discipline).
 
 ### C4 — Sunlight-column persist→replay and the `AddPendingBlocklight` placement-after-removal guard are unpinned ·  **CLOSED (2026-06-14)**
 
@@ -401,24 +421,24 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 
 ## 6. Priority backlog (snapshot)
 
-| #  | Finding                                                            | Status            | Priority         | Effort         |
-|----|--------------------------------------------------------------------|-------------------|------------------|----------------|
-| C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47) | **CLOSED**        | —                | done           |
-| C5 | Cumulative multi-layer attenuation probe (B45)                     | **CLOSED**        | —                | done           |
-| C3 | Cross-chunk sunlight removal / darkening quadrant                  | OPEN              | Medium           | small          |
-| C6 | Per-channel removal independence                                   | OPEN              | Low–Medium       | small          |
-| C7 | Deterministic corner spill / in-chunk re-shadow                    | OPEN              | Low              | small          |
-| §5 | Bug-09 fleet (B15–B25) consolidation                               | **CLOSED**        | —                | done           |
-| A3 | `ModifyVoxel` heightmap (shared) / enqueue path                    | **PARTIAL**       | Low              | heightmap done |
-| A4 | Oracle shared-assumption probes                                    | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
-| B5 | Meshing-gate coverage                                              | OPEN              | Low (by design)  | —              |
-| C2 | Bug-05 dense-canopy geometry (found Bug 10)                        | **CLOSED**        | —                | done           |
-| B2 | `neighborsDataReady` toggle                                        | **CLOSED**        | —                | done           |
-| C1 | Bug-09 geometry fuzz (randomize geometry)                          | **CLOSED**        | —                | done           |
-| B1 | Chunk-unload / persist-replay path                                 | **CLOSED**        | —                | done           |
-| B4 | Pool-recycle / flag-pairing                                        | **CLOSED**        | —                | done           |
-| A1 | Section / uniform-sky merge bypass                                 | **CLOSED**        | —                | done           |
-| A2 | Shared mod-routing decision                                        | **CLOSED**        | —                | done           |
+| #  | Finding                                                                                   | Status            | Priority         | Effort         |
+|----|-------------------------------------------------------------------------------------------|-------------------|------------------|----------------|
+| C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                        | **CLOSED**        | —                | done           |
+| C5 | Cumulative multi-layer attenuation probe (B45)                                            | **CLOSED**        | —                | done           |
+| C3 | Cross-chunk sunlight darkening quadrant (B48/B49) — **prereq for LI-1 → P-2 / TG-4 Ph.4** | **SPEC'D · OPEN** | Medium (prereq)  | small          |
+| C6 | Per-channel removal independence                                                          | OPEN              | Low–Medium       | small          |
+| C7 | Deterministic corner spill / in-chunk re-shadow                                           | OPEN              | Low              | small          |
+| §5 | Bug-09 fleet (B15–B25) consolidation                                                      | **CLOSED**        | —                | done           |
+| A3 | `ModifyVoxel` heightmap (shared) / enqueue path                                           | **PARTIAL**       | Low              | heightmap done |
+| A4 | Oracle shared-assumption probes                                                           | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
+| B5 | Meshing-gate coverage                                                                     | OPEN              | Low (by design)  | —              |
+| C2 | Bug-05 dense-canopy geometry (found Bug 10)                                               | **CLOSED**        | —                | done           |
+| B2 | `neighborsDataReady` toggle                                                               | **CLOSED**        | —                | done           |
+| C1 | Bug-09 geometry fuzz (randomize geometry)                                                 | **CLOSED**        | —                | done           |
+| B1 | Chunk-unload / persist-replay path                                                        | **CLOSED**        | —                | done           |
+| B4 | Pool-recycle / flag-pairing                                                               | **CLOSED**        | —                | done           |
+| A1 | Section / uniform-sky merge bypass                                                        | **CLOSED**        | —                | done           |
+| A2 | Shared mod-routing decision                                                               | **CLOSED**        | —                | done           |
 
 ---
 

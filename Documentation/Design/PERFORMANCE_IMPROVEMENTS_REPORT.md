@@ -556,6 +556,13 @@ satisfy both if the persistent layout itself is halo-padded.
     > identical — any divergence re-dirties the edge-check cascade (§4 of the pipeline doc) on old
     > saves. Treat "identical light output" as a hard acceptance criterion. / ✅ no format change.
 
+> **Validation prerequisite (cross-border darkening coverage).** "Bit-identical light output" only has
+> teeth on the seam if the suite actually exercises a *darkening* wave crossing a chunk border — the
+> halo's hardest read. The lighting suite covers cross-chunk *brightening* fuzz (C1/C2, B40–B44) but the
+> *darkening* quadrant is an open gap. Close
+> [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
+> **C3 (B48/B49)** before freezing any halo-vs-9-map diff for LI-1.
+
 ---
 
 ## Detailed findings — Tick & Gameplay

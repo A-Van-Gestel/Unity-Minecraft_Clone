@@ -73,6 +73,19 @@ disposed one frame later — this is simultaneously the frame-time cost and the 
    read it directly (with a generation/version guard), eliminating schedule-time copies entirely.
    This touches the whole pipeline — consult `chunk-lifecycle` invariants before attempting.
 
+> **Validation prerequisite for recs 2–3 (border slabs = P-1, persistent halo = P-2).** Both change
+> *what neighbor data each job receives*, so their "output-preserving" claim hinges on the seam being
+> guarded on both consumer paths:
+> - **Lighting:** the fill path is already exercised (A1), and cross-chunk *brightening* is covered
+    > (C1/C2) — but cross-chunk *darkening* is an open gap. Close
+    > [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
+    > **C3 (B48/B49)** first.
+> - **Meshing:** border-face culling never consults a neighbor today — the suite leaves the neighbor
+    > maps empty. Close
+    > [MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md)
+    > **MH-10/MH-11 (B18–B21)** first; MH-11 routes the harness through the production `FillChunkMapForJob`
+    > so a slab/halo under-copy actually flips a baseline red.
+
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low (pooling) → 🔴 High (persistent native storage).
 > - **Risk:** 🟡 Medium — pooled arrays must be correctly cleared/returned; disposal-chain rework.
