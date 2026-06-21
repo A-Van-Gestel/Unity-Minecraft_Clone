@@ -10,6 +10,7 @@ namespace Helpers
         public const int CHUNK_HEIGHT = 128;
         public const int SECTION_SIZE = 16;
         public const int SECTION_VOLUME = SECTION_SIZE * SECTION_SIZE * SECTION_SIZE; // 4096 for 16 section width & 16 section size
+        public const int CHUNK_VOLUME = SECTION_VOLUME * (CHUNK_HEIGHT / SECTION_SIZE); // 32768 (8 sections × 4096)
 
         /// <summary>
         /// Calculates the flat array index within a single section based on local section coordinates.
@@ -64,6 +65,11 @@ namespace Helpers
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void GetLocalPositionFromFlattenedIndex(int index, out int x, out int y, out int z)
         {
+            // Defensive clamp mirroring GetFlattenedIndexInChunk's Y-clamp: a malformed (out-of-range) index
+            // decodes to an in-chunk coordinate rather than an out-of-bounds local position that
+            // Chunk.AddActiveVoxel would register and TickUpdate later evaluate against a non-existent voxel.
+            index = math.clamp(index, 0, CHUNK_VOLUME - 1);
+
             // Mirror of the section-aware packing in GetFlattenedIndexInChunk / GetFlattenedIndexInSection.
             int sectionIdx = index / SECTION_VOLUME;
             int withinSection = index % SECTION_VOLUME;

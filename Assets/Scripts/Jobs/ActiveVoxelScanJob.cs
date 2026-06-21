@@ -40,7 +40,11 @@ namespace Jobs
             for (int i = 0; i < VoxelMap.Length; i++)
             {
                 ushort id = BurstVoxelDataBitMapping.GetId(VoxelMap[i]);
-                if (BlockTypes[id].IsActive)
+
+                // Guard against a stale/migrated voxel map carrying an id outside the current palette: BlockTypes
+                // is sized to the registered block count, so an out-of-range id would be an opaque out-of-bounds
+                // Burst read (garbage or a crash in a release build with safety checks off). An unknown id is inert.
+                if (id < BlockTypes.Length && BlockTypes[id].IsActive)
                 {
                     ActiveVoxels.Add(i);
                 }
