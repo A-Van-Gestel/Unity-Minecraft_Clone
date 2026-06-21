@@ -88,13 +88,13 @@ instead of a crash.
 
 ### Tick & Gameplay
 
-| ID     | Finding                                                        | Effort | Risk | Benefit | Seed | Save |
-|--------|----------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| TG-1   | Double voxel lookup + float-path cross-chunk queries per tick  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
-| TG-2 ✅ | `OnDataPopulated` full-chunk scan through managed `BlockType`s |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TG-3 ✅ | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
-| TG-4   | `BlockBehavior` data separation (ECS/DOTS pattern)             |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
-| TG-5   | `BlockBehavior` Burst function pointers (lighter alt. to TG-4) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| ID     | Finding                                                                                | Effort | Risk | Benefit | Seed | Save |
+|--------|----------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| TG-1   | Double voxel lookup + float-path cross-chunk queries per tick                          |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| TG-2 ✅ | `OnDataPopulated` full-chunk scan through managed `BlockType`s                         |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| TG-3 ✅ | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors                         |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
+| TG-4   | `BlockBehavior` data separation (ECS/DOTS pattern)                                     |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
+| TG-5   | `BlockBehavior` Burst function pointers (lighter alt. to TG-4)                         |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 | TG-6   | Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 
 ### Main Thread & Miscellaneous
@@ -706,6 +706,10 @@ initialization code (low priority).
 
 *(Absorbed from `CODEBASE_IMPROVEMENTS.md` §6.1.)*
 
+> **Detailed design:** [TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md](TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) —
+> phased plan (BH-D1 infra → per-family storage split → grass Burst → fluid Burst → parallelize + Tier-2),
+> with the BH-D1 old-vs-new differential slotted into each phase gate.
+
 **Observed:** All ticking voxels (fluids, grass, future behaviors) flow through one monolithic
 collection and a central `switch` in `BlockBehavior`. As behavior types grow, this forces a single
 main-thread tick loop iterating unrelated voxel types.
@@ -771,6 +775,7 @@ letting `GenerationJobData.Dispose` free it — the same split `MeshingJobData.O
 already uses. At shutdown, return each in-flight job's list, then dispose the pool.
 
 **Wiring considerations (why this is its own change, not a quick edit):**
+
 - The pool reference must reach the generator, so `IChunkGenerator.ScheduleGeneration` (a
   multi-implementer surface — `StandardChunkGenerator` + the legacy generator, which leaves the list
   *uncreated* and so never rents) gains a pool dependency.
