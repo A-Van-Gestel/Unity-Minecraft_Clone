@@ -564,7 +564,10 @@ namespace Data
         public static BehaviorFamily ClassifyFamily(ushort id)
         {
             if (id == BlockIDs.Grass) return BehaviorFamily.Grass;
-            if (World.Instance.BlockTypes[id].fluidType != FluidType.None) return BehaviorFamily.Fluid;
+            // Out-of-range ids classify as None rather than throwing (restores the inert-fallback the harness's
+            // former PaletteOf path had, and keeps this public static safe against a malformed/out-of-palette id).
+            if (id < World.Instance.BlockTypes.Length &&
+                World.Instance.BlockTypes[id].fluidType != FluidType.None) return BehaviorFamily.Fluid;
             return BehaviorFamily.None;
         }
 
@@ -609,19 +612,26 @@ namespace Data
             int idx = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
 
             if (family == BehaviorFamily.Grass)
-            {
-                if (!_activeGrass.IsCreated)
-                    _activeGrass = new NativeHashSet<int>(ACTIVE_BUCKET_INITIAL_CAPACITY, Allocator.Persistent);
-                if (_activeFluids.IsCreated) _activeFluids.Remove(idx);
-                _activeGrass.Add(idx);
-            }
+                AddToBucket(ref _activeGrass, ref _activeFluids, idx);
             else // Fluid
-            {
-                if (!_activeFluids.IsCreated)
-                    _activeFluids = new NativeHashSet<int>(ACTIVE_BUCKET_INITIAL_CAPACITY, Allocator.Persistent);
-                if (_activeGrass.IsCreated) _activeGrass.Remove(idx);
-                _activeFluids.Add(idx);
-            }
+                AddToBucket(ref _activeFluids, ref _activeGrass, idx);
+        }
+
+        /// <summary>
+        /// Adds a flat index to its family bucket, lazily creating that bucket on first use and first removing the
+        /// index from the other family's bucket so a voxel lives in exactly one bucket across a family-changing mod.
+        /// Single source of truth for the per-family create/cross-remove/add logic (both branches of
+        /// <see cref="AddActiveVoxel(Vector3Int, ushort)"/> route through it, so the two can't skew).
+        /// </summary>
+        /// <param name="target">The destination family bucket (created if not yet allocated).</param>
+        /// <param name="other">The other family bucket; the index is removed from it if it exists.</param>
+        /// <param name="idx">The flat chunk index to register.</param>
+        private static void AddToBucket(ref NativeHashSet<int> target, ref NativeHashSet<int> other, int idx)
+        {
+            if (!target.IsCreated)
+                target = new NativeHashSet<int>(ACTIVE_BUCKET_INITIAL_CAPACITY, Allocator.Persistent);
+            if (other.IsCreated) other.Remove(idx);
+            target.Add(idx);
         }
 
         /// <summary>

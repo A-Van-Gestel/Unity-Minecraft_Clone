@@ -71,13 +71,9 @@ namespace Editor.Validation.Behavior
         /// </summary>
         private static BehaviorTestWorld BuildMixedFamilyWorld()
         {
-            BehaviorTestWorld world = new BehaviorTestWorld();
-
-            // Water (identical to BH-B1): solid floor + a single level-0 source, stays Tier-1 over MIX_TICKS.
-            for (int x = FLOOR_MIN_XZ; x <= FLOOR_MAX_XZ; x++)
-            for (int z = FLOOR_MIN_XZ; z <= FLOOR_MAX_XZ; z++)
-                world.SetBlock(x, FLOOR_Y, z, BlockIDs.Stone);
-            world.SetBlock(SOURCE_XZ, FLOOR_Y + 1, SOURCE_XZ, BlockIDs.Water, meta: 0);
+            // Compose the exact BH-B1 water world (floor + single level-0 source, Tier-1 over MIX_TICKS) so this
+            // fixture can never drift from the world it mirrors — then add only the grass feature.
+            BehaviorTestWorld world = BuildBh1World();
 
             // Grass capped by a solid block → deterministic grass→dirt on T1 (BH-B7), in a corner the water can't reach.
             world.SetBlock(MIX_GRASS_X, GRASS_Y, MIX_GRASS_Z, BlockIDs.Grass);
