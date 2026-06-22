@@ -35,10 +35,19 @@ namespace Editor.Validation.Behavior
             }
         }
 
+        // BH-D1-MIX geometry: a grass-under-solid cell (deterministic grass→dirt, BH-B7 mechanic, no RNG) placed in a
+        // far corner of the BH-B1 water world. It sits well outside the water's ≤3-cell reach over MIX_TICKS, so the
+        // two families never interact — yet BOTH emit on tick 1 (water flow + the grass→dirt mod), giving the only
+        // fixture with two non-empty family buckets AND real cross-family mods in the same tick.
+        private const int MIX_GRASS_X = 2; // far corner, ≥5 cells from the water source at SOURCE_XZ (BH-B1 floor min is FLOOR_MIN_XZ=3)
+        private const int MIX_GRASS_Z = 2;
+        private const int MIX_TICKS = 3; // BH-B1's window: water emits each tick; grass→dirt fires on T1 then terminates
+
         /// <summary>
-        /// The full behavior surface as differential fixtures — the same seven worlds the golden baselines use
-        /// (BH-B1…B7: water spread/decay/cliff/regen, lava viscosity, grass spread/under-solid). Reuses the existing
-        /// build delegates and tick-count constants so a fixture change updates both golden and differential at once.
+        /// The full behavior surface as differential fixtures — the seven golden worlds (BH-B1…B7) plus BH-D1-MIX,
+        /// the one fixture with grass AND fluid active together (so the SplitFamily driver actually partitions two
+        /// non-empty buckets — the single-family worlds collapse to the legacy order). Reuses the existing build
+        /// delegates and tick-count constants so a fixture change updates both golden and differential at once.
         /// </summary>
         private static List<DiffFixture> DifferentialFixtures() => new List<DiffFixture>
         {
@@ -49,7 +58,32 @@ namespace Editor.Validation.Behavior
             new DiffFixture("BH-B5", BuildBh5World, BH_B5_TICKS),
             new DiffFixture("BH-B6", () => BuildBh6World(GRASS_X, GRASS_Z), BH_B6_TICKS),
             new DiffFixture("BH-B7", BuildBh7World, BH_B7_TICKS),
+            new DiffFixture("BH-D1-MIX", BuildMixedFamilyWorld, MIX_TICKS),
         };
+
+        /// <summary>
+        /// Builds the mixed-family differential fixture: the BH-B1 water source on its stone floor, plus a
+        /// grass-under-solid cell in a far corner (a <see cref="BlockIDs.Grass"/> block capped by
+        /// <see cref="BlockIDs.Stone"/>, which deterministically turns to dirt on tick 1 — the BH-B7 mechanic, no
+        /// RNG). Both families are active from the start and both emit on tick 1, so Legacy (one interleaved set) and
+        /// SplitFamily (grass bucket then fluid bucket) traverse genuinely different orders — exercising the
+        /// comparator's cross-family grouping and the driver partition that no single-family fixture reaches.
+        /// </summary>
+        private static BehaviorTestWorld BuildMixedFamilyWorld()
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld();
+
+            // Water (identical to BH-B1): solid floor + a single level-0 source, stays Tier-1 over MIX_TICKS.
+            for (int x = FLOOR_MIN_XZ; x <= FLOOR_MAX_XZ; x++)
+            for (int z = FLOOR_MIN_XZ; z <= FLOOR_MAX_XZ; z++)
+                world.SetBlock(x, FLOOR_Y, z, BlockIDs.Stone);
+            world.SetBlock(SOURCE_XZ, FLOOR_Y + 1, SOURCE_XZ, BlockIDs.Water, meta: 0);
+
+            // Grass capped by a solid block → deterministic grass→dirt on T1 (BH-B7), in a corner the water can't reach.
+            world.SetBlock(MIX_GRASS_X, GRASS_Y, MIX_GRASS_Z, BlockIDs.Grass);
+            world.SetBlock(MIX_GRASS_X, GRASS_Y + 1, MIX_GRASS_Z, BlockIDs.Stone);
+            return world;
+        }
 
         /// <summary>Registers the BH-D1 differential scenarios (called from <see cref="AddBaselineScenarios"/>).</summary>
         private static void AddDifferentialScenarios(List<Scenario> scenarios)
