@@ -105,10 +105,16 @@ their own chunk; border ("Tier-2") voxels read into neighbors. A Burst job canno
 `World.Instance.worldData`. Two options:
 
 - **(a) Halo-padded native chunk view** — gather the chunk + its 6 (or 26) neighbor borders into a
-  padded native buffer per tick. This is essentially **P-2 (persistent native chunk storage)** from the
-  performance report; if P-2 lands first, TG-4 fluids ride on it.
+  padded native buffer per tick. This is essentially **P-2 _Layer 2_ (persistent native chunk storage,
+  zero-copy)** from the performance report; if Layer 2 lands first, TG-4 fluids ride on it. ⚠️ **P-2 was
+  since split:** **Layer 1 — worker-thread gather — already shipped (2026-06-22)** and does *not* provide
+  this substrate (it relocated the lighting gather over snapshots, no storage change). The substrate option
+  (a) wants is **Layer 2**, which is 🔴 profiler-gated and may not ship — see
+  [`PERSISTENT_CHUNK_STORAGE_P2.md`](PERSISTENT_CHUNK_STORAGE_P2.md).
 - **(b) Per-tick gathered halo** — a lighter, TG-4-local gather of just the border ring each tick. More
-  copying, no P-2 dependency.
+  copying, no P-2 dependency. LI-1 + P-2 Layer 1 already produced a **proven, Burst-safe halo-gather
+  routine** (`ChunkMath.GatherPadded<T>`/`CopyRun<T>`, worker-thread, bit-identical) this option can reuse
+  directly.
 
 **Grass** mostly stays in-chunk (local + 1-ring); **fluids** do deep cross-chunk flow. So the phasing
 (§5) Burstifies **Tier-1 interior voxels first** (no neighbor view needed) and keeps **Tier-2 border
@@ -263,25 +269,32 @@ The pooling *concern* is not superseded (per-chunk native-list churn persists an
   hard dependency, and it is needed **only at Phase 4** — Phases 0–3 are interior-only (Tier-1), so
   *nothing here blocks starting TG-4*. The substrate decision is made *during* TG-4, with Phases 0–3 of
   evidence already banked. Mapping the candidates:
-    - **P-2** (persistent native voxel/light storage, halo-padded, zero-copy — report §1.3) is TG-4
-      option (a): the clean substrate. It also serves lighting (subsumes LI-1), meshing, and is a
-      world-scaling prerequisite (3D-keyed halo-padded). But it is 🔴/🔴 and commits the chunk-storage
-      layout — building it blind, before the halo mechanic is proven against a real consumer, is the
-      expensive way to discover the layout is wrong.
-    - **LI-1** (single halo-padded lighting volume, ~18×128×18 — report Lighting §) is the **cheap,
-      bounded prototype of exactly that layout** (🟡/🟡, acceptance = bit-identical light) and an
-      independent lighting win. The report already mandates *"design P-2 halo-padded so it subsumes
-      LI-1"*, so LI-1 is **not throwaway** — its layout and its copy-vs-compute numbers are the design
-      seed that de-risks P-2.
+    - **P-2 _Layer 2_** (persistent native voxel/light storage, halo-padded, zero-copy — report §1.3) is
+      TG-4 option (a): the clean substrate. It also serves lighting, meshing, and is a world-scaling
+      prerequisite (3D-keyed halo-padded). But it is 🔴/🔴 and commits the chunk-storage layout. (P-2
+      **Layer 1** — the worker-thread gather — shipped 2026-06-22 and is **not** this substrate; it kept
+      the snapshot model. TG-4 option (a) = **Layer 2**, still profiler-gated, not yet built.) The halo
+      mechanic the layout hinges on is **no longer unproven** — LI-1 validated it against a real consumer
+      (lighting, 47 seam baselines), so Layer 2 would be designed from a proven layout rather than blind.
+    - **LI-1** (single halo-padded lighting volume, **20×128×20, halo = 2** — the originally-proposed
+      1-voxel/18×128×18 halo was a *correctness bug*: the sunlight-darkening path reads ±2, edges **and**
+      diagonal corners) is the **cheap, bounded prototype of exactly that layout** (🟡/🟡, acceptance =
+      bit-identical light) and an independent lighting win. **✅ DONE (2026-06-22)** — layout validated (47
+      seam baselines) and shipped net-positive via P-2 Layer 1's worker-thread gather. The report mandates
+      *"design P-2 halo-padded so it subsumes LI-1"*, so LI-1 is **not throwaway** — its layout,
+      gather/extract transcoders, and copy-vs-compute numbers are the design seed that de-risks P-2 Layer 2.
     - **P-1** (border-slab copies — report §1.2) is the LI-1 *alternative* (they "trade against each
       other"), but it optimizes the full-volume snapshot mechanism that P-2 *deletes*, whereas LI-1
       *seeds* P-2. **Skip P-1 if P-2 is the destination.**
-    - **Recommended order:** start TG-4 (Phases 0–3) → **LI-1** (prove + seed the halo layout, lighting
-      win) → **P-2** (the shared substrate, designed from LI-1's layout) to land Phase 4 + lighting +
-      meshing + world scaling together.
-    - **Escape hatch:** if P-2 slips, Phase 4 falls back to **option (b)** — a TG-4-local per-tick halo
-      gather (the P-1 *mechanic* on the tick path). More per-tick copying, no P-2 dependency. So P-2 is
-      the *preferred* substrate, never a hard gate.
+    - **Recommended order:** start TG-4 (Phases 0–3) → **LI-1** ✅ done → **P-2 Layer 1** ✅ shipped →
+      **P-2 Layer 2** (the shared substrate, designed from LI-1's layout — *only this remains for option
+      (a)*) to land Phase 4 + lighting + meshing + world scaling together. Nothing here blocks starting
+      TG-4 today; only Phase 4's clean substrate is outstanding (and option (b) is the no-dependency
+      fallback).
+    - **Escape hatch:** if P-2 Layer 2 slips, Phase 4 falls back to **option (b)** — a TG-4-local per-tick
+      halo gather (the P-1 *mechanic* on the tick path, now with LI-1/P-2-Layer-1's Burst-safe
+      `GatherPadded<T>` routine to reuse). More per-tick copying, no P-2 dependency. So Layer 2 is the
+      *preferred* substrate, never a hard gate.
     - **Validation prerequisite for the substrate (whichever lands).** Phase 4's halo neighbor view shares
       a seam with LI-1/P-2: the lighting and meshing jobs must read correct cross-chunk neighbor data. Both
       consumer paths must be guarded before the substrate is trusted —
