@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using Data;
 using Editor.Validation.Framework;
 using Jobs.BurstData;
@@ -8,6 +9,21 @@ using Object = UnityEngine.Object;
 
 namespace Editor.Validation.Behavior.Framework
 {
+    /// <summary>
+    /// Selects how <see cref="BehaviorTestWorld"/> orders active-voxel evaluation within a tick — the modeled
+    /// production tick driver. <see cref="Legacy"/> reproduces today's single-set traversal; <see cref="SplitFamily"/>
+    /// reproduces the TG-4 Phase 1 per-behavior-family split (evaluate all grass, then all fluids). The
+    /// <b>BH-D1</b> differential pits the two against each other under the §4.3 canonicalization.
+    /// </summary>
+    public enum TickDriver
+    {
+        /// <summary>One monolithic active set, iterated in <c>HashSet</c> enumeration order (today's path).</summary>
+        Legacy,
+
+        /// <summary>Per-behavior-family buckets, iterated grass-then-fluid (the TG-4 Phase 1 path).</summary>
+        SplitFamily,
+    }
+
     /// <summary>
     /// Single-chunk, edit-mode harness that drives the <b>real</b> <see cref="BlockBehavior"/> tick path
     /// (<see cref="BlockBehavior.Behave"/> + <see cref="BlockBehavior.Active"/>) over a synthetic
@@ -50,6 +66,12 @@ namespace Editor.Validation.Behavior.Framework
         private readonly World _previousInstance;
         private int _tick;
         private bool _disposed;
+
+        /// <summary>
+        /// Which tick driver this world models. Defaults to <see cref="TickDriver.Legacy"/> so existing goldens run
+        /// the original traversal unchanged; set before <see cref="RunTicks"/> to model the TG-4 split path for BH-D1.
+        /// </summary>
+        public TickDriver Driver = TickDriver.Legacy;
 
         /// <summary>Stands up the stub world + palette and an all-air chunk at the origin.</summary>
         public BehaviorTestWorld()
@@ -136,8 +158,9 @@ namespace Editor.Validation.Behavior.Framework
             SetTickCounter(_tick);
 
             // Snapshot the active set so the apply pass can mutate it safely (HashSet enum order is deterministic
-            // — see the BH-3 probe), exactly as Chunk.TickUpdate snapshots before iterating.
-            List<Vector3Int> ordered = new List<Vector3Int>(_activeVoxels);
+            // — see the BH-3 probe), exactly as Chunk.TickUpdate snapshots before iterating. The traversal ORDER is
+            // chosen by the modeled driver (Legacy single-set vs SplitFamily per-family) — the variable BH-D1 tests.
+            List<Vector3Int> ordered = OrderActives();
             List<VoxelEval> evals = new List<VoxelEval>(ordered.Count);
             Queue<VoxelMod> pending = new Queue<VoxelMod>();
             List<Vector3Int> toRemove = new List<Vector3Int>();
@@ -165,6 +188,88 @@ namespace Editor.Validation.Behavior.Framework
                 ApplyMod(pending.Dequeue(), pending);
 
             return new TickRecord(_tick, evals);
+        }
+
+        /// <summary>
+        /// Produces this tick's active-voxel evaluation order for the selected <see cref="Driver"/>:
+        /// <list type="bullet">
+        /// <item><see cref="TickDriver.Legacy"/> — the single active set in <c>HashSet</c> enumeration order
+        /// (today's <c>Chunk.TickUpdate</c>).</item>
+        /// <item><see cref="TickDriver.SplitFamily"/> — partitioned by behavior family and concatenated
+        /// grass-then-fluid, modeling the TG-4 Phase 1 per-family buckets. Within a family the relative order is the
+        /// same deterministic set-enumeration order, so the only change vs Legacy is the cross-family interleaving —
+        /// exactly the benign reorder BH-D1 must prove §4.3-equivalent.</item>
+        /// </list>
+        /// Any active voxel that classifies to no known family is appended last, so none is ever dropped.
+        /// </summary>
+        private List<Vector3Int> OrderActives()
+        {
+            if (Driver == TickDriver.Legacy)
+                return new List<Vector3Int>(_activeVoxels);
+
+            List<Vector3Int> grass = new List<Vector3Int>();
+            List<Vector3Int> fluids = new List<Vector3Int>();
+            List<Vector3Int> other = null;
+
+            foreach (Vector3Int pos in _activeVoxels)
+            {
+                switch (FamilyOf(pos))
+                {
+                    case BehaviorFamily.Grass: grass.Add(pos); break;
+                    case BehaviorFamily.Fluid: fluids.Add(pos); break;
+                    default:
+                        (other ??= new List<Vector3Int>()).Add(pos);
+                        break;
+                }
+            }
+
+            List<Vector3Int> ordered = new List<Vector3Int>(_activeVoxels.Count);
+            ordered.AddRange(grass);
+            ordered.AddRange(fluids);
+            if (other != null) ordered.AddRange(other);
+            return ordered;
+        }
+
+        /// <summary>The behavior families <see cref="BlockBehavior.Behave"/>/<c>Active</c> dispatch on today.</summary>
+        private enum BehaviorFamily
+        {
+            None,
+            Grass,
+            Fluid,
+        }
+
+        /// <summary>
+        /// Classifies the voxel currently at <paramref name="pos"/> into its behavior family, mirroring the branch
+        /// conditions in <see cref="BlockBehavior.Behave"/> (grass id, then non-<c>None</c> fluid type). The order
+        /// matches production: grass is checked before fluid.
+        /// </summary>
+        private BehaviorFamily FamilyOf(Vector3Int pos)
+        {
+            ushort id = BurstVoxelDataBitMapping.GetId(ChunkData.GetVoxel(pos.x, pos.y, pos.z));
+            if (id == BlockIDs.Grass) return BehaviorFamily.Grass;
+            if (PaletteOf(id).fluidType != FluidType.None) return BehaviorFamily.Fluid;
+            return BehaviorFamily.None;
+        }
+
+        /// <summary>
+        /// Canonical dump of the chunk's non-air voxels (packed) in ascending (x, y, z) order — the BH-D1
+        /// final-state byte-identity backstop. Two driver runs that emit §4.3-equivalent streams must also leave
+        /// identical voxel state; this surfaces any divergence (e.g. a differing keep/drop) an equal mod set hides.
+        /// </summary>
+        public string DumpVoxels()
+        {
+            StringBuilder sb = new StringBuilder();
+            for (int x = 0; x < VoxelData.ChunkWidth; x++)
+            for (int y = 0; y < VoxelData.ChunkHeight; y++)
+            for (int z = 0; z < VoxelData.ChunkWidth; z++)
+            {
+                uint packed = ChunkData.GetVoxel(x, y, z);
+                if (BurstVoxelDataBitMapping.GetId(packed) == BlockIDs.Air) continue;
+                sb.Append('(').Append(x).Append(',').Append(y).Append(',').Append(z).Append(")=")
+                    .Append(packed).Append('\n');
+            }
+
+            return sb.ToString();
         }
 
         /// <summary>

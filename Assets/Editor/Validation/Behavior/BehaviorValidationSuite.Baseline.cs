@@ -190,6 +190,9 @@ T11
             scenarios.Add(new Scenario("BH-B5: lava viscosity staggers via the seeded-RNG gate (TG-3)", Bh5_LavaViscosityStaggers));
             scenarios.Add(new Scenario("BH-B6: grass spreads to convertible dirt (reservoir sampling + spread roll)", Bh6_GrassSpreadsToDirt));
             scenarios.Add(new Scenario("BH-B7: grass turns to dirt under a solid block (deterministic)", Bh7_GrassUnderSolidTurnsToDirt));
+
+            // BH-D1 old-vs-new differential (comparator self-test + driver-pair fixtures) — see BehaviorValidationSuite.Differential.cs.
+            AddDifferentialScenarios(scenarios);
         }
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
