@@ -1,16 +1,21 @@
 # P-2 — Worker-Thread Gather & (optional) Persistent Native Chunk Storage
 
-> **Status: Design (proposed). Not implemented.** Promotes the backlog finding
-> `PERFORMANCE_IMPROVEMENTS_REPORT.md` → P-2 (and `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md` §1.3) into a
-> full design, and is the home for the validated **LI-1** halo-padded lighting layout —
+> **Status: Layer 1 (Phase 1) — IMPLEMENTED & SHIPPED (2026-06-22, commit `e3e1635`). Layer 2 — Design
+> (proposed), profiler-gated.** Promotes the backlog finding `PERFORMANCE_IMPROVEMENTS_REPORT.md` → P-2
+> (and `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md` §1.3) into a full design, and is the home for the validated
+> **LI-1** halo-padded lighting layout —
 > [`Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md):
 > LI-1's branch-free BFS is a validated **2.4–3× in-job win**, but its **on-demand gather ran on the main
-> thread** (~305 µs/job), making it net-negative standalone.
+> thread** (~305 µs/job), making it net-negative standalone. **Phase 1 moved that gather onto the worker
+> thread and the layout shipped net-positive** (−34 % to −50 % vs LI-1 POST full-timing) —
+> [`Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md).
 
 > **This design is TWO layers, shipped and decided independently:**
-> - **Layer 1 — Worker-thread gather (RECOMMENDED, low risk).** Move the LI-1 gather off the main thread
-    > into the job, fed by the **existing snapshot maps**. Delivers the net-positive LI-1 win with **no new
-    > concurrency surface** and **no storage change**. This is the primary deliverable.
+> - **Layer 1 — Worker-thread gather (✅ SHIPPED 2026-06-22, commit `e3e1635`).** Move the LI-1 gather off
+    > the main thread into the job, fed by the **existing snapshot maps**. Delivered the net-positive LI-1
+    > win with **no new concurrency surface** and **no storage change**. This was the primary deliverable —
+    > now done; result in
+    > [`Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md).
 > - **Layer 2 — Persistent native cores + zero-copy reads (OPTIONAL, profiler-gated, 🔴 HIGH risk).**
     > Additionally removes the schedule-time *fill* copy by letting jobs read chunk storage in place. This
     > reopens a documented architectural constraint (`LIGHTING_SYSTEM_OVERVIEW.md` §4.3) and a large
@@ -67,6 +72,12 @@ removing it requires jobs to read storage in place — **Layer 2**, which carrie
 ---
 
 ## 3. Layer 1 — Worker-thread gather (recommended)
+
+> **✅ IMPLEMENTED & SHIPPED (2026-06-22, commit `e3e1635`). Authoritative implemented description:
+> [`Architecture/LIGHTING_SYSTEM_OVERVIEW.md`](../Architecture/LIGHTING_SYSTEM_OVERVIEW.md) §3.3** (the
+> worker-thread gather is now part of the lighting pipeline's documented behavior). This section is retained
+> as the *design rationale* for that change; for "how it works now," read §3.3. Benchmark:
+> [`Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md).
 
 **Root cause restated:** LI-1's gather is not slow — it is slow *serialized on the main thread*. The BFS
 that consumes it is 2.4–3× faster. Move the gather into the job and the main thread pays only what PRE-LI-1
@@ -267,11 +278,18 @@ different chunk coordinate, ABA) surfaces as a caught assertion rather than sile
 
 ## 8. Phasing
 
-1. **Phase 1 — Worker-thread gather (Layer 1).** Monomorphize the gather into a Burst routine in
-   `NeighborhoodLightingJob.Execute()`; pass the 9 snapshot maps + rented padded scratch; delete the
-   main-thread gather call. Update editor/benchmark consumers. **Acceptance: bit-identical (suite + LI-1
-   prove-red) AND `LightingJobBenchmark` full-timing flips standalone net-positive.** No P-4 dependency,
-   no §6. **This banks the LI-1 win.**
+1. **Phase 1 — Worker-thread gather (Layer 1). ✅ DONE (2026-06-22, commit `e3e1635`).** Made the gather
+   Burst-safe in `NeighborhoodLightingJob.Execute()` (the existing `ChunkMath.GatherPadded<T>`/`CopyRun<T>`
+   kept generic — Burst monomorphizes per concrete `T` — with `NativeArray<T>.Copy` swapped for
+   `UnsafeUtility.MemCpy`); passed the 9 snapshot maps + rented (unfilled) padded scratch into the job;
+   deleted the main-thread gather call; routed all four schedulers through a single
+   `NeighborhoodLightingJob.SetGatherSources(in NeighborMapSet, …)` setter so the compass→field mapping
+   lives in one place. Updated editor/benchmark consumers. No P-4 dependency, no §6. **Acceptance MET:**
+   bit-identical (suite 47/47 incl. C3 B54/B55 + the 11-seam prove-red) AND `LightingJobBenchmark`
+   full-timing net-positive (−34 % to −50 % vs LI-1 POST) —
+   [`Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md).
+   **The LI-1 win is banked.** The Layer-2 profiler gate (below) was **not** triggered — the residual cost
+   is the gather (copy #2), not the fill (copy #1).
 2. **— decision gate —** Profiler capture during streaming. Only if copy #1 (the fill) is shown to be the
    remaining bottleneck do Layer 2 phases proceed.
 3. **Phase 2 — Persistent cores, still buffer-filled (Layer 2a).** Introduce `ChunkNativeStore`; resolve

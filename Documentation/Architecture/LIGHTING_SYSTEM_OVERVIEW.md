@@ -118,22 +118,23 @@ A time-based fail-safe full scan (every ~1 second) re-populates the dirty set fr
 
 ### 3.3 The Job (`NeighborhoodLightingJob`)
 
-**Inputs:** Center chunk map (writable), center light map (writable), 8 neighbor maps + light maps (read-only), heightmap, light queues, block type data.
+**Inputs:** The center + 8 neighbor voxel snapshot maps and the center + 8 neighbor light snapshot maps (all `[ReadOnly]` gather sources), the writable halo-padded voxel/light scratch volumes (`PaddedVoxels`/`PaddedLight`, length `ChunkMath.PADDED_LIGHTING_VOLUME` = 20×128×20), heightmap, light queues, block type data. (LI-1 replaced the old 9-separate-maps-with-a-write-through-hashmap design; the BFS now reads/writes a single padded volume via a branch-free flat index. The center's [0,16) range lives at padded [2,18), with a 2-voxel halo —
+`ChunkMath.LIGHTING_HALO = MAX_LIGHTING_BFS_REACH` — carrying the widest cross-seam read.)
 
 **Execution order:**
 
-1. **Edge check** *(optional)* — If `PerformEdgeCheck` is set, validate light at all 4 horizontal chunk borders against neighbor data. Border voxels with less light than their neighbor could supply are enqueued for re-spreading. See Section 3.6 for details.
-2. **Seed** — Process column recalculation queue, sky light BFS queue, blocklight BFS queue.
-3. **Sky light darkness removal** → **Sky light spreading**.
-4. **Blocklight darkness removal** → **Blocklight spreading** (per-channel RGB).
+1. **Worker-thread gather** *(P-2 Phase 1)* — assemble the 9 voxel + 9 light snapshot maps into the halo-padded `PaddedVoxels`/`PaddedLight` volumes (`ChunkMath.GatherPadded*`). This runs first, on the worker thread inside `Execute()` — **not** on the main thread before scheduling — so the main thread pays only the snapshot fill. A missing neighbor is sentinel-filled (`uint`/`ushort.MaxValue`). All subsequent steps read/write the padded volume.
+2. **Edge check** *(optional)* — If `PerformEdgeCheck` is set, validate light at all 4 horizontal chunk borders against neighbor data. Border voxels with less light than their neighbor could supply are enqueued for re-spreading. See Section 3.6 for details.
+3. **Seed** — Process column recalculation queue, sky light BFS queue, blocklight BFS queue.
+4. **Sky light darkness removal** → **Sky light spreading**.
+5. **Blocklight darkness removal** → **Blocklight spreading** (per-channel RGB).
 
-**Cross-chunk writes:** The job cannot write to read-only neighbor maps. Instead:
+**Cross-chunk writes:** The job never mutates the snapshot maps. Instead:
 
 - Neighbor light modifications are added to `CrossChunkLightMods` (a `NativeList<LightModification>`).
-- A **write-through cache** (`NativeHashMap<long, ulong>`, keyed by encoded position, packing both the voxel `uint` and the light `ushort`) ensures that subsequent reads within the same job execution see the modified values. This is critical for darkness removal: if we set a neighbor voxel to 0, the re-spreading phase must see that 0, not the stale read-only
-  value.
+- The **halo cells of the padded light volume** are the in-job cross-chunk read-back store: a write into a halo cell updates `PaddedLight` in place, so subsequent reads within the same job execution see the modified value. This replaces the old `NativeHashMap<long, ulong>` write-through cache (deleted in LI-1 — it existed only because the previous design's neighbor arrays were `[ReadOnly]`). It is critical for darkness removal: if we set a neighbor voxel's light to 0, the re-spreading phase must see that 0, not the stale snapshot value.
 
-**Output:** Modified center map + light map, cross-chunk modifications list, `IsStable` flag.
+**Output:** The BFS-updated `PaddedLight` volume (its center [2,18) region is extracted back into the center light map on completion, via `ChunkMath.ExtractCenterLight`), the cross-chunk modifications list, and the `IsStable` flag. The voxel data is never modified by the job.
 
 ### 3.4 Result Processing (`WorldJobManager.ProcessLightingJobs`)
 
@@ -197,7 +198,9 @@ Cross-chunk light **placement** (spreading brighter values inward) is robust: th
 
 1. **Jobs read stale schedule-time snapshots.** A job's neighbor maps are copied when it is scheduled (§3.3), so a removal computed against that snapshot can disagree with the neighbor's now-current light. This is the source of the cross-seam removal/re-placement oscillation (Bug 11, fixed) and of the in-flight defer logic (§3.4, Bug 08).
 2. **Edge checks only ADD, never remove** (§3.6, §4.2). Over-bright stale light at a border is *never* corrected by the edge-check pass — only too-dark light is. The "inverse artifact" (light that refuses to darken) therefore has **no automatic correction path** and persists until a full relight.
-3. **Removal needs an initiator.** `PropagateDarkness` (§1.3, Phase 1) clears a voxel by tracing the neighbors *it* lit (`neighbor == old − cost`). A light "loop" with no real source — e.g. two seam voxels on opposite sides of a chunk boundary that mutually support each other after the genuine source is removed — had no node to start removal from, so it survived as a **stable-but-wrong** over-bright field (Bug 12, fixed June 2026). The fix supplies the missing initiator across the seam: when a darkness wave meets a cross-chunk neighbor at *exactly* the removed level (the 2-cycle signature) and that neighbor is neither fully opaque nor directly sky-exposed, `PropagateDarkness` now emits a cross-chunk sunlight removal mod for it. The neighbor's chunk then re-evaluates through the reason-2 veto (`InChunkSunlightSupport`): a genuinely independent in-chunk source keeps the value, the stale loop clears. Guarded by lighting-suite baseline B53 (promoted from repro K12a) + over-correction tripwire B50; only the *symmetric* mutually-equal seam stalls (asymmetric and multi-hop cross-seam loops converge regardless, since a level gradient always has a strictly-lower side the existing removal branch handles — completeness baselines B51/B52).
+3. **Removal needs an initiator.** `PropagateDarkness` (§1.3, Phase 1) clears a voxel by tracing the neighbors *it* lit (`neighbor == old − cost`). A light "loop" with no real source — e.g. two seam voxels on opposite sides of a chunk boundary that mutually support each other after the genuine source is removed — had no node to start removal from, so it survived as a **stable-but-wrong** over-bright field (Bug 12, fixed June 2026). The fix supplies the missing initiator across the seam: when a darkness wave meets a cross-chunk neighbor at *exactly* the
+   removed level (the 2-cycle signature) and that neighbor is neither fully opaque nor directly sky-exposed, `PropagateDarkness` now emits a cross-chunk sunlight removal mod for it. The neighbor's chunk then re-evaluates through the reason-2 veto (`InChunkSunlightSupport`): a genuinely independent in-chunk source keeps the value, the stale loop clears. Guarded by lighting-suite baseline B53 (promoted from repro K12a) + over-correction tripwire B50; only the *symmetric* mutually-equal seam stalls (asymmetric and multi-hop cross-seam loops converge
+   regardless, since a level gradient always has a strictly-lower side the existing removal branch handles — completeness baselines B51/B52).
 
 **Data-model gotcha when sampling neighbor light for a removal decision:** the stored sky value of an **opaque** voxel is *not* a valid propagation source. `PropagateLight` early-returns for opaque sources (§1.3 rule 5 — opaque blocks receive surface light but never propagate it onward), yet a sky-exposed opaque surface still *stores* a high value (a roof block holds sky 15). Any heuristic that reads neighbor light to estimate "is this voxel still independently supported?" must therefore **skip opaque neighbors** and charge the destination's
 `max(1, opacity)` on entry. The cross-chunk sunlight removal veto (`CrossChunkLightModApplier.InChunkSunlightSupport`, added for Bug 11) had to learn both lessons — see its implementation and baselines B48/B49.

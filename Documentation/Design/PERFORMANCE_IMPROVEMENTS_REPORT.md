@@ -82,9 +82,9 @@ instead of a crash.
 
 ### Lighting
 
-| ID   | Finding                                                                              | Effort | Risk | Benefit | Seed | Save |
-|------|--------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| LI-1 | ✅ Branchy 9-map dispatch + hashmap cache (done; layout validated, not shipped → P-2) |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| ID   | Finding                                                                                                                                          | Effort | Risk | Benefit | Seed | Save |
+|------|--------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| LI-1 | ✅ Branchy 9-map dispatch + hashmap cache → halo-padded volume; layout validated, **shipped net-positive via P-2 Phase 1** (worker-thread gather) |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
 
 ### Tick & Gameplay
 
@@ -132,14 +132,14 @@ These remain fully documented in the pipeline analysis — the table is reproduc
 is the single at-a-glance view. **Read that document (and the `chunk-lifecycle` skill) before
 implementing any of these.**
 
-| ID  | Finding (doc section)                                                                                                                                                   | Effort | Risk  | Benefit | Seed |   Save    |
-|-----|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:-----:|:-------:|:----:|:---------:|
-| P-1 | Border-slab copies instead of full-volume snapshots (§1.2)                                                                                                              |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
-| P-2 | Worker-thread gather (Layer 1, low-risk, banks the LI-1 win) + optional persistent zero-copy storage (Layer 2, §1.3) — **[design doc](PERSISTENT_CHUNK_STORAGE_P2.md)** | 🟢→🔴  | 🟢→🔴 |   🟢    |  ✅   |     ✅     |
-| P-3 | Jobified lighting merge in `ApplyLightingJobResult` (§2)                                                                                                                |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
-| P-4 | Backpressure: in-flight caps, out-of-range discard, time budgets, panic gate (§3)                                                                                       |   🟡   | 🟡→🔴 |   🟢    |  ✅   |     ✅     |
-| P-5 | "Lighting stable" save bit to skip edge checks on load (§4.4)                                                                                                           |   🟡   |  🟡   |   🟢    |  ✅   | ⚠️ Format |
-| P-6 | Smaller observations: O(n) removals, fail-safe scan counter, draw-queue trickle (§5)                                                                                    |   🟢   |  🟢   |   🟡    |  ✅   |     ✅     |
+| ID  | Finding (doc section)                                                                                                                                                                                                                                  | Effort | Risk  | Benefit | Seed |   Save    |
+|-----|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:-----:|:-------:|:----:|:---------:|
+| P-1 | Border-slab copies instead of full-volume snapshots (§1.2)                                                                                                                                                                                             |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
+| P-2 | ✅ Worker-thread gather (Layer 1) **SHIPPED 2026-06-22** (banks the LI-1 win, −34/−50 % vs LI-1 POST) + optional persistent zero-copy storage (Layer 2, §1.3, 🔴 profiler-gated — **not** triggered) — **[design doc](PERSISTENT_CHUNK_STORAGE_P2.md)** |  ✅→🔴  | ✅→🔴  |   🟢    |  ✅   |     ✅     |
+| P-3 | Jobified lighting merge in `ApplyLightingJobResult` (§2)                                                                                                                                                                                               |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
+| P-4 | Backpressure: in-flight caps, out-of-range discard, time budgets, panic gate (§3)                                                                                                                                                                      |   🟡   | 🟡→🔴 |   🟢    |  ✅   |     ✅     |
+| P-5 | "Lighting stable" save bit to skip edge checks on load (§4.4)                                                                                                                                                                                          |   🟡   |  🟡   |   🟢    |  ✅   | ⚠️ Format |
+| P-6 | Smaller observations: O(n) removals, fail-safe scan counter, draw-queue trickle (§5)                                                                                                                                                                   |   🟢   |  🟢   |   🟡    |  ✅   |     ✅     |
 
 ---
 
@@ -525,6 +525,11 @@ managed arrays per cloud tile creation.
 ## Detailed findings — Lighting
 
 ### LI-1. ✅ DONE (2026-06-22) — Branchy 9-map dispatch + hashmap cache in the BFS inner loop
+
+> **➡️ UPDATE (2026-06-22): the layout SHIPPED net-positive via P-2 Phase 1** (worker-thread gather, commit
+> `e3e1635`) — −34 % to −50 % vs the LI-1 POST full-timing below. The "NOT shipped standalone" rationale in
+> this section is the *standalone* (gather-on-main-thread) decision and is retained as the motivation for
+> Phase 1. Result: [`Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md).
 
 > **Closed: implemented, bit-identical, suite-guarded, benchmarked — but NOT shipped standalone.**
 > The halo-padded layout is a **validated 2.4–3× in-job BFS win**, but the per-chunk **on-demand gather**
@@ -1224,7 +1229,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
    The GS-5 §7.3 ownership split (`forceRenderingOff` vs `SetActive`) is a small, independently
    harmless PR — now unblocked (MR-3/MR-4 done); do it early so GS-5 stays unblocked.
 5. **Long-horizon architecture:**
-   **P-2 (persistent native chunk storage — design it halo-padded so it subsumes LI-1; NEXT, builds on the validated LI-1 layout — see [`Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md))** →
+   **P-2 Layer 1 (worker-thread gather) ✅ SHIPPED 2026-06-22 — banks the LI-1 win net-positive ([benchmark](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md)); P-2 Layer 2 (persistent zero-copy storage) remains 🔴 profiler-gated, not triggered ([design](PERSISTENT_CHUNK_STORAGE_P2.md))** →
    GS-5 (section occlusion culling — phased plan in `VISIBILITY_CULLING_ARCHITECTURE.md` §5+§7) →
    MR-8 (greedy meshing — own design doc first).
 

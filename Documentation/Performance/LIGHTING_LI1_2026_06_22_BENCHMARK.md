@@ -1,5 +1,11 @@
 # Lighting LI-1 Benchmark — Halo-Padded Volume vs 9-Map Dispatch
 
+> **➡️ Superseded (2026-06-22): the "standalone NO-GO" verdict below was the decision NOT to ship LI-1 with
+> its gather on the main thread. P-2 Phase 1 then moved that gather to the worker thread and the layout
+> shipped net-positive (−34 % to −50 % vs this report's LI-1 POST full-timing). See
+> [`LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md`](LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md). This report is
+> retained unedited as the PRE baseline for that capture.**
+
 | Field           | Value                                                                                           |
 |-----------------|-------------------------------------------------------------------------------------------------|
 | **Captured**    | 2026-06-21 / 2026-06-22 (local)                                                                 |

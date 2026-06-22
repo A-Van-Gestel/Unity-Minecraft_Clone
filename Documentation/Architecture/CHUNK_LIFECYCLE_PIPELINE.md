@@ -264,10 +264,10 @@ flowchart TD
     end
 
     subgraph "ScheduleLightingUpdate (Main Thread)"
-        L4 --> S1["Snapshot center map (writable copy)"]
+        L4 --> S1["Snapshot center voxel + light maps<br/>(read-only gather sources)"]
         L8 --> S1
         L10 --> S1
-        S1 --> S2["Snapshot 8 neighbor maps (read-only copies)"]
+        S1 --> S2["Snapshot 8 neighbor voxel + light maps<br/>(read-only gather sources)"]
         S2 --> S3["Flush managed light queues → NativeQueues"]
         S3 --> S4["Transfer SunlightRecalcQueue entries"]
         S4 --> S5["Set HasLightChangesToProcess = false"]
@@ -276,7 +276,8 @@ flowchart TD
     end
 
     subgraph "Lighting Job (Worker Thread)"
-        S7 --> J1{"PerformEdgeCheck?"}
+        S7 --> J0["Gather 9 snapshot maps →<br/>halo-padded volume (P-2 Phase 1)"]
+        J0 --> J1{"PerformEdgeCheck?"}
         J1 -- Yes --> J2["CheckEdges: validate 4 borders<br/>against neighbor snapshots"]
         J2 --> J3
         J1 -- No --> J3["PASS 0: Seed BFS queues"]
