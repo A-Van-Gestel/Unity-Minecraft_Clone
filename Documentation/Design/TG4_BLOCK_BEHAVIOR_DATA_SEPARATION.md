@@ -189,6 +189,58 @@ differential fixtures (closes harness BH-4) + a determinism stress (replay N tim
 > and could ship alone — at which point **TG-5** (Burst function-pointer dispatch, no parallel
 > re-architecture) becomes a viable lighter finish that reuses the same BH-D1 gate.
 
+### Decision framework — option (b) viability & TG-4-vs-TG-5 (profile-gated)
+
+Phase 4's **option (b)** (per-tick local halo gather) and the **TG-4-vs-TG-5** choice are
+**profile-decidable, not arguable** — the same lesson LI-1 taught: a gather is only a bottleneck when it
+runs *serial on the main thread*; on a worker it parallelizes and is absorbed (see
+[`Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md)).
+The phasing makes the decision cheap to defer.
+
+**Is option (b) net-positive? Yes, with conditions:**
+
+- **Most of the win is gather-free.** Phases 0–3 (storage split + Tier-1 interior parallel Burst for grass
+  *and* fluids) need no neighbor view. Option (b) only taxes **Phase 4** (Tier-2 border voxels) — a
+  minority of actives — so the gather question applies to the last slice of the win, not the bulk.
+- **The tick gather is far lighter than the lighting gather** — a border *ring*, not the full 51,200-cell
+  padded volume P-2 Layer 1 already proved absorbable on a worker.
+- **Run it in-job on the worker (the P-2 Layer 1 pattern), never on the main thread.** It then adds worker
+  latency, not main-thread latency; the tick is a periodic `TickLength` budget, not a per-frame hot path,
+  so the main thread pays only snapshot-fill + drain. Option (b) is literally "P-2 Layer 1 for the tick
+  path" — it reuses the proven `ChunkMath.GatherPadded<T>` routine, so it carries low novel risk.
+- **The only loss is on sparse-active ticks** (gather overhead > tiny compute), but those are cheap in
+  absolute terms (same shape as the lighting trivial-scenario floor). Under heavy fluid sim — *when ticking
+  actually hurts the frame* — actives are dense, compute dominates, and the parallel offload is the win.
+
+**TG-4 (+ option b) vs TG-5 — the asymmetry:**
+
+|                         | **TG-4 + option (b)**                          | **TG-5**                                        |
+|-------------------------|------------------------------------------------|-------------------------------------------------|
+| Tick location           | off main thread, **parallel** across cores     | main-thread, **serial** (just faster per-voxel) |
+| What it fixes           | main-thread *occupancy* (iterating actives)    | per-voxel *compute* (switch → Burst dispatch)   |
+| Cross-chunk gather      | needed at Phase 4 (option b per-tick halo)     | none — Tier-2 stays a managed hybrid            |
+| Effort / Risk / Benefit | 🔴 / 🔴 / 🟢 (only path fully off main thread) | 🟡 / 🟡 / 🟡 (no parallelism)                   |
+
+TG-5 makes the per-voxel work cheaper but leaves it **on the main thread**; TG-4 moves it **off** entirely.
+So the fork is: is the tick cost **iteration-volume-bound** (→ TG-4's parallelism) or
+**per-voxel-compute-bound** (→ TG-5 suffices)?
+
+**Recommended sequence (de-risks the fork):**
+
+1. Ship TG-4 **Phases 0–2** (BH-D1 infra + storage split + grass Burst) — shared verbatim with TG-5,
+   gather-free, low-risk, commits to nothing.
+2. **Profile the tick during heavy fluid sim** (main-thread tick ms; active-chunk count; per-voxel vs
+   iteration-volume split).
+3. Fork on the data:
+    - parallel offload dominated → continue TG-4: Phase 3 fluids, then **Phase 4 + option (b) only if
+      Tier-2 border ticking is itself a measured hotspot**;
+    - Burst-body speedup dominated, parallelism marginal → **finish as TG-5** (no Phase 4, no gather);
+    - Tier-1 captured the win and Tier-2 is a small fraction → **stop at the Tier-1-Burst / Tier-2-managed
+      hybrid** — option (b) never needed.
+
+Treat **Phases 0–2 as the commitment** and **option (b) / Phase 4 as the optional, profile-gated tail**,
+with TG-5 as the documented off-ramp.
+
 ---
 
 ## 6. BH-D1 — the old-vs-new differential (where it slots in)
