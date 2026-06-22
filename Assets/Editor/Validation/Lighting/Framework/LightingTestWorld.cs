@@ -4,6 +4,7 @@ using Data;
 using Helpers;
 using Jobs;
 using Jobs.BurstData;
+using Jobs.Data;
 using Serialization;
 using Unity.Collections;
 using Unity.Jobs;
@@ -410,11 +411,11 @@ namespace Editor.Validation.Lighting.Framework
             flight.CenterVoxels = map;
             flight.CenterLight = lightMap;
 
-            // LI-1: snapshot the 8 neighbors as section-contiguous full-chunk maps (the SnapshotNeighbor*
-            // helpers replay the production fill, and hand a missing neighbor a zero-length array — which
-            // GatherPadded* sentinel-fills exactly like production). Then gather center + 8 into the
-            // halo-padded volumes the job actually reads/writes. This mirrors WorldJobManager's gather so
-            // the harness stays a faithful production replay.
+            // LI-1 / P-2 Layer 1: snapshot the 8 neighbors as section-contiguous full-chunk maps (the
+            // SnapshotNeighbor* helpers replay the production fill, and hand a missing neighbor a created
+            // zero-length array — which the in-job gather sentinel-fills exactly like production). The
+            // gather itself now runs on the worker thread inside the job (fed by these snapshots), so the
+            // harness stays a faithful production replay.
             NativeArray<uint> nW = SnapshotNeighborVoxels(flight, chunkCoord, -1, 0);
             NativeArray<uint> nE = SnapshotNeighborVoxels(flight, chunkCoord, 1, 0);
             NativeArray<uint> nS = SnapshotNeighborVoxels(flight, chunkCoord, 0, -1);
@@ -433,10 +434,9 @@ namespace Editor.Validation.Lighting.Framework
             NativeArray<ushort> lSE = SnapshotNeighborLight(flight, chunkCoord, 1, -1);
             NativeArray<ushort> lNE = SnapshotNeighborLight(flight, chunkCoord, 1, 1);
 
+            // P-2 Layer 1: rented UNFILLED — the worker-thread gather inside the job fills them.
             NativeArray<uint> paddedVoxels = NewOwned(flight, new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory));
             NativeArray<ushort> paddedLight = NewOwned(flight, new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory));
-            ChunkMath.GatherPaddedVoxels(paddedVoxels, map, nW, nE, nS, nN, nSW, nNW, nSE, nNE);
-            ChunkMath.GatherPaddedLight(paddedLight, lightMap, lW, lE, lS, lN, lSW, lNW, lSE, lNE);
             flight.PaddedLight = paddedLight;
 
             // Seed queues: drain the chunk's managed queues into native ones (production flushes
@@ -455,7 +455,17 @@ namespace Editor.Validation.Lighting.Framework
             flight.IsStable = NewOwned(flight, new NativeArray<bool>(1, Allocator.Persistent));
             flight.Mods = NewOwned(flight, new NativeList<LightModification>(Allocator.Persistent));
 
-            flight.Job = new NeighborhoodLightingJob
+            // Bundle the snapshots into a NeighborMapSet (mirrors production's AcquireNeighborMaps) so the
+            // compass→job-field mapping lives only in NeighborhoodLightingJob.SetGatherSources.
+            NeighborMapSet sources = new NeighborMapSet
+            {
+                NeighborW = nW, NeighborE = nE, NeighborS = nS, NeighborN = nN,
+                NeighborSW = nSW, NeighborNW = nNW, NeighborSE = nSE, NeighborNE = nNE,
+                LightW = lW, LightE = lE, LightS = lS, LightN = lN,
+                LightSW = lSW, LightNW = lNW, LightSE = lSE, LightNE = lNE,
+            };
+
+            NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 PaddedVoxels = paddedVoxels,
                 PaddedLight = paddedLight,
@@ -469,6 +479,8 @@ namespace Editor.Validation.Lighting.Framework
                 IsStable = flight.IsStable,
                 PerformEdgeCheck = edgeCheck,
             };
+            job.SetGatherSources(sources, map, lightMap);
+            flight.Job = job;
 
             return flight;
         }

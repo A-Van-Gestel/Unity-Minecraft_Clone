@@ -408,8 +408,10 @@ public class WorldJobManager : IDisposable
 
     /// <summary>
     /// Acquires a halo-padded voxel volume buffer (length <see cref="ChunkJobArrayPool.PaddedBufferLength"/>):
-    /// pooled when <paramref name="pooled"/> is true, otherwise a fresh allocation. Contents are undefined —
-    /// the caller fills every element via <see cref="ChunkMath.GatherPaddedVoxels"/> (LI-1).
+    /// pooled when <paramref name="pooled"/> is true, otherwise a fresh allocation. Contents are undefined
+    /// and left UNFILLED at schedule time — the job's worker-thread gather
+    /// (<see cref="Jobs.NeighborhoodLightingJob.Execute"/>, P-2 Layer 1) fills every element from the
+    /// snapshot maps wired in via <see cref="Jobs.NeighborhoodLightingJob.SetGatherSources"/>.
     /// </summary>
     /// <param name="pooled">Whether to rent from the pool instead of allocating.</param>
     /// <param name="allocator">The allocator for the non-pooled path.</param>
@@ -423,8 +425,10 @@ public class WorldJobManager : IDisposable
 
     /// <summary>
     /// Acquires a halo-padded light volume buffer (length <see cref="ChunkJobArrayPool.PaddedBufferLength"/>):
-    /// pooled when <paramref name="pooled"/> is true, otherwise a fresh allocation. Contents are undefined —
-    /// the caller fills every element via <see cref="ChunkMath.GatherPaddedLight"/> (LI-1).
+    /// pooled when <paramref name="pooled"/> is true, otherwise a fresh allocation. Contents are undefined
+    /// and left UNFILLED at schedule time — the job's worker-thread gather
+    /// (<see cref="Jobs.NeighborhoodLightingJob.Execute"/>, P-2 Layer 1) fills every element from the
+    /// snapshot maps wired in via <see cref="Jobs.NeighborhoodLightingJob.SetGatherSources"/>.
     /// </summary>
     /// <param name="pooled">Whether to rent from the pool instead of allocating.</param>
     /// <param name="allocator">The allocator for the non-pooled path.</param>
@@ -512,18 +516,12 @@ public class WorldJobManager : IDisposable
             jobData.Map = AcquireVoxelMap(chunkData.Position, usePooledBuffers, allocator);
             jobData.LightMap = AcquireLightMap(chunkData.Position, usePooledBuffers, allocator);
 
-            // LI-1: gather the center + 8 neighbor full-chunk maps into the halo-padded volumes the job
-            // reads/writes. Missing neighbors are sentinel-filled inside GatherPadded* (uint/ushort
-            // MaxValue), reproducing the old per-neighbor !IsCreated||Length==0 guard.
+            // P-2 Layer 1: rent the halo-padded volumes the job reads/writes, but leave them UNFILLED —
+            // the gather now runs on the worker thread inside NeighborhoodLightingJob.Execute() (fed by the
+            // 9 snapshot maps wired in below), so the main thread no longer pays the ~305 µs gather floor.
             NeighborMapSet neighbors = jobData.Input.Neighbors;
             jobData.PaddedVoxels = AcquirePaddedVoxels(usePooledBuffers, allocator);
             jobData.PaddedLight = AcquirePaddedLight(usePooledBuffers, allocator);
-            ChunkMath.GatherPaddedVoxels(jobData.PaddedVoxels, jobData.Map,
-                neighbors.NeighborW, neighbors.NeighborE, neighbors.NeighborS, neighbors.NeighborN,
-                neighbors.NeighborSW, neighbors.NeighborNW, neighbors.NeighborSE, neighbors.NeighborNE);
-            ChunkMath.GatherPaddedLight(jobData.PaddedLight, jobData.LightMap,
-                neighbors.LightW, neighbors.LightE, neighbors.LightS, neighbors.LightN,
-                neighbors.LightSW, neighbors.LightNW, neighbors.LightSE, neighbors.LightNE);
 
             jobData.Mods = new NativeList<LightModification>(allocator);
             jobData.IsStable = new NativeArray<bool>(1, allocator);
@@ -556,6 +554,8 @@ public class WorldJobManager : IDisposable
                 IsStable = jobData.IsStable,
                 PerformEdgeCheck = chunkData.NeedsEdgeCheck,
             };
+            // P-2 Layer 1: wire the worker-thread gather's sources (center + 8 neighbors) in one place.
+            job.SetGatherSources(neighbors, jobData.Map, jobData.LightMap);
 
             jobData.Handle = job.Schedule();
             chunkData.HasLightChangesToProcess = false;

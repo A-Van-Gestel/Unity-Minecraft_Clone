@@ -46,11 +46,13 @@ namespace Jobs.Data
         // --- Input data ---
         public LightingJobInputData Input;
 
-        // LI-1: the halo-padded volumes the job actually reads/writes. PaddedVoxels is gathered from the
-        // center + 8 neighbor voxel maps (read-only in-job); PaddedLight is gathered from the center +
-        // 8 neighbor light maps and is the job's sole writable light store. After the job completes,
-        // the center [2,18) region of PaddedLight is extracted back into LightMap for ApplyJobLightMap.
-        // Pooled via ChunkJobArrayPool.RentPaddedVoxels/RentPaddedLight when UsesPooledBuffers.
+        // P-2 Layer 1: the halo-padded volumes the job reads/writes. These are rented UNFILLED here; the
+        // job's worker-thread gather (NeighborhoodLightingJob.Execute) populates them from the center +
+        // 8 neighbor snapshot maps (Map/LightMap + Input.Neighbors), wired in via SetGatherSources. The
+        // gather writes PaddedVoxels once (then read-only in-job); PaddedLight is the job's sole writable
+        // light store. After the job completes, the center [2,18) region of PaddedLight is extracted back
+        // into LightMap for ApplyJobLightMap. Pooled via ChunkJobArrayPool.RentPaddedVoxels/RentPaddedLight
+        // when UsesPooledBuffers.
         public NativeArray<uint> PaddedVoxels;
         public NativeArray<ushort> PaddedLight;
 

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Data;
 using Helpers;
 using Jobs.BurstData;
+using Jobs.Data;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -24,15 +25,81 @@ namespace Jobs
         // cross-seam read the BFS performs. A missing neighbor is filled with the uint/ushort MaxValue
         // sentinel at gather time, reproducing the old per-neighbor !IsCreated||Length==0 guard.
 
-        // Padded voxel volume. Read-only in-job (the job never writes voxels) — only light is computed.
-        [ReadOnly]
+        // P-2 Layer 1: the gather runs HERE (on the worker thread) at the top of Execute(), not on the
+        // main thread before scheduling. The main thread only fills the 9 snapshot maps below and rents
+        // the padded buffers (left unfilled); Execute() gathers center + 8 neighbors into the padded
+        // volumes, then runs the existing BFS. Inputs are unchanged point-in-time snapshots, so the gather
+        // moving threads is bit-identical by construction — only the gather's location changed.
+
+        // Padded voxel volume. Written ONCE by the in-job gather, then read-only for the rest of Execute()
+        // (the job never mutates voxels) — NOT [ReadOnly], because the gather writes it on the worker.
         public NativeArray<uint> PaddedVoxels;
 
-        // Padded ushort light volume. The ONLY writable light store. It also serves as the in-job
-        // cross-chunk read-back store: a SetSunlight/SetBlocklightRGB into a halo cell writes the padded
-        // volume directly (replacing the deleted NativeHashMap write-through cache), so a subsequent
-        // Get*Data on that position observes the just-written value within the same job execution.
+        // Padded ushort light volume. Gathered first, then the ONLY writable light store. It also serves
+        // as the in-job cross-chunk read-back store: a SetSunlight/SetBlocklightRGB into a halo cell writes
+        // the padded volume directly (replacing the deleted NativeHashMap write-through cache), so a
+        // subsequent Get*Data on that position observes the just-written value within the same job execution.
         public NativeArray<ushort> PaddedLight;
+
+        // P-2 Layer 1: gather SOURCES — the center + 8 neighbor section-contiguous full-chunk snapshot maps
+        // the worker-thread gather reads into the padded volumes above. Compass directions match
+        // WorldJobManager.AcquireNeighborMaps / NeighborMapSet. Each is a point-in-time snapshot copied by
+        // the main thread before scheduling (read-only here). A missing neighbor is passed as a created
+        // zero-length array (NOT default — Unity job-safety requires every container be constructed), which
+        // ChunkMath.GatherPadded* sentinel-fills (uint/ushort MaxValue) exactly as before.
+        [ReadOnly]
+        public NativeArray<uint> CenterVoxels;
+
+        [ReadOnly]
+        public NativeArray<uint> VoxelW;
+
+        [ReadOnly]
+        public NativeArray<uint> VoxelE;
+
+        [ReadOnly]
+        public NativeArray<uint> VoxelS;
+
+        [ReadOnly]
+        public NativeArray<uint> VoxelN;
+
+        [ReadOnly]
+        public NativeArray<uint> VoxelSW;
+
+        [ReadOnly]
+        public NativeArray<uint> VoxelNW;
+
+        [ReadOnly]
+        public NativeArray<uint> VoxelSE;
+
+        [ReadOnly]
+        public NativeArray<uint> VoxelNE;
+
+        [ReadOnly]
+        public NativeArray<ushort> CenterLight;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightW;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightE;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightS;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightN;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightSW;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightNW;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightSE;
+
+        [ReadOnly]
+        public NativeArray<ushort> LightNE;
 
         public Vector2Int ChunkPosition;
 
@@ -67,10 +134,55 @@ namespace Jobs
         #endregion
 
         /// <summary>
+        /// Wires the P-2 Layer 1 gather sources (center + 8 neighbor snapshot maps) into this job from a
+        /// <see cref="NeighborMapSet"/> plus the center voxel/light maps. This is the SINGLE site that maps
+        /// each compass direction onto its <c>[ReadOnly]</c> source field, so the four schedulers
+        /// (production <c>WorldJobManager</c>, the editor pipeline, the benchmark, and the validation
+        /// harness) cannot drift or transpose a direction — a swap here would surface once, not in four
+        /// hand-copied blocks. Called on the main thread at schedule time (not Burst code); must run before
+        /// <see cref="IJob.Schedule"/> so <see cref="Execute"/>'s gather sees the populated fields.
+        /// </summary>
+        /// <param name="neighbors">The 8 neighbor voxel + light snapshot maps (compass-keyed).</param>
+        /// <param name="centerVoxels">The center chunk's voxel snapshot (gather source for px/pz ∈ [2,18)).</param>
+        /// <param name="centerLight">The center chunk's light snapshot (gather source for the center span).</param>
+        public void SetGatherSources(in NeighborMapSet neighbors, NativeArray<uint> centerVoxels, NativeArray<ushort> centerLight)
+        {
+            CenterVoxels = centerVoxels;
+            VoxelW = neighbors.NeighborW;
+            VoxelE = neighbors.NeighborE;
+            VoxelS = neighbors.NeighborS;
+            VoxelN = neighbors.NeighborN;
+            VoxelSW = neighbors.NeighborSW;
+            VoxelNW = neighbors.NeighborNW;
+            VoxelSE = neighbors.NeighborSE;
+            VoxelNE = neighbors.NeighborNE;
+            CenterLight = centerLight;
+            LightW = neighbors.LightW;
+            LightE = neighbors.LightE;
+            LightS = neighbors.LightS;
+            LightN = neighbors.LightN;
+            LightSW = neighbors.LightSW;
+            LightNW = neighbors.LightNW;
+            LightSE = neighbors.LightSE;
+            LightNE = neighbors.LightNE;
+        }
+
+        /// <summary>
         /// Executes the flood-fill lighting propagation algorithm within the central chunk, crossing boundaries to its 8 neighbors if necessary.
         /// </summary>
         public void Execute()
         {
+            // --- P-2 LAYER 1: WORKER-THREAD GATHER ---
+            // Gather the center + 8 neighbor snapshot maps into the halo-padded volumes BEFORE any BFS
+            // work. This used to run on the main thread before scheduling (LI-1); moving it here lands the
+            // ~305 µs gather floor on the worker thread instead, so the main thread pays only the snapshot
+            // fill and the worker keeps the 2.4–3× branch-free BFS win. Bit-identical: the inputs are the
+            // same unchanged snapshots and the gather logic is unchanged — only the call site moved.
+            ChunkMath.GatherPaddedVoxels(PaddedVoxels, CenterVoxels,
+                VoxelW, VoxelE, VoxelS, VoxelN, VoxelSW, VoxelNW, VoxelSE, VoxelNE);
+            ChunkMath.GatherPaddedLight(PaddedLight, CenterLight,
+                LightW, LightE, LightS, LightN, LightSW, LightNW, LightSE, LightNE);
+
             // Internal queues for the actual flood-fill algorithm. These are temporary for this job's execution.
             NativeQueue<LightRemovalNode> sunlightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
             NativeQueue<Vector3Int> sunlightPlacementQueue = new NativeQueue<Vector3Int>(Allocator.Temp);

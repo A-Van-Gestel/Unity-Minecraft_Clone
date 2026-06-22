@@ -185,17 +185,13 @@ namespace Editor.WorldTools.Libraries
                 SunLightRecalcQueue = sunlightRecalcQueue,
             };
 
-            // LI-1: gather the center + 8 neighbor maps into the halo-padded volumes the job consumes.
-            // Missing neighbors are sentinel-filled inside GatherPadded* (uint/ushort MaxValue).
+            // P-2 Layer 1: rent the padded volumes UNFILLED — the gather runs on the worker thread inside
+            // NeighborhoodLightingJob.Execute(), fed by the 9 snapshot maps wired in below. Missing
+            // neighbors are passed as created zero-length arrays and sentinel-filled in-job (uint/ushort
+            // MaxValue), exactly as production.
             NeighborMapSet nbrs = jobData.Input.Neighbors;
             jobData.PaddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             jobData.PaddedLight = new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            ChunkMath.GatherPaddedVoxels(jobData.PaddedVoxels, jobData.Map,
-                nbrs.NeighborW, nbrs.NeighborE, nbrs.NeighborS, nbrs.NeighborN,
-                nbrs.NeighborSW, nbrs.NeighborNW, nbrs.NeighborSE, nbrs.NeighborNE);
-            ChunkMath.GatherPaddedLight(jobData.PaddedLight, jobData.LightMap,
-                nbrs.LightW, nbrs.LightE, nbrs.LightS, nbrs.LightN,
-                nbrs.LightSW, nbrs.LightNW, nbrs.LightSE, nbrs.LightNE);
 
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
@@ -211,6 +207,7 @@ namespace Editor.WorldTools.Libraries
                 IsStable = jobData.IsStable,
                 PerformEdgeCheck = false,
             };
+            job.SetGatherSources(nbrs, jobData.Map, jobData.LightMap);
 
             jobData.Handle = job.Schedule();
             return jobData;

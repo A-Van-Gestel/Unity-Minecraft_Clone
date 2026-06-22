@@ -1,5 +1,7 @@
+using System;
 using System.Runtime.CompilerServices;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 
 namespace Helpers
@@ -67,19 +69,32 @@ namespace Helpers
         /// <c>!IsCreated || Length == 0</c> missing-neighbor guard). The run is contiguous in BOTH layouts
         /// because X is the fastest axis (stride 1) in each, so a fixed-(y,z) span of consecutive X is a
         /// flat block in the section-aware source AND in the linear padded volume — letting the gather move
-        /// a whole row segment with one bulk
-        /// <see cref="NativeArray{T}.Copy(NativeArray{T},int,NativeArray{T},int,int)"/> instead of a branchy
+        /// a whole row segment with one bulk <see cref="UnsafeUtility.MemCpy"/> instead of a branchy
         /// per-cell scatter (LI-1 follow-up #3). Generic over the element type so the voxel (uint) and light
-        /// (ushort) gathers share one implementation — this is main-thread <c>Helpers</c> code, not Burst,
-        /// so the generic carries no Burst constraint.
+        /// (ushort) gathers share one implementation; <c>MemCpy</c> over <c>GetUnsafeReadOnlyPtr</c>/
+        /// <c>GetUnsafePtr</c> keeps the body Burst-compatible (P-2 Layer 1 moved the gather into
+        /// <c>NeighborhoodLightingJob.Execute()</c>, so this now runs on a worker thread under Burst). Burst
+        /// monomorphizes the generic per concrete <c>T</c>, so there is no genericity cost at runtime.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void CopyRun<T>(NativeArray<T> src, int srcStart, NativeArray<T> padded, int dstStart, int length, T sentinel)
+        private static unsafe void CopyRun<T>(NativeArray<T> src, int srcStart, NativeArray<T> padded, int dstStart, int length, T sentinel)
             where T : unmanaged
         {
             if (src.IsCreated && src.Length > 0)
             {
-                NativeArray<T>.Copy(src, srcStart, padded, dstStart, length);
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                // Restore the bounds validation NativeArray<T>.Copy performed (the raw MemCpy below
+                // bypasses it). Gated on the SAME symbol Copy's own guards use, so it is compiled out in
+                // optimized/player/Burst-no-checks builds — the hot-path MemCpy pays nothing — while the
+                // editor and safety builds still trap an out-of-range run instead of corrupting memory.
+                if (srcStart < 0 || dstStart < 0 || length < 0 ||
+                    srcStart + length > src.Length || dstStart + length > padded.Length)
+                    throw new ArgumentException("CopyRun: source or destination run is out of bounds.");
+#endif
+                long stride = UnsafeUtility.SizeOf<T>();
+                byte* srcPtr = (byte*)src.GetUnsafeReadOnlyPtr() + srcStart * stride;
+                byte* dstPtr = (byte*)padded.GetUnsafePtr() + dstStart * stride;
+                UnsafeUtility.MemCpy(dstPtr, srcPtr, length * stride);
                 return;
             }
 

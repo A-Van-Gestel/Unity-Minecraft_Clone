@@ -449,7 +449,8 @@ namespace Benchmarks
                 Map = new NativeArray<uint>(sourceData.Center, allocator),
                 LightMap = new NativeArray<ushort>(sourceData.CenterLight, allocator),
 
-                // LI-1: gather the 9 source maps into the halo-padded volumes the job consumes.
+                // P-2 Layer 1: padded volumes rented UNFILLED — the worker-thread gather inside the job
+                // fills them from the 9 source maps wired into the job by ScheduleJob.
                 PaddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, allocator, NativeArrayOptions.UninitializedMemory),
                 PaddedLight = new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, allocator, NativeArrayOptions.UninitializedMemory),
 
@@ -469,16 +470,6 @@ namespace Benchmarks
 
             foreach (Vector2Int vector2Int in sourceData.SourceSunRecalcQueue)
                 jobData.SunLightRecalcQueue.Enqueue(vector2Int);
-
-            // LI-1: gather the just-copied center + 8 neighbor maps into the padded volumes. Argument
-            // order matches ChunkMath.GatherPadded* (center, W, E, S, N, SW, NW, SE, NE).
-            NeighborMapSet n = jobData.Input.Neighbors;
-            ChunkMath.GatherPaddedVoxels(jobData.PaddedVoxels, jobData.Map,
-                n.NeighborW, n.NeighborE, n.NeighborS, n.NeighborN,
-                n.NeighborSW, n.NeighborNW, n.NeighborSE, n.NeighborNE);
-            ChunkMath.GatherPaddedLight(jobData.PaddedLight, jobData.LightMap,
-                n.LightW, n.LightE, n.LightS, n.LightN,
-                n.LightSW, n.LightNW, n.LightSE, n.LightNE);
 
             return jobData;
         }
@@ -506,6 +497,7 @@ namespace Benchmarks
                 IsStable = data.IsStable,
                 PerformEdgeCheck = performEdgeCheck,
             };
+            job.SetGatherSources(data.Input.Neighbors, data.Map, data.LightMap);
 
             return job.Schedule();
         }
