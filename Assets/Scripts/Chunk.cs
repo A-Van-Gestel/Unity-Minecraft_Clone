@@ -19,7 +19,9 @@ public class Chunk
     public readonly GameObject ChunkGameObject;
 
     private bool _isActive;
-    private readonly HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
+
+    // TG-4 Phase 1: the active-voxel behavior buckets now live on ChunkData (the data they describe), which owns
+    // their allocation, per-family routing, and disposal. Chunk keeps only the tick orchestration below.
 
     // Cached reference to avoid a GetComponent call on every pool activation, while remaining Unity-lifetime safe
     private ChunkLoadAnimation _loadAnimation;
@@ -93,8 +95,9 @@ public class Chunk
 
         // Reset State
         _isActive = true;
-        _activeVoxels.Clear();
         _hasPlayedLoadAnimation = false;
+        // NOTE: the active-voxel buckets live on ChunkData and are cleared in ChunkData.Reset (data lifecycle),
+        // not here — a recycled visual re-linking to a still-valid cached ChunkData keeps its correct active set.
 
         Vector2Int worldPosKey = Coord.ToVoxelOrigin();
 
@@ -211,7 +214,7 @@ public class Chunk
                     int yOffset = i / ChunkMath.SECTION_SIZE % ChunkMath.SECTION_SIZE;
                     int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
 
-                    AddActiveVoxel(new Vector3Int(x, startY + yOffset, z));
+                    ChunkData.AddActiveVoxel(new Vector3Int(x, startY + yOffset, z), id);
                 }
             }
         }
@@ -229,33 +232,64 @@ public class Chunk
         foreach (int i in packedIndices)
         {
             ChunkMath.GetLocalPositionFromFlattenedIndex(i, out int x, out int y, out int z);
-            AddActiveVoxel(new Vector3Int(x, y, z));
+            ChunkData.AddActiveVoxel(new Vector3Int(x, y, z));
         }
     }
 
     #region Block Behavior Methods
 
     /// <summary>
-    /// Processes the block behavior for all active voxels currently registered in this chunk.
-    /// Removes voxels from the active list if they no longer meet their activation conditions.
+    /// Processes the block behavior for all active voxels currently registered in this chunk's <see cref="ChunkData"/>.
+    /// Removes voxels from the active buckets if they no longer meet their activation conditions. The active-voxel
+    /// storage lives on <see cref="ChunkData"/> (TG-4 Phase 1); this method is the tick orchestration that drives it.
     /// </summary>
     public void TickUpdate()
     {
-        if (_activeVoxels.Count == 0) return;
+        if (ChunkData == null) return;
 
-        // A temporary, pooled list to track items that need to be removed
-        List<Vector3Int> toRemove = ListPool<Vector3Int>.Get();
+        NativeHashSet<int> grass = ChunkData.ActiveGrassBucket;
+        NativeHashSet<int> fluids = ChunkData.ActiveFluidsBucket;
 
-        foreach (Vector3Int pos in _activeVoxels)
+        int grassCount = grass.IsCreated ? grass.Count : 0;
+        int fluidCount = fluids.IsCreated ? fluids.Count : 0;
+        if (grassCount == 0 && fluidCount == 0) return;
+
+        // Iterate each behavior family in a fixed order (grass, then fluids) — the TG-4 Phase 1 split. This changes
+        // the order mods are emitted vs the old single set; BH-D1 proves the change is §4.3-equivalent (independent
+        // mods canonicalize, same-voxel writes stay ordered). The apply path stays serial/unchanged in
+        // World.ApplyModifications. A single pooled scratch list is reused across both families.
+        List<int> toRemove = ListPool<int>.Get();
+        if (grassCount > 0) TickFamily(grass, toRemove);
+        if (fluidCount > 0) TickFamily(fluids, toRemove);
+        ListPool<int>.Release(toRemove);
+    }
+
+    /// <summary>
+    /// Ticks one behavior-family bucket: evaluates <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/>
+    /// for every registered voxel (unpacking its flat index to a local position), enqueues emitted mods to the world,
+    /// and drops voxels that are no longer active. Removals are deferred until after enumeration (a
+    /// <see cref="NativeHashSet{T}"/> cannot be modified mid-iteration); the apply pass runs later, so the bucket is
+    /// not mutated by mod application during this loop.
+    /// </summary>
+    /// <param name="bucket">The per-family active-voxel set (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
+    /// <param name="removeScratch">A reusable scratch list for the now-inactive indices; cleared on entry.</param>
+    private void TickFamily(NativeHashSet<int> bucket, List<int> removeScratch)
+    {
+        removeScratch.Clear();
+
+        foreach (int idx in bucket)
         {
+            ChunkMath.GetLocalPositionFromFlattenedIndex(idx, out int x, out int y, out int z);
+            Vector3Int pos = new Vector3Int(x, y, z);
+
             // Get the list of modifications from the behavior logic.
             List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
 
-            // If the block is NO LONGER active, mark it for removal
-            // TODO: Future refactor could combine Behave and Active logic to save chunk lookups
+            // If the block is NO LONGER active, mark it for removal.
+            // TODO: Future refactor could combine Behave and Active logic to save chunk lookups (TG-1).
             if (!BlockBehavior.Active(ChunkData, pos))
             {
-                toRemove.Add(pos);
+                removeScratch.Add(idx);
             }
 
             // If the behavior produced any changes, submit them to the world's global queue.
@@ -265,41 +299,31 @@ public class Chunk
             }
         }
 
-        // Remove inactive voxels from the HashSet in O(1) time each
-        foreach (Vector3Int pos in toRemove)
+        // Remove inactive voxels from the bucket in O(1) time each (deferred — see remarks).
+        foreach (int idx in removeScratch)
         {
-            _activeVoxels.Remove(pos);
+            bucket.Remove(idx);
         }
-
-        // Release the temporary list back to the pool
-        ListPool<Vector3Int>.Release(toRemove);
     }
 
     /// <summary>
-    /// Registers a voxel as active, meaning it will be evaluated during every chunk tick.
+    /// Registers a voxel as active (delegates to <see cref="ChunkData"/>, which owns the per-family buckets). Used
+    /// by the World's cross-chunk neighbor re-activation, which holds the neighbor <see cref="Chunk"/>.
     /// </summary>
     /// <param name="pos">The local position of the voxel within this chunk.</param>
     public void AddActiveVoxel(Vector3Int pos)
     {
-        _activeVoxels.Add(pos);
+        ChunkData.AddActiveVoxel(pos);
     }
 
     /// <summary>
-    /// Unregisters an active voxel, stopping it from being evaluated during chunk ticks.
+    /// Retrieves the total number of active voxels currently registered for ticking in this chunk (across all
+    /// behavior families). Delegates to <see cref="ChunkData"/>.
     /// </summary>
-    /// <param name="pos">The local position of the voxel within this chunk.</param>
-    public void RemoveActiveVoxel(Vector3Int pos)
-    {
-        _activeVoxels.Remove(pos);
-    }
-
-    /// <summary>
-    /// Retrieves the total number of active voxels currently registered for ticking in this chunk.
-    /// </summary>
-    /// <returns>The count of active voxels.</returns>
+    /// <returns>The count of active voxels, or 0 if no data is linked.</returns>
     public int GetActiveVoxelCount()
     {
-        return _activeVoxels.Count;
+        return ChunkData?.GetActiveVoxelCount() ?? 0;
     }
 
     #endregion
@@ -410,25 +434,24 @@ public class Chunk
     #region Public Getters
 
     /// <summary>
-    /// Gets a read-only collection of the active voxels in this chunk.
+    /// Enumerates the active voxels in this chunk (local positions), across all behavior families. Delegates to
+    /// <see cref="ChunkData"/>, which owns the buckets; empty when no data is linked.
     /// </summary>
-    public IReadOnlyCollection<Vector3Int> ActiveVoxels => _activeVoxels;
+    public IEnumerable<Vector3Int> ActiveVoxels =>
+        ChunkData != null ? ChunkData.ActiveVoxels : System.Array.Empty<Vector3Int>();
 
     #endregion
 
     #region Debug Information Methods
 
     /// <summary>
-    /// Checks if a voxel is active in this chunk.
+    /// Checks if a voxel is active in this chunk. Delegates to <see cref="ChunkData"/>.
     /// </summary>
     /// <param name="localVoxelPos">The local position of the voxel in the given chunk.</param>
     /// <returns>True if the voxel is active, false otherwise.</returns>
     public bool IsVoxelActive(Vector3Int localVoxelPos)
     {
-        if (_activeVoxels.Count == 0)
-            return false;
-
-        return _activeVoxels.Contains(localVoxelPos);
+        return ChunkData != null && ChunkData.IsVoxelActive(localVoxelPos);
     }
 
     #endregion

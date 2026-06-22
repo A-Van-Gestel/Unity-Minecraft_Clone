@@ -234,8 +234,13 @@ T11
             int activeAtEnd;
             bool ok = true;
 
+            // TG-4 Phase 1 promotion (in-game confirmed 2026-06-22): the goldens characterize the production
+            // SplitFamily traversal (per-family buckets, grass-then-fluid) rather than the retired single-set order.
+            // BH-D1[L|S] proves this equals the legacy order under §4.3; every fixture is single-family, so the
+            // serialized goldens are byte-identical to the legacy capture (no re-capture needed).
             using (BehaviorTestWorld world = build())
             {
+                world.Driver = TickDriver.SplitFamily;
                 BehaviorSnapshot snap = world.RunTicks(ticks);
                 s1 = snap.Serialize();
                 totalMods = snap.TotalModCount;
@@ -247,7 +252,10 @@ T11
             }
 
             using (BehaviorTestWorld world = build())
+            {
+                world.Driver = TickDriver.SplitFamily;
                 s2 = world.RunTicks(ticks).Serialize();
+            }
 
             // BH-6: determinism (the one universal invariant a single golden-equality check cannot prove).
             if (s1 != s2)

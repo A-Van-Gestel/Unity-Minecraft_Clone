@@ -51,10 +51,7 @@ public class ChunkPoolManager
         // Initialize ChunkData Pool
         _dataPool = new ConcurrentDynamicPool<ChunkData>(
             createFunc: () => new ChunkData(Vector2Int.zero), // Pos set in Get()
-            destroyAction: _ =>
-            {
-                /* Data GC handled by runtime */
-            },
+            destroyAction: data => data.Dispose(), // Frees the native active-voxel buckets (managed state is GC'd)
             onReturnAction: _ =>
             {
                 /* Reset handled manually in Return logic due to complexity */
