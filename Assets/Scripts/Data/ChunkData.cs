@@ -70,8 +70,13 @@ namespace Data
         /// <summary>Cold-start capacity hint for the per-family active buckets; they grow and retain capacity, self-tuning.</summary>
         private const int ACTIVE_BUCKET_INITIAL_CAPACITY = 64;
 
+#if UNITY_EDITOR
+        /// <summary>Block ids already warned about as active-but-unclassifiable, so the diagnostic logs once per id, not per voxel.</summary>
+        private static readonly HashSet<ushort> s_warnedUnclassifiedIds = new HashSet<ushort>();
+#endif
+
         /// <summary>The behavior families <see cref="BlockBehavior"/> dispatches on today (grass spread + fluids).</summary>
-        private enum BehaviorFamily
+        public enum BehaviorFamily
         {
             None,
             Grass,
@@ -96,6 +101,9 @@ namespace Data
         private static void DomainReset()
         {
             OnLightWorkFlagged = null;
+#if UNITY_EDITOR
+            s_warnedUnclassifiedIds.Clear();
+#endif
         }
 
         [NonSerialized]
@@ -547,25 +555,13 @@ namespace Data
         #region Active Voxel Behavior Buckets
 
         /// <summary>
-        /// Lazily allocates the per-family active-voxel sets on first registration. Keeping allocation off the
-        /// constructor means raw <see cref="ChunkData"/> instances that never register an active voxel (the
-        /// editor/test rigs) never touch native memory and so need no disposal.
-        /// </summary>
-        private void EnsureActiveBucketsCreated()
-        {
-            if (_activeGrass.IsCreated) return;
-            _activeGrass = new NativeHashSet<int>(ACTIVE_BUCKET_INITIAL_CAPACITY, Allocator.Persistent);
-            _activeFluids = new NativeHashSet<int>(ACTIVE_BUCKET_INITIAL_CAPACITY, Allocator.Persistent);
-        }
-
-        /// <summary>
         /// Classifies a block id into its behavior family, mirroring the dispatch order in
         /// <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/> (grass id first, then non-<c>None</c>
         /// fluid type).
         /// </summary>
         /// <param name="id">The block id to classify.</param>
         /// <returns>The behavior family, or <see cref="BehaviorFamily.None"/> if the block has no ticking behavior.</returns>
-        private static BehaviorFamily ClassifyFamily(ushort id)
+        public static BehaviorFamily ClassifyFamily(ushort id)
         {
             if (id == BlockIDs.Grass) return BehaviorFamily.Grass;
             if (World.Instance.BlockTypes[id].fluidType != FluidType.None) return BehaviorFamily.Fluid;
@@ -587,7 +583,8 @@ namespace Data
         /// <summary>
         /// Registers a voxel as active, routing it into the bucket for its behavior family (grass or fluid). The
         /// voxel is removed from the other family's bucket first, guaranteeing it lives in exactly one bucket even
-        /// across a family-changing mod.
+        /// across a family-changing mod. Each bucket is allocated lazily and independently on first use, so a
+        /// single-family chunk (e.g. grass surface, ocean) only ever allocates the one native set it needs.
         /// </summary>
         /// <param name="localPos">The local position of the voxel within this chunk.</param>
         /// <param name="id">The block id at <paramref name="localPos"/> (avoids a redundant voxel read).</param>
@@ -598,47 +595,53 @@ namespace Data
             {
                 // Defensive: AddActiveVoxel is only ever called for blocks World marked active (grass + fluids
                 // today). A block that is active but classifies to no family would silently never tick — surface it
-                // so a future third behavior family gets wired up (see TG-4 §10) instead of failing silently.
+                // so a future third behavior family gets wired up (see TG-4 §10) instead of failing silently. Warn
+                // once per id (in-editor): the bulk OnDataPopulated/scan path would otherwise spam one log per voxel.
                 RemoveActiveVoxel(localPos);
 #if UNITY_EDITOR
-                Debug.LogWarning($"[TG-4] AddActiveVoxel: voxel id {id} at {localPos} is active but matches no " +
-                                 "behavior family; not registered. Add a family bucket (TG-4 §10).");
+                if (s_warnedUnclassifiedIds.Add(id))
+                    Debug.LogWarning($"[TG-4] AddActiveVoxel: voxel id {id} is active but matches no behavior " +
+                                     "family; not registered. Add a family bucket (TG-4 §10).");
 #endif
                 return;
             }
 
-            EnsureActiveBucketsCreated();
             int idx = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
 
             if (family == BehaviorFamily.Grass)
             {
-                _activeFluids.Remove(idx);
+                if (!_activeGrass.IsCreated)
+                    _activeGrass = new NativeHashSet<int>(ACTIVE_BUCKET_INITIAL_CAPACITY, Allocator.Persistent);
+                if (_activeFluids.IsCreated) _activeFluids.Remove(idx);
                 _activeGrass.Add(idx);
             }
             else // Fluid
             {
-                _activeGrass.Remove(idx);
+                if (!_activeFluids.IsCreated)
+                    _activeFluids = new NativeHashSet<int>(ACTIVE_BUCKET_INITIAL_CAPACITY, Allocator.Persistent);
+                if (_activeGrass.IsCreated) _activeGrass.Remove(idx);
                 _activeFluids.Add(idx);
             }
         }
 
         /// <summary>
         /// Unregisters an active voxel, stopping it from being ticked. Removes from whichever family bucket holds it
-        /// (they are disjoint, so removing from both is safe). No-op before the buckets are first allocated.
+        /// (they are disjoint, so removing from both is safe). Each bucket is guarded independently because the two
+        /// are allocated lazily and a chunk may have created only one of them.
         /// </summary>
         /// <param name="localPos">The local position of the voxel within this chunk.</param>
         public void RemoveActiveVoxel(Vector3Int localPos)
         {
-            if (!_activeGrass.IsCreated) return;
+            if (!_activeGrass.IsCreated && !_activeFluids.IsCreated) return;
             int idx = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
-            _activeGrass.Remove(idx);
-            _activeFluids.Remove(idx);
+            if (_activeGrass.IsCreated) _activeGrass.Remove(idx);
+            if (_activeFluids.IsCreated) _activeFluids.Remove(idx);
         }
 
-        /// <summary>The grass-family active-voxel bucket (flat chunk indices). May be uncreated (see <see cref="EnsureActiveBucketsCreated"/>).</summary>
+        /// <summary>The grass-family active-voxel bucket (flat chunk indices). May be uncreated — guard with <c>IsCreated</c> (allocated lazily on first grass registration).</summary>
         internal NativeHashSet<int> ActiveGrassBucket => _activeGrass;
 
-        /// <summary>The fluid-family active-voxel bucket (flat chunk indices). May be uncreated (see <see cref="EnsureActiveBucketsCreated"/>).</summary>
+        /// <summary>The fluid-family active-voxel bucket (flat chunk indices). May be uncreated — guard with <c>IsCreated</c> (allocated lazily on first fluid registration).</summary>
         internal NativeHashSet<int> ActiveFluidsBucket => _activeFluids;
 
         /// <summary>
@@ -660,9 +663,10 @@ namespace Data
         /// <returns>True if the voxel is in either family bucket.</returns>
         public bool IsVoxelActive(Vector3Int localPos)
         {
-            if (!_activeGrass.IsCreated) return false;
+            if (!_activeGrass.IsCreated && !_activeFluids.IsCreated) return false;
             int idx = ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z);
-            return _activeGrass.Contains(idx) || _activeFluids.Contains(idx);
+            return (_activeGrass.IsCreated && _activeGrass.Contains(idx)) ||
+                   (_activeFluids.IsCreated && _activeFluids.Contains(idx));
         }
 
         /// <summary>

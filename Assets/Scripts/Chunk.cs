@@ -313,7 +313,10 @@ public class Chunk
     /// <param name="pos">The local position of the voxel within this chunk.</param>
     public void AddActiveVoxel(Vector3Int pos)
     {
-        ChunkData.AddActiveVoxel(pos);
+        // Null-guarded like the sibling delegations (TickUpdate/GetActiveVoxelCount/IsVoxelActive/ActiveVoxels):
+        // World's cross-chunk re-activation reaches here holding only the neighbor Chunk, whose ChunkData may be
+        // unlinked mid-recycle. The old local-HashSet add could never NRE; preserve that.
+        ChunkData?.AddActiveVoxel(pos);
     }
 
     /// <summary>
