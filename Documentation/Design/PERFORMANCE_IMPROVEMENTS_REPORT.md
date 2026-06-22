@@ -82,9 +82,9 @@ instead of a crash.
 
 ### Lighting
 
-| ID   | Finding                                                      | Effort | Risk | Benefit | Seed | Save |
-|------|--------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| LI-1 | Branchy 9-map dispatch + hashmap cache in the BFS inner loop |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| ID   | Finding                                                                              | Effort | Risk | Benefit | Seed | Save |
+|------|--------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| LI-1 | ✅ Branchy 9-map dispatch + hashmap cache (done; layout validated, not shipped → P-2) |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
 
 ### Tick & Gameplay
 
@@ -524,7 +524,20 @@ managed arrays per cloud tile creation.
 
 ## Detailed findings — Lighting
 
-### LI-1. Branchy 9-map dispatch + hashmap cache in the BFS inner loop
+### LI-1. ✅ DONE (2026-06-22) — Branchy 9-map dispatch + hashmap cache in the BFS inner loop
+
+> **Closed: implemented, bit-identical, suite-guarded, benchmarked — but NOT shipped standalone.**
+> The halo-padded layout is a **validated 2.4–3× in-job BFS win**, but the per-chunk **on-demand gather**
+> that feeds it costs ~2.6× the old 9-map prep on the main thread, so standalone schedule-time cost is
+> flat-to-worse on every scenario except the most BFS-bound. **The validated layout is folded into P-2**
+> (persistent halo-padded storage), where the data is already padded and the gather cost vanishes — keeping
+> the BFS win for free. The LI-1 branch is the proven foundation for P-2: branch-free accessors,
+> `LIGHTING_HALO = MAX_LIGHTING_BFS_REACH = 2`, the gather/extract transcoders, and 47 lighting baselines
+> guarding bit-identity across the halo seam. Full numbers + decision:
+> [`Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md).
+> Retained here (not deleted) so the "halo helps → just ship it" idea isn't re-proposed without the gather
+> caveat. Key correction from this work: the doc's suggested **1-voxel halo is a correctness bug** — the
+> sunlight-darkening path reads ±2 (edges *and* diagonal corners), so **halo = 2** (20×128×20). Full record below.
 
 **Observed:** Every `GetLightData` / `GetPackedData` call inside `NeighborhoodLightingJob`
 (`NeighborhoodLightingJob.cs` ~lines 814–891) walks an up-to-9-way branch tree to select the correct
@@ -1206,12 +1219,12 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
    ~~MR-2 ✅ done — vertex format (60 B → 32 B/vertex, upload −57%)~~.
    TG-6 (pool the per-chunk `ActiveVoxels` `NativeList` — small, independent; benchmark via `ActiveVoxelScanBenchmark`) →
    GS-1 (baked-noise liquid shader) →
-   LI-1 (padded lighting volume — benchmark against P-1, acceptance: bit-identical light output) →
+   ~~LI-1 ✅ done — padded lighting volume; layout validated (2.4–3× in-job BFS) but on-demand gather is the cost → NOT shipped standalone, folded into P-2~~ →
    TG-1 (tick path) or directly TG-4 if committing to the full split.
    The GS-5 §7.3 ownership split (`forceRenderingOff` vs `SetActive`) is a small, independently
    harmless PR — now unblocked (MR-3/MR-4 done); do it early so GS-5 stays unblocked.
 5. **Long-horizon architecture:**
-   P-2 (persistent native chunk storage — design it halo-padded so it subsumes LI-1) →
+   **P-2 (persistent native chunk storage — design it halo-padded so it subsumes LI-1; NEXT, builds on the validated LI-1 layout — see [`Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md`](../Performance/LIGHTING_LI1_2026_06_22_BENCHMARK.md))** →
    GS-5 (section occlusion culling — phased plan in `VISIBILITY_CULLING_ARCHITECTURE.md` §5+§7) →
    MR-8 (greedy meshing — own design doc first).
 
