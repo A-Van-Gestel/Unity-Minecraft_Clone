@@ -72,6 +72,9 @@ disposed one frame later — this is simultaneously the frame-time cost and the 
 3. **Long term:** store canonical voxel/light data in persistent native memory per chunk so jobs
    read it directly (with a generation/version guard), eliminating schedule-time copies entirely.
    This touches the whole pipeline — consult `chunk-lifecycle` invariants before attempting.
+   **Now designed as P-2 — see [`PERSISTENT_CHUNK_STORAGE_P2.md`](PERSISTENT_CHUNK_STORAGE_P2.md)**
+   (Layer 1 = move the LI-1 gather to a worker thread over the existing snapshots, low-risk, banks the win;
+   Layer 2 = this rec's zero-copy persistent storage, optional/profiler-gated, subsumes P-1, overlaps §2/P-3).
 
 > **Validation prerequisite for recs 2–3 (border slabs = P-1, persistent halo = P-2).** Both change
 > *what neighbor data each job receives*, so their "output-preserving" claim hinges on the seam being

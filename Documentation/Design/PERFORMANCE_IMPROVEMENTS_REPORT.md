@@ -132,14 +132,14 @@ These remain fully documented in the pipeline analysis — the table is reproduc
 is the single at-a-glance view. **Read that document (and the `chunk-lifecycle` skill) before
 implementing any of these.**
 
-| ID  | Finding (doc section)                                                                | Effort | Risk  | Benefit | Seed |   Save    |
-|-----|--------------------------------------------------------------------------------------|:------:|:-----:|:-------:|:----:|:---------:|
-| P-1 | Border-slab copies instead of full-volume snapshots (§1.2)                           |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
-| P-2 | Persistent native voxel/light storage, zero-copy jobs (§1.3)                         |   🔴   |  🔴   |   🟢    |  ✅   |     ✅     |
-| P-3 | Jobified lighting merge in `ApplyLightingJobResult` (§2)                             |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
-| P-4 | Backpressure: in-flight caps, out-of-range discard, time budgets, panic gate (§3)    |   🟡   | 🟡→🔴 |   🟢    |  ✅   |     ✅     |
-| P-5 | "Lighting stable" save bit to skip edge checks on load (§4.4)                        |   🟡   |  🟡   |   🟢    |  ✅   | ⚠️ Format |
-| P-6 | Smaller observations: O(n) removals, fail-safe scan counter, draw-queue trickle (§5) |   🟢   |  🟢   |   🟡    |  ✅   |     ✅     |
+| ID  | Finding (doc section)                                                                                                                                                   | Effort | Risk  | Benefit | Seed |   Save    |
+|-----|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:-----:|:-------:|:----:|:---------:|
+| P-1 | Border-slab copies instead of full-volume snapshots (§1.2)                                                                                                              |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
+| P-2 | Worker-thread gather (Layer 1, low-risk, banks the LI-1 win) + optional persistent zero-copy storage (Layer 2, §1.3) — **[design doc](PERSISTENT_CHUNK_STORAGE_P2.md)** | 🟢→🔴  | 🟢→🔴 |   🟢    |  ✅   |     ✅     |
+| P-3 | Jobified lighting merge in `ApplyLightingJobResult` (§2)                                                                                                                |   🟡   |  🟡   |   🟢    |  ✅   |     ✅     |
+| P-4 | Backpressure: in-flight caps, out-of-range discard, time budgets, panic gate (§3)                                                                                       |   🟡   | 🟡→🔴 |   🟢    |  ✅   |     ✅     |
+| P-5 | "Lighting stable" save bit to skip edge checks on load (§4.4)                                                                                                           |   🟡   |  🟡   |   🟢    |  ✅   | ⚠️ Format |
+| P-6 | Smaller observations: O(n) removals, fail-safe scan counter, draw-queue trickle (§5)                                                                                    |   🟢   |  🟢   |   🟡    |  ✅   |     ✅     |
 
 ---
 
