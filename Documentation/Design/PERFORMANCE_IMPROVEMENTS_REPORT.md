@@ -734,6 +734,14 @@ initialization code (low priority).
 > **Detailed design:** [TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md](TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) —
 > phased plan (BH-D1 infra → per-family storage split → grass Burst → fluid Burst → parallelize + Tier-2),
 > with the BH-D1 old-vs-new differential slotted into each phase gate.
+>
+> **Status (2026-06-22): Phases 0–1 SHIPPED, Phases 2–4 profile-gated.** Phase 0 (BH-D1 differential infra) +
+> Phase 1 (per-family `NativeHashSet<int>` active-voxel buckets — landed on **`ChunkData`**, not `Chunk`; tick
+> orchestration stays on `Chunk`) are in-game confirmed, suite 11/11 green. The new runtime buckets are
+> pool-retained (no per-recycle churn — **TG-6-aligned**, but TG-6's own target, the `GenerationJobData.ActiveVoxels`
+> hand-off list, is untouched). Phases 2–3 (grass/fluid Burst) and Phase 4 (parallelize + cross-chunk) are not
+> started; the TG-4-vs-TG-5 fork is decided by profiling the tick under heavy fluid sim (see the design doc's §5
+> decision framework). The 🔴/🔴 ratings below cover the *remaining* Phases 2–4.
 
 **Observed:** All ticking voxels (fluids, grass, future behaviors) flow through one monolithic
 collection and a central `switch` in `BlockBehavior`. As behavior types grow, this forces a single

@@ -1,10 +1,18 @@
 # TG-4 — `BlockBehavior` Data Separation (ECS/DOTS pattern)
 
-> **Status:** PROPOSED (design). Not yet implemented. Detail doc for the **TG-4** entry in
+> **Status:** PARTIALLY IMPLEMENTED (2026-06-22). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
+> per-family active-voxel storage split, in-game confirmed, suite 11/11 green); **Phases 2–4 remain PROPOSED**
+> and are profile-gated (see §5 decision framework). Detail doc for the **TG-4** entry in
 > [PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md). The behavior-tick validation
 > harness that gates this work is **built and green** (Waves 0–2, 8 baselines) — see
 > [BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md).
-> This document scopes the implementation and pins **where BH-D1 (the old-vs-new differential) slots in**.
+>
+> **As-built correction (Phase 1):** the per-family buckets live on **`ChunkData`** (the data they describe),
+> **not** on `Chunk` as §3/§5 below were originally drafted. `ChunkData` owns the buckets +
+> `AddActiveVoxel`/`RemoveActiveVoxel`/`ClassifyFamily`; `Chunk` keeps only the **tick orchestration**
+> (`TickUpdate` reads `ChunkData`'s buckets). This let `ChunkData.ModifyVoxel` register actives directly
+> instead of calling up into the visual `Chunk`, removing the old `if (Chunk != null)` worldgen gap. The
+> sections below are kept as the original design narrative with per-section ⮕ **AS BUILT** notes where they diverge.
 
 ---
 
@@ -86,6 +94,14 @@ flow pathfinding and cross-chunk spread.
    `Chunk.OnDataPopulated`, and `Chunk.AddActiveVoxel`/`RemoveActiveVoxel` all route into the
    per-family collection. (This is the TG-6 surface — see §7; pooling its hand-off list is folded in.)
 
+> ⮕ **AS BUILT (Phase 1).** Items 1 & 4 landed on **`ChunkData`**, not `Chunk`. The buckets are
+> **`NativeHashSet<int>`** (`_activeGrass`/`_activeFluids`), not `NativeList<int>` — the registration sinks re-add
+> already-active voxels (Step-4 re-activation, `ModifyVoxel`) and rely on set **dedup** + O(1) remove that a list
+> can't give. (`NativeList<int>` remains the eventual *job-input* form for Phase 2+, materialized by snapshotting the
+> set at schedule time.) Buckets are allocated **lazily and per-family** (a grass-only/ocean-only chunk allocates
+> one set), cleared in `ChunkData.Reset`, and disposed via the `ChunkData` pool's `destroyAction`. Item 2's
+> per-family Burst jobs are **not yet built** (Phases 2–3).
+
 ---
 
 ## 4. The three hard problems
@@ -145,7 +161,7 @@ incidental order would reject a correct TG-4.
 Each phase is independently shippable and **gated by the harness + BH-D1**. No phase advances until the
 8 baselines stay green and BH-D1 reports stream-equivalence.
 
-### Phase 0 — BH-D1 differential infrastructure *(prerequisite; no production change)*
+### Phase 0 — BH-D1 differential infrastructure *(prerequisite; no production change)* — ✅ DONE (2026-06-22)
 
 Build the old-vs-new comparator in the behavior suite (see §6): a runner that replays a fixture through
 two driver implementations and asserts stream-equivalence under the §4.3 canonicalization. Wire **both
@@ -153,15 +169,33 @@ sides to the current path** initially → it must report identical (sanity check
 canonicalization are correct before any real divergence exists). **Gate:** comparator green on all 8
 fixtures with old==old.
 
-### Phase 1 — Split the active-set storage by family *(managed, still main-thread)*
+> ✅ **Shipped:** `BehaviorDifferential` (the §4.3 canonicalizer: per-tick mods grouped by target →
+> same-voxel order-sensitive, independent mods position-canonicalized + a final-state byte-identity backstop via
+> `BehaviorTestWorld.DumpVoxels`), a `TickDriver{Legacy,SplitFamily}` enum on `BehaviorTestWorld`, and a
+> `BehaviorValidationSuite.Differential` partial with a comparator self-test + the `BH-D1[L|L]` self-check. All
+> green with both drivers = legacy.
 
-Replace `Chunk._activeVoxels` with per-family collections; bucket on registration
+### Phase 1 — Split the active-set storage by family *(managed, still main-thread)* — ✅ DONE (2026-06-22)
+
+Replace the single `_activeVoxels` set with per-family collections; bucket on registration
 (`RegisterActiveVoxelsFromJob`/`OnDataPopulated`/`AddActiveVoxel`); `TickUpdate` iterates each bucket and
 calls the **unchanged** managed `Behave`/`Active`. Pure data-layout change, no logic change.
 **Gate:** 8 baselines green **and** BH-D1 (new-storage path vs legacy) green — this is the first real
-exercise of §4.3, because bucketing changes iteration order. Pool-reset safety: per-family collections
-are transient fields on a pooled type → add their `.Clear()` to `ChunkData.Reset` in the same commit
-(pool-reset-safety rule).
+exercise of §4.3, because bucketing changes iteration order.
+
+> ✅ **Shipped — but on `ChunkData`, not `Chunk`** (the original draft above and the pool-reset note assumed the set
+> stayed on the visual `Chunk`; the active set is data-derived metadata, so it moved to `ChunkData`):
+> - `ChunkData._activeGrass`/`_activeFluids` (`NativeHashSet<int>`, `[NonSerialized]`) + `AddActiveVoxel`/
+    > `RemoveActiveVoxel`/`ClassifyFamily`/`GetActiveVoxelCount`/`IsVoxelActive`/`ActiveVoxels`/`Dispose`. `Chunk`
+    > keeps `TickUpdate`/`TickFamily` (reading `ChunkData.ActiveGrassBucket`/`ActiveFluidsBucket`) + thin delegations.
+> - `ChunkData.ModifyVoxel` now maintains the buckets **directly on `this`**, deleting the old
+    > `if (Chunk != null) Chunk.AddActiveVoxel(...)` back-call and its worldgen gap.
+> - **Pool-reset safety:** buckets are `.Clear()`'d in **`ChunkData.Reset`** (correct — data lifecycle; the original
+    > note named the right method but the wrong owning type) and `Dispose()`'d via the `ChunkData` pool's
+    > `destroyAction`; lazily allocated per-family so single-family chunks allocate one set.
+> - **BH-D1 gate:** `BH-D1[L|S]` (legacy vs split-family) green over **8 fixtures** — incl. a new mixed grass+fluid
+    > fixture (`BuildMixedFamilyWorld`), the only one with two non-empty buckets; the seven golden fixtures are
+    > single-family so their goldens were promoted to the `SplitFamily` driver byte-identically (no re-capture).
 
 ### Phase 2 — Burstify **grass** (Tier-1 interior) *(first real Burst job)*
 
@@ -264,11 +298,17 @@ two-driver runner.
 
 | Phase | BH-D1 configuration               | Pass condition                                                              |
 |-------|-----------------------------------|-----------------------------------------------------------------------------|
-| 0     | both drivers = legacy             | streams identical (comparator self-check)                                   |
-| 1     | legacy vs split-storage (managed) | equivalent under §4.3 (first real reorder test)                             |
+| 0 ✅   | both drivers = legacy             | streams identical (comparator self-check) — **green**                       |
+| 1 ✅   | legacy vs split-storage (managed) | equivalent under §4.3 (first real reorder test) — **green over 8 fixtures** |
 | 2     | legacy vs grass-Burst hybrid      | equivalent over BH-B6/B7; fluids unaffected                                 |
 | 3     | legacy vs fluid-Burst hybrid      | equivalent over BH-B1–B5                                                    |
 | 4     | legacy vs full parallel + Tier-2  | equivalent over all fixtures + new cross-chunk fixtures + N-run determinism |
+
+> **Phase 1 fixture note:** the seven golden fixtures (BH-B1…B7) are each single-family, so under `SplitFamily`
+> their traversal order equals legacy — `BH-D1[L|S]` passes but exercises no *cross-family* reorder there. A mixed
+> grass+fluid fixture (`BH-D1-MIX`) was added so the two-non-empty-bucket partition is actually covered;
+> genuine *same-target* cross-family ordering (which never occurs in real behavior — grass and fluids don't
+> co-target a voxel) stays covered by the comparator self-test, not a behavior fixture.
 
 **Promotion.** Once a phase's new path is confirmed in-game and BH-D1 is green, the new path *becomes*
 the path the existing goldens run against (they are re-captured only if §4.3 canonicalization legitimately
@@ -285,6 +325,13 @@ list into one per behavior family. Therefore **TG-6 should be done *after* TG-4 
 registration rework)**, built against the final per-family layout — doing it first courts throwaway work.
 The pooling *concern* is not superseded (per-chunk native-list churn persists and grows); only its
 *implementation* is. See the TG-6 detail section in the performance report.
+
+> ⮕ **AS BUILT (Phase 1) — TG-6-aligned, but TG-6 is NOT closed.** Phase 1 chose a pool-friendly layout for the
+> **runtime** buckets — the per-family `NativeHashSet<int>`s are allocated once per pooled `ChunkData` (lazily),
+> **retained across `Reset`**, and freed only when the pool trims the instance — so the new native storage adds no
+> per-recycle alloc/free churn. **TG-6's actual target is untouched:** the generation hand-off list
+> `GenerationJobData.ActiveVoxels` (`NativeList<int>` allocated per generated chunk, freed in `Dispose`) is still
+> per-chunk churn. TG-6 now builds against this final per-family sink layout (item 4 above), as planned.
 
 ---
 
