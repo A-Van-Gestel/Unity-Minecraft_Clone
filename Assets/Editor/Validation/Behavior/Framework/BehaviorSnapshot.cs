@@ -107,11 +107,8 @@ namespace Editor.Validation.Behavior.Framework
                     {
                         for (int i = 0; i < eval.Mods.Count; i++)
                         {
-                            VoxelMod m = eval.Mods[i];
                             if (i > 0) sb.Append(", ");
-                            sb.Append(m.ID).Append("@(").Append(m.GlobalPosition.x).Append(',')
-                                .Append(m.GlobalPosition.y).Append(',').Append(m.GlobalPosition.z).Append("):")
-                                .Append(m.Meta.ToString("X2")).Append(':').Append(m.ImmediateUpdate ? '1' : '0');
+                            sb.Append(FormatMod(eval.Mods[i]));
                         }
                     }
 
@@ -121,5 +118,17 @@ namespace Editor.Validation.Behavior.Framework
 
             return sb.ToString();
         }
+
+        /// <summary>
+        /// Renders a single <see cref="VoxelMod"/> to its canonical <c>id@(x,y,z):meta:imm</c> string — the one
+        /// source of truth for the per-mod format, shared by <see cref="Serialize"/> and the BH-D1 differential
+        /// canonicalizer so the golden masters and the differential can never disagree on what "same mod" means.
+        /// Encodes exactly the fields <see cref="VoxelMod"/> equality compares (id, target, meta, immediate-update;
+        /// Rule is deliberately excluded).
+        /// </summary>
+        /// <param name="m">The mod to render.</param>
+        /// <returns>The canonical per-mod string.</returns>
+        public static string FormatMod(VoxelMod m) =>
+            $"{m.ID}@({m.GlobalPosition.x},{m.GlobalPosition.y},{m.GlobalPosition.z}):{m.Meta:X2}:{(m.ImmediateUpdate ? '1' : '0')}";
     }
 }

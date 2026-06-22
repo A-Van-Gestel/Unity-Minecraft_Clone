@@ -211,12 +211,16 @@ namespace Editor.Validation.Behavior.Framework
             List<Vector3Int> fluids = new List<Vector3Int>();
             List<Vector3Int> other = null;
 
+            // Classify via the PRODUCTION classifier (ChunkData.ClassifyFamily) so this driver models the real
+            // per-family partition by construction — a third family added to production can't silently drift from
+            // the harness's model. The stub World.Instance.BlockTypes is the test palette, so the lookup matches.
             foreach (Vector3Int pos in _activeVoxels)
             {
-                switch (FamilyOf(pos))
+                ushort id = BurstVoxelDataBitMapping.GetId(ChunkData.GetVoxel(pos.x, pos.y, pos.z));
+                switch (ChunkData.ClassifyFamily(id))
                 {
-                    case BehaviorFamily.Grass: grass.Add(pos); break;
-                    case BehaviorFamily.Fluid: fluids.Add(pos); break;
+                    case ChunkData.BehaviorFamily.Grass: grass.Add(pos); break;
+                    case ChunkData.BehaviorFamily.Fluid: fluids.Add(pos); break;
                     default:
                         (other ??= new List<Vector3Int>()).Add(pos);
                         break;
@@ -228,27 +232,6 @@ namespace Editor.Validation.Behavior.Framework
             ordered.AddRange(fluids);
             if (other != null) ordered.AddRange(other);
             return ordered;
-        }
-
-        /// <summary>The behavior families <see cref="BlockBehavior.Behave"/>/<c>Active</c> dispatch on today.</summary>
-        private enum BehaviorFamily
-        {
-            None,
-            Grass,
-            Fluid,
-        }
-
-        /// <summary>
-        /// Classifies the voxel currently at <paramref name="pos"/> into its behavior family, mirroring the branch
-        /// conditions in <see cref="BlockBehavior.Behave"/> (grass id, then non-<c>None</c> fluid type). The order
-        /// matches production: grass is checked before fluid.
-        /// </summary>
-        private BehaviorFamily FamilyOf(Vector3Int pos)
-        {
-            ushort id = BurstVoxelDataBitMapping.GetId(ChunkData.GetVoxel(pos.x, pos.y, pos.z));
-            if (id == BlockIDs.Grass) return BehaviorFamily.Grass;
-            if (PaletteOf(id).fluidType != FluidType.None) return BehaviorFamily.Fluid;
-            return BehaviorFamily.None;
         }
 
         /// <summary>

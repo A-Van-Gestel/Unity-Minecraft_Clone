@@ -107,12 +107,10 @@ namespace Editor.Validation.Behavior.Framework
         }
 
         /// <summary>
-        /// Canonical per-mod string, mirroring the field set <see cref="VoxelMod"/> equality compares (id, target,
-        /// meta, immediate-update flag; Rule is deliberately excluded) and the format used by
-        /// <see cref="BehaviorSnapshot.Serialize"/>.
+        /// Canonical per-mod string — delegates to <see cref="BehaviorSnapshot.FormatMod"/> so the differential and
+        /// the golden masters share one definition of the per-mod format (id, target, meta, immediate-update).
         /// </summary>
-        private static string ModString(VoxelMod m) =>
-            $"{m.ID}@({m.GlobalPosition.x},{m.GlobalPosition.y},{m.GlobalPosition.z}):{m.Meta:X2}:{(m.ImmediateUpdate ? '1' : '0')}";
+        private static string ModString(VoxelMod m) => BehaviorSnapshot.FormatMod(m);
 
         /// <summary>Returns a short description of the first line at which two canonical strings differ, for diagnostics.</summary>
         private static string FirstDiff(string a, string b)
