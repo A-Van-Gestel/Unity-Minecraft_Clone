@@ -744,8 +744,12 @@ initialization code (low priority).
 > finisher for **fluid** (grass negligible → stays managed): the isolated tick is perfectly linear across chunks
 > and ~21 ms/tick single-threaded at render-distance-5 ocean — see
 > [`Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md)
-> and the design doc's §5. Committing the Phase-3 fluid-Burst engineering is gated on a full-world stress pass
-> (tick-vs-mesh attribution). The 🔴/🔴 ratings below cover the *remaining* Phases 2–4.
+> and the design doc's §5. The **full-world stress-pass attribution gate is now CLOSED** (2026-06-23,
+> [`Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md)):
+> mesh-rebuild does **not** dominate (refuted); the tick owns the **GC-bound ~180 ms dam-break spike** (Phase-3
+> fluid→Burst justified) — but the **sustained** ocean frame is **lighting-dominated** (~66 %), so TG-4 removes the
+> stutter *spike*, not the *average* cost (ocean smoothness additionally needs the lighting line, LI-1 / P-2). The
+> 🔴/🔴 ratings below cover the *remaining* Phases 2–4.
 
 **Observed:** All ticking voxels (fluids, grass, future behaviors) flow through one monolithic
 collection and a central `switch` in `BlockBehavior`. As behavior types grow, this forces a single

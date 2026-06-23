@@ -3,9 +3,13 @@
 > **Status:** PARTIALLY IMPLEMENTED (2026-06-22). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
 > per-family active-voxel storage split, in-game confirmed, suite 11/11 green); **Phases 2–4 remain PROPOSED**.
 > The §5 profile gate **RAN 2026-06-23** and resolves toward TG-4's **parallel** finisher for **fluid** (grass
-> stays managed) — see [`Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md);
-> committing the Phase-3 fluid-Burst engineering is itself gated on a full-world stress pass (tick-vs-mesh
-> attribution). Detail doc for the **TG-4** entry in
+> stays managed) — see [`Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md).
+> The **full-world stress pass attribution gate is now CLOSED** (2026-06-23,
+> [`Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md)):
+> mesh-rebuild does **not** dominate (refuted); the tick owns the **GC-bound ~180 ms dam-break spike** (Phase-3
+> fluid→Burst is justified and well-targeted); but the **sustained** ocean frame is **lighting-dominated** (~66 %),
+> so TG-4 removes the *stutter spike*, not the *average* cost — ocean smoothness additionally needs the lighting
+> line (LI-1 / P-2). Detail doc for the **TG-4** entry in
 > [PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md). The behavior-tick validation
 > harness that gates this work is **built and green** (Waves 0–2, 8 baselines) — see
 > [BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md).
@@ -240,9 +244,16 @@ differential fixtures (closes harness BH-4) + a determinism stress (replay N tim
     > (grass-Burst) is therefore **not** motivated by cost — do it only as the Burst-pattern stepping-stone to
     > Phase 3, or skip it.
 > - **GC is only ~10 % in IL2CPP** (Mono inflated it) → **parallelism is the prize**, not GC-elimination.
-> - **Open gate before committing the Phase-3 fluid-Burst engineering:** a **full-world stress pass** must
-    > confirm the *tick* (not the mesh-rebuild it triggers + lighting + cross-chunk) dominates the real ocean
-    > frame. This benchmark is **tick-only**; it proves the tick win exists, not that it is the whole frame.
+> - **Attribution gate — CLOSED 2026-06-23** (was: a full-world stress pass must confirm the *tick*, not the
+    > mesh-rebuild it triggers, dominates the real ocean frame). The **full-world fluid stress pass** ran the real,
+    > throttled, full-pipeline 25-chunk flood and split each frame across Tick/Apply/Mesh/Light
+    > ([`Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md)):
+    > **mesh-rebuild does *not* dominate** (1.5 ms avg / 5.5 ms peak — refuted); the **tick owns the worst-case
+    > spike** (the ~180 ms dam-break tick = 96 % of the peak frame), and that spike is **GC/managed-bound** (IL2CPP
+    > only 1.05× on it) → TG-4's Burst/`NativeList` port is exactly what removes it. **However the *sustained* flood
+    > frame is lighting-dominated** (~6.9 ms = 66 % of the avg frame), which TG-4 does not touch. **Net: commit
+    > Phase-3 to kill the dam-break stutter spike (justified); ocean *average* smoothness is a separate lighting
+    > lever, not TG-4.**
 >
 > The framework below is the original pre-profile reasoning; it stands, and the data confirms its TG-4 branch
 > for fluid.
