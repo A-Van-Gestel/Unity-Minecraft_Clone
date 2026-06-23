@@ -1,4 +1,5 @@
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -216,7 +217,7 @@ namespace Benchmarks
         /// </summary>
         /// <param name="scenario">The scenario to measure.</param>
         /// <param name="onComplete">Callback receiving the aggregated result.</param>
-        private IEnumerator RunScenario(FluidScenario scenario, System.Action<ScenarioResult> onComplete)
+        private IEnumerator RunScenario(FluidScenario scenario, Action<ScenarioResult> onComplete)
         {
             Debug.Log($"--- Running: {scenario.Name} ({scenario.ChunkCount} chunk(s), {scenario.Ticks} ticks × {_benchmarkRuns} runs) ---");
 
@@ -298,6 +299,12 @@ namespace Benchmarks
                 data.IsPopulated = true;
 
                 Chunk chunk = new Chunk(coord);
+                // Chunk.Reset normally sets ChunkPosition, but we bypass Reset (it would re-fetch ChunkData from
+                // worldData instead of using our seeded data). Set it explicitly: ApplyModifications' six-neighbor
+                // re-activation converts global→local via Chunk.GetVoxelPositionInChunkFromGlobalVector3, which
+                // subtracts ChunkPosition — without it, chunks at a non-zero origin (the multi-chunk scenarios)
+                // read the wrong cell and mis-register neighbors.
+                chunk.ChunkPosition = coord.ToWorldPosition();
                 chunk.ChunkData = data;
                 data.Chunk = chunk;
 
@@ -364,7 +371,7 @@ namespace Benchmarks
         /// <summary>Logs (and optionally writes) the system info + results table.</summary>
         /// <param name="results">Per-scenario aggregated results.</param>
         /// <param name="totalElapsed">Wall-clock time of the whole benchmark.</param>
-        private void GenerateReport(List<ScenarioResult> results, System.TimeSpan totalElapsed)
+        private void GenerateReport(List<ScenarioResult> results, TimeSpan totalElapsed)
         {
             StringBuilder report = new StringBuilder();
             report.AppendLine("<color=cyan><b>--- FLUID / BEHAVIOR TICK BENCHMARK REPORT ---</b></color>");
