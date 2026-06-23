@@ -4,6 +4,7 @@ using Helpers;
 using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Mathematics;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Pool;
 using Object = UnityEngine.Object;
@@ -22,6 +23,14 @@ public class Chunk
 
     // TG-4 Phase 1: the active-voxel behavior buckets now live on ChunkData (the data they describe), which owns
     // their allocation, per-family routing, and disposal. Chunk keeps only the tick orchestration below.
+
+    // Profiler markers for the behavior-tick path (TG-4 profile gate: measure managed/main-thread tick cost and the
+    // per-family split before deciding Phase 2 jobification vs the TG-5 finisher). Near-zero cost when not recording;
+    // these are the named samples the Unity Profiler window and the profiler MCP tools key off, and the substrate the
+    // full-world fluid stress pass reads. Declared once (static) — the marker name, not the instance, is what's sampled.
+    private static readonly ProfilerMarker s_tickUpdateMarker = new ProfilerMarker("Chunk.TickUpdate");
+    private static readonly ProfilerMarker s_tickGrassMarker = new ProfilerMarker("Chunk.TickUpdate.Grass");
+    private static readonly ProfilerMarker s_tickFluidMarker = new ProfilerMarker("Chunk.TickUpdate.Fluid");
 
     // Cached reference to avoid a GetComponent call on every pool activation, while remaining Unity-lifetime safe
     private ChunkLoadAnimation _loadAnimation;
@@ -254,14 +263,28 @@ public class Chunk
         int fluidCount = fluids.IsCreated ? fluids.Count : 0;
         if (grassCount == 0 && fluidCount == 0) return;
 
-        // Iterate each behavior family in a fixed order (grass, then fluids) — the TG-4 Phase 1 split. This changes
-        // the order mods are emitted vs the old single set; BH-D1 proves the change is §4.3-equivalent (independent
-        // mods canonicalize, same-voxel writes stay ordered). The apply path stays serial/unchanged in
-        // World.ApplyModifications. A single pooled scratch list is reused across both families.
-        List<int> toRemove = ListPool<int>.Get();
-        if (grassCount > 0) TickFamily(grass, toRemove);
-        if (fluidCount > 0) TickFamily(fluids, toRemove);
-        ListPool<int>.Release(toRemove);
+        // Marker opened AFTER the no-op early-outs so a chunk with nothing to tick pays nothing.
+        using (s_tickUpdateMarker.Auto())
+        {
+            // Iterate each behavior family in a fixed order (grass, then fluids) — the TG-4 Phase 1 split. This changes
+            // the order mods are emitted vs the old single set; BH-D1 proves the change is §4.3-equivalent (independent
+            // mods canonicalize, same-voxel writes stay ordered). The apply path stays serial/unchanged in
+            // World.ApplyModifications. A single pooled scratch list is reused across both families.
+            List<int> toRemove = ListPool<int>.Get();
+            if (grassCount > 0)
+            {
+                using (s_tickGrassMarker.Auto())
+                    TickFamily(grass, toRemove);
+            }
+
+            if (fluidCount > 0)
+            {
+                using (s_tickFluidMarker.Auto())
+                    TickFamily(fluids, toRemove);
+            }
+
+            ListPool<int>.Release(toRemove);
+        }
     }
 
     /// <summary>

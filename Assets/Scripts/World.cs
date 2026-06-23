@@ -23,6 +23,7 @@ using Serialization;
 using UI;
 using Unity.Collections;
 using Unity.Mathematics;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
@@ -1913,8 +1914,15 @@ public class World : MonoBehaviour
     /// <remarks>
     /// TODO: I believe this method should be private, as forcing ALL modifications to be applied at once should be avoided
     /// </remarks>
+    // Named sample for the voxel-mod apply pass — the second half of a behavior step (TickUpdate enqueues, this
+    // drains). Paired with Chunk.TickUpdate's markers so a profiler/MCP capture (or the full-world fluid stress pass)
+    // can attribute a behavior step's cost across tick-eval vs apply. Near-zero cost when not recording.
+    private static readonly ProfilerMarker s_applyModificationsMarker = new ProfilerMarker("World.ApplyModifications");
+
     internal void ApplyModifications()
     {
+        using ProfilerMarker.AutoScope applyScope = s_applyModificationsMarker.Auto();
+
         _applyingModifications = true;
 
         // Process directly from the single flattened queue
@@ -2049,6 +2057,61 @@ public class World : MonoBehaviour
 
         _applyingModifications = false;
     }
+
+    #endregion
+
+    #region Benchmark / Test Substrate
+
+#if UNITY_EDITOR || DEVELOPMENT_BUILD
+    // Compiled only in the Editor and Development builds (the only contexts the benchmark/stress harnesses run in),
+    // so this generation-pipeline-bypassing surface never ships in a release player. See FluidTickBenchmark.
+
+    /// <summary>
+    /// Registers a pre-populated, synthetic <see cref="Chunk"/> directly into the live chunk map, active-chunk set,
+    /// and <see cref="worldData"/>, bypassing the generation/loading/meshing pipeline entirely. This is the substrate
+    /// the fluid-tick benchmark (and future fluid stress / menu-driven harnesses) use to drive the <b>production</b>
+    /// <see cref="Chunk.TickUpdate"/> + <see cref="ApplyModifications"/> path over hand-seeded chunks, so the measured
+    /// cost is the real tick code rather than a model.
+    /// </summary>
+    /// <param name="chunk">A chunk whose <see cref="Chunk.ChunkData"/> is already populated and seeded.</param>
+    /// <remarks>
+    /// NOT for gameplay use — it touches none of the pipeline gates/flags (terrain readiness, lighting stability,
+    /// mesh scheduling) that the normal <see cref="CheckViewDistance"/> path establishes; it only makes the chunk a
+    /// valid mod target and a neighbor-reactivation lookup hit. Callers own the chunk's lifetime and disposal.
+    /// </remarks>
+    internal void RegisterSyntheticChunk(Chunk chunk)
+    {
+        if (chunk == null || chunk.ChunkData == null) return;
+
+        _chunkMap[chunk.Coord] = chunk;
+        _activeChunks.Add(chunk.Coord);
+        worldData.Chunks[chunk.Coord.ToVoxelOrigin()] = chunk.ChunkData;
+    }
+
+    /// <summary>
+    /// Tears down all synthetic-chunk registrations made via <see cref="RegisterSyntheticChunk"/>, drains the
+    /// pending-mod queue, and clears the mesh-rebuild / visualization queues that <see cref="NotifyChunkModified"/>
+    /// populates during the tick — returning every live map this path touches to empty. The harness calls this
+    /// between benchmark runs (after disposing the chunk data it owns) so each run rebuilds from a clean slate.
+    /// Safe only in a world that was populated exclusively by the synthetic path (the benchmark scene); not for
+    /// gameplay use.
+    /// </summary>
+    internal void ClearSyntheticChunks()
+    {
+        _chunkMap.Clear();
+        _activeChunks.Clear();
+        worldData.Chunks.Clear();
+        worldData.ModifiedChunks.Clear();
+        _modifications.Clear();
+
+        // NotifyChunkModified (reached via ChunkData.ModifyVoxel during ApplyModifications) enqueues the modified
+        // chunk into these mesh/visualization queues; drain them too so no stale coord for a torn-down synthetic
+        // chunk survives into a later run.
+        _chunksToBuildMesh.Clear();
+        _chunksToBuildMeshSet.Clear();
+        _chunksToUpdateVisualization.Clear();
+    }
+#endif
 
     #endregion
 
