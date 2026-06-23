@@ -36,8 +36,9 @@ namespace Benchmarks
             sb.AppendLine();
             sb.Append(BenchmarkEnvironment.DescribeSystem());
 
-            AppendAttributionTable(sb, collector, peak: false);
-            AppendAttributionTable(sb, collector, peak: true);
+            AppendAvgTable(sb, collector);
+            AppendWorstFrameTable(sb, collector);
+            AppendIndependentPeaksTable(sb, collector);
             AppendContextTable(sb, collector);
             AppendVerdict(sb, collector);
 
@@ -52,37 +53,94 @@ namespace Benchmarks
             };
         }
 
-        /// <summary>Appends the per-phase sub-phase split (avg or peak ms) with Tick% / Mesh% of the sub-phase total.</summary>
-        private static void AppendAttributionTable(StringBuilder sb, FluidStressMetricsCollector collector, bool peak)
+        /// <summary>
+        /// Appends the per-phase <b>average</b> sub-phase split. Tick% / Mesh% / Light% are shares of the whole
+        /// <b>Frame</b> (not of the sub-phase total) so they line up with the frame-relative reading the report's
+        /// narrative uses; the sub-phases do not sum to 100% because generation/pool/render sit outside the split.
+        /// </summary>
+        private static void AppendAvgTable(StringBuilder sb, FluidStressMetricsCollector collector)
         {
             sb.AppendLine();
-            sb.AppendLine($"<b>=== Attribution — {(peak ? "PEAK" : "AVG")} ms/frame ===</b>");
+            sb.AppendLine("<b>=== Attribution — AVG ms/frame (sustained cost) ===</b>");
+            sb.AppendLine("(Tick% / Mesh% / Light% are shares of the whole Frame; they don't sum to 100% — " +
+                          "generation/pool/render are outside the split.)");
 
-            ReportTable table = new ReportTable("Phase", "Frame", "Tick", "Apply", "Mesh", "Light", "Tick%", "Mesh%");
+            ReportTable table = new ReportTable("Phase", "Frame", "Tick", "Apply", "Mesh", "Light", "Tick%", "Mesh%", "Light%");
 
             foreach (FluidStressMetricsCollector.PhaseResult p in collector.Phases)
             {
-                double frame = peak ? p.FrameMsPeak : p.FrameMsAvg;
-                double tick = peak ? p.TickMsPeak : p.TickMsAvg;
-                double apply = peak ? p.ApplyMsPeak : p.ApplyMsAvg;
-                double mesh = peak ? p.MeshMsPeak : p.MeshMsAvg;
-                double light = peak ? p.LightMsPeak : p.LightMsAvg;
-
-                // Percentages are of the AVG sub-phase total (the stable attribution denominator), shown on both
-                // tables so the avg/peak rows share one reference split.
-                double subTotal = p.SubPhaseMsAvg;
-                double tickPct = subTotal > 0 ? p.TickMsAvg / subTotal * 100.0 : 0;
-                double meshPct = subTotal > 0 ? p.MeshMsAvg / subTotal * 100.0 : 0;
-
+                double denom = p.FrameMsAvg > 0 ? p.FrameMsAvg : 1.0;
                 table.AddRow(
                     p.Name,
-                    frame.ToString("F3"),
-                    tick.ToString("F3"),
-                    apply.ToString("F3"),
-                    mesh.ToString("F3"),
-                    light.ToString("F3"),
-                    tickPct.ToString("F1"),
-                    meshPct.ToString("F1"));
+                    p.FrameMsAvg.ToString("F3"),
+                    p.TickMsAvg.ToString("F3"),
+                    p.ApplyMsAvg.ToString("F3"),
+                    p.MeshMsAvg.ToString("F3"),
+                    p.LightMsAvg.ToString("F3"),
+                    (p.TickMsAvg / denom * 100.0).ToString("F1"),
+                    (p.MeshMsAvg / denom * 100.0).ToString("F1"),
+                    (p.LightMsAvg / denom * 100.0).ToString("F1"));
+            }
+
+            table.AppendTo(sb);
+        }
+
+        /// <summary>
+        /// Appends the composition of the single <b>worst whole-frame</b> per phase — the frame that set
+        /// <see cref="FluidStressMetricsCollector.PhaseResult.FrameMsPeak"/> and its own Tick/Apply/Mesh/Light.
+        /// Because this is ONE real frame, the Tick% / Mesh% / Light% (shares of that frame) substantiate an
+        /// "X% of the worst frame" statement — unlike the independent per-metric peaks below.
+        /// </summary>
+        private static void AppendWorstFrameTable(StringBuilder sb, FluidStressMetricsCollector collector)
+        {
+            sb.AppendLine();
+            sb.AppendLine("<b>=== Worst single frame — composition ===</b>");
+            sb.AppendLine("(ONE real frame: the max-Frame-ms frame and its own breakdown. % are shares of that frame.)");
+
+            ReportTable table = new ReportTable("Phase", "Frame", "Tick", "Apply", "Mesh", "Light", "Tick%", "Mesh%", "Light%");
+
+            foreach (FluidStressMetricsCollector.PhaseResult p in collector.Phases)
+            {
+                double denom = p.FrameMsPeak > 0 ? p.FrameMsPeak : 1.0;
+                table.AddRow(
+                    p.Name,
+                    p.FrameMsPeak.ToString("F3"),
+                    p.PeakFrameTickMs.ToString("F3"),
+                    p.PeakFrameApplyMs.ToString("F3"),
+                    p.PeakFrameMeshMs.ToString("F3"),
+                    p.PeakFrameLightMs.ToString("F3"),
+                    (p.PeakFrameTickMs / denom * 100.0).ToString("F1"),
+                    (p.PeakFrameMeshMs / denom * 100.0).ToString("F1"),
+                    (p.PeakFrameLightMs / denom * 100.0).ToString("F1"));
+            }
+
+            table.AppendTo(sb);
+        }
+
+        /// <summary>
+        /// Appends the <b>independent</b> per-metric maxima — the largest each sub-phase reached across all frames.
+        /// These are spike <i>magnitudes</i> (e.g. the worst dam-break tick), and a row is NOT one frame: the cells
+        /// may come from different frames and from a different frame than the worst-frame table above. Kept because
+        /// the spike magnitude is the TG-4 justification, but labeled so it is never read as a composition.
+        /// </summary>
+        private static void AppendIndependentPeaksTable(StringBuilder sb, FluidStressMetricsCollector collector)
+        {
+            sb.AppendLine();
+            sb.AppendLine("<b>=== Per-metric peaks (independent maxima) ===</b>");
+            sb.AppendLine("(Max each sub-phase reached across all frames — spike magnitudes. A row is NOT one frame: " +
+                          "the cells need not share a frame with each other or with the worst frame above.)");
+
+            ReportTable table = new ReportTable("Phase", "Frame", "Tick", "Apply", "Mesh", "Light");
+
+            foreach (FluidStressMetricsCollector.PhaseResult p in collector.Phases)
+            {
+                table.AddRow(
+                    p.Name,
+                    p.FrameMsPeak.ToString("F3"),
+                    p.TickMsPeak.ToString("F3"),
+                    p.ApplyMsPeak.ToString("F3"),
+                    p.MeshMsPeak.ToString("F3"),
+                    p.LightMsPeak.ToString("F3"));
             }
 
             table.AppendTo(sb);
@@ -94,7 +152,7 @@ namespace Benchmarks
             sb.AppendLine();
             sb.AppendLine("<b>=== Frame context ===</b>");
 
-            ReportTable table = new ReportTable("Phase", "Frames", "Duration", "Frame avg", "Frame peak", "Min FPS", "GC/frame");
+            ReportTable table = new ReportTable("Phase", "Frames", "Duration", "Frame avg", "Frame peak", "Min FPS", "GC/frame avg", "GC/frame peak");
 
             foreach (FluidStressMetricsCollector.PhaseResult p in collector.Phases)
             {
@@ -106,16 +164,24 @@ namespace Benchmarks
                     $"{p.FrameMsAvg:F2} ms",
                     $"{p.FrameMsPeak:F2} ms",
                     minFps.ToString("F0"),
-                    $"{p.GcKbAvg:F1} KB");
+                    $"{p.GcKbAvg:F1} KB",
+                    $"{p.GcKbPeak:F1} KB");
             }
 
             table.AppendTo(sb);
         }
 
         /// <summary>
-        /// Appends the §5 verdict, comparing the flood phase's Tick vs Mesh cost. A perfect parallel TG-4
-        /// re-architects only the Tick; if Mesh dominates the flood frame instead, parallelizing the tick wins
-        /// little and the mesh-rebuild path is the real bottleneck.
+        /// Appends the §5 verdict. TG-4 (parallel-for-fluid) re-architects <b>only the Tick</b>, so the verdict
+        /// separates the two questions it must answer rather than a single Tick-vs-Mesh peak compare:
+        /// <list type="number">
+        /// <item><b>The spike</b> — which sub-phase owns the single <i>worst</i> frame (the stutter the player feels);
+        /// TG-4 helps only if that is the Tick.</item>
+        /// <item><b>The sustained cost</b> — which sub-phase dominates the <i>average</i> frame; if that is Light
+        /// (or Mesh) rather than Tick, TG-4 leaves the average ocean-frame smoothness untouched.</item>
+        /// </list>
+        /// Both dominants weigh all four sub-phases (including Light), so the verdict can no longer report
+        /// "TICK dominates" while Lighting actually owns the sustained frame.
         /// </summary>
         private static void AppendVerdict(StringBuilder sb, FluidStressMetricsCollector collector)
         {
@@ -129,29 +195,74 @@ namespace Benchmarks
             }
 
             // The flood phase is the last recorded phase.
-            FluidStressMetricsCollector.PhaseResult flood = collector.Phases[collector.Phases.Count - 1];
+            FluidStressMetricsCollector.PhaseResult flood = collector.Phases[^1];
+
+            // Sustained = the sub-phase that dominates the AVERAGE frame; spike = the sub-phase that dominates the
+            // single WORST whole-frame. Both consider all four sub-phases (Light included).
+            string sustained = Dominant(flood.TickMsAvg, flood.ApplyMsAvg, flood.MeshMsAvg, flood.LightMsAvg, out double sustainedMs);
+            string spike = Dominant(flood.PeakFrameTickMs, flood.PeakFrameApplyMs, flood.PeakFrameMeshMs, flood.PeakFrameLightMs, out double spikeMs);
+
+            double frameAvg = flood.FrameMsAvg > 0 ? flood.FrameMsAvg : 1.0;
+            double framePeak = flood.FrameMsPeak > 0 ? flood.FrameMsPeak : 1.0;
 
             sb.AppendLine($"  Flood phase: \"{flood.Name}\"");
-            sb.AppendLine($"  Tick  avg {flood.TickMsAvg:F3} ms / peak {flood.TickMsPeak:F3} ms");
-            sb.AppendLine($"  Mesh  avg {flood.MeshMsAvg:F3} ms / peak {flood.MeshMsPeak:F3} ms");
-            sb.AppendLine($"  Apply avg {flood.ApplyMsAvg:F3} ms / Light avg {flood.LightMsAvg:F3} ms");
+            sb.AppendLine($"  Sustained (avg {flood.FrameMsAvg:F2} ms/frame): {sustained}-dominated — " +
+                          $"{sustainedMs:F3} ms = {sustainedMs / frameAvg * 100.0:F0}% of the avg frame.");
+            sb.AppendLine($"  Worst frame ({flood.FrameMsPeak:F2} ms): {spike}-dominated — " +
+                          $"{spikeMs:F3} ms = {spikeMs / framePeak * 100.0:F0}% of that frame.");
+            sb.AppendLine($"  Tick spike magnitude (max single-frame tick): {flood.TickMsPeak:F3} ms. " +
+                          $"Mesh: avg {flood.MeshMsAvg:F3} ms / peak {flood.MeshMsPeak:F3} ms.");
+            sb.AppendLine();
 
-            string dominant = flood.TickMsPeak >= flood.MeshMsPeak ? "TICK" : "MESH";
-            if (dominant == "TICK")
-            {
-                sb.AppendLine("  → TICK dominates the flood frame: TG-4's parallel-for-fluid tick re-architecture " +
-                              "targets the dominant cost — committing the Phase-3 fluid→Burst engineering is justified.");
-            }
+            bool tickOwnsSpike = spike == "Tick";
+            bool tickOwnsSustained = sustained == "Tick";
+
+            if (tickOwnsSpike)
+                sb.AppendLine("  → TG-4 (parallel-for-fluid) targets the TICK, which owns the worst-frame spike — " +
+                              "committing the Phase-3 fluid→Burst engineering is justified to remove that stutter.");
             else
-            {
-                sb.AppendLine("  → MESH dominates the flood frame: the per-edit mesh rebuild, not the tick, is the " +
-                              "real ocean-frame bottleneck. Parallelizing the tick alone (TG-4) would leave it — " +
-                              "reconsider scope before committing the Phase-3 fluid→Burst engineering.");
-            }
+                sb.AppendLine($"  → The worst frame is {spike}-bound, not Tick-bound — TG-4 (which re-architects only " +
+                              "the tick) would NOT remove this spike; reconsider scope before committing Phase-3.");
+
+            if (tickOwnsSustained)
+                sb.AppendLine("  → The Tick also dominates the sustained frame, so TG-4 improves both the spike and the average.");
+            else
+                sb.AppendLine($"  → But the SUSTAINED frame is {sustained}-dominated, which TG-4 does not touch — " +
+                              $"average ocean-frame smoothness needs the {sustained} lever, not (only) the tick.");
 
             sb.AppendLine();
             sb.AppendLine("  (Sub-phases are the main-thread World.Update interior; generation/pool/render are " +
-                          "excluded from the split but included in Frame ms.)");
+                          "excluded from the split but included in Frame ms. \"Worst frame\" is ONE frame; the " +
+                          "per-metric peaks table lists independent maxima.)");
+        }
+
+        /// <summary>
+        /// Returns the label of the largest of the four sub-phase values and, via <paramref name="value"/>, that
+        /// largest value. Ties resolve in Tick → Apply → Mesh → Light order.
+        /// </summary>
+        private static string Dominant(double tick, double apply, double mesh, double light, out double value)
+        {
+            value = tick;
+            string name = "Tick";
+            if (apply > value)
+            {
+                value = apply;
+                name = "Apply";
+            }
+
+            if (mesh > value)
+            {
+                value = mesh;
+                name = "Mesh";
+            }
+
+            if (light > value)
+            {
+                value = light;
+                name = "Light";
+            }
+
+            return name;
         }
     }
 }

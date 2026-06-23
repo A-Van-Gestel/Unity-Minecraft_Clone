@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -13,8 +14,20 @@ namespace Benchmarks
     /// <para>
     /// Whole-frame cost is taken as <see cref="Time.unscaledDeltaTime"/> (a true per-frame wall time including
     /// render/GPU), and the sub-phases from <see cref="WorldFrameProfiler"/> (true per-frame, main-thread
-    /// <c>World.Update</c> interior). Both are exact per frame, so avg <b>and</b> peak are meaningful. GC/frame is
-    /// read from <see cref="PerformanceMonitor"/> for context (smoothed).
+    /// <c>World.Update</c> interior). Both are exact per frame, so avg <b>and</b> peak are meaningful.
+    /// </para>
+    /// <para>
+    /// <b>Two distinct kinds of "peak" are tracked, because conflating them misattributes the frame:</b>
+    /// <list type="bullet">
+    /// <item>the <b>independent</b> per-metric maxima (<c>*MsPeak</c>) — the largest each sub-phase ever reached,
+    /// which need NOT share a frame; these are spike <i>magnitudes</i>; and</item>
+    /// <item>the <b>composition of the single worst whole-frame</b> (<c>PeakFrame*Ms</c>) — the Tick/Apply/Mesh/Light
+    /// of the one frame with the maximum <see cref="PhaseResult.FrameMsPeak"/>. Only these substantiate a
+    /// "<i>X % of the worst frame</i>" statement, because they are one real frame.</item>
+    /// </list>
+    /// GC/frame is a true per-frame managed-allocation delta (<see cref="GC.GetTotalMemory(bool)"/>, the same
+    /// IL2CPP-valid method <see cref="PerformanceMonitor"/> uses), tracked as avg + peak — <b>not</b> a smoothed
+    /// moving average, so a per-frame allocation spike is not averaged away.
     /// </para>
     /// </summary>
     public sealed class FluidStressMetricsCollector
@@ -34,20 +47,25 @@ namespace Benchmarks
             /// <summary>Average / peak whole-frame wall time (ms), from <see cref="Time.unscaledDeltaTime"/>.</summary>
             public readonly double FrameMsAvg, FrameMsPeak;
 
-            /// <summary>Average / peak behavior-tick time (ms) — <c>ProcessTickUpdates</c>.</summary>
-            public readonly double TickMsAvg, TickMsPeak;
+            /// <summary>Average behavior-tick / modification-drain / mesh / lighting time (ms) over all frames.</summary>
+            public readonly double TickMsAvg, ApplyMsAvg, MeshMsAvg, LightMsAvg;
 
-            /// <summary>Average / peak modification-drain time (ms) — <c>World.ApplyModifications</c>.</summary>
-            public readonly double ApplyMsAvg, ApplyMsPeak;
+            /// <summary>
+            /// <b>Independent</b> per-metric maxima (ms): the largest each sub-phase reached across all frames.
+            /// These are spike <i>magnitudes</i> and need NOT come from the same frame as each other or as
+            /// <see cref="FrameMsPeak"/> — do not read them as one frame's composition (use <c>PeakFrame*Ms</c> for that).
+            /// </summary>
+            public readonly double TickMsPeak, ApplyMsPeak, MeshMsPeak, LightMsPeak;
 
-            /// <summary>Average / peak main-thread mesh time (ms) — mesh-job process + schedule + <c>CreateMesh</c>.</summary>
-            public readonly double MeshMsAvg, MeshMsPeak;
+            /// <summary>
+            /// Composition of the single worst whole-frame — the Tick/Apply/Mesh/Light of the frame that set
+            /// <see cref="FrameMsPeak"/>. This is ONE real frame, so a "X % of the worst frame" claim is
+            /// substantiated only by these fields.
+            /// </summary>
+            public readonly double PeakFrameTickMs, PeakFrameApplyMs, PeakFrameMeshMs, PeakFrameLightMs;
 
-            /// <summary>Average / peak main-thread lighting time (ms) — lighting-job process + schedule.</summary>
-            public readonly double LightMsAvg, LightMsPeak;
-
-            /// <summary>Average managed GC allocation per frame (KB), smoothed (context only).</summary>
-            public readonly double GcKbAvg;
+            /// <summary>True per-frame managed GC allocation (KB): average / peak, measured as a per-frame delta (not smoothed).</summary>
+            public readonly double GcKbAvg, GcKbPeak;
 
             /// <summary>Constructs a phase result.</summary>
             public PhaseResult(string name, int frames, double durationSeconds,
@@ -56,7 +74,8 @@ namespace Benchmarks
                 double applyMsAvg, double applyMsPeak,
                 double meshMsAvg, double meshMsPeak,
                 double lightMsAvg, double lightMsPeak,
-                double gcKbAvg)
+                double peakFrameTickMs, double peakFrameApplyMs, double peakFrameMeshMs, double peakFrameLightMs,
+                double gcKbAvg, double gcKbPeak)
             {
                 Name = name;
                 Frames = frames;
@@ -71,7 +90,12 @@ namespace Benchmarks
                 MeshMsPeak = meshMsPeak;
                 LightMsAvg = lightMsAvg;
                 LightMsPeak = lightMsPeak;
+                PeakFrameTickMs = peakFrameTickMs;
+                PeakFrameApplyMs = peakFrameApplyMs;
+                PeakFrameMeshMs = peakFrameMeshMs;
+                PeakFrameLightMs = peakFrameLightMs;
                 GcKbAvg = gcKbAvg;
+                GcKbPeak = gcKbPeak;
             }
 
             /// <summary>The sub-phase total (Tick+Apply+Mesh+Light) of the average frame — the fluid-relevant Update cost.</summary>
@@ -93,7 +117,9 @@ namespace Benchmarks
         private double _applySum, _applyPeak;
         private double _meshSum, _meshPeak;
         private double _lightSum, _lightPeak;
-        private double _gcSum;
+        private double _peakFrameTick, _peakFrameApply, _peakFrameMesh, _peakFrameLight;
+        private double _gcSum, _gcPeak;
+        private long _lastGcMemory;
 
         /// <summary>Begins a new measured phase, resetting all accumulators.</summary>
         /// <param name="name">Phase label for the report.</param>
@@ -108,7 +134,12 @@ namespace Benchmarks
             _applySum = _applyPeak = 0;
             _meshSum = _meshPeak = 0;
             _lightSum = _lightPeak = 0;
-            _gcSum = 0;
+            _peakFrameTick = _peakFrameApply = _peakFrameMesh = _peakFrameLight = 0;
+            _gcSum = _gcPeak = 0;
+
+            // Re-baseline the GC counter so the first sampled frame's delta is this phase's allocation, not the
+            // backlog accumulated since the previous phase / startup.
+            _lastGcMemory = GC.GetTotalMemory(false);
         }
 
         /// <summary>
@@ -122,14 +153,34 @@ namespace Benchmarks
             _frames++;
 
             double frameMs = Time.unscaledDeltaTime * 1000.0;
-            Accumulate(frameMs, ref _frameSum, ref _framePeak);
-            Accumulate(WorldFrameProfiler.LastFrameTickMs, ref _tickSum, ref _tickPeak);
-            Accumulate(WorldFrameProfiler.LastFrameApplyMs, ref _applySum, ref _applyPeak);
-            Accumulate(WorldFrameProfiler.LastFrameMeshMs, ref _meshSum, ref _meshPeak);
-            Accumulate(WorldFrameProfiler.LastFrameLightMs, ref _lightSum, ref _lightPeak);
+            double tickMs = WorldFrameProfiler.LastFrameTickMs;
+            double applyMs = WorldFrameProfiler.LastFrameApplyMs;
+            double meshMs = WorldFrameProfiler.LastFrameMeshMs;
+            double lightMs = WorldFrameProfiler.LastFrameLightMs;
 
-            if (PerformanceMonitor.Instance != null)
-                _gcSum += PerformanceMonitor.Instance.GcAllocationPerFrame.GetAverage() / 1024.0;
+            // Capture the worst whole-frame's composition BEFORE updating _framePeak, so the snapshot is the
+            // breakdown of the frame that sets the new maximum — keeping the worst-frame attribution to one real frame.
+            if (frameMs > _framePeak)
+            {
+                _peakFrameTick = tickMs;
+                _peakFrameApply = applyMs;
+                _peakFrameMesh = meshMs;
+                _peakFrameLight = lightMs;
+            }
+
+            Accumulate(frameMs, ref _frameSum, ref _framePeak);
+            Accumulate(tickMs, ref _tickSum, ref _tickPeak);
+            Accumulate(applyMs, ref _applySum, ref _applyPeak);
+            Accumulate(meshMs, ref _meshSum, ref _meshPeak);
+            Accumulate(lightMs, ref _lightSum, ref _lightPeak);
+
+            // True per-frame managed GC allocation: the GC.GetTotalMemory delta since the previous frame (the
+            // method PerformanceMonitor uses — IL2CPP-valid), clamped at 0 across collections. NOT a moving
+            // average, so per-frame allocation peaks survive into GcKbPeak.
+            long currentGc = GC.GetTotalMemory(false);
+            double gcKb = Math.Max(0L, currentGc - _lastGcMemory) / 1024.0;
+            _lastGcMemory = currentGc;
+            Accumulate(gcKb, ref _gcSum, ref _gcPeak);
         }
 
         /// <summary>Finalizes the active phase and appends its <see cref="PhaseResult"/>.</summary>
@@ -149,7 +200,8 @@ namespace Benchmarks
                 _applySum * inv, _applyPeak,
                 _meshSum * inv, _meshPeak,
                 _lightSum * inv, _lightPeak,
-                _gcSum * inv));
+                _peakFrameTick, _peakFrameApply, _peakFrameMesh, _peakFrameLight,
+                _gcSum * inv, _gcPeak));
         }
 
         /// <summary>Adds <paramref name="value"/> to a running sum and updates the peak.</summary>
