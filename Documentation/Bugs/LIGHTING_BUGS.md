@@ -82,3 +82,52 @@ seed and ordering.
 The Bug 07/08 cross-chunk mod delivery fixes were already present when Bug 09 was last observed — the bug is either a genuine async race condition (Burst job system timing, IL2CPP memory ordering) that synchronous `.Run()` cannot reproduce, or is no longer present in the current codebase. A faithful failing repro is still TODO before this bug's fix can be test-driven; the surviving baselines serve as regression guards.
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
+
+---
+
+## Bug 13: Large Suspended Opaque Slab Never Settles (Oscillating Cross-Chunk Skylight)
+
+**Severity:** Medium
+**Status:** Open
+
+**Description:**
+A large, flat **opaque** block layer (opacity 15) suspended in otherwise sky-lit air and **spanning a contiguous
+multi-chunk region** never reaches a stable lighting state. The columns directly under the slab are shadowed while
+the surrounding air stays full-bright, so light spills in from the slab's perimeter and forms a cross-chunk skylight
+gradient beneath it. That gradient **oscillates / never converges**: the lighting jobs keep re-scheduling so
+`WorldJobManager.HasActiveJobs` never returns to `false`, and in the scene view the slab's lit surfaces visibly
+**flicker** (light values churn frame-to-frame) rather than settling.
+
+This is distinct from **Bug 05** (dense-canopy shadow patches that converge to a *wrong but static* state until a
+reload): there the system reaches a fixed point (an incorrect one); here it appears to reach **no fixed point at all**
+within the production scheduling — a non-termination / live-oscillation symptom rather than a static artifact. It is
+the same cross-chunk-convergence family, at the opposite extreme (one large hard shadow boundary tiled across many
+chunk seams, instead of many small diagonal light pockets).
+
+**Root Cause Suspected:**
+A feedback loop in the iterative cross-chunk edge-check (`CheckEdges` / `CheckEdgeVoxel`, `RemainingEdgeCheckRounds`)
+when a steep, uniform sky→shadow discontinuity runs along many chunk borders at once. Each chunk's edge check adjusts
+its border columns, which dirties its neighbors, which re-trigger edge checks back into it; with the add-only
+`CheckEdgeVoxel` reconciling a large shadowed interior fed only from the perimeter, the region may have no stable
+fixed point under the current rounds limit + continuous re-scheduling, so the dirty set never empties. Suspected to be
+the same mechanism family as the cross-chunk darkening guarded by the C3 baselines and the unresolved half of Bug 05.
+
+**Reproduction (deterministic, via the fluid stress harness):**
+The full-world fluid stress pass (`Assets/Scripts/Benchmarks/FluidStressController.cs`, launched in
+`RuntimeMode.FluidStress`) stamps a flat floor across a `REGION_CHUNKS × REGION_CHUNKS` region at a fixed high
+altitude (y 100) above lower terrain/ocean, then waits for the pipeline to settle. With an **opaque** floor block
+(e.g. `BlockIDs.Stone`, the pre-fix configuration) and `REGION_CHUNKS ≥ 3`, the substrate settle **never completes**
+and the slab flickers. The current harness sidesteps this by using `BlockIDs.Facade` (solid but **opacity 0**) for the
+floor — a light-transparent solid casts no shadow, so the gradient never forms and the region settles immediately.
+That workaround is the empirical confirmation of the root cause (the defect is driven by the slab's *opacity*, not its
+solidity, geometry, or the throttled stamp).
+
+**Workaround:** for any large manufactured platform/ceiling that must span chunks in lit air, prefer a light-transparent
+solid (opacity 0) over an opaque one. Naturally this also affects player-built large flat opaque roofs spanning chunk
+borders.
+
+**Validation suite:** no faithful failing repro scenario yet. Like Bug 05/09 it likely depends on the multi-chunk
+concurrent generation/edge-check wave + continuous re-scheduling, which the synchronous `.Run()`-based harness does not
+reproduce; a deterministic scenario (a large opaque slab tiled across several chunks asserting **termination** —
+`HasActiveJobs` returns false within a bounded number of rounds — and convergence to the borderless oracle) is **TODO**
+before a fix can be test-driven. Fix is **out of scope** for the session that filed this (2026-06-23).
