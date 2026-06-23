@@ -127,6 +127,7 @@ MonoBehaviour:
   chunkBorderPrefab: {fileID: 2348571843614231521, guid: 0c5d03a94304a4b4bbf7153e8f2675e4, type: 3}
   voxelVisualizer: {fileID: 0}
   visualizationMode: 0
+  _enableFluidBurstTick: 1
 --- !u!114 &715589282694584058
 MonoBehaviour:
   m_ObjectHideFlags: 0
