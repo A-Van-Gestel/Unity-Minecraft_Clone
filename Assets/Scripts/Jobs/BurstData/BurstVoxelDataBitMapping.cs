@@ -25,6 +25,28 @@ namespace Jobs.BurstData
         public const byte META_VAL_FLUID_MASK = 0xF; // 4 bits (0-15)
         public const byte META_VAL_ORIENT_MASK = 0x7; // 3 bits (0-7)
 
+        // --- Fluid falling-flag sub-encoding (within the 4-bit fluid-level nibble) ---
+        // Minecraft Beta 1.3.2 uses fluid level >= 8 to mark a vertically falling block; the lower 3 bits carry
+        // the "effective level" of the upstream block. Source of truth for both the managed BlockBehavior.Fluids
+        // tick and the Burst FluidTickJob — keep the encoding here so the two paths can never drift.
+        public const byte FLUID_FALLING_FLAG = 8; // level >= 8 means falling
+        public const byte FLUID_EFFECTIVE_LEVEL_MASK = 0x7; // lower 3 bits = effective level
+
+        /// <summary>Returns true if the fluid level encodes a vertically falling block (level &gt;= 8).</summary>
+        /// <param name="fluidLevel">The 4-bit fluid level (0-15).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsFluidFalling(byte fluidLevel) => fluidLevel >= FLUID_FALLING_FLAG;
+
+        /// <summary>Strips the falling flag, returning the horizontal effective level (0-7).</summary>
+        /// <param name="fluidLevel">The 4-bit fluid level (0-15).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte GetEffectiveFluidLevel(byte fluidLevel) => (byte)(fluidLevel & FLUID_EFFECTIVE_LEVEL_MASK);
+
+        /// <summary>Builds a falling-flagged fluid level from a horizontal effective level (0-7).</summary>
+        /// <param name="effectiveLevel">The horizontal effective level (0-7).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte MakeFluidFalling(byte effectiveLevel) => (byte)(effectiveLevel | FLUID_FALLING_FLAG);
+
         // --- Helpers ---
 
         /// <summary>Maps World Orientation (Face Index) -> Internal Storage Index (0-5).</summary>

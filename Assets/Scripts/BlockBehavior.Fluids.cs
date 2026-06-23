@@ -1,7 +1,9 @@
 using System;
 using Data;
+using Jobs;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 using Random = Unity.Mathematics.Random;
 
@@ -10,19 +12,29 @@ public static partial class BlockBehavior
     #region Fluid Behavior Methods
 
     // --- Falling Flag Encoding ---
-    // Minecraft Beta 1.3.2 uses metadata >= 8 for falling fluid.
-    // Lower 3 bits (0-7) carry the "effective level" of the upstream block.
-    // FluidLevel 0 = source, 1-7 = horizontal flow, 8 = falling from source, 9-15 = falling from flow.
-    private const byte FALLING_FLAG = 8;
+    // Minecraft Beta 1.3.2 uses metadata >= 8 for falling fluid; the lower 3 bits carry the "effective level" of
+    // the upstream block (0 = source, 1-7 = horizontal flow, 8 = falling from source, 9-15 = falling from flow).
+    // Source of truth: BurstVoxelDataBitMapping — shared with the Burst FluidTickJob so the two cannot drift.
 
     /// <summary>Returns true if the fluid level encodes a vertically falling block (level >= 8).</summary>
-    private static bool IsFalling(byte fluidLevel) => fluidLevel >= FALLING_FLAG;
+    private static bool IsFalling(byte fluidLevel) => BurstVoxelDataBitMapping.IsFluidFalling(fluidLevel);
 
     /// <summary>Strips the falling flag, returning the horizontal level (0-7).</summary>
-    private static byte GetEffectiveLevel(byte fluidLevel) => (byte)(fluidLevel & 0x7);
+    private static byte GetEffectiveLevel(byte fluidLevel) => BurstVoxelDataBitMapping.GetEffectiveFluidLevel(fluidLevel);
 
     /// <summary>Creates a falling metadata value from a horizontal level.</summary>
-    private static byte MakeFalling(byte effectiveLevel) => (byte)(effectiveLevel | FALLING_FLAG);
+    private static byte MakeFalling(byte effectiveLevel) => BurstVoxelDataBitMapping.MakeFluidFalling(effectiveLevel);
+
+    /// <summary>
+    /// The local-space offset of the <paramref name="i"/>-th horizontal fluid-flow neighbor (0=+Z, 1=-Z, 2=+X,
+    /// 3=-X), shared with the Burst path via <see cref="FluidTierClassifier.HorizontalNeighborOffset"/> so the
+    /// spread/BFS direction order stays identical across both implementations.
+    /// </summary>
+    private static Vector3Int HorizontalNeighbor(int i)
+    {
+        int3 o = FluidTierClassifier.HorizontalNeighborOffset(i);
+        return new Vector3Int(o.x, o.y, o.z);
+    }
 
     /// <summary>
     /// Manages the flow logic for a single fluid voxel.
@@ -174,7 +186,7 @@ public static partial class BlockBehavior
             // If this direction is not in the optimal flow mask, skip it to prevent spreading away from drops
             if ((optimalFlowMask & (1 << i)) == 0) continue;
 
-            Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+            Vector3Int neighborPos = localPos + HorizontalNeighbor(i);
             VoxelState? neighborState = chunkData.GetState(neighborPos);
 
             if (!neighborState.HasValue) continue;
@@ -239,7 +251,7 @@ public static partial class BlockBehavior
         {
             for (int i = 0; i < 4; i++) // 4 cardinal horizontal directions
             {
-                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                Vector3Int neighborPos = localPos + HorizontalNeighbor(i);
                 VoxelState? neighborState = chunkData.GetState(neighborPos);
 
                 if (!neighborState.HasValue) continue;
@@ -324,7 +336,7 @@ public static partial class BlockBehavior
             // 2. Check horizontal neighbors for the lowest effective level (closest to source)
             for (int i = 0; i < 4; i++)
             {
-                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                Vector3Int neighborPos = localPos + HorizontalNeighbor(i);
                 VoxelState? neighborState = chunkData.GetState(neighborPos);
 
                 if (neighborState.HasValue && neighborState.Value.ID == fluidId)
@@ -419,7 +431,7 @@ public static partial class BlockBehavior
                     }
                 }
 
-                Vector3Int neighborPos = node.Pos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                Vector3Int neighborPos = node.Pos + HorizontalNeighbor(i);
 
                 if (visited.Contains(neighborPos)) continue;
                 visited.Add(neighborPos);
@@ -446,8 +458,8 @@ public static partial class BlockBehavior
                     return minCost;
                 }
 
-                // If no drop and we haven't reached max depth (4), explore further
-                if (node.Cost + 1 < 4)
+                // If no drop and we haven't reached max depth, explore further
+                if (node.Cost + 1 < FluidTierClassifier.MaxFlowSearchDepth)
                 {
                     queue.Enqueue(new SearchNode { Pos = neighborPos, Cost = node.Cost + 1 });
                 }
@@ -472,7 +484,7 @@ public static partial class BlockBehavior
         for (int i = 0; i < 4; i++)
         {
             flowCost[i] = 1000;
-            Vector3Int neighborPos = centerPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+            Vector3Int neighborPos = centerPos + HorizontalNeighbor(i);
             VoxelState? neighborState = chunkData.GetState(neighborPos);
 
             if (!neighborState.HasValue) continue;
@@ -504,10 +516,10 @@ public static partial class BlockBehavior
         }
 
         // GetOptimalFlowDirections needs to accurately collect ALL minimum paths.
-        // If minCost is > 4 (the max BFS depth), that means NO drops were found in ANY direction.
+        // If minCost is beyond the max BFS depth, that means NO drops were found in ANY direction.
         // In that case, we MUST return all valid flowing directions minus solid walls, to create the spreading diamond.
 
-        if (minCost > 4)
+        if (minCost > FluidTierClassifier.MaxFlowSearchDepth)
         {
             // No optimal path found, fallback to uniform spread.
             if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} NO OPTIMAL DROPS. Falling back to mask={Convert.ToString(validDirectionsMask, 2).PadLeft(4, '0')}");

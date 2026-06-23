@@ -68,10 +68,6 @@ namespace Jobs
         /// </summary>
         public NativeList<int> ModsPerSource;
 
-        // --- Falling-flag encoding (mirror of BlockBehavior.Fluids) ---
-        private const byte FALLING_FLAG = 8;
-        private const byte FLUID_MASK = 0x7;
-
         /// <summary>32-bit golden-ratio constant mixing the per-tick salt into the voxel-position hash (mirror of BlockBehavior).</summary>
         private const uint TICK_SALT_HASH_MULTIPLIER = 0x9E3779B1u;
 
@@ -374,7 +370,7 @@ namespace Jobs
             }
 
             // No drop found in any direction (minCost beyond max BFS depth) → uniform spread over valid dirs.
-            if (minCost > 4)
+            if (minCost > FluidTierClassifier.MaxFlowSearchDepth)
                 return validDirectionsMask;
 
             byte optimalMask = 0;
@@ -437,7 +433,7 @@ namespace Jobs
                         return minCost;
                     }
 
-                    if (node.Cost + 1 < 4)
+                    if (node.Cost + 1 < FluidTierClassifier.MaxFlowSearchDepth)
                         queue.Enqueue(new SearchNode { Pos = neighborPos, Cost = node.Cost + 1 });
                 }
             }
@@ -487,21 +483,13 @@ namespace Jobs
             return new Random(seed);
         }
 
-        /// <summary>Local horizontal direction offset for index i (0=+z, 1=-z, 2=+x, 3=-x) — mirrors <c>FaceChecks[HorizontalFaceChecksIndices[i]]</c>.</summary>
-        private static int3 HorizontalOffset(int i)
-        {
-            switch (i)
-            {
-                case 0: return new int3(0, 0, 1); // Front (+z)
-                case 1: return new int3(0, 0, -1); // Back (-z)
-                case 2: return new int3(1, 0, 0); // Right (+x)
-                default: return new int3(-1, 0, 0); // Left (-x)
-            }
-        }
+        /// <summary>Local horizontal direction offset for index i (0=+z, 1=-z, 2=+x, 3=-x) — shared with the managed path via <see cref="FluidTierClassifier.HorizontalNeighborOffset"/>.</summary>
+        private static int3 HorizontalOffset(int i) => FluidTierClassifier.HorizontalNeighborOffset(i);
 
-        private static bool IsFalling(byte fluidLevel) => fluidLevel >= FALLING_FLAG;
-        private static byte GetEffectiveLevel(byte fluidLevel) => (byte)(fluidLevel & FLUID_MASK);
-        private static byte MakeFalling(byte effectiveLevel) => (byte)(effectiveLevel | FALLING_FLAG);
+        // Falling-flag encoding shared with the managed path (source of truth: BurstVoxelDataBitMapping).
+        private static bool IsFalling(byte fluidLevel) => BurstVoxelDataBitMapping.IsFluidFalling(fluidLevel);
+        private static byte GetEffectiveLevel(byte fluidLevel) => BurstVoxelDataBitMapping.GetEffectiveFluidLevel(fluidLevel);
+        private static byte MakeFalling(byte effectiveLevel) => BurstVoxelDataBitMapping.MakeFluidFalling(effectiveLevel);
 
         /// <summary>A BFS search frontier node (local coords).</summary>
         private struct SearchNode
