@@ -26,11 +26,19 @@ namespace Jobs
         private NativeArray<uint> _snapshot;
         private NativeList<int> _interior;
         private NativeList<VoxelMod> _mods;
+        private NativeList<int> _modsPerSource;
         private NativeList<int> _inactive;
         private bool _allocated;
 
         /// <summary>Voxel mods emitted by the most recent <see cref="RunInteriorFluids"/> (valid until the next call).</summary>
         public NativeList<VoxelMod> Mods => _mods;
+
+        /// <summary>
+        /// Per-source mod run lengths from the most recent run, in the same order interior voxels were enumerated
+        /// from the bucket. Walk the bucket in that order again and consume <see cref="Mods"/> in these runs to
+        /// replay the job's emission interleaved with the managed border path (valid until the next call).
+        /// </summary>
+        public NativeList<int> ModsPerSource => _modsPerSource;
 
         /// <summary>Flat indices of interior voxels that became inactive in the most recent run (valid until the next call).</summary>
         public NativeList<int> InactiveInterior => _inactive;
@@ -50,6 +58,7 @@ namespace Jobs
             EnsureAllocated();
             _interior.Clear();
             _mods.Clear();
+            _modsPerSource.Clear();
             _inactive.Clear();
 
             NativeHashSet<int> bucket = cd.ActiveFluidsBucket;
@@ -82,6 +91,7 @@ namespace Jobs
                 ChunkOrigin = new int2(cd.Position.x, cd.Position.y),
                 Mods = _mods,
                 NowInactive = _inactive,
+                ModsPerSource = _modsPerSource,
             }.Run();
         }
 
@@ -94,6 +104,7 @@ namespace Jobs
             _snapshot = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Persistent);
             _interior = new NativeList<int>(256, Allocator.Persistent);
             _mods = new NativeList<VoxelMod>(256, Allocator.Persistent);
+            _modsPerSource = new NativeList<int>(256, Allocator.Persistent);
             _inactive = new NativeList<int>(64, Allocator.Persistent);
             _allocated = true;
         }
@@ -107,6 +118,7 @@ namespace Jobs
             if (_snapshot.IsCreated) _snapshot.Dispose();
             if (_interior.IsCreated) _interior.Dispose();
             if (_mods.IsCreated) _mods.Dispose();
+            if (_modsPerSource.IsCreated) _modsPerSource.Dispose();
             if (_inactive.IsCreated) _inactive.Dispose();
             _allocated = false;
         }

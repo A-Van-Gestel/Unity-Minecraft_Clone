@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using Data;
 using Helpers;
+using Jobs;
 using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Mathematics;
@@ -280,7 +282,14 @@ public class Chunk
             if (fluidCount > 0)
             {
                 using (s_tickFluidMarker.Auto())
-                    TickFamily(fluids, toRemove);
+                {
+                    // TG-4 Phase 3: tick Tier-1 interior fluids via the Burst job (border fluids stay managed),
+                    // feature-flagged so the fully-managed legacy path is a one-toggle revert.
+                    if (World.Instance.EnableFluidBurstTick)
+                        TickFluidsHybrid(fluids, toRemove);
+                    else
+                        TickFamily(fluids, toRemove);
+                }
             }
 
             ListPool<int>.Release(toRemove);
@@ -327,6 +336,71 @@ public class Chunk
         {
             bucket.Remove(idx);
         }
+    }
+
+    /// <summary>
+    /// TG-4 Phase 3 — ticks the fluids family as a <b>hybrid</b>: Tier-1 interior voxels are evaluated by the Burst
+    /// <see cref="FluidTickJob"/> (via <see cref="World.FluidBurstTicker"/>), Tier-2 border voxels stay on the
+    /// managed <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/> path. The job runs first (over
+    /// a pre-tick snapshot), then this method <b>replays the emitted mods in the original bucket-enumeration
+    /// order</b>, interleaved with the managed border evaluations — so the emitted <see cref="VoxelMod"/> stream is
+    /// byte-identical to the legacy single loop (zero drift; preserves same-target ordering for BH-D1). Removals
+    /// (interior from the job, border from <see cref="BlockBehavior.Active"/>) are order-independent and applied
+    /// after the loop, exactly as <see cref="TickFamily"/> does.
+    /// </summary>
+    /// <param name="fluids">The active-fluids bucket (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
+    /// <param name="removeScratch">A reusable scratch list for now-inactive indices; cleared on entry.</param>
+    private void TickFluidsHybrid(NativeHashSet<int> fluids, List<int> removeScratch)
+    {
+        removeScratch.Clear();
+
+        World world = World.Instance;
+        FluidBurstTicker ticker = world.FluidBurstTicker;
+
+        // Pass 1: snapshot + partition + run the interior fluid job (serial .Run). The border list is required by
+        // the runner API but unused here — the replay below re-classifies in bucket order instead.
+        List<int> borderScratch = ListPool<int>.Get();
+        ticker.RunInteriorFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData, borderScratch);
+        ListPool<int>.Release(borderScratch);
+
+        NativeList<VoxelMod> jobMods = ticker.Mods;
+        NativeList<int> modsPerSource = ticker.ModsPerSource;
+
+        // Pass 2: walk the bucket in the SAME enumeration order the runner used to build the interior set, so the
+        // interior cursor stays in lockstep. Interior voxels emit their precomputed job-mod run; border voxels run
+        // the managed path. This interleaves emission exactly as the legacy single loop would.
+        int interiorCursor = 0;
+        int modCursor = 0;
+        foreach (int idx in fluids)
+        {
+            ChunkMath.GetLocalPositionFromFlattenedIndex(idx, out int x, out int y, out int z);
+
+            if (FluidTierClassifier.IsTier1Interior(x, y, z))
+            {
+                int count = modsPerSource[interiorCursor];
+                interiorCursor++;
+                for (int k = 0; k < count; k++)
+                    world.EnqueueVoxelModification(jobMods[modCursor + k]);
+                modCursor += count;
+            }
+            else
+            {
+                Vector3Int pos = new Vector3Int(x, y, z);
+                List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
+                if (!BlockBehavior.Active(ChunkData, pos))
+                    removeScratch.Add(idx);
+                if (mods != null)
+                    world.EnqueueVoxelModifications(mods);
+            }
+        }
+
+        // Interior now-inactive indices come from the job (order-independent set removal, like the border path).
+        NativeList<int> inactive = ticker.InactiveInterior;
+        foreach (int k in inactive)
+            removeScratch.Add(k);
+
+        foreach (int idx in removeScratch)
+            fluids.Remove(idx);
     }
 
     /// <summary>
@@ -464,7 +538,7 @@ public class Chunk
     /// <see cref="ChunkData"/>, which owns the buckets; empty when no data is linked.
     /// </summary>
     public IEnumerable<Vector3Int> ActiveVoxels =>
-        ChunkData != null ? ChunkData.ActiveVoxels : System.Array.Empty<Vector3Int>();
+        ChunkData != null ? ChunkData.ActiveVoxels : Array.Empty<Vector3Int>();
 
     #endregion
 

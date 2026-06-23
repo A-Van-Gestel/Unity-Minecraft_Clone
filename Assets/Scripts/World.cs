@@ -15,6 +15,7 @@ using Data.WorldTypes;
 using DebugVisualizations;
 using Helpers;
 using JetBrains.Annotations;
+using Jobs;
 using Jobs.BurstData;
 using Jobs.Data;
 using Libraries;
@@ -186,6 +187,20 @@ public class World : MonoBehaviour
     [NonSerialized]
     public JobDataManager JobDataManager;
 
+    // --- TG-4 Phase 3: interior-fluid Burst tick ---
+    [SerializeField]
+    [Tooltip("TG-4 Phase 3: tick Tier-1 interior fluids via the Burst FluidTickJob (border fluids stay managed). " +
+             "Off = legacy fully-managed fluid tick. Defaults off until the hybrid path is validated (BH-D1 + in-game).")]
+    private bool _enableFluidBurstTick;
+
+    private FluidBurstTicker _fluidBurstTicker;
+
+    /// <summary>When true, Tier-1 interior fluids tick via the Burst <c>FluidTickJob</c>; otherwise the legacy managed path runs.</summary>
+    public bool EnableFluidBurstTick => _enableFluidBurstTick;
+
+    /// <summary>Lazily-created reusable runner for the interior fluid Burst tick. Disposed in <c>OnDestroy</c>.</summary>
+    internal FluidBurstTicker FluidBurstTicker => _fluidBurstTicker ??= new FluidBurstTicker();
+
     // --- Chunk Border Visualization ---
     private readonly Dictionary<ChunkCoord, GameObject> _chunkBorders = new Dictionary<ChunkCoord, GameObject>();
     private Transform _chunkBorderParent;
@@ -337,6 +352,7 @@ public class World : MonoBehaviour
 
         // 2. Dispose of the persistent global data.
         JobDataManager?.Dispose();
+        _fluidBurstTicker?.Dispose();
 
         // 3. Dispose of fluid vertex templates.
         FluidVertexTemplates?.Dispose();

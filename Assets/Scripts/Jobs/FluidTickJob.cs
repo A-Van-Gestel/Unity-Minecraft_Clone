@@ -60,6 +60,14 @@ namespace Jobs
         /// <summary>Output: flat indices of voxels that are no longer active and should be dropped from the bucket.</summary>
         public NativeList<int> NowInactive;
 
+        /// <summary>
+        /// Output: the number of mods emitted for each source, in <see cref="InteriorFluidIndices"/> order (one entry
+        /// per source, including zeros). Lets the caller replay the job's mods in the <b>original bucket order</b> —
+        /// interleaved with the managed border path — so the emitted stream is byte-identical to the legacy single
+        /// loop (zero drift; BH-D1 same-target order holds).
+        /// </summary>
+        public NativeList<int> ModsPerSource;
+
         // --- Falling-flag encoding (mirror of BlockBehavior.Fluids) ---
         private const byte FALLING_FLAG = 8;
         private const byte FLUID_MASK = 0x7;
@@ -72,6 +80,8 @@ namespace Jobs
         {
             foreach (int index in InteriorFluidIndices)
             {
+                int modsBefore = Mods.Length;
+
                 ChunkMath.GetLocalPositionFromFlattenedIndex(index, out int x, out int y, out int z);
 
                 uint packed = VoxelMap[index];
@@ -82,6 +92,7 @@ namespace Jobs
                 if (id >= BlockTypes.Length || BlockTypes[id].FluidType == FluidType.None)
                 {
                     NowInactive.Add(index);
+                    ModsPerSource.Add(0);
                     continue;
                 }
 
@@ -94,6 +105,9 @@ namespace Jobs
                 // Active: re-evaluate against the same pre-tick snapshot; drop if stable.
                 if (!IsFluidActive(x, y, z, id, level, props))
                     NowInactive.Add(index);
+
+                // Record this source's mod run length so the caller can replay it in bucket order.
+                ModsPerSource.Add(Mods.Length - modsBefore);
             }
         }
 
@@ -501,6 +515,7 @@ namespace Jobs
         {
             [MarshalAs(UnmanagedType.U1)]
             public bool Has;
+
             public ushort Id;
             public byte Level;
             public BlockTypeJobData Props;
