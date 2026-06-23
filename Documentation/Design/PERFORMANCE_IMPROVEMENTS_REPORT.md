@@ -740,8 +740,12 @@ initialization code (low priority).
 > orchestration stays on `Chunk`) are in-game confirmed, suite 11/11 green. The new runtime buckets are
 > pool-retained (no per-recycle churn — **TG-6-aligned**, but TG-6's own target, the `GenerationJobData.ActiveVoxels`
 > hand-off list, is untouched). Phases 2–3 (grass/fluid Burst) and Phase 4 (parallelize + cross-chunk) are not
-> started; the TG-4-vs-TG-5 fork is decided by profiling the tick under heavy fluid sim (see the design doc's §5
-> decision framework). The 🔴/🔴 ratings below cover the *remaining* Phases 2–4.
+> started; the TG-4-vs-TG-5 fork **has now been profiled (2026-06-23)** and resolves toward TG-4's **parallel**
+> finisher for **fluid** (grass negligible → stays managed): the isolated tick is perfectly linear across chunks
+> and ~21 ms/tick single-threaded at render-distance-5 ocean — see
+> [`Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md)
+> and the design doc's §5. Committing the Phase-3 fluid-Burst engineering is gated on a full-world stress pass
+> (tick-vs-mesh attribution). The 🔴/🔴 ratings below cover the *remaining* Phases 2–4.
 
 **Observed:** All ticking voxels (fluids, grass, future behaviors) flow through one monolithic
 collection and a central `switch` in `BlockBehavior`. As behavior types grow, this forces a single

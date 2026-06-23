@@ -1,8 +1,11 @@
 # TG-4 — `BlockBehavior` Data Separation (ECS/DOTS pattern)
 
 > **Status:** PARTIALLY IMPLEMENTED (2026-06-22). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
-> per-family active-voxel storage split, in-game confirmed, suite 11/11 green); **Phases 2–4 remain PROPOSED**
-> and are profile-gated (see §5 decision framework). Detail doc for the **TG-4** entry in
+> per-family active-voxel storage split, in-game confirmed, suite 11/11 green); **Phases 2–4 remain PROPOSED**.
+> The §5 profile gate **RAN 2026-06-23** and resolves toward TG-4's **parallel** finisher for **fluid** (grass
+> stays managed) — see [`Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md);
+> committing the Phase-3 fluid-Burst engineering is itself gated on a full-world stress pass (tick-vs-mesh
+> attribution). Detail doc for the **TG-4** entry in
 > [PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md). The behavior-tick validation
 > harness that gates this work is **built and green** (Waves 0–2, 8 baselines) — see
 > [BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md).
@@ -224,6 +227,25 @@ differential fixtures (closes harness BH-4) + a determinism stress (replay N tim
 > re-architecture) becomes a viable lighter finish that reuses the same BH-D1 gate.
 
 ### Decision framework — option (b) viability & TG-4-vs-TG-5 (profile-gated)
+
+> ⮕ **PROFILE-GATE RESULT (2026-06-23) — fork resolved toward TG-4 parallelism for fluid.** The profiling step
+> (#2 in the recommended sequence below) ran *early* — at the Phase-1 (managed) state, isolating the tick — and
+> answered the fork outright. Captured IL2CPP in
+> [`Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md):
+> - **The tick is iteration-volume-bound, not compute-bound → TG-4's parallelism, not TG-5.** It is *perfectly
+    > linear across chunks* (embarrassingly parallel) and the absolute cost at render-distance-5 ocean is
+    > **~21 ms/tick, single-threaded — >1 frame @ 60 fps**, reproducing the historical ocean stutter. Parallelizing
+    > across chunks projects to ~3.5–5 ms (sub-frame); TG-5 leaves the 21 ms stall.
+> - **Grass is negligible** (0.044 µs/voxel, ~12× cheaper than fluid) → stays managed regardless. Phase 2
+    > (grass-Burst) is therefore **not** motivated by cost — do it only as the Burst-pattern stepping-stone to
+    > Phase 3, or skip it.
+> - **GC is only ~10 % in IL2CPP** (Mono inflated it) → **parallelism is the prize**, not GC-elimination.
+> - **Open gate before committing the Phase-3 fluid-Burst engineering:** a **full-world stress pass** must
+    > confirm the *tick* (not the mesh-rebuild it triggers + lighting + cross-chunk) dominates the real ocean
+    > frame. This benchmark is **tick-only**; it proves the tick win exists, not that it is the whole frame.
+>
+> The framework below is the original pre-profile reasoning; it stands, and the data confirms its TG-4 branch
+> for fluid.
 
 Phase 4's **option (b)** (per-tick local halo gather) and the **TG-4-vs-TG-5** choice are
 **profile-decidable, not arguable** — the same lesson LI-1 taught: a gather is only a bottleneck when it
