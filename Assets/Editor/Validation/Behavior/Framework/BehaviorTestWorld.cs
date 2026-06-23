@@ -3,7 +3,12 @@ using System.Collections.Generic;
 using System.Text;
 using Data;
 using Editor.Validation.Framework;
+using Helpers;
+using Jobs;
 using Jobs.BurstData;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -22,6 +27,14 @@ namespace Editor.Validation.Behavior.Framework
 
         /// <summary>Per-behavior-family buckets, iterated grass-then-fluid (the TG-4 Phase 1 path).</summary>
         SplitFamily,
+
+        /// <summary>
+        /// TG-4 Phase 3 hybrid: grass-then-fluid order (as <see cref="SplitFamily"/>), but Tier-1 <b>interior</b> fluid
+        /// voxels are evaluated by the real Burst <see cref="FluidTickJob"/> instead of the managed
+        /// <see cref="BlockBehavior"/>; border fluids + grass stay managed. BH-D1[L|F] pits this against
+        /// <see cref="Legacy"/> to prove the Burst port emits a byte-identical stream.
+        /// </summary>
+        FluidBurstHybrid,
     }
 
     /// <summary>
@@ -59,6 +72,7 @@ namespace Editor.Validation.Behavior.Framework
 
         private readonly BlockType[] _palette;
         private readonly BlockType _inert;
+        private NativeArray<BlockTypeJobData> _blockTypesJob; // built from the palette for the FluidBurstHybrid driver
         private readonly HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
         private readonly GameObject _worldGo;
         private readonly BlockDatabase _stubDatabase;
@@ -81,6 +95,12 @@ namespace Editor.Validation.Behavior.Framework
             {
                 _palette = TestBehaviorBlockPalette.Create();
                 _inert = _palette[BlockIDs.Air]; // inert default for out-of-palette ids (see PaletteOf)
+
+                // Blittable copy of the palette for the FluidBurstHybrid driver's FluidTickJob (mirrors
+                // World.JobDataManager.BlockTypesJobData, built from the same BlockType source).
+                _blockTypesJob = new NativeArray<BlockTypeJobData>(_palette.Length, Allocator.Persistent);
+                for (int i = 0; i < _palette.Length; i++)
+                    _blockTypesJob[i] = new BlockTypeJobData(_palette[i]);
 
                 _stubDatabase = ScriptableObject.CreateInstance<BlockDatabase>();
                 _stubDatabase.blockTypes = _palette;
@@ -161,17 +181,36 @@ namespace Editor.Validation.Behavior.Framework
             // — see the BH-3 probe), exactly as Chunk.TickUpdate snapshots before iterating. The traversal ORDER is
             // chosen by the modeled driver (Legacy single-set vs SplitFamily per-family) — the variable BH-D1 tests.
             List<Vector3Int> ordered = OrderActives();
+
+            // FluidBurstHybrid: precompute the Tier-1 interior fluid voxels' (mods, active) via the real
+            // FluidTickJob over a pre-tick snapshot, keyed by position — mirroring production's
+            // Chunk.TickFluidsHybrid (interior = Burst, border + grass = managed). Null for the other drivers.
+            Dictionary<Vector3Int, FluidJobResult> jobResults =
+                Driver == TickDriver.FluidBurstHybrid ? RunInteriorFluidJob() : null;
+
             List<VoxelEval> evals = new List<VoxelEval>(ordered.Count);
             Queue<VoxelMod> pending = new Queue<VoxelMod>();
             List<Vector3Int> toRemove = new List<Vector3Int>();
 
             foreach (Vector3Int pos in ordered)
             {
-                // Behave returns a reused ThreadStatic list — deep-copy immediately before the next call clears it.
-                List<VoxelMod> raw = BlockBehavior.Behave(ChunkData, pos);
-                List<VoxelMod> copy = raw == null ? null : new List<VoxelMod>(raw);
+                List<VoxelMod> copy;
+                bool active;
 
-                bool active = BlockBehavior.Active(ChunkData, pos);
+                if (jobResults != null && jobResults.TryGetValue(pos, out FluidJobResult jr))
+                {
+                    // Interior fluid — its Behave/Active were computed by the Burst job (over the same pre-tick state).
+                    copy = jr.Mods;
+                    active = jr.Active;
+                }
+                else
+                {
+                    // Behave returns a reused ThreadStatic list — deep-copy immediately before the next call clears it.
+                    List<VoxelMod> raw = BlockBehavior.Behave(ChunkData, pos);
+                    copy = raw == null ? null : new List<VoxelMod>(raw);
+                    active = BlockBehavior.Active(ChunkData, pos);
+                }
+
                 evals.Add(new VoxelEval(pos, active, copy));
 
                 if (copy != null)
@@ -188,6 +227,100 @@ namespace Editor.Validation.Behavior.Framework
                 ApplyMod(pending.Dequeue(), pending);
 
             return new TickRecord(_tick, evals);
+        }
+
+        /// <summary>The Burst job's per-voxel result for one interior fluid: its emitted mods (null if none) and active flag.</summary>
+        private readonly struct FluidJobResult
+        {
+            public readonly List<VoxelMod> Mods;
+            public readonly bool Active;
+
+            public FluidJobResult(List<VoxelMod> mods, bool active)
+            {
+                Mods = mods;
+                Active = active;
+            }
+        }
+
+        /// <summary>
+        /// Runs the real <see cref="FluidTickJob"/> over the Tier-1 interior fluid voxels of <see cref="_activeVoxels"/>
+        /// (in enumeration order, matching the fluids order <see cref="OrderActives"/> produces) and returns each
+        /// interior voxel's (mods, active) keyed by position. This is the harness model of production's
+        /// <c>Chunk.TickFluidsHybrid</c>: it exercises the actual Burst port so BH-D1[L|F] proves the job emits the
+        /// same per-voxel stream the managed path does. Border fluids and grass are left to the managed path.
+        /// </summary>
+        private Dictionary<Vector3Int, FluidJobResult> RunInteriorFluidJob()
+        {
+            Dictionary<Vector3Int, FluidJobResult> results = new Dictionary<Vector3Int, FluidJobResult>();
+
+            // Interior fluid voxels in _activeVoxels enumeration order (same order the fluids land in OrderActives,
+            // so the job's per-source outputs line up positionally with the replay below).
+            List<Vector3Int> interiorPositions = new List<Vector3Int>();
+            NativeList<int> interiorFlat = new NativeList<int>(Allocator.TempJob);
+            foreach (Vector3Int pos in _activeVoxels)
+            {
+                ushort id = BurstVoxelDataBitMapping.GetId(ChunkData.GetVoxel(pos.x, pos.y, pos.z));
+                if (ChunkData.ClassifyFamily(id) == ChunkData.BehaviorFamily.Fluid &&
+                    FluidTierClassifier.IsTier1Interior(pos.x, pos.y, pos.z))
+                {
+                    interiorPositions.Add(pos);
+                    interiorFlat.Add(ChunkMath.GetFlattenedIndexInChunk(pos.x, pos.y, pos.z));
+                }
+            }
+
+            if (interiorFlat.Length == 0)
+            {
+                interiorFlat.Dispose();
+                return results;
+            }
+
+            NativeArray<uint> snapshot = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.TempJob);
+            ChunkData.FillJobVoxelMap(snapshot);
+            NativeList<VoxelMod> mods = new NativeList<VoxelMod>(Allocator.TempJob);
+            NativeList<int> inactive = new NativeList<int>(Allocator.TempJob);
+            NativeList<int> perSource = new NativeList<int>(Allocator.TempJob);
+
+            new FluidTickJob
+            {
+                VoxelMap = snapshot,
+                BlockTypes = _blockTypesJob,
+                InteriorFluidIndices = interiorFlat.AsArray(),
+                TickCounter = _tick,
+                ChunkOrigin = new int2(ChunkData.Position.x, ChunkData.Position.y),
+                Mods = mods,
+                NowInactive = inactive,
+                ModsPerSource = perSource,
+            }.Run();
+
+            HashSet<int> inactiveSet = new HashSet<int>();
+            foreach (int k in inactive)
+                inactiveSet.Add(k);
+
+            // Split the flat mod list back into per-source runs (ModsPerSource is parallel to interiorFlat). Use null
+            // for a zero-mod source to match BlockBehavior.Behave's "return null when no mods" contract.
+            int modCursor = 0;
+            for (int i = 0; i < interiorPositions.Count; i++)
+            {
+                int count = perSource[i];
+                List<VoxelMod> srcMods = null;
+                if (count > 0)
+                {
+                    srcMods = new List<VoxelMod>(count);
+                    for (int k = 0; k < count; k++)
+                        srcMods.Add(mods[modCursor + k]);
+                }
+
+                modCursor += count;
+                bool active = !inactiveSet.Contains(interiorFlat[i]);
+                results[interiorPositions[i]] = new FluidJobResult(srcMods, active);
+            }
+
+            snapshot.Dispose();
+            mods.Dispose();
+            inactive.Dispose();
+            perSource.Dispose();
+            interiorFlat.Dispose();
+            return results;
         }
 
         /// <summary>
@@ -377,6 +510,7 @@ namespace Editor.Validation.Behavior.Framework
 
             ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _previousInstance);
 
+            if (_blockTypesJob.IsCreated) _blockTypesJob.Dispose();
             if (_worldGo != null) Object.DestroyImmediate(_worldGo);
             if (_stubDatabase != null) Object.DestroyImmediate(_stubDatabase);
         }
