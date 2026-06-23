@@ -7,6 +7,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Benchmarks;
 using Data;
 using Data.JobData;
 using Data.NativeData;
@@ -1327,6 +1328,11 @@ public class World : MonoBehaviour
         // Prevent normal generation logic from interfering with the startup coroutine
         if (!_isWorldLoaded) return;
 
+        // Reset the opt-in sub-phase profiler's per-frame accumulators (no-op unless a fluid stress capture has
+        // enabled it). Bookends the four timed regions below (Apply / Light / Mesh / Tick); EndFrame() publishes
+        // them at the bottom of Update for the stress-pass collector to read.
+        WorldFrameProfiler.BeginFrame();
+
         PlayerChunkCoord = GetChunkCoordFromVector3(_playerTransform.position);
 
         // Only update the chunks if the player has moved from the chunk they were previously on.
@@ -1361,10 +1367,13 @@ public class World : MonoBehaviour
         JobManager.ProcessGenerationJobs();
 
         // 2. Apply all queued voxel modifications (from player and world gen).
+        long applyStart = WorldFrameProfiler.Begin();
         if (!_applyingModifications)
             ApplyModifications();
+        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Apply, applyStart);
 
         // 3. Process completed lighting jobs from the PREVIOUS frame.
+        long lightStart = WorldFrameProfiler.Begin();
         JobManager.ProcessLightingJobs();
 
         // 4. Schedule lighting jobs from the dirty set (only chunks with pending work).
@@ -1482,7 +1491,10 @@ public class World : MonoBehaviour
             }
         }
 
+        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Light, lightStart);
+
         // 5. Process completed mesh jobs from the PREVIOUS frame.
+        long meshStart = WorldFrameProfiler.Begin();
         JobManager.ProcessMeshJobs();
 
         // 6. Schedule NEW mesh jobs for chunks that now need them.
@@ -1537,12 +1549,16 @@ public class World : MonoBehaviour
             }
         }
 
+        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Mesh, meshStart);
+
 
         // Run Pool Cleanup
         ChunkPool.Update();
 
         // Process block behavior ticks (grass spreading, fluid flow, etc.)
+        long tickStart = WorldFrameProfiler.Begin();
         ProcessTickUpdates();
+        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Tick, tickStart);
 
         // Check if settings changed to update pool target
         // (Optional: You can move this to a dedicated ApplySettings method)
@@ -1551,6 +1567,9 @@ public class World : MonoBehaviour
             ChunkPool.SetTargetViewDistance(settings.viewDistance);
             CheckViewDistance();
         }
+
+        // Publish the four sub-phase accumulators (no-op unless a fluid stress capture is running).
+        WorldFrameProfiler.EndFrame();
     }
 
     // --- JOB-RELATED METHODS ---
