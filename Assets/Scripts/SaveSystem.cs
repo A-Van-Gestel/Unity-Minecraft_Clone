@@ -49,6 +49,7 @@ public static class SaveSystem
         string baseFolder = WorldLaunchState.CurrentMode switch
         {
             RuntimeMode.Benchmark => Path.Combine(Application.persistentDataPath, "Benchmark_Saves"),
+            RuntimeMode.FluidStress => Path.Combine(Application.persistentDataPath, "FluidStress_Saves"),
             _ => useVolatilePath ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves") : Path.Combine(Application.persistentDataPath, "Saves"),
         };
 

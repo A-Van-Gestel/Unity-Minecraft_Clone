@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using Data;
-using Data.Enums;
 using TMPro;
 using UI;
 using UnityEngine;
@@ -199,13 +198,13 @@ namespace Input
 
         /// <summary>
         /// Persistent controls (top button row) are visible whenever the player is
-        /// in the world scene and not in a benchmark run — even while a UI overlay
-        /// (inventory, pause) is open, so the user can dismiss it via touch.
+        /// in the world scene and not in an automated harness run (benchmark / fluid stress) — even while a UI
+        /// overlay (inventory, pause) is open, so the user can dismiss it via touch.
         /// </summary>
         private static bool ShouldShowPersistentControls()
         {
             if (World.Instance == null) return false;
-            return WorldLaunchState.CurrentMode != RuntimeMode.Benchmark;
+            return !WorldLaunchState.IsAutomatedMode;
         }
 
         // ═══════════════════════════════════════════

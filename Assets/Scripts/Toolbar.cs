@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using Data;
-using Data.Enums;
 using Input;
 using Serialization;
 using UI;
@@ -47,7 +46,7 @@ public class Toolbar : MonoBehaviour
 
     private void Update()
     {
-        if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark) return;
+        if (WorldLaunchState.IsAutomatedMode) return;
         if (WorldUIManager.Instance != null && WorldUIManager.Instance.IsPauseMenuOpen) return;
 
         // SCROLL WHEEL
