@@ -46,10 +46,12 @@ namespace Benchmarks
         [SerializeField]
         private bool _benchmarkEnabled = true;
 
-        [Tooltip("Number of measured runs per scenario; the per-tick timings are averaged across them.")]
+        [Tooltip("Number of measured runs per scenario. Each run yields one avg-ms/tick sample; the report aggregates " +
+                 "their mean/min/median/stddev. More runs = finer resolution (the whole suite is sub-second); ~30–100 " +
+                 "is the sweet spot before returns diminish.")]
         [SerializeField]
         [Min(1)]
-        private int _benchmarkRuns = 5;
+        private int _benchmarkRuns = 30;
 
         [Tooltip("Discarded warm-up ticks run before measurement each run, to absorb Burst/JIT and first-touch cost.")]
         [SerializeField]
@@ -213,7 +215,9 @@ namespace Benchmarks
 
         /// <summary>
         /// Runs one scenario across <see cref="_benchmarkRuns"/> rebuilt runs (plus a discarded warm-up run) and
-        /// reports the averaged per-tick cost, the peak per-tick cost, and the peak active-voxel count.
+        /// reports the per-run avg-ms/tick distribution (mean/min/median/stddev), the single worst tick, and the peak
+        /// active-voxel count. Each run's avg-ms/tick is one independent sample (ticks within a run are correlated —
+        /// the fluid spreads then settles — so the run, not the tick, is the iid unit the statistics aggregate over).
         /// </summary>
         /// <param name="scenario">The scenario to measure.</param>
         /// <param name="onComplete">Callback receiving the aggregated result.</param>
@@ -228,8 +232,8 @@ namespace Benchmarks
                 TeardownChunks(warmup);
             }
 
-            double sumAvgMsPerTick = 0;
-            double maxMsPerTick = 0;
+            List<double> runAvgsMs = new List<double>(_benchmarkRuns); // one avg-ms/tick sample per run (iid unit)
+            double maxMsPerTick = 0; // single worst tick across all runs (outlier)
             int peakActive = 0;
 
             for (int run = 0; run < _benchmarkRuns; run++)
@@ -256,16 +260,17 @@ namespace Benchmarks
                     peakActive = Mathf.Max(peakActive, CountActive(chunks));
                 }
 
-                sumAvgMsPerTick += runTotalMs / scenario.Ticks;
+                runAvgsMs.Add(runTotalMs / scenario.Ticks);
                 TeardownChunks(chunks);
                 yield return null; // keep the editor responsive between runs
             }
 
-            double avgMsPerTick = sumAvgMsPerTick / _benchmarkRuns;
-            double usPerVoxel = peakActive > 0 ? avgMsPerTick * 1000.0 / peakActive : 0;
+            DistributionStats stats = DistributionStats.From(runAvgsMs);
+            // µs/voxel uses the MIN ms/tick — the GC-free, uninterrupted floor — so the headline per-voxel cost is the
+            // clean CPU cost, not inflated by GC/OS-scheduler spikes (whose magnitude is shown separately by stddev/peak).
+            double usPerVoxel = peakActive > 0 ? stats.Min * 1000.0 / peakActive : 0;
 
-            onComplete(new ScenarioResult(scenario.Name, scenario.ChunkCount, peakActive,
-                avgMsPerTick, maxMsPerTick, usPerVoxel));
+            onComplete(new ScenarioResult(scenario.Name, scenario.ChunkCount, peakActive, stats, maxMsPerTick, usPerVoxel));
         }
 
         /// <summary>One behavior step over all chunks: tick each (production path), then drain the mod queue.</summary>
@@ -346,23 +351,83 @@ namespace Benchmarks
 
         #region Reporting
 
+        /// <summary>
+        /// Summary statistics over a set of per-run avg-ms/tick samples. <see cref="Min"/> is the clean,
+        /// uninterrupted floor (best proxy for raw CPU cost); <see cref="Mean"/> includes GC/scheduler overhead;
+        /// <see cref="StdDev"/> quantifies the spread (here dominated by per-voxel <c>List&lt;VoxelMod&gt;</c> GC —
+        /// the cost TG-4 Phase 2 would remove).
+        /// </summary>
+        private readonly struct DistributionStats
+        {
+            public readonly double Mean;
+            public readonly double Min;
+            public readonly double Median;
+            public readonly double StdDev;
+
+            private DistributionStats(double mean, double min, double median, double stdDev)
+            {
+                Mean = mean;
+                Min = min;
+                Median = median;
+                StdDev = stdDev;
+            }
+
+            /// <summary>
+            /// Computes mean, min, median, and sample standard deviation (N−1) over <paramref name="samples"/>.
+            /// Returns zeros for an empty set; <see cref="StdDev"/> is 0 for a single sample.
+            /// </summary>
+            /// <param name="samples">The per-run samples (not mutated; a copy is sorted for the median).</param>
+            public static DistributionStats From(List<double> samples)
+            {
+                int n = samples.Count;
+                if (n == 0) return new DistributionStats(0, 0, 0, 0);
+
+                double sum = 0;
+                double min = double.MaxValue;
+                foreach (double s in samples)
+                {
+                    sum += s;
+                    if (s < min) min = s;
+                }
+
+                double mean = sum / n;
+
+                double sumSq = 0;
+                foreach (double s in samples)
+                {
+                    double d = s - mean;
+                    sumSq += d * d;
+                }
+
+                double stdDev = n > 1 ? Math.Sqrt(sumSq / (n - 1)) : 0;
+
+                List<double> sorted = new List<double>(samples);
+                sorted.Sort();
+                double median = n % 2 == 1
+                    ? sorted[n / 2]
+                    : (sorted[n / 2 - 1] + sorted[n / 2]) * 0.5;
+
+                return new DistributionStats(mean, min, median, stdDev);
+            }
+        }
+
         /// <summary>The aggregated measurement for one scenario.</summary>
         private readonly struct ScenarioResult
         {
             public readonly string Name;
             public readonly int ChunkCount;
             public readonly int PeakActive;
-            public readonly double AvgMsPerTick;
+            public readonly DistributionStats Stats;
             public readonly double PeakMsPerTick;
             public readonly double UsPerVoxel;
 
             public ScenarioResult(string name, int chunkCount, int peakActive,
-                double avgMsPerTick, double peakMsPerTick, double usPerVoxel)
+                DistributionStats stats, double peakMsPerTick, double usPerVoxel)
             {
                 Name = name;
                 ChunkCount = chunkCount;
                 PeakActive = peakActive;
-                AvgMsPerTick = avgMsPerTick;
+                Stats = stats;
                 PeakMsPerTick = peakMsPerTick;
                 UsPerVoxel = usPerVoxel;
             }
@@ -378,7 +443,9 @@ namespace Benchmarks
             report.AppendLine($"Measured over {_benchmarkRuns} run(s) per scenario, {_warmupTicks} warm-up tick(s) discarded.");
             report.AppendLine("Path: production Chunk.TickUpdate (per-family buckets) + World.ApplyModifications. " +
                               "Isolated — no render/mesh/light.");
-            report.AppendLine("µs/voxel = avg ms/tick × 1000 ÷ peak active voxels (cost to evaluate one active voxel).");
+            report.AppendLine("ms/tick columns are over per-run avg-ms/tick samples (one per run). min = clean floor; " +
+                              "mean includes GC/scheduler cost; stddev = spread (mostly per-voxel mod-list GC); peak = worst single tick.");
+            report.AppendLine("µs/voxel = MIN ms/tick × 1000 ÷ peak active voxels (clean per-voxel cost, GC-spike-free).");
             report.AppendLine($"Total wall-clock runtime: {BenchmarkEnvironment.FormatDuration(totalElapsed)}");
             report.AppendLine();
             report.Append(BenchmarkEnvironment.DescribeSystem());
@@ -386,7 +453,7 @@ namespace Benchmarks
             report.AppendLine();
 
             ReportTable table = new ReportTable(
-                "Scenario", "Chunks", "PeakActive", "ms/tick avg", "ms/tick peak", "µs/voxel");
+                "Scenario", "Chunks", "PeakActive", "mean", "min", "median", "stddev", "peak", "µs/voxel");
 
             foreach (ScenarioResult r in results)
             {
@@ -394,7 +461,10 @@ namespace Benchmarks
                     r.Name,
                     r.ChunkCount.ToString(),
                     r.PeakActive.ToString(),
-                    r.AvgMsPerTick.ToString("F3"),
+                    r.Stats.Mean.ToString("F3"),
+                    r.Stats.Min.ToString("F3"),
+                    r.Stats.Median.ToString("F3"),
+                    r.Stats.StdDev.ToString("F3"),
                     r.PeakMsPerTick.ToString("F3"),
                     r.UsPerVoxel.ToString("F3"));
             }
