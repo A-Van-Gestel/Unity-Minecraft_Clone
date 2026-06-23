@@ -1,7 +1,9 @@
 # TG-4 — `BlockBehavior` Data Separation (ECS/DOTS pattern)
 
 > **Status:** PARTIALLY IMPLEMENTED (2026-06-22). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
-> per-family active-voxel storage split, in-game confirmed, suite 11/11 green); **Phases 2–4 remain PROPOSED**.
+> per-family active-voxel storage split, in-game confirmed, suite 11/11 green); **Phase 2 (grass-Burst) SKIPPED**
+> (2026-06-23 — negligible cost + job-latency risk, see §5); **Phase 3 (fluid-Burst, Tier-1 interior) IN PROGRESS**
+> (2026-06-23); **Phase 4 remains PROPOSED**.
 > The §5 profile gate **RAN 2026-06-23** and resolves toward TG-4's **parallel** finisher for **fluid** (grass
 > stays managed) — see [`Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md).
 > The **full-world stress pass attribution gate is now CLOSED** (2026-06-23,
@@ -204,7 +206,17 @@ exercise of §4.3, because bucketing changes iteration order.
     > fixture (`BuildMixedFamilyWorld`), the only one with two non-empty buckets; the seven golden fixtures are
     > single-family so their goldens were promoted to the `SplitFamily` driver byte-identically (no re-capture).
 
-### Phase 2 — Burstify **grass** (Tier-1 interior) *(first real Burst job)*
+### Phase 2 — Burstify **grass** (Tier-1 interior) *(first real Burst job)* — ⏭️ SKIPPED (2026-06-23)
+
+> ⏭️ **SKIPPED — not worth it, and likely a net loss.** The §5 profile gate measured grass at **0.044 µs/voxel
+> (~12× cheaper than fluid)**, so its main-thread tick cost is already negligible — there is no frame win to
+> capture. Moving it to a Burst job would, if anything, make it *slower*: a periodic grass tick would pay the
+> per-tick snapshot + schedule/complete **job latency** on a workload too small to amortize it (the same
+> gather-overhead-on-sparse-ticks floor LI-1 measured). The Burst-pattern scaffolding Phase 2 was meant to
+> establish (snapshot, blittable-blob extension, single-job driver, canonicalized drain, BH-D1 fluid config) is
+> **family-agnostic** and is instead built directly in **Phase 3 against fluids** (where the cost actually is);
+> grass-Burst becomes a trivial later follow-on reusing it **only if** a future profile ever shows grass costing
+> a frame. **Decision: go straight to Phase 3.**
 
 Rewrite the grass branch as `GrassTickJob` over native inputs for **interior** voxels; border grass stays
 on the managed path (hybrid). Grass is the simpler family (local reads, the TG-3 seeded RNG already uses

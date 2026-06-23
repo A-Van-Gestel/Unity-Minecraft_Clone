@@ -257,6 +257,18 @@ namespace Data
         public readonly byte FluidLevel;
         public byte FlowLevels;
 
+        // Fluid behavior (TG-4 Phase 3 — consumed by FluidTickJob; mirror of the managed BlockBehavior fluid path)
+        public readonly float SpreadChance;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool WaterfallsMaxSpread;
+
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool InfiniteSourceRegeneration;
+
+        /// <summary>Block tag bitmask (e.g. <c>REPLACEABLE</c>, <c>UNBREAKABLE</c>) — fluids test it to decide spread targets.</summary>
+        public readonly BlockTags Tags;
+
         // Lighting properties
         public readonly byte Opacity;
         public readonly byte LightEmission;
@@ -301,6 +313,12 @@ namespace Data
             FluidShaderID = blockType.fluidShaderID;
             FluidLevel = blockType.fluidLevel;
             FlowLevels = blockType.flowLevels;
+
+            // Fluid behavior (TG-4 Phase 3)
+            SpreadChance = blockType.spreadChance;
+            WaterfallsMaxSpread = blockType.waterfallsMaxSpread;
+            InfiniteSourceRegeneration = blockType.infiniteSourceRegeneration;
+            Tags = blockType.tags;
 
             // Lighting properties
             Opacity = blockType.opacity;
