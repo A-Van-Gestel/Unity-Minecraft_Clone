@@ -1,35 +1,35 @@
 using System.IO;
+using Data;
+using Data.Enums;
 using TMPro;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 namespace Benchmarks
 {
     /// <summary>
-    /// Post-benchmark results overlay that displays the full performance report in a
-    /// scrollable text field with buttons to open the log folder or return to the main menu.
-    /// Created programmatically by <see cref="BenchmarkUIBuilder"/> and activated by
-    /// <see cref="BenchmarkController.ShowResults"/>.
+    /// Post-run results overlay that displays a full performance report in a scrollable text field with buttons to
+    /// open the log folder or return to the main menu. Created programmatically by <see cref="BenchmarkUIBuilder"/>
+    /// and shared by both automated runners (<see cref="BenchmarkController"/> and <c>FluidStressController</c>) —
+    /// it is controller-agnostic; the "Return to Main Menu" button reverts the runtime mode and loads the menu scene
+    /// itself.
     /// </summary>
     public class BenchmarkResultsScreen : MonoBehaviour
     {
-        private BenchmarkController _controller;
         private TextMeshProUGUI _reportText;
         private Button _openFolderButton;
         private Button _returnButton;
         private string _logFolderPath;
 
         /// <summary>
-        /// Initializes the results screen with its data source and UI components.
+        /// Initializes the results screen with its UI components.
         /// </summary>
-        /// <param name="controller">The benchmark controller for the "Return to Menu" callback.</param>
         /// <param name="reportText">The TMP component to display the report in.</param>
         /// <param name="openFolderButton">Button that opens the log folder.</param>
         /// <param name="returnButton">Button that returns to the main menu.</param>
-        public void Initialize(BenchmarkController controller, TextMeshProUGUI reportText,
-            Button openFolderButton, Button returnButton)
+        public void Initialize(TextMeshProUGUI reportText, Button openFolderButton, Button returnButton)
         {
-            _controller = controller;
             _reportText = reportText;
             _openFolderButton = openFolderButton;
             _returnButton = returnButton;
@@ -65,7 +65,8 @@ namespace Benchmarks
         private void OnReturnClicked()
         {
             gameObject.SetActive(false);
-            _controller.ReturnToMainMenu();
+            WorldLaunchState.CurrentMode = RuntimeMode.Default;
+            SceneManager.LoadScene("Scenes/MainMenu", LoadSceneMode.Single);
         }
     }
 }

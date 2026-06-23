@@ -172,7 +172,7 @@ namespace Benchmarks
                 _blurMaterial = new Material(blurShader);
 
             _hud = BenchmarkUIBuilder.CreateHUD(this, _blurMaterial);
-            _resultsScreen = BenchmarkUIBuilder.CreateResultsScreen(this, _blurMaterial);
+            _resultsScreen = BenchmarkUIBuilder.CreateResultsScreen("Benchmark Complete", _blurMaterial);
 
             Debug.Log("[Benchmark] Waiting for initial chunk pipeline to settle...");
             Progress = -1f;

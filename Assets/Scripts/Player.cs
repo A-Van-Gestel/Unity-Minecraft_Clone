@@ -79,13 +79,19 @@ public class Player : MonoBehaviour
             IsFlying = true;
             IsNoclipping = true;
         }
+        else if (WorldLaunchState.CurrentMode == RuntimeMode.FluidStress)
+        {
+            gameObject.AddComponent<FluidStressController>();
+            IsFlying = true;
+            IsNoclipping = true;
+        }
     }
 
     private void Update()
     {
-        if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark)
+        if (WorldLaunchState.IsAutomatedMode)
         {
-            // BenchmarkController handles movement/rotation
+            // The active automated controller (BenchmarkController / FluidStressController) drives movement.
             VoxelRigidbody.SetMovementIntent(Vector3.zero);
         }
         else if (!World.InUI)

@@ -154,6 +154,97 @@ namespace Benchmarks
             for (int z = z0; z <= z1; z++)
                 cd.SetVoxel(x, y, z, packed);
         }
+
+        // ── Real-world (full-pipeline) flood — used by the full-world fluid stress pass ──────────────
+        // A SELF-CONTAINED suspended basin: a solid catch-floor with a water cap above it, stamped across a
+        // contiguous multi-chunk region HIGH in the sky. This makes the flood DETERMINISTIC regardless of the natural
+        // terrain below (ocean, plains, mountain) and across world-gen/seed changes — the reason a "let it flow over
+        // natural terrain" approach fails (an ocean spawn has nowhere to flow; a new seed moves the terrain). The
+        // water falls onto the floor, pools, spreads ACROSS chunk borders, and overflows the platform edges —
+        // exercising the REAL meshing + lighting pipeline (the cross-chunk realism the interior-only Tier-1 scenarios
+        // above deliberately exclude). Emitted as world-position VoxelMods through the production edit path.
+        //
+        // CRITICAL — stamp it THROTTLED across frames (see FluidStressController.EnqueueThrottled): a single-frame
+        // drain of the whole region dirties every chunk at once and avalanches the mesh/light allocators → OOM. The
+        // SUBSTRATE (floor + the air-clear that guarantees the band is empty whatever the terrain) is stamped +
+        // settled BEFORE the baseline, so its one-time relight is unmeasured; only the water cap (the flood) is
+        // measured.
+
+        /// <summary>
+        /// Block used for the catch-floor: <see cref="BlockIDs.Facade"/> — <b>solid</b> (isSolid, so it dams the
+        /// water) but <b>opacity 0</b> (fully transparent to light), so it casts NO skylight shadow on the columns
+        /// below. That distinction is load-bearing: a high <i>opaque</i> floor (e.g. Stone) shadows the whole region,
+        /// and the resulting cross-chunk skylight gradient oscillates without ever settling — the pipeline never goes
+        /// idle and the harness's settle wait hangs. A light-transparent solid sidesteps that entirely while still
+        /// containing the flood. (Facade is the only solid + opacity-0 block in <see cref="BlockIDs"/>.)
+        /// </summary>
+        private const ushort FLOOR_BLOCK = BlockIDs.Facade;
+
+        /// <summary>Y of the catch-floor — high enough to clear the ocean surface and typical terrain at any seed.</summary>
+        public const int SkyFloorY = 100;
+
+        /// <summary>Air layers the water falls through between the floor and the suspended cap.</summary>
+        private const int SKY_AIR_GAP = 6;
+
+        /// <summary>Bottom Y of the suspended water cap.</summary>
+        public const int SkyWaterBaseY = SkyFloorY + 1 + SKY_AIR_GAP; // 107
+
+        /// <summary>Thickness (in layers) of the water reservoir cap.</summary>
+        public const int SkyWaterThickness = 4;
+
+        /// <summary>Top Y of the suspended water cap (also the top of the cleared substrate band).</summary>
+        public const int SkyWaterTopY = SkyWaterBaseY + SkyWaterThickness - 1; // 110
+
+        /// <summary>
+        /// Emits the deterministic flood <b>substrate</b>: a <see cref="FLOOR_BLOCK"/> catch-floor at
+        /// <see cref="SkyFloorY"/> plus an explicit <see cref="BlockIDs.Air"/> clear of the band above it (the fall
+        /// gap + the water-cap rows), so the basin is identical regardless of any natural terrain at that altitude.
+        /// Enqueue <b>throttled</b>, then settle, then baseline — this is unmeasured setup.
+        /// </summary>
+        /// <param name="mods">The list to append world-position modifications to.</param>
+        /// <param name="regionMin">The minimum-corner chunk of the (regionChunks × regionChunks) flood footprint.</param>
+        /// <param name="regionChunks">Side length of the square flood region, in chunks (e.g. 3 → 9 chunks).</param>
+        public static void EmitFloodSubstrate(List<VoxelMod> mods, ChunkCoord regionMin, int regionChunks)
+        {
+            GetRegionVoxelBounds(regionMin, regionChunks, out int minWX, out int maxWX, out int minWZ, out int maxWZ);
+
+            for (int x = minWX; x <= maxWX; x++)
+            for (int z = minWZ; z <= maxWZ; z++)
+            {
+                mods.Add(new VoxelMod(new Vector3Int(x, SkyFloorY, z), FLOOR_BLOCK));
+                for (int y = SkyFloorY + 1; y <= SkyWaterTopY; y++)
+                    mods.Add(new VoxelMod(new Vector3Int(x, y, z), BlockIDs.Air));
+            }
+        }
+
+        /// <summary>
+        /// Emits the flood <b>trigger</b>: the suspended <see cref="BlockIDs.Water"/> source cap (level-0 sources via
+        /// <see cref="VoxelMod"/>'s default meta) across the whole region, which falls onto the substrate floor and
+        /// spreads / overflows across chunk borders. Enqueue <b>throttled</b> after the substrate has settled and the
+        /// baseline recorded — this is the measured cascade.
+        /// </summary>
+        /// <param name="mods">The list to append world-position modifications to.</param>
+        /// <param name="regionMin">The minimum-corner chunk of the flood footprint (same as the substrate).</param>
+        /// <param name="regionChunks">Side length of the square flood region, in chunks.</param>
+        public static void EmitFloodTrigger(List<VoxelMod> mods, ChunkCoord regionMin, int regionChunks)
+        {
+            GetRegionVoxelBounds(regionMin, regionChunks, out int minWX, out int maxWX, out int minWZ, out int maxWZ);
+
+            for (int x = minWX; x <= maxWX; x++)
+            for (int z = minWZ; z <= maxWZ; z++)
+            for (int y = SkyWaterBaseY; y <= SkyWaterTopY; y++)
+                mods.Add(new VoxelMod(new Vector3Int(x, y, z), BlockIDs.Water));
+        }
+
+        /// <summary>Computes the inclusive world-voxel X/Z bounds of a square chunk region.</summary>
+        private static void GetRegionVoxelBounds(ChunkCoord regionMin, int regionChunks,
+            out int minWX, out int maxWX, out int minWZ, out int maxWZ)
+        {
+            minWX = regionMin.X * VoxelData.ChunkWidth;
+            maxWX = (regionMin.X + regionChunks) * VoxelData.ChunkWidth - 1;
+            minWZ = regionMin.Z * VoxelData.ChunkWidth;
+            maxWZ = (regionMin.Z + regionChunks) * VoxelData.ChunkWidth - 1;
+        }
     }
 
     /// <summary>

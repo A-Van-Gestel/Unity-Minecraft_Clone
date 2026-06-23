@@ -74,13 +74,13 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Creates the post-benchmark results screen with a scrollable report and action buttons.
-        /// The root GameObject starts inactive.
+        /// Creates the post-run results screen with a scrollable report and action buttons. Shared by both automated
+        /// runners. The root GameObject starts inactive.
         /// </summary>
-        /// <param name="controller">The benchmark controller to wire into the results screen.</param>
+        /// <param name="title">Heading shown above the report (e.g. "Benchmark Complete").</param>
         /// <returns>The configured <see cref="BenchmarkResultsScreen"/> component.</returns>
         /// <param name="blurMaterial">Optional UI blur material for the background overlay. Pass null to skip.</param>
-        public static BenchmarkResultsScreen CreateResultsScreen(BenchmarkController controller, Material blurMaterial = null)
+        public static BenchmarkResultsScreen CreateResultsScreen(string title = "Benchmark Complete", Material blurMaterial = null)
         {
             // Canvas
             GameObject canvasObj = CreateCanvas("BenchmarkResults_Canvas", 200);
@@ -125,7 +125,7 @@ namespace Benchmarks
             // Title
             GameObject titleObj = CreateTMPText("Results_Title", contentPanel.transform, 24, TextAlignmentOptions.Center);
             TextMeshProUGUI titleText = titleObj.GetComponent<TextMeshProUGUI>();
-            titleText.text = "Benchmark Complete";
+            titleText.text = title;
             titleText.fontStyle = FontStyles.Bold;
             LayoutElement titleLayout = titleObj.AddComponent<LayoutElement>();
             titleLayout.preferredHeight = 40;
@@ -152,7 +152,7 @@ namespace Benchmarks
 
             // Attach results screen component
             BenchmarkResultsScreen screen = canvasObj.AddComponent<BenchmarkResultsScreen>();
-            screen.Initialize(controller, reportText, openFolderBtn, returnBtn);
+            screen.Initialize(reportText, openFolderBtn, returnBtn);
 
             canvasObj.SetActive(false);
             return screen;
