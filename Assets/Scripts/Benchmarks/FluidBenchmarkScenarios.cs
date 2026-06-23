@@ -33,10 +33,18 @@ namespace Benchmarks
         private const byte FLUID_SOURCE_META = 0;
         private const byte INERT_META = 0; // schema-agnostic; solids/grass/dirt seed with meta 0 (matches the suite)
 
+        // Cave-fill cascade geometry: a thin ocean source cap over a deep air void it floods — a transient, expanding
+        // front rather than the sustained source VOLUME of the boxes above. Models the historical ocean-over-cave
+        // stutter case (water above filling an underwater air cave below).
+        private const int CAVE_FLOOR_Y = FLOOR_Y; // the flood pools onto this; same solid floor as the boxes
+        private const int OCEAN_CAP_BASE_Y = 26; // bottom of the ocean source cap (≈24-deep air cave beneath it)
+        private const int OCEAN_CAP_THICKNESS = 4; // ocean reservoir layers — a sustained source that keeps flooding
+
         /// <summary>
         /// The full scenario set: a fluid size-scaling sweep (small → medium → large-multichunk) for the core
-        /// "cost per active fluid voxel" curve, a pure-grass field for the family baseline, and a mixed lake+grass
-        /// for the two-family split overhead.
+        /// "cost per active fluid voxel" curve; a cave-fill cascade + a 25-chunk ocean for the realistic transient
+        /// load and the absolute budget at render-distance-5 scale; a pure-grass field for the family baseline; and a
+        /// mixed lake+grass for the two-family split overhead.
         /// </summary>
         /// <returns>A fresh list of scenarios.</returns>
         public static List<FluidScenario> All() => new List<FluidScenario>
@@ -53,6 +61,18 @@ namespace Benchmarks
             // exercises the per-chunk TickUpdate loop / ApplyModifications drain at higher chunk counts.
             new FluidScenario("Fluid-Large-4ch", chunkCount: 4, ticks: 10,
                 seed: cd => SeedSuspendedWater(cd, MIN_XZ, MAX_XZ, baseY: 22, height: 24)),
+
+            // Cave-fill cascade: a thin ocean source cap flooding a deep air void — a transient, expanding front
+            // (peak active ≫ start), not a sustained source volume. The realistic shape of the historical ocean
+            // stutter (the ocean above filling an underwater cave). Compare its PeakActive to the boxes' near-static.
+            new FluidScenario("Cave-Fill-Cascade", chunkCount: 1, ticks: 12,
+                seed: cd => SeedOceanOverCave(cd, MIN_XZ, MAX_XZ)),
+
+            // The cave-fill ocean replicated across 25 independent chunks = render distance 5 (the regime the
+            // historical ocean stutter occurred in). The ABSOLUTE tick budget at real ocean scale — the concrete
+            // go/no-go number for "would the tick alone still stutter." Heavy: consider fewer runs when capturing it.
+            new FluidScenario("Ocean-25ch", chunkCount: 25, ticks: 12,
+                seed: cd => SeedOceanOverCave(cd, MIN_XZ, MAX_XZ)),
 
             // 12×12 = 144 grass blocks on a dirt bed, each with convertible dirt neighbors — the grass family
             // baseline (a different, cheaper per-voxel behavior than fluid).
@@ -86,6 +106,27 @@ namespace Benchmarks
 
             // Suspended water source box. Air everywhere else (the all-air default chunk) lets it flow.
             FillBox(cd, minXZ, maxXZ, baseY, baseY + height - 1, minXZ, maxXZ, BlockIDs.Water, FLUID_SOURCE_META);
+        }
+
+        /// <summary>
+        /// Seeds a thin <see cref="BlockIDs.Water"/> source cap (the ocean reservoir) over a deep air void (the cave)
+        /// on a solid floor, so the water floods DOWN into the void — a transient, expanding cascade front rather than
+        /// the sustained source VOLUME of <see cref="SeedSuspendedWater"/>. Models the historical "underwater cave
+        /// filled by the ocean above" load. Interior-only: the cap footprint stays inside the Tier-1 margin.
+        /// </summary>
+        /// <param name="cd">The chunk data to seed.</param>
+        /// <param name="minXZ">Inclusive min on X and Z for the ocean cap / cave footprint.</param>
+        /// <param name="maxXZ">Inclusive max on X and Z for the ocean cap / cave footprint.</param>
+        private static void SeedOceanOverCave(ChunkData cd, int minXZ, int maxXZ)
+        {
+            // Solid floor the flood pools onto and spreads across.
+            FillBox(cd, minXZ, maxXZ, CAVE_FLOOR_Y, CAVE_FLOOR_Y, minXZ, maxXZ, BlockIDs.Stone, INERT_META);
+
+            // The deep air cave between the floor and the cap is the all-air default — nothing to seed.
+
+            // Ocean source cap: a thin sustained reservoir that floods the void below (the cave-fill cascade).
+            FillBox(cd, minXZ, maxXZ, OCEAN_CAP_BASE_Y, OCEAN_CAP_BASE_Y + OCEAN_CAP_THICKNESS - 1, minXZ, maxXZ,
+                BlockIDs.Water, FLUID_SOURCE_META);
         }
 
         /// <summary>

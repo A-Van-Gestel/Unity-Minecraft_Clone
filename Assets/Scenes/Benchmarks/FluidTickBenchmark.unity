@@ -368,7 +368,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Benchmarks.FluidTickBenchmark
   _benchmarkEnabled: 1
-  _benchmarkRuns: 250
+  _benchmarkRuns: 150
   _warmupTicks: 5
   _runOnStart: 1
   _writeReportToFile: 1
