@@ -9,9 +9,14 @@ The harness exists and runs: menu item **`Minecraft Clone/Dev/Validate Behavior`
 **BH-B6** (grass spread to convertible dirt — TG-3 seeded-RNG gate #2: reservoir sampling + 2% roll; in-game
 confirmed), and **BH-B7** (grass→dirt under a solid block — deterministic). BH-7 (apply-path fidelity) closed as
 accepted defensive parity. Promoted from `Design/` to `Architecture/Testing Framework/` on 2026-06-21 (an
-implemented suite, sibling to the meshing/lighting fidelity docs). Remaining: **BH-D1**, the old-vs-new
-differential — the load-bearing TG-4/TG-5 parity test, built in that PR since it needs both code paths to exist.
-**Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21
+implemented suite, sibling to the meshing/lighting fidelity docs). **BH-D1 — the old-vs-new differential — is now
+BUILT and green** (`BehaviorValidationSuite.Differential.cs`): `BH-D1[L|L]` (comparator self-check), `BH-D1[L|S]`
+(legacy vs split-family), and `BH-D1[L|F]` (legacy vs the TG-4 Phase-3 fluid-Burst hybrid — **byte-identical over
+all fixtures**, driving the real `FluidBurstTicker`). TG-4 Phase 4a additionally added a separate
+**parallel-vs-serial determinism gate** (`FluidParallelDeterminismValidation`, menu
+**`Minecraft Clone/Dev/Validate Fluid Parallel Determinism`**) — N concurrent pooled tickers byte-identical to the
+serial baseline + run-to-run. Remaining: the deferred **Tier-2 cross-chunk fixtures (BH-4)** for Phase 4b.
+**Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21 · **BH-D1 + parallel gate built:** 2026-06-23/24
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
 (Burst function-pointer dispatch) optimizations in
 [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim *behavior-preserving* —

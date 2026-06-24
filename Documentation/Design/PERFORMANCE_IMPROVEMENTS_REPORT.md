@@ -735,21 +735,23 @@ initialization code (low priority).
 > phased plan (BH-D1 infra → per-family storage split → grass Burst → fluid Burst → parallelize + Tier-2),
 > with the BH-D1 old-vs-new differential slotted into each phase gate.
 >
-> **Status (2026-06-22): Phases 0–1 SHIPPED, Phases 2–4 profile-gated.** Phase 0 (BH-D1 differential infra) +
-> Phase 1 (per-family `NativeHashSet<int>` active-voxel buckets — landed on **`ChunkData`**, not `Chunk`; tick
-> orchestration stays on `Chunk`) are in-game confirmed, suite 11/11 green. The new runtime buckets are
-> pool-retained (no per-recycle churn — **TG-6-aligned**, but TG-6's own target, the `GenerationJobData.ActiveVoxels`
-> hand-off list, is untouched). Phases 2–3 (grass/fluid Burst) and Phase 4 (parallelize + cross-chunk) are not
-> started; the TG-4-vs-TG-5 fork **has now been profiled (2026-06-23)** and resolves toward TG-4's **parallel**
-> finisher for **fluid** (grass negligible → stays managed): the isolated tick is perfectly linear across chunks
-> and ~21 ms/tick single-threaded at render-distance-5 ocean — see
-> [`Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md)
-> and the design doc's §5. The **full-world stress-pass attribution gate is now CLOSED** (2026-06-23,
-> [`Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md)):
-> mesh-rebuild does **not** dominate (refuted); the tick owns the **GC-bound ~180 ms dam-break spike** (Phase-3
-> fluid→Burst justified) — but the **sustained** ocean frame is **lighting-dominated** (~66 %), so TG-4 removes the
-> stutter *spike*, not the *average* cost (ocean smoothness additionally needs the lighting line, LI-1 / P-2). The
-> 🔴/🔴 ratings below cover the *remaining* Phases 2–4.
+> **Status (2026-06-24): Phases 0–1 + 3 + 4a SHIPPED (default on); Phase 2 skipped; Phase 4b deferred.** Phase 0
+> (BH-D1 differential infra) + Phase 1 (per-family `NativeHashSet<int>` active-voxel buckets — landed on
+> **`ChunkData`**, not `Chunk`; tick orchestration stays on `Chunk`) are in-game confirmed. **Phase 3** Burst-ticks
+> Tier-1 interior fluids (`FluidTickJob`, border stays managed) gated by `BH-D1[L|F]` (byte-identical); **Phase 4a**
+> parallelizes those interior jobs across chunks (`World.ProcessTickUpdatesParallel`, worker-count guarded) gated by
+> a parallel-vs-serial determinism suite + an 8-run IL2CPP A/B. **Phase 2 (grass) skipped** (negligible cost);
+> **Phase 4b (Tier-2 border via the neighbor view) deferred.** The new runtime buckets are pool-retained (no
+> per-recycle churn — **TG-6-aligned**, but TG-6's own target, the `GenerationJobData.ActiveVoxels` hand-off list,
+> is untouched). The attribution gates resolved toward TG-4's parallel finisher and CLOSED across three captures —
+> [`…FLUID_TICK_2026_06_23`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md) (isolated tick
+> ~21 ms/tick), [`…FULLWORLD_FLUID_2026_06_23`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md)
+> (tick owns the **GC-bound ~180 ms dam-break spike**; Phase 3 cut it to ~143 ms; sustained frame
+> **lighting-dominated ~66 %**), and the Phase-4a A/B
+> [`…FULLWORLD_FLUID_PARALLEL_2026-06-24`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_PARALLEL_2026-06-24_BENCHMARK.md)
+> (parallelizing the interior shaves a further **~6.6 ms / ~4.6 %** off the spike, sustained tick unchanged). **Net:
+> TG-4 removed the stutter *spike*, not the *average* cost; the tick is not the frame bottleneck — so Phase 4b is
+> low-ROI and ocean smoothness needs the lighting line.** The 🔴/🔴 ratings below now cover only the *deferred* Phase 4b.
 
 **Observed:** All ticking voxels (fluids, grass, future behaviors) flow through one monolithic
 collection and a central `switch` in `BlockBehavior`. As behavior types grow, this forces a single

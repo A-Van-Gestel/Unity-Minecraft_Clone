@@ -1,19 +1,31 @@
 # TG-4 — `BlockBehavior` Data Separation (ECS/DOTS pattern)
 
-> **Status:** PARTIALLY IMPLEMENTED (2026-06-22). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
-> per-family active-voxel storage split, in-game confirmed, suite 11/11 green); **Phase 2 (grass-Burst) SKIPPED**
-> (2026-06-23 — negligible cost + job-latency risk, see §5); **Phase 3 (fluid-Burst, Tier-1 interior) IN PROGRESS**
-> (2026-06-23); **Phase 4 remains PROPOSED**.
-> The §5 profile gate **RAN 2026-06-23** and resolves toward TG-4's **parallel** finisher for **fluid** (grass
-> stays managed) — see [`Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md).
-> The **full-world stress pass attribution gate is now CLOSED** (2026-06-23,
-> [`Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md)):
-> mesh-rebuild does **not** dominate (refuted); the tick owns the **GC-bound ~180 ms dam-break spike** (Phase-3
-> fluid→Burst is justified and well-targeted); but the **sustained** ocean frame is **lighting-dominated** (~66 %),
-> so TG-4 removes the *stutter spike*, not the *average* cost — ocean smoothness additionally needs the lighting
-> line (LI-1 / P-2). Detail doc for the **TG-4** entry in
+> **Status:** IMPLEMENTED THROUGH PHASE 4a (2026-06-24). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
+> per-family active-voxel storage split, in-game confirmed); **Phase 2 (grass-Burst) SKIPPED** (2026-06-23 —
+> negligible cost + job-latency risk, see §5); **Phase 3 (fluid-Burst, Tier-1 interior hybrid) SHIPPED**
+> (2026-06-23, **default on**) — `FluidTickJob` Burst-ticks interior fluids, border stays managed, gated by
+> `BH-D1[L|F]` (byte-identical over all fixtures) + in-game; **Phase 4a (parallelize interior jobs across chunks)
+> SHIPPED** (2026-06-24, **default on**, worker-count guarded) — gated by the parallel-vs-serial determinism suite
+> + an 8-run IL2CPP A/B. **Phase 4b (close Tier-2 border via the §4.2 neighbor view) DEFERRED** (the only part
+    > still proposed — see §5 verdict below for why).
+>
+> **Profile/attribution gates (all CLOSED):** the §5 isolated-tick gate
+> ([`Performance/…FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md))
+> and the full-world attribution gate
+> ([`…FULLWORLD_FLUID_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md))
+> showed mesh-rebuild does **not** dominate (refuted), the tick owned the **GC-bound ~180 ms dam-break spike**
+> (which Phase 3 cut to ~143 ms by Bursting the interior), and the **sustained** ocean frame is
+> **lighting-dominated (~66 %)**. The **Phase-4a realized-win A/B**
+> ([`…FULLWORLD_FLUID_PARALLEL_2026-06-24_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_PARALLEL_2026-06-24_BENCHMARK.md),
+> 8 IL2CPP runs) then showed parallelizing the interior shaves only a **further ~6.6 ms (~4.6 %) off the dam-break
+> spike** (real + repeatable) while the **sustained tick is unchanged (~2 % of frame)**: the spike is dominated by
+> the *managed border* (Tier-2, ~75 % of voxels) which P4a does not touch, and the frame is not tick-bound. **Net:
+> P4a is correct and shipped, but the tick is not the frame bottleneck — so P4b (the 🔴 neighbor-view work for the
+> border) is deferred as low-ROI, and ocean smoothness needs the lighting line (LI-1 / P-2), not (only) the tick.**
+> Detail doc for the **TG-4** entry in
 > [PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md). The behavior-tick validation
-> harness that gates this work is **built and green** (Waves 0–2, 8 baselines) — see
+> harness that gates this work is **built and green** (8 baselines + `BH-D1[L|L]/[L|S]/[L|F]` + the parallel
+> determinism gate) — see
 > [BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md).
 >
 > **As-built correction (Phase 1):** the per-family buckets live on **`ChunkData`** (the data they describe),
@@ -224,23 +236,62 @@ on the managed path (hybrid). Grass is the simpler family (local reads, the TG-3
 the 8 baselines. Single-job (not yet parallel) to isolate the Burst-correctness change from the
 scheduling change.
 
-### Phase 3 — Burstify **fluids** (Tier-1 interior) *(the hard family)*
+### Phase 3 — Burstify **fluids** (Tier-1 interior) *(the hard family)* — ✅ SHIPPED (2026-06-23, default on)
 
 Rewrite the fluid branch as `FluidTickJob` for interior voxels: flow, decay, falling/waterfall reset,
 infinite-source regeneration, and the **TG-3 viscosity RNG**. Border fluids stay managed until 4.2 is
 solved. **Gate:** BH-D1 over fluid fixtures (BH-B1–B5) + the 8 baselines. This is the highest-risk phase.
 
-### Phase 4 — Parallelize + close Tier-2
+> ⮕ **AS BUILT (Phase 3).** `Jobs/FluidTickJob.cs` (a faithful 1:1 Burst port of `BlockBehavior.Fluids`),
+> `Jobs/FluidTierClassifier.cs` (the **margin-4** interior test — interior = central 8×8 of each 16×16 chunk, the
+> max horizontal reach of `CalculateFlowCost`), and `Jobs/FluidBurstTicker.cs` (snapshot → single partition pass
+> → run the job, exposing the outputs the caller drains). Wired in `Chunk.TickFluidsHybrid` behind
+> `World.EnableFluidBurstTick`. **Zero-drift design:** rather than re-baseline goldens, the job emits a per-source
+> `ModsPerSource` count and the runner captures the bucket's enumeration order (`ReplayOrder`); the caller replays
+> interior-job mods **interleaved with the managed border in the original bucket order**, so the emitted
+> `VoxelMod` stream is **byte-identical** to the serial single loop — `BH-D1[L|F]` confirms it over all fixtures
+> (no golden re-capture needed). Shared single-source-of-truth helpers added so the managed and Burst paths can't
+> drift: falling-bit encoding in `BurstVoxelDataBitMapping`, `FluidTierClassifier.{MaxFlowSearchDepth,HorizontalNeighborOffset}`,
+> and a `VoxelMod(int3, ushort)` ctor (keeps `Vector3Int` out of the job). Border fluids + grass stay managed.
 
-Schedule the per-family jobs concurrently; drain emitted mods through the canonicalized apply path
-(§4.3). Then build the native neighbor view (4.2 option a or b) and migrate border voxels off the
-managed hybrid, retiring the fallback. **Gate:** full BH-D1 (all fixtures) + **new** Tier-2 cross-chunk
-differential fixtures (closes harness BH-4) + a determinism stress (replay N times, identical streams).
+### Phase 4a — Parallelize the interior jobs across chunks *(gather-free)* — ✅ SHIPPED (2026-06-24, default on, worker-guarded)
 
-> **Scope honesty:** Phases 3–4 (fluids + cross-chunk) are where the 🔴 effort/risk lives and where the
-> P-2 dependency bites. Phases 0–2 (infra + storage split + grass) are independently valuable, low-risk,
-> and could ship alone — at which point **TG-5** (Burst function-pointer dispatch, no parallel
-> re-architecture) becomes a viable lighter finish that reuses the same BH-D1 gate.
+Schedule the per-chunk interior `FluidTickJob`s **concurrently** across all ticking chunks, then drain. Interior
+emissions are chunk-local (an interior voxel never targets another chunk), so the drain stays **serial in the
+deterministic chunk-iteration order** and the emitted stream remains byte-identical — **no canonical apply-drain
+needed** (that was a full-parallel-emission concern; it isn't reached here). **Gate:** the behavior suite (serial
+parity unchanged) + a dedicated **parallel-vs-serial determinism suite** (`FluidParallelDeterminismValidation` —
+N concurrent pooled tickers over one chunk, byte-identical to the serial baseline + run-to-run) + the 8-run IL2CPP A/B.
+
+> ⮕ **AS BUILT (Phase 4a).** `FluidBurstTicker.ScheduleInteriorFluids → JobHandle` (the `.Schedule()` counterpart
+> of `RunInteriorFluids`); `World.ProcessTickUpdatesParallel` does **schedule-all → `ScheduleBatchedJobs` →
+> complete → serial drain** with a `DynamicPool<FluidBurstTicker>` (one in-flight ticker per chunk; the scratch is
+> per-ticker, not shared). `Chunk.DrainTick(ticker)` runs grass + the fluid replay from the pre-completed ticker.
+> Gated by `World.EnableParallelFluidTick` **and** a worker-count guard (`JobsUtility.JobWorkerCount ≥ 2`) that
+> falls back to the serial path on core-starved hosts. `CalculateFlowCost`'s BFS scratch was hoisted to one reused
+> queue/visited per `Execute` (threaded locals — Burst rejects per-job container *fields*). **Realized win is
+> marginal** (see status header / §5): only the ~25 % interior parallelizes and it was already Burst, so ~6.6 ms
+> off the dam-break spike, sustained tick unchanged. The serial path is retained as the flag-off fallback; the
+> intended endgame is to **retire it** (make parallel unconditional, delete the serial `TickUpdate` path +
+> `RunInteriorFluids` + flags + guard) once soaked on real devices.
+
+### Phase 4b — Close Tier-2 (border) via the §4.2 neighbor view — ⏸️ DEFERRED (low-ROI on current evidence)
+
+Build the native neighbor view (4.2 option a or b) and migrate **border** voxels off the managed hybrid into the
+parallel Burst path, retiring the managed fallback. **Gate (when pursued):** full BH-D1 (all fixtures) + **new**
+Tier-2 cross-chunk differential fixtures (closes harness BH-4) + a determinism stress.
+
+> ⏸️ **Deferred — why.** The Phase-4a A/B showed the dam-break tick spike is **managed-border-dominated**, so P4b
+> *would* target the right cost — **but** (a) the worst flood frames carry coincident render/generation/GC hitches
+> of equal magnitude that P4b can't touch, and (b) the **sustained** frame is lighting-bound (~66 %) with the tick
+> at ~2 %. So the 🔴 neighbor-view investment chases a tick that isn't frame-limiting. Revisit only if a genuinely
+> tick-bound scenario appears; the substrate (P-2 Layer 2 / option (b) halo gather) is tracked in §10.
+
+> **Scope honesty (as it played out):** Phase 3 (the GC-bound spike) was the real win — Bursting the interior cut
+> the ~180 ms managed spike to ~143 ms. Phase 4a's parallelism added a small, real, but imperceptible sliver on
+> top (the interior was already fast). The big remaining tick cost is the managed border (P4b), but the tick as a
+> whole is not the frame bottleneck — so **TG-5** (function-pointer dispatch, same BH-D1 gate, no parallel
+> re-architecture) was never needed, and further tick work is low priority versus the lighting line.
 
 ### Decision framework — option (b) viability & TG-4-vs-TG-5 (profile-gated)
 
@@ -341,13 +392,14 @@ two-driver runner.
 
 **How it gates each phase:**
 
-| Phase | BH-D1 configuration               | Pass condition                                                              |
-|-------|-----------------------------------|-----------------------------------------------------------------------------|
-| 0 ✅   | both drivers = legacy             | streams identical (comparator self-check) — **green**                       |
-| 1 ✅   | legacy vs split-storage (managed) | equivalent under §4.3 (first real reorder test) — **green over 8 fixtures** |
-| 2     | legacy vs grass-Burst hybrid      | equivalent over BH-B6/B7; fluids unaffected                                 |
-| 3     | legacy vs fluid-Burst hybrid      | equivalent over BH-B1–B5                                                    |
-| 4     | legacy vs full parallel + Tier-2  | equivalent over all fixtures + new cross-chunk fixtures + N-run determinism |
+| Phase | BH-D1 configuration                          | Pass condition                                                                                                                                                                                     |
+|-------|----------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0 ✅   | both drivers = legacy                        | streams identical (comparator self-check) — **green**                                                                                                                                              |
+| 1 ✅   | legacy vs split-storage (managed)            | equivalent under §4.3 (first real reorder test) — **green over 8 fixtures**                                                                                                                        |
+| 2 ⏭️  | *(skipped — grass stays managed)*            | n/a                                                                                                                                                                                                |
+| 3 ✅   | `BH-D1[L\|F]` — legacy vs fluid-Burst hybrid | equivalent over **all fixtures** (incl. BH-B1–B5) — **green**                                                                                                                                      |
+| 4a ✅  | parallel-vs-serial determinism suite         | N concurrent tickers byte-identical to serial + run-to-run — **green** *(separate from BH-D1: it is single-chunk; the World-level parallel drain is covered by this suite + the 8-run IL2CPP A/B)* |
+| 4b ⏸️ | legacy vs full parallel + Tier-2 border      | *(deferred)* equivalent over all fixtures + new cross-chunk fixtures + N-run determinism                                                                                                           |
 
 > **Phase 1 fixture note:** the seven golden fixtures (BH-B1…B7) are each single-family, so under `SplitFamily`
 > their traversal order equals legacy — `BH-D1[L|S]` passes but exercises no *cross-family* reorder there. A mixed
@@ -398,12 +450,13 @@ The pooling *concern* is not superseded (per-chunk native-list churn persists an
 
 ## 9. Acceptance criteria
 
-- All 8 behavior baselines green at every phase boundary.
-- BH-D1 green at the configuration for the current phase (§6 table).
-- In-game confirmation of fluid + grass behavior after Phases 2 and 3.
-- Phase 4: N-run determinism stress green; Tier-2 cross-chunk differential fixtures added and green
-  (closes harness BH-4); legacy driver removed.
-- No GC allocation in the per-tick job path (Burst rules); pool-reset safety satisfied.
+- All 8 behavior baselines green at every phase boundary. ✅
+- BH-D1 green at the configuration for the current phase (§6 table). ✅ (through `BH-D1[L|F]`)
+- In-game confirmation of fluid + grass behavior after Phases 2 and 3. ✅
+- Phase 4a: parallel-vs-serial determinism stress green ✅; interior jobs scheduled concurrently with a serial
+  byte-identical drain ✅. **Phase 4b (pending):** Tier-2 cross-chunk differential fixtures added and green
+  (closes harness BH-4); legacy serial driver removed.
+- No GC allocation in the per-tick job path (Burst rules); pool-reset safety satisfied. ✅
 
 ---
 
