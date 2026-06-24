@@ -357,25 +357,24 @@ public class Chunk
         World world = World.Instance;
         FluidBurstTicker ticker = world.FluidBurstTicker;
 
-        // Pass 1: snapshot + partition + run the interior fluid job (serial .Run). The border list is required by
-        // the runner API but unused here — the replay below re-classifies in bucket order instead.
-        List<int> borderScratch = ListPool<int>.Get();
-        ticker.RunInteriorFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData, borderScratch);
-        ListPool<int>.Release(borderScratch);
+        // Pass 1: snapshot + single partition + run the interior fluid job (serial .Run). The runner captures the
+        // bucket's enumeration order (interior/border tagged) in ReplayOrder so Pass 2 replays it in one walk —
+        // no re-enumeration or re-classification of the bucket.
+        ticker.RunInteriorFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData);
 
+        NativeList<int2> replay = ticker.ReplayOrder;
         NativeList<VoxelMod> jobMods = ticker.Mods;
         NativeList<int> modsPerSource = ticker.ModsPerSource;
 
-        // Pass 2: walk the bucket in the SAME enumeration order the runner used to build the interior set, so the
-        // interior cursor stays in lockstep. Interior voxels emit their precomputed job-mod run; border voxels run
-        // the managed path. This interleaves emission exactly as the legacy single loop would.
+        // Pass 2: replay in the runner's captured bucket order. Interior voxels emit their precomputed job-mod run
+        // (cursor stays in lockstep with ModsPerSource by construction — both come from the same single partition);
+        // border voxels run the managed path. This interleaves emission exactly as the legacy single loop would.
         int interiorCursor = 0;
         int modCursor = 0;
-        foreach (int idx in fluids)
+        for (int e = 0; e < replay.Length; e++)
         {
-            ChunkMath.GetLocalPositionFromFlattenedIndex(idx, out int x, out int y, out int z);
-
-            if (FluidTierClassifier.IsTier1Interior(x, y, z))
+            int idx = replay[e].x;
+            if (replay[e].y == 1)
             {
                 int count = modsPerSource[interiorCursor];
                 interiorCursor++;
@@ -385,6 +384,7 @@ public class Chunk
             }
             else
             {
+                ChunkMath.GetLocalPositionFromFlattenedIndex(idx, out int x, out int y, out int z);
                 Vector3Int pos = new Vector3Int(x, y, z);
                 List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
                 if (!BlockBehavior.Active(ChunkData, pos))

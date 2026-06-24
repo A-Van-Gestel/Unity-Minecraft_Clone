@@ -76,10 +76,9 @@ namespace Editor.Validation.Behavior.Framework
         private readonly FluidBurstTicker _fluidTicker = new FluidBurstTicker();
         // The ticker reads ChunkData.ActiveFluidsBucket; the harness's own active model (_activeVoxels) is mirrored
         // into it each tick by SyncFluidBucketToActives. _bucketedFluids tracks what we put there so stale fluids
-        // can be evicted; _bucketBorderScratch satisfies the runner's (currently required) border out-param.
+        // can be evicted.
         private readonly HashSet<Vector3Int> _bucketedFluids = new HashSet<Vector3Int>();
         private readonly List<Vector3Int> _bucketSyncScratch = new List<Vector3Int>();
-        private readonly List<int> _bucketBorderScratch = new List<int>();
         private readonly HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
         private readonly GameObject _worldGo;
         private readonly BlockDatabase _stubDatabase;
@@ -265,7 +264,7 @@ namespace Editor.Validation.Behavior.Framework
 
             // Mirror the harness active set into ChunkData's fluid bucket (the runner's input), then run it.
             SyncFluidBucketToActives();
-            _fluidTicker.RunInteriorFluids(ChunkData, _tick, _blockTypesJob, _bucketBorderScratch);
+            _fluidTicker.RunInteriorFluids(ChunkData, _tick, _blockTypesJob);
 
             NativeList<int> interiorIndices = _fluidTicker.InteriorIndices;
             if (interiorIndices.Length == 0)

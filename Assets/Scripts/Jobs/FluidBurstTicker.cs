@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Data;
 using Helpers;
 using Unity.Collections;
@@ -25,6 +24,7 @@ namespace Jobs
     {
         private NativeArray<uint> _snapshot;
         private NativeList<int> _interior;
+        private NativeList<int2> _replay;
         private NativeList<VoxelMod> _mods;
         private NativeList<int> _modsPerSource;
         private NativeList<int> _inactive;
@@ -34,11 +34,22 @@ namespace Jobs
         public NativeList<VoxelMod> Mods => _mods;
 
         /// <summary>
-        /// Per-source mod run lengths from the most recent run, in the same order interior voxels were enumerated
-        /// from the bucket. Walk the bucket in that order again and consume <see cref="Mods"/> in these runs to
-        /// replay the job's emission interleaved with the managed border path (valid until the next call).
+        /// Per-source mod run lengths from the most recent run, one entry per interior voxel in
+        /// <see cref="InteriorIndices"/> order. Consume <see cref="Mods"/> in these runs (walking
+        /// <see cref="ReplayOrder"/>) to replay the job's emission interleaved with the managed border path
+        /// (valid until the next call).
         /// </summary>
         public NativeList<int> ModsPerSource => _modsPerSource;
+
+        /// <summary>
+        /// The bucket's full enumeration order captured during the partition, one entry per active fluid voxel:
+        /// <c>x</c> = flat chunk index, <c>y</c> = 1 if the voxel is Tier-1 interior (its mods were computed by the
+        /// job, replay via the <see cref="ModsPerSource"/> cursor) or 0 if it is a border voxel (replay via the
+        /// managed path). Lets the caller replay the tick in a <b>single</b> ordered walk — interleaving interior
+        /// and border emission exactly as the legacy single loop would — without re-enumerating or re-classifying
+        /// the bucket (valid until the next call).
+        /// </summary>
+        public NativeList<int2> ReplayOrder => _replay;
 
         /// <summary>Flat indices of interior voxels that became inactive in the most recent run (valid until the next call).</summary>
         public NativeList<int> InactiveInterior => _inactive;
@@ -53,18 +64,18 @@ namespace Jobs
 
         /// <summary>
         /// Ticks the interior fluids of <paramref name="cd"/> via <see cref="FluidTickJob"/>. Reads a pre-tick
-        /// snapshot of the chunk and does NOT modify it. Border (Tier-2) fluid indices are appended to
-        /// <paramref name="borderFluidsOut"/> for the managed path (the list is not cleared here — the caller owns it).
+        /// snapshot of the chunk and does NOT modify it. The bucket's enumeration order (interior/border tagged) is
+        /// captured in <see cref="ReplayOrder"/> for the caller to replay in a single ordered walk; border (Tier-2)
+        /// voxels carry no precomputed output and stay on the managed path.
         /// </summary>
         /// <param name="cd">The chunk whose interior fluids to tick.</param>
         /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
         /// <param name="blockTypes">The global block-type job blob (<c>World.JobDataManager.BlockTypesJobData</c>).</param>
-        /// <param name="borderFluidsOut">Receives the flat indices that stay on the managed (Tier-2) path.</param>
-        public void RunInteriorFluids(ChunkData cd, int tickCounter,
-            NativeArray<BlockTypeJobData> blockTypes, List<int> borderFluidsOut)
+        public void RunInteriorFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes)
         {
             EnsureAllocated();
             _interior.Clear();
+            _replay.Clear();
             _mods.Clear();
             _modsPerSource.Clear();
             _inactive.Clear();
@@ -73,14 +84,15 @@ namespace Jobs
             if (!bucket.IsCreated || bucket.Count == 0)
                 return;
 
-            // Partition the active-fluids bucket: interior → Burst job, border → managed remainder.
+            // Single partition pass over the active-fluids bucket: capture the enumeration order (interior/border
+            // tagged) in _replay so the caller replays in one walk, and collect interior indices for the Burst job.
             foreach (int index in bucket)
             {
                 ChunkMath.GetLocalPositionFromFlattenedIndex(index, out int x, out int y, out int z);
-                if (FluidTierClassifier.IsTier1Interior(x, y, z))
+                bool interior = FluidTierClassifier.IsTier1Interior(x, y, z);
+                _replay.Add(new int2(index, interior ? 1 : 0));
+                if (interior)
                     _interior.Add(index);
-                else
-                    borderFluidsOut.Add(index);
             }
 
             if (_interior.Length == 0)
@@ -111,6 +123,7 @@ namespace Jobs
 
             _snapshot = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Persistent);
             _interior = new NativeList<int>(256, Allocator.Persistent);
+            _replay = new NativeList<int2>(256, Allocator.Persistent);
             _mods = new NativeList<VoxelMod>(256, Allocator.Persistent);
             _modsPerSource = new NativeList<int>(256, Allocator.Persistent);
             _inactive = new NativeList<int>(64, Allocator.Persistent);
@@ -125,6 +138,7 @@ namespace Jobs
 
             if (_snapshot.IsCreated) _snapshot.Dispose();
             if (_interior.IsCreated) _interior.Dispose();
+            if (_replay.IsCreated) _replay.Dispose();
             if (_mods.IsCreated) _mods.Dispose();
             if (_modsPerSource.IsCreated) _modsPerSource.Dispose();
             if (_inactive.IsCreated) _inactive.Dispose();
