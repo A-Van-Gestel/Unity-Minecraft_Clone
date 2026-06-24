@@ -79,6 +79,13 @@ namespace Editor.Validation.Behavior.Framework
         /// <summary>The blittable palette blob (mirrors <c>World.JobDataManager.BlockTypesJobData</c>) for driving the real fluid jobs in edit-mode validation.</summary>
         internal NativeArray<BlockTypeJobData> BlockTypesJob => _blockTypesJob;
 
+        /// <summary>
+        /// The stub chunk store backing cross-chunk neighbor reads (holds the <see cref="SetNeighborBlock"/>-seeded
+        /// neighbor chunks). Needed to drive the Phase-4b halo runner (<see cref="FluidBurstTicker.RunFluids"/> /
+        /// <see cref="FluidBurstTicker.ScheduleFluids"/>) directly from the parallel-determinism gate.
+        /// </summary>
+        internal WorldData WorldData => _world.worldData;
+
         private readonly BlockType[] _palette;
         private readonly BlockType _inert;
 
