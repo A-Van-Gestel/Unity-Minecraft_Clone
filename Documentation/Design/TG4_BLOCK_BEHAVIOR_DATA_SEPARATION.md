@@ -6,8 +6,9 @@
 > (2026-06-23, **default on**) — `FluidTickJob` Burst-ticks interior fluids, border stays managed, gated by
 > `BH-D1[L|F]` (byte-identical over all fixtures) + in-game; **Phase 4a (parallelize interior jobs across chunks)
 > SHIPPED** (2026-06-24, **default on**, worker-count guarded) — gated by the parallel-vs-serial determinism suite
-> + an 8-run IL2CPP A/B. **Phase 4b (close Tier-2 border via the §4.2 neighbor view) DEFERRED** (the only part
-    > still proposed — see §5 verdict below for why).
+> + an 8-run IL2CPP A/B. **Phase 4b (close Tier-2 border via the §4.2 option (b) halo gather) IN PROGRESS**
+    > (2026-06-24 — revived to fully close Tier-2 + future-proof for taller worlds; full-height halo first behind a
+    > flag, the Y-band optimization deferred; implementation plan + harness-gate-first sequencing in §5).
 >
 > **Profile/attribution gates (all CLOSED):** the §5 isolated-tick gate
 > ([`Performance/…FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md))
@@ -275,23 +276,113 @@ N concurrent pooled tickers over one chunk, byte-identical to the serial baselin
 > intended endgame is to **retire it** (make parallel unconditional, delete the serial `TickUpdate` path +
 > `RunInteriorFluids` + flags + guard) once soaked on real devices.
 
-### Phase 4b — Close Tier-2 (border) via the §4.2 neighbor view — ⏸️ DEFERRED (low-ROI on current evidence)
+### Phase 4b — Close Tier-2 (border) via the §4.2 option (b) halo gather — 🚧 IN PROGRESS (2026-06-24, behind a flag)
 
 Build the native neighbor view (4.2 option a or b) and migrate **border** voxels off the managed hybrid into the
-parallel Burst path, retiring the managed fallback. **Gate (when pursued):** full BH-D1 (all fixtures) + **new**
+parallel Burst path, retiring the managed fallback. **Gate:** full BH-D1 (all fixtures) + **new**
 Tier-2 cross-chunk differential fixtures (closes harness BH-4) + a determinism stress.
 
-> ⏸️ **Deferred — why.** The Phase-4a A/B showed the dam-break tick spike is **managed-border-dominated**, so P4b
-> *would* target the right cost — **but** (a) the worst flood frames carry coincident render/generation/GC hitches
-> of equal magnitude that P4b can't touch, and (b) the **sustained** frame is lighting-bound (~66 %) with the tick
-> at ~2 %. So the 🔴 neighbor-view investment chases a tick that isn't frame-limiting. Revisit only if a genuinely
-> tick-bound scenario appears; the substrate (P-2 Layer 2 / option (b) halo gather) is tracked in §10.
+> ⏸️ **Was deferred — why (still the honest ROI picture).** The Phase-4a A/B showed the dam-break tick spike is
+> **managed-border-dominated**, so P4b *would* target the right cost — **but** (a) the worst flood frames carry
+> coincident render/generation/GC hitches of equal magnitude that P4b can't touch, and (b) the **sustained** frame
+> is lighting-bound (~66 %) with the tick at ~2 %. So as a *frame-time* lever P4b is marginal.
+>
+> 🚧 **Revived 2026-06-24 — why now.** Pursued to **completion** rather than left half-done: it closes the last
+> managed path in the tick (everything Burst + parallel), and the option-(b) gather is **future-proofed against
+> taller worlds** (the Y-band, below, makes the per-tick copy independent of world height). The marginal frame ROI
+> is accepted with eyes open; the win is architectural completeness + the cleanup it unlocks (the serial/managed
+> fallbacks all retire together — see the cleanup-scope note below). Uses option (b) (per-tick local halo gather),
+> **not** P-2 Layer 2 — no chunk-storage commitment.
+
+#### Phase 4b implementation plan (option (b) halo gather)
+
+**Sequencing decisions (2026-06-24):** ① **full-height halo first** (`24×128×24`), measured as a new baseline,
+**then** the Y-band optimization on a green base — isolates "halo path correct" from "band-edge correct"; ② the
+managed border **stays behind a flag** (rollback), removed later in the TG-4 cleanup; ③ **harness gate first**,
+then the production refactor.
+
+**Verified read reach (grounds the halo dimensions — measured from `FluidTickJob`, not assumed):**
+
+- **Horizontal = 4.** `CalculateFlowCost`'s 4-cardinal BFS reads at Manhattan distance ≤4 from a border source
+  (`MaxFlowSearchDepth = 4`), incl. diagonal (±2,±2) corner reads → an **8-neighbor** gather, padded width
+  `16 + 2·4 = 24`.
+- **Vertical = 1.** Every read is at the source's level, one below (`below`/`belowNeighbor`), or one above
+  (`above`/`nbAbove`) — *regardless of horizontal distance* (the BFS only moves horizontally). So
+  `FLUID_VERTICAL_REACH = 1`; no vertical cross-chunk neighbor exists (chunks are full height).
+
+**Why it stays byte-identical (the determinism crux, same mechanism as 4a).** Border voxels now read across seams
+**and** can emit into neighbors, but emission *order* is fixed by the *emitting* voxel's
+`(chunk-snapshot-order, bucket-order)`, never the target. The drain stays **serial in chunk order**, each job emits
+in bucket order via `ModsPerSource`, so the drained `VoxelMod` stream is byte-identical to the legacy single loop
+even with cross-chunk targets — **no §4.3 canonical apply-drain needed** (that was only for parallel *emission*,
+which we still don't do). Cross-chunk emission already works: `FluidTickJob.Emit` writes a **global**-position
+`VoxelMod` the unchanged `ApplyModifications` routes. The one new risk is a **read** risk: the halo must return
+what managed `GetVoxelState` returns for the **pre-tick** neighbor — incl. missing/ungenerated → `null`, mapped
+from the `uint.MaxValue` gather sentinel to `Has=false`.
+
+**Gather API.** Generalize the proven `ChunkMath` gather: keep one drift-critical `CopyRun<T>` core and expose two
+intent-named wrappers — `GatherPaddedFull` (lighting Y=0..H **and** fluid v1) and `GatherPaddedBand` (the later
+band, Y=`[yStart, yStart+yCount)`) — both with **halo width as a parameter** (lighting 2, fluid 4). Fluid SoT
+constants: `FLUID_HALO = 4`, `FLUID_VERTICAL_REACH = 1`, `PADDED_FLUID_WIDTH = 24`. Lighting keeps passing
+compile-time consts (codegen unchanged); regression gate = `Validate Lighting Engine` (B5/B10/B40-B44/B48/B50-B55).
+
+**Per-chunk flow** (inside `ProcessTickUpdatesParallel`): schedule → acquire 9 pre-tick neighbor voxel snapshots
+(reuse `AcquireVoxelMap`) + rent a `24×128×24` padded buffer → job gathers center+8 on the worker
+(`GatherPaddedFull`), then runs the existing flow logic with `GetStateLocal` reading the padded volume
+(`+FLUID_HALO` X/Z offset, sentinel→`Has=false`) → serial drain (byte-identical). All fluid voxels go through the
+job; the Tier-1/Tier-2 partition is dropped on the halo path.
+
+**Y-band optimization (deferred to after the full-height baseline).** Since the only sources are the chunk's active
+fluids and the reach is ±1 in Y, *every* read lands in `[minActiveY−1, maxActiveY+1]`. Size the whole padded volume
+to that band (`bandMinY = minActiveY−1`; job offsets `paddedY = y − bandMinY`), via a band-aware
+`AcquireVoxelMapBand` + `GatherPaddedBand`, with `bandHeight` rounded up to `SECTION_SIZE` for pooling. Makes the
+per-tick copy **independent of world height**. Invariant mirrors `LIGHTING_HALO = MAX_LIGHTING_BFS_REACH`: the band
+is `[minY − FLUID_VERTICAL_REACH, maxY + FLUID_VERTICAL_REACH]`; the managed path obeys the same ±1 reach so
+band-limiting drops nothing → byte-identical. Reserved further levers if the A/B shows the copy dominates:
+edge-slab-only neighbor snapshots; snapshot dedup (each unique chunk once per tick). Guard: a **vertically-split**
+BH-4 fixture (e.g. water y=64 + lava y=10 in one border chunk).
+
+**The harness gate (built FIRST, prove-red).** The behavior suite is single-synthetic-chunk; closing BH-4 needs a
+**cross-chunk-aware `BehaviorTestWorld`** so the legacy driver can read across a seam to diff against the
+Burst-halo. Fixtures: fluid across +X/−X/±Z, a diagonal-corner seam, a missing-neighbor case (sentinel == managed
+null), and (for the band phase) the vertically-split case. `BH-D1` asserts legacy == Burst-halo byte-identical;
+the parallel cross-chunk determinism stress extends `FluidParallelDeterminismValidation` to multi-chunk.
+
+**Commit sequence:** C1 harness gate (multi-chunk world + BH-4, prove-red) → C2 gather refactor (`CopyRun` core +
+`GatherPaddedFull`, lighting green) → C3 `FluidTickJob` full-height halo reads → C4 wire behind the flag + BH-4
+green + determinism stress → C5 full-height A/B baseline + in-game → C6 docs-sync (this section → shipped behind
+flag, close BH-4) → C7 (later, measured) Y-band optimization. Then the **TG-4 cleanup** retires the fallbacks.
 
 > **Scope honesty (as it played out):** Phase 3 (the GC-bound spike) was the real win — Bursting the interior cut
 > the ~180 ms managed spike to ~143 ms. Phase 4a's parallelism added a small, real, but imperceptible sliver on
 > top (the interior was already fast). The big remaining tick cost is the managed border (P4b), but the tick as a
 > whole is not the frame bottleneck — so **TG-5** (function-pointer dispatch, same BH-D1 gate, no parallel
 > re-architecture) was never needed, and further tick work is low priority versus the lighting line.
+
+### Planned TG-4 cleanup — flag-gated fallback removal (do NOT guess; this is the authoritative list)
+
+Every phase from 3 onward shipped its new path **behind a flag with the prior path retained** as a one-toggle
+rollback (the §8 discipline). Phase 4b (the halo border port, option (b)) continues this: it lands behind its own
+flag with the managed-border hybrid kept reachable. Once the full parallel halo path is **soaked on real devices**,
+a single **TG-4 cleanup** pass deletes the whole flag-gated fallback set together. The removable parts — recorded
+here so a future cleanup session does not have to reverse-engineer them:
+
+- **The serial tick path** — `World.ProcessTickUpdates`' non-parallel `foreach … chunk.TickUpdate()` branch,
+  `Chunk.TickUpdate` itself, and `FluidBurstTicker.RunFluids` (the `.Run()` counterpart of `ScheduleFluids`).
+- **The interior-only hybrid + managed border** — `Chunk.TickFluidsHybrid` / `DrainTick`'s managed-border replay
+  branch in `ReplayHybridFluids`, and the `BlockBehavior.Fluids` managed border path it calls. Superseded once the
+  halo path ticks **all** fluids.
+- **The Tier-1/Tier-2 partition** — `FluidTierClassifier.IsTier1Interior` and the interior/border tagging in
+  `FluidBurstTicker` + `ReplayOrder` (the halo path processes every fluid voxel, so the split is moot).
+  `FluidTierClassifier.MaxFlowSearchDepth` and the horizontal-offset helpers **stay** — they remain the halo-width
+  source of truth.
+- **The feature flags + guard** — `World._enableFluidBurstTick`, `_enableParallelFluidTick`, the Phase-4b border
+  flag, and the `JobsUtility.JobWorkerCount ≥ 2` worker-count guard. The parallel halo path becomes unconditional.
+
+> ⚠️ This list is the **only** sanctioned removal scope. Do not remove `FluidTickJob`, `FluidBurstTicker`'s
+> schedule path, `World.ProcessTickUpdatesParallel`, the `DynamicPool<FluidBurstTicker>`, or the gather/snapshot
+> infra — those are the *kept* parallel path. When the cleanup lands, flip the §5 Phase-4b/4a status notes and the
+> §6 BH-D1 table rows accordingly.
 
 ### Decision framework — option (b) viability & TG-4-vs-TG-5 (profile-gated)
 
