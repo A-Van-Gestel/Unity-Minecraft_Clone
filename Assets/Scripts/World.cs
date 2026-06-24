@@ -192,8 +192,8 @@ public class World : MonoBehaviour
     // --- TG-4 Phase 3: interior-fluid Burst tick ---
     [SerializeField]
     [Tooltip("TG-4 Phase 3: tick Tier-1 interior fluids via the Burst FluidTickJob (border fluids stay managed). " +
-             "Off = legacy fully-managed fluid tick. Defaults off until the hybrid path is validated (BH-D1 + in-game).")]
-    private bool _enableFluidBurstTick;
+             "Off = legacy fully-managed fluid tick. On by default — validated (BH-D1 + in-game).")]
+    private bool _enableFluidBurstTick = true;
 
     private FluidBurstTicker _fluidBurstTicker;
 
@@ -206,9 +206,9 @@ public class World : MonoBehaviour
     // --- TG-4 Phase 4a: parallel interior-fluid tick across chunks ---
     [SerializeField]
     [Tooltip("TG-4 Phase 4a: schedule the Tier-1 interior fluid jobs across chunks in parallel (requires Enable " +
-             "Fluid Burst Tick). Off = the Phase-3 serial per-chunk path. Defaults off until validated " +
-             "(parallel-vs-serial determinism gate + in-game).")]
-    private bool _enableParallelFluidTick;
+             "Fluid Burst Tick). Off = the Phase-3 serial per-chunk path. On by default — validated " +
+             "(parallel-vs-serial determinism gate + 8-run IL2CPP stress); auto-falls back to serial on <2-worker hosts.")]
+    private bool _enableParallelFluidTick = true;
 
     // Minimum Job worker threads required to take the parallel path (else fall back to the serial tick). A host
     // with <2 workers (≤2 cores) gains nothing from scheduling — the jobs can't overlap — and only pays the
