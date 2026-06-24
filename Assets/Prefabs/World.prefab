@@ -129,6 +129,7 @@ MonoBehaviour:
   visualizationMode: 0
   _enableFluidBurstTick: 1
   _enableParallelFluidTick: 1
+  _enableFluidBorderBurst: 1
 --- !u!114 &715589282694584058
 MonoBehaviour:
   m_ObjectHideFlags: 0

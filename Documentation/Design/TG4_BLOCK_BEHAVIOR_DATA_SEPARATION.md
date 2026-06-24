@@ -1,13 +1,13 @@
 # TG-4 — `BlockBehavior` Data Separation (ECS/DOTS pattern)
 
-> **Status:** IMPLEMENTED THROUGH PHASE 4b (2026-06-24; 4b behind a flag, default off). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
+> **Status:** IMPLEMENTED THROUGH PHASE 4b (2026-06-24; 4b default on, rollback flag retained). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
 > per-family active-voxel storage split, in-game confirmed); **Phase 2 (grass-Burst) SKIPPED** (2026-06-23 —
 > negligible cost + job-latency risk, see §5); **Phase 3 (fluid-Burst, Tier-1 interior hybrid) SHIPPED**
 > (2026-06-23, **default on**) — `FluidTickJob` Burst-ticks interior fluids, border stays managed, gated by
 > `BH-D1[L|F]` (byte-identical over all fixtures) + in-game; **Phase 4a (parallelize interior jobs across chunks)
 > SHIPPED** (2026-06-24, **default on**, worker-count guarded) — gated by the parallel-vs-serial determinism suite
 > + an 8-run IL2CPP A/B. **Phase 4b (close Tier-2 border via the §4.2 option (b) halo gather) SHIPPED**
-    > (2026-06-24, **behind `EnableFluidBorderBurst`, default off**) — every fluid (interior AND border) is Burst-ticked,
+    > (2026-06-24, **`EnableFluidBorderBurst` default on**; off = rollback to the hybrid) — every fluid (interior AND border) is Burst-ticked,
     > border voxels reading a per-tick 9-snapshot neighbor halo; gated by `BH-D1[L|H]` (byte-identical over all 13
     > fixtures incl. the 5 BH-4 cross-chunk cases) + the cross-chunk parallel-determinism stress + in-game (a large
     > cascading removal/flood). The full-height A/B found it **1.70–2.15× faster** than the managed-border hybrid with
@@ -25,8 +25,12 @@
 > 8 IL2CPP runs) then showed parallelizing the interior shaves only a **further ~6.6 ms (~4.6 %) off the dam-break
 > spike** (real + repeatable) while the **sustained tick is unchanged (~2 % of frame)**: the spike is dominated by
 > the *managed border* (Tier-2, ~75 % of voxels) which P4a does not touch, and the frame is not tick-bound. **Net:
-> P4a is correct and shipped, but the tick is not the frame bottleneck — so P4b (the 🔴 neighbor-view work for the
-> border) is deferred as low-ROI, and ocean smoothness needs the lighting line (LI-1 / P-2), not (only) the tick.**
+> P4a is correct and shipped, but the tick is not the frame bottleneck.** P4b then targeted exactly that
+> managed-border cost: the [Phase-4b tick A/B](../Performance/BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md)
+> showed Bursting the border makes the **tick** 1.70–2.15× faster with the GC-spike tail removed, so P4b **shipped
+> default-on** for the tick win + architectural completeness (every fluid Burst+parallel) — **but** the *sustained
+> ocean frame* stays lighting-bound (~66 %), so frame smoothness still needs the lighting line (LI-1 / P-2), not
+> (only) the tick.
 > Detail doc for the **TG-4** entry in
 > [PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md). The behavior-tick validation
 > harness that gates this work is **built and green** (8 baselines + `BH-D1[L|L]/[L|S]/[L|F]/[L|H]` + the parallel
@@ -281,17 +285,19 @@ N concurrent pooled tickers over one chunk, byte-identical to the serial baselin
 > intended endgame is to **retire it** (make parallel unconditional, delete the serial `TickUpdate` path +
 > `RunInteriorFluids` + flags + guard) once soaked on real devices.
 
-### Phase 4b — Close Tier-2 (border) via the §4.2 option (b) halo gather — ✅ SHIPPED (2026-06-24, behind a flag, default off)
+### Phase 4b — Close Tier-2 (border) via the §4.2 option (b) halo gather — ✅ SHIPPED (2026-06-24, default on, rollback flag retained)
 
 Build the native neighbor view (4.2 option a or b) and migrate **border** voxels off the managed hybrid into the
 Burst path. **Done:** every fluid (interior AND border) now runs through `FluidTickJob`, border voxels reading a
-per-tick **9-snapshot neighbor halo**, behind `EnableFluidBorderBurst` (**default off**; the managed border stays as
-the flag-off fallback, retired later in the TG-4 cleanup — see the cleanup-scope note). **Gate (all green):** full
-`BH-D1[L|H]` (all 13 fixtures incl. the 5 new BH-4 cross-chunk cases, prove-red confirmed) + the cross-chunk
-parallel-determinism stress (`Validate Fluid Parallel Determinism (Cross-Chunk Halo)`, 3×3 distinct chunks, prove-red
-confirmed) + in-game (large cascading removal/flood). The **Y-band optimization remains deferred** (the full-height
-A/B proved it is not a GO blocker — see the implementation plan below + the
-[Phase-4b halo A/B baseline](../Performance/BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md)).
+per-tick **9-snapshot neighbor halo**, behind `EnableFluidBorderBurst` (**default on** since 2026-06-24 after the A/B
+
++ in-game; flag retained as a one-toggle **rollback** to the managed-border hybrid, removed later in the TG-4
+  cleanup — see the cleanup-scope note). **Gate (all green):** full
+  `BH-D1[L|H]` (all 13 fixtures incl. the 5 new BH-4 cross-chunk cases, prove-red confirmed) + the cross-chunk
+  parallel-determinism stress (`Validate Fluid Parallel Determinism (Cross-Chunk Halo)`, 3×3 distinct chunks, prove-red
+  confirmed) + in-game (large cascading removal/flood). The **Y-band optimization remains deferred** (the full-height
+  A/B proved it is not a GO blocker — see the implementation plan below + the
+  [Phase-4b halo A/B baseline](../Performance/BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md)).
 
 > ⏸️ **Was deferred — why (still the honest ROI picture).** The Phase-4a A/B showed the dam-break tick spike is
 > **managed-border-dominated**, so P4b *would* target the right cost — **but** (a) the worst flood frames carry
@@ -564,8 +570,8 @@ The pooling *concern* is not superseded (per-chunk native-list churn persists an
 - Phase 4a: parallel-vs-serial determinism stress green ✅; interior jobs scheduled concurrently with a serial
   byte-identical drain ✅. **Phase 4b** ✅: the 5 Tier-2 cross-chunk differential fixtures added and green (closes
   harness BH-4) via `BH-D1[L|H]`; cross-chunk parallel-determinism stress green; shipped behind
-  `EnableFluidBorderBurst` (**default off** — the managed border fallback is **retained** for the TG-4 cleanup, NOT
-  yet removed).
+  `EnableFluidBorderBurst` (**default on** since 2026-06-24 — the managed border fallback is **retained** as a
+  rollback toggle for the TG-4 cleanup, NOT yet removed).
 - No GC allocation in the per-tick job path (Burst rules); pool-reset safety satisfied. ✅
 
 ---

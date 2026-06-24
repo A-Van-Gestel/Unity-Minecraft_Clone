@@ -233,8 +233,9 @@ public class World : MonoBehaviour
     [SerializeField]
     [Tooltip("TG-4 Phase 4b: tick ALL fluids (interior AND border) through the Burst job, with border voxels reading " +
              "a per-tick gathered neighbor halo (requires Enable Fluid Burst Tick). Off = the Phase-3/4a hybrid " +
-             "(border stays managed). Off by default until validated (BH-4 cross-chunk differential + in-game).")]
-    private bool _enableFluidBorderBurst;
+             "(border stays managed). On by default (validated 2026-06-24: BH-D1[L|H] + cross-chunk determinism + " +
+             "in-game; the A/B found it 1.70-2.15x faster than the managed border). Off = rollback to the hybrid.")]
+    private bool _enableFluidBorderBurst = true;
 
     /// <summary>When true (and <see cref="EnableFluidBurstTick"/>), border fluids tick in-job via the §4.2(b) neighbor halo (TG-4 Phase 4b); else the border stays managed.</summary>
     public bool EnableFluidBorderBurst => _enableFluidBorderBurst;
