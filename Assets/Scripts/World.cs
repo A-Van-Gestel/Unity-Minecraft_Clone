@@ -25,6 +25,7 @@ using Serialization;
 using UI;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
@@ -208,6 +209,11 @@ public class World : MonoBehaviour
              "Fluid Burst Tick). Off = the Phase-3 serial per-chunk path. Defaults off until validated " +
              "(parallel-vs-serial determinism gate + in-game).")]
     private bool _enableParallelFluidTick;
+
+    // Minimum Job worker threads required to take the parallel path (else fall back to the serial tick). A host
+    // with <2 workers (≤2 cores) gains nothing from scheduling — the jobs can't overlap — and only pays the
+    // Schedule/Complete overhead. Real targets (8-core phones and up) clear this trivially.
+    private const int MIN_PARALLEL_WORKER_THREADS = 2;
 
     private DynamicPool<FluidBurstTicker> _fluidTickerPool;
 
@@ -1350,8 +1356,12 @@ public class World : MonoBehaviour
 
             // TG-4 Phase 4a: when enabled, schedule the interior fluid jobs across all chunks in parallel, then drain
             // serially in the SAME chunk order (so the emitted mod stream stays byte-identical to the serial path).
-            // Otherwise run the unchanged Phase-3 serial per-chunk tick.
-            if (_enableFluidBurstTick && _enableParallelFluidTick)
+            // The worker-count guard falls back to the serial tick on genuinely core-starved hosts (≤2 cores → <2 Job
+            // workers), where the Schedule + blocking-Complete overhead would exceed the win; every real target —
+            // even a 2021 midrange 8-core phone — clears it. (Temporary: retires with the serial path once
+            // parallel-only ships.) Otherwise run the unchanged Phase-3 serial per-chunk tick.
+            if (_enableFluidBurstTick && _enableParallelFluidTick
+                                      && JobsUtility.JobWorkerCount >= MIN_PARALLEL_WORKER_THREADS)
             {
                 ProcessTickUpdatesParallel(snapshot);
             }
