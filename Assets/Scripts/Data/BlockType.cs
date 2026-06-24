@@ -39,7 +39,7 @@ namespace Data
         [ConditionalField(nameof(isSolid), false, true)]
         public BlockCollisionBounds collisionBounds = BlockCollisionBounds.FullBlock;
 
-        [Tooltip("Indicates whether the neighbouring faces should still be rendered when this block is placed.")]
+        [Tooltip("Indicates whether the neighboring faces should still be rendered when this block is placed.")]
         public bool renderNeighborFaces;
 
         [Header("Fluid Properties")]

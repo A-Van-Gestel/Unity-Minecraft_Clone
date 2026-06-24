@@ -1445,7 +1445,7 @@ namespace Editor.Validation.Lighting
         // light loop (the seam voxels mutually support each other across the boundary), so no removal mod
         // ever reaches the target — that orphaned-loop limitation is a separate concern that would mask
         // exactly what finding 3 changed (the attenuation formula). ---
-        private const byte B49_NEIGHBOUR_SKY = 12; // the single lit in-chunk neighbor of the probe
+        private const byte B49_neighbor_SKY = 12; // the single lit in-chunk neighbor of the probe
         private const byte B49_DIMGLASS_OPACITY = 5; // TestBlockPalette.DimGlass
 
         /// <summary>
@@ -1455,7 +1455,7 @@ namespace Editor.Validation.Lighting
         /// <c>NeighborhoodLightingJob.AttenuateLight</c> and the <c>CheckEdgeVoxel</c> cross-chunk guard),
         /// not by a flat air step.
         /// <para>
-        /// One in-chunk neighbor of the probe is set to sky <see cref="B49_NEIGHBOUR_SKY"/> (all other
+        /// One in-chunk neighbor of the probe is set to sky <see cref="B49_neighbor_SKY"/> (all other
         /// neighbors stay dark). The guard's support for a DimGlass (opacity 5) target must therefore be
         /// <c>sky − max(1,5) = sky − 5</c>, not the pre-fix flat <c>sky − 1</c>. We then drive the real
         /// decision logic (<c>ComputeSunlight</c>) for a removal of a voxel held over-bright at a value
@@ -1472,25 +1472,25 @@ namespace Editor.Validation.Lighting
         {
             using LightingTestWorld world = new LightingTestWorld(1);
 
-            // Set a single lit in-chunk neighbour of the probe directly (no BFS / geometry), so the guard's
-            // support is a deterministic function of one known neighbour sky.
+            // Set a single lit in-chunk neighbor of the probe directly (no BFS / geometry), so the guard's
+            // support is a deterministic function of one known neighbor sky.
             Vector3Int probe = new Vector3Int(8, 64, 8);
-            Vector3Int neighbour = new Vector3Int(7, 64, 8);
-            world.SetSkyLightAt(neighbour, B49_NEIGHBOUR_SKY);
+            Vector3Int neighbor = new Vector3Int(7, 64, 8);
+            world.SetSkyLightAt(neighbor, B49_neighbor_SKY);
 
             // Finding 3: in-chunk support charges the TARGET voxel's opacity on entry (max(1, opacity)),
-            // so DimGlass (opacity 5) support is neighbourSky-5 — strictly below the pre-fix flat air step.
+            // so DimGlass (opacity 5) support is neighborSky-5 — strictly below the pre-fix flat air step.
             byte supportDim = world.InChunkSunlightSupportAt(probe, B49_DIMGLASS_OPACITY);
             byte supportFlat = world.InChunkSunlightSupportAt(probe, 1);
             bool passed = LightingAssert.IsTrue(
-                supportDim == B49_NEIGHBOUR_SKY - B49_DIMGLASS_OPACITY && supportFlat == B49_NEIGHBOUR_SKY - 1 && supportDim < supportFlat,
-                "B49: in-chunk support charges the target's opacity (neighbourSky-5), not the flat air step (neighbourSky-1)",
-                $"neighbourSky={B49_NEIGHBOUR_SKY}: DimGlass support={supportDim} (expected {B49_NEIGHBOUR_SKY - B49_DIMGLASS_OPACITY}), flat support={supportFlat} (expected {B49_NEIGHBOUR_SKY - 1})");
+                supportDim == B49_neighbor_SKY - B49_DIMGLASS_OPACITY && supportFlat == B49_neighbor_SKY - 1 && supportDim < supportFlat,
+                "B49: in-chunk support charges the target's opacity (neighborSky-5), not the flat air step (neighborSky-1)",
+                $"neighborSky={B49_neighbor_SKY}: DimGlass support={supportDim} (expected {B49_neighbor_SKY - B49_DIMGLASS_OPACITY}), flat support={supportFlat} (expected {B49_neighbor_SKY - 1})");
 
             // A DimGlass voxel held over-bright at a value above its true (opacity-attenuated) support but
             // at/below the flat estimate. The opacity-aware guard applies the legitimate removal; the
             // pre-fix flat estimate would have spuriously vetoed it.
-            const byte overBright = B49_NEIGHBOUR_SKY - 3; // supportDim (sky-5) < overBright (sky-3) <= supportFlat (sky-1)
+            const byte overBright = B49_neighbor_SKY - 3; // supportDim (sky-5) < overBright (sky-3) <= supportFlat (sky-1)
             passed &= LightingAssert.IsTrue(!LightingTestWorld.CrossChunkSunlightRemovalVetoed(overBright, supportDim),
                 "B49: opacity-aware support does NOT veto the legitimate cross-chunk removal (it applies)",
                 $"removal of sky {overBright} with opacity-aware support {supportDim} was unexpectedly vetoed");
@@ -1498,20 +1498,20 @@ namespace Editor.Validation.Lighting
                 "B49: the pre-fix flat-attenuation support WOULD have vetoed the same removal (the bug the fix prevents)",
                 $"removal of sky {overBright} with flat support {supportFlat} was expected to be vetoed");
 
-            // A FULLY-OPAQUE in-chunk neighbour cannot propagate sunlight (mirror of
+            // A FULLY-OPAQUE in-chunk neighbor cannot propagate sunlight (mirror of
             // PropagateLight's IsOpaque source guard), so even storing a high sky-top value it must
-            // contribute ZERO support. A separate probe whose only lit neighbour is an opaque Stone block
+            // contribute ZERO support. A separate probe whose only lit neighbor is an opaque Stone block
             // holding full sky must read 0 — otherwise the guard would over-estimate and veto a legitimate
             // removal of a voxel under a roof/wall.
             Vector3Int opaqueProbe = new Vector3Int(8, 70, 8);
-            Vector3Int opaqueNeighbour = new Vector3Int(7, 70, 8);
-            world.SetBlock(opaqueNeighbour, TestBlockPalette.Stone);
-            world.SetSkyLightAt(opaqueNeighbour, 15);
+            Vector3Int opaqueneighbor = new Vector3Int(7, 70, 8);
+            world.SetBlock(opaqueneighbor, TestBlockPalette.Stone);
+            world.SetSkyLightAt(opaqueneighbor, 15);
             byte opaqueSupportDim = world.InChunkSunlightSupportAt(opaqueProbe, B49_DIMGLASS_OPACITY);
             byte opaqueSupportFlat = world.InChunkSunlightSupportAt(opaqueProbe, 1);
             passed &= LightingAssert.IsTrue(opaqueSupportDim == 0 && opaqueSupportFlat == 0,
-                "B49: a fully-opaque neighbour (cannot propagate sunlight) contributes zero support, even storing sky 15",
-                $"Expected 0 support from an opaque sky-15 neighbour, got dim={opaqueSupportDim}, flat={opaqueSupportFlat}");
+                "B49: a fully-opaque neighbor (cannot propagate sunlight) contributes zero support, even storing sky 15",
+                $"Expected 0 support from an opaque sky-15 neighbor, got dim={opaqueSupportDim}, flat={opaqueSupportFlat}");
 
             return passed;
         }

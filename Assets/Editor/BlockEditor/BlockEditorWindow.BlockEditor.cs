@@ -324,7 +324,7 @@ namespace Editor.BlockEditor
                     EditorGUI.indentLevel--;
                 }
 
-                _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighbouring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
+                _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighboring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
                 _selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), _selectedBlock.isActive);
 
                 EditorUILayoutHelper.DrawSeparator();

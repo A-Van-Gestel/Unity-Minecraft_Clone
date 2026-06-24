@@ -292,7 +292,7 @@ namespace Editor.Validation.Behavior
         /// </summary>
         private static void SeedInteriorFluids(ChunkData cd)
         {
-            // Solid floor beneath the fluids, spanning the interior + 2 cells of margin so neighbour/below reads
+            // Solid floor beneath the fluids, spanning the interior + 2 cells of margin so neighbor/below reads
             // resolve to a real block. One interior hole gives the drop-search BFS an actual drop to find.
             for (int x = 2; x <= 13; x++)
             for (int z = 2; z <= 13; z++)

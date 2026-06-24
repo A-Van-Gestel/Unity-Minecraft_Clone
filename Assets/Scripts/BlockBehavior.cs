@@ -163,8 +163,8 @@ public static partial class BlockBehavior
         if (id == BlockIDs.Grass)
         {
             // Condition 1: If there is a solid block on top, grass turns to dirt.
-            VoxelState? topNeighbour = chunkData.GetState(localPos + VoxelData.FaceChecks[2]);
-            if (topNeighbour.HasValue && topNeighbour.Value.Properties.isSolid)
+            VoxelState? topneighbor = chunkData.GetState(localPos + VoxelData.FaceChecks[2]);
+            if (topneighbor.HasValue && topneighbor.Value.Properties.isSolid)
             {
                 Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.Position.x, localPos.y, localPos.z + chunkData.Position.y);
                 VoxelMod voxelMod = new VoxelMod(globalPos, BlockIDs.Dirt);

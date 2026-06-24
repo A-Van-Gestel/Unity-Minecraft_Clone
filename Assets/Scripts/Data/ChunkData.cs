@@ -55,7 +55,7 @@ namespace Data
         // Active voxels split into per-behavior-family native sets (keyed by the flat chunk index —
         // ChunkMath.GetFlattenedIndexInChunk) so each family can later tick as its own Burst job. NativeHashSet
         // preserves the dedup + O(1) add/remove/contains the old Chunk-side HashSet<Vector3Int> provided — the
-        // Step-4 six-neighbour re-activation and ModifyVoxel re-add already-active voxels and rely on that dedup.
+        // Step-4 six-neighbor re-activation and ModifyVoxel re-add already-active voxels and rely on that dedup.
         // [NonSerialized]: active voxels are never persisted (re-derived on load/generate — see the serialization
         // architecture doc), so they carry no save-format weight. Lazily created on first registration (see
         // EnsureActiveBucketsCreated): the editor/test rigs that build a raw ChunkData but never register actives
