@@ -41,6 +41,22 @@ namespace Helpers
         public const int PADDED_HORIZONTAL_AREA = PADDED_CHUNK_WIDTH * PADDED_CHUNK_WIDTH; // 400
         public const int PADDED_LIGHTING_VOLUME = PADDED_HORIZONTAL_AREA * CHUNK_HEIGHT; // 51,200
 
+        // --- Halo-padded fluid volume (TG-4 Phase 4b) ---------------------------------------------
+        // The FluidTickJob reads a halo-padded neighborhood so Tier-2 BORDER fluid voxels can resolve cross-chunk
+        // neighbor reads (the same gather mechanic LI-1 proved for lighting, but a WIDER halo). Two reach invariants,
+        // each a single source of truth — bump them (and re-verify BH-4) only if the fluid logic's reach changes:
+        //   • Horizontal: FLUID_HALO MUST be >= the widest distance any fluid read reaches PAST a seam. The
+        //     pathfinder (CalculateFlowCost BFS) reaches Manhattan distance 4 (= FluidTierClassifier.MaxFlowSearchDepth),
+        //     so FLUID_HALO = 4. A square halo of 4 covers the 4-cardinal diamond incl. its (±2,±2) diagonal corners.
+        //   • Vertical: FLUID_VERTICAL_REACH = 1 — every read is at the source's level, one below, or one above,
+        //     regardless of horizontal distance (the BFS only moves horizontally). Used by the Y-band gather variant
+        //     (a later optimization); the full-height variant pads no Y (out-of-range Y is sentinel-guarded).
+        public const int FLUID_HALO = 4;
+        public const int FLUID_VERTICAL_REACH = 1;
+        public const int PADDED_FLUID_WIDTH = CHUNK_WIDTH + 2 * FLUID_HALO; // 24
+        public const int PADDED_FLUID_HORIZONTAL_AREA = PADDED_FLUID_WIDTH * PADDED_FLUID_WIDTH; // 576
+        public const int PADDED_FLUID_VOLUME = PADDED_FLUID_HORIZONTAL_AREA * CHUNK_HEIGHT; // 73,728
+
         /// <summary>
         /// Flat index into the halo-padded lighting volume (see <see cref="PADDED_LIGHTING_VOLUME"/>).
         /// Padded coordinates are grid-local coordinates shifted by <see cref="LIGHTING_HALO"/>: a
@@ -60,6 +76,25 @@ namespace Helpers
         {
             py = math.clamp(py, 0, CHUNK_HEIGHT - 1);
             return px + pz * PADDED_CHUNK_WIDTH + py * PADDED_HORIZONTAL_AREA;
+        }
+
+        /// <summary>
+        /// Flat index into the full-height halo-padded fluid volume (see <see cref="PADDED_FLUID_VOLUME"/>). Same
+        /// linear layout as <see cref="GetPaddedLightingIndex"/> but with the wider <see cref="FLUID_HALO"/>: a
+        /// chunk-local position <c>(lx, ly, lz)</c> with <c>lx, lz ∈ [-4, 19]</c> maps to <c>(lx + 4, ly, lz + 4)</c>
+        /// with <c>px, pz ∈ [0, 24)</c>, so the center chunk's [0,16) range lives at padded [4,20). Layout: X fastest
+        /// (stride 1), then Z (stride 24), then Y (stride 576). Y is defensively clamped exactly as the lighting
+        /// index does; callers that must distinguish an out-of-range Y check the Y bound BEFORE indexing.
+        /// </summary>
+        /// <param name="px">Padded X (0-23).</param>
+        /// <param name="py">Padded/global Y (0-ChunkHeight).</param>
+        /// <param name="pz">Padded Z (0-23).</param>
+        /// <returns>The flattened index into the padded fluid volume.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int GetPaddedFluidIndex(int px, int py, int pz)
+        {
+            py = math.clamp(py, 0, CHUNK_HEIGHT - 1);
+            return px + pz * PADDED_FLUID_WIDTH + py * PADDED_FLUID_HORIZONTAL_AREA;
         }
 
         /// <summary>
@@ -103,92 +138,107 @@ namespace Helpers
 
         /// <summary>
         /// Scatters the center chunk + its 8 horizontal neighbors (each a section-contiguous full-chunk
-        /// buffer) into the halo-padded linear volume consumed by the <c>NeighborhoodLightingJob</c>. A
-        /// missing neighbor (uncreated/empty array) fills its region with <paramref name="sentinel"/>,
-        /// reproducing the job's old per-neighbor missing-source sentinel. Writes EVERY padded cell.
+        /// buffer) into the <b>full-height</b> halo-padded linear volume. A missing neighbor (uncreated/empty
+        /// array) fills its region with <paramref name="sentinel"/>, reproducing the per-neighbor missing-source
+        /// sentinel. Writes EVERY padded cell. Parameterized by <paramref name="halo"/> + <paramref name="paddedWidth"/>
+        /// so the same body serves the lighting halo (2, width 20) and the wider fluid halo (4, width 24) — see the
+        /// <see cref="GatherPaddedVoxels"/>/<see cref="GatherPaddedLight"/>/<see cref="GatherPaddedFluidVoxels"/> wrappers.
         /// <para>
-        /// Each padded horizontal row (fixed py, pz — 20 cells of X) is built as three contiguous runs: the
-        /// 2-wide West halo, the 16-wide center span, and the 2-wide East halo, each copied in bulk from one
-        /// source chunk via <see cref="CopyRun{T}"/>. The pz band picks the source row (<c>lz</c>) and the
-        /// West/center/East source chunks once per row — pz∈[0,2)→south side (SW/S/SE), pz∈[18,20)→north
-        /// side (NW/N/NE), else the center row (W/Center/E) — the same 3×3 dispatch the old per-cell
-        /// <c>PaddedSourceIndex</c> performed, hoisted out of the inner loop. Bit-identical to the per-cell
-        /// scatter it replaces (X is the fastest axis in both layouts, so the run order is preserved).
-        /// Generic over the element type so the voxel and light gathers share one body and cannot silently
-        /// diverge; the public <see cref="GatherPaddedVoxels"/>/<see cref="GatherPaddedLight"/> wrappers
-        /// bind <c>T</c> and the matching sentinel.
+        /// Each padded horizontal row (fixed py, pz — <paramref name="paddedWidth"/> cells of X) is built as three
+        /// contiguous runs: the <paramref name="halo"/>-wide West halo, the 16-wide center span, and the
+        /// <paramref name="halo"/>-wide East halo, each copied in bulk from one source chunk via <see cref="CopyRun{T}"/>.
+        /// The pz band picks the source row (<c>lz</c>) and the West/center/East source chunks once per row —
+        /// pz∈[0,halo)→south side (SW/S/SE), pz∈[width−halo,width)→north side (NW/N/NE), else the center row
+        /// (W/Center/E) — hoisted out of the inner loop. Bit-identical to a per-cell scatter (X is the fastest axis in
+        /// both layouts, so the run order is preserved). Generic over the element type so the voxel and light gathers
+        /// share one body and cannot silently diverge; the wrappers bind <c>T</c>, the matching sentinel, and the geometry.
         /// </para>
         /// </summary>
-        private static void GatherPadded<T>(NativeArray<T> padded,
+        private static void GatherPaddedFull<T>(NativeArray<T> padded,
             NativeArray<T> center, NativeArray<T> w, NativeArray<T> e, NativeArray<T> s, NativeArray<T> n,
-            NativeArray<T> sw, NativeArray<T> nw, NativeArray<T> se, NativeArray<T> ne, T sentinel)
+            NativeArray<T> sw, NativeArray<T> nw, NativeArray<T> se, NativeArray<T> ne, int halo, int paddedWidth, T sentinel)
             where T : unmanaged
         {
+            int paddedArea = paddedWidth * paddedWidth;
             for (int py = 0; py < CHUNK_HEIGHT; py++)
             {
-                for (int pz = 0; pz < PADDED_CHUNK_WIDTH; pz++)
+                for (int pz = 0; pz < paddedWidth; pz++)
                 {
                     // Resolve the pz band once per row: source-local Z + the West/center/East source chunks.
                     int lz;
                     NativeArray<T> west, mid, east;
-                    if (pz < LIGHTING_HALO) // South side
+                    if (pz < halo) // South side
                     {
-                        lz = pz + CHUNK_WIDTH - LIGHTING_HALO;
+                        lz = pz + CHUNK_WIDTH - halo;
                         west = sw;
                         mid = s;
                         east = se;
                     }
-                    else if (pz >= CHUNK_WIDTH + LIGHTING_HALO) // North side
+                    else if (pz >= CHUNK_WIDTH + halo) // North side
                     {
-                        lz = pz - CHUNK_WIDTH - LIGHTING_HALO;
+                        lz = pz - CHUNK_WIDTH - halo;
                         west = nw;
                         mid = n;
                         east = ne;
                     }
                     else // Center row
                     {
-                        lz = pz - LIGHTING_HALO;
+                        lz = pz - halo;
                         west = w;
                         mid = center;
                         east = e;
                     }
 
-                    int rowBase = GetPaddedLightingIndex(0, py, pz);
+                    int rowBase = py * paddedArea + pz * paddedWidth; // padded index of px=0 in this row
 
-                    // West halo: padded px[0,2) <- west-side chunk local x[14,16).
-                    CopyRun(west, GetFlattenedIndexInChunk(CHUNK_WIDTH - LIGHTING_HALO, py, lz),
-                        padded, rowBase, LIGHTING_HALO, sentinel);
-                    // Center span: padded px[2,18) <- center-side chunk local x[0,16).
+                    // West halo: padded px[0,halo) <- west-side chunk local x[16−halo,16).
+                    CopyRun(west, GetFlattenedIndexInChunk(CHUNK_WIDTH - halo, py, lz),
+                        padded, rowBase, halo, sentinel);
+                    // Center span: padded px[halo,halo+16) <- center-side chunk local x[0,16).
                     CopyRun(mid, GetFlattenedIndexInChunk(0, py, lz),
-                        padded, rowBase + LIGHTING_HALO, CHUNK_WIDTH, sentinel);
-                    // East halo: padded px[18,20) <- east-side chunk local x[0,2).
+                        padded, rowBase + halo, CHUNK_WIDTH, sentinel);
+                    // East halo: padded px[halo+16,width) <- east-side chunk local x[0,halo).
                     CopyRun(east, GetFlattenedIndexInChunk(0, py, lz),
-                        padded, rowBase + CHUNK_WIDTH + LIGHTING_HALO, LIGHTING_HALO, sentinel);
+                        padded, rowBase + CHUNK_WIDTH + halo, halo, sentinel);
                 }
             }
         }
 
         /// <summary>
-        /// Voxel gather: fills the padded voxel volume from the center + 8 neighbor voxel buffers, missing
-        /// sources stamped <c>uint.MaxValue</c>. Thin typed wrapper over <see cref="GatherPadded{T}"/>.
+        /// Lighting voxel gather: fills the padded voxel volume from the center + 8 neighbor voxel buffers, missing
+        /// sources stamped <c>uint.MaxValue</c>. Thin typed wrapper over <see cref="GatherPaddedFull{T}"/> bound to
+        /// the <see cref="LIGHTING_HALO"/>/<see cref="PADDED_CHUNK_WIDTH"/> geometry.
         /// </summary>
         public static void GatherPaddedVoxels(NativeArray<uint> padded,
             NativeArray<uint> center, NativeArray<uint> w, NativeArray<uint> e, NativeArray<uint> s, NativeArray<uint> n,
             NativeArray<uint> sw, NativeArray<uint> nw, NativeArray<uint> se, NativeArray<uint> ne)
         {
-            GatherPadded(padded, center, w, e, s, n, sw, nw, se, ne, uint.MaxValue);
+            GatherPaddedFull(padded, center, w, e, s, n, sw, nw, se, ne, LIGHTING_HALO, PADDED_CHUNK_WIDTH, uint.MaxValue);
+        }
+
+        /// <summary>
+        /// Fluid voxel gather (TG-4 Phase 4b): fills the full-height <see cref="PADDED_FLUID_WIDTH"/>-wide padded
+        /// voxel volume from the center + 8 neighbor voxel buffers, missing sources stamped <c>uint.MaxValue</c>.
+        /// Thin typed wrapper over <see cref="GatherPaddedFull{T}"/> bound to the wider <see cref="FLUID_HALO"/>
+        /// geometry — the <c>FluidTickJob</c> border voxels read this in place of the per-chunk snapshot.
+        /// </summary>
+        public static void GatherPaddedFluidVoxels(NativeArray<uint> padded,
+            NativeArray<uint> center, NativeArray<uint> w, NativeArray<uint> e, NativeArray<uint> s, NativeArray<uint> n,
+            NativeArray<uint> sw, NativeArray<uint> nw, NativeArray<uint> se, NativeArray<uint> ne)
+        {
+            GatherPaddedFull(padded, center, w, e, s, n, sw, nw, se, ne, FLUID_HALO, PADDED_FLUID_WIDTH, uint.MaxValue);
         }
 
         /// <summary>
         /// Light gather: fills the padded light volume from the center + 8 neighbor light buffers, missing
-        /// sources stamped <c>ushort.MaxValue</c>. Thin typed wrapper over <see cref="GatherPadded{T}"/>; the
-        /// voxel/light pair always agrees because both route through the same generic body.
+        /// sources stamped <c>ushort.MaxValue</c>. Thin typed wrapper over <see cref="GatherPaddedFull{T}"/> bound to
+        /// the lighting geometry; the voxel/light pair always agrees because both route through the same generic body.
         /// </summary>
         public static void GatherPaddedLight(NativeArray<ushort> padded,
             NativeArray<ushort> center, NativeArray<ushort> w, NativeArray<ushort> e, NativeArray<ushort> s, NativeArray<ushort> n,
             NativeArray<ushort> sw, NativeArray<ushort> nw, NativeArray<ushort> se, NativeArray<ushort> ne)
         {
-            GatherPadded(padded, center, w, e, s, n, sw, nw, se, ne, ushort.MaxValue);
+            GatherPaddedFull(padded, center, w, e, s, n, sw, nw, se, ne, LIGHTING_HALO, PADDED_CHUNK_WIDTH, ushort.MaxValue);
         }
 
         /// <summary>
