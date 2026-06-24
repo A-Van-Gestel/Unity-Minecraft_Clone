@@ -31,7 +31,7 @@ namespace Legacy
 
             // LEAVES — uses the constructor so Meta defaults to 0 (legacy Front/North storage index).
             // GlobalPosition is overwritten on each yield below.
-            VoxelMod leafMod = new VoxelMod(default, BlockIDs.OakLeaves);
+            VoxelMod leafMod = new VoxelMod(default(Vector3Int), BlockIDs.OakLeaves);
 
             for (int x = -2; x < 3; x++)
             {

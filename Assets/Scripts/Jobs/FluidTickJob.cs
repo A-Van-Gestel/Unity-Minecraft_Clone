@@ -7,7 +7,6 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
-using UnityEngine;
 using Random = Unity.Mathematics.Random;
 
 namespace Jobs
@@ -468,7 +467,7 @@ namespace Jobs
         /// <summary>Appends a <see cref="VoxelMod"/> for a local position, translating to its global position.</summary>
         private void Emit(int localX, int localY, int localZ, ushort id, byte meta, bool immediate)
         {
-            VoxelMod mod = new VoxelMod(new Vector3Int(localX + ChunkOrigin.x, localY, localZ + ChunkOrigin.y), id)
+            VoxelMod mod = new VoxelMod(new int3(localX + ChunkOrigin.x, localY, localZ + ChunkOrigin.y), id)
             {
                 Meta = meta,
                 ImmediateUpdate = immediate,

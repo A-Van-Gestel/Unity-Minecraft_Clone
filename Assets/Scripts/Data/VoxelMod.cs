@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Data
@@ -50,6 +51,22 @@ namespace Data
         public VoxelMod(Vector3Int globalPosition, ushort blockId)
         {
             GlobalPosition = globalPosition;
+            ID = blockId;
+            Meta = 0; // Front/North storage index for solid blocks; fluid level 0 for fluids.
+            ImmediateUpdate = false;
+            Rule = ReplacementRule.Default;
+        }
+
+        /// <summary>
+        /// Creates a new voxel modification from an <see cref="int3"/> position — the Burst-friendly overload for
+        /// job code, which must not construct a <see cref="Vector3Int"/> itself (see
+        /// <c>.agents/rules/burst-jobs.md</c>). Behaves identically to <see cref="VoxelMod(Vector3Int, ushort)"/>.
+        /// </summary>
+        /// <param name="globalPosition">The absolute world-space block position.</param>
+        /// <param name="blockId">The ID of the block to place.</param>
+        public VoxelMod(int3 globalPosition, ushort blockId)
+        {
+            GlobalPosition = new Vector3Int(globalPosition.x, globalPosition.y, globalPosition.z);
             ID = blockId;
             Meta = 0; // Front/North storage index for solid blocks; fluid level 0 for fluids.
             ImmediateUpdate = false;
