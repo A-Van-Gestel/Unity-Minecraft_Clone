@@ -352,23 +352,39 @@ public class Chunk
     /// <param name="removeScratch">A reusable scratch list for now-inactive indices; cleared on entry.</param>
     private void TickFluidsHybrid(NativeHashSet<int> fluids, List<int> removeScratch)
     {
-        removeScratch.Clear();
-
         World world = World.Instance;
         FluidBurstTicker ticker = world.FluidBurstTicker;
 
         // Pass 1: snapshot + single partition + run the interior fluid job (serial .Run). The runner captures the
-        // bucket's enumeration order (interior/border tagged) in ReplayOrder so Pass 2 replays it in one walk —
-        // no re-enumeration or re-classification of the bucket.
+        // bucket's enumeration order (interior/border tagged) in ReplayOrder so the replay walks it in one pass.
         ticker.RunInteriorFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData);
 
+        // Pass 2: replay the prepared+completed ticker (shared with the TG-4 Phase 4a parallel drain path).
+        ReplayHybridFluids(ticker, fluids, removeScratch);
+    }
+
+    /// <summary>
+    /// Drains a chunk's fluid tick from an <b>already prepared</b> <paramref name="ticker"/> (its interior
+    /// <see cref="FluidTickJob"/> already run/completed): replays the captured bucket order, interleaving the
+    /// interior job's precomputed mods with managed border <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/>
+    /// evaluations, then applies the now-inactive removals. Shared by the serial <see cref="TickFluidsHybrid"/> and
+    /// the Phase-4a parallel <see cref="DrainTick"/> so both produce the identical emission stream.
+    /// </summary>
+    /// <param name="ticker">The chunk's prepared fluid runner (interior job already complete).</param>
+    /// <param name="fluids">The active-fluids bucket (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
+    /// <param name="removeScratch">A reusable scratch list for now-inactive indices; cleared on entry.</param>
+    private void ReplayHybridFluids(FluidBurstTicker ticker, NativeHashSet<int> fluids, List<int> removeScratch)
+    {
+        removeScratch.Clear();
+
+        World world = World.Instance;
         NativeList<int2> replay = ticker.ReplayOrder;
         NativeList<VoxelMod> jobMods = ticker.Mods;
         NativeList<int> modsPerSource = ticker.ModsPerSource;
 
-        // Pass 2: replay in the runner's captured bucket order. Interior voxels emit their precomputed job-mod run
-        // (cursor stays in lockstep with ModsPerSource by construction — both come from the same single partition);
-        // border voxels run the managed path. This interleaves emission exactly as the legacy single loop would.
+        // Replay in the runner's captured bucket order. Interior voxels emit their precomputed job-mod run (cursor
+        // stays in lockstep with ModsPerSource by construction — both come from the same single partition); border
+        // voxels run the managed path. This interleaves emission exactly as the legacy single loop would.
         int interiorCursor = 0;
         int modCursor = 0;
         for (int e = 0; e < replay.Length; e++)
@@ -401,6 +417,50 @@ public class Chunk
 
         foreach (int idx in removeScratch)
             fluids.Remove(idx);
+    }
+
+    /// <summary>
+    /// TG-4 Phase 4a — drains one chunk's tick in the parallel path: grass on the managed path, and fluids replayed
+    /// from the supplied pre-completed <paramref name="ticker"/> (or the managed <see cref="TickFamily"/> when
+    /// <paramref name="ticker"/> is null — a grass-only chunk). Mirrors <see cref="TickUpdate"/>, except the interior
+    /// fluid job was already scheduled+completed in parallel by <see cref="World.ProcessTickUpdatesParallel"/>.
+    /// </summary>
+    /// <param name="ticker">The chunk's prepared fluid runner (interior job complete), or null if none was scheduled.</param>
+    public void DrainTick(FluidBurstTicker ticker)
+    {
+        if (ChunkData == null) return;
+
+        NativeHashSet<int> grass = ChunkData.ActiveGrassBucket;
+        NativeHashSet<int> fluids = ChunkData.ActiveFluidsBucket;
+
+        int grassCount = grass.IsCreated ? grass.Count : 0;
+        int fluidCount = fluids.IsCreated ? fluids.Count : 0;
+        if (grassCount == 0 && fluidCount == 0) return;
+
+        using (s_tickUpdateMarker.Auto())
+        {
+            List<int> toRemove = ListPool<int>.Get();
+            if (grassCount > 0)
+            {
+                using (s_tickGrassMarker.Auto())
+                    TickFamily(grass, toRemove);
+            }
+
+            if (fluidCount > 0)
+            {
+                using (s_tickFluidMarker.Auto())
+                {
+                    // ticker is non-null for every chunk with active fluids (scheduled in Phase 1); the managed
+                    // fallback only runs in the defensive null case.
+                    if (ticker != null)
+                        ReplayHybridFluids(ticker, fluids, toRemove);
+                    else
+                        TickFamily(fluids, toRemove);
+                }
+            }
+
+            ListPool<int>.Release(toRemove);
+        }
     }
 
     /// <summary>

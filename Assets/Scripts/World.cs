@@ -24,6 +24,7 @@ using Physics;
 using Serialization;
 using UI;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
@@ -201,6 +202,27 @@ public class World : MonoBehaviour
     /// <summary>Lazily-created reusable runner for the interior fluid Burst tick. Disposed in <c>OnDestroy</c>.</summary>
     internal FluidBurstTicker FluidBurstTicker => _fluidBurstTicker ??= new FluidBurstTicker();
 
+    // --- TG-4 Phase 4a: parallel interior-fluid tick across chunks ---
+    [SerializeField]
+    [Tooltip("TG-4 Phase 4a: schedule the Tier-1 interior fluid jobs across chunks in parallel (requires Enable " +
+             "Fluid Burst Tick). Off = the Phase-3 serial per-chunk path. Defaults off until validated " +
+             "(parallel-vs-serial determinism gate + in-game).")]
+    private bool _enableParallelFluidTick;
+
+    private DynamicPool<FluidBurstTicker> _fluidTickerPool;
+
+    // Reusable per-tick scratch for the parallel schedule→complete→drain phases (cleared each tick, never re-alloc).
+    private readonly List<Chunk> _parallelFluidChunks = new List<Chunk>();
+    private readonly List<FluidBurstTicker> _parallelFluidTickers = new List<FluidBurstTicker>();
+    private readonly List<JobHandle> _parallelFluidHandles = new List<JobHandle>();
+
+    /// <summary>When true (and <see cref="EnableFluidBurstTick"/>), interior fluid jobs schedule in parallel across chunks (TG-4 Phase 4a).</summary>
+    public bool EnableParallelFluidTick => _enableParallelFluidTick;
+
+    /// <summary>Lazily-created pool of per-chunk fluid runners for the parallel tick (one in-flight per scheduled chunk). Cleared in <c>OnDestroy</c>.</summary>
+    private DynamicPool<FluidBurstTicker> FluidTickerPool =>
+        _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
+
     // --- Chunk Border Visualization ---
     private readonly Dictionary<ChunkCoord, GameObject> _chunkBorders = new Dictionary<ChunkCoord, GameObject>();
     private Transform _chunkBorderParent;
@@ -353,6 +375,7 @@ public class World : MonoBehaviour
         // 2. Dispose of the persistent global data.
         JobDataManager?.Dispose();
         _fluidBurstTicker?.Dispose();
+        _fluidTickerPool?.Clear(); // disposes every pooled per-chunk fluid ticker (all returned between ticks)
 
         // 3. Dispose of fluid vertex templates.
         FluidVertexTemplates?.Dispose();
@@ -1325,11 +1348,21 @@ public class World : MonoBehaviour
             while (enumerator.MoveNext())
                 snapshot.Add(enumerator.Current);
 
-            foreach (ChunkCoord chunkCoord in snapshot)
+            // TG-4 Phase 4a: when enabled, schedule the interior fluid jobs across all chunks in parallel, then drain
+            // serially in the SAME chunk order (so the emitted mod stream stays byte-identical to the serial path).
+            // Otherwise run the unchanged Phase-3 serial per-chunk tick.
+            if (_enableFluidBurstTick && _enableParallelFluidTick)
             {
-                if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
+                ProcessTickUpdatesParallel(snapshot);
+            }
+            else
+            {
+                foreach (ChunkCoord chunkCoord in snapshot)
                 {
-                    chunk.TickUpdate();
+                    if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
+                    {
+                        chunk.TickUpdate();
+                    }
                 }
             }
         }
@@ -1337,6 +1370,74 @@ public class World : MonoBehaviour
         {
             ListPool<ChunkCoord>.Release(snapshot);
         }
+    }
+
+    /// <summary>
+    /// TG-4 Phase 4a — ticks all active chunks with the interior fluid jobs <b>parallelized across chunks</b>:
+    /// <list type="number">
+    /// <item><b>Schedule</b> — for every chunk with active fluids, acquire a pooled <see cref="FluidBurstTicker"/>
+    /// and schedule its interior <see cref="FluidTickJob"/> on a worker (each chunk gets its own ticker, so the
+    /// in-flight jobs never share scratch).</item>
+    /// <item><b>Complete</b> — flush + complete all scheduled handles.</item>
+    /// <item><b>Drain</b> — walk the chunks in the <b>same snapshot order</b> and run each chunk's managed work
+    /// (grass + the fluid replay using its pre-computed ticker results), then return the ticker to the pool.</item>
+    /// </list>
+    /// Interior fluid emissions are chunk-local (an interior voxel never targets another chunk), and the drain is
+    /// serial in the deterministic chunk-iteration order, so the emitted <see cref="VoxelMod"/> stream is identical
+    /// to the Phase-3 serial path — only the compute moves off the main thread.
+    /// </summary>
+    /// <param name="snapshot">The active-chunk coordinates to tick, in deterministic iteration order.</param>
+    private void ProcessTickUpdatesParallel(List<ChunkCoord> snapshot)
+    {
+        _parallelFluidChunks.Clear();
+        _parallelFluidTickers.Clear();
+        _parallelFluidHandles.Clear();
+
+        // Phase 1: schedule the interior fluid job for every chunk that has active fluids.
+        foreach (ChunkCoord chunkCoord in snapshot)
+        {
+            if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
+                continue;
+
+            NativeHashSet<int> fluids = chunk.ChunkData.ActiveFluidsBucket;
+            if (!fluids.IsCreated || fluids.Count == 0)
+                continue;
+
+            FluidBurstTicker ticker = FluidTickerPool.Get();
+            JobHandle handle = ticker.ScheduleInteriorFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData);
+            _parallelFluidChunks.Add(chunk);
+            _parallelFluidTickers.Add(ticker);
+            _parallelFluidHandles.Add(handle);
+        }
+
+        // Kick the scheduled jobs onto worker threads so they actually run in parallel before we block on them.
+        JobHandle.ScheduleBatchedJobs();
+
+        // Phase 2: complete all scheduled jobs.
+        for (int i = 0; i < _parallelFluidHandles.Count; i++)
+            _parallelFluidHandles[i].Complete();
+
+        // Phase 3: drain serially in the same snapshot order. A cursor pairs each fluid chunk with its ticker
+        // (Phase 1 added chunks in this same order, so the cursor stays aligned without a lookup).
+        int fluidCursor = 0;
+        foreach (ChunkCoord chunkCoord in snapshot)
+        {
+            if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
+                continue;
+
+            FluidBurstTicker ticker = null;
+            if (fluidCursor < _parallelFluidChunks.Count && ReferenceEquals(_parallelFluidChunks[fluidCursor], chunk))
+            {
+                ticker = _parallelFluidTickers[fluidCursor];
+                fluidCursor++;
+            }
+
+            chunk.DrainTick(ticker);
+        }
+
+        // Return every ticker to the pool for reuse next tick.
+        foreach (FluidBurstTicker ticker in _parallelFluidTickers)
+            FluidTickerPool.Return(ticker);
     }
 
     private void Update()
