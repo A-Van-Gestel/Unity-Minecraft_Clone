@@ -73,6 +73,12 @@ namespace Jobs
         /// <inheritdoc />
         public void Execute()
         {
+            // Allocate the BFS scratch once for the whole pass (locals, threaded into the flow chain); CalculateFlowCost
+            // Clear()s it per call. Replaces the prior per-call Temp NativeQueue + NativeHashSet allocation
+            // (≤4×/voxel/tick). Job fields can't hold this — Burst requires job containers constructed before schedule.
+            NativeQueue<SearchNode> searchQueue = new NativeQueue<SearchNode>(Allocator.Temp);
+            NativeHashSet<int3> searchVisited = new NativeHashSet<int3>(64, Allocator.Temp);
+
             foreach (int index in InteriorFluidIndices)
             {
                 int modsBefore = Mods.Length;
@@ -95,7 +101,7 @@ namespace Jobs
                 BlockTypeJobData props = BlockTypes[id];
 
                 // Behave: emit this voxel's mods for the tick.
-                HandleFluidFlow(x, y, z, id, level, props);
+                HandleFluidFlow(x, y, z, id, level, props, searchQueue, searchVisited);
 
                 // Active: re-evaluate against the same pre-tick snapshot; drop if stable.
                 if (!IsFluidActive(x, y, z, id, level, props))
@@ -104,6 +110,9 @@ namespace Jobs
                 // Record this source's mod run length so the caller can replay it in bucket order.
                 ModsPerSource.Add(Mods.Length - modsBefore);
             }
+
+            searchQueue.Dispose();
+            searchVisited.Dispose();
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -111,7 +120,8 @@ namespace Jobs
         // ─────────────────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>Manages the flow logic for a single fluid voxel (Beta 1.3.2 order: Drain → Gravitate → Spread).</summary>
-        private void HandleFluidFlow(int x, int y, int z, ushort currentId, byte currentLevel, BlockTypeJobData props)
+        private void HandleFluidFlow(int x, int y, int z, ushort currentId, byte currentLevel, BlockTypeJobData props,
+            NativeQueue<SearchNode> searchQueue, NativeHashSet<int3> searchVisited)
         {
             LocalVoxel below = GetStateLocal(x, y - 1, z);
             bool belowIsSameFluid = below.Has && below.Id == currentId;
@@ -129,7 +139,8 @@ namespace Jobs
                 return;
 
             // Step 4: horizontal spread.
-            HandleFluidSpread(x, y, z, currentId, currentLevel, effectiveLevel, props, below, belowIsSameFluid, falling);
+            HandleFluidSpread(x, y, z, currentId, currentLevel, effectiveLevel, props, below, belowIsSameFluid, falling,
+                searchQueue, searchVisited);
         }
 
         /// <summary>Drains/decays the fluid based on its support. Returns true if a terminal mod was emitted for this voxel.</summary>
@@ -171,7 +182,8 @@ namespace Jobs
 
         /// <summary>Handles horizontal spreading across supported surfaces (Minecraft source/non-source gate + viscosity RNG).</summary>
         private void HandleFluidSpread(int x, int y, int z, ushort currentId, byte currentLevel, byte effectiveLevel,
-            BlockTypeJobData props, LocalVoxel below, bool belowIsSameFluid, bool falling)
+            BlockTypeJobData props, LocalVoxel below, bool belowIsSameFluid, bool falling,
+            NativeQueue<SearchNode> searchQueue, NativeHashSet<int3> searchVisited)
         {
             bool canSpreadHorizontally = effectiveLevel == 0 ||
                                          (below.Has && below.Props.IsSolid && !belowIsSameFluid);
@@ -189,7 +201,7 @@ namespace Jobs
                 if (rng.NextFloat() > props.SpreadChance) return;
             }
 
-            byte optimalFlowMask = GetOptimalFlowDirections(x, y, z, currentId);
+            byte optimalFlowMask = GetOptimalFlowDirections(x, y, z, currentId, searchQueue, searchVisited);
 
             for (int i = 0; i < 4; i++)
             {
@@ -334,7 +346,8 @@ namespace Jobs
         }
 
         /// <summary>Returns a bitmask of optimal horizontal flow directions (toward the nearest drop within 4 blocks).</summary>
-        private byte GetOptimalFlowDirections(int x, int y, int z, ushort fluidId)
+        private byte GetOptimalFlowDirections(int x, int y, int z, ushort fluidId,
+            NativeQueue<SearchNode> searchQueue, NativeHashSet<int3> searchVisited)
         {
             Span<int> flowCost = stackalloc int[4];
             int minCost = 1000;
@@ -361,7 +374,7 @@ namespace Jobs
                     if (belowNeighbor.Has && !belowIsSolid)
                         flowCost[i] = 0; // immediate drop
                     else
-                        flowCost[i] = CalculateFlowCost(nx, ny, nz, 1, i, fluidId);
+                        flowCost[i] = CalculateFlowCost(nx, ny, nz, 1, i, fluidId, searchQueue, searchVisited);
                 }
 
                 if (flowCost[i] < minCost)
@@ -383,18 +396,20 @@ namespace Jobs
         }
 
         /// <summary>BFS to the nearest drop (max distance 4), in local coords. Mirror of the managed routine using <see cref="int3"/> keys.</summary>
-        private int CalculateFlowCost(int startX, int startY, int startZ, int startCost, int incomingDir, ushort fluidId)
+        private int CalculateFlowCost(int startX, int startY, int startZ, int startCost, int incomingDir, ushort fluidId,
+            NativeQueue<SearchNode> searchQueue, NativeHashSet<int3> searchVisited)
         {
-            NativeQueue<SearchNode> queue = new NativeQueue<SearchNode>(Allocator.Temp);
-            NativeHashSet<int3> visited = new NativeHashSet<int3>(64, Allocator.Temp);
+            // Reuse the per-Execute scratch (cleared per call) instead of allocating Temp containers each call.
+            searchQueue.Clear();
+            searchVisited.Clear();
 
             int3 startPos = new int3(startX, startY, startZ);
-            queue.Enqueue(new SearchNode { Pos = startPos, Cost = startCost });
-            visited.Add(startPos);
+            searchQueue.Enqueue(new SearchNode { Pos = startPos, Cost = startCost });
+            searchVisited.Add(startPos);
 
             int minCost = 1000;
 
-            while (queue.TryDequeue(out SearchNode node))
+            while (searchQueue.TryDequeue(out SearchNode node))
             {
                 for (int i = 0; i < 4; i++)
                 {
@@ -411,8 +426,8 @@ namespace Jobs
                     int3 off = HorizontalOffset(i);
                     int3 neighborPos = node.Pos + off;
 
-                    if (visited.Contains(neighborPos)) continue;
-                    visited.Add(neighborPos);
+                    if (searchVisited.Contains(neighborPos)) continue;
+                    searchVisited.Add(neighborPos);
 
                     LocalVoxel nb = GetStateLocal(neighborPos.x, neighborPos.y, neighborPos.z);
                     if (!nb.Has) continue;
@@ -427,18 +442,14 @@ namespace Jobs
                     if (belowNeighbor.Has && !belowIsSolid)
                     {
                         minCost = node.Cost + 1;
-                        queue.Dispose();
-                        visited.Dispose();
                         return minCost;
                     }
 
                     if (node.Cost + 1 < FluidTierClassifier.MaxFlowSearchDepth)
-                        queue.Enqueue(new SearchNode { Pos = neighborPos, Cost = node.Cost + 1 });
+                        searchQueue.Enqueue(new SearchNode { Pos = neighborPos, Cost = node.Cost + 1 });
                 }
             }
 
-            queue.Dispose();
-            visited.Dispose();
             return minCost;
         }
 
