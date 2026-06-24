@@ -128,6 +128,7 @@ MonoBehaviour:
   voxelVisualizer: {fileID: 0}
   visualizationMode: 0
   _enableFluidBurstTick: 1
+  _enableParallelFluidTick: 0
 --- !u!114 &715589282694584058
 MonoBehaviour:
   m_ObjectHideFlags: 0

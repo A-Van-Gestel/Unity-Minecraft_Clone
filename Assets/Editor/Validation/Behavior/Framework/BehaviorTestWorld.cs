@@ -68,6 +68,9 @@ namespace Editor.Validation.Behavior.Framework
         /// <summary>The synthetic chunk the behavior code reads and the harness mutates.</summary>
         public readonly ChunkData ChunkData;
 
+        /// <summary>The blittable palette blob (mirrors <c>World.JobDataManager.BlockTypesJobData</c>) for driving the real fluid jobs in edit-mode validation.</summary>
+        internal NativeArray<BlockTypeJobData> BlockTypesJob => _blockTypesJob;
+
         private readonly BlockType[] _palette;
         private readonly BlockType _inert;
         private NativeArray<BlockTypeJobData> _blockTypesJob; // built from the palette for the FluidBurstHybrid driver
