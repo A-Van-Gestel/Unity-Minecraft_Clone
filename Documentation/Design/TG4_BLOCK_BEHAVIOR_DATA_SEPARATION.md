@@ -1,14 +1,18 @@
 # TG-4 — `BlockBehavior` Data Separation (ECS/DOTS pattern)
 
-> **Status:** IMPLEMENTED THROUGH PHASE 4a (2026-06-24). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
+> **Status:** IMPLEMENTED THROUGH PHASE 4b (2026-06-24; 4b behind a flag, default off). **Phases 0–1 SHIPPED** (BH-D1 differential infra + the
 > per-family active-voxel storage split, in-game confirmed); **Phase 2 (grass-Burst) SKIPPED** (2026-06-23 —
 > negligible cost + job-latency risk, see §5); **Phase 3 (fluid-Burst, Tier-1 interior hybrid) SHIPPED**
 > (2026-06-23, **default on**) — `FluidTickJob` Burst-ticks interior fluids, border stays managed, gated by
 > `BH-D1[L|F]` (byte-identical over all fixtures) + in-game; **Phase 4a (parallelize interior jobs across chunks)
 > SHIPPED** (2026-06-24, **default on**, worker-count guarded) — gated by the parallel-vs-serial determinism suite
-> + an 8-run IL2CPP A/B. **Phase 4b (close Tier-2 border via the §4.2 option (b) halo gather) IN PROGRESS**
-    > (2026-06-24 — revived to fully close Tier-2 + future-proof for taller worlds; full-height halo first behind a
-    > flag, the Y-band optimization deferred; implementation plan + harness-gate-first sequencing in §5).
+> + an 8-run IL2CPP A/B. **Phase 4b (close Tier-2 border via the §4.2 option (b) halo gather) SHIPPED**
+    > (2026-06-24, **behind `EnableFluidBorderBurst`, default off**) — every fluid (interior AND border) is Burst-ticked,
+    > border voxels reading a per-tick 9-snapshot neighbor halo; gated by `BH-D1[L|H]` (byte-identical over all 13
+    > fixtures incl. the 5 BH-4 cross-chunk cases) + the cross-chunk parallel-determinism stress + in-game (a large
+    > cascading removal/flood). The full-height A/B found it **1.70–2.15× faster** than the managed-border hybrid with
+    > GC variance/peak spikes collapsed (the Y-band optimization remains deferred — not a GO blocker). See the
+    > [Phase-4b halo A/B](../Performance/BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md).
 >
 > **Profile/attribution gates (all CLOSED):** the §5 isolated-tick gate
 > ([`Performance/…FLUID_TICK_2026_06_23_BENCHMARK.md`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md))
@@ -25,8 +29,8 @@
 > border) is deferred as low-ROI, and ocean smoothness needs the lighting line (LI-1 / P-2), not (only) the tick.**
 > Detail doc for the **TG-4** entry in
 > [PERFORMANCE_IMPROVEMENTS_REPORT.md](PERFORMANCE_IMPROVEMENTS_REPORT.md). The behavior-tick validation
-> harness that gates this work is **built and green** (8 baselines + `BH-D1[L|L]/[L|S]/[L|F]` + the parallel
-> determinism gate) — see
+> harness that gates this work is **built and green** (8 baselines + `BH-D1[L|L]/[L|S]/[L|F]/[L|H]` + the parallel
+> determinism gates, interior and cross-chunk halo) — see
 > [BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md).
 >
 > **As-built correction (Phase 1):** the per-family buckets live on **`ChunkData`** (the data they describe),
@@ -155,9 +159,10 @@ their own chunk; border ("Tier-2") voxels read into neighbors. A Burst job canno
   directly.
 
 **Grass** mostly stays in-chunk (local + 1-ring); **fluids** do deep cross-chunk flow. So the phasing
-(§5) Burstifies **Tier-1 interior voxels first** (no neighbor view needed) and keeps **Tier-2 border
-voxels on the managed path** as a hybrid, closing Tier-2 only once (a) or (b) exists. This mirrors the
-harness's existing Tier-1/Tier-2 split (BH-4 is the deferred cross-chunk fixture).
+(§5) Burstified **Tier-1 interior voxels first** (no neighbor view needed) and kept **Tier-2 border
+voxels on the managed path** as a hybrid (Phase 3/4a), then closed Tier-2 via option (b) in Phase 4b (every fluid
+Bursted, border reading the halo). This mirrors the harness's Tier-1/Tier-2 split (the BH-4 cross-chunk fixtures are
+now built + green via `BH-D1[L|H]`).
 
 ### 4.3 Determinism & ordering (the BH-D1 crux)
 
@@ -276,23 +281,31 @@ N concurrent pooled tickers over one chunk, byte-identical to the serial baselin
 > intended endgame is to **retire it** (make parallel unconditional, delete the serial `TickUpdate` path +
 > `RunInteriorFluids` + flags + guard) once soaked on real devices.
 
-### Phase 4b — Close Tier-2 (border) via the §4.2 option (b) halo gather — 🚧 IN PROGRESS (2026-06-24, behind a flag)
+### Phase 4b — Close Tier-2 (border) via the §4.2 option (b) halo gather — ✅ SHIPPED (2026-06-24, behind a flag, default off)
 
 Build the native neighbor view (4.2 option a or b) and migrate **border** voxels off the managed hybrid into the
-parallel Burst path, retiring the managed fallback. **Gate:** full BH-D1 (all fixtures) + **new**
-Tier-2 cross-chunk differential fixtures (closes harness BH-4) + a determinism stress.
+Burst path. **Done:** every fluid (interior AND border) now runs through `FluidTickJob`, border voxels reading a
+per-tick **9-snapshot neighbor halo**, behind `EnableFluidBorderBurst` (**default off**; the managed border stays as
+the flag-off fallback, retired later in the TG-4 cleanup — see the cleanup-scope note). **Gate (all green):** full
+`BH-D1[L|H]` (all 13 fixtures incl. the 5 new BH-4 cross-chunk cases, prove-red confirmed) + the cross-chunk
+parallel-determinism stress (`Validate Fluid Parallel Determinism (Cross-Chunk Halo)`, 3×3 distinct chunks, prove-red
+confirmed) + in-game (large cascading removal/flood). The **Y-band optimization remains deferred** (the full-height
+A/B proved it is not a GO blocker — see the implementation plan below + the
+[Phase-4b halo A/B baseline](../Performance/BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md)).
 
 > ⏸️ **Was deferred — why (still the honest ROI picture).** The Phase-4a A/B showed the dam-break tick spike is
 > **managed-border-dominated**, so P4b *would* target the right cost — **but** (a) the worst flood frames carry
 > coincident render/generation/GC hitches of equal magnitude that P4b can't touch, and (b) the **sustained** frame
 > is lighting-bound (~66 %) with the tick at ~2 %. So as a *frame-time* lever P4b is marginal.
 >
-> 🚧 **Revived 2026-06-24 — why now.** Pursued to **completion** rather than left half-done: it closes the last
-> managed path in the tick (everything Burst + parallel), and the option-(b) gather is **future-proofed against
+> ✅ **Revived + shipped 2026-06-24 — why.** Pursued to **completion** rather than left half-done: it closes the last
+> managed path in the tick (every fluid Burst-ticked), and the option-(b) gather is **future-proofed against
 > taller worlds** (the Y-band, below, makes the per-tick copy independent of world height). The marginal frame ROI
-> is accepted with eyes open; the win is architectural completeness + the cleanup it unlocks (the serial/managed
-> fallbacks all retire together — see the cleanup-scope note below). Uses option (b) (per-tick local halo gather),
-> **not** P-2 Layer 2 — no chunk-storage commitment.
+> was accepted with eyes open — but the A/B then made it a *positive*: the full-height halo is **1.70–2.15× faster**
+> than the managed-border hybrid (the managed border it replaces costs more than the gather) with GC variance/peak
+> spikes collapsed, so the win is architectural completeness **and** a real serial speedup + the cleanup it unlocks
+> (the serial/managed fallbacks all retire together — see the cleanup-scope note below). Uses option (b) (per-tick
+> local halo gather), **not** P-2 Layer 2 — no chunk-storage commitment.
 
 #### Phase 4b implementation plan (option (b) halo gather)
 
@@ -348,10 +361,14 @@ Burst-halo. Fixtures: fluid across +X/−X/±Z, a diagonal-corner seam, a missin
 null), and (for the band phase) the vertically-split case. `BH-D1` asserts legacy == Burst-halo byte-identical;
 the parallel cross-chunk determinism stress extends `FluidParallelDeterminismValidation` to multi-chunk.
 
-**Commit sequence:** C1 harness gate (multi-chunk world + BH-4, prove-red) → C2 gather refactor (`CopyRun` core +
-`GatherPaddedFull`, lighting green) → C3 `FluidTickJob` full-height halo reads → C4 wire behind the flag + BH-4
-green + determinism stress → C5 full-height A/B baseline + in-game → C6 docs-sync (this section → shipped behind
-flag, close BH-4) → C7 (later, measured) Y-band optimization. Then the **TG-4 cleanup** retires the fallbacks.
+**Commit sequence (as shipped):** C1 harness gate (multi-chunk `BehaviorTestWorld` + the 5 BH-4 fixtures, prove-red)
+→ C2 gather refactor (`CopyRun` core + `GatherPaddedFull`, lighting green) → C3 `FluidTickJob` full-height halo reads
+→ C4 wire behind `EnableFluidBorderBurst` + `BH-D1[L|H]` green (prove-red) → C5 cross-chunk parallel-determinism stress
+(3×3 distinct chunks, prove-red) → C6 full-height A/B baseline + in-game → C7 docs-sync (this section). **Result:** the
+A/B found the full-height halo **1.70–2.15× faster** than the managed-border hybrid (the gather is cheaper than the
+managed border it replaces) with GC variance/peak spikes collapsed — so the **Y-band optimization is deferred** (a
+margin-widener, not a GO blocker). Still pending (later, measured): the **Y-band**, then the **TG-4 cleanup** retires
+the fallbacks.
 
 > **Scope honesty (as it played out):** Phase 3 (the GC-bound spike) was the real win — Bursting the interior cut
 > the ~180 ms managed spike to ~143 ms. Phase 4a's parallelism added a small, real, but imperceptible sliver on
@@ -483,14 +500,14 @@ two-driver runner.
 
 **How it gates each phase:**
 
-| Phase | BH-D1 configuration                          | Pass condition                                                                                                                                                                                     |
-|-------|----------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 0 ✅   | both drivers = legacy                        | streams identical (comparator self-check) — **green**                                                                                                                                              |
-| 1 ✅   | legacy vs split-storage (managed)            | equivalent under §4.3 (first real reorder test) — **green over 8 fixtures**                                                                                                                        |
-| 2 ⏭️  | *(skipped — grass stays managed)*            | n/a                                                                                                                                                                                                |
-| 3 ✅   | `BH-D1[L\|F]` — legacy vs fluid-Burst hybrid | equivalent over **all fixtures** (incl. BH-B1–B5) — **green**                                                                                                                                      |
-| 4a ✅  | parallel-vs-serial determinism suite         | N concurrent tickers byte-identical to serial + run-to-run — **green** *(separate from BH-D1: it is single-chunk; the World-level parallel drain is covered by this suite + the 8-run IL2CPP A/B)* |
-| 4b ⏸️ | legacy vs full parallel + Tier-2 border      | *(deferred)* equivalent over all fixtures + new cross-chunk fixtures + N-run determinism                                                                                                           |
+| Phase | BH-D1 configuration                                                 | Pass condition                                                                                                                                                                                     |
+|-------|---------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0 ✅   | both drivers = legacy                                               | streams identical (comparator self-check) — **green**                                                                                                                                              |
+| 1 ✅   | legacy vs split-storage (managed)                                   | equivalent under §4.3 (first real reorder test) — **green over 8 fixtures**                                                                                                                        |
+| 2 ⏭️  | *(skipped — grass stays managed)*                                   | n/a                                                                                                                                                                                                |
+| 3 ✅   | `BH-D1[L\|F]` — legacy vs fluid-Burst hybrid                        | equivalent over **all fixtures** (incl. BH-B1–B5) — **green**                                                                                                                                      |
+| 4a ✅  | parallel-vs-serial determinism suite                                | N concurrent tickers byte-identical to serial + run-to-run — **green** *(separate from BH-D1: it is single-chunk; the World-level parallel drain is covered by this suite + the 8-run IL2CPP A/B)* |
+| 4b ✅  | `BH-D1[L\|H]` — legacy vs full Burst halo + cross-chunk determinism | equivalent over **all 13 fixtures** (incl. the 5 BH-4 cross-chunk cases, prove-red) — **green**; + the 3×3 distinct-chunk parallel-determinism stress (prove-red) — **green**                      |
 
 > **Phase 1 fixture note:** the seven golden fixtures (BH-B1…B7) are each single-family, so under `SplitFamily`
 > their traversal order equals legacy — `BH-D1[L|S]` passes but exercises no *cross-family* reorder there. A mixed
@@ -542,11 +559,13 @@ The pooling *concern* is not superseded (per-chunk native-list churn persists an
 ## 9. Acceptance criteria
 
 - All 8 behavior baselines green at every phase boundary. ✅
-- BH-D1 green at the configuration for the current phase (§6 table). ✅ (through `BH-D1[L|F]`)
-- In-game confirmation of fluid + grass behavior after Phases 2 and 3. ✅
+- BH-D1 green at the configuration for the current phase (§6 table). ✅ (through `BH-D1[L|H]`)
+- In-game confirmation of fluid + grass behavior after Phases 2 and 3. ✅ (and Phase 4b — large cascading removal/flood)
 - Phase 4a: parallel-vs-serial determinism stress green ✅; interior jobs scheduled concurrently with a serial
-  byte-identical drain ✅. **Phase 4b (pending):** Tier-2 cross-chunk differential fixtures added and green
-  (closes harness BH-4); legacy serial driver removed.
+  byte-identical drain ✅. **Phase 4b** ✅: the 5 Tier-2 cross-chunk differential fixtures added and green (closes
+  harness BH-4) via `BH-D1[L|H]`; cross-chunk parallel-determinism stress green; shipped behind
+  `EnableFluidBorderBurst` (**default off** — the managed border fallback is **retained** for the TG-4 cleanup, NOT
+  yet removed).
 - No GC allocation in the per-tick job path (Burst rules); pool-reset safety satisfied. ✅
 
 ---
@@ -591,7 +610,8 @@ The pooling *concern* is not superseded (per-chunk native-list churn persists an
       [MESHING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md)
       **MH-10/MH-11 (B18–B21, CLOSED 2026-06-21)** (border-face culling consumption + production-fill faithful). These guard the
       *substrate*; **BH-D1** (§6) separately guards the *tick path* — both are Phase-4 gates.
-- **Tier-2 fixtures (BH-4)** — currently deferred in the harness; must be built for Phase 4.
+- **Tier-2 fixtures (BH-4)** — ✅ built + green (2026-06-24): 5 cross-chunk differential fixtures in
+  `BehaviorValidationSuite.CrossChunk.cs` gated by `BH-D1[L|H]`, on a multi-chunk-aware `BehaviorTestWorld`.
 - **TG-5 relationship** — if Phases 3–4 prove too costly, TG-5 (function-pointer dispatch, same BH-D1
   gate, no parallel re-architecture) is the documented lighter finish. The two share Phases 0–1.
 - **Family count** — only Grass + Fluid today. Confirm no other `isActive` block types are planned that
