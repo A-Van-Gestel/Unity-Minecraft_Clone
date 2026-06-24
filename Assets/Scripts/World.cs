@@ -1403,51 +1403,63 @@ public class World : MonoBehaviour
         _parallelFluidTickers.Clear();
         _parallelFluidHandles.Clear();
 
-        // Phase 1: schedule the interior fluid job for every chunk that has active fluids.
-        foreach (ChunkCoord chunkCoord in snapshot)
+        try
         {
-            if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
-                continue;
-
-            NativeHashSet<int> fluids = chunk.ChunkData.ActiveFluidsBucket;
-            if (!fluids.IsCreated || fluids.Count == 0)
-                continue;
-
-            FluidBurstTicker ticker = FluidTickerPool.Get();
-            JobHandle handle = ticker.ScheduleInteriorFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData);
-            _parallelFluidChunks.Add(chunk);
-            _parallelFluidTickers.Add(ticker);
-            _parallelFluidHandles.Add(handle);
-        }
-
-        // Kick the scheduled jobs onto worker threads so they actually run in parallel before we block on them.
-        JobHandle.ScheduleBatchedJobs();
-
-        // Phase 2: complete all scheduled jobs.
-        for (int i = 0; i < _parallelFluidHandles.Count; i++)
-            _parallelFluidHandles[i].Complete();
-
-        // Phase 3: drain serially in the same snapshot order. A cursor pairs each fluid chunk with its ticker
-        // (Phase 1 added chunks in this same order, so the cursor stays aligned without a lookup).
-        int fluidCursor = 0;
-        foreach (ChunkCoord chunkCoord in snapshot)
-        {
-            if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
-                continue;
-
-            FluidBurstTicker ticker = null;
-            if (fluidCursor < _parallelFluidChunks.Count && ReferenceEquals(_parallelFluidChunks[fluidCursor], chunk))
+            // Phase 1: schedule the interior fluid job for every chunk that has active fluids.
+            foreach (ChunkCoord chunkCoord in snapshot)
             {
-                ticker = _parallelFluidTickers[fluidCursor];
-                fluidCursor++;
+                if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
+                    continue;
+
+                NativeHashSet<int> fluids = chunk.ChunkData.ActiveFluidsBucket;
+                if (!fluids.IsCreated || fluids.Count == 0)
+                    continue;
+
+                // Record the acquired ticker BEFORE scheduling so the finally always returns it (and completes its
+                // job) even if ScheduleInteriorFluids throws — the chunk/ticker lists stay paired for the drain cursor.
+                FluidBurstTicker ticker = FluidTickerPool.Get();
+                _parallelFluidChunks.Add(chunk);
+                _parallelFluidTickers.Add(ticker);
+                _parallelFluidHandles.Add(ticker.ScheduleInteriorFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData));
             }
 
-            chunk.DrainTick(ticker);
-        }
+            // Kick the scheduled jobs onto worker threads so they actually run in parallel before we block on them.
+            JobHandle.ScheduleBatchedJobs();
 
-        // Return every ticker to the pool for reuse next tick.
-        foreach (FluidBurstTicker ticker in _parallelFluidTickers)
-            FluidTickerPool.Return(ticker);
+            // Phase 2: complete all scheduled jobs.
+            for (int i = 0; i < _parallelFluidHandles.Count; i++)
+                _parallelFluidHandles[i].Complete();
+
+            // Phase 3: drain serially in the same snapshot order. A cursor pairs each fluid chunk with its ticker
+            // (Phase 1 added chunks in this same order, so the cursor stays aligned without a lookup).
+            int fluidCursor = 0;
+            foreach (ChunkCoord chunkCoord in snapshot)
+            {
+                if (!_chunkMap.TryGetValue(chunkCoord, out Chunk chunk) || chunk.ChunkData == null)
+                    continue;
+
+                FluidBurstTicker ticker = null;
+                if (fluidCursor < _parallelFluidChunks.Count && ReferenceEquals(_parallelFluidChunks[fluidCursor], chunk))
+                {
+                    ticker = _parallelFluidTickers[fluidCursor];
+                    fluidCursor++;
+                }
+
+                chunk.DrainTick(ticker);
+            }
+        }
+        finally
+        {
+            // Ensure no job is still in flight before its ticker scratch is reused — a no-op on the normal path
+            // (Phase 2 already completed them), but on an exceptional throw mid-schedule/drain this drains the
+            // still-running jobs so returning their tickers can't hand live, job-written scratch back to the pool.
+            for (int i = 0; i < _parallelFluidHandles.Count; i++)
+                _parallelFluidHandles[i].Complete();
+
+            // Return every acquired ticker to the pool for reuse next tick.
+            foreach (FluidBurstTicker ticker in _parallelFluidTickers)
+                FluidTickerPool.Return(ticker);
+        }
     }
 
     private void Update()
