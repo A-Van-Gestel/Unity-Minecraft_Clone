@@ -73,6 +73,41 @@ namespace Jobs
         /// <param name="blockTypes">The global block-type job blob (<c>World.JobDataManager.BlockTypesJobData</c>).</param>
         public void RunInteriorFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes)
         {
+            // Serial path (TG-4 Phase 3): prepare + run the job synchronously on the calling thread.
+            if (PrepareInteriorJob(cd))
+                BuildJob(cd, tickCounter, blockTypes).Run();
+        }
+
+        /// <summary>
+        /// TG-4 Phase 4a — the parallel counterpart of <see cref="RunInteriorFluids"/>: prepares the same snapshot +
+        /// partition on the calling thread, then <b>schedules</b> the interior fluid job on a worker and returns its
+        /// <see cref="JobHandle"/>. The caller batches handles across chunks, completes them, then drains the outputs
+        /// (<see cref="Mods"/>/<see cref="ModsPerSource"/>/<see cref="ReplayOrder"/>/<see cref="InactiveInterior"/>)
+        /// in deterministic chunk order. <b>Each concurrently-scheduled chunk must use its own ticker instance</b>
+        /// (the scratch is per-ticker, not shareable across in-flight jobs).
+        /// </summary>
+        /// <param name="cd">The chunk whose interior fluids to tick.</param>
+        /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
+        /// <param name="blockTypes">The global block-type job blob (<c>World.JobDataManager.BlockTypesJobData</c>).</param>
+        /// <returns>The scheduled job's handle, or <c>default</c> (an already-complete handle) when the chunk has no interior fluids.</returns>
+        public JobHandle ScheduleInteriorFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes)
+        {
+            if (!PrepareInteriorJob(cd))
+                return default;
+
+            return BuildJob(cd, tickCounter, blockTypes).Schedule();
+        }
+
+        /// <summary>
+        /// Clears the per-run outputs and runs the single partition pass over <see cref="ChunkData.ActiveFluidsBucket"/>:
+        /// captures the bucket's enumeration order (interior/border tagged) in <see cref="ReplayOrder"/> and collects
+        /// the interior indices for the job, then snapshots the chunk's pre-tick voxels. Shared by the serial
+        /// (<see cref="RunInteriorFluids"/>) and parallel (<see cref="ScheduleInteriorFluids"/>) paths.
+        /// </summary>
+        /// <param name="cd">The chunk whose interior fluids to prepare.</param>
+        /// <returns>True if there is interior work (a job should run); false if the bucket or interior set is empty.</returns>
+        private bool PrepareInteriorJob(ChunkData cd)
+        {
             EnsureAllocated();
             _interior.Clear();
             _replay.Clear();
@@ -82,7 +117,7 @@ namespace Jobs
 
             NativeHashSet<int> bucket = cd.ActiveFluidsBucket;
             if (!bucket.IsCreated || bucket.Count == 0)
-                return;
+                return false;
 
             // Single partition pass over the active-fluids bucket: capture the enumeration order (interior/border
             // tagged) in _replay so the caller replays in one walk, and collect interior indices for the Burst job.
@@ -96,12 +131,15 @@ namespace Jobs
             }
 
             if (_interior.Length == 0)
-                return;
+                return false;
 
-            // Snapshot the chunk's pre-tick voxels (section-contiguous), then run the interior fluid job serially.
-            // .Run() (not Schedule) keeps Phase 3 single-threaded — Phase 4 parallelizes across chunks.
+            // Snapshot the chunk's pre-tick voxels (section-contiguous) for the job to read.
             cd.FillJobVoxelMap(_snapshot);
+            return true;
+        }
 
+        /// <summary>Builds the interior fluid job over the prepared snapshot + interior indices and this ticker's outputs.</summary>
+        private FluidTickJob BuildJob(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes) =>
             new FluidTickJob
             {
                 VoxelMap = _snapshot,
@@ -112,8 +150,7 @@ namespace Jobs
                 Mods = _mods,
                 NowInactive = _inactive,
                 ModsPerSource = _modsPerSource,
-            }.Run();
-        }
+            };
 
         /// <summary>Lazily allocates the reusable persistent scratch on first use.</summary>
         private void EnsureAllocated()
