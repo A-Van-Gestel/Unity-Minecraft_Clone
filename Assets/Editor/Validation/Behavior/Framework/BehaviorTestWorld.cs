@@ -73,16 +73,27 @@ namespace Editor.Validation.Behavior.Framework
 
         private readonly BlockType[] _palette;
         private readonly BlockType _inert;
+
         private NativeArray<BlockTypeJobData> _blockTypesJob; // built from the palette for the FluidBurstHybrid driver
+
         // The REAL production runner — the FluidBurstHybrid driver drives this (not a hand-copy) so BH-D1[L|F]
         // exercises the shipped partition/snapshot/job/ModsPerSource path, not a twin that could drift from it.
         private readonly FluidBurstTicker _fluidTicker = new FluidBurstTicker();
+
         // The ticker reads ChunkData.ActiveFluidsBucket; the harness's own active model (_activeVoxels) is mirrored
         // into it each tick by SyncFluidBucketToActives. _bucketedFluids tracks what we put there so stale fluids
         // can be evicted.
         private readonly HashSet<Vector3Int> _bucketedFluids = new HashSet<Vector3Int>();
         private readonly List<Vector3Int> _bucketSyncScratch = new List<Vector3Int>();
+
         private readonly HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
+
+        // BH-4 (TG-4 Phase 4b): static cross-chunk READ context. Neighbor chunks seeded here are registered in
+        // _world.worldData.Chunks so the center chunk's border voxels resolve real neighbor data through the
+        // production GetState → worldData.GetVoxelState path (no shim). Neighbors are read-only context — they are
+        // NOT ticked and their voxels are NOT registered active; an UNSEEDED neighbor coord resolves to null (void),
+        // which IS the missing/ungenerated-neighbor case. Keyed by voxel origin; disposed in Dispose.
+        private readonly Dictionary<Vector2Int, ChunkData> _neighbors = new Dictionary<Vector2Int, ChunkData>();
         private readonly GameObject _worldGo;
         private readonly BlockDatabase _stubDatabase;
         private readonly World _world;
@@ -96,8 +107,16 @@ namespace Editor.Validation.Behavior.Framework
         /// </summary>
         public TickDriver Driver = TickDriver.Legacy;
 
-        /// <summary>Stands up the stub world + palette and an all-air chunk at the origin.</summary>
-        public BehaviorTestWorld()
+        /// <summary>
+        /// Stands up the stub world + palette and an all-air center chunk at <paramref name="centerChunkVoxelOrigin"/>.
+        /// </summary>
+        /// <param name="centerChunkVoxelOrigin">
+        /// The center chunk's voxel origin (its <see cref="ChunkData.Position"/>). Defaults to the world origin
+        /// <c>(0,0)</c> — what every single-chunk (Tier-1) fixture uses, where −X/−Z reads fall outside the world
+        /// (void) exactly as before. BH-4 cross-chunk fixtures pass an <b>interior</b> origin so all 8 neighbor coords
+        /// satisfy <see cref="WorldData.IsVoxelInWorld"/> and can be seeded via <see cref="SetNeighborBlock"/>.
+        /// </param>
+        public BehaviorTestWorld(Vector2Int centerChunkVoxelOrigin = default)
         {
             _previousInstance = World.Instance;
             try
@@ -131,7 +150,7 @@ namespace Editor.Validation.Behavior.Framework
                 ValidationReflection.SetInstanceProperty(_world, nameof(World.ChunkPool),
                     new ChunkPoolManager(_worldGo.transform));
 
-                ChunkData = new ChunkData(Vector2Int.zero);
+                ChunkData = new ChunkData(centerChunkVoxelOrigin);
 
                 ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _world);
                 SetTickCounter(0);
@@ -160,6 +179,39 @@ namespace Editor.Validation.Behavior.Framework
             ChunkData.SetVoxel(x, y, z, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
             if (PaletteOf(id).isActive)
                 _activeVoxels.Add(new Vector3Int(x, y, z));
+        }
+
+        /// <summary>
+        /// BH-4 (TG-4 Phase 4b): writes a block into a <b>neighbor</b> chunk as static cross-chunk READ context, so
+        /// the center chunk's border voxels read real neighbor data through the production
+        /// <c>ChunkData.GetState → worldData.GetVoxelState</c> path. The neighbor chunk is lazily created at the
+        /// center's chunk coord offset by <paramref name="dChunkX"/>/<paramref name="dChunkZ"/> and registered in the
+        /// stub <see cref="WorldData.Chunks"/>. Neighbor voxels are <b>not</b> ticked and <b>not</b> registered active
+        /// (read-only context); to model a missing/ungenerated neighbor, simply do not seed it (its coord resolves to
+        /// null = void, matching <c>GetVoxelState</c>). Requires an interior center origin (see the ctor) so the
+        /// neighbor coord is in-world.
+        /// </summary>
+        /// <param name="dChunkX">Neighbor chunk offset on X (−1, 0, or +1).</param>
+        /// <param name="dChunkZ">Neighbor chunk offset on Z (−1, 0, or +1).</param>
+        /// <param name="lx">Neighbor-local X (0-15).</param>
+        /// <param name="ly">Neighbor-local Y (0-127).</param>
+        /// <param name="lz">Neighbor-local Z (0-15).</param>
+        /// <param name="id">Block ID (a real <see cref="BlockIDs"/> value present in the palette).</param>
+        /// <param name="meta">Raw metadata byte (e.g. a fluid level); defaults to 0.</param>
+        public void SetNeighborBlock(int dChunkX, int dChunkZ, int lx, int ly, int lz, ushort id, byte meta = 0)
+        {
+            Vector2Int origin = new Vector2Int(
+                ChunkData.Position.x + dChunkX * VoxelData.ChunkWidth,
+                ChunkData.Position.y + dChunkZ * VoxelData.ChunkWidth);
+
+            if (!_neighbors.TryGetValue(origin, out ChunkData neighbor))
+            {
+                neighbor = new ChunkData(origin);
+                _neighbors[origin] = neighbor;
+                _world.worldData.Chunks[origin] = neighbor; // the seam GetVoxelState resolves
+            }
+
+            neighbor.SetVoxel(lx, ly, lz, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
         }
 
         /// <summary>
@@ -523,6 +575,8 @@ namespace Editor.Validation.Behavior.Framework
             ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _previousInstance);
 
             _fluidTicker.Dispose();
+            foreach (ChunkData neighbor in _neighbors.Values)
+                neighbor.Dispose();
             if (_blockTypesJob.IsCreated) _blockTypesJob.Dispose();
             if (_worldGo != null) Object.DestroyImmediate(_worldGo);
             if (_stubDatabase != null) Object.DestroyImmediate(_stubDatabase);

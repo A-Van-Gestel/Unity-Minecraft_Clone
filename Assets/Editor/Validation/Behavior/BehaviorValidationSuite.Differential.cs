@@ -49,17 +49,25 @@ namespace Editor.Validation.Behavior
         /// non-empty buckets — the single-family worlds collapse to the legacy order). Reuses the existing build
         /// delegates and tick-count constants so a fixture change updates both golden and differential at once.
         /// </summary>
-        private static List<DiffFixture> DifferentialFixtures() => new List<DiffFixture>
+        private static List<DiffFixture> DifferentialFixtures()
         {
-            new DiffFixture("BH-B1", BuildBh1World, BH_B1_TICKS),
-            new DiffFixture("BH-B2", BuildBh2World, BH_B2_TICKS),
-            new DiffFixture("BH-B3", BuildBh3World, BH_B3_TICKS),
-            new DiffFixture("BH-B4", BuildBh4World, BH_B4_TICKS),
-            new DiffFixture("BH-B5", BuildBh5World, BH_B5_TICKS),
-            new DiffFixture("BH-B6", () => BuildBh6World(GRASS_X, GRASS_Z), BH_B6_TICKS),
-            new DiffFixture("BH-B7", BuildBh7World, BH_B7_TICKS),
-            new DiffFixture("BH-D1-MIX", BuildMixedFamilyWorld, MIX_TICKS),
-        };
+            List<DiffFixture> fixtures = new List<DiffFixture>
+            {
+                new DiffFixture("BH-B1", BuildBh1World, BH_B1_TICKS),
+                new DiffFixture("BH-B2", BuildBh2World, BH_B2_TICKS),
+                new DiffFixture("BH-B3", BuildBh3World, BH_B3_TICKS),
+                new DiffFixture("BH-B4", BuildBh4World, BH_B4_TICKS),
+                new DiffFixture("BH-B5", BuildBh5World, BH_B5_TICKS),
+                new DiffFixture("BH-B6", () => BuildBh6World(GRASS_X, GRASS_Z), BH_B6_TICKS),
+                new DiffFixture("BH-B7", BuildBh7World, BH_B7_TICKS),
+                new DiffFixture("BH-D1-MIX", BuildMixedFamilyWorld, MIX_TICKS),
+            };
+
+            // BH-4 (TG-4 Phase 4b): cross-chunk Tier-2 border fixtures. Green under today's managed-border drivers;
+            // the prove-red → green gate for the Phase-4b halo driver (see BehaviorValidationSuite.CrossChunk.cs).
+            fixtures.AddRange(CrossChunkFixtures());
+            return fixtures;
+        }
 
         /// <summary>
         /// Builds the mixed-family differential fixture: the BH-B1 water source on its stone floor, plus a
