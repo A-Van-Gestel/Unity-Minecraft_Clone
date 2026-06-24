@@ -23,6 +23,12 @@ namespace Jobs
     public sealed class FluidBurstTicker : IDisposable
     {
         private NativeArray<uint> _snapshot;
+
+        // TG-4 Phase 4b: the gather destination (halo-padded, full height) the FluidTickJob reads, plus a created
+        // zero-length array passed for every neighbor on the interior-only path — the gather sentinel-fills it, so
+        // border reads resolve to void exactly as the old out-of-chunk read did (Phase 4b C4 swaps in real neighbors).
+        private NativeArray<uint> _paddedVoxels;
+        private NativeArray<uint> _emptyNeighbor;
         private NativeList<int> _interior;
         private NativeList<int2> _replay;
         private NativeList<VoxelMod> _mods;
@@ -142,7 +148,12 @@ namespace Jobs
         private FluidTickJob BuildJob(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes) =>
             new FluidTickJob
             {
-                VoxelMap = _snapshot,
+                CenterVoxels = _snapshot,
+                // Interior-only path: empty neighbors → the gather sentinel-fills the halo (border reads as void).
+                // Phase 4b C4 supplies real neighbor snapshots here.
+                VoxelW = _emptyNeighbor, VoxelE = _emptyNeighbor, VoxelS = _emptyNeighbor, VoxelN = _emptyNeighbor,
+                VoxelSW = _emptyNeighbor, VoxelNW = _emptyNeighbor, VoxelSE = _emptyNeighbor, VoxelNE = _emptyNeighbor,
+                PaddedVoxels = _paddedVoxels,
                 BlockTypes = blockTypes,
                 InteriorFluidIndices = _interior.AsArray(),
                 TickCounter = tickCounter,
@@ -159,6 +170,8 @@ namespace Jobs
                 return;
 
             _snapshot = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Persistent);
+            _paddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_FLUID_VOLUME, Allocator.Persistent);
+            _emptyNeighbor = new NativeArray<uint>(0, Allocator.Persistent); // created, zero-length → gather sentinel
             _interior = new NativeList<int>(256, Allocator.Persistent);
             _replay = new NativeList<int2>(256, Allocator.Persistent);
             _mods = new NativeList<VoxelMod>(256, Allocator.Persistent);
@@ -174,6 +187,8 @@ namespace Jobs
                 return;
 
             if (_snapshot.IsCreated) _snapshot.Dispose();
+            if (_paddedVoxels.IsCreated) _paddedVoxels.Dispose();
+            if (_emptyNeighbor.IsCreated) _emptyNeighbor.Dispose();
             if (_interior.IsCreated) _interior.Dispose();
             if (_replay.IsCreated) _replay.Dispose();
             if (_mods.IsCreated) _mods.Dispose();
