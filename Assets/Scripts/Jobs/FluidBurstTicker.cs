@@ -44,6 +44,14 @@ namespace Jobs
         public NativeList<int> InactiveInterior => _inactive;
 
         /// <summary>
+        /// The flat chunk indices of the interior voxels processed by the most recent run, in the same order as
+        /// <see cref="ModsPerSource"/> (i.e. the order they were enumerated from the bucket). The i-th entry owns
+        /// the i-th <see cref="ModsPerSource"/> run — lets a caller map the job's per-source output back to a voxel
+        /// position without re-deriving the partition (valid until the next call).
+        /// </summary>
+        public NativeList<int> InteriorIndices => _interior;
+
+        /// <summary>
         /// Ticks the interior fluids of <paramref name="cd"/> via <see cref="FluidTickJob"/>. Reads a pre-tick
         /// snapshot of the chunk and does NOT modify it. Border (Tier-2) fluid indices are appended to
         /// <paramref name="borderFluidsOut"/> for the managed path (the list is not cleared here — the caller owns it).
