@@ -33,6 +33,14 @@ namespace Editor.Validation.Behavior.Framework
         /// <see cref="Legacy"/> to prove the Burst port emits a byte-identical stream.
         /// </summary>
         FluidBurstHybrid,
+
+        /// <summary>
+        /// TG-4 Phase 4b full halo: grass-then-fluid order, but <b>every</b> fluid voxel (interior AND border) is
+        /// evaluated by the Burst <see cref="FluidTickJob"/>, border voxels reading the per-tick neighbor halo
+        /// gathered from the seeded neighbor chunks. Grass stays managed. BH-D1[L|H] pits this against
+        /// <see cref="Legacy"/> over the BH-4 cross-chunk fixtures to prove the halo border port is byte-identical.
+        /// </summary>
+        FluidBurstHalo,
     }
 
     /// <summary>
@@ -243,11 +251,13 @@ namespace Editor.Validation.Behavior.Framework
             // chosen by the modeled driver (Legacy single-set vs SplitFamily per-family) — the variable BH-D1 tests.
             List<Vector3Int> ordered = OrderActives();
 
-            // FluidBurstHybrid: precompute the Tier-1 interior fluid voxels' (mods, active) via the real
-            // FluidTickJob over a pre-tick snapshot, keyed by position — mirroring production's
-            // Chunk.TickFluidsHybrid (interior = Burst, border + grass = managed). Null for the other drivers.
+            // FluidBurstHybrid/FluidBurstHalo: precompute the job-ticked fluids' (mods, active) via the real
+            // FluidTickJob over a pre-tick snapshot, keyed by position — mirroring production's Chunk.TickFluidsHybrid.
+            // Hybrid: only Tier-1 interior (border + grass = managed). Halo: ALL fluids (border via the neighbor halo;
+            // grass = managed). Null for the managed-only drivers.
             Dictionary<Vector3Int, FluidJobResult> jobResults =
-                Driver == TickDriver.FluidBurstHybrid ? RunInteriorFluidJob() : null;
+                Driver == TickDriver.FluidBurstHybrid ? RunFluidJob(halo: false) :
+                Driver == TickDriver.FluidBurstHalo ? RunFluidJob(halo: true) : null;
 
             List<VoxelEval> evals = new List<VoxelEval>(ordered.Count);
             Queue<VoxelMod> pending = new Queue<VoxelMod>();
@@ -313,13 +323,21 @@ namespace Editor.Validation.Behavior.Framework
         /// positions via the runner's <see cref="FluidBurstTicker.InteriorIndices"/>. Border fluids and grass stay
         /// on the managed path.
         /// </summary>
-        private Dictionary<Vector3Int, FluidJobResult> RunInteriorFluidJob()
+        /// <param name="halo">
+        /// False = the Phase-3 interior-only hybrid (<see cref="FluidBurstTicker.RunInteriorFluids"/>, border managed);
+        /// true = the Phase-4b full halo (<see cref="FluidBurstTicker.RunFluids"/>, every fluid job-ticked via the
+        /// neighbor halo gathered from the harness's seeded neighbor chunks in <c>worldData</c>).
+        /// </param>
+        private Dictionary<Vector3Int, FluidJobResult> RunFluidJob(bool halo)
         {
             Dictionary<Vector3Int, FluidJobResult> results = new Dictionary<Vector3Int, FluidJobResult>();
 
             // Mirror the harness active set into ChunkData's fluid bucket (the runner's input), then run it.
             SyncFluidBucketToActives();
-            _fluidTicker.RunInteriorFluids(ChunkData, _tick, _blockTypesJob);
+            if (halo)
+                _fluidTicker.RunFluids(ChunkData, _tick, _blockTypesJob, _world.worldData);
+            else
+                _fluidTicker.RunInteriorFluids(ChunkData, _tick, _blockTypesJob);
 
             NativeList<int> interiorIndices = _fluidTicker.InteriorIndices;
             if (interiorIndices.Length == 0)

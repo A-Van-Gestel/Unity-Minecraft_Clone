@@ -4,6 +4,7 @@ using Helpers;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using UnityEngine;
 
 namespace Jobs
 {
@@ -29,12 +30,32 @@ namespace Jobs
         // border reads resolve to void exactly as the old out-of-chunk read did (Phase 4b C4 swaps in real neighbors).
         private NativeArray<uint> _paddedVoxels;
         private NativeArray<uint> _emptyNeighbor;
+        // TG-4 Phase 4b halo mode: 8 owned full-chunk neighbor snapshot buffers (lazy) + the per-build selection
+        // (a real filled buffer when the neighbor is loaded, else _emptyNeighbor → sentinel halo → void). Compass
+        // order matches GatherPaddedFluidVoxels' (w,e,s,n,sw,nw,se,ne) parameters and s_neighborOffsets.
+        private NativeArray<uint>[] _neighborBuffers;
+        private NativeArray<uint>[] _jobNeighbors;
+        private bool _neighborsAllocated;
         private NativeList<int> _interior;
         private NativeList<int2> _replay;
         private NativeList<VoxelMod> _mods;
         private NativeList<int> _modsPerSource;
         private NativeList<int> _inactive;
         private bool _allocated;
+
+        // Neighbor voxel-origin offsets in compass order (w,e,s,n,sw,nw,se,ne) — matches GatherPaddedFluidVoxels and
+        // the lighting AcquireNeighborMaps compass (N=+Z, S=−Z, E=+X, W=−X).
+        private static readonly Vector2Int[] s_neighborOffsets =
+        {
+            new Vector2Int(-ChunkMath.CHUNK_WIDTH, 0),                      // W
+            new Vector2Int(ChunkMath.CHUNK_WIDTH, 0),                       // E
+            new Vector2Int(0, -ChunkMath.CHUNK_WIDTH),                      // S
+            new Vector2Int(0, ChunkMath.CHUNK_WIDTH),                       // N
+            new Vector2Int(-ChunkMath.CHUNK_WIDTH, -ChunkMath.CHUNK_WIDTH), // SW
+            new Vector2Int(-ChunkMath.CHUNK_WIDTH, ChunkMath.CHUNK_WIDTH),  // NW
+            new Vector2Int(ChunkMath.CHUNK_WIDTH, -ChunkMath.CHUNK_WIDTH),  // SE
+            new Vector2Int(ChunkMath.CHUNK_WIDTH, ChunkMath.CHUNK_WIDTH),   // NE
+        };
 
         /// <summary>Voxel mods emitted by the most recent <see cref="RunInteriorFluids"/> (valid until the next call).</summary>
         public NativeList<VoxelMod> Mods => _mods;
@@ -105,6 +126,40 @@ namespace Jobs
         }
 
         /// <summary>
+        /// TG-4 Phase 4b — the full halo path's serial counterpart of <see cref="RunInteriorFluids"/>: ticks EVERY
+        /// active fluid (interior AND border) through the job, the border voxels resolving cross-chunk reads from the
+        /// gathered neighbor halo (neighbors looked up in <paramref name="worldData"/>). No managed border path; the
+        /// drain (<see cref="ReplayOrder"/> all-job) emits every source's mods from the job in bucket order.
+        /// </summary>
+        /// <param name="cd">The chunk whose fluids to tick.</param>
+        /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
+        /// <param name="blockTypes">The global block-type job blob.</param>
+        /// <param name="worldData">The chunk store used to resolve the 8 neighbor snapshots (missing → sentinel/void).</param>
+        public void RunFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData)
+        {
+            if (PrepareFluidJob(cd, worldData))
+                BuildJob(cd, tickCounter, blockTypes).Run();
+        }
+
+        /// <summary>
+        /// TG-4 Phase 4b — the full halo path's parallel counterpart of <see cref="ScheduleInteriorFluids"/>: prepares
+        /// all-fluid indices + the neighbor halo, then schedules the job. <b>Each concurrently-scheduled chunk needs
+        /// its own ticker instance</b> (the snapshot + neighbor scratch is per-ticker, not shareable in flight).
+        /// </summary>
+        /// <param name="cd">The chunk whose fluids to tick.</param>
+        /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
+        /// <param name="blockTypes">The global block-type job blob.</param>
+        /// <param name="worldData">The chunk store used to resolve the 8 neighbor snapshots (missing → sentinel/void).</param>
+        /// <returns>The scheduled job's handle, or <c>default</c> when the chunk has no active fluids.</returns>
+        public JobHandle ScheduleFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData)
+        {
+            if (!PrepareFluidJob(cd, worldData))
+                return default;
+
+            return BuildJob(cd, tickCounter, blockTypes).Schedule();
+        }
+
+        /// <summary>
         /// Clears the per-run outputs and runs the single partition pass over <see cref="ChunkData.ActiveFluidsBucket"/>:
         /// captures the bucket's enumeration order (interior/border tagged) in <see cref="ReplayOrder"/> and collects
         /// the interior indices for the job, then snapshots the chunk's pre-tick voxels. Shared by the serial
@@ -139,20 +194,89 @@ namespace Jobs
             if (_interior.Length == 0)
                 return false;
 
+            // Interior-only path: no neighbor halo needed (interior reads stay in-chunk). Select the empty neighbor
+            // for every direction → the gather sentinel-fills the halo.
+            SelectEmptyNeighbors();
+
             // Snapshot the chunk's pre-tick voxels (section-contiguous) for the job to read.
             cd.FillJobVoxelMap(_snapshot);
             return true;
         }
 
-        /// <summary>Builds the interior fluid job over the prepared snapshot + interior indices and this ticker's outputs.</summary>
+        /// <summary>
+        /// TG-4 Phase 4b — clears the outputs and partitions <see cref="ChunkData.ActiveFluidsBucket"/> for the full
+        /// halo path: collects <b>every</b> active fluid index for the job (no Tier-1/Tier-2 split) and tags every
+        /// <see cref="ReplayOrder"/> entry as job-computed, then gathers the 8 neighbor snapshots and the center.
+        /// </summary>
+        /// <param name="cd">The chunk whose fluids to prepare.</param>
+        /// <param name="worldData">The chunk store used to resolve the neighbor snapshots.</param>
+        /// <returns>True if there is any active fluid (a job should run); false if the bucket is empty.</returns>
+        private bool PrepareFluidJob(ChunkData cd, WorldData worldData)
+        {
+            EnsureAllocated();
+            _interior.Clear();
+            _replay.Clear();
+            _mods.Clear();
+            _modsPerSource.Clear();
+            _inactive.Clear();
+
+            NativeHashSet<int> bucket = cd.ActiveFluidsBucket;
+            if (!bucket.IsCreated || bucket.Count == 0)
+                return false;
+
+            // Every active fluid is job-computed (the halo lets border voxels read across seams). ReplayOrder tags
+            // them all interior=1, so the unchanged drain emits every source's mods from the job in bucket order.
+            foreach (int index in bucket)
+            {
+                _replay.Add(new int2(index, 1));
+                _interior.Add(index);
+            }
+
+            // Gather the 8 neighbor snapshots (for the border voxels) + the center snapshot, all pre-tick.
+            PrepareNeighbors(cd, worldData);
+            cd.FillJobVoxelMap(_snapshot);
+            return true;
+        }
+
+        /// <summary>
+        /// Fills the owned neighbor buffers from the 8 loaded neighbor chunks (pre-tick snapshots) and points
+        /// <see cref="_jobNeighbors"/> at them; a missing/unloaded neighbor points at <see cref="_emptyNeighbor"/>
+        /// (zero-length → the gather sentinel-fills it → border reads resolve to void, matching managed GetVoxelState).
+        /// </summary>
+        private void PrepareNeighbors(ChunkData cd, WorldData worldData)
+        {
+            EnsureNeighborsAllocated();
+            for (int i = 0; i < s_neighborOffsets.Length; i++)
+            {
+                Vector2Int origin = cd.Position + s_neighborOffsets[i];
+                if (worldData != null && worldData.Chunks.TryGetValue(origin, out ChunkData neighbor) && neighbor != null)
+                {
+                    neighbor.FillJobVoxelMap(_neighborBuffers[i]);
+                    _jobNeighbors[i] = _neighborBuffers[i];
+                }
+                else
+                {
+                    _jobNeighbors[i] = _emptyNeighbor;
+                }
+            }
+        }
+
+        /// <summary>Points every <see cref="_jobNeighbors"/> slot at the empty (sentinel) neighbor — the interior path.</summary>
+        private void SelectEmptyNeighbors()
+        {
+            for (int i = 0; i < _jobNeighbors.Length; i++)
+                _jobNeighbors[i] = _emptyNeighbor;
+        }
+
+        /// <summary>Builds the fluid job over the prepared snapshot + neighbor halo + indices and this ticker's outputs.</summary>
         private FluidTickJob BuildJob(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes) =>
             new FluidTickJob
             {
                 CenterVoxels = _snapshot,
-                // Interior-only path: empty neighbors → the gather sentinel-fills the halo (border reads as void).
-                // Phase 4b C4 supplies real neighbor snapshots here.
-                VoxelW = _emptyNeighbor, VoxelE = _emptyNeighbor, VoxelS = _emptyNeighbor, VoxelN = _emptyNeighbor,
-                VoxelSW = _emptyNeighbor, VoxelNW = _emptyNeighbor, VoxelSE = _emptyNeighbor, VoxelNE = _emptyNeighbor,
+                // Neighbor selection set by the Prepare pass: empty (sentinel halo) for the interior path, real
+                // snapshots for the Phase-4b halo path. Compass order: 0=W,1=E,2=S,3=N,4=SW,5=NW,6=SE,7=NE.
+                VoxelW = _jobNeighbors[0], VoxelE = _jobNeighbors[1], VoxelS = _jobNeighbors[2], VoxelN = _jobNeighbors[3],
+                VoxelSW = _jobNeighbors[4], VoxelNW = _jobNeighbors[5], VoxelSE = _jobNeighbors[6], VoxelNE = _jobNeighbors[7],
                 PaddedVoxels = _paddedVoxels,
                 BlockTypes = blockTypes,
                 InteriorFluidIndices = _interior.AsArray(),
@@ -172,12 +296,29 @@ namespace Jobs
             _snapshot = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Persistent);
             _paddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_FLUID_VOLUME, Allocator.Persistent);
             _emptyNeighbor = new NativeArray<uint>(0, Allocator.Persistent); // created, zero-length → gather sentinel
+            // The selection array starts all-empty (the interior path); the halo Prepare swaps in real buffers. The
+            // full-chunk neighbor buffers themselves are allocated lazily only when the halo path is first used.
+            _jobNeighbors = new NativeArray<uint>[s_neighborOffsets.Length];
+            for (int i = 0; i < _jobNeighbors.Length; i++)
+                _jobNeighbors[i] = _emptyNeighbor;
             _interior = new NativeList<int>(256, Allocator.Persistent);
             _replay = new NativeList<int2>(256, Allocator.Persistent);
             _mods = new NativeList<VoxelMod>(256, Allocator.Persistent);
             _modsPerSource = new NativeList<int>(256, Allocator.Persistent);
             _inactive = new NativeList<int>(64, Allocator.Persistent);
             _allocated = true;
+        }
+
+        /// <summary>Lazily allocates the 8 full-chunk neighbor snapshot buffers on first use of the Phase-4b halo path.</summary>
+        private void EnsureNeighborsAllocated()
+        {
+            if (_neighborsAllocated)
+                return;
+
+            _neighborBuffers = new NativeArray<uint>[s_neighborOffsets.Length];
+            for (int i = 0; i < _neighborBuffers.Length; i++)
+                _neighborBuffers[i] = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Persistent);
+            _neighborsAllocated = true;
         }
 
         /// <summary>Disposes the reusable native scratch. Call once when the owner (World) tears down.</summary>
@@ -189,6 +330,12 @@ namespace Jobs
             if (_snapshot.IsCreated) _snapshot.Dispose();
             if (_paddedVoxels.IsCreated) _paddedVoxels.Dispose();
             if (_emptyNeighbor.IsCreated) _emptyNeighbor.Dispose();
+            if (_neighborsAllocated)
+            {
+                for (int i = 0; i < _neighborBuffers.Length; i++)
+                    if (_neighborBuffers[i].IsCreated) _neighborBuffers[i].Dispose();
+                _neighborsAllocated = false;
+            }
             if (_interior.IsCreated) _interior.Dispose();
             if (_replay.IsCreated) _replay.Dispose();
             if (_mods.IsCreated) _mods.Dispose();

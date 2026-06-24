@@ -229,6 +229,16 @@ public class World : MonoBehaviour
     private DynamicPool<FluidBurstTicker> FluidTickerPool =>
         _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
 
+    // --- TG-4 Phase 4b: full halo fluid tick (border voxels Bursted via a per-tick neighbor halo) ---
+    [SerializeField]
+    [Tooltip("TG-4 Phase 4b: tick ALL fluids (interior AND border) through the Burst job, with border voxels reading " +
+             "a per-tick gathered neighbor halo (requires Enable Fluid Burst Tick). Off = the Phase-3/4a hybrid " +
+             "(border stays managed). Off by default until validated (BH-4 cross-chunk differential + in-game).")]
+    private bool _enableFluidBorderBurst;
+
+    /// <summary>When true (and <see cref="EnableFluidBurstTick"/>), border fluids tick in-job via the §4.2(b) neighbor halo (TG-4 Phase 4b); else the border stays managed.</summary>
+    public bool EnableFluidBorderBurst => _enableFluidBorderBurst;
+
     // --- Chunk Border Visualization ---
     private readonly Dictionary<ChunkCoord, GameObject> _chunkBorders = new Dictionary<ChunkCoord, GameObject>();
     private Transform _chunkBorderParent;
@@ -1416,11 +1426,16 @@ public class World : MonoBehaviour
                     continue;
 
                 // Record the acquired ticker BEFORE scheduling so the finally always returns it (and completes its
-                // job) even if ScheduleInteriorFluids throws — the chunk/ticker lists stay paired for the drain cursor.
+                // job) even if Schedule throws — the chunk/ticker lists stay paired for the drain cursor.
                 FluidBurstTicker ticker = FluidTickerPool.Get();
                 _parallelFluidChunks.Add(chunk);
                 _parallelFluidTickers.Add(ticker);
-                _parallelFluidHandles.Add(ticker.ScheduleInteriorFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData));
+                // Phase 4b: when border-burst is on, tick ALL fluids via the neighbor halo; else the Phase-3/4a
+                // interior-only path (border drained on the managed branch in DrainTick).
+                JobHandle handle = _enableFluidBorderBurst
+                    ? ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData)
+                    : ticker.ScheduleInteriorFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData);
+                _parallelFluidHandles.Add(handle);
             }
 
             // Kick the scheduled jobs onto worker threads so they actually run in parallel before we block on them.

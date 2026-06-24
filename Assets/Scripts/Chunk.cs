@@ -355,9 +355,14 @@ public class Chunk
         World world = World.Instance;
         FluidBurstTicker ticker = world.FluidBurstTicker;
 
-        // Pass 1: snapshot + single partition + run the interior fluid job (serial .Run). The runner captures the
-        // bucket's enumeration order (interior/border tagged) in ReplayOrder so the replay walks it in one pass.
-        ticker.RunInteriorFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData);
+        // Pass 1: snapshot + single partition + run the fluid job (serial .Run). The runner captures the bucket's
+        // enumeration order (interior/border tagged) in ReplayOrder so the replay walks it in one pass. Phase 4b:
+        // when border-burst is on, ALL fluids tick in-job via the neighbor halo (ReplayOrder all-job); else the
+        // Phase-3 interior-only hybrid (border tagged 0 → managed in the replay).
+        if (world.EnableFluidBorderBurst)
+            ticker.RunFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData, world.worldData);
+        else
+            ticker.RunInteriorFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData);
 
         // Pass 2: replay the prepared+completed ticker (shared with the TG-4 Phase 4a parallel drain path).
         ReplayHybridFluids(ticker, fluids, removeScratch);

@@ -99,6 +99,8 @@ namespace Editor.Validation.Behavior
                 () => BhD1_DifferentialOverFixtures("BH-D1[L|S]", TickDriver.Legacy, TickDriver.SplitFamily)));
             scenarios.Add(new Scenario("BH-D1: legacy vs fluid-Burst-hybrid over all fixtures (TG-4 Phase 3 interior-Burst gate)",
                 () => BhD1_DifferentialOverFixtures("BH-D1[L|F]", TickDriver.Legacy, TickDriver.FluidBurstHybrid)));
+            scenarios.Add(new Scenario("BH-D1: legacy vs fluid-Burst-halo over all fixtures (TG-4 Phase 4b border-Burst gate)",
+                () => BhD1_DifferentialOverFixtures("BH-D1[L|H]", TickDriver.Legacy, TickDriver.FluidBurstHalo)));
         }
 
         /// <summary>
