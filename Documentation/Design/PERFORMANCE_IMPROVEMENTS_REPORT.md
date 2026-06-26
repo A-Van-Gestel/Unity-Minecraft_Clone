@@ -88,14 +88,14 @@ instead of a crash.
 
 ### Tick & Gameplay
 
-| ID     | Finding                                                                                | Effort | Risk | Benefit | Seed | Save |
-|--------|----------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| TG-1   | Double voxel lookup + float-path cross-chunk queries per tick                          |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
-| TG-2 ✅ | `OnDataPopulated` full-chunk scan through managed `BlockType`s                         |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TG-3 ✅ | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors                         |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
-| TG-4   | `BlockBehavior` data separation (ECS/DOTS pattern)                                     |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
-| TG-5   | `BlockBehavior` Burst function pointers (lighter alt. to TG-4)                         |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| TG-6   | Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| ID      | Finding                                                                                                                | Effort | Risk | Benefit | Seed | Save |
+|---------|------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| TG-1 ⏭️ | Double voxel lookup + float-path cross-chunk queries per tick (obviated by TG-4 for fluids; grass residual negligible) |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| TG-2 ✅  | `OnDataPopulated` full-chunk scan through managed `BlockType`s                                                         |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| TG-3 ✅  | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors                                                         |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
+| TG-4 ✅  | `BlockBehavior` data separation (ECS/DOTS pattern)                                                                     |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
+| TG-5 ⏭️ | `BlockBehavior` Burst function pointers (lighter alt. to TG-4 — superseded, not needed)                                |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| TG-6    | Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up)                                 |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 
 ### Main Thread & Miscellaneous
 
@@ -587,6 +587,23 @@ satisfy both if the persistent layout itself is halo-padded.
 
 ### TG-1. Double voxel lookup + float-path cross-chunk queries in the tick loop
 
+> **Status (2026-06-27): ⏭️ OBVIATED for the hot path by TG-4 — not worth pursuing standalone.** TG-1 named **fluid
+> simulation** as its hot path ("active voxels cluster at chunk borders by nature"), and TG-4 eliminated **both** TG-1
+> costs *there*: the Burst `FluidTickJob.Execute` evaluates Behave **and** Active in a **single pass** over one pre-tick
+> snapshot (item 1 gone), and border voxels resolve cross-chunk reads from the **integer-indexed neighbor halo**
+> (`GetStateLocal` over `PaddedVoxels`) instead of `ChunkData.GetState`'s `new Vector3` → `WorldData.GetVoxelState`
+> float path (item 2 gone). Note TG-4 reached this via a *different* mechanism than TG-1 proposed (Burst job + halo,
+> not "Behave returns a flag" + cached cardinal-neighbor refs).
+>
+> **Residual (deliberately left, negligible):** **grass** still ticks through the managed `Chunk.TickFamily`, which
+> calls `BlockBehavior.Behave` then `BlockBehavior.Active` separately (item 1 — the TG-1 TODO still sits at
+> `Chunk.cs:321`) and reaches cross-chunk neighbors via `ChunkData.GetState`'s float path (item 2). The same managed
+> path is also the `EnableFluidBurstTick`-off fluid rollback. This is intentional: grass is **0.044 µs/voxel**
+> (the reason Phase 2 was skipped), so applying TG-1's mechanism to grass alone is not worth the API churn + the
+> stale-neighbor-reference pool-reset risk. If a future behavior family makes the managed path hot again, revisit
+> TG-1 (or fold that family into the TG-4 job scaffolding). **Not marked ✅** — the managed two-pass + float path
+> still exist; it is simply no longer worth doing as a standalone optimization.
+
 **Observed:** Two compounding costs in the active-voxel tick path:
 
 1. `Chunk.TickUpdate` (`Chunk.cs` ~lines 220–237) calls `BlockBehavior.Behave(...)` **and then**
@@ -735,23 +752,39 @@ initialization code (low priority).
 > phased plan (BH-D1 infra → per-family storage split → grass Burst → fluid Burst → parallelize + Tier-2),
 > with the BH-D1 old-vs-new differential slotted into each phase gate.
 >
-> **Status (2026-06-24): Phases 0–1 + 3 + 4a SHIPPED (default on); Phase 2 skipped; Phase 4b deferred.** Phase 0
-> (BH-D1 differential infra) + Phase 1 (per-family `NativeHashSet<int>` active-voxel buckets — landed on
-> **`ChunkData`**, not `Chunk`; tick orchestration stays on `Chunk`) are in-game confirmed. **Phase 3** Burst-ticks
-> Tier-1 interior fluids (`FluidTickJob`, border stays managed) gated by `BH-D1[L|F]` (byte-identical); **Phase 4a**
-> parallelizes those interior jobs across chunks (`World.ProcessTickUpdatesParallel`, worker-count guarded) gated by
-> a parallel-vs-serial determinism suite + an 8-run IL2CPP A/B. **Phase 2 (grass) skipped** (negligible cost);
-> **Phase 4b (Tier-2 border via the neighbor view) deferred.** The new runtime buckets are pool-retained (no
-> per-recycle churn — **TG-6-aligned**, but TG-6's own target, the `GenerationJobData.ActiveVoxels` hand-off list,
-> is untouched). The attribution gates resolved toward TG-4's parallel finisher and CLOSED across three captures —
+> **Status (2026-06-27): FULLY IMPLEMENTED — Phases 0–1 + 3 + 4a + 4b + Y-band SHIPPED (all default on); Phase 2
+> skipped. Only the flag-gated-fallback cleanup pass remains.** Phase 0 (BH-D1 differential infra) + Phase 1
+> (per-family `NativeHashSet<int>` active-voxel buckets — landed on **`ChunkData`**, not `Chunk`; tick orchestration
+> stays on `Chunk`) are in-game confirmed. **Phase 3** Burst-ticks Tier-1 interior fluids (`FluidTickJob`, border
+> managed) gated by `BH-D1[L|F]`; **Phase 4a** parallelizes those interior jobs across chunks
+> (`World.ProcessTickUpdatesParallel`, worker-count guarded) gated by a parallel-vs-serial determinism suite + an
+> 8-run IL2CPP A/B; **Phase 4b** closes the Tier-2 border — **every** fluid (interior AND border) is Burst-ticked,
+> border voxels reading a per-tick **9-snapshot neighbor halo** via the **§4.2 option (b) per-tick local gather**
+> (`ChunkMath.GatherPaddedFluidVoxels`), gated by `BH-D1[L|H]` + a cross-chunk determinism stress + in-game; and the
+> **Y-band** (2026-06-27) sizes that gather to the active-fluid Y-extent (height-independent copy), gated by
+> `BH-D1[H|HB]`/`[L|HB]` + the Y-band determinism stress + in-game. **Phase 2 (grass) skipped** (negligible cost). The
+> new runtime buckets are pool-retained (no per-recycle churn — **TG-6-aligned**, but TG-6's own target, the
+> `GenerationJobData.ActiveVoxels` hand-off list, is untouched).
+>
+> **Important — option (b), NOT a P-2 Layer 2 dependency.** Phase 4b deliberately took the **TG-4-local per-tick halo
+> gather** (option (b)), so it ships **standalone** with no chunk-storage commitment — TG-4 does **not** depend on
+> [P-2 Layer 2](PERSISTENT_CHUNK_STORAGE_P2.md) (persistent zero-copy storage), which stays 🔴 profiler-gated and is a
+> *separate, optional* future optimization of the same gather (it would let the halo read neighbor cores zero-copy).
+>
+> **Net (attribution gates CLOSED across five captures —**
 > [`…FLUID_TICK_2026_06_23`](../Performance/BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md) (isolated tick
 > ~21 ms/tick), [`…FULLWORLD_FLUID_2026_06_23`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md)
-> (tick owns the **GC-bound ~180 ms dam-break spike**; Phase 3 cut it to ~143 ms; sustained frame
-> **lighting-dominated ~66 %**), and the Phase-4a A/B
-> [`…FULLWORLD_FLUID_PARALLEL_2026-06-24`](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_PARALLEL_2026-06-24_BENCHMARK.md)
-> (parallelizing the interior shaves a further **~6.6 ms / ~4.6 %** off the spike, sustained tick unchanged). **Net:
-> TG-4 removed the stutter *spike*, not the *average* cost; the tick is not the frame bottleneck — so Phase 4b is
-> low-ROI and ocean smoothness needs the lighting line.** The 🔴/🔴 ratings below now cover only the *deferred* Phase 4b.
+> (tick owns the **GC-bound ~180 ms dam-break spike**; Phase 3 → ~143 ms; sustained frame **lighting-dominated
+> ~66 %**), the [Phase-4a A/B](../Performance/BEHAVIOR_TG4_FULLWORLD_FLUID_PARALLEL_2026-06-24_BENCHMARK.md)
+> (interior-parallel shaves a further **~6.6 ms / ~4.6 %** off the spike), the
+> [Phase-4b halo A/B](../Performance/BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md) (Bursting the border makes
+> the **tick** 1.70–2.15× faster, GC-spike tail removed), and the
+> [Y-band A/B](../Performance/BEHAVIOR_TG4_PHASE4B_YBAND_AB_2026-06-27_BENCHMARK.md) (serial worst-tick tail
+> −24–46 %, **frame-neutral** in-game)**): the fluid tick is now fully Burst + parallel with a flat, predictable cost
+> — but it was **never the frame bottleneck.** The sustained ocean frame stays **lighting-dominated (~66–70 %)**, so
+> ocean smoothness needs the **lighting line** (LI-1 / [P-2](PERSISTENT_CHUNK_STORAGE_P2.md)), not (only) the
+> tick. TG-4 removed the stutter *spike* and made the tick scale across cores; the *average* frame cost is the
+> lighting engine's to win. The 🔴/🔴 effort/risk ratings below describe the (now-completed) work's nature.
 
 **Observed:** All ticking voxels (fluids, grass, future behaviors) flow through one monolithic
 collection and a central `switch` in `BlockBehavior`. As behavior types grow, this forces a single
@@ -780,6 +813,11 @@ must sever.
 ### TG-5. `BlockBehavior` Burst function pointers (lighter alternative to TG-4)
 
 *(Absorbed from `CODEBASE_IMPROVEMENTS.md` §6.2.)*
+
+> **Status (2026-06-27): ⏭️ SUPERSEDED — not needed.** TG-5 was the *lighter alternative* to be taken **if TG-4 was
+> overkill**. TG-4 shipped in full (Phases 0–1 + 3 + 4a + 4b + Y-band, all default-on) with the tick now fully Burst +
+> parallel and behavior byte-identical, so the function-pointer-dispatch fallback buys nothing TG-4 hasn't already
+> delivered — and the tick is no longer the frame bottleneck (the lighting line is). Kept here for historical context.
 
 **Observed/Recommendation:** If TG-4 is overkill, replace the central `switch` with a
 `Unity.Burst.FunctionPointer<T>` registry indexed by voxel ID. Keeps a single active-voxel
@@ -1243,7 +1281,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
    TG-6 (pool the per-chunk `ActiveVoxels` `NativeList` — small, independent; benchmark via `ActiveVoxelScanBenchmark`) →
    GS-1 (baked-noise liquid shader) →
    ~~LI-1 ✅ done — padded lighting volume; layout validated (2.4–3× in-job BFS) but on-demand gather is the cost → NOT shipped standalone, folded into P-2~~ →
-   TG-1 (tick path) or directly TG-4 if committing to the full split.
+   ~~TG-1 (tick path) / TG-4 (full split) — ✅ TG-4 done (Phases 0–1+3+4a+4b+Y-band, all default-on); TG-1 ⏭️ obviated for the fluid hot path (grass residual negligible)~~.
    The GS-5 §7.3 ownership split (`forceRenderingOff` vs `SetActive`) is a small, independently
    harmless PR — now unblocked (MR-3/MR-4 done); do it early so GS-5 stays unblocked.
 5. **Long-horizon architecture:**

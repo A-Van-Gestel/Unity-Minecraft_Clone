@@ -13,11 +13,13 @@ implemented suite, sibling to the meshing/lighting fidelity docs). **BH-D1 — t
 BUILT and green** (`BehaviorValidationSuite.Differential.cs`): `BH-D1[L|L]` (comparator self-check), `BH-D1[L|S]`
 (legacy vs split-family), and `BH-D1[L|F]` (legacy vs the TG-4 Phase-3 fluid-Burst hybrid — **byte-identical over
 all fixtures**, driving the real `FluidBurstTicker`), and `BH-D1[L|H]` (legacy vs the Phase-4b full Burst halo —
-byte-identical over all 13 fixtures incl. the 5 BH-4 cross-chunk cases). TG-4 Phase 4a/4b additionally added
-**parallel-vs-serial determinism gates** (`FluidParallelDeterminismValidation`, menus
-**`Minecraft Clone/Dev/Validate Fluid Parallel Determinism`** + **`… (Cross-Chunk Halo)`**) — N concurrent pooled
-tickers byte-identical to the serial baseline + run-to-run, interior and over a 3×3 distinct-chunk grid. **BH-4
-(Tier-2 cross-chunk) is now CLOSED** (2026-06-24); the vertically-split BH-4 case is reserved for the deferred Y-band.
+byte-identical over all 15 fixtures incl. the 7 BH-4 cross-chunk cases), plus the Y-band gates `BH-D1[H|HB]` (full
+halo vs Y-band — the band-edge gate) and `BH-D1[L|HB]` (legacy vs Y-band, end-to-end). TG-4 Phase 4a/4b additionally
+added **parallel-vs-serial determinism gates** (`FluidParallelDeterminismValidation`, menus
+**`Minecraft Clone/Dev/Validate Fluid Parallel Determinism`** + **`… (Cross-Chunk Halo)`** + **`… (Cross-Chunk Halo,
+Y-band)`**) — N concurrent pooled tickers byte-identical to the serial baseline + run-to-run, interior and over a 3×3
+distinct-chunk grid. **BH-4 (Tier-2 cross-chunk) is CLOSED** (2026-06-24); the **Y-band is SHIPPED** (2026-06-27) with
+its `BH-4-SPLIT-Y` (vertically-split) + `BH-4-BAND-EDGE` (section-boundary) fixtures.
 **Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21 · **BH-D1 + parallel gates built:** 2026-06-23/24
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
 (Burst function-pointer dispatch) optimizations in
@@ -291,9 +293,12 @@ two cells write the same neighbor. The driver must replicate production's order:
   neighbor `ChunkData` into the stub `worldData.Chunks`, so the **legacy** driver reads across the seam through the
   production `GetVoxelState` path (no shim). 5 fixtures in `BehaviorValidationSuite.CrossChunk.cs` (fluid across
   +X/−X/±Z, a diagonal-corner seam, and a missing-neighbor case = sentinel == managed null) are diffed legacy vs the
-  Burst halo via **`BH-D1[L|H]`** (all 13 fixtures byte-identical under §4.3, prove-red confirmed). The parallel
-  cross-chunk path is guarded separately by `Validate Fluid Parallel Determinism (Cross-Chunk Halo)` (3×3 distinct
-  chunks). The vertically-split BH-4 case is reserved for the deferred Y-band phase.
+  Burst halo via **`BH-D1[L|H]`** (byte-identical under §4.3, prove-red confirmed). The parallel cross-chunk path is
+  guarded separately by `Validate Fluid Parallel Determinism (Cross-Chunk Halo)` (3×3 distinct chunks).
+- **Y-band follow-up (SHIPPED 2026-06-27):** the vertically-split case landed as `BH-4-SPLIT-Y` (water y=11 + y=71 in
+  one border chunk) alongside `BH-4-BAND-EDGE` (source on a y%16 section seam, real voxel on both ±reach edges) — 7
+  BH-4 fixtures total. The Y-band halo is diffed full-vs-band via **`BH-D1[H|HB]`** and legacy-vs-band via
+  **`BH-D1[L|HB]`** (prove-red confirmed), with a Y-band parallel determinism gate (`… Cross-Chunk Halo, Y-band`).
 - **Effort:** 🟡 medium (as estimated).
 
 ### BH-5 — `Active`/`Behave` contract invariant · **RETRACTED (2026-06-20) — not a valid invariant**
@@ -438,9 +443,10 @@ optimization** — it needs both code paths to exist, so it lands in the TG-4/TG
 ### ~~Deferred~~ — built when Phase 4b needed border-fluid coverage
 
 **BH-4** (cross-chunk Tier-2 fixture) · **CLOSED 2026-06-24.** Built exactly when first needed (TG-4 Phase 4b's
-border-fluid halo): `BehaviorTestWorld` seeds real neighbor `ChunkData` into the stub `worldData.Chunks`, and the 5
+border-fluid halo): `BehaviorTestWorld` seeds real neighbor `ChunkData` into the stub `worldData.Chunks`, and the
 `BehaviorValidationSuite.CrossChunk.cs` fixtures diff legacy vs the Burst halo via `BH-D1[L|H]`. See the BH-4 entry
-above. (The vertically-split case is still reserved for the deferred Y-band phase.)
+above. (The vertically-split case landed 2026-06-27 as `BH-4-SPLIT-Y` + `BH-4-BAND-EDGE` when the **Y-band shipped** —
+7 BH-4 fixtures total, gated by `BH-D1[H|HB]`/`[L|HB]`.)
 
 ### Promotion · ✅ DONE (2026-06-21)
 

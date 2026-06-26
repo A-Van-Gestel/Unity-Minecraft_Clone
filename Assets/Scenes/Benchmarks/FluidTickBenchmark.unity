@@ -371,6 +371,7 @@ MonoBehaviour:
   _benchmarkRuns: 150
   _warmupTicks: 5
   _sweepBorderBurst: 1
+  _sweepBandGather: 1
   _runOnStart: 1
   _writeReportToFile: 1
   _triggerKey: 20

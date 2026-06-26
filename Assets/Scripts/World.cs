@@ -243,10 +243,10 @@ public class World : MonoBehaviour
     [SerializeField]
     [Tooltip("TG-4 Phase 4b Y-band: restrict the per-tick fluid gather + reads to the tight active-fluid Y-band " +
              "(minActiveY-1 .. maxActiveY+1) instead of full chunk height, making the per-tick copy independent of " +
-             "world height (requires Enable Fluid Border Burst). Byte-identical by the FLUID_VERTICAL_REACH invariant " +
-             "(validated 2026-06-27: BH-D1[H|HB]/[L|HB] + prove-red). Off by default pending the in-game soak + A/B; " +
-             "Off = the full-height halo (one-toggle rollback).")]
-    private bool _enableFluidBandGather;
+             "world height (requires Enable Fluid Border Burst). Byte-identical by the FLUID_VERTICAL_REACH invariant. " +
+             "On by default (validated 2026-06-27: BH-D1[H|HB]/[L|HB] + prove-red + cross-chunk determinism + in-game; " +
+             "the A/B cut the large-flood worst-tick tail 24-46%). Off = rollback to the full-height halo.")]
+    private bool _enableFluidBandGather = true;
 
     /// <summary>When true (and <see cref="EnableFluidBorderBurst"/>), the fluid halo gather/read window is sized to the active-fluid Y-band instead of full chunk height (TG-4 Phase 4b Y-band); byte-identical, height-independent copy.</summary>
     public bool EnableFluidBandGather => _enableFluidBandGather;
