@@ -29,7 +29,9 @@ namespace Jobs
         // zero-length array passed for every neighbor on the interior-only path — the gather sentinel-fills it, so
         // border reads resolve to void exactly as the old out-of-chunk read did (Phase 4b C4 swaps in real neighbors).
         private NativeArray<uint> _paddedVoxels;
+
         private NativeArray<uint> _emptyNeighbor;
+
         // TG-4 Phase 4b halo mode: 8 owned full-chunk neighbor snapshot buffers (lazy) + the per-build selection
         // (a real filled buffer when the neighbor is loaded, else _emptyNeighbor → sentinel halo → void). Compass
         // order matches GatherPaddedFluidVoxels' (w,e,s,n,sw,nw,se,ne) parameters and s_neighborOffsets.
@@ -43,18 +45,24 @@ namespace Jobs
         private NativeList<int> _inactive;
         private bool _allocated;
 
+        // TG-4 Phase 4b Y-band: the active-fluid Y-band the FluidTickJob gathers + reads (a prefix of the full-height
+        // padded volume). Set by the Prepare pass: [0, CHUNK_HEIGHT) on the interior + full-height halo paths
+        // (byte-identical to the pre-band gather), or the tight [minActiveY−reach, maxActiveY+reach] on the band path.
+        private int _bandMinY;
+        private int _bandHeight;
+
         // Neighbor voxel-origin offsets in compass order (w,e,s,n,sw,nw,se,ne) — matches GatherPaddedFluidVoxels and
         // the lighting AcquireNeighborMaps compass (N=+Z, S=−Z, E=+X, W=−X).
         private static readonly Vector2Int[] s_neighborOffsets =
         {
-            new Vector2Int(-ChunkMath.CHUNK_WIDTH, 0),                      // W
-            new Vector2Int(ChunkMath.CHUNK_WIDTH, 0),                       // E
-            new Vector2Int(0, -ChunkMath.CHUNK_WIDTH),                      // S
-            new Vector2Int(0, ChunkMath.CHUNK_WIDTH),                       // N
+            new Vector2Int(-ChunkMath.CHUNK_WIDTH, 0), // W
+            new Vector2Int(ChunkMath.CHUNK_WIDTH, 0), // E
+            new Vector2Int(0, -ChunkMath.CHUNK_WIDTH), // S
+            new Vector2Int(0, ChunkMath.CHUNK_WIDTH), // N
             new Vector2Int(-ChunkMath.CHUNK_WIDTH, -ChunkMath.CHUNK_WIDTH), // SW
-            new Vector2Int(-ChunkMath.CHUNK_WIDTH, ChunkMath.CHUNK_WIDTH),  // NW
-            new Vector2Int(ChunkMath.CHUNK_WIDTH, -ChunkMath.CHUNK_WIDTH),  // SE
-            new Vector2Int(ChunkMath.CHUNK_WIDTH, ChunkMath.CHUNK_WIDTH),   // NE
+            new Vector2Int(-ChunkMath.CHUNK_WIDTH, ChunkMath.CHUNK_WIDTH), // NW
+            new Vector2Int(ChunkMath.CHUNK_WIDTH, -ChunkMath.CHUNK_WIDTH), // SE
+            new Vector2Int(ChunkMath.CHUNK_WIDTH, ChunkMath.CHUNK_WIDTH), // NE
         };
 
         /// <summary>Voxel mods emitted by the most recent <see cref="RunInteriorFluids"/> (valid until the next call).</summary>
@@ -135,9 +143,14 @@ namespace Jobs
         /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
         /// <param name="blockTypes">The global block-type job blob.</param>
         /// <param name="worldData">The chunk store used to resolve the 8 neighbor snapshots (missing → sentinel/void).</param>
-        public void RunFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData)
+        /// <param name="useBand">
+        /// TG-4 Phase 4b Y-band: when true, the gather + reads are restricted to the tight active-fluid Y-band
+        /// (<see cref="ChunkMath.FLUID_VERTICAL_REACH"/>-padded) instead of the full chunk height — byte-identical by
+        /// the reach invariant, but the per-tick copy is independent of world height. Defaults false (full height).
+        /// </param>
+        public void RunFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData, bool useBand = false)
         {
-            if (PrepareFluidJob(cd, worldData))
+            if (PrepareFluidJob(cd, worldData, useBand))
                 BuildJob(cd, tickCounter, blockTypes).Run();
         }
 
@@ -150,10 +163,11 @@ namespace Jobs
         /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
         /// <param name="blockTypes">The global block-type job blob.</param>
         /// <param name="worldData">The chunk store used to resolve the 8 neighbor snapshots (missing → sentinel/void).</param>
+        /// <param name="useBand">TG-4 Phase 4b Y-band: restrict the gather + reads to the tight active-fluid Y-band (see <see cref="RunFluids"/>). Defaults false.</param>
         /// <returns>The scheduled job's handle, or <c>default</c> when the chunk has no active fluids.</returns>
-        public JobHandle ScheduleFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData)
+        public JobHandle ScheduleFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData, bool useBand = false)
         {
-            if (!PrepareFluidJob(cd, worldData))
+            if (!PrepareFluidJob(cd, worldData, useBand))
                 return default;
 
             return BuildJob(cd, tickCounter, blockTypes).Schedule();
@@ -198,6 +212,10 @@ namespace Jobs
             // for every direction → the gather sentinel-fills the halo.
             SelectEmptyNeighbors();
 
+            // Full-height band: the job's GetStateLocal then behaves exactly as the pre-band gather (py == y).
+            _bandMinY = 0;
+            _bandHeight = ChunkMath.CHUNK_HEIGHT;
+
             // Snapshot the chunk's pre-tick voxels (section-contiguous) for the job to read.
             cd.FillJobVoxelMap(_snapshot);
             return true;
@@ -210,8 +228,9 @@ namespace Jobs
         /// </summary>
         /// <param name="cd">The chunk whose fluids to prepare.</param>
         /// <param name="worldData">The chunk store used to resolve the neighbor snapshots.</param>
+        /// <param name="useBand">When true, size the gather/read window to the tight active-fluid Y-band instead of full height (see <see cref="RunFluids"/>).</param>
         /// <returns>True if there is any active fluid (a job should run); false if the bucket is empty.</returns>
-        private bool PrepareFluidJob(ChunkData cd, WorldData worldData)
+        private bool PrepareFluidJob(ChunkData cd, WorldData worldData, bool useBand)
         {
             EnsureAllocated();
             _interior.Clear();
@@ -226,10 +245,35 @@ namespace Jobs
 
             // Every active fluid is job-computed (the halo lets border voxels read across seams). ReplayOrder tags
             // them all interior=1, so the unchanged drain emits every source's mods from the job in bucket order.
+            // On the band path, track the active fluids' Y-extent in the same pass to size the gather window.
+            int minY = int.MaxValue;
+            int maxY = int.MinValue;
             foreach (int index in bucket)
             {
                 _replay.Add(new int2(index, 1));
                 _interior.Add(index);
+
+                if (useBand)
+                {
+                    ChunkMath.GetLocalPositionFromFlattenedIndex(index, out _, out int y, out _);
+                    minY = math.min(minY, y);
+                    maxY = math.max(maxY, y);
+                }
+            }
+
+            // Size the Y-band: [minActiveY−reach, maxActiveY+reach] clamped to the chunk — a tight superset of every
+            // read (FLUID_VERTICAL_REACH invariant), so band reads are byte-identical to full height. The full path
+            // keeps [0, CHUNK_HEIGHT) so the job's GetStateLocal degenerates to py == y.
+            if (useBand)
+            {
+                _bandMinY = math.max(0, minY - ChunkMath.FLUID_VERTICAL_REACH);
+                int bandMaxYExclusive = math.min(ChunkMath.CHUNK_HEIGHT, maxY + ChunkMath.FLUID_VERTICAL_REACH + 1);
+                _bandHeight = bandMaxYExclusive - _bandMinY;
+            }
+            else
+            {
+                _bandMinY = 0;
+                _bandHeight = ChunkMath.CHUNK_HEIGHT;
             }
 
             // Gather the 8 neighbor snapshots (for the border voxels) + the center snapshot, all pre-tick.
@@ -280,6 +324,8 @@ namespace Jobs
                 PaddedVoxels = _paddedVoxels,
                 BlockTypes = blockTypes,
                 InteriorFluidIndices = _interior.AsArray(),
+                BandMinY = _bandMinY,
+                BandHeight = _bandHeight,
                 TickCounter = tickCounter,
                 ChunkOrigin = new int2(cd.Position.x, cd.Position.y),
                 Mods = _mods,
@@ -333,9 +379,11 @@ namespace Jobs
             if (_neighborsAllocated)
             {
                 for (int i = 0; i < _neighborBuffers.Length; i++)
-                    if (_neighborBuffers[i].IsCreated) _neighborBuffers[i].Dispose();
+                    if (_neighborBuffers[i].IsCreated)
+                        _neighborBuffers[i].Dispose();
                 _neighborsAllocated = false;
             }
+
             if (_interior.IsCreated) _interior.Dispose();
             if (_replay.IsCreated) _replay.Dispose();
             if (_mods.IsCreated) _mods.Dispose();

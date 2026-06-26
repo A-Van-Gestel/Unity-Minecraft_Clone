@@ -29,6 +29,14 @@ namespace Editor.Validation.Behavior
         private const int BH4_MID = 8; // mid-axis lane the seam scenarios center on
         private const int BH4_TICKS = 5; // enough for a border source to reach the seam and spill across
 
+        // TG-4 Phase 4b Y-band fixtures. BH-4-SPLIT-Y: a high cluster + the BH4_FLOOR_Y low cluster in ONE center chunk
+        // → the active-fluid Y-band spans both (a single contiguous [minY−reach, maxY+reach]); proves the band's
+        // min/max scan handles separated clusters. BH-4-BAND-EDGE: a source sitting on a y%16 section boundary with a
+        // real voxel on BOTH its below- and above-read, so the band's lower AND upper ±reach edges each gate a
+        // meaningful read across a section seam — the direct prove-red for the band's reach padding.
+        private const int BH4_SPLIT_HIGH_FLOOR_Y = 70; // high cluster floor (low cluster stays at BH4_FLOOR_Y)
+        private const int BH4_EDGE_FLOOR_Y = 15; // section-0 top; source sits at 16 (section-1 base)
+
         /// <summary>The BH-4 cross-chunk fixtures, appended to <see cref="DifferentialFixtures"/>.</summary>
         private static List<DiffFixture> CrossChunkFixtures() => new List<DiffFixture>
         {
@@ -37,6 +45,8 @@ namespace Editor.Validation.Behavior
             new DiffFixture("BH-4-NZ-SPREAD", BuildBh4NzSpreadWorld, BH4_TICKS),
             new DiffFixture("BH-4-CORNER", BuildBh4CornerWorld, BH4_TICKS),
             new DiffFixture("BH-4-MISSING", BuildBh4MissingNeighborWorld, BH4_TICKS),
+            new DiffFixture("BH-4-SPLIT-Y", BuildBh4SplitYWorld, BH4_TICKS),
+            new DiffFixture("BH-4-BAND-EDGE", BuildBh4BandEdgeWorld, BH4_TICKS),
         };
 
         /// <summary>Floors a rectangular center region with stone at <see cref="BH4_FLOOR_Y"/> (inclusive bounds).</summary>
@@ -111,6 +121,63 @@ namespace Editor.Validation.Behavior
             BehaviorTestWorld world = new BehaviorTestWorld(s_bh4CenterOrigin);
             SeedCenterFloor(world, 0, 6, BH4_MID - 2, BH4_MID + 2);
             world.SetBlock(2, BH4_FLOOR_Y + 1, BH4_MID, BlockIDs.Water, meta: 0); // −X neighbor deliberately not seeded
+            return world;
+        }
+
+        /// <summary>
+        /// BH-4-SPLIT-Y (TG-4 Phase 4b Y-band): two −X-border water sources far apart in Y — one over the
+        /// <see cref="BH4_FLOOR_Y"/> floor, one over a <see cref="BH4_SPLIT_HIGH_FLOOR_Y"/> floor — in the SAME center
+        /// chunk. The active-fluid band therefore spans <c>[BH4_FLOOR_Y−reach, BH4_SPLIT_HIGH_FLOOR_Y+1+reach]</c>
+        /// (one contiguous window covering both clusters and the gap between them). Both clusters reach the −X seam, so
+        /// the halo drivers job-tick them; <c>BH-D1[H|HB]</c> proves the band (sized from the min/max scan over both
+        /// clusters) gathers/reads identically to the full-height halo. A per-cluster band model would split the window
+        /// and diverge here.
+        /// </summary>
+        private static BehaviorTestWorld BuildBh4SplitYWorld()
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld(s_bh4CenterOrigin);
+
+            // Low cluster over the BH4_FLOOR_Y floor; −X neighbor floored at the same level for the cross-seam spread.
+            SeedCenterFloor(world, 0, 6, BH4_MID - 2, BH4_MID + 2);
+            SeedNeighborFloor(world, -1, 0, 13, 15, BH4_MID - 2, BH4_MID + 2);
+            world.SetBlock(2, BH4_FLOOR_Y + 1, BH4_MID, BlockIDs.Water, meta: 0);
+
+            // High cluster over a separate floor near the top of the chunk; same −X edge, floored to match.
+            for (int x = 0; x <= 6; x++)
+            for (int z = BH4_MID - 2; z <= BH4_MID + 2; z++)
+                world.SetBlock(x, BH4_SPLIT_HIGH_FLOOR_Y, z, BlockIDs.Stone);
+            for (int x = 13; x <= 15; x++)
+            for (int z = BH4_MID - 2; z <= BH4_MID + 2; z++)
+                world.SetNeighborBlock(-1, 0, x, BH4_SPLIT_HIGH_FLOOR_Y, z, BlockIDs.Stone);
+            world.SetBlock(2, BH4_SPLIT_HIGH_FLOOR_Y + 1, BH4_MID, BlockIDs.Water, meta: 0);
+
+            return world;
+        }
+
+        /// <summary>
+        /// BH-4-BAND-EDGE (TG-4 Phase 4b Y-band): a single −X-border water source at y=16 — the base of section 1 —
+        /// with a stone floor at <see cref="BH4_EDGE_FLOOR_Y"/>=15 (top of section 0) AND a stone cap at y=17. The
+        /// source's below-read (15) lands on the band's lower edge (<c>bandMinY = 16−reach = 15</c>) across the
+        /// section-0/1 seam, and its above-read (17) lands on the band's upper edge across a section seam too — so
+        /// both ±<c>FLUID_VERTICAL_REACH</c> band edges gate a real, behavior-relevant voxel. Dropping either reach
+        /// pad turns that edge read into void and diverges: the direct prove-red target for the band sizing.
+        /// </summary>
+        private static BehaviorTestWorld BuildBh4BandEdgeWorld()
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld(s_bh4CenterOrigin);
+
+            for (int x = 0; x <= 6; x++)
+            for (int z = BH4_MID - 2; z <= BH4_MID + 2; z++)
+            {
+                world.SetBlock(x, BH4_EDGE_FLOOR_Y, z, BlockIDs.Stone); // floor (band lower edge, below-read)
+                world.SetBlock(x, BH4_EDGE_FLOOR_Y + 2, z, BlockIDs.Stone); // cap  (band upper edge, above-read)
+            }
+
+            for (int x = 13; x <= 15; x++)
+            for (int z = BH4_MID - 2; z <= BH4_MID + 2; z++)
+                world.SetNeighborBlock(-1, 0, x, BH4_EDGE_FLOOR_Y, z, BlockIDs.Stone);
+
+            world.SetBlock(2, BH4_EDGE_FLOOR_Y + 1, BH4_MID, BlockIDs.Water, meta: 0); // source at y=16 (section seam)
             return world;
         }
     }

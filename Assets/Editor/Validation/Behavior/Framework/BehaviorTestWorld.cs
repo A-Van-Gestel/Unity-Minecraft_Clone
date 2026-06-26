@@ -41,6 +41,15 @@ namespace Editor.Validation.Behavior.Framework
         /// <see cref="Legacy"/> over the BH-4 cross-chunk fixtures to prove the halo border port is byte-identical.
         /// </summary>
         FluidBurstHalo,
+
+        /// <summary>
+        /// TG-4 Phase 4b Y-band: identical to <see cref="FluidBurstHalo"/> but the per-tick gather + reads are
+        /// restricted to the tight active-fluid Y-band (<c>FluidBurstTicker.RunFluids(useBand: true)</c>) instead of
+        /// full chunk height. <b>BH-D1[H|HB]</b> pits this directly against <see cref="FluidBurstHalo"/> to isolate
+        /// band-edge correctness from halo correctness — the two must be byte-identical (the band drops no read the
+        /// full-height gather served); <b>BH-D1[L|HB]</b> pits it against <see cref="Legacy"/> as the end-to-end gate.
+        /// </summary>
+        FluidBurstHaloBand,
     }
 
     /// <summary>
@@ -264,7 +273,8 @@ namespace Editor.Validation.Behavior.Framework
             // grass = managed). Null for the managed-only drivers.
             Dictionary<Vector3Int, FluidJobResult> jobResults =
                 Driver == TickDriver.FluidBurstHybrid ? RunFluidJob(halo: false) :
-                Driver == TickDriver.FluidBurstHalo ? RunFluidJob(halo: true) : null;
+                Driver == TickDriver.FluidBurstHalo ? RunFluidJob(halo: true) :
+                Driver == TickDriver.FluidBurstHaloBand ? RunFluidJob(halo: true, band: true) : null;
 
             List<VoxelEval> evals = new List<VoxelEval>(ordered.Count);
             Queue<VoxelMod> pending = new Queue<VoxelMod>();
@@ -335,14 +345,19 @@ namespace Editor.Validation.Behavior.Framework
         /// true = the Phase-4b full halo (<see cref="FluidBurstTicker.RunFluids"/>, every fluid job-ticked via the
         /// neighbor halo gathered from the harness's seeded neighbor chunks in <c>worldData</c>).
         /// </param>
-        private Dictionary<Vector3Int, FluidJobResult> RunFluidJob(bool halo)
+        /// <param name="band">
+        /// TG-4 Phase 4b Y-band: only meaningful when <paramref name="halo"/> is true. False = full-height gather;
+        /// true = the tight active-fluid Y-band gather (<see cref="FluidBurstTicker.RunFluids"/> <c>useBand</c>). The
+        /// <see cref="TickDriver.FluidBurstHaloBand"/> driver sets it so BH-D1[H|HB] diffs band vs full directly.
+        /// </param>
+        private Dictionary<Vector3Int, FluidJobResult> RunFluidJob(bool halo, bool band = false)
         {
             Dictionary<Vector3Int, FluidJobResult> results = new Dictionary<Vector3Int, FluidJobResult>();
 
             // Mirror the harness active set into ChunkData's fluid bucket (the runner's input), then run it.
             SyncFluidBucketToActives();
             if (halo)
-                _fluidTicker.RunFluids(ChunkData, _tick, _blockTypesJob, _world.worldData);
+                _fluidTicker.RunFluids(ChunkData, _tick, _blockTypesJob, _world.worldData, band);
             else
                 _fluidTicker.RunInteriorFluids(ChunkData, _tick, _blockTypesJob);
 

@@ -82,6 +82,18 @@ namespace Jobs
         /// </summary>
         public NativeArray<uint> PaddedVoxels;
 
+        /// <summary>
+        /// TG-4 Phase 4b Y-band: the global Y of <see cref="PaddedVoxels"/>' first row (band-local Y 0). The gather
+        /// fills only <c>[BandMinY, BandMinY + BandHeight)</c> and <see cref="GetStateLocal"/> reads at band-local
+        /// <c>y − BandMinY</c>. The full-height path passes <c>BandMinY = 0, BandHeight = CHUNK_HEIGHT</c>, which
+        /// makes every read byte-identical to the pre-band gather (no out-of-band Y exists). A non-zero band relies
+        /// on the <see cref="ChunkMath.FLUID_VERTICAL_REACH"/> invariant: no read lands outside the active band.
+        /// </summary>
+        public int BandMinY;
+
+        /// <summary>TG-4 Phase 4b Y-band: the number of Y rows held by <see cref="PaddedVoxels"/> (the band prefix). See <see cref="BandMinY"/>.</summary>
+        public int BandHeight;
+
         /// <summary>Global block-type blob indexed by id (carries the fluid behavior props added in TG-4 Phase 3 C1).</summary>
         [ReadOnly]
         public NativeArray<BlockTypeJobData> BlockTypes;
@@ -120,8 +132,11 @@ namespace Jobs
             // pattern), so border voxels' cross-chunk reads resolve from one contiguous buffer. For the interior-only
             // path the neighbors are empty (sentinel halo) and the center region is identical to the old snapshot, so
             // interior reads are byte-identical.
-            ChunkMath.GatherPaddedFluidVoxels(PaddedVoxels, CenterVoxels,
-                VoxelW, VoxelE, VoxelS, VoxelN, VoxelSW, VoxelNW, VoxelSE, VoxelNE);
+            // Y-band gather: fills only [BandMinY, BandMinY+BandHeight) of the padded volume. The full-height path
+            // passes 0/CHUNK_HEIGHT (byte-identical to the pre-band gather); the band path passes the tight active
+            // band, making the copy independent of world height. GetStateLocal offsets its Y read by BandMinY.
+            ChunkMath.GatherPaddedFluidVoxelsBand(PaddedVoxels, CenterVoxels,
+                VoxelW, VoxelE, VoxelS, VoxelN, VoxelSW, VoxelNW, VoxelSE, VoxelNE, BandMinY, BandHeight);
 
             // Allocate the BFS scratch once for the whole pass (locals, threaded into the flow chain); CalculateFlowCost
             // Clear()s it per call. Replaces the prior per-call Temp NativeQueue + NativeHashSet allocation
@@ -515,6 +530,16 @@ namespace Jobs
             if (y < 0 || y >= VoxelData.ChunkHeight)
                 return default; // Has == false
 
+            // Y-band: translate the global Y into the band-local row the gather wrote. The full-height path
+            // (BandMinY=0, BandHeight=CHUNK_HEIGHT) leaves py == y, so this is a no-op there. For a tight band, a read
+            // outside [BandMinY, BandMinY+BandHeight) is unreachable under the FLUID_VERTICAL_REACH invariant (every
+            // read is within ±1 Y of an active source, and the band spans [minActiveY−reach, maxActiveY+reach]); the
+            // guard returns void defensively — a divergence here would be a reach-invariant violation that BH-D1[H|HB]
+            // (full-vs-band byte-identity) catches as a diff rather than silently corrupting state.
+            int py = y - BandMinY;
+            if (py < 0 || py >= BandHeight)
+                return default;
+
             int px = x + ChunkMath.FLUID_HALO;
             int pz = z + ChunkMath.FLUID_HALO;
             if (px < 0 || px >= ChunkMath.PADDED_FLUID_WIDTH ||
@@ -523,7 +548,7 @@ namespace Jobs
                 return default; // beyond the 4-cell halo (margin-4 never reaches here; a defensive bound)
             }
 
-            uint p = PaddedVoxels[ChunkMath.GetPaddedFluidIndex(px, y, pz)];
+            uint p = PaddedVoxels[ChunkMath.GetPaddedFluidIndex(px, py, pz)];
             if (p == uint.MaxValue)
                 return default; // missing/ungenerated neighbor (gather sentinel) == managed GetVoxelState null
 
