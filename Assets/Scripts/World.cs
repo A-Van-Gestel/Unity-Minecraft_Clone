@@ -240,6 +240,17 @@ public class World : MonoBehaviour
     /// <summary>When true (and <see cref="EnableFluidBurstTick"/>), border fluids tick in-job via the §4.2(b) neighbor halo (TG-4 Phase 4b); else the border stays managed.</summary>
     public bool EnableFluidBorderBurst => _enableFluidBorderBurst;
 
+    [SerializeField]
+    [Tooltip("TG-4 Phase 4b Y-band: restrict the per-tick fluid gather + reads to the tight active-fluid Y-band " +
+             "(minActiveY-1 .. maxActiveY+1) instead of full chunk height, making the per-tick copy independent of " +
+             "world height (requires Enable Fluid Border Burst). Byte-identical by the FLUID_VERTICAL_REACH invariant " +
+             "(validated 2026-06-27: BH-D1[H|HB]/[L|HB] + prove-red). Off by default pending the in-game soak + A/B; " +
+             "Off = the full-height halo (one-toggle rollback).")]
+    private bool _enableFluidBandGather;
+
+    /// <summary>When true (and <see cref="EnableFluidBorderBurst"/>), the fluid halo gather/read window is sized to the active-fluid Y-band instead of full chunk height (TG-4 Phase 4b Y-band); byte-identical, height-independent copy.</summary>
+    public bool EnableFluidBandGather => _enableFluidBandGather;
+
     // --- Chunk Border Visualization ---
     private readonly Dictionary<ChunkCoord, GameObject> _chunkBorders = new Dictionary<ChunkCoord, GameObject>();
     private Transform _chunkBorderParent;
@@ -1434,7 +1445,7 @@ public class World : MonoBehaviour
                 // Phase 4b: when border-burst is on, tick ALL fluids via the neighbor halo; else the Phase-3/4a
                 // interior-only path (border drained on the managed branch in DrainTick).
                 JobHandle handle = _enableFluidBorderBurst
-                    ? ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData)
+                    ? ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData, _enableFluidBandGather)
                     : ticker.ScheduleInteriorFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData);
                 _parallelFluidHandles.Add(handle);
             }

@@ -360,7 +360,7 @@ public class Chunk
         // when border-burst is on, ALL fluids tick in-job via the neighbor halo (ReplayOrder all-job); else the
         // Phase-3 interior-only hybrid (border tagged 0 → managed in the replay).
         if (world.EnableFluidBorderBurst)
-            ticker.RunFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData, world.worldData);
+            ticker.RunFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData, world.worldData, world.EnableFluidBandGather);
         else
             ticker.RunInteriorFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData);
 

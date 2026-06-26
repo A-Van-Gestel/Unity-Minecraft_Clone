@@ -102,10 +102,24 @@ namespace Editor.Validation.Behavior
         /// <c>EnableFluidBorderBurst</c> on.
         /// </summary>
         [MenuItem("Minecraft Clone/Dev/Validate Fluid Parallel Determinism (Cross-Chunk Halo)")]
-        public static void RunHalo()
+        public static void RunHalo() => RunHaloInternal(useBand: false);
+
+        /// <summary>
+        /// TG-4 Phase 4b Y-band variant of <see cref="RunHalo"/>: the same 3×3 distinct-chunk concurrent flood, but
+        /// every <see cref="FluidBurstTicker.RunFluids"/>/<see cref="FluidBurstTicker.ScheduleFluids"/> runs with the
+        /// Y-band gather (<c>useBand: true</c>). Because the band extent is computed per-ticker from each chunk's own
+        /// active fluids, this guards that band sizing is deterministic across the serial baseline, the concurrent
+        /// schedule, and run-to-run — the determinism surface the band adds on top of <c>BH-D1[H|HB]</c> (which proves
+        /// band == full). Guards flipping <c>EnableFluidBandGather</c> on with <c>EnableFluidBorderBurst</c>.
+        /// </summary>
+        [MenuItem("Minecraft Clone/Dev/Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)")]
+        public static void RunHaloBand() => RunHaloInternal(useBand: true);
+
+        private static void RunHaloInternal(bool useBand)
         {
             using BehaviorTestWorld rig = new BehaviorTestWorld(s_haloCenterOrigin);
             WorldData wd = rig.WorldData;
+            string mode = useBand ? "Y-band" : "full-height";
 
             // Build a 3×3 grid of distinct flooded chunks around the center, each registered in the shared WorldData so
             // every chunk is a real neighbor of the others. The center (index 4) reads all 8 distinct neighbors; edge
@@ -144,7 +158,7 @@ namespace Editor.Validation.Behavior
                 for (int i = 0; i < chunks.Count; i++)
                 {
                     FluidBurstTicker serial = new FluidBurstTicker();
-                    serial.RunFluids(chunks[i], FIXED_TICK, rig.BlockTypesJob, wd);
+                    serial.RunFluids(chunks[i], FIXED_TICK, rig.BlockTypesJob, wd, useBand);
                     baselines[i] = Capture(serial);
                     serial.Dispose();
                 }
@@ -153,12 +167,12 @@ namespace Editor.Validation.Behavior
                 // else we'd be exercising nothing the interior gate doesn't already cover.
                 if (baselines[4].Interior.Length == 0 || !HasBorderVoxel(baselines[4].Interior))
                 {
-                    Debug.LogError("[FAIL] Fluid parallel determinism (halo): center chunk has no Tier-2 border fluids — " +
-                                   "the neighbor-halo scratch is never exercised, so the test is vacuous.");
+                    Debug.LogError($"[FAIL] Fluid parallel determinism (halo {mode}): center chunk has no Tier-2 border " +
+                                   "fluids — the neighbor-halo scratch is never exercised, so the test is vacuous.");
                     return;
                 }
 
-                int failures = StressMultiChunk(chunks, baselines, wd, rig.BlockTypesJob);
+                int failures = StressMultiChunk(chunks, baselines, wd, rig.BlockTypesJob, useBand);
 
                 int totalMods = 0, totalFluids = 0;
                 foreach (TickerOutput b in baselines)
@@ -169,13 +183,13 @@ namespace Editor.Validation.Behavior
 
                 if (failures == 0)
                 {
-                    Debug.Log($"<color=green>[PASS] Fluid parallel determinism (cross-chunk halo): {chunks.Count} distinct " +
+                    Debug.Log($"<color=green>[PASS] Fluid parallel determinism (cross-chunk halo, {mode}): {chunks.Count} distinct " +
                               $"chunks × {ROUNDS} concurrent rounds byte-identical to per-chunk serial baselines " +
                               $"({totalFluids} fluids, {totalMods} mods; center reads 8 distinct neighbors).</color>");
                 }
                 else
                 {
-                    Debug.LogError($"<color=red>[FAIL] Fluid parallel determinism (cross-chunk halo): {failures} divergence(s) — see above.</color>");
+                    Debug.LogError($"<color=red>[FAIL] Fluid parallel determinism (cross-chunk halo, {mode}): {failures} divergence(s) — see above.</color>");
                 }
             }
             finally
@@ -242,7 +256,7 @@ namespace Editor.Validation.Behavior
         /// gathered from a different region of the shared <paramref name="wd"/>. Returns the divergence count (0 = pass).
         /// </summary>
         private static int StressMultiChunk(List<ChunkData> chunks, TickerOutput[] baselines, WorldData wd,
-            NativeArray<BlockTypeJobData> blockTypes)
+            NativeArray<BlockTypeJobData> blockTypes, bool useBand)
         {
             DynamicPool<FluidBurstTicker> pool =
                 new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
@@ -261,7 +275,7 @@ namespace Editor.Validation.Behavior
                 {
                     FluidBurstTicker t = pool.Get();
                     tickers.Add(t);
-                    handles[i] = t.ScheduleFluids(chunks[i], FIXED_TICK, blockTypes, wd);
+                    handles[i] = t.ScheduleFluids(chunks[i], FIXED_TICK, blockTypes, wd, useBand);
                 }
 
                 JobHandle.ScheduleBatchedJobs();
