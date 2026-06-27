@@ -3780,11 +3780,12 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
-    /// Gets a detailed breakdown of the mesh queue for display in debug UI.
+    /// Appends a detailed breakdown of the mesh queue to <paramref name="sb"/> for display in debug UI.
+    /// Writes directly into the supplied builder so the debug overlay can refresh without allocating.
     /// Note: Categories evaluate strictly in order. A chunk that is both null and inactive will only increment Null.
     /// </summary>
-    /// <returns>Formatted string with mesh queue statistics</returns>
-    public string GetMeshQueueDebugInfo()
+    /// <param name="sb">The <see cref="StringBuilder"/> to append the formatted statistics to.</param>
+    public void AppendMeshQueueDebugInfo(StringBuilder sb)
     {
         int active = 0;
         int inactive = 0;
@@ -3803,8 +3804,11 @@ public class World : MonoBehaviour
                 active++;
         }
 
-        return $"{_chunksToBuildMesh.Count.ToString()} total\n" +
-               $" └ Active: {active.ToString()}, Inactive: {inactive.ToString()}, Destroyed: {destroyed.ToString()}, Null: {nullCount.ToString()}";
+        sb.Append(_chunksToBuildMesh.Count).Append(" total\n")
+            .Append(" └ Active: ").Append(active)
+            .Append(", Inactive: ").Append(inactive)
+            .Append(", Destroyed: ").Append(destroyed)
+            .Append(", Null: ").Append(nullCount);
     }
 
     #endregion

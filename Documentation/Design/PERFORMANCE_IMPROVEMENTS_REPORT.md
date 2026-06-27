@@ -95,7 +95,7 @@ instead of a crash.
 | TG-3 ✅  | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors                                                         |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
 | TG-4 ✅  | `BlockBehavior` data separation (ECS/DOTS pattern)                                                                     |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
 | TG-5 ⏭️ | `BlockBehavior` Burst function pointers (lighter alt. to TG-4 — superseded, not needed)                                |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| TG-6 ✅  | Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up)                                 |   🟡   |  🟡  |   ⚪³   |  ✅   |  ✅   |
+| TG-6 ✅  | Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up)                                 |   🟡   |  🟡  |   ⚪³    |  ✅   |  ✅   |
 
 > ³ TG-6 benefit downgraded 🟡→⚪ after the change shipped: the pooled buffer is a `Persistent`
 > (native, not GC) container, and its alloc/free is a sub-µs main-thread op over a handful of chunks
@@ -109,14 +109,14 @@ instead of a crash.
 
 ### Main Thread & Miscellaneous
 
-| ID   | Finding                                                    | Effort | Risk | Benefit | Seed | Save |
-|------|------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| MT-1 | `List.Insert(0)` / `RemoveAt(i)` O(n) mesh priority queue  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
-| MT-2 | Light scheduler snapshots the full dirty set every frame   |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
-| MT-3 | `DebugScreen` intermediate string allocations per refresh  |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| MT-4 | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| MT-5 | Startup `.ToArray()` intermediates feeding `NativeArray`   |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| MT-6 | `CompressionFactory` "GZip" actually writes raw Deflate    |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
+| ID     | Finding                                                    | Effort | Risk | Benefit | Seed | Save |
+|--------|------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| MT-1   | `List.Insert(0)` / `RemoveAt(i)` O(n) mesh priority queue  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| MT-2   | Light scheduler snapshots the full dirty set every frame   |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
+| MT-3 ✅ | `DebugScreen` intermediate string allocations per refresh  |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| MT-4   | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| MT-5   | Startup `.ToArray()` intermediates feeding `NativeArray`   |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| MT-6   | `CompressionFactory` "GZip" actually writes raw Deflate    |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
 
 ### GPU & Shaders
 
@@ -957,7 +957,18 @@ and stops at the throttle. ⚠ Respect the flag-pairing invariants in
 
 ---
 
-### MT-3. `DebugScreen` intermediate string allocations per refresh
+### MT-3. ✅ DONE (2026-06-27) — `DebugScreen` intermediate string allocations per refresh
+
+> **Closed:** zero-alloc refresh implemented and in-game verified. All `.ToString()`/`$"..."` sites
+> replaced: numeric `Append` overloads + a shared `Helpers/UI/StringBuilderFormat.cs` (`AppendFixed`,
+> `AppendFixedPadded`, `AppendIntPadded`, `AppendBytes`, `AppendMs`, `AppendHex2`, `AppendElapsedTime`),
+> TMP `SetText(StringBuilder)` at the assignment seam, the constant `graphicsDeviceType` cached once,
+> and the `[Flags]` `BlockTags` + `DebugVisualizationMode` enum `ToString()` boxing replaced with
+> declaration-order appenders / literal mappers (output-parity confirmed against both enum definitions).
+> `World.GetMeshQueueDebugInfo()` → `AppendMeshQueueDebugInfo(StringBuilder)`. `BenchmarkHUD`'s three
+> private formatters were folded into the shared helper (single source of truth). Player/IL2CPP builds
+> are zero-alloc; under `UNITY_EDITOR` TMP's `SetText` still materializes one inspector string (compiled
+> out of player builds).
 
 **Observed:** Despite the cached `StringBuilder`s, each refresh allocates dozens of temporaries:
 `.ToString()` calls on numbers feeding `Append` (`DebugScreen.cs` ~lines 383–396), plus `$"..."`
@@ -1290,7 +1301,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 
 1. **Quick wins, near-zero risk (one sitting each):**
    ~~MR-1 (Euler hoist) ✅ done — marginal~~, ~~MR-5 ✅ done — chain post-process~~, ~~MR-3 + MR-4 ✅ done — SectionRenderer~~, ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
-   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~. Remaining: MT-4, MT-5, MT-3. MT-6 (doc/rename only).
+   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~. Remaining: MT-4, MT-5. MT-6 (doc/rename only).
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side) →

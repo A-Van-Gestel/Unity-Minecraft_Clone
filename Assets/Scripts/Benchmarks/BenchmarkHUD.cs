@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Text;
+using Helpers.UI;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Profiling;
@@ -62,7 +63,7 @@ namespace Benchmarks
             }
 
             _sb.Append("    <mspace=0.55em>");
-            AppendElapsedTime(_sb, _controller.ElapsedSeconds);
+            _sb.AppendElapsedTime(_controller.ElapsedSeconds);
             _sb.Append("</mspace>");
             _sb.AppendLine();
 
@@ -103,11 +104,11 @@ namespace Benchmarks
 
                 _sb.Append("<mspace=0.55em>");
                 _sb.Append("CPU: ");
-                AppendFixed1Padded(_sb, cpuMs, 6);
+                _sb.AppendFixedPadded(cpuMs, 1, 6);
                 _sb.Append(" ms | Wall: ");
-                AppendFixed1Padded(_sb, wallMs, 6);
+                _sb.AppendFixedPadded(wallMs, 1, 6);
                 _sb.Append(" ms | GC: ");
-                AppendFixed1Padded(_sb, gcKb, 8);
+                _sb.AppendFixedPadded(gcKb, 1, 8);
                 _sb.Append(" KB");
                 _sb.Append("</mspace>");
                 _sb.AppendLine();
@@ -121,15 +122,15 @@ namespace Benchmarks
 
                 _sb.Append("<mspace=0.55em>");
                 _sb.Append("FPS: ");
-                AppendIntPadded(_sb, wallFps, 3);
+                _sb.AppendIntPadded(wallFps, 3);
                 _sb.Append(" (CPU: ");
-                AppendIntPadded(_sb, cpuFps, 3);
+                _sb.AppendIntPadded(cpuFps, 3);
                 _sb.Append(") | Mem: ");
-                AppendFixed1Padded(_sb, totalMb, 6);
+                _sb.AppendFixedPadded(totalMb, 1, 6);
                 _sb.Append(" MB (Nat: ");
-                AppendFixed1Padded(_sb, nativeMb, 6);
+                _sb.AppendFixedPadded(nativeMb, 1, 6);
                 _sb.Append(" + Man: ");
-                AppendFixed1Padded(_sb, managedMb, 6);
+                _sb.AppendFixedPadded(managedMb, 1, 6);
                 _sb.Append(")");
                 _sb.Append("</mspace>");
             }
@@ -154,75 +155,6 @@ namespace Benchmarks
             }
 
             sb.Append(']');
-        }
-
-        /// <summary>
-        /// Appends elapsed time as "Xm Ys" or "Xs" without string allocations.
-        /// </summary>
-        private static void AppendElapsedTime(StringBuilder sb, float seconds)
-        {
-            int totalSec = (int)seconds;
-            int min = totalSec / 60;
-            int sec = totalSec % 60;
-
-            sb.Append(min);
-            sb.Append(':');
-            if (sec < 10) sb.Append('0');
-            sb.Append(sec);
-        }
-
-        /// <summary>
-        /// Appends a double with one decimal place, right-aligned in a fixed-width field.
-        /// Uses leading spaces for padding (effective inside a <c>&lt;mspace&gt;</c> block).
-        /// </summary>
-        /// <param name="sb">The StringBuilder to append to.</param>
-        /// <param name="value">The value to format.</param>
-        /// <param name="totalWidth">The minimum total character width (e.g., 6 for "  3.2").</param>
-        private static void AppendFixed1Padded(StringBuilder sb, double value, int totalWidth)
-        {
-            int whole = (int)value;
-            int frac = (int)((value - whole) * 10.0);
-            if (frac < 0) frac = -frac;
-
-            // Count digits: whole part + '.' + 1 frac digit
-            int digits = 1;
-            int temp = whole;
-            while (temp >= 10)
-            {
-                digits++;
-                temp /= 10;
-            }
-
-            int valueWidth = digits + 2; // digits + '.' + frac
-
-            for (int i = valueWidth; i < totalWidth; i++)
-                sb.Append(' ');
-
-            sb.Append(whole);
-            sb.Append('.');
-            sb.Append(frac);
-        }
-
-        /// <summary>
-        /// Appends an integer right-aligned in a fixed-width field.
-        /// Uses leading spaces for padding (effective inside a <c>&lt;mspace&gt;</c> block).
-        /// </summary>
-        private static void AppendIntPadded(StringBuilder sb, int value, int totalWidth)
-        {
-            int digits = 1;
-            int temp = value >= 0 ? value : -value;
-            while (temp >= 10)
-            {
-                digits++;
-                temp /= 10;
-            }
-
-            if (value < 0) digits++;
-
-            for (int i = digits; i < totalWidth; i++)
-                sb.Append(' ');
-
-            sb.Append(value);
         }
     }
 }
