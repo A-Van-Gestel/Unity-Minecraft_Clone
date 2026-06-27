@@ -1207,11 +1207,12 @@ culling overhead scale with loaded sections), growing further with taller worlds
 
 ### OM-1. All budgets and caps are desktop-tuned absolute constants
 
-> **Promoted to full design:** [`OM1_DEVICE_CALIBRATION.md`](./OM1_DEVICE_CALIBRATION.md) — first-launch
-> calibration (specs → memory caps, micro-benchmark → throughput) written to `settings.json`, plus
-> enablers **A** (`ResourceLoader.LoadBlockDatabase()`) and **B** (shared runtime `JobDataManagerFactory`).
-> The follow-up structural cleanup **C** (decoupling `World.blockDatabase`) is split out into
-> [`BLOCK_DATABASE_DECOUPLING.md`](./BLOCK_DATABASE_DECOUPLING.md).
+> **IMPLEMENTED (2026-06-27, pending in-game/player verification) — full design + as-built:**
+> [`OM1_DEVICE_CALIBRATION.md`](./OM1_DEVICE_CALIBRATION.md). First-launch calibration (specs → memory
+> caps, micro-benchmark → throughput, reference-anchored) written to `settings.json`, plus enablers **A**
+> (`ResourceLoader.LoadBlockDatabase()`) and **B** (shared runtime `JobDataManagerFactory`). Desktop
+> reproduces the historical 10 / 32 / 20 / 512 exactly. The follow-up structural cleanup **C** (decoupling
+> `World.blockDatabase`) is split out into [`BLOCK_DATABASE_DECOUPLING.md`](./BLOCK_DATABASE_DECOUPLING.md).
 
 **Observed:** Every throughput and retention knob is a fixed number chosen on desktop hardware:
 `maxLightJobsPerFrame = 32`, `maxMeshRebuildsPerFrame = 10`, in-flight mesh cap `20` (hardcoded in

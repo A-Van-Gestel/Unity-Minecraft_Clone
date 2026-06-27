@@ -396,6 +396,31 @@ public class Settings
              TooltipTags.Performance + "Prevents massive lag spikes when generating dense forests.")]
     public int maxStructureModsPerFrame = 5000;
 
+    // ── OM-1 device-calibrated engine knobs ──────────────────────────────
+    // Seeded once on first launch by DeviceCalibration (see OM1_DEVICE_CALIBRATION.md) and persisted
+    // here so they are user-editable. Not exposed as [SettingField] UI controls — they are low-level
+    // ceilings scaled to the device, not everyday gameplay options. Defaults reproduce the historical
+    // desktop constants so a missing/old settings file behaves exactly as before until re-calibrated.
+
+    /// <summary>
+    /// Maximum mesh jobs allowed in flight before scheduling pauses to let the job system drain
+    /// (memory cap; OM-1). Calibrated from system RAM; default reproduces the historical literal.
+    /// </summary>
+    public int maxInFlightMeshJobs = 20;
+
+    /// <summary>
+    /// Buffers retained per type in the chunk job array pool — the native-memory retention ceiling
+    /// (OM-1). Calibrated from system RAM; default reproduces the historical constant (≈96 MB worst case).
+    /// </summary>
+    public int chunkJobArrayPoolRetention = 512;
+
+    /// <summary>
+    /// Version of the <see cref="Config.DeviceCalibration"/> formula that last seeded the calibrated
+    /// fields. A persisted file with an older version is re-calibrated on next launch. <c>0</c> means
+    /// never calibrated (pre-OM-1 file or fresh defaults awaiting first-launch calibration).
+    /// </summary>
+    public int calibrationVersion = 0;
+
     #endregion
 
     #region Benchmark Tab
@@ -623,6 +648,15 @@ public static class SettingsManager
                     : new DevSettings();
 
                 s_cachedSettings = loadedSettings;
+
+                // OM-1: Re-calibrate a file written by an older calibration formula (or a pre-OM-1 file
+                // with no version stamp). Only overwrites the calibrated engine knobs, not other edits.
+                if (loadedSettings.calibrationVersion < Config.DeviceCalibration.CalibrationVersion
+                    && ApplyCalibration(loadedSettings))
+                {
+                    SaveSettings(loadedSettings);
+                }
+
                 return s_cachedSettings;
             }
             catch (Exception e)
@@ -631,14 +665,66 @@ public static class SettingsManager
             }
         }
 
-        // File missing or failed to parse — create defaults and persist
+        // File missing or failed to parse — create defaults, calibrate to the device (OM-1), and persist.
         Debug.Log("[SettingsManager] No settings file found, creating new one.");
         s_cachedSettings = new Settings();
+        ApplyCalibration(s_cachedSettings);
         SaveSettings(s_cachedSettings);
 #if UNITY_EDITOR
         AssetDatabase.Refresh();
 #endif
         return s_cachedSettings;
+    }
+
+    /// <summary>
+    /// Seeds the OM-1 device-calibrated engine knobs into <paramref name="settings"/> and stamps the
+    /// calibration version. Runs only at runtime (Main Menu / player builds) — never during editor
+    /// edit-mode settings loads, since calibration schedules Burst jobs. Falls back to the existing
+    /// field defaults if the calibration probe throws.
+    /// </summary>
+    /// <param name="settings">The settings instance to seed in place.</param>
+    /// <returns><c>true</c> if calibration ran (the caller should persist); <c>false</c> if skipped.</returns>
+    private static bool ApplyCalibration(Settings settings)
+    {
+        if (!Application.isPlaying) return false; // edit-mode settings load — defer to play/first launch
+
+        try
+        {
+            Config.CalibrationResult result = Config.DeviceCalibration.Resolve();
+            settings.maxMeshRebuildsPerFrame = result.MaxMeshRebuildsPerFrame;
+            settings.maxLightJobsPerFrame = result.MaxLightJobsPerFrame;
+            settings.maxInFlightMeshJobs = result.MaxInFlightMeshJobs;
+            settings.chunkJobArrayPoolRetention = result.JobArrayPoolRetention;
+            settings.calibrationVersion = Config.DeviceCalibration.CalibrationVersion;
+            Debug.Log($"[SettingsManager] Device-calibrated budgets (OM-1): {result}");
+        }
+        catch (Exception e)
+        {
+            // Stamp the version anyway so a persistently failing probe does not re-run every launch;
+            // the user can force a retry via the explicit recalibration path.
+            Debug.LogWarning($"[SettingsManager] Device calibration failed ({e.Message}); keeping default budgets.");
+            settings.calibrationVersion = Config.DeviceCalibration.CalibrationVersion;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Forces an OM-1 device re-calibration (re-running the probe regardless of the stored version),
+    /// persists the result, and notifies listeners. Intended for an explicit "Recalibrate Performance"
+    /// action after a hardware change or accidental over-tweak. No-op outside play mode, since
+    /// calibration schedules Burst jobs.
+    /// </summary>
+    /// <returns><c>true</c> if calibration ran and was saved; <c>false</c> if skipped (edit-mode).</returns>
+    public static bool RecalibrateDevice()
+    {
+        Settings settings = LoadSettings();
+        if (!ApplyCalibration(settings)) return false;
+
+        SaveSettings(settings);
+        NotifySettingChanged(nameof(Settings.maxLightJobsPerFrame));
+        NotifySettingChanged(nameof(Settings.maxMeshRebuildsPerFrame));
+        return true;
     }
 
     /// <summary>

@@ -23,12 +23,13 @@ namespace Helpers
         /// <summary>
         /// Maximum buffers retained per element type; returns beyond this cap dispose instead,
         /// so a backlog spike does not permanently pin its peak native memory.
-        /// Sized above peak steady-state in-flight demand (≈468 buffers per type at max job
-        /// settings: (32 lighting + 20 mesh jobs) × 9 buffers per type) so renting never degrades
-        /// into an alloc/free storm. Worst-case retention ≈ 96 MB, but the pool only ever holds
-        /// the peak that was actually rented concurrently.
+        /// <para>Device-calibrated (OM-1, <c>Settings.chunkJobArrayPoolRetention</c>): on a high-RAM
+        /// desktop this resolves to <c>512</c> — sized above peak steady-state in-flight demand
+        /// (≈468 buffers per type at max job settings: (32 lighting + 20 mesh jobs) × 9 buffers per type)
+        /// so renting never degrades into an alloc/free storm (worst-case retention ≈ 96 MB). Low-RAM
+        /// devices get a proportionally smaller cap so the pool ceiling matches what they can hold.</para>
         /// </summary>
-        private const int MAX_RETAINED_PER_TYPE = 512;
+        private readonly int _maxRetainedPerType;
 
         private readonly Stack<NativeArray<uint>> _voxelMaps = new Stack<NativeArray<uint>>();
         private readonly Stack<NativeArray<ushort>> _lightMaps = new Stack<NativeArray<ushort>>();
@@ -40,6 +41,20 @@ namespace Helpers
         private readonly Stack<NativeArray<ushort>> _paddedLight = new Stack<NativeArray<ushort>>();
 
         private bool _isDisposed;
+
+        /// <summary>Default retention cap reproducing the historical desktop constant (≈96 MB worst case).</summary>
+        public const int DefaultMaxRetainedPerType = 512;
+
+        /// <summary>
+        /// Creates a pool with the given per-type retention cap.
+        /// </summary>
+        /// <param name="maxRetainedPerType">Device-calibrated retention ceiling (OM-1). Defaults to
+        /// <see cref="DefaultMaxRetainedPerType"/> for callers that do not scale to the device
+        /// (benchmarks, editor tools).</param>
+        public ChunkJobArrayPool(int maxRetainedPerType = DefaultMaxRetainedPerType)
+        {
+            _maxRetainedPerType = maxRetainedPerType;
+        }
 
         /// <summary>
         /// Rents a full-chunk <c>uint</c> voxel map buffer. Contents are undefined —
@@ -101,7 +116,7 @@ namespace Helpers
         {
             if (!buffer.IsCreated) return;
 
-            if (_isDisposed || _voxelMaps.Count >= MAX_RETAINED_PER_TYPE || buffer.Length != BufferLength)
+            if (_isDisposed || _voxelMaps.Count >= _maxRetainedPerType || buffer.Length != BufferLength)
             {
                 buffer.Dispose();
                 return;
@@ -120,7 +135,7 @@ namespace Helpers
         {
             if (!buffer.IsCreated) return;
 
-            if (_isDisposed || _lightMaps.Count >= MAX_RETAINED_PER_TYPE || buffer.Length != BufferLength)
+            if (_isDisposed || _lightMaps.Count >= _maxRetainedPerType || buffer.Length != BufferLength)
             {
                 buffer.Dispose();
                 return;
@@ -139,7 +154,7 @@ namespace Helpers
         {
             if (!buffer.IsCreated) return;
 
-            if (_isDisposed || _paddedVoxels.Count >= MAX_RETAINED_PER_TYPE || buffer.Length != PaddedBufferLength)
+            if (_isDisposed || _paddedVoxels.Count >= _maxRetainedPerType || buffer.Length != PaddedBufferLength)
             {
                 buffer.Dispose();
                 return;
@@ -158,7 +173,7 @@ namespace Helpers
         {
             if (!buffer.IsCreated) return;
 
-            if (_isDisposed || _paddedLight.Count >= MAX_RETAINED_PER_TYPE || buffer.Length != PaddedBufferLength)
+            if (_isDisposed || _paddedLight.Count >= _maxRetainedPerType || buffer.Length != PaddedBufferLength)
             {
                 buffer.Dispose();
                 return;

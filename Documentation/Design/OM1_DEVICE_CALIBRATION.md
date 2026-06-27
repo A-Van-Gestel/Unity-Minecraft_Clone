@@ -1,10 +1,17 @@
 # OM-1 — Device Calibration of Throughput & Memory Budgets
 
-> **Status: Design (proposed).** Promotes the backlog finding
-> [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](./PERFORMANCE_IMPROVEMENTS_REPORT.md) → **OM-1** into a full
-> design. OM-1 replaces the desktop-tuned absolute constants that gate engine throughput and native
-> memory retention with values **calibrated once on first launch** and written to `settings.json`,
-> where they remain fully user-editable.
+> **Status: Implemented (2026-06-27) — pending in-game/player-build verification.** Promotes the backlog
+> finding [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](./PERFORMANCE_IMPROVEMENTS_REPORT.md) → **OM-1** into a
+> full design and records the as-built implementation. OM-1 replaces the desktop-tuned absolute constants
+> that gate engine throughput and native memory retention with values **calibrated once on first launch**
+> and written to `settings.json`, where they remain fully user-editable.
+>
+> **As-built deltas from the original design** (see §3.2, §5): throughput uses a **reference-anchored**
+> scaling model (not an absolute time-slice — the time-slice regressed the desktop); the `IsolatedJobProbe`
+> extraction is **mesh-only** (the lighting leg is self-contained to avoid refactoring a lighting-suite
+> guard). The calibrated knobs persist as `Settings` fields: `maxMeshRebuildsPerFrame`,
+> `maxLightJobsPerFrame`, `maxInFlightMeshJobs`, `chunkJobArrayPoolRetention`, `calibrationVersion`.
+> Desktop sanity verified: a 16-core / 64 GB box resolves to exactly the historical 10 / 32 / 20 / 512.
 >
 > This document also specifies two enabling refactors required by the calibrator and worth doing on
 > their own merits:
@@ -105,22 +112,27 @@ MaxInFlightMeshJobs   = g(JobArrayPoolRetention)         // keep retention ≈ (
 `f`/`g` are documented monotonic functions with a floor (never starve the pipeline) and a ceiling at
 today's constants. Exact breakpoints are tuning-only and live in one table in `DeviceCalibration`.
 
-### 3.2 Throughput budgets (benchmarked, first launch)
+### 3.2 Throughput budgets (benchmarked, first launch — reference-anchored)
 
-A first-launch micro-benchmark times the **real** mesh and lighting jobs and maps median cost to a
-per-frame budget:
+A first-launch micro-benchmark times the **real** mesh and lighting jobs (median ms/chunk) and maps
+that to a per-frame budget by **anchoring against a reference device**:
 
 ```
-maxMeshRebuildsPerFrame = clamp( floor(TARGET_MESH_MS_PER_FRAME  / medianMeshMs),  FLOOR, fieldRangeMax )
-maxLightJobsPerFrame    = clamp( floor(TARGET_LIGHT_MS_PER_FRAME / medianLightMs), FLOOR, fieldRangeMax )
+maxMeshRebuildsPerFrame = clamp( round(DEFAULT_MESH_BUDGET  * REFERENCE_MESH_MS  / medianMeshMs),  FLOOR, fieldRangeMax )
+maxLightJobsPerFrame    = clamp( round(DEFAULT_LIGHT_BUDGET * REFERENCE_LIGHT_MS / medianLightMs), FLOOR, fieldRangeMax )
 ```
 
-- `FLOOR ≥ 1` — never zero out the pipeline.
+- A device whose per-chunk time **equals the reference reproduces today's default budget exactly**
+  (`DEFAULT_MESH_BUDGET = 10`, `DEFAULT_LIGHT_BUDGET = 32`); slower devices scale down, faster devices up.
 - The `clamp` upper bound is the field's **own** `[Range]` max — not a new restriction (§2 non-goal).
-- `TARGET_*_MS_PER_FRAME` are the per-frame time-slice budgets and are **where the irreducible
-  hand-tuning lives** — centralized and documented in `DeviceCalibration`. A benchmark gives "ms per
-  chunk"; converting that to "N chunks per frame" is still a heuristic — OM-1 relocates the tuning, it
-  does not eliminate it.
+- `REFERENCE_*_MS` are **where the irreducible hand-tuning lives** — centralized in `DeviceCalibration`.
+  They were chosen over an absolute "ms-per-frame time slice" model because the historical defaults are
+  *count*-based, not time-budgeted (10 mesh × ~1.2 ms ≈ 12 ms/frame is not a real per-frame slice), so a
+  time-slice model regressed the desktop. Anchoring guarantees the "desktop unchanged" goal by construction.
+- **Anchor values are editor-measured** on a 16-core / 64 GB desktop (Burst on): `REFERENCE_MESH_MS ≈
+  1.233`, `REFERENCE_LIGHT_MS ≈ 1.110`. Re-anchor from a player-build capture when tuning (a follow-up;
+  editor Burst ≈ player Burst, so editor-anchoring is slightly generous in player — acceptable, it only
+  means a fast box gets ≥ the default, never less).
 
 ---
 
@@ -150,17 +162,28 @@ maxLightJobsPerFrame    = clamp( floor(TARGET_LIGHT_MS_PER_FRAME / medianLightMs
    (deterministic, not random) voxel pattern.
 3. Returns `medianMeshMs`, `medianLightMs`.
 
-**Reuse — `IsolatedJobProbe`.** The two scene benchmarks (`MeshGenerationBenchmark`,
-`LightingJobBenchmark`) already each own the isolated `Schedule → Complete → Stopwatch` setup for
-`MeshGenerationJob` / `NeighborhoodLightingJob`. Extract that core into an `IsolatedJobProbe` that takes
+**Reuse — `IsolatedJobProbe` (mesh shared; lighting self-contained — as built).** The mesh leg goes
+through a shared `IsolatedJobProbe.ScheduleMesh` that owns the `MeshGenerationJob` field wiring and takes
 its job data **by injection** (`JobDataManager` + `FluidVertexTemplatesNativeData`), **not** via the
-static `World.Instance`. Then it works in both contexts unchanged: the scene benchmarks pass
-`World.Instance.JobDataManager`; the calibrator passes a temporary one (§6). This also stops the two
-scene benchmarks from drifting apart.
+static `World.Instance`. `MeshGenerationBenchmark.ScheduleBenchmarkMeshing` now delegates to it (passing
+`World.Instance.*`); the calibrator passes a temporary one (§6) — so the two cannot drift.
 
-**Determinism mitigations & limits.** Warmup + median + fixed pattern stabilize the result; the
-acceptance test is budget variance ≤ ±1 across repeated probe runs (§8). A short first-launch run cannot
-capture sustained thermal throttling — accepted, and the reason "Recalibrate" exists.
+The **lighting** leg is deliberately **self-contained**: `StartupCalibrationProbe` stands up its own
+minimal flat-sunlit scenario and `NeighborhoodLightingJob` wiring rather than extracting from
+`LightingJobBenchmark`. The lighting job is far more coupled to that benchmark's scenario machinery
+(`NeighborMapSet`, padded volumes, three `NativeQueue`s, gather sources), so a full extraction would
+invasively refactor a lighting-suite regression guard. The accepted trade is a small, intentional
+duplication of job-field wiring on the lighting side, in exchange for leaving that guard untouched.
+
+> **Editor job-safety note (as built):** `MeshGenerationJob` has 9 `[ReadOnly]` light maps that the
+> benchmark leaves unassigned (it runs only in IL2CPP player builds where job-safety is off). The
+> calibrator must also pass *editor* job-safety, so `MeshProbeInput` carries optional light maps: the
+> benchmark leaves them `default` (unchanged behavior), the calibrator supplies zero-filled maps.
+
+**Determinism mitigations & limits.** Warmup + median + fixed pattern stabilize the result (measured
+variance < 0.01 ms across runs on the reference desktop — well within the ±1 budget acceptance gate, §8).
+A short first-launch run cannot capture sustained thermal throttling — accepted, and the reason
+"Recalibrate" exists (`SettingsManager.RecalibrateDevice()`).
 
 ---
 

@@ -96,7 +96,8 @@ public class WorldJobManager : IDisposable
     // --- Native Buffer Pooling ---
     // Pools the fixed-size full-chunk job input buffers (voxel + light maps) shared by lighting
     // and meshing jobs, avoiding ~1.7 MB of Persistent alloc/dispose churn per job.
-    private readonly ChunkJobArrayPool _jobArrayPool = new ChunkJobArrayPool();
+    // Retention cap is device-calibrated (OM-1); constructed in the constructor from settings.
+    private readonly ChunkJobArrayPool _jobArrayPool;
 
     // MR-6: pools whole MeshDataJobOutput instances for the runtime meshing path. The output is rented
     // at ScheduleMeshing and returned in ProcessMeshJobs after the data is uploaded — never while the
@@ -157,6 +158,10 @@ public class WorldJobManager : IDisposable
         _chunkGenerator.Initialize(VoxelData.Seed, activeWorldType, globalJobData);
 
         Settings settings = SettingsManager.LoadSettings();
+
+        // OM-1: size the native buffer pool's retention cap to the device (calibrated; default 512 on desktop).
+        _jobArrayPool = new ChunkJobArrayPool(settings.chunkJobArrayPoolRetention);
+
         GenerationFeatureFlags flags = GenerationFeatureFlags.Default;
         flags.EnableCaves = settings.enableCaves;
         flags.EnableLodes = settings.enableLodes;

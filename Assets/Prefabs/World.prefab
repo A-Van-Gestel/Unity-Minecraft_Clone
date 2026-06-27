@@ -72,6 +72,9 @@ MonoBehaviour:
     maxMeshRebuildsPerFrame: 10
     maxLightJobsPerFrame: 32
     maxStructureModsPerFrame: 5000
+    maxInFlightMeshJobs: 20
+    chunkJobArrayPoolRetention: 512
+    calibrationVersion: 0
     benchmarkRegionSize: 64
     benchmarkGenerationSpeeds: 10; 20; 50; 100; 200
     benchmarkLoadingSpeeds: 50; 100; 200

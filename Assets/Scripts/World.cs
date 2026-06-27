@@ -1664,9 +1664,9 @@ public class World : MonoBehaviour
         JobManager.ProcessMeshJobs();
 
         // 6. Schedule NEW mesh jobs for chunks that now need them.
-        //    NOTE: If we have too many jobs already running (e.g. > 20),
-        //          pause scheduling new ones to let the Job System catch up.
-        if (_chunksToBuildMesh.Count > 0 && JobManager.MeshJobs.Count < 20)
+        //    NOTE: If too many mesh jobs are already in flight, pause scheduling new ones to let the
+        //          Job System catch up. The cap is device-calibrated (OM-1) — see Settings.maxInFlightMeshJobs.
+        if (_chunksToBuildMesh.Count > 0 && JobManager.MeshJobs.Count < settings.maxInFlightMeshJobs)
         {
             int meshJobsScheduled = 0;
             // Iterate forwards to respect priority (Index 0 is highest priority).
