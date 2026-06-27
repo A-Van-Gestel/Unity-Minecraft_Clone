@@ -1504,9 +1504,9 @@ namespace Editor.Validation.Lighting
             // holding full sky must read 0 — otherwise the guard would over-estimate and veto a legitimate
             // removal of a voxel under a roof/wall.
             Vector3Int opaqueProbe = new Vector3Int(8, 70, 8);
-            Vector3Int opaqueneighbor = new Vector3Int(7, 70, 8);
-            world.SetBlock(opaqueneighbor, TestBlockPalette.Stone);
-            world.SetSkyLightAt(opaqueneighbor, 15);
+            Vector3Int opaqueNeighbor = new Vector3Int(7, 70, 8);
+            world.SetBlock(opaqueNeighbor, TestBlockPalette.Stone);
+            world.SetSkyLightAt(opaqueNeighbor, 15);
             byte opaqueSupportDim = world.InChunkSunlightSupportAt(opaqueProbe, B49_DIMGLASS_OPACITY);
             byte opaqueSupportFlat = world.InChunkSunlightSupportAt(opaqueProbe, 1);
             passed &= LightingAssert.IsTrue(opaqueSupportDim == 0 && opaqueSupportFlat == 0,

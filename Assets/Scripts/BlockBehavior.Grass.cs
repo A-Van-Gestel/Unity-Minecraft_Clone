@@ -35,14 +35,5 @@ public static partial class BlockBehavior
         return IsConvertibleDirt(chunkData, airPos + VoxelData.FaceChecks[3]); // FaceChecks[3] is Down
     }
 
-    /// Helper to reduce boilerplate code when checking a neighbor's neighbor.
-    private static VoxelState? Getneighborsneighbor(ChunkData chunkData, Vector3Int initialPos, int neighborFaceIndex, int finalFaceIndex)
-    {
-        VoxelState? initialneighbor = chunkData.GetState(initialPos + VoxelData.FaceChecks[neighborFaceIndex]);
-        if (!initialneighbor.HasValue) return null;
-
-        return chunkData.GetState(initialPos + VoxelData.FaceChecks[neighborFaceIndex] + VoxelData.FaceChecks[finalFaceIndex]);
-    }
-
     #endregion
 }
