@@ -6,6 +6,28 @@ namespace Helpers
 {
     public static class ResourceLoader
     {
+        /// <summary>Resources-relative path to the shared block-database asset (no extension).</summary>
+        private const string BLOCK_DATABASE_PATH = "Data/BlockDatabase";
+
+        /// <summary>
+        /// Loads the shared <see cref="BlockDatabase"/> asset from the Resources folder.
+        /// <para>The database is world-agnostic global engine content (block definitions, materials,
+        /// custom meshes); this static loader is the single source of truth for callers that need it
+        /// without a live <c>World</c> instance (e.g. the OM-1 startup calibrator, editor tools).</para>
+        /// </summary>
+        /// <returns>The shared block database, or <c>null</c> if the asset is missing (logged).</returns>
+        public static BlockDatabase LoadBlockDatabase()
+        {
+            BlockDatabase database = Resources.Load<BlockDatabase>(BLOCK_DATABASE_PATH);
+            if (!database)
+            {
+                Debug.LogError($"Could not find '{BLOCK_DATABASE_PATH}.asset' in Resources. " +
+                               "Block data is unavailable.");
+            }
+
+            return database;
+        }
+
         /// <summary>
         /// Loads the FluidMeshData assets from the Resources folder.
         /// </summary>
