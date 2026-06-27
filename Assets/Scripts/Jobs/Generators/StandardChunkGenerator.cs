@@ -348,7 +348,7 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
-        public GenerationJobData ScheduleGeneration(ChunkCoord coord)
+        public GenerationJobData ScheduleGeneration(ChunkCoord coord, global::Helpers.ActiveVoxelListPool activeVoxelPool = null)
         {
             Vector2Int chunkVoxelPos = coord.ToVoxelOrigin();
 
@@ -471,7 +471,14 @@ namespace Jobs.Generators
             // managed BlockType objects up to ChunkVolume times in Chunk.OnDataPopulated.
             // Pre-size for water-heavy chunks (oceans/lakes register thousands of active source
             // voxels) to avoid repeated Persistent realloc+copy growth inside the scan job.
-            NativeList<int> activeVoxels = new NativeList<int>(ActiveVoxelPresizeCapacity, Allocator.Persistent);
+            // TG-6: rent from the pool on the production path (returned at the STAGE-1 consume site in
+            // WorldJobManager); fall back to a fresh allocation when no pool is supplied (editor/benchmark),
+            // freed by GenerationJobData.Dispose. The pool also retains grown capacity across reuse, so a
+            // warmed pool removes the realloc+copy growth too.
+            bool activeVoxelsFromPool = activeVoxelPool != null;
+            NativeList<int> activeVoxels = activeVoxelsFromPool
+                ? activeVoxelPool.Rent()
+                : new NativeList<int>(ActiveVoxelPresizeCapacity, Allocator.Persistent);
             ActiveVoxelScanJob activeVoxelScanJob = new ActiveVoxelScanJob
             {
                 VoxelMap = outputMap,
@@ -489,6 +496,7 @@ namespace Jobs.Generators
                 StructureSpawns = structureSpawnsQueue,
                 WormTelemetry = wormTelemetry,
                 ActiveVoxels = activeVoxels,
+                ActiveVoxelsFromPool = activeVoxelsFromPool,
             };
         }
 

@@ -95,7 +95,16 @@ instead of a crash.
 | TG-3 ✅  | `UnityEngine.Random` → `Unity.Mathematics.Random` in behaviors                                                         |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
 | TG-4 ✅  | `BlockBehavior` data separation (ECS/DOTS pattern)                                                                     |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
 | TG-5 ⏭️ | `BlockBehavior` Burst function pointers (lighter alt. to TG-4 — superseded, not needed)                                |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| TG-6    | Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up)                                 |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| TG-6 ✅  | Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up)                                 |   🟡   |  🟡  |   ⚪³   |  ✅   |  ✅   |
+
+> ³ TG-6 benefit downgraded 🟡→⚪ after the change shipped: the pooled buffer is a `Persistent`
+> (native, not GC) container, and its alloc/free is a sub-µs main-thread op over a handful of chunks
+> per streaming frame — below every frame benchmark's noise floor. Two IL2CPP harnesses (the full-world
+> fluid stress pass and the isolated tick bench) came back **frame-neutral / no-regression**, exactly as
+> expected: the win is real but small and mostly off the main thread (worker-thread realloc-growth
+> avoidance on water-heavy chunks). Shipped as a cleanliness/scalability fix per the CLAUDE.md "pool
+> repeatedly alloc/freed containers" mandate and the MR-6 `MeshOutputPool` precedent, not for a
+> measurable speedup. See the TG-6 detail section.
 
 ### Main Thread & Miscellaneous
 
@@ -763,8 +772,8 @@ initialization code (low priority).
 > (`ChunkMath.GatherPaddedFluidVoxels`), gated by `BH-D1[L|H]` + a cross-chunk determinism stress + in-game; and the
 > **Y-band** (2026-06-27) sizes that gather to the active-fluid Y-extent (height-independent copy), gated by
 > `BH-D1[H|HB]`/`[L|HB]` + the Y-band determinism stress + in-game. **Phase 2 (grass) skipped** (negligible cost). The
-> new runtime buckets are pool-retained (no per-recycle churn — **TG-6-aligned**, but TG-6's own target, the
-> `GenerationJobData.ActiveVoxels` hand-off list, is untouched).
+> new runtime buckets are pool-retained (no per-recycle churn — **TG-6-aligned**; TG-6's own target, the
+> `GenerationJobData.ActiveVoxels` hand-off list, is now pooled too — shipped 2026-06-27).
 >
 > **Important — option (b), NOT a P-2 Layer 2 dependency.** Phase 4b deliberately took the **TG-4-local per-tick halo
 > gather** (option (b)), so it ships **standalone** with no chunk-storage commitment — TG-4 does **not** depend on
@@ -836,55 +845,59 @@ stream tick-for-tick.
 
 ---
 
-### TG-6. Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up)
+### TG-6 ✅. Per-chunk `ActiveVoxels` `NativeList<int>` alloc/free churn — pool it (TG-2 follow-up)
 
-*(Surfaced by the 2026-06-21 behavior-suite review, finding #4.)*
+*(Surfaced by the 2026-06-21 behavior-suite review, finding #4. Shipped 2026-06-27.)*
 
-**Observed:** TG-2's jobified emission allocates a fresh `NativeList<int>` per chunk generation —
+**Was:** TG-2's jobified emission allocated a fresh `NativeList<int>` per chunk generation —
 `new NativeList<int>(StandardChunkGenerator.ActiveVoxelPresizeCapacity, Allocator.Persistent)` (2048 ⇒
 8 KB) in `StandardChunkGenerator.ScheduleGeneration`, stored in `GenerationJobData.ActiveVoxels`, and
-freed per chunk in `GenerationJobData.Dispose`. During streaming this is per-chunk Persistent
+freed per chunk in `GenerationJobData.Dispose`. During streaming this was per-chunk Persistent
 allocate-and-free churn — exactly the repeated-allocation pattern CLAUDE.md says to pool — and the 8 KB
-is reserved up front even for the common sparse-actives chunk (which emits ~0 indices).
+was reserved up front even for the common sparse-actives chunk (which emits ~0 indices).
 
-**Recommendation:** Pool the list, mirroring **MR-6**'s `MeshOutputPool`. `NativeList` retains its
-allocated capacity across `Clear()`, so a warmed pool also removes the realloc-and-copy growth a
-water-heavy chunk (thousands of source voxels) otherwise pays inside the scan. Rent in
-`ScheduleGeneration`; at the consume site (`WorldJobManager.ProcessGenerationJobs` STAGE 1, after
-`RegisterActiveVoxelsFromJob`) return the list (cleared, capacity-retained) to the pool **instead of**
-letting `GenerationJobData.Dispose` free it — the same split `MeshingJobData.Output` / `_meshOutputPool`
-already uses. At shutdown, return each in-flight job's list, then dispose the pool.
+**Shipped:** new `Helpers/ActiveVoxelListPool.cs` (mirrors **MR-6**'s `MeshOutputPool`: `Rent`/`Return`/
+`Dispose`, `Clear()` on return retains capacity, `MAX_RETAINED` cap self-disposes overflow). `NativeList`
+retains its allocated capacity across `Clear()`, so a warmed pool also removes the realloc-and-copy growth
+a water-heavy chunk (thousands of source voxels) otherwise pays inside the scan.
+`IChunkGenerator.ScheduleGeneration` gained an optional `ActiveVoxelListPool` parameter (default `null`):
+`WorldJobManager` passes its owned pool on the production path; editor / preview / benchmark callers pass
+`null` and keep the fresh-alloc + `Dispose` path. A `GenerationJobData.ActiveVoxelsFromPool` flag routes
+the release — `Dispose` frees the list only when **not** pool-owned.
 
-**Wiring considerations (why this is its own change, not a quick edit):**
+**Release-path design (the part that mattered).** The first cut returned the list mid-pipeline at the
+STAGE-1 consume site; a `/code-review` found that left a **stale handle on the lingering job** (a
+budget-exhausted job stays enrolled in `GenerationJobs` after STAGE 1), which `WorldJobManager.Dispose`
+then **re-returned → double-push → double-dispose** at shutdown. The fix moved the return to a single
+terminal release helper, `WorldJobManager.ReleaseGenerationJobData` (mirroring `ReleaseLightingJobData` /
+`ReleaseMeshingJobInputs`), co-located with `Dispose` at the terminal completion **and** the shutdown
+loop. Because a job is removed from `GenerationJobs` the instant it reaches terminal completion, and
+shutdown only releases still-enrolled jobs, each job's list is returned **exactly once** — no stale-handle
+window. Native-container lifetime is respected: the return sits strictly after `Handle.Complete()`.
 
-- The pool reference must reach the generator, so `IChunkGenerator.ScheduleGeneration` (a
-  multi-implementer surface — `StandardChunkGenerator` + the legacy generator, which leaves the list
-  *uncreated* and so never rents) gains a pool dependency.
-- `GenerationJobData.Dispose` must stop disposing `ActiveVoxels` once it is pool-owned; the central
-  return site becomes the sole release path. This interacts with the dispose-path no-leak invariant now
-  documented on `GenerationJobData.Dispose` — the pooled list's lifecycle moves to the pool.
-- Native-container lifetime is the risk surface: a list returned before its generation `JobHandle` has
-  `Complete()`d is a use-after-free. The return must sit strictly after STAGE-1 consumption (it already
-  does, post-`Complete()`).
-
-> **Impact Analysis:**
-> - **Effort:** 🟡 Medium — pool type + threading it through the generator interface + the dispose-path split.
-> - **Risk:** 🟡 Medium — native-container lifetime / use-after-free; the pipeline has deadlock history
-    > (see the chunk-lifecycle invariants), so the return site must be exact.
-> - **Benefit:** 🟡 Medium — removes per-chunk 8 KB Persistent alloc/free during streaming and the
-    > realloc growth on active-heavy chunks once the pool warms; no main-thread tick cost change.
+> **Impact Analysis (as shipped):**
+> - **Effort:** 🟡 Medium — pool type + threading it through the generator interface + the terminal-release split.
+> - **Risk:** 🟡 Medium — native-container lifetime / use-after-free (the double-dispose the review caught);
+    > de-risked by routing all release through one post-`Complete()` helper.
+> - **Benefit:** ⚪ Low — removes per-chunk 8 KB Persistent alloc/free during streaming and the realloc
+    > growth on active-heavy chunks once the pool warms, but this is **native** (not GC) churn, sub-µs and
+    > mostly off the main thread; frame-neutral by construction (see footnote ³). No tick-path cost change.
 > - **Seed/Save:** ✅ / ✅ — active voxels are not persisted; pooling is an internal allocation concern.
 
-**Measurement gate (per MR-6 discipline):** ship this only with a before/after benchmark — the
-`ActiveVoxelScanBenchmark` (menu `Minecraft Clone/Benchmarks/Active-Voxel Scan (TG-2)`) already exists
-and its `LIST_CAPACITY` is pinned to `ActiveVoxelPresizeCapacity` — plus an IL2CPP re-capture, exactly as
-MR-6's pooling was validated.
+**Validation (no dedicated benchmark — by design).** The win is a `Persistent` (native, not GC) alloc that
+no frame benchmark can resolve above its noise floor, so the gate was reframed from "before/after speedup"
+to **no-regression on two IL2CPP harnesses**: the full-world fluid stress pass (`FluidStressPass`) and the
+isolated tick bench (`FluidTickBenchmark`) both came back frame-neutral across 3 runs each — uniform sub-2%
+deltas with no code path linking the pooling change to either hot path (settled/flood frame is Light-bound
+~69%; the tick path is `Chunk.TickUpdate`, which TG-6 never touches). Neither validates the *win*; together
+they confirm the refactor (incl. the double-dispose fix) is safe. `ActiveVoxelScanBenchmark` was **not**
+extended — it is editor/Mono-only and cannot capture IL2CPP. A future runtime A/B (pooled vs fresh leg on
+`ChunkGenerationBenchmark`) is the only place the win could be isolated; deferred as low-ROI for TG-6 alone
+(tracked as a possible standing generation-path regression guard, not a TG-6 blocker).
 
-**Already closed (the rest of review finding #4):** the `2048` magic number is extracted to
+**Also closed (the rest of review finding #4):** the `2048` magic number is extracted to
 `StandardChunkGenerator.ActiveVoxelPresizeCapacity` (the benchmark pins to it, no drift), and the
-dispose-path audit found only two `GenerationJobs` eviction sites (completion drain + shutdown), both of
-which `Dispose` — now guarded by the no-leak invariant comment on `GenerationJobData.Dispose`. Pooling is
-the sole remaining open item.
+dispose-path no-leak invariant is documented on `GenerationJobData.Dispose`.
 
 ---
 
@@ -1278,7 +1291,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
    P-5 stable-save bit (⚠️ save migration) → P-3 jobified merge.
 4. **Benchmark-gated structural work:**
    ~~MR-2 ✅ done — vertex format (60 B → 32 B/vertex, upload −57%)~~.
-   TG-6 (pool the per-chunk `ActiveVoxels` `NativeList` — small, independent; benchmark via `ActiveVoxelScanBenchmark`) →
+   ~~TG-6 ✅ done — pooled the per-chunk `ActiveVoxels` `NativeList` (`ActiveVoxelListPool`); benefit ⚪ (native, off-main-thread, frame-neutral), shipped as no-regression + CLAUDE.md/MR-6 pooling mandate~~ →
    GS-1 (baked-noise liquid shader) →
    ~~LI-1 ✅ done — padded lighting volume; layout validated (2.4–3× in-job BFS) but on-demand gather is the cost → NOT shipped standalone, folded into P-2~~ →
    ~~TG-1 (tick path) / TG-4 (full split) — ✅ TG-4 done (Phases 0–1+3+4a+4b+Y-band, all default-on); TG-1 ⏭️ obviated for the fluid hot path (grass residual negligible)~~.

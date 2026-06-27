@@ -65,8 +65,14 @@ namespace Jobs.Generators
         /// Schedules the generation job and returns a populated GenerationJobData struct.
         /// </summary>
         /// <param name="coord">The chunk coordinate to generate.</param>
+        /// <param name="activeVoxelPool">Optional pool for the per-chunk active-voxel
+        /// <see cref="GenerationJobData.ActiveVoxels"/> list (TG-6). When supplied, the generator rents from
+        /// it and marks <see cref="GenerationJobData.ActiveVoxelsFromPool"/> so the caller returns the list to
+        /// the pool instead of disposing it. When null (editor / preview / benchmark paths) the list is
+        /// freshly allocated and freed by <see cref="GenerationJobData.Dispose"/>. Generators that do not run
+        /// the active-voxel scan (e.g. the legacy generator) ignore it.</param>
         /// <returns>A <see cref="GenerationJobData"/> containing the job handle and output containers.</returns>
-        GenerationJobData ScheduleGeneration(ChunkCoord coord);
+        GenerationJobData ScheduleGeneration(ChunkCoord coord, global::Helpers.ActiveVoxelListPool activeVoxelPool = null);
 
         /// <summary>
         /// Synchronous main-thread voxel query. Used by World.GetHighestVoxel and spawn-point logic.

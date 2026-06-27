@@ -104,6 +104,12 @@ public class WorldJobManager : IDisposable
     // job reallocates its output buffers.
     private readonly MeshOutputPool _meshOutputPool = new MeshOutputPool();
 
+    // TG-6: pools the per-chunk active-voxel NativeList rented by the generation path. The list is rented
+    // inside StandardChunkGenerator.ScheduleGeneration and returned at the single terminal release point
+    // (ReleaseGenerationJobData, post-Complete) — never while the generation job may still be running.
+    // NativeList retains capacity across Clear(), so after warm-up no scan job reallocates its active-voxel list.
+    private readonly ActiveVoxelListPool _activeVoxelListPool = new ActiveVoxelListPool();
+
     // --- Cached Collections for GC Optimization ---
     private readonly List<ChunkCoord> _completedGenJobs = new List<ChunkCoord>();
     private readonly List<ChunkCoord> _completedMeshJobs = new List<ChunkCoord>();
@@ -202,7 +208,7 @@ public class WorldJobManager : IDisposable
         if (_world.worldData.Chunks.TryGetValue(chunkVoxelPos, out ChunkData data) && data.IsPopulated)
             return;
 
-        GenerationJobData jobData = _chunkGenerator.ScheduleGeneration(chunkCoord);
+        GenerationJobData jobData = _chunkGenerator.ScheduleGeneration(chunkCoord, _activeVoxelListPool);
         GenerationJobs.Add(chunkCoord, jobData);
     }
 
@@ -729,7 +735,7 @@ public class WorldJobManager : IDisposable
                     }
                 }
 
-                jobEntry.Value.Dispose();
+                ReleaseGenerationJobData(jobEntry.Value);
                 _completedGenJobs.Add(jobEntry.Key);
 
                 Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
@@ -744,10 +750,11 @@ public class WorldJobManager : IDisposable
             }
         }
 
-        // Each entry here was already Complete()+Dispose()'d at its STAGE-3 completion above, so removing it
-        // only drops the (now-empty) dictionary slot. Any future path that evicts a still-pending job (e.g. an
-        // early removal on view-distance change before it completes) MUST Complete()+Dispose() it first — see
-        // GenerationJobData.Dispose — or its per-chunk native buffers leak.
+        // Each entry here was already Complete()+ReleaseGenerationJobData()'d at its STAGE-3 completion above,
+        // so removing it only drops the (now-empty) dictionary slot. Any future path that evicts a still-pending
+        // job (e.g. an early removal on view-distance change before it completes) MUST Complete() then
+        // ReleaseGenerationJobData() it first — see ReleaseGenerationJobData / GenerationJobData.Dispose — or its
+        // per-chunk native buffers leak (and a pooled active-voxel list is lost from the pool).
         foreach (ChunkCoord chunkCoord in _completedGenJobs)
         {
             GenerationJobs.Remove(chunkCoord);
@@ -790,6 +797,26 @@ public class WorldJobManager : IDisposable
         {
             MeshJobs.Remove(chunkCoord);
         }
+    }
+
+    /// <summary>
+    /// Releases a completed generation job: returns its pooled active-voxel list to
+    /// <see cref="_activeVoxelListPool"/> (TG-6) and disposes the rest of its per-job containers via
+    /// <see cref="GenerationJobData.Dispose"/>. This is the single terminal release path for a pooled
+    /// <see cref="GenerationJobData.ActiveVoxels"/> — co-located with <c>Dispose</c> so the list is
+    /// returned exactly once (a job is removed from <see cref="GenerationJobs"/> the moment it reaches this
+    /// point, and shutdown only releases jobs still enrolled — never both). Non-pooled lists
+    /// (<see cref="GenerationJobData.ActiveVoxelsFromPool"/> == false) are freed by <c>Dispose</c> instead.
+    /// Must only be called after <c>Handle.Complete()</c>.
+    /// </summary>
+    /// <param name="jobData">The completed generation job data.</param>
+    private void ReleaseGenerationJobData(in GenerationJobData jobData)
+    {
+        // Return the pooled list BEFORE Dispose (which skips it via the ActiveVoxelsFromPool guard).
+        if (jobData.ActiveVoxelsFromPool)
+            _activeVoxelListPool.Return(jobData.ActiveVoxels);
+
+        jobData.Dispose();
     }
 
     /// <summary>
@@ -1242,7 +1269,10 @@ public class WorldJobManager : IDisposable
         foreach (GenerationJobData job in GenerationJobs.Values)
         {
             job.Handle.Complete();
-            job.Dispose();
+            // Releases an enrolled (not-yet-terminally-completed) job — returns its pooled list to the pool
+            // (freed by _activeVoxelListPool.Dispose() below) and disposes the rest. These jobs never reached
+            // the terminal ReleaseGenerationJobData in ProcessGenerationJobs, so this is their only release.
+            ReleaseGenerationJobData(job);
         }
 
         foreach (MeshingJobData job in MeshJobs.Values)
@@ -1274,6 +1304,7 @@ public class WorldJobManager : IDisposable
         // POOLING: Dispose retained buffers last — all jobs above have returned theirs by now.
         _jobArrayPool.Dispose();
         _meshOutputPool.Dispose();
+        _activeVoxelListPool.Dispose();
 
         _chunkGenerator?.Dispose();
     }

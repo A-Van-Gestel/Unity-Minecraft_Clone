@@ -564,12 +564,14 @@ registration rework)**, built against the final per-family layout — doing it f
 The pooling *concern* is not superseded (per-chunk native-list churn persists and grows); only its
 *implementation* is. See the TG-6 detail section in the performance report.
 
-> ⮕ **AS BUILT (Phase 1) — TG-6-aligned, but TG-6 is NOT closed.** Phase 1 chose a pool-friendly layout for the
-> **runtime** buckets — the per-family `NativeHashSet<int>`s are allocated once per pooled `ChunkData` (lazily),
+> ⮕ **AS BUILT (Phase 1) — TG-6-aligned; TG-6 now CLOSED (2026-06-27).** Phase 1 chose a pool-friendly layout for
+> the **runtime** buckets — the per-family `NativeHashSet<int>`s are allocated once per pooled `ChunkData` (lazily),
 > **retained across `Reset`**, and freed only when the pool trims the instance — so the new native storage adds no
-> per-recycle alloc/free churn. **TG-6's actual target is untouched:** the generation hand-off list
-> `GenerationJobData.ActiveVoxels` (`NativeList<int>` allocated per generated chunk, freed in `Dispose`) is still
-> per-chunk churn. TG-6 now builds against this final per-family sink layout (item 4 above), as planned.
+> per-recycle alloc/free churn. **TG-6's actual target is now pooled too:** the generation hand-off list
+> `GenerationJobData.ActiveVoxels` (`NativeList<int>` previously allocated per generated chunk, freed in `Dispose`)
+> is rented from `Helpers/ActiveVoxelListPool` and returned at the single terminal release point
+> (`WorldJobManager.ReleaseGenerationJobData`). Built against this final per-family sink layout (item 4 above), as
+> planned. See the TG-6 detail section in the performance report.
 
 ---
 
