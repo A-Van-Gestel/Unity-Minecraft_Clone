@@ -1744,93 +1744,14 @@ public class World : MonoBehaviour
         // --- Block Types & Custom Meshes ---
         // Biome and Lode data is now owned by each IChunkGenerator implementation,
         // allocated during IChunkGenerator.Initialize().
-
-        // --- Step 1: Collect all unique custom mesh assets
-        List<VoxelMeshData> uniqueCustomMeshes = new List<VoxelMeshData>();
-        foreach (BlockType blockType in blockDatabase.blockTypes)
-        {
-            if (blockType.meshData != null && !uniqueCustomMeshes.Contains(blockType.meshData))
-            {
-                uniqueCustomMeshes.Add(blockType.meshData);
-            }
-        }
-
-        // --- Step 2: Flatten custom mesh data into temporary lists
-        List<CustomMeshData> customMeshesList = new List<CustomMeshData>();
-        List<CustomFaceData> customFacesList = new List<CustomFaceData>();
-        List<CustomVertData> customVertsList = new List<CustomVertData>();
-        List<int> customTrisList = new List<int>();
-
-        foreach (VoxelMeshData meshAsset in uniqueCustomMeshes)
-        {
-            customMeshesList.Add(new CustomMeshData
-            {
-                FaceStartIndex = customFacesList.Count,
-                FaceCount = meshAsset.faces.Length,
-            });
-
-            if (meshAsset.faces.Length > 6)
-                Debug.LogWarning($"VoxelMeshData asset '{meshAsset.name}' has more than 6 faces. Only the first 6 will be used.");
-
-            foreach (FaceMeshData faceAsset in meshAsset.faces)
-            {
-                customFacesList.Add(new CustomFaceData
-                {
-                    VertStartIndex = customVertsList.Count,
-                    VertCount = faceAsset.vertData.Length,
-                    TriStartIndex = customTrisList.Count,
-                    TriCount = faceAsset.triangles.Length,
-                });
-
-                foreach (VertData vertAsset in faceAsset.vertData)
-                {
-                    customVertsList.Add(new CustomVertData { Position = vertAsset.position, UV = vertAsset.uv });
-                }
-
-                customTrisList.AddRange(faceAsset.triangles);
-            }
-        }
-
-        // --- Step 3: Convert lists to persistent NativeArrays
-        NativeArray<CustomMeshData> customMeshesJobData = new NativeArray<CustomMeshData>(customMeshesList.ToArray(), Allocator.Persistent);
-        NativeArray<CustomFaceData> customFacesJobData = new NativeArray<CustomFaceData>(customFacesList.ToArray(), Allocator.Persistent);
-        NativeArray<CustomVertData> customVertsJobData = new NativeArray<CustomVertData>(customVertsList.ToArray(), Allocator.Persistent);
-        NativeArray<int> customTrisJobData = new NativeArray<int>(customTrisList.ToArray(), Allocator.Persistent);
-
-        // --- Step 4: Populate blockTypesJobData, including the custom mesh index
-        NativeArray<BlockTypeJobData> blockTypesJobData =
-            new NativeArray<BlockTypeJobData>(blockDatabase.blockTypes.Length, Allocator.Persistent);
-
-        // Precomputed flat isActive lookup for the fallback active-voxel scan (load / pool-replay paths).
-        // Co-built in the loop below with blockTypesJobData[i].IsActive from the same BlockType.isActive source,
-        // so the two active-voxel scan paths (Chunk.OnDataPopulated vs Jobs.ActiveVoxelScanJob) cannot disagree
-        // on the active criterion — keep them built together.
-        IsActiveById = new bool[blockDatabase.blockTypes.Length];
-
-        for (int i = 0; i < blockDatabase.blockTypes.Length; i++)
-        {
-            int customMeshIndex = -1;
-            if (blockDatabase.blockTypes[i].meshData != null)
-            {
-                customMeshIndex = uniqueCustomMeshes.IndexOf(blockDatabase.blockTypes[i].meshData);
-            }
-
-            blockTypesJobData[i] = new BlockTypeJobData(blockDatabase.blockTypes[i], customMeshIndex);
-            IsActiveById[i] = blockDatabase.blockTypes[i].isActive;
-        }
-
-        // --- Step 5: Create the final JobDataManager ---
-        JobDataManager = new JobDataManager(
-            blockTypesJobData,
-            customMeshesJobData,
-            customFacesJobData,
-            customVertsJobData,
-            customTrisJobData
-        );
-
-        // --- Prepare Fluid Vertex Templates ---
-        FluidTemplates fluidTemplates = ResourceLoader.LoadFluidTemplates();
-        FluidVertexTemplates = new FluidVertexTemplatesNativeData(fluidTemplates);
+        //
+        // The flatten logic lives in the shared runtime JobDataManagerFactory (one source of truth,
+        // also used by editor tools and the OM-1 startup calibrator). World owns the resulting native
+        // containers and disposes them in OnDestroy.
+        GlobalJobData jobData = JobDataManagerFactory.Create(blockDatabase);
+        JobDataManager = jobData.JobDataManager;
+        FluidVertexTemplates = jobData.FluidVertexTemplates;
+        IsActiveById = jobData.IsActiveById;
     }
 
     /// <summary>
