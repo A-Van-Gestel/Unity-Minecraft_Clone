@@ -104,7 +104,8 @@ instead of a crash.
 > expected: the win is real but small and mostly off the main thread (worker-thread realloc-growth
 > avoidance on water-heavy chunks). Shipped as a cleanliness/scalability fix per the CLAUDE.md "pool
 > repeatedly alloc/freed containers" mandate and the MR-6 `MeshOutputPool` precedent, not for a
-> measurable speedup. See the TG-6 detail section.
+> measurable *frame* speedup. (The dedicated `ChunkGenerationBenchmark` fresh-vs-pooled leg *does* resolve
+> it in isolation — ~0.95 µs/ch of main-thread time — via narrowed micro-timing; see the TG-6 detail section.)
 
 ### Main Thread & Miscellaneous
 
@@ -891,9 +892,17 @@ isolated tick bench (`FluidTickBenchmark`) both came back frame-neutral across 3
 deltas with no code path linking the pooling change to either hot path (settled/flood frame is Light-bound
 ~69%; the tick path is `Chunk.TickUpdate`, which TG-6 never touches). Neither validates the *win*; together
 they confirm the refactor (incl. the double-dispose fix) is safe. `ActiveVoxelScanBenchmark` was **not**
-extended — it is editor/Mono-only and cannot capture IL2CPP. A future runtime A/B (pooled vs fresh leg on
-`ChunkGenerationBenchmark`) is the only place the win could be isolated; deferred as low-ROI for TG-6 alone
-(tracked as a possible standing generation-path regression guard, not a TG-6 blocker).
+extended — it is editor/Mono-only and cannot capture IL2CPP.
+
+The win *is* isolated by the runtime `ChunkGenerationBenchmark`, extended (2026-06-27) with a fresh-vs-pooled
+leg over Land (sparse) and Ocean (raised sea level → water-heavy, active-list realloc growth) scenarios,
+64 chunks/run, and `sched µs/ch` + `free µs/ch` columns narrowed to the main-thread schedule/release window
+where the per-chunk alloc lives. Across 3 IL2CPP runs the pooled leg shaves a stable **~0.6 µs/ch off schedule
+(~5%)** and **~0.35 µs/ch off release (~14–17%)** — consistent in sign across all scenario×run combinations —
+for ~0.95 µs/ch of main-thread time per chunk. `total ms/ch` (~1.58 ms) shows no leg advantage: it is
+dominated by the worker-side generation `Complete()`, so the Ocean realloc saving is real but sub-noise
+against it. The benchmark is retained as a standing generation-path regression guard and comparison-grade
+fixture for any future dedicated-generation work.
 
 **Also closed (the rest of review finding #4):** the `2048` magic number is extracted to
 `StandardChunkGenerator.ActiveVoxelPresizeCapacity` (the benchmark pins to it, no drift), and the

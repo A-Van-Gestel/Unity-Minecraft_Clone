@@ -34,8 +34,10 @@ namespace Helpers
         /// (<see cref="StandardChunkGenerator.ActiveVoxelPresizeCapacity"/> × 4 bytes), so even a fully
         /// warmed pool is bounded at a few hundred KB. Sized to comfortably cover steady-state in-flight
         /// generation demand with headroom; mirrors <see cref="MeshOutputPool"/>.
+        /// <para>Public so the generation benchmark can cap its concurrent-batch size to it — a batch larger
+        /// than this would force the pooled leg to partially fall back to fresh allocation.</para>
         /// </summary>
-        private const int MAX_RETAINED = 64;
+        public const int MaxRetained = 64;
 
         private readonly Stack<NativeList<int>> _pool = new Stack<NativeList<int>>();
 
@@ -66,7 +68,7 @@ namespace Helpers
         {
             if (!list.IsCreated) return;
 
-            if (_isDisposed || _pool.Count >= MAX_RETAINED)
+            if (_isDisposed || _pool.Count >= MaxRetained)
             {
                 list.Dispose();
                 return;
