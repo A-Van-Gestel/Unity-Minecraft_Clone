@@ -390,55 +390,26 @@ namespace Benchmarks
         /// <returns>A tuple containing the final JobHandle and the job's output data struct.</returns>
         private (JobHandle handle, MeshDataJobOutput output) ScheduleBenchmarkMeshing(BenchmarkVoxelData data, BenchmarkMode mode)
         {
-            MeshDataJobOutput meshOutput = new MeshDataJobOutput(Allocator.Persistent);
-
-            // SectionData is required by MeshGenerationJob.Execute (one entry per 16-block section).
-            // We deliberately leave every entry at default (IsEmpty=false, IsFullySolid=false) so that
-            // every section is processed via IterateStandardSection — the per-voxel hot path the
-            // Phase 2b meshing rewrite targets. Production uses the IsFullySolid shell-iteration
-            // optimization for solid sections, but that would skew the benchmark away from the
-            // code path under refactor.
-            const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
-            NativeArray<SectionJobData> sectionData = new NativeArray<SectionJobData>(sectionCount, Allocator.TempJob);
-
-            // If we're in CardinalsOnly mode, create a temporary empty array to pass to the unused job fields.
-            NativeArray<uint> emptyArray = mode == BenchmarkMode.CardinalsOnly
-                ? new NativeArray<uint>(0, Allocator.TempJob)
-                : default;
-
-            MeshGenerationJob job = new MeshGenerationJob
+            // Job field wiring + per-schedule scratch lives in the shared IsolatedJobProbe so the
+            // benchmark and the OM-1 startup calibrator schedule the identical job. Here the live world
+            // supplies the injected job data.
+            // Light maps left default — the benchmark runs only in player builds (job-safety off), and the
+            // job reads zero light for uncreated maps. This preserves the original benchmark's measured path.
+            MeshProbeInput input = new MeshProbeInput
             {
-                Map = data.Center,
-                SectionData = sectionData,
-                BlockTypes = _world.JobDataManager.BlockTypesJobData,
-                NeighborBack = data.Back,
-                NeighborFront = data.Front,
-                NeighborLeft = data.Left,
-                NeighborRight = data.Right,
-                NeighborFrontRight = mode == BenchmarkMode.WithDiagonals ? data.FrontRight : emptyArray,
-                NeighborBackRight = mode == BenchmarkMode.WithDiagonals ? data.BackRight : emptyArray,
-                NeighborBackLeft = mode == BenchmarkMode.WithDiagonals ? data.BackLeft : emptyArray,
-                NeighborFrontLeft = mode == BenchmarkMode.WithDiagonals ? data.FrontLeft : emptyArray,
-                CustomMeshes = _world.JobDataManager.CustomMeshesJobData,
-                CustomFaces = _world.JobDataManager.CustomFacesJobData,
-                CustomVerts = _world.JobDataManager.CustomVertsJobData,
-                CustomTris = _world.JobDataManager.CustomTrisJobData,
-                WaterVertexTemplates = _world.FluidVertexTemplates.WaterVertexTemplates,
-                LavaVertexTemplates = _world.FluidVertexTemplates.LavaVertexTemplates,
-                ClipBounds = MeshClipBounds.Disabled,
-                Output = meshOutput,
+                Center = data.Center,
+                Back = data.Back,
+                Front = data.Front,
+                Left = data.Left,
+                Right = data.Right,
+                FrontRight = data.FrontRight,
+                BackRight = data.BackRight,
+                BackLeft = data.BackLeft,
+                FrontLeft = data.FrontLeft,
+                IncludeDiagonals = mode == BenchmarkMode.WithDiagonals,
             };
 
-            // Schedule the job and chain disposal of all temporary native containers to its handle
-            // so they auto-free when the job completes (avoids JobTempAlloc 4-frame leak warnings).
-            JobHandle handle = job.Schedule();
-            handle = sectionData.Dispose(handle);
-            if (emptyArray.IsCreated)
-            {
-                handle = emptyArray.Dispose(handle);
-            }
-
-            return (handle, meshOutput);
+            return IsolatedJobProbe.ScheduleMesh(input, _world.JobDataManager, _world.FluidVertexTemplates);
         }
 
         /// <summary>
