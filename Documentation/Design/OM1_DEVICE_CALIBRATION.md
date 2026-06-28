@@ -226,6 +226,11 @@ multi-point by construction (a function, not an anchor), so they need no baselin
 - **Recalibration:** auto-run on `calibrationVersion` bump, plus an explicit **"Recalibrate
   Performance"** action (Dev menu and/or Settings tab) that clears the calibrated fields and re-runs —
   covers hardware swaps and lets a user reset after over-tweaking.
+  - *Apply semantics (as built):* the per-frame budgets and the in-flight mesh cap are re-read from
+    settings each frame and take effect immediately, but `chunkJobArrayPoolRetention` is captured once at
+    `ChunkJobArrayPool` construction (`WorldJobManager` init), so a changed retention **applies on the
+    next world load**. The Recalibrate action should therefore live where a reload follows (main menu),
+    or a live pool resize must be wired before exposing it mid-session.
 
 ---
 

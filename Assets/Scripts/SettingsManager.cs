@@ -720,6 +720,13 @@ public static class SettingsManager
     /// action after a hardware change or accidental over-tweak. No-op outside play mode, since
     /// calibration schedules Burst jobs.
     /// </summary>
+    /// <remarks>
+    /// The per-frame budgets and the in-flight mesh cap take effect immediately (re-read from
+    /// <c>settings</c> each frame), but <see cref="Settings.chunkJobArrayPoolRetention"/> is captured once
+    /// when <c>ChunkJobArrayPool</c> is constructed (at <c>WorldJobManager</c> init), so a changed
+    /// retention only applies on the <b>next world load</b>. Surface this from a menu where a reload
+    /// naturally follows (e.g. main menu), not mid-session, or wire a live pool resize first.
+    /// </remarks>
     /// <returns><c>true</c> if calibration ran and was saved; <c>false</c> if skipped (edit-mode).</returns>
     public static bool RecalibrateDevice()
     {
