@@ -86,7 +86,10 @@ Reference sites for `World.blockDatabase` (and the accessors backed by it):
 
 **Editor:**
 
-- `WorldEditor.cs:20, 38, 45` — reads `world.blockDatabase` (and marks it dirty for preset application).
+- `WorldEditor.cs` — *was* a `[CustomEditor(typeof(World))]` that read `world.blockDatabase` for its
+  preset tool. It turned out to be entirely commented out (dead since before this work), so it had no live
+  edit-time read to repoint — and a `World.BlockDatabase` that resolves only at runtime (in `Awake`) would
+  have read null in the edit-time inspector anyway. The dead file was deleted as part of this cleanup.
 - `BlockEditorWindow*`, `StructurePreviewWindow` — hold their **own** `_blockDatabase` (loaded
   independently); **not** `World`-coupled, out of scope.
 
