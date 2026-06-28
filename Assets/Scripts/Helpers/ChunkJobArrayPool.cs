@@ -53,7 +53,10 @@ namespace Helpers
         /// (benchmarks, editor tools).</param>
         public ChunkJobArrayPool(int maxRetainedPerType = DefaultMaxRetainedPerType)
         {
-            _maxRetainedPerType = maxRetainedPerType;
+            // Guard against a non-positive cap (e.g. a hand-edited / corrupt settings.json): a 0 or
+            // negative retention makes `Count >= _maxRetainedPerType` always true, so every returned
+            // buffer is disposed and every rent re-allocates — a per-frame native alloc/free storm.
+            _maxRetainedPerType = maxRetainedPerType < 1 ? 1 : maxRetainedPerType;
         }
 
         /// <summary>
