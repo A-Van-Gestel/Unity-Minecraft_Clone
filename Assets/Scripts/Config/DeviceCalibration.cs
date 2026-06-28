@@ -201,12 +201,13 @@ namespace Config
             sb.AppendLine($"Timestamp:        {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             sb.AppendLine($"CalibrationVer:   {CalibrationVersion}");
             sb.AppendLine();
-            sb.AppendLine("-- Device --");
-            sb.AppendLine($"Model:            {SystemInfo.deviceModel}");
-            sb.AppendLine($"OS:               {SystemInfo.operatingSystem}");
-            sb.AppendLine($"CPU:              {SystemInfo.processorType} ({SystemInfo.processorCount} logical cores)");
-            sb.AppendLine($"System RAM:       {SystemInfo.systemMemorySize} MB");
-            sb.AppendLine($"GPU:              {SystemInfo.graphicsDeviceName}");
+            // Shared system/build description — crucially records Backend (IL2CPP/Mono) and Editor-vs-Player,
+            // the config that determines whether a capture is comparable to the REFERENCE_*_MS anchor (§3.2).
+            sb.Append(BenchmarkEnvironment.DescribeSystem());
+            sb.AppendLine();
+            sb.AppendLine("=== Device (extra) ===");
+            sb.AppendLine($"Model:          {SystemInfo.deviceModel}");
+            sb.AppendLine($"GPU:            {SystemInfo.graphicsDeviceName}");
             sb.AppendLine();
             sb.AppendLine("-- Probe distribution (median is the throughput anchor) --");
             sb.AppendLine($"Mesh:   {probe.Mesh}");
