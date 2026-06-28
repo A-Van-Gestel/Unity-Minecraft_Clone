@@ -3157,7 +3157,7 @@ public class World : MonoBehaviour
     /// original position if it was already resolved.</returns>
     private Vector3 ResolveSpawnHeight(Vector3 position)
     {
-        if (position.y > ChunkRelativePosition.UNRESOLVED_HEIGHT + 1f)
+        if (ChunkRelativePosition.IsHeightResolved(position.y))
             return position;
 
         Vector3Int posToResolve = position.ToVector3Int();

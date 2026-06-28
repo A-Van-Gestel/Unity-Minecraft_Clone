@@ -25,9 +25,24 @@ namespace Data.WorldTypes
         public ChunkCoord Chunk;
 
         /// <summary>
-        /// A sentinel value indicating that the Y-axis has not yet been resolved against terrain height.
+        /// Sentinel Y value marking a height that has not yet been resolved against terrain.
+        /// Far below any valid terrain floor so it can never collide with a real height, yet within
+        /// the range Unity's renderer and physics can represent safely.
         /// </summary>
-        public const float UNRESOLVED_HEIGHT = float.MinValue;
+        public const float UNRESOLVED_HEIGHT = -1_000_000f;
+
+        /// <summary>
+        /// Any Y at or below this is treated as the unresolved sentinel; anything above is a real height.
+        /// </summary>
+        private const float RESOLVED_THRESHOLD = UNRESOLVED_HEIGHT + 1f;
+
+        /// <summary>
+        /// Returns <c>true</c> if the supplied world-space Y is a real, terrain-resolved height
+        /// rather than the <see cref="UNRESOLVED_HEIGHT"/> sentinel.
+        /// </summary>
+        /// <param name="worldY">The world-space Y coordinate to classify.</param>
+        /// <returns><c>true</c> if the height has been resolved; otherwise <c>false</c>.</returns>
+        public static bool IsHeightResolved(float worldY) => worldY > RESOLVED_THRESHOLD;
 
         /// <summary>
         /// Local position. X and Z are strictly bounded [0.0, ChunkMath.CHUNK_WIDTH).
