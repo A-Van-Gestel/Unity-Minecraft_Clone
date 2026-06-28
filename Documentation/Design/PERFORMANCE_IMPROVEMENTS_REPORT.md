@@ -1212,7 +1212,7 @@ culling overhead scale with loaded sections), growing further with taller worlds
 > caps, micro-benchmark → throughput, reference-anchored) written to `settings.json`, plus enablers **A**
 > (`ResourceLoader.LoadBlockDatabase()`) and **B** (shared runtime `JobDataManagerFactory`). Desktop
 > reproduces the historical 10 / 32 / 20 / 512 exactly. The follow-up structural cleanup **C** (decoupling
-> `World.blockDatabase`) is split out into [`BLOCK_DATABASE_DECOUPLING.md`](./BLOCK_DATABASE_DECOUPLING.md).
+> `World.blockDatabase`) is split out into [`BLOCK_DATABASE_DECOUPLING.md`](../Architecture/BLOCK_DATABASE_DECOUPLING.md).
 
 **Observed:** Every throughput and retention knob is a fixed number chosen on desktop hardware:
 `maxLightJobsPerFrame = 32`, `maxMeshRebuildsPerFrame = 10`, in-flight mesh cap `20` (hardcoded in

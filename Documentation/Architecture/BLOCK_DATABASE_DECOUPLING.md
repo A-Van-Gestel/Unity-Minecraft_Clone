@@ -1,6 +1,6 @@
-# C — Decoupling `World.blockDatabase` from the `World` Instance
+# Decoupling `World.blockDatabase` from the `World` Instance
 
-> **Status: Implemented.** Follow-up to OM-1, landed once OM-1's enablers A/B were in place. The
+> **Status: Implemented.** Follow-up to OM-1[^c], landed once OM-1's enablers A/B were in place. The
 > `BlockDatabase` was a world-agnostic, shared asset (every world uses the same one) yet was owned by
 > `World` as a serialized field and reached as `World.Instance.blockDatabase` throughout. The serialized
 > field is gone: `World` now resolves the database once in `Awake` via `ResourceLoader.LoadBlockDatabase()`
@@ -17,12 +17,12 @@
 
 **Relationship to other documents:**
 
-- [`OM1_DEVICE_CALIBRATION.md`](./OM1_DEVICE_CALIBRATION.md) — OM-1 introduces the two enablers this
+- [`OM1_DEVICE_CALIBRATION.md`](../Design/OM1_DEVICE_CALIBRATION.md) — OM-1 introduces the two enablers this
   cleanup builds on: **A** `ResourceLoader.LoadBlockDatabase()` (the static load path) and **B** the
   runtime `JobDataManagerFactory` (a `World`-free way to build job data). **C depends on A existing**;
   it should land *after* OM-1, when the load path and factory are already in place and the remaining work
   is mostly deleting the serialized field and repointing readers.
-- `Architecture/DATA_STRUCTURES.md` — the `BlockDatabase` / `BlockType` data model this references.
+- [`DATA_STRUCTURES.md`](./DATA_STRUCTURES.md) — the `BlockDatabase` / `BlockType` data model this references.
 
 ---
 
@@ -110,18 +110,18 @@ Reference sites for `World.blockDatabase` (and the accessors backed by it):
 4. **Remove the serialized field** and clean the World prefab's now-dangling reference (`unity-file-ops`).
 5. **Collapse the remaining ad-hoc loads** onto a single path — *done as a follow-up.* On inspection this
    was far smaller than §4.5 first implied, and splits by assembly:
-   - **Runtime → `ResourceLoader.LoadBlockDatabase()`:** `FluidTickBenchmark` was the only straggler (a
-     duplicated `Resources.Load<BlockDatabase>("Data/BlockDatabase")`); it now calls the loader. Every
-     runtime BlockDatabase load (`World`, `DeviceCalibration`, the benchmark) goes through one path.
-   - **Editor → `EditorBlockDatabaseCache.Database`:** editor tools must **not** use `ResourceLoader`
-     (which is `Resources.Load`-based). `EditorBlockDatabaseCache` intentionally uses `AssetDatabase`
-     (finds the asset anywhere, not just under `Resources/`; builds an OnGUI lookup dict; auto-refreshes on
-     domain reload; yields an editable, path-anchored reference for `SetDirty`/`SaveAssets`). The editor
-     windows (`BlockEditorWindow`, `StructurePreviewWindow`) **already** route through it; the lone
-     straggler was `ActiveVoxelScanBenchmark` (hardcoded asset path), now repointed at the cache.
-     `BlockIdGenerator` keeps its own `FindAssets` — code-gen genuinely needs the asset *path* to emit
-     `BlockIDs.cs` beside it. This supersedes §4.5's "editor windows … onto `ResourceLoader`" wording,
-     which conflicted with §2's non-goal; §2 was correct.
+    - **Runtime → `ResourceLoader.LoadBlockDatabase()`:** `FluidTickBenchmark` was the only straggler (a
+      duplicated `Resources.Load<BlockDatabase>("Data/BlockDatabase")`); it now calls the loader. Every
+      runtime BlockDatabase load (`World`, `DeviceCalibration`, the benchmark) goes through one path.
+    - **Editor → `EditorBlockDatabaseCache.Database`:** editor tools must **not** use `ResourceLoader`
+      (which is `Resources.Load`-based). `EditorBlockDatabaseCache` intentionally uses `AssetDatabase`
+      (finds the asset anywhere, not just under `Resources/`; builds an OnGUI lookup dict; auto-refreshes on
+      domain reload; yields an editable, path-anchored reference for `SetDirty`/`SaveAssets`). The editor
+      windows (`BlockEditorWindow`, `StructurePreviewWindow`) **already** route through it; the lone
+      straggler was `ActiveVoxelScanBenchmark` (hardcoded asset path), now repointed at the cache.
+      `BlockIdGenerator` keeps its own `FindAssets` — code-gen genuinely needs the asset *path* to emit
+      `BlockIDs.cs` beside it. This supersedes §4.5's "editor windows … onto `ResourceLoader`" wording,
+      which conflicted with §2's non-goal; §2 was correct.
 
 ---
 
@@ -156,3 +156,10 @@ the Main Menu — both of which it delivers. Fully removing `World`'s serialized
 in the World prefab serialization and a dozen repoint sites that have nothing to do with calibration.
 Bundling them would couple a performance feature to a structural cleanup and bloat the diff. With A in
 place, C becomes a small, focused follow-up: load once, repoint readers, delete the field.
+
+---
+
+[^c]: OM-1's design doc ([`OM1_DEVICE_CALIBRATION.md`](../Design/OM1_DEVICE_CALIBRATION.md)) labels this
+cleanup **C** — the third follow-up after enablers **A** (`ResourceLoader.LoadBlockDatabase()`) and
+**B** (the shared runtime `JobDataManagerFactory`). That **A/B/C** lettering is retained there for
+cross-reference; this document no longer carries the "C — " prefix in its title.

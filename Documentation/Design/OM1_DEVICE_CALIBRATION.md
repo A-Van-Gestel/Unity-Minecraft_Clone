@@ -24,7 +24,7 @@
 >
 > A third, larger structural cleanup it unblocks — **C. Fully decoupling `World.blockDatabase` from the
 > `World` instance** — is intentionally **out of scope** here and specified separately in
-> [`BLOCK_DATABASE_DECOUPLING.md`](./BLOCK_DATABASE_DECOUPLING.md).
+> [`BLOCK_DATABASE_DECOUPLING.md`](../Architecture/BLOCK_DATABASE_DECOUPLING.md).
 
 **Relationship to other documents:**
 
@@ -354,8 +354,8 @@ value on the very first world load is an acceptable bridge. Not expected to be n
 Static loader consistent with the existing `ResourceLoader.LoadFluidTemplates()`. Canonical path
 `"Data/BlockDatabase"` (already used at runtime by `FluidTickBenchmark`). Low risk, independently
 useful. Note: OM-1 does **not** remove `World`'s serialized `blockDatabase` reference — that is **C**
-([`BLOCK_DATABASE_DECOUPLING.md`](./BLOCK_DATABASE_DECOUPLING.md)). Until C lands, two access paths
-coexist (World's serialized reference and the static loader resolve to the same shared asset).
+([`BLOCK_DATABASE_DECOUPLING.md`](../Architecture/BLOCK_DATABASE_DECOUPLING.md)). C has since landed:
+`World` now resolves the database via the static loader and the serialized reference is gone.
 
 ### 6.B Shared runtime `JobDataManagerFactory`
 
