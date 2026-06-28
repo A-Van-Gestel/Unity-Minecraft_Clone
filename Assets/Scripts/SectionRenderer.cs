@@ -63,6 +63,26 @@ public class SectionRenderer
     /// <summary>The <see cref="s_materialCacheVersion"/> observed at this section's last material assignment (MR-3).</summary>
     private int _lastMaterialCacheVersion = -1;
 
+    /// <summary>
+    /// Resets the static material cache on every play-session start. With "Enter Play Mode Options →
+    /// Reload Domain" disabled, mutable statics survive between sessions, so without this hook the
+    /// cached material references (and the populated <see cref="s_materialCombinations"/> arrays) would
+    /// leak across sessions and let <see cref="EnsureMaterialCacheCurrent"/> early-return on stale or
+    /// destroyed materials. Also clears the UDR0001 domain-reload analyzer warnings.
+    /// </summary>
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStaticState()
+    {
+        s_cachedOpaque = null;
+        s_cachedTransparent = null;
+        s_cachedLiquid = null;
+        s_materialCacheVersion = 0;
+        for (int i = 0; i < s_materialCombinations.Length; i++)
+        {
+            s_materialCombinations[i] = null;
+        }
+    }
+
     public SectionRenderer(Transform parent, int sectionIndex)
     {
 #if UNITY_EDITOR
