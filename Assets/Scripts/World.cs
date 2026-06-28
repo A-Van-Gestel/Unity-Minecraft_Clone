@@ -72,12 +72,18 @@ public class World : MonoBehaviour
     [InitializationField]
     public Vector3 spawnPositionOffset = new Vector3(0.5f, 1.1f, 0.5f);
 
-    [Header("Blocks & Materials")]
-    [SerializeField]
-    [Tooltip("The BlockDatabase asset that contains all the block data & materials.")]
-    public BlockDatabase blockDatabase;
+    /// <summary>
+    /// The shared, world-agnostic block database. Resolved once in <see cref="Awake"/> via
+    /// <see cref="ResourceLoader.LoadBlockDatabase"/> (no longer a serialized field — every world uses the
+    /// same asset). Edit-mode test fixtures that bypass <see cref="Awake"/> inject a stub directly into this
+    /// backing field via reflection; the loader only runs when it is still null.
+    /// </summary>
+    private BlockDatabase _blockDatabase;
 
-    public BlockType[] BlockTypes => blockDatabase.blockTypes;
+    /// <summary>The shared block database backing the material and <see cref="BlockTypes"/> accessors.</summary>
+    public BlockDatabase BlockDatabase => _blockDatabase;
+
+    public BlockType[] BlockTypes => _blockDatabase.blockTypes;
 
     /// <summary>
     /// Precomputed flat lookup of <see cref="BlockType.isActive"/> indexed by block id, built once in
@@ -87,9 +93,9 @@ public class World : MonoBehaviour
     [NonSerialized]
     public bool[] IsActiveById;
 
-    public Material OpaqueMaterial => blockDatabase.opaqueMaterial;
-    public Material TransparentMaterial => blockDatabase.transparentMaterial;
-    public Material LiquidMaterial => blockDatabase.liquidMaterial;
+    public Material OpaqueMaterial => _blockDatabase.opaqueMaterial;
+    public Material TransparentMaterial => _blockDatabase.transparentMaterial;
+    public Material LiquidMaterial => _blockDatabase.liquidMaterial;
 
     private readonly Dictionary<ChunkCoord, Chunk> _chunkMap = new Dictionary<ChunkCoord, Chunk>();
 
@@ -327,6 +333,11 @@ public class World : MonoBehaviour
 
             // Initialize Pool Manager
             ChunkPool = new ChunkPoolManager(transform);
+
+            // Resolve the shared block database from the single static load path. Skipped when an edit-mode
+            // test fixture has already injected a stub into the backing field (it bypasses Awake entirely).
+            if (_blockDatabase == null)
+                _blockDatabase = ResourceLoader.LoadBlockDatabase();
 
             // --- Prepare Job-Safe Data (Block Types & Custom Meshes only — biomes are owned by the generator) ---
             PrepareGlobalJobData();
@@ -1756,7 +1767,7 @@ public class World : MonoBehaviour
         // The flatten logic lives in the shared runtime JobDataManagerFactory (one source of truth,
         // also used by editor tools and the OM-1 startup calibrator). World owns the resulting native
         // containers and disposes them in OnDestroy.
-        GlobalJobData jobData = JobDataManagerFactory.Create(blockDatabase);
+        GlobalJobData jobData = JobDataManagerFactory.Create(_blockDatabase);
         JobDataManager = jobData.JobDataManager;
         FluidVertexTemplates = jobData.FluidVertexTemplates;
         IsActiveById = jobData.IsActiveById;
@@ -2071,7 +2082,7 @@ public class World : MonoBehaviour
             {
                 VoxelState? stateToBreak = worldData.GetVoxelState(v.GlobalPosition);
                 if (stateToBreak.HasValue &&
-                    (blockDatabase.blockTypes[stateToBreak.Value.ID].tags & BlockTags.UNBREAKABLE) != 0)
+                    (BlockTypes[stateToBreak.Value.ID].tags & BlockTags.UNBREAKABLE) != 0)
                 {
                     continue; // Cannot break an unbreakable block.
                 }
@@ -2087,7 +2098,7 @@ public class World : MonoBehaviour
                     {
                         case ReplacementRule.ForcePlace:
                             // Force placement, but still respect Unbreakable blocks.
-                            if ((blockDatabase.blockTypes[existingState.Value.ID].tags & BlockTags.UNBREAKABLE) != 0)
+                            if ((BlockTypes[existingState.Value.ID].tags & BlockTags.UNBREAKABLE) != 0)
                                 canPlace = false;
                             break;
 
@@ -2100,8 +2111,8 @@ public class World : MonoBehaviour
                         case ReplacementRule.Default:
                         default:
                             // --- Use the default Block Tag system ---
-                            BlockType incomingProps = blockDatabase.blockTypes[v.ID];
-                            BlockType existingProps = blockDatabase.blockTypes[existingState.Value.ID];
+                            BlockType incomingProps = BlockTypes[v.ID];
+                            BlockType existingProps = BlockTypes[existingState.Value.ID];
 
                             if (!BlockTagUtility.CanReplace(incomingProps, existingProps))
                             {
@@ -2123,7 +2134,7 @@ public class World : MonoBehaviour
 
             // Capture old state BEFORE modification for support check
             VoxelState? oldState = worldData.GetVoxelState(v.GlobalPosition);
-            bool oldProvidedSupport = oldState.HasValue && blockDatabase.blockTypes[oldState.Value.ID].ProvidesSupport;
+            bool oldProvidedSupport = oldState.HasValue && BlockTypes[oldState.Value.ID].ProvidesSupport;
 
             chunkData.ModifyVoxel(localPos, v);
 
@@ -2131,13 +2142,13 @@ public class World : MonoBehaviour
             // If support was removed (solid→non-solid), break any block above that requires it.
             if (oldProvidedSupport)
             {
-                BlockType newModProps = blockDatabase.blockTypes[v.ID];
+                BlockType newModProps = BlockTypes[v.ID];
                 if (!newModProps.ProvidesSupport)
                 {
                     Vector3Int abovePos = v.GlobalPosition + Vector3Int.up;
                     VoxelState? aboveState = worldData.GetVoxelState(abovePos);
                     if (aboveState.HasValue &&
-                        (blockDatabase.blockTypes[aboveState.Value.ID].tags & BlockTags.REQUIRES_SUPPORT) != 0)
+                        (BlockTypes[aboveState.Value.ID].tags & BlockTags.REQUIRES_SUPPORT) != 0)
                     {
                         _modifications.Enqueue(new VoxelMod(abovePos, blockId: BlockIDs.Air)
                         {
@@ -3220,7 +3231,7 @@ public class World : MonoBehaviour
         {
             Vector3Int currentVoxel = new Vector3Int(x, i, z);
             byte voxelBlockId = JobManager.GetVoxel(currentVoxel);
-            if (!blockDatabase.blockTypes[voxelBlockId].isSolid) continue;
+            if (!BlockTypes[voxelBlockId].isSolid) continue;
             Debug.Log($"Highest voxel in chunk {chunkCoord.X} / {chunkCoord.Z} is {currentVoxel}.");
             return currentVoxel;
         }
@@ -3244,7 +3255,7 @@ public class World : MonoBehaviour
         VoxelState? voxel = worldData.GetVoxelState(worldPos);
         if (!voxel.HasValue) return false;
 
-        BlockType props = blockDatabase.blockTypes[voxel.Value.ID];
+        BlockType props = BlockTypes[voxel.Value.ID];
 
         // Skip Air (ID 0) — never a hit
         if (voxel.Value.ID == BlockIDs.Air) return false;

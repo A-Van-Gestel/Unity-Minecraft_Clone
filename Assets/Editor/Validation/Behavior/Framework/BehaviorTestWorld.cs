@@ -161,7 +161,9 @@ namespace Editor.Validation.Behavior.Framework
                 // AddComponent on a plain MonoBehaviour runs no Awake/OnEnable/OnValidate in edit mode, so no
                 // world initialization fires; we only need the component as the typed Instance target.
                 _world = _worldGo.AddComponent<World>();
-                _world.blockDatabase = _stubDatabase;
+                // World no longer exposes a public block-database field; inject the stub into the private
+                // backing field directly (Awake is bypassed in edit mode, so the loader never overwrites it).
+                ValidationReflection.SetInstanceField(_world, "_blockDatabase", _stubDatabase);
                 _world.settings = new Settings { enableLighting = false, enableWaterDiagnosticLogs = false };
                 // Empty WorldData: ChunkData.GetState routes out-of-chunk reads to worldData.GetVoxelState,
                 // which returns null for absent chunks — so a border-reaching neighbor query degrades to "void"

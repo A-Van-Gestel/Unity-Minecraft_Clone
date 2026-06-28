@@ -119,7 +119,6 @@ MonoBehaviour:
   player: {fileID: 0}
   spawnPosition: {x: 0, y: 0, z: 0}
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
-  blockDatabase: {fileID: 11400000, guid: 6aebc05383d66d242886f3518fb31bb0, type: 2}
   debugScreen: {fileID: 0}
   clouds: {fileID: 0}
   worldData:

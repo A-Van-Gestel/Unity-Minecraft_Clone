@@ -1,10 +1,19 @@
 # C — Decoupling `World.blockDatabase` from the `World` Instance
 
-> **Status: Design (proposed). Follow-up to OM-1 — not a blocker for it.** The `BlockDatabase` is a
-> world-agnostic, shared asset (every world currently uses the same one), yet it is owned by `World` as a
-> serialized field and reached as `World.Instance.blockDatabase` throughout. This document specifies
-> removing that ownership so the database is loaded once from a static source and the engine stops
-> treating a global resource as `World` state.
+> **Status: Implemented.** Follow-up to OM-1, landed once OM-1's enablers A/B were in place. The
+> `BlockDatabase` was a world-agnostic, shared asset (every world uses the same one) yet was owned by
+> `World` as a serialized field and reached as `World.Instance.blockDatabase` throughout. The serialized
+> field is gone: `World` now resolves the database once in `Awake` via `ResourceLoader.LoadBlockDatabase()`
+> and exposes it through a read-only `World.BlockDatabase` property; the material / `BlockTypes` accessors
+> and all gameplay readers are backed by that loaded instance.
+>
+> **Two implementation notes beyond §3's original blast radius** (both grew after this doc was first
+> written): the edit-mode validation fixtures `BehaviorTestWorld` and `SectionRendererTestFixture` inject a
+> *stub* database. Because they bypass `Awake`, they now set the private backing field directly via
+> `ValidationReflection.SetInstanceField(world, "_blockDatabase", stub)` (consistent with how they already
+> inject `Instance`/`ChunkPool`); the `Awake` loader only runs when the field is still null, so the stub is
+> never overwritten. `FluidTickBenchmark` dropped its manual assignment and relies on the loader (it uses
+> the real asset anyway), keeping only its pre-flight existence check.
 
 **Relationship to other documents:**
 

@@ -93,7 +93,9 @@ namespace Editor.Validation.Meshing.Framework
                 // AddComponent on a plain MonoBehaviour does NOT invoke Awake/OnEnable/OnValidate in edit mode,
                 // so no World initialization runs — we only need the component as the typed Instance target.
                 World world = _worldGo.AddComponent<World>();
-                world.blockDatabase = _stubDatabase;
+                // World no longer exposes a public block-database field; inject the stub into the private
+                // backing field directly (Awake is bypassed in edit mode, so the loader never overwrites it).
+                ValidationReflection.SetInstanceField(world, "_blockDatabase", _stubDatabase);
 
                 _parentGo = new GameObject("MH6_SectionParent");
 

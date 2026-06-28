@@ -17,16 +17,16 @@ namespace Editor
             World world = (World)target;
 
             // Check the referenced BlockDatabase asset.
-            if (world.blockDatabase == null || world.blockTypes == null || world.blockTypes.Length == 0)
+            if (world.BlockDatabase == null || world.BlockTypes == null || world.BlockTypes.Length == 0)
                 return;
 
             EditorGUILayout.Space(10);
             EditorGUILayout.LabelField("Block Tag Preset Tools", EditorStyles.boldLabel);
 
             // Iterate through the database's array.
-            for (int i = 0; i < world.blockTypes.Length; i++)
+            for (int i = 0; i < world.BlockTypes.Length; i++)
             {
-                BlockType blockType = world.blockTypes[i];
+                BlockType blockType = world.BlockTypes[i];
 
                 // Check if a preset is assigned for this block type
                 if (blockType.tagPreset != null)
@@ -35,14 +35,14 @@ namespace Editor
                     if (GUILayout.Button($"Apply Preset to '{blockType.blockName}' (ID: {i})"))
                     {
                         // This allows the action to be undone with Ctrl+Z
-                        Undo.RecordObject(world.blockDatabase, $"Apply Preset to {blockType.blockName}");
+                        Undo.RecordObject(world.BlockDatabase, $"Apply Preset to {blockType.blockName}");
 
                         // Core Logic: Copy values from the preset to the block type.
                         blockType.tags = blockType.tagPreset.tags;
                         blockType.canReplaceTags = blockType.tagPreset.canReplaceTags;
 
                         // Mark the object as "dirty" to ensure the changes are saved.
-                        EditorUtility.SetDirty(world.blockDatabase);
+                        EditorUtility.SetDirty(world.BlockDatabase);
 
                         Debug.Log($"Applied preset '{blockType.tagPreset.name}' to block '{blockType.blockName}'.");
                     }
@@ -52,5 +52,6 @@ namespace Editor
     }
 }
 */
+
 
 

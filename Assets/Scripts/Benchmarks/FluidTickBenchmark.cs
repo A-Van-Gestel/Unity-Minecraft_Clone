@@ -123,10 +123,10 @@ namespace Benchmarks
             }
 
             // Stand up our own inert World. The trick: create the GameObject inactive so AddComponent<World> DEFERS
-            // Awake, wire blockDatabase (Awake's PrepareGlobalJobData reads it), force the component disabled so the
-            // World.Start → StartWorld full bootstrap never fires, then activate — Awake now runs (Instance +
-            // ChunkPool + job-safe block tables) while Start/Update stay dormant. A fully-wired World.Instance with
-            // zero tick-loop interference, all owned and torn down by this benchmark.
+            // Awake, force the component disabled so the World.Start → StartWorld full bootstrap never fires, then
+            // activate — Awake now runs (loads the shared block database, Instance + ChunkPool + job-safe block
+            // tables) while Start/Update stay dormant. A fully-wired World.Instance with zero tick-loop
+            // interference, all owned and torn down by this benchmark.
             _ownWorld = CreateInertWorld();
         }
 
@@ -170,7 +170,7 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Creates a disabled <see cref="World"/> wired only with its <c>blockDatabase</c> — enough for <c>Awake</c> to
+        /// Creates a disabled <see cref="World"/> whose <c>Awake</c> loads the shared block database — enough to
         /// initialize <c>Instance</c>, the chunk pool, and the block tables, but never the full <c>StartWorld</c> boot.
         /// </summary>
         /// <returns>The inert world component, or <c>null</c> if the block database could not be loaded.</returns>
@@ -184,11 +184,10 @@ namespace Benchmarks
             }
 
             GameObject go = new GameObject("FluidBench_InertWorld");
-            go.SetActive(false); // defer Awake until blockDatabase is wired
+            go.SetActive(false); // defer Awake (the db pre-check above guards against the asset being missing)
             World world = go.AddComponent<World>();
-            world.blockDatabase = db;
             world.enabled = false; // Start()/StartWorld() must never run
-            go.SetActive(true); // Awake runs now (Instance + ChunkPool + block tables)
+            go.SetActive(true); // Awake runs now (loads the block database, Instance + ChunkPool + block tables)
 
             // ApplyModifications routes a mod whose target chunk isn't registered/populated through ModManager (a
             // dependency StartWorld normally builds). Interior scenarios never hit that branch, but wire a volatile
