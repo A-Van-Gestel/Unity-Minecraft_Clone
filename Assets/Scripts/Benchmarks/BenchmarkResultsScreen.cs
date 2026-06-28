@@ -59,7 +59,9 @@ namespace Benchmarks
         private void OnOpenFolderClicked()
         {
             if (string.IsNullOrEmpty(_logFolderPath)) return;
-            Application.OpenURL("file:///" + _logFolderPath.Replace('\\', '/'));
+            // Opens the OS file browser on desktop, or the system Downloads view on Android (where
+            // file:// is a no-op and reports live in MediaStore Downloads).
+            BenchmarkEnvironment.OpenReportsLocation(_logFolderPath);
         }
 
         private void OnReturnClicked()

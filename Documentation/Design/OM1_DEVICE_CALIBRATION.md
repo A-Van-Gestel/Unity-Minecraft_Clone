@@ -305,9 +305,9 @@ can't reference `UnityEngine.AndroidJNIModule`), so the Android player build is 
 
 > **Done (post-review #8):** the MediaStore-Downloads routing was generalized into
 > `BenchmarkEnvironment.WriteReportToDisk`, so **every** benchmark report (not just calibration) now lands
-> in public Downloads on Android. **Remaining follow-up (not OM-1 scope):** the **Benchmark Results
-> Screen** "Open folder" action still uses `Application.OpenURL("file://…")`, which is a no-op on Android
-> even though the file now exists in Downloads — repointing that open/share action is a separate change.
+> in public Downloads on Android. The **Benchmark Results Screen** "Open folder" action was likewise
+> repointed to `BenchmarkEnvironment.OpenReportsLocation`, which opens the system Downloads view
+> (`DownloadManager.ACTION_VIEW_DOWNLOADS`) on Android instead of the no-op `file://` URL.
 
 ---
 

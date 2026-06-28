@@ -203,6 +203,55 @@ namespace Benchmarks
 #endif
         }
 
+        /// <summary>
+        /// Opens the location where reports are stored for the user to browse. On desktop/editor this opens
+        /// <paramref name="desktopFolderPath"/> in the OS file browser; on Android it opens the system
+        /// <b>Downloads</b> view (where <see cref="WriteReportToDisk"/> places reports), since a
+        /// <c>file://</c> URL into app-private storage is a no-op there.
+        /// </summary>
+        /// <param name="desktopFolderPath">The report folder to open on desktop/editor (ignored on Android).</param>
+        public static void OpenReportsLocation(string desktopFolderPath)
+        {
+            // Android: a file:// URL is blocked, and reports live in MediaStore Downloads (no real path),
+            // so open the system Downloads UI instead. Fall through to file:// if the intent fails.
+            if (Application.platform == RuntimePlatform.Android && TryOpenAndroidDownloads())
+                return;
+
+            if (!string.IsNullOrEmpty(desktopFolderPath))
+                Application.OpenURL("file:///" + desktopFolderPath.Replace('\\', '/'));
+        }
+
+        /// <summary>
+        /// Launches the Android system Downloads view (<c>DownloadManager.ACTION_VIEW_DOWNLOADS</c>). The JNI
+        /// body compiles only under the Android target; elsewhere it is a no-op returning <c>false</c>.
+        /// </summary>
+        /// <returns><c>true</c> if the Downloads view was launched; <c>false</c> on any failure.</returns>
+        private static bool TryOpenAndroidDownloads()
+        {
+#if UNITY_ANDROID
+            try
+            {
+                const int FLAG_ACTIVITY_NEW_TASK = 0x10000000;
+
+                using AndroidJavaClass player = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                using AndroidJavaObject activity = player.GetStatic<AndroidJavaObject>("currentActivity");
+
+                // DownloadManager.ACTION_VIEW_DOWNLOADS == "android.intent.action.VIEW_DOWNLOADS".
+                using AndroidJavaObject intent = new AndroidJavaObject("android.content.Intent", "android.intent.action.VIEW_DOWNLOADS");
+                intent.Call<AndroidJavaObject>("addFlags", FLAG_ACTIVITY_NEW_TASK);
+                activity.Call("startActivity", intent);
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Benchmark] Could not open the Android Downloads view ({e.Message}).");
+                return false;
+            }
+#else
+            return false;
+#endif
+        }
+
         // ----- Helpers -----
 
         /// <summary>
