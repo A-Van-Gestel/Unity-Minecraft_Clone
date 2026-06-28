@@ -149,6 +149,14 @@ namespace Config
             if (s_override.HasValue) return s_override.Value;
 
             BlockDatabase database = ResourceLoader.LoadBlockDatabase();
+            if (!database)
+            {
+                // Fail loudly but cleanly rather than NRE deep inside the factory. The caller treats this
+                // as "calibration could not run" and retries next launch (see SettingsManager.ApplyCalibration).
+                throw new InvalidOperationException(
+                    "OM-1 calibration cannot run: BlockDatabase failed to load from Resources.");
+            }
+
             GlobalJobData jobData = JobDataManagerFactory.Create(database);
             try
             {

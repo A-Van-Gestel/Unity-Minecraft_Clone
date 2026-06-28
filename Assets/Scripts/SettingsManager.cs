@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using Config;
 using Data;
 using Data.Enums;
 using MyBox;
@@ -651,7 +652,7 @@ public static class SettingsManager
 
                 // OM-1: Re-calibrate a file written by an older calibration formula (or a pre-OM-1 file
                 // with no version stamp). Only overwrites the calibrated engine knobs, not other edits.
-                if (loadedSettings.calibrationVersion < Config.DeviceCalibration.CalibrationVersion
+                if (loadedSettings.calibrationVersion < DeviceCalibration.CalibrationVersion
                     && ApplyCalibration(loadedSettings))
                 {
                     SaveSettings(loadedSettings);
@@ -678,35 +679,39 @@ public static class SettingsManager
 
     /// <summary>
     /// Seeds the OM-1 device-calibrated engine knobs into <paramref name="settings"/> and stamps the
-    /// calibration version. Runs only at runtime (Main Menu / player builds) — never during editor
-    /// edit-mode settings loads, since calibration schedules Burst jobs. Falls back to the existing
-    /// field defaults if the calibration probe throws.
+    /// calibration version — but only on success. Runs only at runtime (Main Menu / player builds), never
+    /// during editor edit-mode settings loads, since calibration schedules Burst jobs.
+    /// <para>On failure the existing field defaults are kept and the version is left <b>un-stamped</b>, so
+    /// the next launch retries. This is deliberate: the probe is most likely to fail (e.g. low-memory OOM)
+    /// on exactly the constrained devices OM-1 must scale down, and stamping on failure would latch the
+    /// desktop defaults onto them with no automatic retry.</para>
     /// </summary>
     /// <param name="settings">The settings instance to seed in place.</param>
-    /// <returns><c>true</c> if calibration ran (the caller should persist); <c>false</c> if skipped.</returns>
+    /// <returns><c>true</c> only if calibration succeeded (the caller should persist); <c>false</c> if it
+    /// was skipped (edit-mode) or failed (defaults kept, will retry next launch).</returns>
     private static bool ApplyCalibration(Settings settings)
     {
         if (!Application.isPlaying) return false; // edit-mode settings load — defer to play/first launch
 
         try
         {
-            Config.CalibrationResult result = Config.DeviceCalibration.Resolve();
+            CalibrationResult result = DeviceCalibration.Resolve();
             settings.maxMeshRebuildsPerFrame = result.MaxMeshRebuildsPerFrame;
             settings.maxLightJobsPerFrame = result.MaxLightJobsPerFrame;
             settings.maxInFlightMeshJobs = result.MaxInFlightMeshJobs;
             settings.chunkJobArrayPoolRetention = result.JobArrayPoolRetention;
-            settings.calibrationVersion = Config.DeviceCalibration.CalibrationVersion;
+            settings.calibrationVersion = DeviceCalibration.CalibrationVersion;
             Debug.Log($"[SettingsManager] Device-calibrated budgets (OM-1): {result}");
+            return true;
         }
         catch (Exception e)
         {
-            // Stamp the version anyway so a persistently failing probe does not re-run every launch;
-            // the user can force a retry via the explicit recalibration path.
-            Debug.LogWarning($"[SettingsManager] Device calibration failed ({e.Message}); keeping default budgets.");
-            settings.calibrationVersion = Config.DeviceCalibration.CalibrationVersion;
+            // Keep the safe default budgets and DO NOT stamp the version, so the next launch retries
+            // rather than latching desktop caps onto a device that failed to calibrate. A deterministic
+            // failure (e.g. a missing BlockDatabase) keeps surfacing this log, which is the right signal.
+            Debug.LogWarning($"[SettingsManager] Device calibration failed ({e.Message}); keeping default budgets, will retry next launch.");
+            return false;
         }
-
-        return true;
     }
 
     /// <summary>
