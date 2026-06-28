@@ -98,24 +98,40 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Strips rich-text tags from a report string and writes the plain-text version to a
-        /// timestamped file under <c>Application.persistentDataPath/Benchmarks/</c>.
+        /// Strips rich-text tags from a report string and writes the plain-text version to a timestamped
+        /// file. On desktop/editor this is <c>Application.persistentDataPath/Benchmarks/</c>; on Android it
+        /// is the public <c>Downloads/&lt;product&gt;/</c> collection (via MediaStore) instead, because
+        /// <c>persistentDataPath</c> is app-private there — invisible to file managers and unopenable via
+        /// <c>file://</c>. Android falls back to <c>persistentDataPath</c> if MediaStore fails.
         /// </summary>
         /// <param name="richTextReport">The full report with rich-text tags.</param>
         /// <param name="filenamePrefix">Prefix for the output file (e.g., "BenchmarkRun" or "MeshGenerationBenchmark").</param>
-        /// <returns>The full file path on success, or <c>null</c> on failure.</returns>
+        /// <returns>The written location (full path, or public Downloads relative path on Android) on
+        /// success, or <c>null</c> on failure.</returns>
         public static string WriteReportToDisk(string richTextReport, string filenamePrefix)
         {
+            string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+            string fileName = $"{filenamePrefix}_{timestamp}.log";
+            string plainText = StripRichTextTags(richTextReport);
+
+            // Android: target public Downloads so the file is retrievable from the Files / Downloads app.
+            if (Application.platform == RuntimePlatform.Android)
+            {
+                string downloadsLocation = TryWriteToAndroidDownloads(fileName, plainText);
+                if (!string.IsNullOrEmpty(downloadsLocation))
+                {
+                    Debug.Log($"<color=cyan>[Benchmark] Report written to:</color> {downloadsLocation}");
+                    return downloadsLocation;
+                }
+                // MediaStore failed — fall through to persistentDataPath (still adb-pullable).
+            }
+
             try
             {
                 string folder = Path.Combine(Application.persistentDataPath, "Benchmarks");
                 Directory.CreateDirectory(folder);
-
-                string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                string fileName = $"{filenamePrefix}_{timestamp}.log";
                 string fullPath = Path.Combine(folder, fileName);
 
-                string plainText = StripRichTextTags(richTextReport);
                 File.WriteAllText(fullPath, plainText);
 
                 Debug.Log($"<color=cyan>[Benchmark] Report written to:</color> {fullPath}");
@@ -126,6 +142,65 @@ namespace Benchmarks
                 Debug.LogError($"[Benchmark] Failed to write report to disk: {e.Message}");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Writes <paramref name="content"/> into the device's public <c>Downloads</c> collection via
+        /// MediaStore (Android 10+ / API 29+, no storage permission required), so the file is reachable
+        /// from the Files / Downloads app — unlike <c>persistentDataPath</c>, which is app-private. The JNI
+        /// body compiles only under the Android target (<c>#if UNITY_ANDROID</c>); elsewhere it is a no-op
+        /// returning <c>null</c> so the caller falls back to <c>persistentDataPath</c>.
+        /// </summary>
+        /// <param name="fileName">Display name for the created file.</param>
+        /// <param name="content">UTF-8 text to write.</param>
+        /// <returns>The public relative path on success, or <c>null</c> on any failure.</returns>
+        private static string TryWriteToAndroidDownloads(string fileName, string content)
+        {
+#if UNITY_ANDROID
+            try
+            {
+                // Group reports under Downloads/<product> so they are easy to find and clean up.
+                string relativeDir = "Download/" + Application.productName;
+
+                using AndroidJavaClass player = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+                using AndroidJavaObject activity = player.GetStatic<AndroidJavaObject>("currentActivity");
+                using AndroidJavaObject resolver = activity.Call<AndroidJavaObject>("getContentResolver");
+
+                // Column-name string literals are the stable MediaStore.MediaColumns values, used directly
+                // to avoid extra JNI static lookups: DISPLAY_NAME / MIME_TYPE / RELATIVE_PATH.
+                using AndroidJavaObject values = new AndroidJavaObject("android.content.ContentValues");
+                values.Call("put", "_display_name", fileName);
+                values.Call("put", "mime_type", "text/plain");
+                values.Call("put", "relative_path", relativeDir);
+
+                using AndroidJavaClass downloads = new AndroidJavaClass("android.provider.MediaStore$Downloads");
+                using AndroidJavaObject collection = downloads.GetStatic<AndroidJavaObject>("EXTERNAL_CONTENT_URI");
+
+                using AndroidJavaObject itemUri = resolver.Call<AndroidJavaObject>("insert", collection, values);
+                if (itemUri == null) return null;
+
+                using AndroidJavaObject stream = resolver.Call<AndroidJavaObject>("openOutputStream", itemUri);
+                if (stream == null) return null;
+
+                byte[] bytes = Encoding.UTF8.GetBytes(content);
+                stream.Call("write", bytes);
+                stream.Call("flush");
+                stream.Call("close");
+
+                return relativeDir + "/" + fileName;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Benchmark] MediaStore write to Downloads failed ({e.Message}); " +
+                                 "falling back to persistentDataPath.");
+                return null;
+            }
+#else
+            // Non-Android targets never reach the Android branch in WriteReportToDisk; stub for compilation.
+            _ = fileName;
+            _ = content;
+            return null;
+#endif
         }
 
         // ----- Helpers -----

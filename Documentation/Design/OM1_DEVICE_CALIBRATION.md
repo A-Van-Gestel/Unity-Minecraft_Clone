@@ -272,14 +272,16 @@ for shipping) is the opt-in precision mode:
 - Logs each leg's full distribution (`min / median / max / mean / std`) so the noise floor is *visible* —
   a tight `std` means the median is a trustworthy anchor.
 - **Persists a self-contained capture file** (device specs + per-leg distribution + reference constants +
-  resolved budgets) via `DeviceCalibration.WriteBaselineReport`, so the data can be harvested off devices
-  whose logs are awkward to read.
+  resolved budgets) via `DeviceCalibration.WriteBaselineReport` → the shared
+  `BenchmarkEnvironment.WriteReportToDisk`, so the data can be harvested off devices whose logs are
+  awkward to read.
 
 **On-device output path — platform-split, because `persistentDataPath` is app-private on Android.** On
 Android, `Application.persistentDataPath` is app-private external storage: invisible to file managers, and
 even a `file://` open from inside the app trips a permission/URI error (the existing
 `BenchmarkResultsScreen.OnOpenFolderClicked` `Application.OpenURL("file://…")` fails there for the same
-reason). So:
+reason). The destination split lives in **`BenchmarkEnvironment.WriteReportToDisk`** (shared by every
+report writer, not just calibration):
 
 | Platform         | Capture target                                                                | How the user retrieves it            |
 |------------------|-------------------------------------------------------------------------------|--------------------------------------|
@@ -289,17 +291,18 @@ reason). So:
 The Android leg uses MediaStore (`ContentResolver.insert` into `MediaStore.Downloads`), which needs **no
 storage permission** under scoped storage and works on the Xperia 10 III (API 30+). It falls back to
 `persistentDataPath` if MediaStore fails (still `adb pull`-able), so it is never worse than today. The JNI
-body is `#if UNITY_ANDROID`-guarded (the desktop build can't reference `UnityEngine.AndroidJNIModule`), so
-the Android player build is its compile check.
+body (`BenchmarkEnvironment.TryWriteToAndroidDownloads`) is `#if UNITY_ANDROID`-guarded (the desktop build
+can't reference `UnityEngine.AndroidJNIModule`), so the Android player build is its compile check.
 
 > **Build dependency:** the JNI path requires the built-in **Android JNI** module
 > (`com.unity.modules.androidjni`), which was added to `Packages/manifest.json` for this feature. It had
 > been pruned from the lean module set; do not re-prune it while the MediaStore export exists.
 
-> **Follow-up (not OM-1 scope):** the *same* app-private-storage limitation breaks the existing
-> **Benchmark Results Screen** "Open folder" action on Android. The MediaStore-Downloads routing here is
-> the reusable fix; generalizing it to `BenchmarkEnvironment.WriteReportToDisk` + repointing the results
-> screen's open/share action is a separate, broader change tracked outside this doc.
+> **Done (post-review #8):** the MediaStore-Downloads routing was generalized into
+> `BenchmarkEnvironment.WriteReportToDisk`, so **every** benchmark report (not just calibration) now lands
+> in public Downloads on Android. **Remaining follow-up (not OM-1 scope):** the **Benchmark Results
+> Screen** "Open folder" action still uses `Application.OpenURL("file://…")`, which is a no-op on Android
+> even though the file now exists in Downloads — repointing that open/share action is a separate change.
 
 ---
 

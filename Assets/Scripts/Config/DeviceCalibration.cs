@@ -223,81 +223,11 @@ namespace Config
             sb.AppendLine("To add an OM1 §3.3 baseline row: pair those medians with the known-good budget");
             sb.AppendLine("found by playtesting on this device.");
 
-            string report = sb.ToString();
-            string fileName = $"CalibrationBaseline_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.log";
-
-            // On Android, persistentDataPath is app-private (invisible to file managers, and even
-            // file:// opens trip a permission error), so target the public Downloads collection instead
-            // — retrievable from the Files / Downloads app. Desktop keeps the canonical Benchmarks path.
-            string location = null;
-            if (Application.platform == RuntimePlatform.Android)
-                location = TryWriteToAndroidDownloads(fileName, report);
-
-            // Desktop, editor, or Android-MediaStore-failure fallback (still adb-pullable).
-            if (string.IsNullOrEmpty(location))
-                location = BenchmarkEnvironment.WriteReportToDisk(report, "CalibrationBaseline");
-
+            // WriteReportToDisk routes to public Downloads on Android (MediaStore) and the Benchmarks
+            // folder on desktop/editor, so the capture is retrievable on every platform — see OM1 §5.1.
+            string location = BenchmarkEnvironment.WriteReportToDisk(sb.ToString(), "CalibrationBaseline");
             if (!string.IsNullOrEmpty(location))
                 Debug.Log($"[DeviceCalibration] Baseline capture written to: {location}");
-        }
-
-        /// <summary>
-        /// Writes <paramref name="content"/> into the device's public <c>Downloads</c> collection via
-        /// MediaStore (Android 10+ / API 29+, no storage permission required), so the capture is reachable
-        /// from the Files / Downloads app — unlike <c>persistentDataPath</c>, which is app-private. The JNI
-        /// body compiles only under the Android target (<c>#if UNITY_ANDROID</c>); on every other platform
-        /// it is a no-op returning <c>null</c> so the caller falls back to <c>persistentDataPath</c>.
-        /// </summary>
-        /// <param name="fileName">Display name for the created file (e.g. <c>CalibrationBaseline_*.log</c>).</param>
-        /// <param name="content">UTF-8 text to write.</param>
-        /// <returns>The public relative path on success, or <c>null</c> on any failure (caller falls back).</returns>
-        private static string TryWriteToAndroidDownloads(string fileName, string content)
-        {
-#if UNITY_ANDROID
-            try
-            {
-                // Group captures under Downloads/<product> so they are easy to find and clean up.
-                string relativeDir = "Download/" + Application.productName;
-
-                using AndroidJavaClass player = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
-                using AndroidJavaObject activity = player.GetStatic<AndroidJavaObject>("currentActivity");
-                using AndroidJavaObject resolver = activity.Call<AndroidJavaObject>("getContentResolver");
-
-                // Column-name string literals are the stable MediaStore.MediaColumns values, used directly
-                // to avoid extra JNI static lookups: DISPLAY_NAME / MIME_TYPE / RELATIVE_PATH.
-                using AndroidJavaObject values = new AndroidJavaObject("android.content.ContentValues");
-                values.Call("put", "_display_name", fileName);
-                values.Call("put", "mime_type", "text/plain");
-                values.Call("put", "relative_path", relativeDir);
-
-                using AndroidJavaClass downloads = new AndroidJavaClass("android.provider.MediaStore$Downloads");
-                using AndroidJavaObject collection = downloads.GetStatic<AndroidJavaObject>("EXTERNAL_CONTENT_URI");
-
-                using AndroidJavaObject itemUri = resolver.Call<AndroidJavaObject>("insert", collection, values);
-                if (itemUri == null) return null;
-
-                using AndroidJavaObject stream = resolver.Call<AndroidJavaObject>("openOutputStream", itemUri);
-                if (stream == null) return null;
-
-                byte[] bytes = Encoding.UTF8.GetBytes(content);
-                stream.Call("write", bytes);
-                stream.Call("flush");
-                stream.Call("close");
-
-                return relativeDir + "/" + fileName;
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning($"[DeviceCalibration] MediaStore write to Downloads failed ({e.Message}); " +
-                                 "falling back to persistentDataPath.");
-                return null;
-            }
-#else
-            // Non-Android targets never reach the Android branch in WriteBaselineReport; stub for compilation.
-            _ = fileName;
-            _ = content;
-            return null;
-#endif
         }
     }
 }
