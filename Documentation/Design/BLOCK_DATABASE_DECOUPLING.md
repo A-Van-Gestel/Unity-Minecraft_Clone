@@ -108,8 +108,20 @@ Reference sites for `World.blockDatabase` (and the accessors backed by it):
    loader directly); `FluidTickBenchmark` drops its manual `world.blockDatabase = db` assignment and lets
    the loader supply it.
 4. **Remove the serialized field** and clean the World prefab's now-dangling reference (`unity-file-ops`).
-5. **Optionally collapse the ad-hoc loads** (`FluidTickBenchmark`, editor windows) onto
-   `ResourceLoader.LoadBlockDatabase()` for a single load path — nice-to-have, can be incremental.
+5. **Collapse the remaining ad-hoc loads** onto a single path — *done as a follow-up.* On inspection this
+   was far smaller than §4.5 first implied, and splits by assembly:
+   - **Runtime → `ResourceLoader.LoadBlockDatabase()`:** `FluidTickBenchmark` was the only straggler (a
+     duplicated `Resources.Load<BlockDatabase>("Data/BlockDatabase")`); it now calls the loader. Every
+     runtime BlockDatabase load (`World`, `DeviceCalibration`, the benchmark) goes through one path.
+   - **Editor → `EditorBlockDatabaseCache.Database`:** editor tools must **not** use `ResourceLoader`
+     (which is `Resources.Load`-based). `EditorBlockDatabaseCache` intentionally uses `AssetDatabase`
+     (finds the asset anywhere, not just under `Resources/`; builds an OnGUI lookup dict; auto-refreshes on
+     domain reload; yields an editable, path-anchored reference for `SetDirty`/`SaveAssets`). The editor
+     windows (`BlockEditorWindow`, `StructurePreviewWindow`) **already** route through it; the lone
+     straggler was `ActiveVoxelScanBenchmark` (hardcoded asset path), now repointed at the cache.
+     `BlockIdGenerator` keeps its own `FindAssets` — code-gen genuinely needs the asset *path* to emit
+     `BlockIDs.cs` beside it. This supersedes §4.5's "editor windows … onto `ResourceLoader`" wording,
+     which conflicted with §2's non-goal; §2 was correct.
 
 ---
 

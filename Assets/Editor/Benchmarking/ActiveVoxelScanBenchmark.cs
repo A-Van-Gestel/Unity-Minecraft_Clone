@@ -5,6 +5,7 @@ using System.IO;
 using System.Text;
 using Data;
 using Data.WorldTypes;
+using Editor.DataGeneration;
 using Editor.WorldTools.Libraries;
 using Helpers;
 using Jobs;
@@ -43,7 +44,6 @@ namespace Editor.Benchmarking
         private const int LIST_CAPACITY = StandardChunkGenerator.ActiveVoxelPresizeCapacity; // single source of truth for the pre-size
 
         private const string WORLD_TYPE_PATH = "Assets/Data/WorldGen/WorldTypes/Standard.asset";
-        private const string BLOCK_DB_PATH = "Assets/Resources/Data/BlockDatabase.asset";
 
         /// <summary>Result of timing one scenario (one sea-level configuration).</summary>
         private struct ScenarioResult
@@ -64,10 +64,10 @@ namespace Editor.Benchmarking
             try
             {
                 WorldTypeDefinition worldType = AssetDatabase.LoadAssetAtPath<WorldTypeDefinition>(WORLD_TYPE_PATH);
-                BlockDatabase db = AssetDatabase.LoadAssetAtPath<BlockDatabase>(BLOCK_DB_PATH);
+                BlockDatabase db = EditorBlockDatabaseCache.Database;
                 if (worldType == null || db == null)
                 {
-                    sb.Append("ERROR: could not load ").Append(WORLD_TYPE_PATH).Append(" / ").Append(BLOCK_DB_PATH);
+                    sb.Append("ERROR: could not load ").Append(WORLD_TYPE_PATH).Append(" / BlockDatabase");
                     Finish(outPath, sb);
                     return;
                 }

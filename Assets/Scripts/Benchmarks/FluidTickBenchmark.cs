@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using Data;
+using Helpers;
 using Serialization;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -176,10 +177,11 @@ namespace Benchmarks
         /// <returns>The inert world component, or <c>null</c> if the block database could not be loaded.</returns>
         private World CreateInertWorld()
         {
-            BlockDatabase db = Resources.Load<BlockDatabase>("Data/BlockDatabase");
+            // Pre-flight existence check via the shared runtime load path (same asset Awake will load below).
+            BlockDatabase db = ResourceLoader.LoadBlockDatabase();
             if (db == null)
             {
-                Debug.LogError("FluidTickBenchmark: could not load BlockDatabase from Resources/Data/BlockDatabase.", this);
+                Debug.LogError("FluidTickBenchmark: BlockDatabase unavailable — cannot stand up the inert world.", this);
                 return null;
             }
 
