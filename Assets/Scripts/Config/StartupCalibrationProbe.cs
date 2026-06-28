@@ -11,6 +11,7 @@ using Jobs.Data;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace Config
 {
@@ -27,11 +28,27 @@ namespace Config
     /// </summary>
     public static class StartupCalibrationProbe
     {
+        /// <summary>
+        /// Opt-in precision mode for re-anchoring the <see cref="DeviceCalibration"/> <c>REFERENCE_*_MS</c>
+        /// constants from a clean capture. When true, the probe runs far more warmup + measure iterations
+        /// (driving down the median's noise floor) and logs the per-leg spread so the reading's stability
+        /// is visible. Leave <c>false</c> for shipping — the extra iterations add seconds of startup latency
+        /// that real users must not pay. Flip to <c>true</c> only to harvest reference values, then revert.
+        /// </summary>
+        private const bool BASELINE_CALIBRATION = false;
+
         /// <summary>Iterations run and discarded before timing, to absorb Burst compilation / cold caches.</summary>
-        private const int WARMUP_ITERATIONS = 2;
+        private const int WARMUP_ITERATIONS = BASELINE_CALIBRATION ? 8 : 2;
 
         /// <summary>Timed iterations; the reported cost is the median over these (odd count for a clean median).</summary>
-        private const int MEASURE_ITERATIONS = 7;
+        private const int MEASURE_ITERATIONS = BASELINE_CALIBRATION ? 99 : 7;
+
+        /// <summary>
+        /// Whether the high-iteration precision capture mode is compiled in. When true, callers should
+        /// persist the capture to disk (see <c>DeviceCalibration.WriteBaselineReport</c>) so it can be
+        /// harvested off devices whose logs are awkward to read (e.g. Android). See OM1 §3.3 / §5.
+        /// </summary>
+        internal static bool BaselineCalibrationEnabled => BASELINE_CALIBRATION;
 
         /// <summary>Surface height of the representative terrain (solid below, air above) — a realistic exposed face layer.</summary>
         private const int SURFACE_HEIGHT = VoxelData.ChunkHeight / 2;
@@ -42,23 +59,84 @@ namespace Config
         /// <summary>Number of columns in one chunk heightmap.</summary>
         private const int HEIGHTMAP_LENGTH = VoxelData.ChunkWidth * VoxelData.ChunkWidth;
 
+        /// <summary>The timing distribution of one probe leg (mesh or lighting) over its measured samples.</summary>
+        public readonly struct LegStats
+        {
+            /// <summary>Fastest sample (ms).</summary>
+            public readonly double Min;
+
+            /// <summary>Median sample (ms) — the value used as the throughput anchor.</summary>
+            public readonly double Median;
+
+            /// <summary>Slowest sample (ms).</summary>
+            public readonly double Max;
+
+            /// <summary>Arithmetic mean of the samples (ms).</summary>
+            public readonly double Mean;
+
+            /// <summary>Population standard deviation of the samples (ms) — the noise-floor indicator.</summary>
+            public readonly double Std;
+
+            /// <summary>Number of timed samples the statistics were computed over.</summary>
+            public readonly int SampleCount;
+
+            /// <summary>Initializes a leg's timing distribution.</summary>
+            public LegStats(double min, double median, double max, double mean, double std, int sampleCount)
+            {
+                Min = min;
+                Median = median;
+                Max = max;
+                Mean = mean;
+                Std = std;
+                SampleCount = sampleCount;
+            }
+
+            /// <inheritdoc/>
+            public override string ToString() =>
+                $"min={Min:F3} median={Median:F3} max={Max:F3} mean={Mean:F3} std={Std:F3} ms over {SampleCount} samples";
+        }
+
+        /// <summary>The full result of a probe run: the per-leg timing distributions.</summary>
+        public readonly struct ProbeResult
+        {
+            /// <summary>Mesh-leg timing distribution.</summary>
+            public readonly LegStats Mesh;
+
+            /// <summary>Lighting-leg timing distribution.</summary>
+            public readonly LegStats Light;
+
+            /// <summary>Initializes a probe result.</summary>
+            public ProbeResult(LegStats mesh, LegStats light)
+            {
+                Mesh = mesh;
+                Light = light;
+            }
+
+            /// <summary>Median mesh job time in milliseconds — the throughput anchor for the mesh budget.</summary>
+            public double MeshMs => Mesh.Median;
+
+            /// <summary>Median lighting job time in milliseconds — the throughput anchor for the light budget.</summary>
+            public double LightMs => Light.Median;
+        }
+
         /// <summary>
         /// Measures the device's per-chunk mesh and lighting job cost.
         /// </summary>
         /// <param name="jobData">Injected block-type / custom-mesh native job data.</param>
         /// <param name="fluidTemplates">Injected water/lava vertex templates.</param>
-        /// <returns>The median mesh and lighting job times in milliseconds.</returns>
-        public static (double meshMs, double lightMs) Measure(
+        /// <returns>The per-leg timing distributions; <see cref="ProbeResult.MeshMs"/> /
+        /// <see cref="ProbeResult.LightMs"/> are the medians used as throughput anchors.</returns>
+        public static ProbeResult Measure(
             JobDataManager jobData, FluidVertexTemplatesNativeData fluidTemplates)
         {
-            double meshMs = MeasureMesh(jobData, fluidTemplates);
-            double lightMs = MeasureLighting(jobData);
-            return (meshMs, lightMs);
+            LegStats mesh = MeasureMesh(jobData, fluidTemplates);
+            LegStats light = MeasureLighting(jobData);
+            return new ProbeResult(mesh, light);
         }
 
         #region Mesh leg (shared IsolatedJobProbe)
 
-        private static double MeasureMesh(JobDataManager jobData, FluidVertexTemplatesNativeData fluidTemplates)
+        private static LegStats MeasureMesh(JobDataManager jobData, FluidVertexTemplatesNativeData fluidTemplates)
         {
             // 9 voxel maps (center + 8 neighbors) all carrying the same representative terrain, plus 9
             // zero-filled light maps so the schedule passes editor job-safety (all containers constructed).
@@ -107,7 +185,10 @@ namespace Config
                     samples[i] = sw.Elapsed.TotalMilliseconds;
                 }
 
-                return Median(samples);
+                LegStats stats = ComputeStats(samples);
+                if (BASELINE_CALIBRATION)
+                    Debug.Log($"[StartupCalibrationProbe] mesh baseline spread: {stats}.");
+                return stats;
             }
             finally
             {
@@ -127,7 +208,7 @@ namespace Config
 
         #region Lighting leg (self-contained)
 
-        private static double MeasureLighting(JobDataManager jobData)
+        private static LegStats MeasureLighting(JobDataManager jobData)
         {
             // Persistent source maps — gather sources are read-only to the job, so they are reused across
             // iterations. The consumable per-iteration containers (padded volumes, queues) are fresh each run.
@@ -200,7 +281,10 @@ namespace Config
                     isStable.Dispose();
                 }
 
-                return Median(samples);
+                LegStats stats = ComputeStats(samples);
+                if (BASELINE_CALIBRATION)
+                    Debug.Log($"[StartupCalibrationProbe] light baseline spread: {stats}.");
+                return stats;
             }
             finally
             {
@@ -255,12 +339,37 @@ namespace Config
             }
         }
 
-        /// <summary>Returns the median of the samples (does not mutate the input).</summary>
-        private static double Median(double[] samples)
+        /// <summary>
+        /// Computes the timing distribution (min / median / max / mean / std) over a leg's samples. The
+        /// median is the throughput anchor; the spread exposes the noise floor of a baseline capture — a
+        /// tight std means the median is a trustworthy reference. Does not mutate the input.
+        /// </summary>
+        /// <param name="samples">The timed samples in milliseconds.</param>
+        /// <returns>The distribution statistics for the samples.</returns>
+        private static LegStats ComputeStats(double[] samples)
         {
             double[] sorted = (double[])samples.Clone();
             Array.Sort(sorted);
-            return sorted[sorted.Length / 2];
+            double min = sorted[0];
+            double max = sorted[^1];
+            double median = sorted[sorted.Length / 2];
+
+            double sum = 0.0;
+            foreach (double t in sorted)
+                sum += t;
+
+            double mean = sum / sorted.Length;
+
+            double sumSq = 0.0;
+            foreach (double t in sorted)
+            {
+                double d = t - mean;
+                sumSq += d * d;
+            }
+
+            double std = Math.Sqrt(sumSq / sorted.Length);
+
+            return new LegStats(min, median, max, mean, std, sorted.Length);
         }
 
         #endregion

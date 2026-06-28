@@ -1,6 +1,8 @@
 # OM-1 — Device Calibration of Throughput & Memory Budgets
 
-> **Status: Implemented (2026-06-27) — pending in-game/player-build verification.** Promotes the backlog
+> **Status: Implemented (2026-06-27); player-build verified + reference re-anchored (2026-06-28).** A
+> first-launch IL2CPP run calibrated and wrote `settings.json` correctly, and `REFERENCE_*_MS` were
+> re-anchored from a 99-sample player-build capture (§3.2). Promotes the backlog
 > finding [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](./PERFORMANCE_IMPROVEMENTS_REPORT.md) → **OM-1** into a
 > full design and records the as-built implementation. OM-1 replaces the desktop-tuned absolute constants
 > that gate engine throughput and native memory retention with values **calibrated once on first launch**
@@ -11,7 +13,8 @@
 > extraction is **mesh-only** (the lighting leg is self-contained to avoid refactoring a lighting-suite
 > guard). The calibrated knobs persist as `Settings` fields: `maxMeshRebuildsPerFrame`,
 > `maxLightJobsPerFrame`, `maxInFlightMeshJobs`, `chunkJobArrayPoolRetention`, `calibrationVersion`.
-> Desktop sanity verified: a 16-core / 64 GB box resolves to exactly the historical 10 / 32 / 20 / 512.
+> Desktop sanity verified: an i9-9900K / 64 GB box resolves in a **player build** to exactly the
+> historical 10 / 32 / 20 / 512.
 >
 > This document also specifies two enabling refactors required by the calibrator and worth doing on
 > their own merits:
@@ -129,16 +132,89 @@ maxLightJobsPerFrame    = clamp( round(DEFAULT_LIGHT_BUDGET * REFERENCE_LIGHT_MS
   They were chosen over an absolute "ms-per-frame time slice" model because the historical defaults are
   *count*-based, not time-budgeted (10 mesh × ~1.2 ms ≈ 12 ms/frame is not a real per-frame slice), so a
   time-slice model regressed the desktop. Anchoring guarantees the "desktop unchanged" goal by construction.
-- **Anchor values are editor-measured** on a 16-core / 64 GB desktop (Burst on): `REFERENCE_MESH_MS ≈
-  1.233`, `REFERENCE_LIGHT_MS ≈ 1.110`. Re-anchor from a player-build capture when tuning (a follow-up;
-  editor Burst ≈ player Burst, so editor-anchoring is slightly generous in player — acceptable, it only
-  means a fast box gets ≥ the default, never less).
+- **Anchor values are player-build (IL2CPP) measured** on an i9-9900K (16 logical cores) / 64 GB / RTX
+  4070 Ti, 99-sample median (`BASELINE_CALIBRATION`, std ≈ 0.03 ms): `REFERENCE_MESH_MS = 0.952`,
+  `REFERENCE_LIGHT_MS = 0.604`. On that box this reproduces today's 10 / 32 exactly *in the player*. (The
+  initial editor-measured anchor of 1.233 / 1.110 was ~1.5–1.8× generous — every device's budget was
+  inflated by the editor-vs-player speed ratio; the player re-anchor removes that systematic bias.)
+- This **single-anchor, inverse-proportional** model (`budget ∝ 1/medianMs`) is a v1 simplification. It
+  assumes the right budget scales *linearly* with raw job throughput across the whole device spectrum —
+  unverified. §3.3 plans a multi-baseline generalization that **validates or replaces** that assumption.
+
+### 3.3 Multi-baseline interpolation (planned — v1 ships single-anchor)
+
+The §3.2 model anchors on **one** reference device and scales the budget inversely-proportionally to
+measured job time. That encodes a strong, untested assumption: **the right per-frame budget scales
+linearly with raw job throughput across the entire device spectrum** — that a phone which meshes N× slower
+than the desktop wants exactly `1/N` the budget. A single anchor **cannot** detect curvature, because one
+point defines a *ray*, not a curve. The reference is also a ~2019 ultra-high-end desktop (i9-9900K / 64 GB)
+— still high-end in 2026 — so *every* non-desktop device is a long **extrapolation from a single far-fast
+endpoint**, the regime where a wrong slope hurts most.
+
+**Plan: anchor on several real, hand-validated devices and interpolate between them**, so the budget curve
+is *measured* at multiple points rather than assumed linear from one.
+
+**Per-leg baseline table.** Each baseline is a real device on which a *known-good* budget was found by
+playtesting (capture `medianMs` precisely via `BASELINE_CALIBRATION`, §5):
+
+Captured player-build medians (2026-06-28, `BASELINE_CALIBRATION` 99-sample), sorted fast → slow:
+
+| Device (player build)                | Class               | RAM     | Median mesh / light (ms) | Std mesh / light | Known-good budget                    |
+|--------------------------------------|---------------------|---------|--------------------------|------------------|--------------------------------------|
+| Sony Xperia 1 VIII (Adreno 840)      | 2026 flagship phone | 11.2 GB | 0.392 / 0.302            | 0.17 / 0.16      | — (playtest)                         |
+| i9-9900K / RTX 4070 Ti (**anchor**)  | 2019 high-end PC    | 64 GB   | 0.952 / 0.604            | 0.03 / 0.03      | 10 mesh / 32 light (today's default) |
+| Lenovo Legion 5 (i7-10750H/RTX 2060) | 2020 perf laptop    | 64 GB   | 0.962 / 0.710            | 0.22 / 0.11      | — (playtest)                         |
+| Sony Xperia 10 III (Adreno 619)      | 2021 midrange phone | 5.5 GB  | 1.905 / 1.378            | 0.39 / 0.28      | — (playtest)                         |
+
+**Observed (2026-06-28) — what the four captures already prove, and what is still pending:**
+
+- **"No platform tiers" is empirically validated.** The 2026 flagship phone is the *fastest* device measured
+  (2.4× mesh / 2.0× light vs the desktop anchor) and resolves *above* the laptop on throughput — purely from
+  `f(SystemInfo)`. A `platform==Android → low` rule would have badly mis-classified it. (§3.)
+- **The two-signal split (§3) behaves as designed on real hardware.** That same flagship is *memory*-capped,
+  not throughput-capped (retention 350 / in-flight 14 from 11 GB, while its throughput budgets are high at
+  24 / 64); the 5.5 GB midrange phone is capped on *both* (171 / 7 and 5 / 14). Memory and throughput scale
+  independently, exactly as the two-signal model intends.
+- **The anchor is no longer the fast end.** Extrapolation now runs *both* directions from the reference,
+  which strengthens — not weakens — the case for multi-baseline interpolation over a single-anchor ray.
+- **Mobile variance is large and is the linearity risk made concrete.** Std and especially *max* on mobile
+  dwarf the desktop's near-flat distribution (Xperia 10 III: std 0.39, max **5.69 ms** ≈ 3× its median; vs
+  desktop std 0.03). The median is robust to these spikes, but a short probe cannot see sustained thermal
+  throttling, so the median-anchored *linear* budget is likely **optimistic for mobile under load**. This
+  is the strongest argument yet that linear extrapolation onto mobile needs the §3.3 playtest validation.
+- **Still pending — known-good budgets.** The implied-slice check (`S_i = knownGoodBudget_i × medianMs_i`)
+  cannot run until each non-anchor device is *playtested* to find its smooth budget; the table's medians are
+  ready, only the known-good column is open. Until then the shipped single-anchor model stands (now
+  player-anchored), and these captures are the medians half of each future baseline row.
+
+> The **Lenovo Legion 5** capture was taken with the *pre-re-anchor* constants (1.233 / 1.110), so its logged
+> 13 / 50 is stale; medians are anchor-independent and under the re-anchored model it resolves to 10 / 27.
+
+**Linearity self-check — the diagnostic the multi-baseline buys for free.** Each baseline implies an
+effective per-frame "slice" `S_i = knownGoodBudget_i × medianMs_i`. Under the single-anchor model every
+`S_i` is identical by construction. Compare the captured ones:
+
+- **`S_i` agree (within tolerance)** → the linear model is *confirmed*; keep the cheap single-anchor
+  formula, now backed by evidence instead of assumption.
+- **`S_i` diverge** → the curve bends (e.g. a phone needs a *smaller* slice than linear predicts, hitting
+  thermal / scheduler / memory-bandwidth ceilings the desktop never reaches). Switch to **piecewise-linear
+  interpolation of `budget` vs `medianMs`** across the baselines sorted by `medianMs`:
+    - between two baselines → linear interpolate;
+    - faster than the fastest baseline → extrapolate along the first segment, then `clamp` to the field's
+      `[Range]` max;
+    - slower than the slowest baseline → extrapolate along the last segment, then `clamp` to the `FLOOR`.
+
+This preserves every §2 non-goal: the interpolated value still only **seeds** `settings.json`, and the
+upper `clamp` is the field's own range max — never a new restriction.
+
+**Scope: throughput only.** Memory caps stay the continuous `f(systemMemorySize)` of §3.1 — already
+multi-point by construction (a function, not an anchor), so they need no baselines.
 
 ---
 
 ## 4. Calibration lifecycle
 
-- Runs when `settings.json` is **missing** OR its `calibrationVersion` < the current constant. Otherwise
+- Runs when `settings.json` is **missing** OR its `calibrationVersion` < the current constant. Otherwise,
   the persisted (possibly user-tweaked) values are used unchanged.
 - Adds a `calibrationVersion : int` field to `Settings` so the formula can be revised and re-run on
   upgrade without stomping user edits gratuitously.
@@ -184,6 +260,46 @@ duplication of job-field wiring on the lighting side, in exchange for leaving th
 variance < 0.01 ms across runs on the reference desktop — well within the ±1 budget acceptance gate, §8).
 A short first-launch run cannot capture sustained thermal throttling — accepted, and the reason
 "Recalibrate" exists (`SettingsManager.RecalibrateDevice()`).
+
+### 5.1 Precision-capture mode & on-device output (`BASELINE_CALIBRATION`)
+
+Re-anchoring `REFERENCE_*_MS` (§3.2) and harvesting §3.3 multi-baseline rows both need a *clean*
+per-device measurement. `StartupCalibrationProbe.BASELINE_CALIBRATION` (a compile-time `const bool`, off
+for shipping) is the opt-in precision mode:
+
+- Raises the iteration counts (8 warmup + 99 measured vs 2 + 7) to drive down the median's noise floor;
+  the counts fold at compile time (`const ? :`), so the shipping path keeps zero runtime branch.
+- Logs each leg's full distribution (`min / median / max / mean / std`) so the noise floor is *visible* —
+  a tight `std` means the median is a trustworthy anchor.
+- **Persists a self-contained capture file** (device specs + per-leg distribution + reference constants +
+  resolved budgets) via `DeviceCalibration.WriteBaselineReport`, so the data can be harvested off devices
+  whose logs are awkward to read.
+
+**On-device output path — platform-split, because `persistentDataPath` is app-private on Android.** On
+Android, `Application.persistentDataPath` is app-private external storage: invisible to file managers, and
+even a `file://` open from inside the app trips a permission/URI error (the existing
+`BenchmarkResultsScreen.OnOpenFolderClicked` `Application.OpenURL("file://…")` fails there for the same
+reason). So:
+
+| Platform         | Capture target                                                                | How the user retrieves it            |
+|------------------|-------------------------------------------------------------------------------|--------------------------------------|
+| Desktop / editor | `persistentDataPath/Benchmarks/` (canonical, matches benchmarks)              | open the folder directly             |
+| Android          | **public `Downloads/<product>/`** via **MediaStore** (API 29+, no permission) | Files / Downloads app, or `adb pull` |
+
+The Android leg uses MediaStore (`ContentResolver.insert` into `MediaStore.Downloads`), which needs **no
+storage permission** under scoped storage and works on the Xperia 10 III (API 30+). It falls back to
+`persistentDataPath` if MediaStore fails (still `adb pull`-able), so it is never worse than today. The JNI
+body is `#if UNITY_ANDROID`-guarded (the desktop build can't reference `UnityEngine.AndroidJNIModule`), so
+the Android player build is its compile check.
+
+> **Build dependency:** the JNI path requires the built-in **Android JNI** module
+> (`com.unity.modules.androidjni`), which was added to `Packages/manifest.json` for this feature. It had
+> been pruned from the lean module set; do not re-prune it while the MediaStore export exists.
+
+> **Follow-up (not OM-1 scope):** the *same* app-private-storage limitation breaks the existing
+> **Benchmark Results Screen** "Open folder" action on Android. The MediaStore-Downloads routing here is
+> the reusable fix; generalizing it to `BenchmarkEnvironment.WriteReportToDisk` + repointing the results
+> screen's open/share action is a separate, broader change tracked outside this doc.
 
 ---
 
@@ -286,8 +402,10 @@ OM-1 needs a third caller (the calibrator), so unify into one **runtime** factor
 
 - `dotnet build "Assembly-CSharp.csproj"` after each step; editor-touching steps also build
   `Assembly-CSharp-Editor.csproj`. New `.cs` files → expect phantom `CS0103` until `AssetDatabase.Refresh()`.
-- **Desktop sanity:** calibration on a desktop produces throughput budgets ≥ today's defaults (a fast box
-  must not regress) and memory caps == `512` / `20` exactly.
+- **Desktop sanity:** calibration in a **player build** on the reference desktop reproduces today's
+  defaults exactly (10 / 32) and memory caps == `512` / `20`. *In-editor* the same box now resolves
+  *lower* (editor Burst is ~1.5–1.8× slower than the player it is anchored to) — expected, not a regression,
+  since the shipped path is the player build.
 - **Forced low-spec:** debug override feeding the calibrator a high `medianMeshMs` / low
   `systemMemorySize` → confirm small budgets propagate into `World`, the pool, and `settings.json`.
   Doubles as the report's "test on a memory-capped device" stand-in without hardware.
@@ -305,13 +423,14 @@ the calibration.
 
 ## 10. Risks
 
-| Risk                                           | Severity | Mitigation                                                      |
-|------------------------------------------------|----------|-----------------------------------------------------------------|
-| Probe variance yields unstable budgets         | 🟡       | Warmup + median-K + fixed pattern; ±1 acceptance gate           |
-| First-run Burst compile stalls the menu        | 🟢       | One-time; "Calibrating…" status; warmup absorbs it              |
-| Bootstrap ordering at Main Menu                | 🟢       | Data is Resources-loadable & World-free (§6); Option B fallback |
-| `JobDataManagerFactory` merge changes behavior | 🟢       | Only delta is `IsActiveById`/warning — preserved for both sites |
-| Conservative caps under-use a fast device      | 🟢       | Tunable, user-editable, "Recalibrate"; report rates risk 🟢     |
+| Risk                                                           | Severity | Mitigation                                                                                                           |
+|----------------------------------------------------------------|----------|----------------------------------------------------------------------------------------------------------------------|
+| Probe variance yields unstable budgets                         | 🟡       | Warmup + median-K + fixed pattern; ±1 acceptance gate                                                                |
+| First-run Burst compile stalls the menu                        | 🟢       | One-time; "Calibrating…" status; warmup absorbs it                                                                   |
+| Bootstrap ordering at Main Menu                                | 🟢       | Data is Resources-loadable & World-free (§6); Option B fallback                                                      |
+| `JobDataManagerFactory` merge changes behavior                 | 🟢       | Only delta is `IsActiveById`/warning — preserved for both sites                                                      |
+| Conservative caps under-use a fast device                      | 🟢       | Tunable, user-editable, "Recalibrate"; report rates risk 🟢                                                          |
+| Single-anchor linear model mis-scales far-from-desktop devices | 🟡       | Multi-baseline interpolation (§3.3) validates/replaces the linearity assumption with measured laptop + phone anchors |
 
 ---
 
@@ -321,3 +440,5 @@ the calibration.
 - `TARGET_MESH_MS_PER_FRAME` / `TARGET_LIGHT_MS_PER_FRAME` slice budgets and `FLOOR`.
 - Probe `K` (iterations) and warmup count.
 - Calibrate-at-Main-Menu (Option A, recommended) vs defer-to-first-frame (Option B).
+- **Multi-baseline throughput interpolation (§3.3):** capture laptop + Xperia 10 III baselines, compute
+  each implied slice `S_i`, and decide single-anchor-linear vs piecewise-linear from whether they agree.
