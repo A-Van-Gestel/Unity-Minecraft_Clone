@@ -1666,7 +1666,8 @@ public class World : MonoBehaviour
         // 6. Schedule NEW mesh jobs for chunks that now need them.
         //    NOTE: If too many mesh jobs are already in flight, pause scheduling new ones to let the
         //          Job System catch up. The cap is device-calibrated (OM-1) — see Settings.maxInFlightMeshJobs.
-        if (_chunksToBuildMesh.Count > 0 && JobManager.MeshJobs.Count < Mathf.Max(1, settings.maxInFlightMeshJobs))
+        int inFlightMeshCap = Mathf.Max(1, settings.maxInFlightMeshJobs);
+        if (_chunksToBuildMesh.Count > 0 && JobManager.MeshJobs.Count < inFlightMeshCap)
         {
             int meshJobsScheduled = 0;
             // Iterate forwards to respect priority (Index 0 is highest priority).
@@ -1674,6 +1675,13 @@ public class World : MonoBehaviour
             for (int i = 0; i < _chunksToBuildMesh.Count; i++)
             {
                 if (meshJobsScheduled >= settings.maxMeshRebuildsPerFrame) break;
+
+                // Re-check the in-flight cap every iteration, not just on entry: each successful schedule
+                // grows JobManager.MeshJobs, and a single frame must not push its whole per-frame mesh
+                // budget past the cap. On a fast-CPU / low-RAM device the per-frame budget (CPU-scaled)
+                // can far exceed the in-flight cap (RAM-scaled), so the entry gate alone would let one
+                // frame overshoot the native-memory ceiling the cap exists to enforce (OM-1).
+                if (JobManager.MeshJobs.Count >= inFlightMeshCap) break;
 
                 Chunk chunk = _chunksToBuildMesh[i];
 
