@@ -16,7 +16,7 @@ namespace Editor.Validation.Placement.Framework
         /// <summary>
         /// True when the top-down ray <b>stopped</b> on a cell (<c>World.CheckForVoxel</c> reported a hit under the
         /// held block's skip mask). False means every cell in the column was air or skipped — the held block's
-        /// <see cref="BlockType.canReplaceTags"/> caused the ray to <i>tunnel through</i> every surface, so the
+        /// <see cref="BlockType.placementCanReplaceTags"/> caused the ray to <i>tunnel through</i> every surface, so the
         /// player cannot aim at this column at all.
         /// </summary>
         public readonly bool DidHit;
@@ -58,7 +58,7 @@ namespace Editor.Validation.Placement.Framework
     /// (<c>World.CheckForVoxel</c>, <see cref="PlacementResolver"/>, <c>World.IsCellOccupiedForPlacement</c>) over a
     /// synthetic <see cref="ChunkData"/>, mirroring the tag-driven half of <c>PlayerInteraction.PlaceCursorBlocks</c>
     /// without a camera, toolbar, or geometric ray march. The march geometry is not where placement bugs live —
-    /// the held block's <see cref="BlockType.canReplaceTags"/> driving the skip mask and the replace decision is.
+    /// the held block's <see cref="BlockType.placementCanReplaceTags"/> driving the skip mask and the replace decision is.
     /// <para>
     /// <b>World seam</b> reuses the <see cref="ValidationReflection"/> recipe established by
     /// <c>BehaviorTestWorld</c>: <c>AddComponent</c> a plain <see cref="World"/> (no <c>Awake</c> in edit mode),

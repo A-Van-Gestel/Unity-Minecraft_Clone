@@ -13,4 +13,5 @@ MonoBehaviour:
   m_Name: BTP_Leaves
   m_EditorClassIdentifier: Assembly-CSharp::Data.BlockTagPreset
   tags: 1217
-  canReplaceTags: 0
+  worldGenCanReplaceTags: 0
+  placementCanReplaceTags: 0

@@ -45,13 +45,13 @@ namespace Editor.Validation.Placement
             BlockType unbreakable = p[Id.Unbreakable];
 
             bool ok = true;
-            ok &= Expect(BlockTagUtility.CanReplace(ground, air), "ground should replace air");
-            ok &= Expect(!BlockTagUtility.CanReplace(ground, ground), "ground should NOT replace solid ground");
-            ok &= Expect(BlockTagUtility.CanReplace(ground, plant), "ground should replace a REPLACEABLE plant");
-            ok &= Expect(!BlockTagUtility.CanReplace(ground, unbreakable), "nothing should replace an UNBREAKABLE block");
+            ok &= Expect(BlockTagUtility.CanReplaceForPlacement(ground, air), "ground should replace air");
+            ok &= Expect(!BlockTagUtility.CanReplaceForPlacement(ground, ground), "ground should NOT replace solid ground");
+            ok &= Expect(BlockTagUtility.CanReplaceForPlacement(ground, plant), "ground should replace a REPLACEABLE plant");
+            ok &= Expect(!BlockTagUtility.CanReplaceForPlacement(ground, unbreakable), "nothing should replace an UNBREAKABLE block");
             // A block with canReplaceTags == NONE can only replace air or a REPLACEABLE block (Rule C).
-            ok &= Expect(BlockTagUtility.CanReplace(plant, plant), "NONE-canReplace block should replace a REPLACEABLE block");
-            ok &= Expect(!BlockTagUtility.CanReplace(plant, ground), "NONE-canReplace block should NOT replace a solid block");
+            ok &= Expect(BlockTagUtility.CanReplaceForPlacement(plant, plant), "NONE-canReplace block should replace a REPLACEABLE block");
+            ok &= Expect(!BlockTagUtility.CanReplaceForPlacement(plant, ground), "NONE-canReplace block should NOT replace a solid block");
             return ok;
         }
 

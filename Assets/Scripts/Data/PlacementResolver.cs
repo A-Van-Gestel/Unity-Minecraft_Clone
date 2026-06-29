@@ -30,7 +30,7 @@ namespace Data
         /// </returns>
         public static BlockTags GetRaycastSkipTags(BlockType heldBlock)
         {
-            return heldBlock != null ? heldBlock.canReplaceTags : BlockTags.NONE;
+            return heldBlock != null ? heldBlock.placementCanReplaceTags : BlockTags.NONE;
         }
 
         /// <summary>
@@ -42,7 +42,7 @@ namespace Data
         /// <param name="heldBlock">The block type currently held, or <c>null</c> when the hand is empty.</param>
         /// <param name="hitBlock">The block type the ray hit.</param>
         /// <returns>
-        /// When holding a block, defers to <see cref="BlockTagUtility.CanReplace"/>.
+        /// When holding a block, defers to <see cref="BlockTagUtility.CanReplaceForPlacement"/>.
         /// When the hand is empty, returns true only if the hit block carries the
         /// <see cref="BlockTags.REPLACEABLE"/> tag.
         /// </returns>
@@ -50,7 +50,7 @@ namespace Data
         {
             if (heldBlock != null)
             {
-                return BlockTagUtility.CanReplace(heldBlock, hitBlock);
+                return BlockTagUtility.CanReplaceForPlacement(heldBlock, hitBlock);
             }
 
             return (hitBlock.tags & BlockTags.REPLACEABLE) != 0;

@@ -646,7 +646,11 @@ public class WorldJobManager : IDisposable
 
                     foreach (VoxelMod fm in floraMods)
                     {
-                        _world.EnqueueVoxelModification(fm);
+                        // World-generation expansion: resolve the Default replacement rule against the broad
+                        // worldGenCanReplaceTags (not the player placement mask).
+                        VoxelMod worldGenMod = fm;
+                        worldGenMod.Source = VoxelModSource.WorldGen;
+                        _world.EnqueueVoxelModification(worldGenMod);
                         modsBudget--;
                     }
 
@@ -668,7 +672,11 @@ public class WorldJobManager : IDisposable
 
                         foreach (VoxelMod sm in structureMods)
                         {
-                            _world.EnqueueVoxelModification(sm);
+                            // World-generation expansion: resolve the Default replacement rule against the broad
+                            // worldGenCanReplaceTags (not the player placement mask).
+                            VoxelMod worldGenMod = sm;
+                            worldGenMod.Source = VoxelModSource.WorldGen;
+                            _world.EnqueueVoxelModification(worldGenMod);
                             modsBudget--;
                         }
 

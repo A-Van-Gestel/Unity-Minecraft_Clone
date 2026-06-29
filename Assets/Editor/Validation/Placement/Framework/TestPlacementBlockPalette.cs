@@ -54,7 +54,8 @@ namespace Editor.Validation.Placement.Framework
                 blockName = "TestAir",
                 isSolid = false,
                 tags = BlockTags.NONE,
-                canReplaceTags = (BlockTags)0xFFFFFFFF,
+                worldGenCanReplaceTags = (BlockTags)0xFFFFFFFF,
+                placementCanReplaceTags = (BlockTags)0xFFFFFFFF,
                 fluidType = FluidType.None,
             };
 
@@ -63,7 +64,8 @@ namespace Editor.Validation.Placement.Framework
                 blockName = "TestGround",
                 isSolid = true,
                 tags = BlockTags.SOLID | BlockTags.ROCK,
-                canReplaceTags = SanePlayerCanReplace,
+                worldGenCanReplaceTags = SanePlayerCanReplace,
+                placementCanReplaceTags = SanePlayerCanReplace,
                 fluidType = FluidType.None,
             };
 
@@ -72,7 +74,8 @@ namespace Editor.Validation.Placement.Framework
                 blockName = "TestSoftPlant",
                 isSolid = false,
                 tags = BlockTags.REPLACEABLE | BlockTags.PLANT,
-                canReplaceTags = BlockTags.NONE,
+                worldGenCanReplaceTags = BlockTags.NONE,
+                placementCanReplaceTags = BlockTags.NONE,
                 fluidType = FluidType.None,
             };
 
@@ -81,7 +84,8 @@ namespace Editor.Validation.Placement.Framework
                 blockName = "TestUnbreakable",
                 isSolid = true,
                 tags = BlockTags.SOLID | BlockTags.UNBREAKABLE,
-                canReplaceTags = SanePlayerCanReplace,
+                worldGenCanReplaceTags = SanePlayerCanReplace,
+                placementCanReplaceTags = SanePlayerCanReplace,
                 fluidType = FluidType.None,
             };
 
@@ -90,7 +94,8 @@ namespace Editor.Validation.Placement.Framework
                 blockName = "TestFluid",
                 isSolid = false,
                 tags = BlockTags.LIQUID,
-                canReplaceTags = SanePlayerCanReplace,
+                worldGenCanReplaceTags = SanePlayerCanReplace,
+                placementCanReplaceTags = SanePlayerCanReplace,
                 fluidType = FluidType.WaterLike,
             };
 

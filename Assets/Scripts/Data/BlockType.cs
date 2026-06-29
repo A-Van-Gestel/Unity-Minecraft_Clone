@@ -2,6 +2,7 @@ using System;
 using System.Runtime.CompilerServices;
 using MyBox;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace Data
 {
@@ -92,8 +93,16 @@ namespace Data
         [Tooltip("What tags does this block have? A block can have multiple tags.")]
         public BlockTags tags;
 
-        [Tooltip("What tags can this block replace? If NONE, it can only replace Air. If ALL tags are selected, it can replace anything (except Unbreakable).")]
-        public BlockTags canReplaceTags;
+        [Tooltip("What tags can this block replace during WORLD GENERATION (structures, flora, ores)?\n" +
+                 "If NONE, it can only replace Air. If ALL tags are selected, it can replace anything (except Unbreakable).\n" +
+                 "This is the broad, generation-time mask (e.g. a structure log overwriting leaves while stacking).")]
+        [FormerlySerializedAs("canReplaceTags")]
+        public BlockTags worldGenCanReplaceTags;
+
+        [Tooltip("What tags can this block replace when PLACED BY THE PLAYER?\n" +
+                 "If NONE, it can only replace Air or REPLACEABLE blocks. This should normally be the soft, transient set " +
+                 "(REPLACEABLE, PLANT, LIQUID) — structural tags here make the placement ray tunnel through that surface.")]
+        public BlockTags placementCanReplaceTags;
 
         [Header("Block Behavior")]
         [Tooltip("Indicates whether the block has any block behavior.")]

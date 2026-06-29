@@ -15,9 +15,10 @@ namespace Editor.Validation.Placement
     public static partial class PlacementValidationSuite
     {
         /// <summary>
-        /// The only tags a <i>player-held</i> block may list in <see cref="BlockType.canReplaceTags"/>: soft, transient
-        /// blocks the player legitimately places through/over. Any structural tag here (e.g. <see cref="BlockTags.ROCK"/>
-        /// or <see cref="BlockTags.LEAVES"/>) makes the placement ray tunnel through that surface — the §03 symptom.
+        /// The only tags a <i>player-held</i> block may list in <see cref="BlockType.placementCanReplaceTags"/>: soft,
+        /// transient blocks the player legitimately places through/over. Any structural tag here (e.g.
+        /// <see cref="BlockTags.ROCK"/> or <see cref="BlockTags.LEAVES"/>) makes the placement ray tunnel through that
+        /// surface — the §03 symptom. The separate <see cref="BlockType.worldGenCanReplaceTags"/> is unconstrained here.
         /// </summary>
         private const BlockTags AllowedPlayerCanReplace =
             BlockTags.REPLACEABLE | BlockTags.PLANT | BlockTags.LIQUID;
@@ -32,8 +33,8 @@ namespace Editor.Validation.Placement
 
         /// <summary>
         /// Asserts that no shipping block (other than Air, which the player never holds) lists a tag outside
-        /// <see cref="AllowedPlayerCanReplace"/> in its <see cref="BlockType.canReplaceTags"/>. Offenders are logged
-        /// individually with the exact disallowed bits so the retune is a checklist.
+        /// <see cref="AllowedPlayerCanReplace"/> in its <see cref="BlockType.placementCanReplaceTags"/>. Offenders are
+        /// logged individually with the exact disallowed bits so the retune is a checklist.
         /// </summary>
         private static bool CanReplaceTagsArePlayerSafe()
         {
@@ -47,19 +48,18 @@ namespace Editor.Validation.Placement
             bool ok = true;
             for (int id = 0; id < database.blockTypes.Length; id++)
             {
-                // Air (id 0) is never a held/placed block; its canReplaceTags = ALL is the world-gen "replace anything"
-                // sentinel and irrelevant to player placement.
+                // Air (id 0) is never a held/placed block; its placement mask is irrelevant to the player.
                 if (id == BlockIDs.Air) continue;
 
                 BlockType block = database.blockTypes[id];
                 if (block == null) continue;
 
-                BlockTags disallowed = block.canReplaceTags & ~AllowedPlayerCanReplace;
+                BlockTags disallowed = block.placementCanReplaceTags & ~AllowedPlayerCanReplace;
                 if (disallowed != BlockTags.NONE)
                 {
                     ok = false;
                     Debug.LogError(
-                        $"  [ASSERT FAILED] '{block.blockName}' (id {id}) canReplaceTags includes disallowed " +
+                        $"  [ASSERT FAILED] '{block.blockName}' (id {id}) placementCanReplaceTags includes disallowed " +
                         $"structural tag(s) for player placement: {DescribeTags(disallowed)} " +
                         $"(allowed: {DescribeTags(AllowedPlayerCanReplace)}).");
                 }

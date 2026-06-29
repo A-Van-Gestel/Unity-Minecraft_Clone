@@ -11,7 +11,7 @@ namespace Editor.Validation.Placement
     /// reproduce the player-visible symptom exactly: holding one of the misconfigured blocks, the placement ray
     /// tunnels through the targeted surface instead of letting the block land on top of it. Each asserts the
     /// <i>desired</i> outcome (<see cref="PlacementOutcome.LandsOnTop"/>), so it fails today and flips green once the
-    /// offending block's <c>canReplaceTags</c> is retuned to the soft player-placement set.
+    /// offending block's <c>placementCanReplaceTags</c> is retuned to the soft player-placement set.
     /// </summary>
     public static partial class PlacementValidationSuite
     {

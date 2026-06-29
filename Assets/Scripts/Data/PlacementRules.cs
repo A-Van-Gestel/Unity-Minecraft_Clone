@@ -63,18 +63,44 @@ namespace Data
     }
 
     /// <summary>
+    /// Identifies which context produced a <see cref="VoxelMod"/>, so the <see cref="ReplacementRule.Default"/>
+    /// gate in <c>World.ApplyModifications</c> can consult the matching <c>canReplaceTags</c> field on the incoming
+    /// block. World generation and player placement intentionally use <b>different</b> replacement masks: a structure
+    /// log may overwrite leaves during tree stacking (world-gen), but the player holding that log must not tunnel
+    /// through leaves (placement). See <see cref="BlockType.worldGenCanReplaceTags"/> /
+    /// <see cref="BlockType.placementCanReplaceTags"/>.
+    /// </summary>
+    public enum VoxelModSource : byte
+    {
+        /// <summary>
+        /// A live edit: player block placement, a block behavior emission, or a replayed saved edit. Resolves the
+        /// default replacement rule against <see cref="BlockType.placementCanReplaceTags"/>. This is the default for
+        /// every <see cref="VoxelMod"/> so existing call sites keep player semantics without modification.
+        /// </summary>
+        Live = 0,
+
+        /// <summary>
+        /// A world-generation placement: structures, flora, or ores expanded during chunk generation. Resolves the
+        /// default replacement rule against <see cref="BlockType.worldGenCanReplaceTags"/>.
+        /// </summary>
+        WorldGen,
+    }
+
+    /// <summary>
     /// Utility class for evaluating block tag interactions.
     /// </summary>
     public static class BlockTagUtility
     {
         /// <summary>
-        /// Evaluates whether an incoming block is allowed to replace an existing block
-        /// based on the tag definitions and replacement rules of both blocks.
+        /// Evaluates whether an incoming block is allowed to replace an existing block, using an explicitly supplied
+        /// "can replace" mask. The mask differs by context — see <see cref="CanReplaceForPlacement"/> (player) and
+        /// <see cref="CanReplaceForWorldGen"/> (generation), the two intended entry points.
         /// </summary>
         /// <param name="incomingProps">The block properties of the block being placed.</param>
         /// <param name="existingProps">The block properties of the block being replaced.</param>
+        /// <param name="incomingCanReplace">The replacement mask to evaluate (a <c>canReplaceTags</c> field of the incoming block).</param>
         /// <returns>True if the replacement is allowed, false otherwise.</returns>
-        public static bool CanReplace(BlockType incomingProps, BlockType existingProps)
+        public static bool CanReplace(BlockType incomingProps, BlockType existingProps, BlockTags incomingCanReplace)
         {
             // Rule A: Nothing can replace an Unbreakable block.
             if ((existingProps.tags & BlockTags.UNBREAKABLE) != 0)
@@ -83,11 +109,11 @@ namespace Data
             }
 
             // Rule B: If the incoming block has specific replacement rules...
-            if (incomingProps.canReplaceTags != BlockTags.NONE)
+            if (incomingCanReplace != BlockTags.NONE)
             {
                 // ...and the existing block has NO tags that match, it can't be placed.
                 // The bitwise AND (&) will be 0 if there are no common flags.
-                if ((existingProps.tags & incomingProps.canReplaceTags) == 0)
+                if ((existingProps.tags & incomingCanReplace) == 0)
                 {
                     // We make one exception: anything can replace "Air", which we define as a block with NONE tags.
                     if (existingProps.tags != BlockTags.NONE)
@@ -106,5 +132,25 @@ namespace Data
 
             return true;
         }
+
+        /// <summary>
+        /// Evaluates replacement for a <b>player placement</b> using the incoming block's
+        /// <see cref="BlockType.placementCanReplaceTags"/>.
+        /// </summary>
+        /// <param name="incomingProps">The block properties of the block being placed.</param>
+        /// <param name="existingProps">The block properties of the block being replaced.</param>
+        /// <returns>True if the placement may replace the existing block, false otherwise.</returns>
+        public static bool CanReplaceForPlacement(BlockType incomingProps, BlockType existingProps) =>
+            CanReplace(incomingProps, existingProps, incomingProps.placementCanReplaceTags);
+
+        /// <summary>
+        /// Evaluates replacement for a <b>world-generation</b> placement using the incoming block's
+        /// <see cref="BlockType.worldGenCanReplaceTags"/>.
+        /// </summary>
+        /// <param name="incomingProps">The block properties of the block being placed.</param>
+        /// <param name="existingProps">The block properties of the block being replaced.</param>
+        /// <returns>True if the generation may replace the existing block, false otherwise.</returns>
+        public static bool CanReplaceForWorldGen(BlockType incomingProps, BlockType existingProps) =>
+            CanReplace(incomingProps, existingProps, incomingProps.worldGenCanReplaceTags);
     }
 }
