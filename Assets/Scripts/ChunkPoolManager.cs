@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using DebugVisualizations;
 using Helpers;
 using UnityEngine;
@@ -31,7 +31,7 @@ public class ChunkPoolManager
     private int _targetViewDistance;
     private const float POOL_BUFFER_PERCENTAGE = 1.25f; // Keep 25% extra as buffer
 
-    public int targetViewDistance => _targetViewDistance;
+    public int TargetViewDistance => _targetViewDistance;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChunkPoolManager"/> class.
@@ -51,10 +51,7 @@ public class ChunkPoolManager
         // Initialize ChunkData Pool
         _dataPool = new ConcurrentDynamicPool<ChunkData>(
             createFunc: () => new ChunkData(Vector2Int.zero), // Pos set in Get()
-            destroyAction: _ =>
-            {
-                /* Data GC handled by runtime */
-            },
+            destroyAction: data => data.Dispose(), // Frees the native active-voxel buckets (managed state is GC'd)
             onReturnAction: _ =>
             {
                 /* Reset handled manually in Return logic due to complexity */
@@ -119,7 +116,7 @@ public class ChunkPoolManager
         _sectionPool.UpdatePruning(maxPoolSize * 8);
 
         // Fully cleanup ChunkBorder pool if disabled to free memory allocation
-        int chunkBorderPoolSize = World.Instance.settings.showChunkBorders ? maxPoolSize : 0;
+        int chunkBorderPoolSize = World.Instance.ShowChunkBorders ? maxPoolSize : 0;
         _borderPool.UpdatePruning(chunkBorderPoolSize);
 
         // Fully cleanup visualizer pool if disabled to free memory allocation
@@ -233,7 +230,9 @@ public class ChunkPoolManager
 
         // Update name
         ChunkCoord chunkCoord = ChunkCoord.FromWorldPosition(position);
-        border.name = $"Border {chunkCoord.X}, {chunkCoord.Z}";
+#if UNITY_EDITOR
+        border.name = $"Border {chunkCoord.X.ToString()}, {chunkCoord.Z.ToString()}";
+#endif
 
         // Set active
         border.SetActive(true);

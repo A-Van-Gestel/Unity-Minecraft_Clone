@@ -18,9 +18,14 @@ MonoBehaviour:
   blockTypes:
   - blockName: Air
     icon: {fileID: 10905, guid: 0000000000000000f000000000000000, type: 0}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 0
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 0
     fluidShaderID: 0
@@ -32,10 +37,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 0
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 0
     canReplaceTags: 4294967295
     isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -44,9 +53,14 @@ MonoBehaviour:
     rightFaceTexture: 0
   - blockName: Stone
     icon: {fileID: 21300000, guid: 27e44f78b5b2e5047a5ade71d928cfd2, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -58,10 +72,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: a91aed358be075240b8070cec5b5d183, type: 2}
     tags: 257
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -70,9 +88,14 @@ MonoBehaviour:
     rightFaceTexture: 0
   - blockName: Grass
     icon: {fileID: 21300000, guid: 2505f40e592d8654cb5c213523807663, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -84,10 +107,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
     tags: 1041
     canReplaceTags: 8258
     isActive: 1
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 12
     frontFaceTexture: 12
     topFaceTexture: 1
@@ -96,9 +123,14 @@ MonoBehaviour:
     rightFaceTexture: 12
   - blockName: Dirt
     icon: {fileID: 21300000, guid: 4d2a30764a49d4d40a87bf33603b7b6a, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -110,10 +142,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
     tags: 1041
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 2
     frontFaceTexture: 2
     topFaceTexture: 2
@@ -122,9 +158,14 @@ MonoBehaviour:
     rightFaceTexture: 2
   - blockName: Sand
     icon: {fileID: 21300000, guid: dbb3377fea8e43441a525b8e5f600fb5, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -136,10 +177,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 049839df00a000b4ea7843c245313b35, type: 2}
     tags: 25
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 3
     frontFaceTexture: 3
     topFaceTexture: 3
@@ -148,9 +193,14 @@ MonoBehaviour:
     rightFaceTexture: 3
   - blockName: Snow
     icon: {fileID: 21300000, guid: 7b8f03c8f0c48804d9fb4a6ad9505a9a, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -162,10 +212,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 17
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 4
     frontFaceTexture: 4
     topFaceTexture: 4
@@ -174,9 +228,14 @@ MonoBehaviour:
     rightFaceTexture: 4
   - blockName: Grass Snowy
     icon: {fileID: 21300000, guid: 7958f1daa10196145a6ad7483f331b69, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -188,10 +247,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
     tags: 1041
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 21
     frontFaceTexture: 21
     topFaceTexture: 5
@@ -200,9 +263,14 @@ MonoBehaviour:
     rightFaceTexture: 21
   - blockName: Stone Walkway
     icon: {fileID: 21300000, guid: d85503badde0d44448178bc5b607e998, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -214,10 +282,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2305
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 6
     frontFaceTexture: 6
     topFaceTexture: 6
@@ -226,9 +298,14 @@ MonoBehaviour:
     rightFaceTexture: 6
   - blockName: Bedrock
     icon: {fileID: 21300000, guid: 44d0880b225812b46862687bbe56e4a4, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -240,10 +317,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 261
-    canReplaceTags: 4294967295
+    canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 7
     frontFaceTexture: 7
     topFaceTexture: 7
@@ -252,9 +333,14 @@ MonoBehaviour:
     rightFaceTexture: 7
   - blockName: Desert Cracked
     icon: {fileID: 21300000, guid: 0005b9a00aa37664fbb7a796137d0c8c, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -266,10 +352,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: a91aed358be075240b8070cec5b5d183, type: 2}
     tags: 257
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 8
     frontFaceTexture: 8
     topFaceTexture: 8
@@ -278,9 +368,14 @@ MonoBehaviour:
     rightFaceTexture: 8
   - blockName: Grass Rocky
     icon: {fileID: 21300000, guid: 766f2bbdc8c56ab44bbb213d710ffe56, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -292,10 +387,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: ee7f51da015e75e40827a2cb9a342bb9, type: 2}
     tags: 1041
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 25
     frontFaceTexture: 25
     topFaceTexture: 9
@@ -304,9 +403,14 @@ MonoBehaviour:
     rightFaceTexture: 25
   - blockName: Tile
     icon: {fileID: 21300000, guid: f043e96164a8e5249931e8c48d451c4f, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -318,10 +422,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2305
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 10
     frontFaceTexture: 10
     topFaceTexture: 10
@@ -330,9 +438,14 @@ MonoBehaviour:
     rightFaceTexture: 10
   - blockName: Wood
     icon: {fileID: 21300000, guid: 2427470a8352b854a8ae6d49ad0ced94, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -344,10 +457,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 845289f1f2ec46f47b7c181729b4cd4d, type: 2}
     tags: 3105
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 11
     frontFaceTexture: 11
     topFaceTexture: 11
@@ -356,9 +473,14 @@ MonoBehaviour:
     rightFaceTexture: 11
   - blockName: Facade
     icon: {fileID: 21300000, guid: 5eb34bc57b61a4c478ac7b0d38fd9736, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 0
     fluidShaderID: 0
@@ -370,10 +492,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 0
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2305
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 13
     frontFaceTexture: 13
     topFaceTexture: 13
@@ -382,9 +508,14 @@ MonoBehaviour:
     rightFaceTexture: 13
   - blockName: Oak Log
     icon: {fileID: 21300000, guid: 1c9020fc480c80a43b91bc252d09d58f, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -396,10 +527,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 929eb7cd71e07db4aa16102fa5ec0746, type: 2}
     tags: 1057
     canReplaceTags: 8386
     isActive: 0
+    metadataSchema: 2
+    placementMetadataMode: 2
+    defaultMetadata: 0
     backFaceTexture: 14
     frontFaceTexture: 14
     topFaceTexture: 15
@@ -408,9 +543,14 @@ MonoBehaviour:
     rightFaceTexture: 14
   - blockName: Oak Leaves
     icon: {fileID: 21300000, guid: 0335f040fa78fcb48a9080f10217e7b6, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 0
     fluidShaderID: 0
@@ -422,10 +562,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 5
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 40c769fe208bc7d45a9682a06a87e461, type: 2}
     tags: 1217
     canReplaceTags: 0
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 16
     frontFaceTexture: 16
     topFaceTexture: 16
@@ -434,9 +578,14 @@ MonoBehaviour:
     rightFaceTexture: 16
   - blockName: Cactus
     icon: {fileID: 21300000, guid: 5bdf426e6c470a14a991101bc047ae99, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -448,10 +597,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 371aa74a265a2b448911164183310f2e, type: 2}
-    tags: 8256
+    tags: 24640
     canReplaceTags: 0
     isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 18
     frontFaceTexture: 18
     topFaceTexture: 17
@@ -460,9 +613,14 @@ MonoBehaviour:
     rightFaceTexture: 18
   - blockName: Stone Half Slab
     icon: {fileID: 21300000, guid: 615f06e5618484b428678b605917c0ff, type: 3}
+    renderShape: 1
     meshData: {fileID: 11400000, guid: f1f1cbb961eacda4dbac46e90f49df51, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 2
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 0.5, z: 1}
     renderNeighborFaces: 1
     fluidType: 0
     fluidShaderID: 0
@@ -474,10 +632,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2305
     canReplaceTags: 8258
     isActive: 0
+    metadataSchema: 4
+    placementMetadataMode: 2
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -486,9 +648,14 @@ MonoBehaviour:
     rightFaceTexture: 0
   - blockName: Directional Block
     icon: {fileID: 21300000, guid: 54584f2d29bbd864ca3da902bf1e3050, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -500,10 +667,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 0}
     tags: 2048
     canReplaceTags: 16379
     isActive: 0
+    metadataSchema: 3
+    placementMetadataMode: 2
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 7
     topFaceTexture: 0
@@ -512,9 +683,14 @@ MonoBehaviour:
     rightFaceTexture: 0
   - blockName: Water
     icon: {fileID: 21300000, guid: 8360d6e2f874c114a9a6ec0f054e66b5, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
     stackSize: 64
     isSolid: 0
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 1
     fluidShaderID: 0
@@ -526,10 +702,14 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 2
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 90adce5ab71476a47b05068311651645, type: 2}
     tags: 2
     canReplaceTags: 8258
     isActive: 1
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -538,13 +718,18 @@ MonoBehaviour:
     rightFaceTexture: 0
   - blockName: Lava
     icon: {fileID: 21300000, guid: c505a45281380954d8a6fdc84a3a94c0, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 018c7b8dcf4c7b64ea48c685473fda69, type: 2}
     stackSize: 64
     isSolid: 0
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
     fluidType: 2
     fluidShaderID: 1
-    fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
+    fluidMeshData: {fileID: 11400000, guid: 4166a3e10e186364d8a9e5f90be4c0ee, type: 2}
     fluidLevel: 0
     flowLevels: 4
     waterfallsMaxSpread: 1
@@ -552,10 +737,14 @@ MonoBehaviour:
     spreadChance: 0.25
     opacity: 7
     lightEmission: 15
+    lightEmissionColor: {r: 1, g: 0.73333335, b: 0.26666668, a: 1}
     tagPreset: {fileID: 11400000, guid: 90adce5ab71476a47b05068311651645, type: 2}
     tags: 2
     canReplaceTags: 8258
     isActive: 1
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -564,9 +753,14 @@ MonoBehaviour:
     rightFaceTexture: 0
   - blockName: Coal Ore
     icon: {fileID: 21300000, guid: ab41ff4a26fa3b14a996591448acc4b2, type: 3}
+    renderShape: 0
     meshData: {fileID: 11400000, guid: 9e670f70cac12fa418d18944a39a8575, type: 2}
     stackSize: 64
     isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
     fluidType: 0
     fluidShaderID: 0
@@ -578,13 +772,577 @@ MonoBehaviour:
     spreadChance: 1
     opacity: 15
     lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 1559d011df30dd845ae9ed95fdef3706, type: 2}
     tags: 769
     canReplaceTags: 256
     isActive: 0
+    metadataSchema: 5
+    placementMetadataMode: 1
+    defaultMetadata: 0
     backFaceTexture: 32
     frontFaceTexture: 32
     topFaceTexture: 32
     bottomFaceTexture: 32
     leftFaceTexture: 32
     rightFaceTexture: 32
+  - blockName: Grass Blades
+    icon: {fileID: 21300000, guid: 6ba5e3ed7da5cba44958c80c9f16b836, type: 3}
+    renderShape: 2
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 0
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 1
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 0
+    lightEmission: 0
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: 371aa74a265a2b448911164183310f2e, type: 2}
+    tags: 24640
+    canReplaceTags: 8192
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 255
+    frontFaceTexture: 255
+    topFaceTexture: 255
+    bottomFaceTexture: 255
+    leftFaceTexture: 255
+    rightFaceTexture: 255
+  - blockName: Debug Lamp 01
+    icon: {fileID: 21300000, guid: 3684b75c48945704787a0d47a88c25fe, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 1
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 225
+    frontFaceTexture: 225
+    topFaceTexture: 225
+    bottomFaceTexture: 225
+    leftFaceTexture: 225
+    rightFaceTexture: 225
+  - blockName: Debug Lamp 02
+    icon: {fileID: 21300000, guid: d1695ff6f8228154981fa844cc1e2010, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 2
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 226
+    frontFaceTexture: 226
+    topFaceTexture: 226
+    bottomFaceTexture: 226
+    leftFaceTexture: 226
+    rightFaceTexture: 226
+  - blockName: Debug Lamp 03
+    icon: {fileID: 21300000, guid: 8559dea71da74c448887eef74648cc11, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 3
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 227
+    frontFaceTexture: 227
+    topFaceTexture: 227
+    bottomFaceTexture: 227
+    leftFaceTexture: 227
+    rightFaceTexture: 227
+  - blockName: Debug Lamp 04
+    icon: {fileID: 21300000, guid: ef1b448d7d1cc214ea9d03c7bcadba22, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 4
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 228
+    frontFaceTexture: 228
+    topFaceTexture: 228
+    bottomFaceTexture: 228
+    leftFaceTexture: 228
+    rightFaceTexture: 228
+  - blockName: Debug Lamp 05
+    icon: {fileID: 21300000, guid: 9a16d1885636a6643a93032883d9d027, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 5
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 229
+    frontFaceTexture: 229
+    topFaceTexture: 229
+    bottomFaceTexture: 229
+    leftFaceTexture: 229
+    rightFaceTexture: 229
+  - blockName: Debug Lamp 06
+    icon: {fileID: 21300000, guid: f255691b2d5d6cd42afb7465acd59ccb, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 6
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 230
+    frontFaceTexture: 230
+    topFaceTexture: 230
+    bottomFaceTexture: 230
+    leftFaceTexture: 230
+    rightFaceTexture: 230
+  - blockName: Debug Lamp 07
+    icon: {fileID: 21300000, guid: 3b87ebc2b83c02f45bd4500be0a1b60f, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 7
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 231
+    frontFaceTexture: 231
+    topFaceTexture: 231
+    bottomFaceTexture: 231
+    leftFaceTexture: 231
+    rightFaceTexture: 231
+  - blockName: Debug Lamp 08
+    icon: {fileID: 21300000, guid: 6478f73956624ae49ba0be2285f9302d, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 8
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 232
+    frontFaceTexture: 232
+    topFaceTexture: 232
+    bottomFaceTexture: 232
+    leftFaceTexture: 232
+    rightFaceTexture: 232
+  - blockName: Debug Lamp 09
+    icon: {fileID: 21300000, guid: 3ca998b1cdcc09948be803a0e6730d9a, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 9
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 233
+    frontFaceTexture: 233
+    topFaceTexture: 233
+    bottomFaceTexture: 233
+    leftFaceTexture: 233
+    rightFaceTexture: 233
+  - blockName: Debug Lamp 10
+    icon: {fileID: 21300000, guid: e7b7ae3768ad7854094e55172833f792, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 10
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 234
+    frontFaceTexture: 234
+    topFaceTexture: 234
+    bottomFaceTexture: 234
+    leftFaceTexture: 234
+    rightFaceTexture: 234
+  - blockName: Debug Lamp 11
+    icon: {fileID: 21300000, guid: bb8f57261dc811e4d9a9e357af56025e, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 11
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 235
+    frontFaceTexture: 235
+    topFaceTexture: 235
+    bottomFaceTexture: 235
+    leftFaceTexture: 235
+    rightFaceTexture: 235
+  - blockName: Debug Lamp 12 - Green
+    icon: {fileID: 21300000, guid: a4df8d46f74dd37428486de9220d573c, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 12
+    lightEmissionColor: {r: 0, g: 1, b: 0, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 236
+    frontFaceTexture: 236
+    topFaceTexture: 236
+    bottomFaceTexture: 236
+    leftFaceTexture: 236
+    rightFaceTexture: 236
+  - blockName: Debug Lamp 13 - Blue
+    icon: {fileID: 21300000, guid: 761df4a0c1287b245ae1ffba82998e2b, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 13
+    lightEmissionColor: {r: 0, g: 0, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 237
+    frontFaceTexture: 237
+    topFaceTexture: 237
+    bottomFaceTexture: 237
+    leftFaceTexture: 237
+    rightFaceTexture: 237
+  - blockName: Debug Lamp 14 - Red
+    icon: {fileID: 21300000, guid: 3330b9de37db55f4f8b669d90edf7a33, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 14
+    lightEmissionColor: {r: 1, g: 0, b: 0, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 238
+    frontFaceTexture: 238
+    topFaceTexture: 238
+    bottomFaceTexture: 238
+    leftFaceTexture: 238
+    rightFaceTexture: 238
+  - blockName: Debug Lamp 15 - White
+    icon: {fileID: 21300000, guid: a88c49276a2385542950593027b0416f, type: 3}
+    renderShape: 0
+    meshData: {fileID: 0}
+    stackSize: 64
+    isSolid: 1
+    collisionBounds:
+      mode: 0
+      min: {x: 0, y: 0, z: 0}
+      max: {x: 1, y: 1, z: 1}
+    renderNeighborFaces: 0
+    fluidType: 0
+    fluidShaderID: 0
+    fluidMeshData: {fileID: 0}
+    fluidLevel: 0
+    flowLevels: 8
+    waterfallsMaxSpread: 1
+    infiniteSourceRegeneration: 0
+    spreadChance: 1
+    opacity: 15
+    lightEmission: 15
+    lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
+    tagPreset: {fileID: 11400000, guid: d5e15e35272206e478de0f83ce02b5e6, type: 2}
+    tags: 65536
+    canReplaceTags: 8258
+    isActive: 0
+    metadataSchema: 0
+    placementMetadataMode: 0
+    defaultMetadata: 0
+    backFaceTexture: 239
+    frontFaceTexture: 239
+    topFaceTexture: 239
+    bottomFaceTexture: 239
+    leftFaceTexture: 239
+    rightFaceTexture: 239

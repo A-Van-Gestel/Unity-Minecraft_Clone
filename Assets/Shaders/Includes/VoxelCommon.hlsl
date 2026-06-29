@@ -18,6 +18,7 @@ struct VoxelAppdata
     float4 vertex : POSITION;
     float2 uv : TEXCOORD0;
     half4 color : COLOR;
+    half4 lightData : TEXCOORD1; // UNorm8: (skyLight, blocklightR, blocklightG, blocklightB)
 };
 
 // --- Fragment Input ---
@@ -26,6 +27,7 @@ struct VoxelV2F
     float4 vertex : SV_POSITION;
     float2 uv : TEXCOORD0;
     half4 color : COLOR;
+    half4 lightData : TEXCOORD1;
 };
 
 // --- Vertex Function ---
@@ -35,6 +37,7 @@ VoxelV2F VoxelVert(VoxelAppdata v)
     o.vertex = TransformObjectToHClip(v.vertex.xyz);
     o.uv = v.uv;
     o.color = v.color;
+    o.lightData = v.lightData;
     return o;
 }
 

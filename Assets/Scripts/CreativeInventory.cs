@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UI.Tooltip;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -25,7 +26,7 @@ public class CreativeInventory : MonoBehaviour
         canvasGridLayoutGroup.cellSize = prefabSize;
 
         // Calculate how many rows the different block types will fill.
-        int itemCount = _world.blockTypes.Length - 1; // Exclude Air (blockTypes[0]) 
+        int itemCount = _world.BlockTypes.Length - 1; // Exclude Air (blockTypes[0])
         int creativeSlotRows = Mathf.CeilToInt((float)itemCount / itemColumnCount);
 
         // Fill in the slots.
@@ -35,12 +36,16 @@ public class CreativeInventory : MonoBehaviour
             int currentRow = Mathf.CeilToInt((float)i / itemColumnCount);
 
             // First fill with creative menu with all block types.
-            if (i < _world.blockTypes.Length)
+            if (i < _world.BlockTypes.Length)
             {
-                ItemStack stack = new ItemStack((byte)i, _world.blockTypes[i].stackSize);
+                ItemStack stack = new ItemStack((byte)i, _world.BlockTypes[i].stackSize);
                 ItemSlot slot = new ItemSlot(newSlot.GetComponent<UIItemSlot>(), stack);
                 slot.IsCreative = true;
                 Slots.Add(slot);
+
+                TooltipTrigger trigger = newSlot.AddComponent<TooltipTrigger>();
+                trigger.text = BlockTooltipBuilder.Build(_world.BlockTypes[i], (byte)i);
+                trigger.hoverPositionOverride = TooltipHoverPosition.TopLeft;
             }
             // Create one row spacer between creative blocks and empty slots by disabling created slot.
             else if (currentRow <= creativeSlotRows + 1)
@@ -53,6 +58,9 @@ public class CreativeInventory : MonoBehaviour
             {
                 ItemSlot slot = new ItemSlot(newSlot.GetComponent<UIItemSlot>());
                 Slots.Add(slot);
+
+                TooltipTrigger emptyTrigger = newSlot.AddComponent<TooltipTrigger>();
+                emptyTrigger.hoverPositionOverride = TooltipHoverPosition.TopLeft;
             }
         }
     }

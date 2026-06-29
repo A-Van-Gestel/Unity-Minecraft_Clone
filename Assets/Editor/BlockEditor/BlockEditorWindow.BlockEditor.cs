@@ -2,6 +2,7 @@ using Data;
 using Editor.BlockEditor.Helpers;
 using Editor.DataGeneration;
 using Editor.Libraries;
+using Jobs.BurstData;
 using UnityEditor;
 using UnityEngine;
 
@@ -74,6 +75,7 @@ namespace Editor.BlockEditor
                 int count = BlockIconGenerator.GenerateAllIcons(
                     _blockTypesCopy, _blockDatabase, forceRegen, s_iconSizes[_iconSizeIndex]);
 
+                if (count > 0) hasUnsavedChanges = true;
                 EditorUtility.DisplayDialog("Complete", $"Generated {count} block icon(s).", "OK");
             }
 
@@ -130,6 +132,10 @@ namespace Editor.BlockEditor
                 {
                     _selectedBlock = _blockTypesCopy[index];
                     _previewFluidLevel = 0;
+                    _previewFacing = 0; // Default to South
+                    _previewRoll = 0;
+                    _previewAxis = 0;
+                    _previewYaw = 0;
                     UpdatePreviewMesh();
                 }
             );
@@ -174,14 +180,17 @@ namespace Editor.BlockEditor
             if (_selectedBlock != null)
             {
                 // --- Title ---
-                EditorGUILayout.LabelField($"Editing: {_selectedBlock.blockName} (ID: {_selectedBlockIndex})", EditorStyles.boldLabel);
+                EditorUILayoutHelper.SectionHeader($"Editing: {_selectedBlock.blockName} (ID: {_selectedBlockIndex})");
                 EditorGUILayout.Space();
 
                 // --- Block details with Tooltips ---
+                EditorGUI.BeginChangeCheck();
                 _selectedBlock.blockName = EditorGUILayout.TextField(new GUIContent("Block Name", "The display name of the block."), _selectedBlock.blockName);
                 EditorGUILayout.BeginHorizontal();
                 _selectedBlock.icon = (Sprite)EditorGUILayout.ObjectField(new GUIContent("Icon", "The icon that appears in the toolbar and inventory."), _selectedBlock.icon, typeof(Sprite), false, GUILayout.Width(200));
+                bool oldChanged1 = GUI.changed;
                 _iconSizeIndex = EditorGUILayout.Popup(_iconSizeIndex, s_iconSizeLabels, GUILayout.Width(70));
+                GUI.changed = oldChanged1;
                 if (GUILayout.Button("🎨 Generate", GUILayout.Width(90)))
                 {
                     Sprite generatedIcon = BlockIconGenerator.GenerateAndSaveIcon(
@@ -189,22 +198,137 @@ namespace Editor.BlockEditor
                     if (generatedIcon != null)
                     {
                         _selectedBlock.icon = generatedIcon;
+                        hasUnsavedChanges = true;
                     }
                 }
 
                 EditorGUILayout.EndHorizontal();
 
-                _selectedBlock.meshData = (VoxelMeshData)EditorGUILayout.ObjectField(new GUIContent("Custom Mesh Data", "The custom mesh data for this block, if it's not a standard cube."), _selectedBlock.meshData, typeof(VoxelMeshData), false);
+                EditorGUILayout.Space();
+                EditorUILayoutHelper.SubHeader("Meshing");
+
+                // --- Render Shape ---
+                EditorGUI.BeginChangeCheck();
+                _selectedBlock.renderShape = (RenderShape)EditorGUILayout.EnumPopup(new GUIContent("Render Shape", "The mesh generation strategy used for this block.\n\n• Cube — Standard 6-face cube.\n• CustomMesh — Uses a VoxelMeshData ScriptableObject.\n• CrossMesh — Two intersecting diagonal planes for flora."), _selectedBlock.renderShape);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    UpdatePreviewMesh();
+                }
+
+                // Only show the Custom Mesh Data field when using CustomMesh shape
+                if (_selectedBlock.renderShape == RenderShape.CustomMesh)
+                {
+                    _selectedBlock.meshData = (VoxelMeshData)EditorGUILayout.ObjectField(new GUIContent("Custom Mesh Data", "The custom mesh data for this block, if it's not a standard cube."), _selectedBlock.meshData, typeof(VoxelMeshData), false);
+                }
 
                 EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Properties", EditorStyles.boldLabel);
+                EditorUILayoutHelper.SubHeader("Properties");
                 _selectedBlock.stackSize = EditorGUILayout.IntSlider(new GUIContent("Stack Size", "The maximum amount of this block that can be stacked."), _selectedBlock.stackSize, 1, 64);
                 _selectedBlock.isSolid = EditorGUILayout.Toggle(new GUIContent("Is Solid", "Indicates whether the player collides with this block."), _selectedBlock.isSolid);
-                _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighbouring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
+
+                if (_selectedBlock.isSolid)
+                {
+                    EditorGUI.indentLevel++;
+                    EditorGUILayout.LabelField("Collision Bounds", EditorStyles.boldLabel);
+
+                    var bounds = _selectedBlock.collisionBounds;
+
+                    EditorGUI.BeginChangeCheck();
+                    bounds.mode = (CollisionBoundsMode)EditorGUILayout.EnumPopup(
+                        new GUIContent("Mode", "How the collision volume is defined.\n\n" +
+                                               "• Full Block — standard 1x1x1 cube (fast path).\n" +
+                                               "• Custom AABB — manually authored sub-voxel box.\n" +
+                                               "• Match Visual Mesh — auto-derived from the mesh bounding box."),
+                        bounds.mode);
+
+                    if (bounds.mode == CollisionBoundsMode.CustomAABB || bounds.mode == CollisionBoundsMode.MatchVisualMesh)
+                    {
+                        if (bounds.mode == CollisionBoundsMode.CustomAABB)
+                        {
+                            // Preset dropdown
+                            int currentPreset = 0;
+                            if (bounds.min == Vector3.zero && bounds.max == new Vector3(1f, 0.5f, 1f)) currentPreset = 1;
+                            else if (bounds.min == new Vector3(0f, 0.5f, 0f) && bounds.max == Vector3.one) currentPreset = 2;
+                            else if (bounds.min == Vector3.zero && bounds.max == new Vector3(1f, 0.25f, 1f)) currentPreset = 3;
+
+                            EditorGUI.BeginChangeCheck();
+                            int newPreset = EditorGUILayout.Popup(new GUIContent("Preset", "Quickly apply common sub-voxel collision shapes."), currentPreset, new[] { "Custom", "Bottom Half Slab", "Top Half Slab", "Quarter Slab" });
+                            if (EditorGUI.EndChangeCheck() && newPreset != 0)
+                            {
+                                if (newPreset == 1) bounds = BlockCollisionBounds.BottomHalfSlab;
+                                else if (newPreset == 2) bounds = BlockCollisionBounds.TopHalfSlab;
+                                else if (newPreset == 3) bounds = BlockCollisionBounds.BottomQuarterSlab;
+                            }
+
+                            bounds.min = EditorGUILayout.Vector3Field("Min", bounds.min);
+                            bounds.max = EditorGUILayout.Vector3Field("Max", bounds.max);
+                        }
+                        else if (bounds.mode == CollisionBoundsMode.MatchVisualMesh)
+                        {
+                            EditorGUILayout.HelpBox("Bounds will be auto-derived from the visual mesh. Preview and click 'Derive Now' to update.", MessageType.Info);
+
+                            GUI.enabled = false;
+                            EditorGUILayout.Vector3Field("Min", bounds.min);
+                            EditorGUILayout.Vector3Field("Max", bounds.max);
+                            GUI.enabled = true;
+
+                            if (GUILayout.Button("Derive Now"))
+                            {
+                                if (_meshPreviewWidget.HasMesh)
+                                {
+                                    // MeshPreviewWidget handles custom rotations, but the base mesh's bounds are what we need.
+                                    // The custom mesh data is compiled into a Unity Mesh which gives us its bounds centered around (0.5, 0.5, 0.5).
+                                    // We need to convert from Unity Mesh bounds back to block space [0,1].
+                                    // Mesh vertices are created centered on 0,0,0 usually? Wait, EditorMeshGenerator centers vertices around 0,0,0? No!
+                                    // Let's rely on standard block bounds logic. If EditorMeshGenerator generates vertices between -0.5 and 0.5, we add 0.5.
+                                    // If we just use the bounds and add 0.5, it should match the preview exactly!
+                                    // But wait, the preview mesh bounds can be retrieved using reflection or just accessing the _previewMesh, but we don't have public access.
+                                    // Let's just generate it here using the editor mesh generator, or store it in UpdatePreviewMesh.
+                                    // For now, let's call UpdatePreviewMesh() and then we need the bounds.
+                                    // Actually, it's safer to just generate the Mesh data directly here.
+                                    Mesh tempMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, _selectedBlock.defaultMetadata, 0);
+                                    if (tempMesh != null)
+                                    {
+                                        bounds.min = tempMesh.bounds.min + new Vector3(0.5f, 0.5f, 0.5f);
+                                        bounds.max = tempMesh.bounds.max + new Vector3(0.5f, 0.5f, 0.5f);
+                                        DestroyImmediate(tempMesh);
+                                        hasUnsavedChanges = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Validation
+                        if (bounds.min.x >= bounds.max.x || bounds.min.y >= bounds.max.y || bounds.min.z >= bounds.max.z)
+                        {
+                            EditorGUILayout.HelpBox("Validation Error: Min must be strictly less than Max.", MessageType.Error);
+                        }
+
+                        if (bounds.min.x < 0f || bounds.min.y < 0f || bounds.min.z < 0f ||
+                            bounds.max.x > 1f || bounds.max.y > 1f || bounds.max.z > 1f)
+                        {
+                            EditorGUILayout.HelpBox("Warning: Bounds are outside the standard [0,1] block space.", MessageType.Warning);
+                        }
+                    }
+                    else if (bounds.mode == CollisionBoundsMode.FullBlock)
+                    {
+                        // Ensure it resets to full block when switched back
+                        bounds = BlockCollisionBounds.FullBlock;
+                    }
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        _selectedBlock.collisionBounds = bounds;
+                    }
+
+                    EditorGUI.indentLevel--;
+                }
+
+                _selectedBlock.renderNeighborFaces = EditorGUILayout.Toggle(new GUIContent("Render Neighbor Faces", "Indicates whether the neighboring faces should still be rendered when this block is placed."), _selectedBlock.renderNeighborFaces);
                 _selectedBlock.isActive = EditorGUILayout.Toggle(new GUIContent("Is Active", "Indicates whether the block has any block behavior."), _selectedBlock.isActive);
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Fluid Properties", EditorStyles.boldLabel);
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Fluid Properties");
                 _selectedBlock.fluidType = (FluidType)EditorGUILayout.EnumPopup(new GUIContent("Fluid Type", "The type of fluid this block represents. 'None' for solid blocks."), _selectedBlock.fluidType);
 
                 // --- Conditional Fluid Properties ---
@@ -224,6 +348,7 @@ namespace Editor.BlockEditor
                     EditorGUILayout.LabelField("Editor Preview", EditorStyles.boldLabel);
 
                     // Begin a change check. This is more efficient than comparing before/after values.
+                    bool oldChanged2 = GUI.changed;
                     EditorGUI.BeginChangeCheck();
                     _previewFluidLevel = EditorGUILayout.IntSlider(new GUIContent("Preview Fluid Level", "Adjust the fluid level for the 3D preview below. This does not affect game data."), _previewFluidLevel, 0, 15);
 
@@ -233,17 +358,150 @@ namespace Editor.BlockEditor
                         UpdatePreviewMesh();
                     }
 
+                    GUI.changed = oldChanged2;
+
                     EditorGUI.indentLevel--;
                 }
 
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Lighting Properties", EditorStyles.boldLabel);
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Metadata");
+                _selectedBlock.metadataSchema = (MetadataSchema)EditorGUILayout.EnumPopup(
+                    new GUIContent("Metadata Schema",
+                        "How the 8-bit voxel metadata byte is interpreted for this block.\n\n" +
+                        "• None — meta is unused; defaultMetadata is written verbatim.\n" +
+                        "• FluidLevel4 — bits 0-3 store fluid level (0-15). For Water/Lava.\n" +
+                        "• Axis3 — bits 0-1 store the log/pillar axis (0=Y, 1=X, 2=Z).\n" +
+                        "• Facing6 — bits 0-2 store one of 6 face directions.\n" +
+                        "• Facing6Roll2 — bits 0-2 facing + bits 3-4 roll quadrant.\n" +
+                        "• HorizontalOnly — bits 0-1 store yaw (0=N, 1=S, 2=W, 3=E).\n\n" +
+                        "Frozen bit layouts — see PER_BLOCK_METADATA_SCHEMAS.md §5.3."),
+                    _selectedBlock.metadataSchema);
+
+                _selectedBlock.placementMetadataMode = (PlacementMetadataMode)EditorGUILayout.EnumPopup(
+                    new GUIContent("Placement Mode",
+                        "How player placement authors this block's metadata byte.\n\n" +
+                        "• None — placement writes 'Default Metadata' unchanged.\n" +
+                        "• PlayerYawCardinal — derives yaw from the player's body facing " +
+                        "(N/S/W/E). Use for blocks whose front face should snap to a horizontal " +
+                        "compass direction (e.g. furnaces, stairs, ordinary cubes routed via " +
+                        "HorizontalOnly).\n" +
+                        "• PlayerLookAxis — derives axis from the camera's look vector " +
+                        "(dominant of |x|, |y|, |z|; ties resolve Y > X > Z). Use for axial " +
+                        "blocks like logs/pillars where the placed face follows where you're " +
+                        "looking, including straight up/down."),
+                    _selectedBlock.placementMetadataMode);
+
+                _selectedBlock.defaultMetadata = (byte)EditorGUILayout.IntSlider(
+                    new GUIContent("Default Metadata",
+                        "Default metadata byte written when placement mode is 'None' or as a " +
+                        "fallback for invalid/missing values. Must fit within the chosen " +
+                        "schema's valid range (see Metadata Schema tooltip)."),
+                    _selectedBlock.defaultMetadata, 0, 255);
+
+                // --- Metadata Editor Preview UI ---
+                if (_selectedBlock.metadataSchema != MetadataSchema.None && _selectedBlock.metadataSchema != MetadataSchema.FluidLevel4)
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Orientation Preview", EditorStyles.boldLabel);
+                    bool oldChanged3 = GUI.changed;
+                    EditorGUI.BeginChangeCheck();
+
+                    switch (_selectedBlock.metadataSchema)
+                    {
+                        case MetadataSchema.Axis3:
+                            _previewAxis = EditorGUILayout.IntPopup("Preview Axis", _previewAxis,
+                                new[] { "Y-Axis (Up & Down)", "X-Axis (East & West)", "Z-Axis (North & South)" },
+                                new[] { 0, 1, 2 });
+                            break;
+                        case MetadataSchema.Facing6:
+                            _previewFacing = EditorGUILayout.IntPopup("Preview Facing", _previewFacing,
+                                new[] { "Top", "Bottom", "North", "South", "West", "East" },
+                                new[] { 2, 3, 1, 0, 4, 5 });
+                            break;
+                        case MetadataSchema.Facing6Roll2:
+                            _previewFacing = EditorGUILayout.IntPopup("Preview Facing", _previewFacing,
+                                new[] { "Top", "Bottom", "North", "South", "West", "East" },
+                                new[] { 2, 3, 1, 0, 4, 5 });
+                            _previewRoll = EditorGUILayout.IntPopup("Preview Roll", _previewRoll,
+                                new[] { "0°", "90° CW", "180°", "270° CW" },
+                                new[] { 0, 1, 2, 3 });
+                            break;
+                        case MetadataSchema.HorizontalOnly:
+                            _previewYaw = EditorGUILayout.IntPopup("Preview Yaw", _previewYaw,
+                                new[] { "North", "South", "West", "East" },
+                                new[] { 0, 1, 2, 3 });
+                            break;
+                    }
+
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        UpdatePreviewMesh();
+                    }
+
+                    GUI.changed = oldChanged3;
+                }
+
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Lighting Properties");
                 _selectedBlock.opacity = (byte)EditorGUILayout.IntSlider(new GUIContent("Opacity", "How many light levels will be blocked by this block."), _selectedBlock.opacity, 0, 15);
                 _selectedBlock.lightEmission = (byte)EditorGUILayout.IntSlider(new GUIContent("Light Emission", "How many light levels will be emitted by this block."), _selectedBlock.lightEmission, 0, 15);
+                if (_selectedBlock.lightEmission > 0)
+                {
+                    _selectedBlock.lightEmissionColor = EditorGUILayout.ColorField(
+                        new GUIContent("Emission Color", "The color of light emitted by this block. Combined with intensity to produce per-channel RGB values."),
+                        _selectedBlock.lightEmissionColor, showEyedropper: true, showAlpha: false, hdr: false);
+
+                    // Derive per-channel 0-15 values (same formula as BlockTypeJobData)
+                    Color emColor = _selectedBlock.lightEmissionColor;
+                    float maxComp = Mathf.Max(emColor.r, Mathf.Max(emColor.g, emColor.b));
+                    float emScale = maxComp > 0 ? _selectedBlock.lightEmission / maxComp : 0;
+                    int derivedR = Mathf.Clamp(Mathf.RoundToInt(emColor.r * emScale), 0, 15);
+                    int derivedG = Mathf.Clamp(Mathf.RoundToInt(emColor.g * emScale), 0, 15);
+                    int derivedB = Mathf.Clamp(Mathf.RoundToInt(emColor.b * emScale), 0, 15);
+
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.PrefixLabel(new GUIContent("Emission RGB", "Per-channel emission levels (0-15). Editing these updates the color picker and intensity."));
+                    EditorGUI.BeginChangeCheck();
+                    int newR = EditorGUILayout.IntField(derivedR, GUILayout.MinWidth(30));
+                    int newG = EditorGUILayout.IntField(derivedG, GUILayout.MinWidth(30));
+                    int newB = EditorGUILayout.IntField(derivedB, GUILayout.MinWidth(30));
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        newR = Mathf.Clamp(newR, 0, 15);
+                        newG = Mathf.Clamp(newG, 0, 15);
+                        newB = Mathf.Clamp(newB, 0, 15);
+                        int peak = Mathf.Max(newR, Mathf.Max(newG, newB));
+                        _selectedBlock.lightEmission = (byte)peak;
+                        _selectedBlock.lightEmissionColor = peak > 0
+                            ? new Color(newR / (float)peak, newG / (float)peak, newB / (float)peak)
+                            : Color.white;
+                    }
+
+                    EditorGUILayout.EndHorizontal();
+
+                    // Attenuation preview — shows how the emission color shifts over 15 blocks
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.PrefixLabel(new GUIContent("Light Falloff", "Preview of how the emission color attenuates over 15 blocks of distance."));
+                    Rect falloffRect = GUILayoutUtility.GetRect(0, 20, GUILayout.ExpandWidth(true));
+                    EditorGUILayout.EndHorizontal();
+
+                    if (Event.current.type == EventType.Repaint)
+                    {
+                        float cellWidth = falloffRect.width / 15f;
+                        for (int d = 0; d < 15; d++)
+                        {
+                            int chR = Mathf.Max(derivedR - d, 0);
+                            int chG = Mathf.Max(derivedG - d, 0);
+                            int chB = Mathf.Max(derivedB - d, 0);
+                            Color cellColor = new Color(chR / 15f, chG / 15f, chB / 15f);
+                            EditorGUI.DrawRect(new Rect(falloffRect.x + d * cellWidth, falloffRect.y, cellWidth + 1, falloffRect.height), cellColor);
+                        }
+                    }
+                }
 
                 EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Placement Rules & Tags", EditorStyles.boldLabel);
+                EditorUILayoutHelper.SubHeader("Placement Rules & Tags");
 
                 // --- Tag Preset Field ---
                 EditorGUILayout.BeginHorizontal();
@@ -313,6 +571,7 @@ namespace Editor.BlockEditor
                     {
                         _selectedBlock.tags = presetTags;
                         _selectedBlock.canReplaceTags = presetCanReplace;
+                        hasUnsavedChanges = true;
                     }
 
                     // Save: only enabled when overrides exist
@@ -341,12 +600,8 @@ namespace Editor.BlockEditor
                 _selectedBlock.canReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Can Replace Tags", "What tags can this block replace?"), _selectedBlock.canReplaceTags);
 
 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Face Textures (ID)", EditorStyles.boldLabel);
-
-                // --- Plus-Shaped Texture Selector Layout ---
-                // This layout uses nested vertical and horizontal groups to align the selectors
-                // in an "unfolded cube" pattern without hardcoding pixel sizes.
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("Face Textures (ID)");
 
                 // Only draw the texture selectors if the block is not a fluid. As fluids are drawn using shaders.
                 if (_selectedBlock.fluidType == FluidType.None)
@@ -354,35 +609,60 @@ namespace Editor.BlockEditor
                     // Auto-refresh the 3D preview when any texture face ID changes.
                     EditorGUI.BeginChangeCheck();
 
-                    // Row 1: Top Face (centered)
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Top (+Y)", "Texture ID for the Positive Y face."), ref _selectedBlock.topFaceTexture);
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
+                    if (_selectedBlock.renderShape == RenderShape.CrossMesh)
+                    {
+                        // --- CrossMesh: Single Texture Selector ---
+                        // Cross meshes use a single texture for all four planes.
+                        // We sync all side face IDs to keep SideFaceTexture consistent.
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Texture", "Texture ID for the cross-mesh planes."), ref _selectedBlock.backFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
 
-                    // Row 2: Left, Front, and Right Faces
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Left (-X)", "Texture ID for the Negative X face."), ref _selectedBlock.leftFaceTexture);
-                    DrawTextureSelectorControl(new GUIContent("Front (+Z)", "Texture ID for the Positive Z face."), ref _selectedBlock.frontFaceTexture);
-                    DrawTextureSelectorControl(new GUIContent("Right (+X)", "Texture ID for the Positive X face."), ref _selectedBlock.rightFaceTexture);
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
+                        // Sync all face IDs so SideFaceTexture always returns this value.
+                        _selectedBlock.frontFaceTexture = _selectedBlock.backFaceTexture;
+                        _selectedBlock.leftFaceTexture = _selectedBlock.backFaceTexture;
+                        _selectedBlock.rightFaceTexture = _selectedBlock.backFaceTexture;
+                        _selectedBlock.topFaceTexture = _selectedBlock.backFaceTexture;
+                        _selectedBlock.bottomFaceTexture = _selectedBlock.backFaceTexture;
+                    }
+                    else
+                    {
+                        // --- Plus-Shaped Texture Selector Layout ---
+                        // This layout uses nested vertical and horizontal groups to align the selectors
+                        // in an "unfolded cube" pattern without hardcoding pixel sizes.
 
-                    // Row 3: Bottom Face (centered)
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Bottom (-Y)", "Texture ID for the Negative Y face."), ref _selectedBlock.bottomFaceTexture);
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
+                        // Row 1: Top Face (centered)
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Top (+Y)", "Texture ID for the Positive Y face."), ref _selectedBlock.topFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
 
-                    // Row 4: Back Face (centered)
-                    EditorGUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    DrawTextureSelectorControl(new GUIContent("Back (-Z)", "Texture ID for the Negative Z face."), ref _selectedBlock.backFaceTexture);
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
+                        // Row 2: Left, Front, and Right Faces
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Left (-X)", "Texture ID for the Negative X face."), ref _selectedBlock.leftFaceTexture);
+                        DrawTextureSelectorControl(new GUIContent("Front (+Z)", "Texture ID for the Positive Z face."), ref _selectedBlock.frontFaceTexture);
+                        DrawTextureSelectorControl(new GUIContent("Right (+X)", "Texture ID for the Positive X face."), ref _selectedBlock.rightFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
+
+                        // Row 3: Bottom Face (centered)
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Bottom (-Y)", "Texture ID for the Negative Y face."), ref _selectedBlock.bottomFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
+
+                        // Row 4: Back Face (centered)
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.FlexibleSpace();
+                        DrawTextureSelectorControl(new GUIContent("Back (-Z)", "Texture ID for the Negative Z face."), ref _selectedBlock.backFaceTexture);
+                        GUILayout.FlexibleSpace();
+                        EditorGUILayout.EndHorizontal();
+                    }
 
                     // If any texture ID changed, rebuild the preview mesh immediately.
                     if (EditorGUI.EndChangeCheck())
@@ -392,10 +672,11 @@ namespace Editor.BlockEditor
                 }
 
                 // --- 3D Preview ---
-                EditorGUILayout.Space(20);
-                EditorGUILayout.LabelField("3D Preview", EditorStyles.boldLabel);
+                EditorUILayoutHelper.DrawSeparator();
+                EditorUILayoutHelper.SubHeader("3D Preview");
 
                 // Add toggle for Force Opaque immediately under the header
+                bool oldChanged4 = GUI.changed;
                 EditorGUI.BeginChangeCheck();
                 _forceOpaquePreview = EditorGUILayout.Toggle(new GUIContent("Force Opaque", "If true, renders transparent blocks (like water or glass) as fully opaque in the preview instead of faintly transparent."), _forceOpaquePreview);
                 if (EditorGUI.EndChangeCheck())
@@ -404,9 +685,16 @@ namespace Editor.BlockEditor
                     Repaint();
                 }
 
+                GUI.changed = oldChanged4;
+
                 if (GUILayout.Button("Refresh Preview", GUILayout.Height(25)))
                 {
                     UpdatePreviewMesh();
+                }
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    hasUnsavedChanges = true;
                 }
 
                 Draw3DPreview();
@@ -433,9 +721,14 @@ namespace Editor.BlockEditor
                 blockName = $"New Block {_blockTypesCopy.Count}",
             };
             _blockTypesCopy.Add(newBlock);
+            hasUnsavedChanges = true;
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
+            _previewFacing = 0; // Default to South
+            _previewRoll = 0;
+            _previewAxis = 0;
+            _previewYaw = 0;
 
             // Automatically select the new block for immediate editing
             _selectedBlockIndex = _blockTypesCopy.Count - 1;
@@ -455,9 +748,11 @@ namespace Editor.BlockEditor
             {
                 blockName = $"{_selectedBlock.blockName} (Copy)",
                 icon = _selectedBlock.icon,
+                renderShape = _selectedBlock.renderShape,
                 meshData = _selectedBlock.meshData,
                 stackSize = _selectedBlock.stackSize,
                 isSolid = _selectedBlock.isSolid,
+                collisionBounds = _selectedBlock.collisionBounds,
                 renderNeighborFaces = _selectedBlock.renderNeighborFaces,
                 fluidType = _selectedBlock.fluidType,
                 fluidShaderID = _selectedBlock.fluidShaderID,
@@ -467,10 +762,14 @@ namespace Editor.BlockEditor
                 waterfallsMaxSpread = _selectedBlock.waterfallsMaxSpread,
                 opacity = _selectedBlock.opacity,
                 lightEmission = _selectedBlock.lightEmission,
+                lightEmissionColor = _selectedBlock.lightEmissionColor,
                 tagPreset = _selectedBlock.tagPreset,
                 tags = _selectedBlock.tags,
                 canReplaceTags = _selectedBlock.canReplaceTags,
                 isActive = _selectedBlock.isActive,
+                metadataSchema = _selectedBlock.metadataSchema,
+                placementMetadataMode = _selectedBlock.placementMetadataMode,
+                defaultMetadata = _selectedBlock.defaultMetadata,
                 backFaceTexture = _selectedBlock.backFaceTexture,
                 frontFaceTexture = _selectedBlock.frontFaceTexture,
                 topFaceTexture = _selectedBlock.topFaceTexture,
@@ -481,9 +780,14 @@ namespace Editor.BlockEditor
 
             int insertIndex = _selectedBlockIndex + 1;
             _blockTypesCopy.Insert(insertIndex, newBlock);
+            hasUnsavedChanges = true;
 
             // When a new block is selected, reset the preview slider to a default value (e.g., 0 for a full block).
             _previewFluidLevel = 0;
+            _previewFacing = 0; // Default to South
+            _previewRoll = 0;
+            _previewAxis = 0;
+            _previewYaw = 0;
 
             // Select the newly created duplicate
             _selectedBlockIndex = insertIndex;
@@ -503,6 +807,7 @@ namespace Editor.BlockEditor
                     "Cancel"))
             {
                 _blockTypesCopy.RemoveAt(_selectedBlockIndex);
+                hasUnsavedChanges = true;
 
                 // Clear selection
                 _selectedBlock = null;
@@ -525,6 +830,7 @@ namespace Editor.BlockEditor
             if (newPreset != null)
             {
                 _selectedBlock.tagPreset = newPreset;
+                hasUnsavedChanges = true;
             }
         }
 
@@ -534,7 +840,31 @@ namespace Editor.BlockEditor
 
         private void UpdatePreviewMesh()
         {
-            Mesh newMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, _previewFluidLevel);
+            byte previewMeta = _selectedBlock.defaultMetadata;
+            if (_selectedBlock.fluidType != FluidType.None)
+            {
+                // Fluid level preview handles mock metadata inside the mesh generator
+            }
+            else
+            {
+                switch (_selectedBlock.metadataSchema)
+                {
+                    case MetadataSchema.Axis3:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeAxis3((byte)_previewAxis);
+                        break;
+                    case MetadataSchema.Facing6:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeFacing6((byte)_previewFacing);
+                        break;
+                    case MetadataSchema.Facing6Roll2:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeFacing6Roll2((byte)_previewFacing, (byte)_previewRoll);
+                        break;
+                    case MetadataSchema.HorizontalOnly:
+                        previewMeta = BurstVoxelMetadataUtility.EncodeHorizontalOnly((byte)_previewYaw);
+                        break;
+                }
+            }
+
+            Mesh newMesh = EditorMeshGenerator.GenerateBlockMesh(_selectedBlock, _blockTypesCopy, previewMeta, _previewFluidLevel);
             Material targetMaterial = null;
 
             // Material switching logic
@@ -543,9 +873,9 @@ namespace Editor.BlockEditor
                 if (_blockDatabase.liquidMaterial != null) targetMaterial = _blockDatabase.liquidMaterial;
                 else EditorUtility.DisplayDialog("Error", "Liquid material not found.", "OK");
             }
-            else if (_selectedBlock.renderNeighborFaces)
+            else if (_selectedBlock.renderNeighborFaces || _selectedBlock.renderShape == RenderShape.CrossMesh)
             {
-                // Use the transparent material for see-through solid blocks
+                // Use the transparent material for see-through solid blocks and cross meshes
                 if (_blockDatabase.transparentMaterial != null) targetMaterial = _blockDatabase.transparentMaterial;
                 else EditorUtility.DisplayDialog("Error", "Transparent material not found.", "OK");
             }
@@ -574,6 +904,18 @@ namespace Editor.BlockEditor
 
             // Sync the opacity setting before drawing
             _meshPreviewWidget.ForceOpaque = _forceOpaquePreview;
+
+            if (_selectedBlock != null && _selectedBlock.collisionBounds.HasCustomBounds)
+            {
+                _meshPreviewWidget.WireframeBounds = new Bounds(
+                    (_selectedBlock.collisionBounds.min + _selectedBlock.collisionBounds.max) * 0.5f,
+                    _selectedBlock.collisionBounds.max - _selectedBlock.collisionBounds.min
+                );
+            }
+            else
+            {
+                _meshPreviewWidget.WireframeBounds = null;
+            }
 
             // The widget internally handles the checkerboard background, interactive rotation, and mesh rendering.
             _meshPreviewWidget.Draw(previewRect);

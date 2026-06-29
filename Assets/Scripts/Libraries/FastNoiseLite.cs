@@ -1,8 +1,10 @@
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Unity.Burst;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
+using UnityEngine;
 
 namespace Libraries
 {
@@ -11,11 +13,15 @@ namespace Libraries
     /// Original Author: Jordan Peck (Auburn)
     /// Burst Port: Adapted for Unity 6.2+
     /// </summary>
-    [BurstCompile]
+    // NOTE: [BurstCompile] was intentionally removed from this struct declaration.
+    // The attribute only has effect on IJob* structs and static methods — on a plain struct it is a no-op.
+    // FastNoiseLite is Burst-compatible by virtue of being fully blittable (72 bytes, 18 value-type fields).
     [SuppressMessage("ReSharper", "InconsistentNaming")]
     [SuppressMessage("ReSharper", "PrivateFieldCanBeConvertedToLocalVariable")]
     public struct FastNoiseLite
     {
+        #region Enums
+
         public enum NoiseType
         {
             OpenSimplex2,
@@ -77,7 +83,10 @@ namespace Libraries
             DefaultOpenSimplex2,
         }
 
-        // Fields
+        #endregion
+
+        #region Fields and Constants
+
         private int mSeed;
         private float mFrequency;
         private NoiseType mNoiseType;
@@ -97,10 +106,19 @@ namespace Libraries
         private TransformType3D mWarpTransformType3D;
         private float mDomainWarpAmp;
 
-        // Constants
+        /// <summary>
+        /// When true, remaps noise output from [-1, 1] to [0, 1].
+        /// Useful for matching legacy Mathf.PerlinNoise range expectations.
+        /// </summary>
+        private bool mNormalizeToZeroOne;
+
         private const int PrimeX = 501125321;
         private const int PrimeY = 1136930381;
         private const int PrimeZ = 1720413743;
+
+        #endregion
+
+        #region Factory Methods
 
         /// <summary>
         /// Create a new state with default values.
@@ -128,6 +146,45 @@ namespace Libraries
             fnl.mDomainWarpAmp = 1.0f;
             return fnl;
         }
+
+        /// <summary>
+        /// Creates a simple single-octave OpenSimplex2 noise with no fractal layering.
+        /// Use this instead of <c>Unity.Mathematics.noise.snoise</c> for seed-aware, consistent noise.
+        /// </summary>
+        /// <param name="seed">The noise seed (typically <c>baseSeed + salt</c>).</param>
+        /// <param name="frequency">Spatial frequency for noise evaluation.</param>
+        /// <returns>A configured <see cref="FastNoiseLite"/> instance ready for <c>GetNoise</c> calls.</returns>
+        public static FastNoiseLite CreateSimple(int seed, float frequency)
+        {
+            FastNoiseLite n = Create(seed);
+            n.SetNoiseType(NoiseType.OpenSimplex2);
+            n.SetFrequency(frequency);
+            return n;
+        }
+
+        /// <summary>
+        /// Creates an FBm (Fractal Brownian Motion) noise with sensible defaults (gain 0.5, lacunarity 2.0).
+        /// Use this for multi-octave noise without the full FastNoiseConfig pipeline.
+        /// </summary>
+        /// <param name="seed">The noise seed (typically <c>baseSeed + salt</c>).</param>
+        /// <param name="frequency">Base frequency for noise evaluation.</param>
+        /// <param name="octaves">Number of fractal octaves (default: 3).</param>
+        /// <returns>A configured <see cref="FastNoiseLite"/> instance ready for <c>GetNoise</c> calls.</returns>
+        public static FastNoiseLite CreateFBm(int seed, float frequency, int octaves = 3)
+        {
+            FastNoiseLite n = Create(seed);
+            n.SetNoiseType(NoiseType.OpenSimplex2);
+            n.SetFrequency(frequency);
+            n.SetFractalType(FractalType.FBm);
+            n.SetFractalOctaves(octaves);
+            n.SetFractalGain(0.5f);
+            n.SetFractalLacunarity(2.0f);
+            return n;
+        }
+
+        #endregion
+
+        #region Configuration
 
         public void SetSeed(int seed)
         {
@@ -210,30 +267,45 @@ namespace Libraries
             mDomainWarpAmp = domainWarpAmp;
         }
 
+        /// <summary>
+        /// When enabled, remaps all GetNoise output from [-1, 1] to [0, 1].
+        /// Useful for matching legacy Mathf.PerlinNoise range expectations.
+        /// </summary>
+        public void SetNormalizeToZeroOne(bool normalize)
+        {
+            mNormalizeToZeroOne = normalize;
+        }
+
+        #endregion
+
+        #region Public Noise API
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float GetNoise(float x, float y)
         {
             TransformNoiseCoordinate(ref x, ref y);
-            return mFractalType switch
+            float result = mFractalType switch
             {
                 FractalType.FBm => GenFractalFBm(x, y),
                 FractalType.Ridged => GenFractalRidged(x, y),
                 FractalType.PingPong => GenFractalPingPong(x, y),
                 _ => GenNoiseSingle(mSeed, x, y),
             };
+            return mNormalizeToZeroOne ? (result + 1f) * 0.5f : result;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float GetNoise(float x, float y, float z)
         {
             TransformNoiseCoordinate(ref x, ref y, ref z);
-            return mFractalType switch
+            float result = mFractalType switch
             {
                 FractalType.FBm => GenFractalFBm(x, y, z),
                 FractalType.Ridged => GenFractalRidged(x, y, z),
                 FractalType.PingPong => GenFractalPingPong(x, y, z),
                 _ => GenNoiseSingle(mSeed, x, y, z),
             };
+            return mNormalizeToZeroOne ? (result + 1f) * 0.5f : result;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -258,9 +330,197 @@ namespace Libraries
             }
         }
 
-        // ========================================================================
-        // Internal Logic
-        // ========================================================================
+        #endregion
+
+        #region Batch Evaluation API
+
+        /// <summary>
+        /// Evaluates 2D noise on a uniform integer grid, writing results to <paramref name="output"/>
+        /// in row-major order (x varies fastest): <c>output[y * countX + x]</c>.
+        /// </summary>
+        /// <param name="startX">Global X coordinate of the grid origin.</param>
+        /// <param name="startY">Global Y coordinate of the grid origin.</param>
+        /// <param name="countX">Number of samples along the X axis.</param>
+        /// <param name="countY">Number of samples along the Y axis.</param>
+        /// <param name="output">Caller-allocated array. Length must be &gt;= <paramref name="countX"/> * <paramref name="countY"/>.</param>
+        public void GetNoiseGrid(int startX, int startY, int countX, int countY, NativeArray<float> output)
+        {
+            int idx = 0;
+
+            switch (mFractalType)
+            {
+                case FractalType.FBm:
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        TransformNoiseCoordinate(ref x, ref y);
+                        output[idx++] = GenFractalFBm(x, y);
+                    }
+
+                    break;
+
+                case FractalType.Ridged:
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        TransformNoiseCoordinate(ref x, ref y);
+                        output[idx++] = GenFractalRidged(x, y);
+                    }
+
+                    break;
+
+                case FractalType.PingPong:
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        TransformNoiseCoordinate(ref x, ref y);
+                        output[idx++] = GenFractalPingPong(x, y);
+                    }
+
+                    break;
+
+                default:
+                    int seed = mSeed;
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        TransformNoiseCoordinate(ref x, ref y);
+                        output[idx++] = GenNoiseSingle(seed, x, y);
+                    }
+
+                    break;
+            }
+
+            if (mNormalizeToZeroOne)
+                NormalizeBatchOutput(output, countX * countY);
+        }
+
+        /// <summary>
+        /// Evaluates 3D noise on a uniform integer grid, writing results to <paramref name="output"/>
+        /// in row-major order (x varies fastest, then y, then z):
+        /// <c>output[z * countY * countX + y * countX + x]</c>.
+        /// </summary>
+        /// <param name="startX">Global X coordinate of the grid origin.</param>
+        /// <param name="startY">Global Y coordinate of the grid origin.</param>
+        /// <param name="startZ">Global Z coordinate of the grid origin.</param>
+        /// <param name="countX">Number of samples along the X axis.</param>
+        /// <param name="countY">Number of samples along the Y axis.</param>
+        /// <param name="countZ">Number of samples along the Z axis.</param>
+        /// <param name="output">Caller-allocated array. Length must be &gt;= <paramref name="countX"/> * <paramref name="countY"/> * <paramref name="countZ"/>.</param>
+        public void GetNoiseGrid(int startX, int startY, int startZ,
+            int countX, int countY, int countZ, NativeArray<float> output)
+        {
+            int idx = 0;
+
+            switch (mFractalType)
+            {
+                case FractalType.FBm:
+                    for (int iz = 0; iz < countZ; iz++)
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        float z = startZ + iz;
+                        TransformNoiseCoordinate(ref x, ref y, ref z);
+                        output[idx++] = GenFractalFBm(x, y, z);
+                    }
+
+                    break;
+
+                case FractalType.Ridged:
+                    for (int iz = 0; iz < countZ; iz++)
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        float z = startZ + iz;
+                        TransformNoiseCoordinate(ref x, ref y, ref z);
+                        output[idx++] = GenFractalRidged(x, y, z);
+                    }
+
+                    break;
+
+                case FractalType.PingPong:
+                    for (int iz = 0; iz < countZ; iz++)
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        float z = startZ + iz;
+                        TransformNoiseCoordinate(ref x, ref y, ref z);
+                        output[idx++] = GenFractalPingPong(x, y, z);
+                    }
+
+                    break;
+
+                default:
+                    int seed = mSeed;
+                    for (int iz = 0; iz < countZ; iz++)
+                    for (int iy = 0; iy < countY; iy++)
+                    for (int ix = 0; ix < countX; ix++)
+                    {
+                        float x = startX + ix;
+                        float y = startY + iy;
+                        float z = startZ + iz;
+                        TransformNoiseCoordinate(ref x, ref y, ref z);
+                        output[idx++] = GenNoiseSingle(seed, x, y, z);
+                    }
+
+                    break;
+            }
+
+            if (mNormalizeToZeroOne)
+                NormalizeBatchOutput(output, countX * countY * countZ);
+        }
+
+        /// <summary>
+        /// Evaluates 2D noise at arbitrary positions provided in <paramref name="positions"/>.
+        /// </summary>
+        /// <param name="positions">Array of 2D sample coordinates.</param>
+        /// <param name="output">Caller-allocated array. Length must be &gt;= <paramref name="positions"/>.Length.</param>
+        public void GetNoiseBatch(NativeArray<float2> positions, NativeArray<float> output)
+        {
+            for (int i = 0; i < positions.Length; i++)
+            {
+                float2 p = positions[i];
+                output[i] = GetNoise(p.x, p.y);
+            }
+        }
+
+        /// <summary>
+        /// Evaluates 3D noise at arbitrary positions provided in <paramref name="positions"/>.
+        /// </summary>
+        /// <param name="positions">Array of 3D sample coordinates.</param>
+        /// <param name="output">Caller-allocated array. Length must be &gt;= <paramref name="positions"/>.Length.</param>
+        public void GetNoiseBatch(NativeArray<float3> positions, NativeArray<float> output)
+        {
+            for (int i = 0; i < positions.Length; i++)
+            {
+                float3 p = positions[i];
+                output[i] = GetNoise(p.x, p.y, p.z);
+            }
+        }
+
+        private static void NormalizeBatchOutput(NativeArray<float> output, int count)
+        {
+            for (int i = 0; i < count; i++)
+                output[i] = (output[i] + 1f) * 0.5f;
+        }
+
+        #endregion
+
+        #region Internal Helpers
 
         private void CalculateFractalBounding()
         {
@@ -579,7 +839,9 @@ namespace Libraries
             };
         }
 
-        // Algorithms (Math implementation replaced with Unity.Mathematics)
+        #endregion
+
+        #region Fractal Generation
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int FastFloor(float f)
@@ -729,6 +991,10 @@ namespace Libraries
 
             return sum;
         }
+
+        #endregion
+
+        #region Noise Algorithms
 
         private static float SingleSimplex(int seed, float x, float y)
         {
@@ -1097,6 +1363,98 @@ namespace Libraries
             }
 
             return value * 9.046026385208288f;
+        }
+
+        public unsafe struct CellularEdgeData
+        {
+            /// <summary>All cells from the 5×5 search grid, sorted by distance.</summary>
+            public const int MaxCells = 25;
+
+            public fixed int Hashes[MaxCells];
+            public fixed float Distances[MaxCells];
+        }
+
+        public void GetCellularEdgeData(float x, float y, out CellularEdgeData edgeData)
+        {
+            TransformNoiseCoordinate(ref x, ref y);
+            SingleCellularEdgeData(mSeed, x, y, out edgeData);
+        }
+
+        private void SingleCellularEdgeData(int seed, float x, float y, out CellularEdgeData edgeData)
+        {
+            int xr = FastRound(x);
+            int yr = FastRound(y);
+
+            edgeData = default;
+            const int N = CellularEdgeData.MaxCells;
+            unsafe
+            {
+                for (int i = 0; i < N; i++)
+                {
+                    edgeData.Distances[i] = float.MaxValue;
+                    edgeData.Hashes[i] = 0;
+                }
+            }
+
+            float cellularJitter = 0.43701595f * mCellularJitterModifier;
+            // 5x5 search grid — all 25 cells are tracked (sorted by distance) to eliminate
+            // truncation seams in the BiomeBlender when the blend radius is large.
+            int xPrimed = (xr - 2) * PrimeX;
+            int yPrimedBase = (yr - 2) * PrimeY;
+            unsafe
+            {
+                for (int xi = xr - 2; xi <= xr + 2; xi++)
+                {
+                    int yPrimed = yPrimedBase;
+                    for (int yi = yr - 2; yi <= yr + 2; yi++)
+                    {
+                        int hash = Hash(seed, xPrimed, yPrimed);
+                        int idx = hash & (255 << 1);
+
+                        float vecX = xi - x + Lookup.Data.RandVecs2D[idx] * cellularJitter;
+                        float vecY = yi - y + Lookup.Data.RandVecs2D[idx | 1] * cellularJitter;
+
+                        float newDistance;
+                        if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+                            newDistance = vecX * vecX + vecY * vecY;
+                        else if (mCellularDistanceFunction == CellularDistanceFunction.Manhattan)
+                            newDistance = math.abs(vecX) + math.abs(vecY);
+                        else
+                            newDistance = math.abs(vecX) + math.abs(vecY) + (vecX * vecX + vecY * vecY);
+
+                        for (int i = 0; i < N; i++)
+                        {
+                            if (newDistance < edgeData.Distances[i])
+                            {
+                                for (int j = N - 1; j > i; j--)
+                                {
+                                    edgeData.Distances[j] = edgeData.Distances[j - 1];
+                                    edgeData.Hashes[j] = edgeData.Hashes[j - 1];
+                                }
+
+                                edgeData.Distances[i] = newDistance;
+                                edgeData.Hashes[i] = hash;
+                                break;
+                            }
+                        }
+
+                        yPrimed += PrimeY;
+                    }
+
+                    xPrimed += PrimeX;
+                }
+            }
+
+            if (mCellularDistanceFunction == CellularDistanceFunction.Euclidean || mCellularDistanceFunction == CellularDistanceFunction.EuclideanSq)
+            {
+                unsafe
+                {
+                    for (int i = 0; i < N; i++)
+                    {
+                        edgeData.Distances[i] = math.sqrt(edgeData.Distances[i]);
+                    }
+                }
+            }
         }
 
         private float SingleCellular(int seed, float x, float y)
@@ -1502,6 +1860,10 @@ namespace Libraries
             return math.lerp(yf0, yf1, zs);
         }
 
+        #endregion
+
+        #region Domain Warp
+
         private void DoSingleDomainWarp(int seed, float amp, float freq, float x, float y, ref float xr, ref float yr)
         {
             switch (mDomainWarpType)
@@ -1859,9 +2221,26 @@ namespace Libraries
             zr += vz * warpAmp;
         }
 
-        // ========================================================================
-        // Unmanaged Lookup Data Handling
-        // ========================================================================
+        #endregion
+
+        #region Lookup Tables
+
+        /// <summary>
+        /// Allocates unmanaged memory for the lookup tables. Must be called on the main thread
+        /// before any Burst jobs use FastNoiseLite.
+        /// </summary>
+        public static void InitializeLookupTables()
+        {
+            Lookup.Initialize();
+        }
+
+        /// <summary>
+        /// Frees the unmanaged memory for the lookup tables. Should be called during application shutdown.
+        /// </summary>
+        public static void ShutdownLookupTables()
+        {
+            Lookup.Shutdown();
+        }
 
         /// <summary>
         /// Holds pointers to the constant lookup tables.
@@ -1877,31 +2256,72 @@ namespace Libraries
 
         /// <summary>
         /// Static wrapper to initialize and hold the lookup pointers.
+        /// Uses <see cref="UnsafeUtility.Malloc"/> to allocate unmanaged memory, avoiding the
+        /// <c>GCHandle.AddrOfPinnedObject()</c> call that triggers Burst error BC1091 in static constructors.
         /// </summary>
         private static class Lookup
         {
             public static readonly SharedStatic<LookupPointers> Ref = SharedStatic<LookupPointers>.GetOrCreate<LookupPointers>();
             public static ref LookupPointers Data => ref Ref.Data;
 
-            // Arrays are kept in managed memory but pinned so Burst can read them via pointers
-            private static readonly GCHandle G2DHandle;
-            private static readonly GCHandle G3DHandle;
-            private static readonly GCHandle R2DHandle;
-            private static readonly GCHandle R3DHandle;
+            private static bool s_initialized;
 
-            static unsafe Lookup()
+            [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+            private static void DomainReset()
             {
-                // Pin the arrays so the garbage collector doesn't move them
-                G2DHandle = GCHandle.Alloc(Gradients2DArray, GCHandleType.Pinned);
-                G3DHandle = GCHandle.Alloc(Gradients3DArray, GCHandleType.Pinned);
-                R2DHandle = GCHandle.Alloc(RandVecs2DArray, GCHandleType.Pinned);
-                R3DHandle = GCHandle.Alloc(RandVecs3DArray, GCHandleType.Pinned);
+                s_initialized = false;
+                Ref.Data = default;
+            }
 
-                // Store pointers in SharedStatic for Burst access
-                Ref.Data.Gradients2D = (float*)G2DHandle.AddrOfPinnedObject();
-                Ref.Data.Gradients3D = (float*)G3DHandle.AddrOfPinnedObject();
-                Ref.Data.RandVecs2D = (float*)R2DHandle.AddrOfPinnedObject();
-                Ref.Data.RandVecs3D = (float*)R3DHandle.AddrOfPinnedObject();
+            /// <summary>
+            /// Allocates unmanaged memory for the lookup tables and copies the managed source data into them.
+            /// Must be called on the main thread before any Burst jobs use <see cref="FastNoiseLite"/>.
+            /// Safe to call multiple times — subsequent calls are no-ops.
+            /// </summary>
+            public static unsafe void Initialize()
+            {
+                if (s_initialized) return;
+
+                Ref.Data.Gradients2D = AllocAndCopy(Gradients2DArray);
+                Ref.Data.Gradients3D = AllocAndCopy(Gradients3DArray);
+                Ref.Data.RandVecs2D = AllocAndCopy(RandVecs2DArray);
+                Ref.Data.RandVecs3D = AllocAndCopy(RandVecs3DArray);
+
+                s_initialized = true;
+            }
+
+            /// <summary>
+            /// Frees the unmanaged memory allocated by <see cref="Initialize"/>.
+            /// Must be called during application shutdown (e.g., from <c>World.OnDestroy</c>).
+            /// </summary>
+            public static unsafe void Shutdown()
+            {
+                if (!s_initialized) return;
+
+                UnsafeUtility.Free(Ref.Data.Gradients2D, Allocator.Persistent);
+                UnsafeUtility.Free(Ref.Data.Gradients3D, Allocator.Persistent);
+                UnsafeUtility.Free(Ref.Data.RandVecs2D, Allocator.Persistent);
+                UnsafeUtility.Free(Ref.Data.RandVecs3D, Allocator.Persistent);
+
+                Ref.Data = default;
+                s_initialized = false;
+            }
+
+            /// <summary>
+            /// Allocates a persistent unmanaged buffer and copies the source managed array into it.
+            /// </summary>
+            private static unsafe float* AllocAndCopy(float[] source)
+            {
+                long sizeInBytes = (long)source.Length * sizeof(float);
+                const int CACHE_LINE = 64;
+                float* dst = (float*)UnsafeUtility.Malloc(sizeInBytes, CACHE_LINE, Allocator.Persistent);
+
+                fixed (float* src = source)
+                {
+                    UnsafeUtility.MemCpy(dst, src, sizeInBytes);
+                }
+
+                return dst;
             }
 
             // Raw Data Arrays
@@ -2065,5 +2485,7 @@ namespace Libraries
                 -0.9111505856f, 0.4047110257f, 0, 0.1399838409f, 0.7601631212f, -0.6344734459f, 0, 0.4484419361f, -0.845289248f, 0.2904925424f, 0,
             };
         }
+
+        #endregion
     }
 }

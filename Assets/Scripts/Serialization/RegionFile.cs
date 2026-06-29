@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -123,9 +123,9 @@ namespace Serialization
                     int length = BitConverter.ToInt32(lengthBytes, 0);
 
                     // Sanity check length (Max 16MB)
-                    if (length <= 1 || length > 16 * 1024 * 1024)
+                    if (length is <= 1 or > 16 * 1024 * 1024)
                     {
-                        Debug.LogWarning($"RegionFile corrupt: Invalid length {length} at {localX},{localZ}");
+                        Debug.LogWarning($"RegionFile corrupt: Invalid length {length.ToString()} at {localX.ToString()},{localZ.ToString()}");
                         return (null, CompressionAlgorithm.GZip);
                     }
 
@@ -138,7 +138,7 @@ namespace Serialization
                     // Basic validation of supported types
                     if (!Enum.IsDefined(typeof(CompressionAlgorithm), algo))
                     {
-                        Debug.LogError($"RegionFile: Unsupported compression type {compressionByte} at {localX},{localZ}");
+                        Debug.LogError($"RegionFile: Unsupported compression type {compressionByte.ToString()} at {localX.ToString()},{localZ.ToString()}");
                         return (null, CompressionAlgorithm.GZip);
                     }
 
@@ -180,7 +180,7 @@ namespace Serialization
 
                     if (sectorsNeeded > 255)
                     {
-                        Debug.LogError($"Chunk {localX}, {localZ} is too big to save ({totalLength} bytes)");
+                        Debug.LogError($"Chunk {localX.ToString()}, {localZ.ToString()} is too big to save ({totalLength.ToString()} bytes)");
                         return;
                     }
 
@@ -272,7 +272,7 @@ namespace Serialization
         /// </summary>
         public List<(Vector2Int localCoord, CompressionAlgorithm algorithm)> GetAllChunkMetadata()
         {
-            var result = new List<(Vector2Int, CompressionAlgorithm)>();
+            List<(Vector2Int, CompressionAlgorithm)> result = new List<(Vector2Int, CompressionAlgorithm)>();
 
             // We must lock the file stream while reading to prevent threading collisions
             lock (_fileLock)
@@ -308,21 +308,6 @@ namespace Serialization
             }
 
             return result;
-        }
-
-        /// <summary>
-        /// Performs a raw byte replacement without full deserialization overhead.
-        /// Used primarily in offline migration tools.
-        /// </summary>
-        /// <param name="localX">The chunk's local X coordinate index within the region (0-31).</param>
-        /// <param name="localZ">The chunk's local Z coordinate index within the region (0-31).</param>
-        /// <param name="data">The compressed binary payload.</param>
-        /// <param name="algorithm">The compression algorithm flag, defaulting to GZip for legacy formats.</param>
-        public void RawWriteChunk(int localX, int localZ, byte[] data, CompressionAlgorithm algorithm = CompressionAlgorithm.GZip)
-        {
-            // For migration/raw writes, we assume GZip if not specified, or we could overload this.
-            // Keeping GZip as default for legacy compatibility in migrations.
-            SaveChunkData(localX, localZ, data, data.Length, algorithm);
         }
 
         private int FindFreeSectors(int count)

@@ -7,10 +7,6 @@ public static class VoxelData
     public const int ChunkHeight = 128;
     public const int WorldSizeInChunks = 100;
 
-    // World Generation Constants
-    public const int SolidGroundHeight = 42;
-    public const int SeaLevel = 45; // Minecraft = 62
-
     // Lighting Values
     public const float MinLightLevel = 0.15f;
     public const float MaxLightLevel = 1.0f;
@@ -26,6 +22,13 @@ public static class VoxelData
     public const float GrassSpreadChance = 0.02f;
 
     public static int Seed = 0;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void DomainReset()
+    {
+        TickLength = 1f;
+        Seed = 0;
+    }
 
     public const int WorldSizeInVoxels = WorldSizeInChunks * ChunkWidth;
 
@@ -101,6 +104,23 @@ public static class VoxelData
         new Vector3Int(-1, 0, 1), // Front-Left  (NW)
         new Vector3Int(1, 0, -1), // Back-Right  (SE)
         new Vector3Int(-1, 0, -1), // Back-Left   (SW)
+    };
+
+    /// <summary>
+    /// All 8 horizontal neighbor offsets (4 cardinal + 4 diagonal).
+    /// Used by <see cref="World.AreNeighborsDataReady"/> to validate that the full
+    /// neighborhood is populated before scheduling lighting jobs.
+    /// </summary>
+    public static readonly Vector3Int[] AllNeighborOffsets =
+    {
+        new Vector3Int(0, 0, -1), // South  (Back)
+        new Vector3Int(0, 0, 1), // North  (Front)
+        new Vector3Int(-1, 0, 0), // West   (Left)
+        new Vector3Int(1, 0, 0), // East   (Right)
+        new Vector3Int(1, 0, 1), // NE     (Front-Right)
+        new Vector3Int(-1, 0, 1), // NW     (Front-Left)
+        new Vector3Int(1, 0, -1), // SE     (Back-Right)
+        new Vector3Int(-1, 0, -1), // SW     (Back-Left)
     };
 
     // Should be accessed like this: VoxelTris[face * 4 + vert].

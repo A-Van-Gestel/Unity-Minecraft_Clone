@@ -1,11 +1,15 @@
 using System.Collections.Generic;
+using Data;
+using Input;
 using Serialization;
+using UI;
+using UI.Enums;
+using UI.Tooltip;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
 public class Toolbar : MonoBehaviour
 {
-    public Player player;
     public RectTransform highlight;
     public UIItemSlot[] slots;
     public int slotIndex;
@@ -17,16 +21,34 @@ public class Toolbar : MonoBehaviour
         _input = InputManager.Instance;
 
         byte index = 1;
-        foreach (UIItemSlot s in slots)
+        for (int i = 0; i < slots.Length; i++)
         {
+            UIItemSlot s = slots[i];
+
+            // Attach tooltip trigger before linking the ItemSlot so the
+            // first UpdateSlot() call finds it and sets the text immediately.
+            TooltipTrigger trigger = s.gameObject.AddComponent<TooltipTrigger>();
+            trigger.hoverPositionOverride = TooltipHoverPosition.TopLeft;
+
             ItemStack stack = new ItemStack(index, Random.Range(2, 65));
             ItemSlot slot = new ItemSlot(s, stack);
             index++;
+
+            // On mobile, make toolbar slots tappable to select them.
+            if (Application.isMobilePlatform)
+            {
+                ToolbarSlotButton btn = s.gameObject.AddComponent<ToolbarSlotButton>();
+                btn.SlotIndex = i;
+                btn.Toolbar = this;
+            }
         }
     }
 
     private void Update()
     {
+        if (WorldLaunchState.IsAutomatedMode) return;
+        if (WorldUIManager.Instance != null && WorldUIManager.Instance.IsPauseMenuOpen) return;
+
         // SCROLL WHEEL
         float scroll = _input.ScrollValue;
 
@@ -58,9 +80,31 @@ public class Toolbar : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Selects the given hotbar slot index and updates the highlight position.
+    /// Called by keyboard/scroll input and by <see cref="ToolbarSlotButton"/> on mobile.
+    /// </summary>
+    /// <param name="index">Slot index from 0 to <c>slots.Length - 1</c>.</param>
+    public void SelectSlot(int index)
+    {
+        if (index < 0 || index >= slots.Length) return;
+
+        slotIndex = index;
+        SetItemSlot();
+    }
+
     private void SetItemSlot()
     {
         highlight.position = slots[slotIndex].slotIcon.transform.position;
+
+        // Return early if no item is in the slot
+        if (!slots[slotIndex].ItemSlot.HasItem) return;
+
+        // Show block name tooltip
+        byte blockId = slots[slotIndex].ItemSlot.Stack.ID;
+        BlockType type = World.Instance.BlockTypes[blockId];
+        string blockNameTooltipText = BlockTooltipBuilder.Build(type, blockId, TooltipDetail.NameOnly);
+        TooltipManager.Show(blockNameTooltipText, highlight, TooltipHoverPosition.BottomCenter, 1f, 2f); // Auto-hide after 2 seconds
     }
 
     // --- SAVE / LOAD LOGIC ---

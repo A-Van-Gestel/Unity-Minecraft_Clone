@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using Data.WorldTypes;
 using UnityEngine;
 
 namespace Serialization
@@ -12,18 +13,49 @@ namespace Serialization
         // Zlib = 3, // Reserved for future use (e.g. Zstd)
     }
 
+
     [Serializable]
     public class WorldSaveData
     {
         public int version = 1;
         public string worldName;
         public int seed;
+
+        /// <summary>
+        /// The chunk height in blocks.
+        /// </summary>
+        public int chunkHeight = 128;
+
+        /// <summary>
+        /// The chunk width and depth in blocks.
+        /// </summary>
+        public int chunkWidth = 16;
+
+        /// <summary>
+        /// The total width of the world in chunks.
+        /// </summary>
+        public int worldSizeInChunks = 100;
+
+        /// <summary>
+        /// The world generation type. Defaults to Legacy (0) when the field is absent in old JSON files,
+        /// ensuring backwards compatibility with saves created before the World Type system was introduced.
+        /// </summary>
+        public WorldTypeID worldType;
+
+        /// <summary>
+        /// The world's canonical spawn point in chunk-relative coordinates.
+        /// Set during initial world generation; used as the fallback player position
+        /// for editor direct-scene-load and future respawn mechanics (e.g. beds).
+        /// </summary>
+        public ChunkRelativePosition spawnPosition;
+
         public long creationDate; // Ticks
         public long lastPlayed; // Ticks
 
         public WorldStateData worldState = new WorldStateData();
         public PlayerSaveData player = new PlayerSaveData();
     }
+
 
     [Serializable]
     public class WorldStateData
@@ -70,7 +102,7 @@ namespace Serialization
 
         public int amount;
 
-        // We track origin slot to try and return it there if possible, 
+        // We track origin slot to try and return it there if possible,
         // though standard logic usually just adds to first available.
         public int originSlotIndex = -1;
     }

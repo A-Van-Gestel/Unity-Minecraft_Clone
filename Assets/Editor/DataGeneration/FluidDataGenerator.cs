@@ -1,4 +1,4 @@
-﻿using Data;
+using Data;
 using JetBrains.Annotations;
 using UnityEditor;
 using UnityEngine;
@@ -47,33 +47,11 @@ namespace Editor.DataGeneration
         /// <param name="decayStep">How much height decreases per level (e.g., 1/8 for water, 1/4 for lava).</param>
         private static void GenerateTemplateHeights(FluidMeshData data, int flowLevels, float decayStep)
         {
-            // Source block (level 0): slightly below the top of the block.
-            const float topY = 1.0f - 1.0f / 8.0f; // 0.875
+            // Single source of truth for the height curve (shared with the meshing validation harness).
+            FluidMeshData.BuildVertexHeightTemplate(data.vertexYPositions, flowLevels, decayStep);
 
             string heights = $"  Levels 0-{flowLevels - 1} (horizontal): ";
-
-            for (int i = 0; i < 16; i++)
-            {
-                if (i < flowLevels)
-                {
-                    // Horizontal flow levels: progressively lower.
-                    data.vertexYPositions[i] = topY - i * decayStep;
-                    heights += $"[{i}]={data.vertexYPositions[i]:F3} ";
-                }
-                else if (i < 8)
-                {
-                    // Beyond max horizontal flow but below falling range:
-                    // carry the last valid horizontal height.
-                    data.vertexYPositions[i] = data.vertexYPositions[flowLevels - 1];
-                }
-                else
-                {
-                    // Falling indices (8-15): always full block height.
-                    // Falling water/lava fills the entire block space visually.
-                    data.vertexYPositions[i] = 1.0f;
-                }
-            }
-
+            for (int i = 0; i < flowLevels; i++) heights += $"[{i}]={data.vertexYPositions[i]:F3} ";
             Debug.Log($"Generated fluid template ({flowLevels} levels, decay={decayStep:F3}):\n{heights}\n  Levels 8-15 (falling): 1.000");
         }
 

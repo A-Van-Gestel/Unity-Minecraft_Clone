@@ -1,0 +1,444 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using Data.WorldTypes;
+using Editor.Libraries;
+using Editor.WorldTools.Libraries;
+using Unity.Mathematics;
+using UnityEditor;
+using UnityEngine;
+
+namespace Editor.WorldTools
+{
+    /// <summary>
+    /// Multi-tab editor window for authoring and previewing world generation (terrain, caves, biomes, blending).
+    /// Split across partial class files: core (this file), CrossSection, NoiseChannels, BiomeEditor, WorldBlending.
+    /// </summary>
+    public partial class WorldGenPreviewWindow : EditorWindow
+    {
+        public enum ResolutionOptions
+        {
+            X128 = 128,
+            X256 = 256,
+            X512 = 512,
+            X768 = 768,
+            X1024 = 1024,
+            X1536 = 1536,
+            X2048 = 2048,
+        }
+
+        // --- Tab State ---
+        private int _selectedTabIndex;
+        private static readonly string[] s_tabLabels = { "Cross-Section", "Noise Channels", "Biome Editing", "World Type", "World Blending" };
+
+        // --- Shared World Type & Biome Selection ---
+        private bool IsLegacyWorldType => _worldType != null && _worldType.typeID == WorldTypeID.Legacy;
+        private WorldTypeDefinition _worldType;
+        private int _seaLevel = 45;
+        private const string BIOME_SAVE_DIR = "Assets/Data/WorldGen/Biomes";
+        private List<StandardBiomeAttributes> _biomeAssets;
+        private StandardBiomeAttributes _biome;
+        private int _selectedBiomeIndex = -1;
+        private string _biomeSearchText = "";
+        private Vector2 _biomeListScrollPos;
+        private DateTime _lastAssetWriteTime;
+
+        // --- Debounce ---
+        private const double AUTO_GENERATE_DEBOUNCE_SECONDS = 0.10;
+        private readonly EditorDebounceTimer _debounceTimer = new EditorDebounceTimer(AUTO_GENERATE_DEBOUNCE_SECONDS);
+
+        // --- Shared Preview State ---
+        private int _seed = 1337;
+        private Vector2Int _offset = Vector2Int.zero;
+        private float _zoom = 1f;
+        private int _chunkRadius = 2;
+        private int3 _crosshairPos = new int3(0, 60, 0);
+        private bool _autoGenerate = true;
+        private bool _liveUpdate = true;
+        private bool _showChunkBorders = true;
+
+        // --- Inline Biome Editing ---
+        private SerializedObject _biomeSerializedObject;
+        private int _lastPreviewTabIndex;
+
+        [MenuItem("Minecraft Clone/World Gen Preview")]
+        public static void ShowWindow()
+        {
+            GetWindow<WorldGenPreviewWindow>("World Gen Preview");
+        }
+
+        private void OnEnable()
+        {
+            AutoDetectWorldType();
+            RefreshWorldTypeList();
+            RefreshBiomeList();
+            OnEnableBlendingTab();
+
+#pragma warning disable UDR0004
+            EditorApplication.update -= PollForAssetChanges;
+            EditorApplication.update += PollForAssetChanges;
+
+            WorldGenPreviewSettings.OnSettingsChanged -= OnPreviewSettingsChanged;
+            WorldGenPreviewSettings.OnSettingsChanged += OnPreviewSettingsChanged;
+#pragma warning restore UDR0004
+        }
+
+        private void OnPreviewSettingsChanged()
+        {
+            bool changed = false;
+            if (_seed != WorldGenPreviewSettings.Seed)
+            {
+                _seed = WorldGenPreviewSettings.Seed;
+                changed = true;
+            }
+
+            if (_worldType != WorldGenPreviewSettings.WorldType)
+            {
+                _worldType = WorldGenPreviewSettings.WorldType;
+                _selectedWtIndex = _wtAssets?.IndexOf(_worldType) ?? -1;
+                changed = true;
+            }
+
+            if (_seaLevel != WorldGenPreviewSettings.SeaLevel)
+            {
+                _seaLevel = WorldGenPreviewSettings.SeaLevel;
+                changed = true;
+            }
+
+            if (!WorldGenPreviewSettings.CrosshairPos.Equals(_crosshairPos))
+            {
+                _crosshairPos = WorldGenPreviewSettings.CrosshairPos;
+                changed = true;
+            }
+
+            CrossSectionMode newMode = WorldGenPreviewSettings.IsSingleBiomeMode ? CrossSectionMode.SingleBiome : CrossSectionMode.WorldView;
+            if (_csMode != newMode)
+            {
+                _csMode = newMode;
+                changed = true;
+            }
+
+            if (_biome != WorldGenPreviewSettings.SelectedBiome)
+            {
+                _biome = WorldGenPreviewSettings.SelectedBiome;
+                _selectedBiomeIndex = _biomeAssets?.IndexOf(_biome) ?? -1;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                Repaint();
+                if (_autoGenerate) _debounceTimer.Request(RegenerateActivePreview);
+            }
+        }
+
+        /// <summary>
+        /// Auto-detects a <see cref="WorldTypeDefinition"/> if exactly one exists with Standard biomes.
+        /// </summary>
+        private void AutoDetectWorldType()
+        {
+            if (_worldType != null) return;
+
+            string[] guids = AssetDatabase.FindAssets("t:WorldTypeDefinition");
+            WorldTypeDefinition candidate = null;
+            int validCount = 0;
+
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                WorldTypeDefinition wt = AssetDatabase.LoadAssetAtPath<WorldTypeDefinition>(path);
+                if (wt == null || wt.biomes == null) continue;
+
+                bool hasStandard = false;
+                foreach (BiomeBase b in wt.biomes)
+                {
+                    if (b is StandardBiomeAttributes)
+                    {
+                        hasStandard = true;
+                        break;
+                    }
+                }
+
+                if (!hasStandard) continue;
+                candidate = wt;
+                validCount++;
+            }
+
+            if (validCount == 1)
+            {
+                _worldType = candidate;
+                _seaLevel = _worldType.seaLevel;
+            }
+        }
+
+        /// <summary>
+        /// Scans the AssetDatabase for all <see cref="StandardBiomeAttributes"/> ScriptableObjects
+        /// and populates the biome selection list.
+        /// </summary>
+        private void RefreshBiomeList()
+        {
+            _biomeAssets = new List<StandardBiomeAttributes>();
+            string[] guids = AssetDatabase.FindAssets("t:StandardBiomeAttributes");
+            foreach (string guid in guids)
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                StandardBiomeAttributes asset = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(path);
+                if (asset != null) _biomeAssets.Add(asset);
+            }
+        }
+
+        private void OnDisable()
+        {
+            WorldGenPreviewSettings.OnSettingsChanged -= OnPreviewSettingsChanged;
+            EditorApplication.update -= PollForAssetChanges;
+            OnDisableBlendingTab();
+            OnDisableCrossSectionTab();
+            OnDisableNoiseChannelsTab();
+        }
+
+        /// <summary>
+        /// Polls the biome asset's file modification timestamp each editor frame.
+        /// If the file was re-saved externally, regenerate the active preview automatically.
+        /// </summary>
+        private void PollForAssetChanges()
+        {
+            if (_biome == null || !_autoGenerate) return;
+
+            string assetPath = AssetDatabase.GetAssetPath(_biome);
+            if (string.IsNullOrEmpty(assetPath)) return;
+
+            string fullPath = Path.GetFullPath(assetPath);
+            DateTime writeTime = File.GetLastWriteTimeUtc(fullPath);
+
+            if (writeTime != _lastAssetWriteTime)
+            {
+                _lastAssetWriteTime = writeTime;
+                _debounceTimer.Cancel();
+                RegenerateActivePreview();
+            }
+        }
+
+        /// <summary>
+        /// Triggers preview regeneration on whichever preview tab is currently active.
+        /// Called by the asset change poller and by the biome editor on live-update.
+        /// </summary>
+        private void RegenerateActivePreview()
+        {
+            if (!IsLegacyWorldType)
+            {
+                switch (_lastPreviewTabIndex)
+                {
+                    case 0: GenerateCrossSectionPreview(); break;
+                    case 1: GenerateNoiseChannelsPreview(); break;
+                    case 4: GenerateBlendingPreview(); break;
+                }
+            }
+
+            WorldGenPreviewSettings.Publish(_seed, _worldType, _crosshairPos, _csMode == CrossSectionMode.SingleBiome, _biome, _seaLevel);
+        }
+
+        private void OnGUI()
+        {
+            _debounceTimer.Poll();
+
+            _selectedTabIndex = GUILayout.Toolbar(_selectedTabIndex, s_tabLabels, GUILayout.Height(25));
+
+            // Track which preview tab was last selected (skip tab 2 = Biome Editing and tab 3 = World Type, not previews)
+            if (_selectedTabIndex != 2 && _selectedTabIndex != 3)
+                _lastPreviewTabIndex = _selectedTabIndex;
+
+            switch (_selectedTabIndex)
+            {
+                case 0:
+                    if (IsLegacyWorldType)
+                    {
+                        DrawLegacyUnsupportedMessage();
+                        break;
+                    }
+
+                    DrawCrossSectionTab();
+                    break;
+                case 1:
+                    if (IsLegacyWorldType)
+                    {
+                        DrawLegacyUnsupportedMessage();
+                        break;
+                    }
+
+                    DrawNoiseChannelsTab();
+                    break;
+                case 2:
+                    if (IsLegacyWorldType)
+                    {
+                        DrawLegacyUnsupportedMessage();
+                        break;
+                    }
+
+                    DrawBiomeEditorTab();
+                    break;
+                case 3:
+                    DrawWorldTypeTab();
+                    break;
+                case 4:
+                    if (IsLegacyWorldType)
+                    {
+                        DrawLegacyUnsupportedMessage();
+                        break;
+                    }
+
+                    DrawWorldBlendingTab();
+                    break;
+            }
+
+            if (_debounceTimer.IsPending)
+                Repaint();
+        }
+
+        /// <summary>
+        /// Draws a full-tab message indicating the current tab is not supported for Legacy world types.
+        /// </summary>
+        private static void DrawLegacyUnsupportedMessage()
+        {
+            EditorGUILayout.Space(20);
+            EditorGUILayout.HelpBox(
+                "This tab is not supported for Legacy world types.\n\n" +
+                "The Cross-Section, Noise Channels, Biome Editing, and World Blending preview tools " +
+                "are designed for the Standard generation pipeline (FastNoiseLite / multi-noise terrain).\n\n" +
+                "Switch to a Standard world type in the World Type tab to use these tools.",
+                MessageType.Warning);
+        }
+
+        #region Shared Biome List
+
+        /// <summary>
+        /// Draws the left-pane biome selection list used by tabs 0, 1, and 2.
+        /// </summary>
+        private void DrawBiomeList()
+        {
+            EditorGUILayout.BeginVertical(GUILayout.Width(180));
+
+            // World Type selector
+            EditorGUI.BeginChangeCheck();
+            _worldType = (WorldTypeDefinition)EditorGUILayout.ObjectField(
+                _worldType, typeof(WorldTypeDefinition), false, GUILayout.Height(18));
+            if (EditorGUI.EndChangeCheck() && _worldType != null)
+            {
+                _seaLevel = _worldType.seaLevel;
+                _selectedWtIndex = _wtAssets?.IndexOf(_worldType) ?? -1;
+                RebuildWorldTypeBiomeList();
+            }
+
+            if (_worldType != null)
+            {
+                GUI.enabled = false;
+                EditorGUILayout.IntField("Sea Level", _seaLevel, GUILayout.Height(16));
+                GUI.enabled = true;
+            }
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Biomes", EditorStyles.boldLabel);
+
+            EditorGUIHelper.DrawSearchableSelectionList(
+                _biomeAssets,
+                ref _biomeSearchText,
+                ref _biomeListScrollPos,
+                ref _selectedBiomeIndex,
+                (biome, search) => string.IsNullOrEmpty(search) || biome.name.ToLower().Contains(search.ToLower()),
+                (rect, biome, _) => { GUI.Label(rect, $" {biome.name}", EditorStyles.toolbarButton); },
+                index =>
+                {
+                    _biome = _biomeAssets[index];
+                    _lastAssetWriteTime = default;
+                    _biomeSerializedObject = new SerializedObject(_biome);
+                    _beValidationDirty = true;
+                    _bePreviewXY = null;
+                    _bePreviewZY = null;
+                    _bePreviewXZ = null;
+                    if (_autoGenerate)
+                    {
+                        _debounceTimer.Cancel();
+                        RegenerateActivePreview();
+                    }
+                }
+            );
+
+            // --- List management buttons ---
+            EditorGUILayout.BeginHorizontal();
+
+            if (GUILayout.Button("Add New"))
+            {
+                if (!AssetDatabase.IsValidFolder(BIOME_SAVE_DIR))
+                {
+                    Directory.CreateDirectory(BIOME_SAVE_DIR);
+                    AssetDatabase.Refresh();
+                }
+
+                string path = AssetDatabase.GenerateUniqueAssetPath($"{BIOME_SAVE_DIR}/New Biome.asset");
+                StandardBiomeAttributes newBiome = CreateInstance<StandardBiomeAttributes>();
+                AssetDatabase.CreateAsset(newBiome, path);
+                AssetDatabase.SaveAssets();
+
+                RefreshBiomeList();
+                _selectedBiomeIndex = _biomeAssets.IndexOf(newBiome);
+                _biome = newBiome;
+                _biomeSerializedObject = new SerializedObject(_biome);
+            }
+
+            GUI.enabled = _biome != null;
+
+            if (GUILayout.Button("Duplicate"))
+            {
+                string sourcePath = AssetDatabase.GetAssetPath(_biome);
+                string newPath = AssetDatabase.GenerateUniqueAssetPath(
+                    $"{BIOME_SAVE_DIR}/{_biome.name} (Copy).asset");
+                AssetDatabase.CopyAsset(sourcePath, newPath);
+                AssetDatabase.SaveAssets();
+
+                RefreshBiomeList();
+                StandardBiomeAttributes duplicated = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(newPath);
+                _selectedBiomeIndex = _biomeAssets.IndexOf(duplicated);
+                _biome = duplicated;
+                _biomeSerializedObject = new SerializedObject(_biome);
+                _lastAssetWriteTime = default;
+                if (_autoGenerate)
+                {
+                    _debounceTimer.Cancel();
+                    RegenerateActivePreview();
+                }
+            }
+
+            GUI.backgroundColor = new Color(1f, 0.6f, 0.6f);
+            if (GUILayout.Button("Delete"))
+            {
+                if (EditorUtility.DisplayDialog(
+                        "Delete Biome",
+                        $"Are you sure you want to delete '{_biome.name}'?\nThis cannot be undone.",
+                        "Delete",
+                        "Cancel"))
+                {
+                    string path = AssetDatabase.GetAssetPath(_biome);
+                    AssetDatabase.DeleteAsset(path);
+                    AssetDatabase.SaveAssets();
+
+                    _biome = null;
+                    _selectedBiomeIndex = -1;
+                    _biomeSerializedObject = null;
+                    RefreshBiomeList();
+                }
+            }
+
+            GUI.backgroundColor = Color.white;
+            GUI.enabled = true;
+            EditorGUILayout.EndHorizontal();
+
+            if (GUILayout.Button("↻ Refresh List"))
+            {
+                RefreshBiomeList();
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        #endregion
+    }
+}

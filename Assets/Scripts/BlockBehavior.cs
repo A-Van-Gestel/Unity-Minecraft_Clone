@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using Data;
 using JetBrains.Annotations;
+using Unity.Mathematics;
 using UnityEngine;
-using Random = UnityEngine.Random;
+using Random = Unity.Mathematics.Random;
 
 /// <summary>
 /// Contains the static logic for all special block behaviors in the world,
@@ -12,11 +13,17 @@ using Random = UnityEngine.Random;
 public static partial class BlockBehavior
 {
     [ThreadStatic]
-    private static List<VoxelMod> _tMods;
+    private static List<VoxelMod> s_tMods;
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void DomainReset()
+    {
+        s_tMods = null;
+    }
 
     // A ThreadStatic reusable list to avoid allocating memory while ensuring thread-safety.
     // Lazy initialized because ThreadStatic inline initializers only run for the first thread.
-    private static List<VoxelMod> Mods => _tMods ??= new List<VoxelMod>();
+    private static List<VoxelMod> Mods => s_tMods ??= new List<VoxelMod>();
 
     // OPTIMIZATION: Cached spread vectors to prevent array allocations every tick
     private static readonly Vector3Int[] s_grassSpreadVectors =
@@ -40,6 +47,25 @@ public static partial class BlockBehavior
         VoxelData.FaceChecks[4],
         VoxelData.FaceChecks[5],
     };
+
+    /// <summary>32-bit golden-ratio constant used to mix the per-tick salt into the voxel-position hash.</summary>
+    private const uint TICK_SALT_HASH_MULTIPLIER = 0x9E3779B1u;
+
+    /// <summary>
+    /// Builds a local <see cref="Random"/> seeded per voxel <b>and</b> per tick for behavior randomness
+    /// (grass spread, fluid viscosity). The seed mixes the voxel's global position (per-voxel variation) with
+    /// a per-tick salt (<see cref="World.TickCounter"/>) so a voxel that rolls one way this tick re-rolls next
+    /// tick instead of freezing in place. A seed of 0 is illegal for <see cref="Random"/>, so it is clamped to
+    /// 1 via <c>math.max</c>. Shared by the grass and fluid paths so their seeding schemes cannot drift apart.
+    /// </summary>
+    /// <param name="globalPos">The voxel's global (world-space) position.</param>
+    /// <returns>A freshly seeded <see cref="Random"/> for this voxel and tick.</returns>
+    private static Random SeededVoxelRandom(Vector3Int globalPos)
+    {
+        int tickSalt = World.Instance.TickCounter;
+        uint seed = math.max(1u, math.hash(new int3(globalPos.x, globalPos.y, globalPos.z)) ^ (uint)(tickSalt * TICK_SALT_HASH_MULTIPLIER));
+        return new Random(seed);
+    }
 
     // --- Public Methods ---
 
@@ -70,7 +96,7 @@ public static partial class BlockBehavior
 
         // Get the voxel's properties & ID
         BlockType props = voxel.Properties;
-        ushort id = voxel.id;
+        ushort id = voxel.ID;
 
         // --- Grass Block ---
         if (id == BlockIDs.Grass)
@@ -131,22 +157,27 @@ public static partial class BlockBehavior
 
         // Get the voxel's properties & ID
         BlockType props = voxel.Properties;
-        ushort id = voxel.id;
+        ushort id = voxel.ID;
 
         // --- Grass Block ---
         if (id == BlockIDs.Grass)
         {
             // Condition 1: If there is a solid block on top, grass turns to dirt.
-            VoxelState? topNeighbour = chunkData.GetState(localPos + VoxelData.FaceChecks[2]);
-            if (topNeighbour.HasValue && topNeighbour.Value.Properties.isSolid)
+            VoxelState? topNeighbor = chunkData.GetState(localPos + VoxelData.FaceChecks[2]);
+            if (topNeighbor.HasValue && topNeighbor.Value.Properties.isSolid)
             {
-                Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
+                Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.Position.x, localPos.y, localPos.z + chunkData.Position.y);
                 VoxelMod voxelMod = new VoxelMod(globalPos, BlockIDs.Dirt);
                 Mods.Add(voxelMod);
                 return Mods;
             }
 
             // Condition 2: Attempt to spread, using a GC-friendly method.
+            // TG-3: seed the per-voxel/per-tick RNG here — below the solid-on-top early-out (which never
+            // touches it, so buried grass pays nothing) and before the reservoir loops, which consume rng
+            // via NextInt as candidates are found. The same rng then drives the spread roll, keeping the
+            // reservoir choice and the roll correlated within the tick. See SeededVoxelRandom.
+            Random rng = SeededVoxelRandom(new Vector3Int(localPos.x + chunkData.Position.x, localPos.y, localPos.z + chunkData.Position.y));
             int candidateCount = 0;
             Vector3Int chosenCandidateLocalPos = Vector3Int.zero; // A default value
 
@@ -158,7 +189,7 @@ public static partial class BlockBehavior
                 {
                     candidateCount++;
                     // Reservoir sampling: for the k-th item, replace choice with probability 1/k
-                    if (Random.Range(0, candidateCount) == 0)
+                    if (rng.NextInt(0, candidateCount) == 0)
                     {
                         chosenCandidateLocalPos = checkPos;
                     }
@@ -172,7 +203,7 @@ public static partial class BlockBehavior
                 if (IsDirtNextToAir(chunkData, checkPos))
                 {
                     candidateCount++;
-                    if (Random.Range(0, candidateCount) == 0)
+                    if (rng.NextInt(0, candidateCount) == 0)
                     {
                         // The actual dirt block is below the air block
                         chosenCandidateLocalPos = checkPos + VoxelData.FaceChecks[3];
@@ -184,10 +215,10 @@ public static partial class BlockBehavior
             if (candidateCount > 0)
             {
                 // Roll the dice to see if we spread this tick.
-                if (Random.Range(0f, 1f) <= VoxelData.GrassSpreadChance)
+                if (rng.NextFloat() <= VoxelData.GrassSpreadChance)
                 {
                     // Modify the single, randomly chosen candidate.
-                    Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.position.y);
+                    Vector3Int chosenCandidateGlobalPos = new Vector3Int(chosenCandidateLocalPos.x + chunkData.Position.x, chosenCandidateLocalPos.y, chosenCandidateLocalPos.z + chunkData.Position.y);
                     Mods.Add(new VoxelMod(chosenCandidateGlobalPos, BlockIDs.Grass));
                 }
             }

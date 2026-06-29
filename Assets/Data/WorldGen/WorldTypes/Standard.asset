@@ -1,0 +1,60 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 34c776fdd5293b04b8b815810cbf49e2, type: 3}
+  m_Name: Standard
+  m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.WorldTypeDefinition
+  typeID: 1
+  displayName: Standard (WIP)
+  biomes:
+  - {fileID: 11400000, guid: 09e7c0bf9ee3bc74ca452e1dc1568050, type: 2}
+  - {fileID: 11400000, guid: 0973908ffb8640de911ca04893e2a319, type: 2}
+  - {fileID: 11400000, guid: 97ca01180be04a8f8433fd2d62859595, type: 2}
+  - {fileID: 11400000, guid: d73f7600d69642868aa79f1f75788e55, type: 2}
+  - {fileID: 11400000, guid: 4e2d8d59432ce5a4fbba25dc1f2e942c, type: 2}
+  - {fileID: 11400000, guid: 1be67b395810af24d95a353dd5b1b23e, type: 2}
+  seaLevel: 54
+  solidGroundHeight: 52
+  trunkWormConfig:
+    enabled: 1
+    spawnChance: 0.008
+    maxWormsPerCell: 1
+    shape:
+      radiusMin: 3
+      radiusMax: 4
+      squashAxis: 0
+      squashFactor: 0.75
+      radiusWaveCount: 3
+      radiusNoiseStrength: 0
+      radiusNoiseFrequency: 0.08
+    waviness: 0.28
+    horizontalBias: 0.72
+    minLength: 200
+    maxLength: 350
+    minHeight: 10
+    maxHeight: 50
+    depthFadeMarginBottom: 5
+    depthFadeMarginTop: 16
+    surfaceFadeMargin: 0
+    surfaceDeflectionStrength: 0
+    yAttraction:
+      strength: 0
+      minY: 20
+      maxY: 38
+    branching:
+      branchChance: 0.04
+      maxBranchDepth: 1
+    noiseSeeking:
+      checkInterval: 8
+      seekDistance: 14
+      seekChance: 0.65
+      maskSeekChance: 0
+      maskSeekMinSteps: 30

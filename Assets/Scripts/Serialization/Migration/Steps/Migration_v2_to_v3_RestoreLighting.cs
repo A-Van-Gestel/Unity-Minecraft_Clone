@@ -20,8 +20,8 @@ namespace Serialization.Migration.Steps
 
         public override byte[] MigrateChunk(byte[] uncompressedData)
         {
-            using var inStream = new MemoryStream(uncompressedData);
-            using var reader = new BinaryReader(inStream);
+            using MemoryStream inStream = new MemoryStream(uncompressedData);
+            using BinaryReader reader = new BinaryReader(inStream);
 
             // =================================================================
             // V2 READ DEFINITION
@@ -61,7 +61,10 @@ namespace Serialization.Migration.Steps
             //   ushort (2)    : section.nonAirCount
             //   byte[] (16384): voxel data (16*16*16 * sizeof(uint))
             // Total per section: 16387 bytes
-            const int maxSections = 8;
+            // Iterate up to 32 times because the sectionBitmask is a 32-bit integer.
+            // This properly handles chunks that were saved with a different ChunkHeight
+            // (e.g., height 256 = 16 sections), preventing stream misalignment.
+            const int maxSections = 32;
             byte[][] v2Sections = new byte[maxSections][];
 
             for (int i = 0; i < maxSections; i++)
@@ -72,8 +75,8 @@ namespace Serialization.Migration.Steps
                 ushort nonAirCount = reader.ReadUInt16();
                 byte[] voxelData = reader.ReadBytes(16384);
 
-                using var secMs = new MemoryStream();
-                using var secWriter = new BinaryWriter(secMs);
+                using MemoryStream secMs = new MemoryStream();
+                using BinaryWriter secWriter = new BinaryWriter(secMs);
                 secWriter.Write(secVersion);
                 secWriter.Write(nonAirCount);
                 secWriter.Write(voxelData);
@@ -93,8 +96,8 @@ namespace Serialization.Migration.Steps
             // Key change: 'needsLight' is written as true regardless of its previous value.
             // =================================================================
 
-            using var outStream = new MemoryStream();
-            using var writer = new BinaryWriter(outStream);
+            using MemoryStream outStream = new MemoryStream();
+            using BinaryWriter writer = new BinaryWriter(outStream);
 
             if (!TargetChunkFormatVersion.HasValue)
                 throw new InvalidOperationException("TargetChunkFormatVersion must be defined for this step.");

@@ -165,13 +165,13 @@ namespace Rendering
                 {
                     int step = i / 2; // Intentional integer division: [0, 0, 1, 1, 2, 2, ...]
                     float offset = 0.5f + step;
-                    TextureHandle src = (i % 2 == 1) ? tempA : tempB;
-                    TextureHandle dst = (i % 2 == 1) ? tempB : tempA;
+                    TextureHandle src = i % 2 == 1 ? tempA : tempB;
+                    TextureHandle dst = i % 2 == 1 ? tempB : tempA;
                     AddKawaseBlitPass(renderGraph, src, dst, offset, $"UI Blur Iter {i}");
                 }
 
                 // Determine which buffer has the final result
-                TextureHandle finalResult = (_settings.iterations % 2 == 1) ? tempA : tempB;
+                TextureHandle finalResult = _settings.iterations % 2 == 1 ? tempA : tempB;
 
                 // Set the result as a global texture so UI shaders can sample _UIBlurTexture.
                 // Must use AddUnsafePass because SetGlobalTexture modifies global state,

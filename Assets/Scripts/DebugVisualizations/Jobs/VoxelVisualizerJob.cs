@@ -1,4 +1,4 @@
-﻿using Unity.Burst;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
@@ -56,7 +56,7 @@ namespace DebugVisualizations.Jobs
             int vertexIndex = 0;
 
             // Instead of iterating the dictionary, we iterate its key array for determinism.
-            var keys = VoxelsToDraw.GetKeyArray(Allocator.Temp);
+            NativeArray<Vector3Int> keys = VoxelsToDraw.GetKeyArray(Allocator.Temp);
 
             foreach (Vector3Int localPos in keys)
             {

@@ -1,16 +1,23 @@
+using System;
 using TMPro;
+using UI.Tooltip;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-public class UIItemSlot : MonoBehaviour
+public class UIItemSlot : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IPointerClickHandler
 {
     public bool isLinked;
-    public ItemSlot ItemSlot;
+
+    [NonSerialized]
+    public ItemSlot ItemSlot; // Runtime-linked via Link(); never Inspector-authored.
+
     public Image slotImage;
     public Image slotIcon;
     public TextMeshProUGUI slotAmount;
 
     private World _world;
+    private TooltipTrigger _tooltipTrigger;
 
     private void Awake()
     {
@@ -38,10 +45,11 @@ public class UIItemSlot : MonoBehaviour
     {
         if (ItemSlot != null && ItemSlot.HasItem)
         {
-            slotIcon.sprite = _world.blockTypes[ItemSlot.Stack.ID].icon;
+            slotIcon.sprite = _world.BlockTypes[ItemSlot.Stack.ID].icon;
             slotAmount.text = ItemSlot.Stack.Amount.ToString();
             slotIcon.enabled = true;
             slotAmount.enabled = true;
+            UpdateTooltip(BlockTooltipBuilder.Build(_world.BlockTypes[ItemSlot.Stack.ID], ItemSlot.Stack.ID));
         }
         else
         {
@@ -55,6 +63,16 @@ public class UIItemSlot : MonoBehaviour
         slotAmount.text = "";
         slotIcon.enabled = false;
         slotAmount.enabled = false;
+        UpdateTooltip(null);
+    }
+
+    private void UpdateTooltip(string text)
+    {
+        if (_tooltipTrigger == null)
+            _tooltipTrigger = GetComponent<TooltipTrigger>();
+
+        if (_tooltipTrigger != null)
+            _tooltipTrigger.text = text;
     }
 
     private void OnDestroy()
@@ -63,6 +81,41 @@ public class UIItemSlot : MonoBehaviour
         {
             ItemSlot.UnlinkUISlot();
         }
+    }
+
+    // --- POINTER EVENT FORWARDING (EventSystem-driven, works for mouse & touch) ---
+
+    /// <summary>
+    /// Forwards pointer-down events to the <see cref="DragAndDropHandler"/>.
+    /// Used on mobile to start tap / long-press detection.
+    /// </summary>
+    /// <param name="eventData">The pointer event data from the EventSystem.</param>
+    public void OnPointerDown(PointerEventData eventData)
+    {
+        if (DragAndDropHandler.Instance != null)
+            DragAndDropHandler.Instance.OnSlotPointerDown(this, eventData);
+    }
+
+    /// <summary>
+    /// Forwards pointer-up events to the <see cref="DragAndDropHandler"/>.
+    /// Used on mobile to complete a tap (left-click) when no long-press fired.
+    /// </summary>
+    /// <param name="eventData">The pointer event data from the EventSystem.</param>
+    public void OnPointerUp(PointerEventData eventData)
+    {
+        if (DragAndDropHandler.Instance != null)
+            DragAndDropHandler.Instance.OnSlotPointerUp(this, eventData);
+    }
+
+    /// <summary>
+    /// Forwards pointer-click events to the <see cref="DragAndDropHandler"/>.
+    /// Used on desktop where <see cref="PointerEventData.button"/> distinguishes left / right clicks.
+    /// </summary>
+    /// <param name="eventData">The pointer event data from the EventSystem.</param>
+    public void OnPointerClick(PointerEventData eventData)
+    {
+        if (DragAndDropHandler.Instance != null)
+            DragAndDropHandler.Instance.OnSlotPointerClick(this, eventData);
     }
 }
 

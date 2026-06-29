@@ -44,11 +44,14 @@ namespace Editor.BlockEditor
         private int _previewFluidLevel = 0;
         private bool _forceOpaquePreview = false;
 
+        // --- Metadata Preview ---
+        private int _previewFacing = 0; // Default to South (0)
+        private int _previewRoll = 0; // Default to 0
+        private int _previewAxis = 0; // Default to Y-axis (0)
+        private int _previewYaw = 0; // Default to North (0)
+
         // --- Custom GUI Style ---
         private GUIStyle _listButtonStyle;
-        private static GUIStyle _checkerboardStyle;
-        private static GUIStyle _centeredIntFieldStyle;
-
         private bool _blockIdsStale = false;
 
         // --- Icon Generation ---
@@ -76,39 +79,34 @@ namespace Editor.BlockEditor
 
         private void OnEnable()
         {
+            saveChangesMessage = "You have unsaved changes in the Block Editor. Do you want to save them before closing?";
+
             // --- Initialize Preview Widget ---
             _meshPreviewWidget = new MeshPreviewWidget();
             _meshPreviewWidget.Initialize();
 
-            // ---  Find BlockDatabase asset ---
-            string[] guids = AssetDatabase.FindAssets("t:BlockDatabase");
-            if (guids.Length == 0)
+            // Use EditorBlockDatabaseCache instead of manual AssetDatabase searches
+            _blockDatabase = EditorBlockDatabaseCache.Database;
+
+            if (_blockDatabase == null)
             {
                 Debug.LogError("Block Editor Error: Could not find a 'BlockDatabase.asset' in the project. Please create one or run the migration tool.", this);
                 return;
             }
 
-            if (guids.Length > 1)
+            LoadBlockData();
+
+            // --- Load Materials ---
+            if (_blockDatabase.opaqueMaterial != null)
             {
-                Debug.LogWarning("Block Editor Warning: Multiple 'BlockDatabase.asset' files found. Using the first one.", this);
+                _atlasTexture = _blockDatabase.opaqueMaterial.mainTexture as Texture2D;
             }
 
-            string path = AssetDatabase.GUIDToAssetPath(guids[0]);
-            _blockDatabase = AssetDatabase.LoadAssetAtPath<BlockDatabase>(path);
-
-            if (_blockDatabase != null)
-            {
-                LoadBlockData();
-
-                // --- Load Materials ---
-                if (_blockDatabase.opaqueMaterial != null)
-                {
-                    _atlasTexture = _blockDatabase.opaqueMaterial.mainTexture as Texture2D;
-                }
-            }
-
+#pragma warning disable UDR0004
             //  Subscribe to the editor's update loop to enable real-time preview.
+            EditorApplication.update -= OnUpdate; // Ensure no double subscription
             EditorApplication.update += OnUpdate;
+#pragma warning restore UDR0004
         }
 
         // --- OnDisable for Cleanup ---
@@ -150,6 +148,7 @@ namespace Editor.BlockEditor
                     // copy all fields
                     blockName = blockType.blockName,
                     icon = blockType.icon,
+                    renderShape = blockType.renderShape,
                     meshData = blockType.meshData,
                     stackSize = blockType.stackSize,
                     isSolid = blockType.isSolid,
@@ -164,19 +163,25 @@ namespace Editor.BlockEditor
                     spreadChance = blockType.spreadChance,
                     opacity = blockType.opacity,
                     lightEmission = blockType.lightEmission,
+                    lightEmissionColor = blockType.lightEmissionColor,
                     tagPreset = blockType.tagPreset,
                     tags = blockType.tags,
                     canReplaceTags = blockType.canReplaceTags,
                     isActive = blockType.isActive,
+                    metadataSchema = blockType.metadataSchema,
+                    placementMetadataMode = blockType.placementMetadataMode,
+                    defaultMetadata = blockType.defaultMetadata,
                     backFaceTexture = blockType.backFaceTexture,
                     frontFaceTexture = blockType.frontFaceTexture,
                     topFaceTexture = blockType.topFaceTexture,
                     bottomFaceTexture = blockType.bottomFaceTexture,
                     leftFaceTexture = blockType.leftFaceTexture,
                     rightFaceTexture = blockType.rightFaceTexture,
+                    collisionBounds = blockType.collisionBounds,
                 });
             }
 
+            hasUnsavedChanges = false;
             Debug.Log("Block Editor: Loaded " + _blockTypesCopy.Count + " block types from BlockDatabase asset.");
         }
 
@@ -186,6 +191,30 @@ namespace Editor.BlockEditor
             {
                 EditorUtility.DisplayDialog("Error", "BlockDatabase asset not found or data not loaded.", "OK");
                 return;
+            }
+
+            // Pre-save validation for collision bounds
+            foreach (BlockType block in _blockTypesCopy)
+            {
+                // Only draw custom block bounds
+                if (block.collisionBounds.mode == CollisionBoundsMode.FullBlock) continue;
+
+                Vector3 min = block.collisionBounds.min;
+                Vector3 max = block.collisionBounds.max;
+
+                // Check inverted/zero bounds
+                if (min.x >= max.x || min.y >= max.y || min.z >= max.z)
+                {
+                    EditorUtility.DisplayDialog("Validation Error", $"Block '{block.blockName}' has invalid custom collision bounds. Min must be strictly less than Max.", "OK");
+                    return;
+                }
+
+                // Strict [0,1] domain requirement for voxel engine logic
+                if (min.x < 0f || min.y < 0f || min.z < 0f || max.x > 1f || max.y > 1f || max.z > 1f)
+                {
+                    EditorUtility.DisplayDialog("Validation Error", $"Block '{block.blockName}' has collision bounds outside the standard [0,1] block space. This is not allowed.", "OK");
+                    return;
+                }
             }
 
             // Prepare the BlockDatabase asset for modification.
@@ -201,16 +230,28 @@ namespace Editor.BlockEditor
 
             // Auto-generate Block IDs
             bool generatedSuccessfully = BlockIdGenerator.TryGenerate();
+
+            // Refresh the fast Editor cache so other tools immediately see the changes
+            EditorBlockDatabaseCache.RefreshCache();
+
             if (generatedSuccessfully)
             {
                 _blockIdsStale = false;
+                hasUnsavedChanges = false;
                 EditorUtility.DisplayDialog("Success", $"Saved {_blockTypesCopy.Count} block types to the BlockDatabase asset and regenerated BlockIDs.cs.", "OK");
             }
             else
             {
                 _blockIdsStale = true;
+                hasUnsavedChanges = false;
                 EditorUtility.DisplayDialog("Warning", $"Saved {_blockTypesCopy.Count} block types, but BlockIDs.cs generation failed. See console for details.", "OK");
             }
+        }
+
+        public override void SaveChanges()
+        {
+            SaveBlockData();
+            base.SaveChanges();
         }
 
         #endregion
@@ -258,6 +299,13 @@ namespace Editor.BlockEditor
 
         private void OnGUI()
         {
+            // --- Handle Keyboard Shortcuts ---
+            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.S && (Event.current.control || Event.current.command))
+            {
+                SaveBlockData();
+                Event.current.Use();
+            }
+
             if (_blockDatabase == null)
             {
                 EditorGUILayout.HelpBox("Could not find the 'BlockDatabase.asset'. Please ensure it exists in your project by creating one via the Assets > Create menu.", MessageType.Error);

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Data;
 using Unity.Collections;
 using Unity.Jobs;
@@ -12,21 +13,13 @@ namespace Jobs.Data
     public struct LightingJobInputData
     {
         public NativeArray<ushort> Heightmap;
-        public NativeArray<uint> NeighborN, NeighborE, NeighborS, NeighborW;
-        public NativeArray<uint> NeighborNE, NeighborSE, NeighborSW, NeighborNW;
+        public NeighborMapSet Neighbors;
 
         /// A helper to dispose all the containers at once
         public void Dispose()
         {
             if (Heightmap.IsCreated) Heightmap.Dispose();
-            if (NeighborN.IsCreated) NeighborN.Dispose();
-            if (NeighborE.IsCreated) NeighborE.Dispose();
-            if (NeighborS.IsCreated) NeighborS.Dispose();
-            if (NeighborW.IsCreated) NeighborW.Dispose();
-            if (NeighborNE.IsCreated) NeighborNE.Dispose();
-            if (NeighborSE.IsCreated) NeighborSE.Dispose();
-            if (NeighborSW.IsCreated) NeighborSW.Dispose();
-            if (NeighborNW.IsCreated) NeighborNW.Dispose();
+            Neighbors.Dispose();
         }
     }
 
@@ -41,11 +34,31 @@ namespace Jobs.Data
     {
         public JobHandle Handle;
 
+        /// <summary>
+        /// True when the full-volume maps (center + neighbor voxel/light maps) were rented from
+        /// <c>ChunkJobArrayPool</c> and must be returned to it instead of disposed. False for
+        /// TempJob-allocated startup jobs and non-pooled callers (editor pipeline, benchmarks),
+        /// which clean up via <see cref="Dispose"/>. Not read by any Burst job.
+        /// </summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool UsesPooledBuffers;
+
         // --- Input data ---
         public LightingJobInputData Input;
 
+        // P-2 Layer 1: the halo-padded volumes the job reads/writes. These are rented UNFILLED here; the
+        // job's worker-thread gather (NeighborhoodLightingJob.Execute) populates them from the center +
+        // 8 neighbor snapshot maps (Map/LightMap + Input.Neighbors), wired in via SetGatherSources. The
+        // gather writes PaddedVoxels once (then read-only in-job); PaddedLight is the job's sole writable
+        // light store. After the job completes, the center [2,18) region of PaddedLight is extracted back
+        // into LightMap for ApplyJobLightMap. Pooled via ChunkJobArrayPool.RentPaddedVoxels/RentPaddedLight
+        // when UsesPooledBuffers.
+        public NativeArray<uint> PaddedVoxels;
+        public NativeArray<ushort> PaddedLight;
+
         // --- Output data ---
-        public NativeArray<uint> Map; // The writable map for the center chunk
+        public NativeArray<uint> Map; // The center chunk voxel snapshot (gather source + ApplyJobLightMap reference)
+        public NativeArray<ushort> LightMap; // The center chunk light buffer (gather source + readback target)
         public NativeQueue<LightQueueNode> SunLightQueue;
         public NativeQueue<LightQueueNode> BlockLightQueue;
         public NativeQueue<Vector2Int> SunLightRecalcQueue;
@@ -58,8 +71,13 @@ namespace Jobs.Data
             // --- Input data ---
             Input.Dispose();
 
+            // --- LI-1 padded volumes ---
+            if (PaddedVoxels.IsCreated) PaddedVoxels.Dispose();
+            if (PaddedLight.IsCreated) PaddedLight.Dispose();
+
             // --- Output data ---
             if (Map.IsCreated) Map.Dispose();
+            if (LightMap.IsCreated) LightMap.Dispose();
             if (SunLightQueue.IsCreated) SunLightQueue.Dispose();
             if (BlockLightQueue.IsCreated) BlockLightQueue.Dispose();
             if (SunLightRecalcQueue.IsCreated) SunLightRecalcQueue.Dispose();

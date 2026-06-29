@@ -82,7 +82,7 @@
                     "name": "AltModifier",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000009",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -136,7 +136,7 @@
                     "name": "ToggleChunkBorders",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000015",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -145,7 +145,7 @@
                     "name": "ToggleFlying",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000016",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -154,7 +154,7 @@
                     "name": "CycleVisMode",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000017",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -163,7 +163,7 @@
                     "name": "DebugCode",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000018",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -172,7 +172,7 @@
                     "name": "ToggleNoclip",
                     "type": "Button",
                     "id": "10000001-0000-0000-0000-000000000019",
-                    "expectedControlType": "Button",
+                    "expectedControlType": "",
                     "processors": "",
                     "interactions": "",
                     "initialStateCheck": false
@@ -620,7 +620,7 @@
             "actions": [
                 {
                     "name": "Point",
-                    "type": "Value",
+                    "type": "PassThrough",
                     "id": "20000001-0000-0000-0000-000000000001",
                     "expectedControlType": "Vector2",
                     "processors": "",
@@ -660,8 +660,30 @@
                 },
                 {
                     "name": "",
+                    "id": "b2000001-0000-0000-0000-000000000002",
+                    "path": "<Touchscreen>/primaryTouch/position",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Point",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
                     "id": "b2000002-0000-0000-0000-000000000001",
                     "path": "<Mouse>/leftButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "Click",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "b2000002-0000-0000-0000-000000000002",
+                    "path": "<Touchscreen>/primaryTouch/press",
                     "interactions": "",
                     "processors": "",
                     "groups": "",

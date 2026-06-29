@@ -224,7 +224,7 @@ namespace Helpers.UI
             // Update Dynamic Y-Axis Labels
             if (_gridLabels != null)
             {
-                float rectHeight = rectTransform.rect.height - (padding.y * 2) - bottomLegendSpace;
+                float rectHeight = rectTransform.rect.height - padding.y * 2 - bottomLegendSpace;
                 int totalGridLines = gridLineCount + 1;
 
                 for (int i = 0; i < totalGridLines; i++)
@@ -234,7 +234,7 @@ namespace Helpers.UI
 
                     _gridLabels[i].text = string.Format(yFormat, val);
 
-                    float py = padding.y + bottomLegendSpace + (fraction * rectHeight);
+                    float py = padding.y + bottomLegendSpace + fraction * rectHeight;
                     _gridLabels[i].rectTransform.anchoredPosition = new Vector2(padding.x - 5f, py);
                 }
             }
@@ -242,19 +242,19 @@ namespace Helpers.UI
             // Update Dynamic X-Axis Labels
             if (_xAxisLabels != null)
             {
-                float graphWidth = rectTransform.rect.width - (padding.x * 2);
+                float graphWidth = rectTransform.rect.width - padding.x * 2;
                 int totalXLabels = xGridLineCount + 2;
                 float fullTimeSpan = _historySize * sampleRate;
 
                 for (int i = 0; i < totalXLabels; i++)
                 {
                     float fraction = (float)i / (totalXLabels - 1);
-                    float px = padding.x + (fraction * graphWidth);
+                    float px = padding.x + fraction * graphWidth;
 
                     // Hang slightly beneath the bottom rendered line of the graph
                     _xAxisLabels[i].rectTransform.anchoredPosition = new Vector2(px, padding.y + bottomLegendSpace - 2f);
 
-                    float timeVal = -fullTimeSpan + (fraction * fullTimeSpan);
+                    float timeVal = -fullTimeSpan + fraction * fullTimeSpan;
                     _xAxisLabels[i].text = string.Format(xFormat, timeVal);
                 }
             }
@@ -300,7 +300,7 @@ namespace Helpers.UI
             // Update Dynamic Y-Axis Labels
             if (_gridLabels != null)
             {
-                float rectHeight = rectTransform.rect.height - (padding.y * 2) - bottomLegendSpace;
+                float rectHeight = rectTransform.rect.height - padding.y * 2 - bottomLegendSpace;
                 int totalGridLines = gridLineCount + 1;
 
                 for (int i = 0; i < totalGridLines; i++)
@@ -310,7 +310,7 @@ namespace Helpers.UI
 
                     _gridLabels[i].text = string.Format(yFormat, val);
 
-                    float py = padding.y + bottomLegendSpace + (fraction * rectHeight);
+                    float py = padding.y + bottomLegendSpace + fraction * rectHeight;
                     _gridLabels[i].rectTransform.anchoredPosition = new Vector2(padding.x - 5f, py);
                 }
             }
@@ -318,19 +318,19 @@ namespace Helpers.UI
             // Update Dynamic X-Axis Labels
             if (_xAxisLabels != null)
             {
-                float graphWidth = rectTransform.rect.width - (padding.x * 2);
+                float graphWidth = rectTransform.rect.width - padding.x * 2;
                 int totalXLabels = xGridLineCount + 2;
                 float fullTimeSpan = _historySize * sampleRate;
 
                 for (int i = 0; i < totalXLabels; i++)
                 {
                     float fraction = (float)i / (totalXLabels - 1);
-                    float px = padding.x + (fraction * graphWidth);
+                    float px = padding.x + fraction * graphWidth;
 
                     // Hang slightly beneath the bottom rendered line of the graph
                     _xAxisLabels[i].rectTransform.anchoredPosition = new Vector2(px, padding.y + bottomLegendSpace - 2f);
 
-                    float timeVal = -fullTimeSpan + (fraction * fullTimeSpan);
+                    float timeVal = -fullTimeSpan + fraction * fullTimeSpan;
                     _xAxisLabels[i].text = string.Format(xFormat, timeVal);
                 }
             }
@@ -345,8 +345,8 @@ namespace Helpers.UI
 
             Rect r = rectTransform.rect;
 
-            float width = r.width - (padding.x * 2);
-            float height = r.height - (padding.y * 2) - bottomLegendSpace;
+            float width = r.width - padding.x * 2;
+            float height = r.height - padding.y * 2 - bottomLegendSpace;
             float minX = r.xMin + padding.x;
             float minY = r.yMin + padding.y + bottomLegendSpace;
             float stepX = width / (_historySize - 1);
@@ -378,7 +378,7 @@ namespace Helpers.UI
                 for (int i = 0; i < totalGridLines; i++)
                 {
                     float fraction = (float)(i + 1) / totalGridLines;
-                    float py = minY + (fraction * height);
+                    float py = minY + fraction * height;
 
                     DrawLine(vh, new Vector2(minX, py), new Vector2(r.xMax - padding.x, py), gridLineColor, gridLineThickness);
                 }
@@ -391,7 +391,7 @@ namespace Helpers.UI
                 for (int i = 0; i < totalXLines; i++)
                 {
                     float fraction = (float)i / (totalXLines - 1);
-                    float px = minX + (fraction * width);
+                    float px = minX + fraction * width;
 
                     DrawLine(vh, new Vector2(px, minY), new Vector2(px, r.yMax - padding.y), gridLineColor, gridLineThickness);
                 }
@@ -409,8 +409,8 @@ namespace Helpers.UI
                     float val = _history[lineIndex, actualIndex];
 
                     float normalizedY = val / _currentVisualMaxY;
-                    float px = minX + (i * stepX);
-                    float py = minY + (normalizedY * height);
+                    float px = minX + i * stepX;
+                    float py = minY + normalizedY * height;
 
                     Vector2 currentPoint = new Vector2(px, py);
 

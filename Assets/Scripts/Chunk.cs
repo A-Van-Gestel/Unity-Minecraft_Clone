@@ -1,10 +1,12 @@
+using System;
 using System.Collections.Generic;
 using Data;
 using Helpers;
+using Jobs;
 using Jobs.BurstData;
-using Unity.Burst;
 using Unity.Collections;
-using Unity.Jobs;
+using Unity.Mathematics;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Pool;
 using Object = UnityEngine.Object;
@@ -20,7 +22,17 @@ public class Chunk
     public readonly GameObject ChunkGameObject;
 
     private bool _isActive;
-    private readonly HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
+
+    // TG-4 Phase 1: the active-voxel behavior buckets now live on ChunkData (the data they describe), which owns
+    // their allocation, per-family routing, and disposal. Chunk keeps only the tick orchestration below.
+
+    // Profiler markers for the behavior-tick path (TG-4 profile gate: measure managed/main-thread tick cost and the
+    // per-family split before deciding Phase 2 jobification vs the TG-5 finisher). Near-zero cost when not recording;
+    // these are the named samples the Unity Profiler window and the profiler MCP tools key off, and the substrate the
+    // full-world fluid stress pass reads. Declared once (static) — the marker name, not the instance, is what's sampled.
+    private static readonly ProfilerMarker s_tickUpdateMarker = new ProfilerMarker("Chunk.TickUpdate");
+    private static readonly ProfilerMarker s_tickGrassMarker = new ProfilerMarker("Chunk.TickUpdate.Grass");
+    private static readonly ProfilerMarker s_tickFluidMarker = new ProfilerMarker("Chunk.TickUpdate.Fluid");
 
     // Cached reference to avoid a GetComponent call on every pool activation, while remaining Unity-lifetime safe
     private ChunkLoadAnimation _loadAnimation;
@@ -37,8 +49,19 @@ public class Chunk
         Coord = chunkCoord;
 
         // Create GameObject hierarchy
-        ChunkGameObject = new GameObject($"Chunk {Coord.X}, {Coord.Z}");
+#if UNITY_EDITOR
+        ChunkGameObject = new GameObject($"Chunk {Coord.X.ToString()}, {Coord.Z.ToString()}");
+#else
+        ChunkGameObject = new GameObject();
+#endif
         ChunkGameObject.transform.SetParent(World.Instance.transform);
+
+        // Pre-add the load animation component to avoid runtime AddComponent (which causes boxing/GC overhead)
+        if (World.Instance.settings.enableChunkLoadAnimations)
+        {
+            _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
+            _loadAnimation.enabled = false;
+        }
 
         // Initialize Section Renderers
         const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
@@ -66,18 +89,13 @@ public class Chunk
         ChunkPosition = Coord.ToWorldPosition();
 
         // Update GameObject identity
-        ChunkGameObject.name = $"Chunk {Coord.X}, {Coord.Z}";
+#if UNITY_EDITOR
+        ChunkGameObject.name = $"Chunk {Coord.X.ToString()}, {Coord.Z.ToString()}";
+#endif
 
-        if (World.Instance.settings.enableChunkLoadAnimations)
+        if (World.Instance.settings.enableChunkLoadAnimations && _loadAnimation != null)
         {
-            if (_loadAnimation == null)
-            {
-                if (!ChunkGameObject.TryGetComponent(out _loadAnimation))
-                {
-                    _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
-                }
-            }
-
+            _loadAnimation.enabled = true;
             _loadAnimation.ResetToUnderground(ChunkPosition);
         }
         else
@@ -88,8 +106,9 @@ public class Chunk
 
         // Reset State
         _isActive = true;
-        _activeVoxels.Clear();
         _hasPlayedLoadAnimation = false;
+        // NOTE: the active-voxel buckets live on ChunkData and are cleared in ChunkData.Reset (data lifecycle),
+        // not here — a recycled visual re-linking to a still-valid cached ChunkData keeps its correct active set.
 
         Vector2Int worldPosKey = Coord.ToVoxelOrigin();
 
@@ -168,8 +187,22 @@ public class Chunk
     /// Scans the newly populated chunk data for voxels that possess active behaviors (e.g., grass spreading)
     /// and registers them to the active voxel list for continuous tick processing.
     /// </summary>
+    /// <remarks>
+    /// Fallback scan used by the load-from-save (<see cref="World"/>) and pool-recycle replay
+    /// (<see cref="Reset"/>) paths, where no generation job runs and active voxels are not persisted.
+    /// The freshly-generated path instead consumes <see cref="RegisterActiveVoxelsFromJob"/>, which is
+    /// emitted by <see cref="Jobs.ActiveVoxelScanJob"/>. This scan reads the precomputed flat
+    /// <see cref="World.IsActiveById"/> table instead of dereferencing managed <c>BlockType</c> objects.
+    /// <para><b>Parity invariant:</b> this managed scan and the Burst <see cref="Jobs.ActiveVoxelScanJob"/>
+    /// must register the same active set — they MUST agree on both the active criterion
+    /// (<see cref="World.IsActiveById"/> here vs <c>BlockTypeJobData.IsActive</c> there, co-built in one loop
+    /// in <c>World</c> init, so drift-proof) and the section/index convention. Change one path's criterion or
+    /// convention and you must change the other.</para>
+    /// </remarks>
     public void OnDataPopulated()
     {
+        bool[] isActiveById = World.Instance.IsActiveById;
+
         // Now that the data is here, we can scan for active voxels.
         // Optimization: Iterate through sections first to skip empty ones.
         for (int s = 0; s < ChunkData.sections.Length; s++)
@@ -185,51 +218,110 @@ public class Chunk
                 uint packedData = section.voxels[i];
                 ushort id = BurstVoxelDataBitMapping.GetId(packedData);
 
-                if (World.Instance.blockTypes[id].isActive)
+                if (isActiveById[id])
                 {
                     // Convert section index back to 3D position
                     int x = i % ChunkMath.SECTION_SIZE;
                     int yOffset = i / ChunkMath.SECTION_SIZE % ChunkMath.SECTION_SIZE;
                     int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
 
-                    AddActiveVoxel(new Vector3Int(x, startY + yOffset, z));
+                    ChunkData.AddActiveVoxel(new Vector3Int(x, startY + yOffset, z), id);
                 }
             }
         }
     }
 
     /// <summary>
-    /// Updates chunk using the Unity Jobs System
+    /// Registers the active voxels emitted by the generation job's <see cref="Jobs.ActiveVoxelScanJob"/>,
+    /// unpacking each flat chunk index back into a local position. Used on the freshly-generated path
+    /// in place of <see cref="OnDataPopulated"/> — the job has already done the per-voxel scan, so the
+    /// main thread only copies a short list.
     /// </summary>
-    public void UpdateChunk()
+    /// <param name="packedIndices">Flat chunk indices (<see cref="ChunkMath.GetFlattenedIndexInChunk"/> convention) of active voxels.</param>
+    public void RegisterActiveVoxelsFromJob(NativeList<int> packedIndices)
     {
-        // The responsibility of meshing is now on the World orchestrator
-        World.Instance.JobManager.ScheduleMeshing(this);
+        foreach (int i in packedIndices)
+        {
+            ChunkMath.GetLocalPositionFromFlattenedIndex(i, out int x, out int y, out int z);
+            ChunkData.AddActiveVoxel(new Vector3Int(x, y, z));
+        }
     }
 
     #region Block Behavior Methods
 
     /// <summary>
-    /// Processes the block behavior for all active voxels currently registered in this chunk.
-    /// Removes voxels from the active list if they no longer meet their activation conditions.
+    /// Processes the block behavior for all active voxels currently registered in this chunk's <see cref="ChunkData"/>.
+    /// Removes voxels from the active buckets if they no longer meet their activation conditions. The active-voxel
+    /// storage lives on <see cref="ChunkData"/> (TG-4 Phase 1); this method is the tick orchestration that drives it.
     /// </summary>
     public void TickUpdate()
     {
-        if (_activeVoxels.Count == 0) return;
+        if (ChunkData == null) return;
 
-        // A temporary, pooled list to track items that need to be removed
-        List<Vector3Int> toRemove = ListPool<Vector3Int>.Get();
+        NativeHashSet<int> grass = ChunkData.ActiveGrassBucket;
+        NativeHashSet<int> fluids = ChunkData.ActiveFluidsBucket;
 
-        foreach (Vector3Int pos in _activeVoxels)
+        int grassCount = grass.IsCreated ? grass.Count : 0;
+        int fluidCount = fluids.IsCreated ? fluids.Count : 0;
+        if (grassCount == 0 && fluidCount == 0) return;
+
+        // Marker opened AFTER the no-op early-outs so a chunk with nothing to tick pays nothing.
+        using (s_tickUpdateMarker.Auto())
         {
+            // Iterate each behavior family in a fixed order (grass, then fluids) — the TG-4 Phase 1 split. This changes
+            // the order mods are emitted vs the old single set; BH-D1 proves the change is §4.3-equivalent (independent
+            // mods canonicalize, same-voxel writes stay ordered). The apply path stays serial/unchanged in
+            // World.ApplyModifications. A single pooled scratch list is reused across both families.
+            List<int> toRemove = ListPool<int>.Get();
+            if (grassCount > 0)
+            {
+                using (s_tickGrassMarker.Auto())
+                    TickFamily(grass, toRemove);
+            }
+
+            if (fluidCount > 0)
+            {
+                using (s_tickFluidMarker.Auto())
+                {
+                    // TG-4 Phase 3: tick Tier-1 interior fluids via the Burst job (border fluids stay managed),
+                    // feature-flagged so the fully-managed legacy path is a one-toggle revert.
+                    if (World.Instance.EnableFluidBurstTick)
+                        TickFluidsHybrid(fluids, toRemove);
+                    else
+                        TickFamily(fluids, toRemove);
+                }
+            }
+
+            ListPool<int>.Release(toRemove);
+        }
+    }
+
+    /// <summary>
+    /// Ticks one behavior-family bucket: evaluates <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/>
+    /// for every registered voxel (unpacking its flat index to a local position), enqueues emitted mods to the world,
+    /// and drops voxels that are no longer active. Removals are deferred until after enumeration (a
+    /// <see cref="NativeHashSet{T}"/> cannot be modified mid-iteration); the apply pass runs later, so the bucket is
+    /// not mutated by mod application during this loop.
+    /// </summary>
+    /// <param name="bucket">The per-family active-voxel set (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
+    /// <param name="removeScratch">A reusable scratch list for the now-inactive indices; cleared on entry.</param>
+    private void TickFamily(NativeHashSet<int> bucket, List<int> removeScratch)
+    {
+        removeScratch.Clear();
+
+        foreach (int idx in bucket)
+        {
+            ChunkMath.GetLocalPositionFromFlattenedIndex(idx, out int x, out int y, out int z);
+            Vector3Int pos = new Vector3Int(x, y, z);
+
             // Get the list of modifications from the behavior logic.
             List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
 
-            // If the block is NO LONGER active, mark it for removal
-            // TODO: Future refactor could combine Behave and Active logic to save chunk lookups
+            // If the block is NO LONGER active, mark it for removal.
+            // TODO: Future refactor could combine Behave and Active logic to save chunk lookups (TG-1).
             if (!BlockBehavior.Active(ChunkData, pos))
             {
-                toRemove.Add(pos);
+                removeScratch.Add(idx);
             }
 
             // If the behavior produced any changes, submit them to the world's global queue.
@@ -239,46 +331,169 @@ public class Chunk
             }
         }
 
-        // Remove inactive voxels from the HashSet in O(1) time each
-        foreach (Vector3Int pos in toRemove)
+        // Remove inactive voxels from the bucket in O(1) time each (deferred — see remarks).
+        foreach (int idx in removeScratch)
         {
-            _activeVoxels.Remove(pos);
+            bucket.Remove(idx);
         }
-
-        // Release the temporary list back to the pool
-        ListPool<Vector3Int>.Release(toRemove);
     }
 
     /// <summary>
-    /// Registers a voxel as active, meaning it will be evaluated during every chunk tick.
+    /// TG-4 Phase 3 — ticks the fluids family as a <b>hybrid</b>: Tier-1 interior voxels are evaluated by the Burst
+    /// <see cref="FluidTickJob"/> (via <see cref="World.FluidBurstTicker"/>), Tier-2 border voxels stay on the
+    /// managed <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/> path. The job runs first (over
+    /// a pre-tick snapshot), then this method <b>replays the emitted mods in the original bucket-enumeration
+    /// order</b>, interleaved with the managed border evaluations — so the emitted <see cref="VoxelMod"/> stream is
+    /// byte-identical to the legacy single loop (zero drift; preserves same-target ordering for BH-D1). Removals
+    /// (interior from the job, border from <see cref="BlockBehavior.Active"/>) are order-independent and applied
+    /// after the loop, exactly as <see cref="TickFamily"/> does.
+    /// </summary>
+    /// <param name="fluids">The active-fluids bucket (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
+    /// <param name="removeScratch">A reusable scratch list for now-inactive indices; cleared on entry.</param>
+    private void TickFluidsHybrid(NativeHashSet<int> fluids, List<int> removeScratch)
+    {
+        World world = World.Instance;
+        FluidBurstTicker ticker = world.FluidBurstTicker;
+
+        // Pass 1: snapshot + single partition + run the fluid job (serial .Run). The runner captures the bucket's
+        // enumeration order (interior/border tagged) in ReplayOrder so the replay walks it in one pass. Phase 4b:
+        // when border-burst is on, ALL fluids tick in-job via the neighbor halo (ReplayOrder all-job); else the
+        // Phase-3 interior-only hybrid (border tagged 0 → managed in the replay).
+        if (world.EnableFluidBorderBurst)
+            ticker.RunFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData, world.worldData, world.EnableFluidBandGather);
+        else
+            ticker.RunInteriorFluids(ChunkData, world.TickCounter, world.JobDataManager.BlockTypesJobData);
+
+        // Pass 2: replay the prepared+completed ticker (shared with the TG-4 Phase 4a parallel drain path).
+        ReplayHybridFluids(ticker, fluids, removeScratch);
+    }
+
+    /// <summary>
+    /// Drains a chunk's fluid tick from an <b>already prepared</b> <paramref name="ticker"/> (its interior
+    /// <see cref="FluidTickJob"/> already run/completed): replays the captured bucket order, interleaving the
+    /// interior job's precomputed mods with managed border <see cref="BlockBehavior.Behave"/>/<see cref="BlockBehavior.Active"/>
+    /// evaluations, then applies the now-inactive removals. Shared by the serial <see cref="TickFluidsHybrid"/> and
+    /// the Phase-4a parallel <see cref="DrainTick"/> so both produce the identical emission stream.
+    /// </summary>
+    /// <param name="ticker">The chunk's prepared fluid runner (interior job already complete).</param>
+    /// <param name="fluids">The active-fluids bucket (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
+    /// <param name="removeScratch">A reusable scratch list for now-inactive indices; cleared on entry.</param>
+    private void ReplayHybridFluids(FluidBurstTicker ticker, NativeHashSet<int> fluids, List<int> removeScratch)
+    {
+        removeScratch.Clear();
+
+        World world = World.Instance;
+        NativeList<int2> replay = ticker.ReplayOrder;
+        NativeList<VoxelMod> jobMods = ticker.Mods;
+        NativeList<int> modsPerSource = ticker.ModsPerSource;
+
+        // Replay in the runner's captured bucket order. Interior voxels emit their precomputed job-mod run (cursor
+        // stays in lockstep with ModsPerSource by construction — both come from the same single partition); border
+        // voxels run the managed path. This interleaves emission exactly as the legacy single loop would.
+        int interiorCursor = 0;
+        int modCursor = 0;
+        for (int e = 0; e < replay.Length; e++)
+        {
+            int idx = replay[e].x;
+            if (replay[e].y == 1)
+            {
+                int count = modsPerSource[interiorCursor];
+                interiorCursor++;
+                for (int k = 0; k < count; k++)
+                    world.EnqueueVoxelModification(jobMods[modCursor + k]);
+                modCursor += count;
+            }
+            else
+            {
+                ChunkMath.GetLocalPositionFromFlattenedIndex(idx, out int x, out int y, out int z);
+                Vector3Int pos = new Vector3Int(x, y, z);
+                List<VoxelMod> mods = BlockBehavior.Behave(ChunkData, pos);
+                if (!BlockBehavior.Active(ChunkData, pos))
+                    removeScratch.Add(idx);
+                if (mods != null)
+                    world.EnqueueVoxelModifications(mods);
+            }
+        }
+
+        // Interior now-inactive indices come from the job (order-independent set removal, like the border path).
+        NativeList<int> inactive = ticker.InactiveInterior;
+        foreach (int k in inactive)
+            removeScratch.Add(k);
+
+        foreach (int idx in removeScratch)
+            fluids.Remove(idx);
+    }
+
+    /// <summary>
+    /// TG-4 Phase 4a — drains one chunk's tick in the parallel path: grass on the managed path, and fluids replayed
+    /// from the supplied pre-completed <paramref name="ticker"/> (or the managed <see cref="TickFamily"/> when
+    /// <paramref name="ticker"/> is null — a grass-only chunk). Mirrors <see cref="TickUpdate"/>, except the interior
+    /// fluid job was already scheduled+completed in parallel by <see cref="World.ProcessTickUpdatesParallel"/>.
+    /// </summary>
+    /// <param name="ticker">The chunk's prepared fluid runner (interior job complete), or null if none was scheduled.</param>
+    public void DrainTick(FluidBurstTicker ticker)
+    {
+        if (ChunkData == null) return;
+
+        NativeHashSet<int> grass = ChunkData.ActiveGrassBucket;
+        NativeHashSet<int> fluids = ChunkData.ActiveFluidsBucket;
+
+        int grassCount = grass.IsCreated ? grass.Count : 0;
+        int fluidCount = fluids.IsCreated ? fluids.Count : 0;
+        if (grassCount == 0 && fluidCount == 0) return;
+
+        using (s_tickUpdateMarker.Auto())
+        {
+            List<int> toRemove = ListPool<int>.Get();
+            if (grassCount > 0)
+            {
+                using (s_tickGrassMarker.Auto())
+                    TickFamily(grass, toRemove);
+            }
+
+            if (fluidCount > 0)
+            {
+                using (s_tickFluidMarker.Auto())
+                {
+                    // ticker is non-null for every chunk with active fluids (scheduled in Phase 1); the managed
+                    // fallback only runs in the defensive null case.
+                    if (ticker != null)
+                        ReplayHybridFluids(ticker, fluids, toRemove);
+                    else
+                        TickFamily(fluids, toRemove);
+                }
+            }
+
+            ListPool<int>.Release(toRemove);
+        }
+    }
+
+    /// <summary>
+    /// Registers a voxel as active (delegates to <see cref="ChunkData"/>, which owns the per-family buckets). Used
+    /// by the World's cross-chunk neighbor re-activation, which holds the neighbor <see cref="Chunk"/>.
     /// </summary>
     /// <param name="pos">The local position of the voxel within this chunk.</param>
     public void AddActiveVoxel(Vector3Int pos)
     {
-        _activeVoxels.Add(pos);
+        // Null-guarded like the sibling delegations (TickUpdate/GetActiveVoxelCount/IsVoxelActive/ActiveVoxels):
+        // World's cross-chunk re-activation reaches here holding only the neighbor Chunk, whose ChunkData may be
+        // unlinked mid-recycle. The old local-HashSet add could never NRE; preserve that.
+        ChunkData?.AddActiveVoxel(pos);
     }
 
     /// <summary>
-    /// Unregisters an active voxel, stopping it from being evaluated during chunk ticks.
+    /// Retrieves the total number of active voxels currently registered for ticking in this chunk (across all
+    /// behavior families). Delegates to <see cref="ChunkData"/>.
     /// </summary>
-    /// <param name="pos">The local position of the voxel within this chunk.</param>
-    public void RemoveActiveVoxel(Vector3Int pos)
-    {
-        _activeVoxels.Remove(pos);
-    }
-
-    /// <summary>
-    /// Retrieves the total number of active voxels currently registered for ticking in this chunk.
-    /// </summary>
-    /// <returns>The count of active voxels.</returns>
+    /// <returns>The count of active voxels, or 0 if no data is linked.</returns>
     public int GetActiveVoxelCount()
     {
-        return _activeVoxels.Count;
+        return ChunkData?.GetActiveVoxelCount() ?? 0;
     }
 
     #endregion
 
-    public bool isActive
+    public bool IsActive
     {
         get => _isActive;
         set
@@ -312,60 +527,6 @@ public class Chunk
 
     #region Mesh Generation
 
-    // Burst Job to adjust vertex positions (Global Y -> Local Section Y) and triangle indices (Global Index -> Local Index)
-    [BurstCompile]
-    private struct PostProcessMeshJob : IJob
-    {
-        public NativeList<Vector3> Vertices;
-        public NativeList<int> OpaqueTris;
-        public NativeList<int> TransparentTris;
-        public NativeList<int> FluidTris;
-
-        [ReadOnly]
-        public NativeArray<MeshSectionStats> Stats;
-
-        public int SectionHeight;
-
-        public void Execute()
-        {
-            // We iterate sections inside the job to avoid overhead of scheduling many tiny jobs
-            for (int i = 0; i < Stats.Length; i++)
-            {
-                MeshSectionStats s = Stats[i];
-                if (s.VertexCount == 0) continue;
-
-                float yOffset = i * SectionHeight;
-                int vertStart = s.VertexStartIndex;
-
-                // 1. Adjust Vertices: Subtract section Y offset so they are local to the Section GameObject
-                for (int v = 0; v < s.VertexCount; v++)
-                {
-                    int index = vertStart + v;
-                    Vector3 pos = Vertices[index];
-                    pos.y -= yOffset;
-                    Vertices[index] = pos;
-                }
-
-                // 2. Adjust Indices: Relativize indices to start at 0 for this section
-                // The indices currently point to the 'allVerts' array.
-                // We need them to point to the start of the section slice.
-                int offset = -vertStart;
-
-                AdjustIndices(OpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount, offset);
-                AdjustIndices(TransparentTris, s.TransparentTriStartIndex, s.TransparentTriCount, offset);
-                AdjustIndices(FluidTris, s.FluidTriStartIndex, s.FluidTriCount, offset);
-            }
-        }
-
-        private static void AdjustIndices(NativeList<int> indices, int start, int count, int offset)
-        {
-            for (int k = 0; k < count; k++)
-            {
-                indices[start + k] += offset;
-            }
-        }
-    }
-
     /// <summary>
     /// Applies the completed mesh data output from the Burst Job System to the chunk's internal section renderers.
     /// Uses the advanced native mesh API to apply data seamlessly without GC allocations.
@@ -373,28 +534,19 @@ public class Chunk
     /// <param name="meshData">The structured mesh data buffer produced by the <see cref="Jobs.MeshGenerationJob"/>.</param>
     public void ApplyMeshData(MeshDataJobOutput meshData)
     {
-        // 1. Run a fast Burst job on the main thread to adjust coordinate spaces from Chunk-Space to Section-Space.
-        // This modifies the data in-place efficiently.
-        PostProcessMeshJob postProcessJob = new PostProcessMeshJob
-        {
-            Vertices = meshData.Vertices,
-            OpaqueTris = meshData.Triangles,
-            TransparentTris = meshData.TransparentTriangles,
-            FluidTris = meshData.FluidTriangles,
-            Stats = meshData.SectionStats,
-            SectionHeight = ChunkMath.SECTION_SIZE,
-        };
+        // MR-5: the chunk-space → section-space rewrite + stream-3 interleave (MeshPostProcessJob) is no
+        // longer run here. It is now chained onto the mesh job at schedule time in
+        // WorldJobManager.ScheduleMeshing, so it has already run on a worker thread by the time
+        // ProcessMeshJobs completes the handle and calls this method — ApplyMeshData only uploads buffers.
 
-        postProcessJob.Schedule().Complete();
-
-        // 2. Pass the data to the renderers using zero-allocation NativeArray views.
+        // 1. Pass the data to the renderers using zero-allocation NativeArray views.
         NativeArray<MeshSectionStats> stats = meshData.SectionStats;
 
         // Obtain raw NativeArray views from the lists
         NativeArray<Vector3> allVerts = meshData.Vertices.AsArray();
-        NativeArray<Vector4> allUvs = meshData.Uvs.AsArray(); // Vector4: xy=flow/atlas, zw=shorePush
-        NativeArray<Color> allColors = meshData.Colors.AsArray();
-        NativeArray<Vector3> allNormals = meshData.Normals.AsArray();
+        NativeArray<half4> allUvs = meshData.Uvs.AsArray(); // MR-2 half4: xy=flow/atlas, zw=shorePush
+        NativeArray<Color32> allColors = meshData.Colors.AsArray();
+        NativeArray<NormalLightVertex> allStream3 = meshData.InterleavedStream3.AsArray();
         NativeArray<int> allOpaqueTris = meshData.Triangles.AsArray();
         NativeArray<int> allTransTris = meshData.TransparentTriangles.AsArray();
         NativeArray<int> allFluidTris = meshData.FluidTriangles.AsArray();
@@ -416,15 +568,17 @@ public class Chunk
             }
 
             _sectionRenderers[i].UpdateMeshNative(
-                allVerts, allUvs, allColors, allNormals, s.VertexStartIndex, s.VertexCount,
+                allVerts, allUvs, allColors, allStream3, s.VertexStartIndex, s.VertexCount,
                 allOpaqueTris, s.OpaqueTriStartIndex, s.OpaqueTriCount,
                 allTransTris, s.TransparentTriStartIndex, s.TransparentTriCount,
                 allFluidTris, s.FluidTriStartIndex, s.FluidTriCount
             );
         }
 
-        // Dispose native memory
-        meshData.Dispose();
+        // MR-6: the mesh output's native memory is no longer released here. The buffers are uploaded
+        // synchronously above (SetVertex/IndexBufferData copy), and WorldJobManager.ProcessMeshJobs
+        // returns the output to its pool (or disposes it) immediately after this call — so the meshing
+        // job's output buffers are pooled and reused instead of allocated/freed per chunk.
 
         // Add to the draw queue to be enabled on the main thread
         World.Instance.ChunksToDraw.Enqueue(this);
@@ -445,25 +599,24 @@ public class Chunk
     #region Public Getters
 
     /// <summary>
-    /// Gets a read-only collection of the active voxels in this chunk.
+    /// Enumerates the active voxels in this chunk (local positions), across all behavior families. Delegates to
+    /// <see cref="ChunkData"/>, which owns the buckets; empty when no data is linked.
     /// </summary>
-    public IReadOnlyCollection<Vector3Int> ActiveVoxels => _activeVoxels;
+    public IEnumerable<Vector3Int> ActiveVoxels =>
+        ChunkData != null ? ChunkData.ActiveVoxels : Array.Empty<Vector3Int>();
 
     #endregion
 
     #region Debug Information Methods
 
     /// <summary>
-    /// Checks if a voxel is active in this chunk.
+    /// Checks if a voxel is active in this chunk. Delegates to <see cref="ChunkData"/>.
     /// </summary>
     /// <param name="localVoxelPos">The local position of the voxel in the given chunk.</param>
     /// <returns>True if the voxel is active, false otherwise.</returns>
     public bool IsVoxelActive(Vector3Int localVoxelPos)
     {
-        if (_activeVoxels.Count == 0)
-            return false;
-
-        return _activeVoxels.Contains(localVoxelPos);
+        return ChunkData != null && ChunkData.IsVoxelActive(localVoxelPos);
     }
 
     #endregion
@@ -475,20 +628,9 @@ public class Chunk
     {
         if (_hasPlayedLoadAnimation) return;
 
-        if (World.Instance.settings.enableChunkLoadAnimations)
+        if (World.Instance.settings.enableChunkLoadAnimations && _loadAnimation != null)
         {
-            // Unity's overloaded == null accurately checks if the native object was destroyed.
-            if (_loadAnimation == null)
-            {
-                if (!ChunkGameObject.TryGetComponent(out _loadAnimation))
-                {
-                    _loadAnimation = ChunkGameObject.AddComponent<ChunkLoadAnimation>();
-                }
-
-                // If added mid-game, snap it underground
-                _loadAnimation.ResetToUnderground(ChunkPosition);
-            }
-
+            _loadAnimation.enabled = true;
             _loadAnimation.StartAnimation();
         }
         else

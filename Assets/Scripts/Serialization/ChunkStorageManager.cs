@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Threading;
@@ -30,11 +30,8 @@ namespace Serialization
         public ChunkStorageManager(string worldName, bool useVolatilePath, int saveVersion)
         {
             // Determine Save Path
-            string basePath = useVolatilePath
-                ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
-                : Path.Combine(Application.persistentDataPath, "Saves");
-
-            _saveFolderPath = Path.Combine(basePath, worldName, "Region");
+            string worldPath = SaveSystem.GetSavePath(worldName, useVolatilePath);
+            _saveFolderPath = Path.Combine(worldPath, "Region");
             _codec = RegionAddressCodec.ForVersion(saveVersion);
 
             if (!Directory.Exists(_saveFolderPath)) Directory.CreateDirectory(_saveFolderPath);
@@ -52,6 +49,9 @@ namespace Serialization
         /// <returns>The deserialized <see cref="ChunkData"/>, or null if the chunk does not exist on disk.</returns>
         public async Task<ChunkData> LoadChunkAsync(Vector2Int chunkVoxelPos)
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+            bool logSaveDiagnostics = World.Instance.settings.enableSaveSystemDiagnosticLogs;
+#endif
             // Run I/O on background thread
             return await Task.Run(() =>
             {
@@ -61,7 +61,10 @@ namespace Serialization
                 (byte[] data, CompressionAlgorithm algorithm) = region.LoadChunkData(lx, lz);
                 if (data == null)
                 {
-                    Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                    if (logSaveDiagnostics)
+                        Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
+#endif
                     return null;
                 }
 
@@ -71,6 +74,7 @@ namespace Serialization
                 if (chunk == null)
                 {
                     Debug.LogWarning($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} deserialization failed -> Will be (re-)generated");
+
                     return null;
                 }
 
@@ -95,19 +99,19 @@ namespace Serialization
                 int length = ChunkSerializer.Serialize(data, buffer, algorithm);
                 if (length <= 0)
                 {
-                    Debug.LogWarning($"[SaveChunk] Chunk at voxelPos {data.position} serialization returned 0 bytes");
+                    Debug.LogWarning($"[SaveChunk] Chunk at voxelPos {data.Position.ToString()} serialization returned 0 bytes");
                     return;
                 }
 
                 // Write to Region
-                (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(data.position);
+                (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(data.Position);
                 RegionFile region = GetRegion(regionCoord);
 
                 region.SaveChunkData(lx, lz, buffer, length, algorithm);
             }
             catch (Exception e)
             {
-                Debug.LogError($"[SaveChunk] Failed to save chunk at voxelPos {data.position}: {e.Message}");
+                Debug.LogError($"[SaveChunk] Failed to save chunk at voxelPos {data.Position.ToString()}: {e.Message}");
             }
             finally
             {
@@ -147,7 +151,7 @@ namespace Serialization
                     if (length <= 0 || cancellationToken.IsCancellationRequested) return;
 
                     // Write
-                    (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(snapshot.position);
+                    (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(snapshot.Position);
                     RegionFile region = GetRegion(regionCoord);
 
                     region.SaveChunkData(lx, lz, buffer, length, algorithm);
@@ -159,7 +163,7 @@ namespace Serialization
             }
             catch (Exception e)
             {
-                Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {data.position}: {e.Message}");
+                Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {data.Position.ToString()}: {e.Message}");
             }
             finally
             {
@@ -176,8 +180,10 @@ namespace Serialization
         /// </summary>
         public void Dispose()
         {
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             Debug.Log($"[ChunkStorageManager] Disposing {_regions.Count} region files...");
-            foreach (var lazyRegion in _regions.Values)
+#endif
+            foreach (Lazy<RegionFile> lazyRegion in _regions.Values)
             {
                 // Only dispose if the file was actually opened
                 if (lazyRegion.IsValueCreated)
@@ -187,7 +193,9 @@ namespace Serialization
             }
 
             _regions.Clear();
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
             Debug.Log("[ChunkStorageManager] All regions disposed.");
+#endif
         }
 
         // -------------------------------------------------------------------------
@@ -205,24 +213,31 @@ namespace Serialization
 
         private static ChunkData CreateSerializationSnapshot(ChunkData source)
         {
-            ChunkData snapshot = World.Instance.ChunkPool.GetChunkData(source.position);
+            ChunkData snapshot = World.Instance.ChunkPool.GetChunkData(source.Position);
             snapshot.NeedsInitialLighting = source.NeedsInitialLighting;
 
             // Copy Heightmap
             if (source.heightMap != null && snapshot.heightMap != null)
                 Array.Copy(source.heightMap, snapshot.heightMap, source.heightMap.Length);
 
+            // Copy compact sky levels
+            Array.Copy(source.SectionUniformSkyLevel, snapshot.SectionUniformSkyLevel, source.SectionUniformSkyLevel.Length);
+
             // Correctly iterate the Section Array
             for (int i = 0; i < source.sections.Length; i++)
             {
                 // Check specific section in source array
-                if (source.sections[i] != null && !source.sections[i].IsEmpty)
+                if (source.sections[i] != null)
                 {
                     ChunkSection snapSec = World.Instance.ChunkPool.GetChunkSection();
                     snapSec.nonAirCount = source.sections[i].nonAirCount;
 
                     // Copy voxels
-                    Array.Copy(source.sections[i].voxels, snapSec.voxels, 4096);
+                    Array.Copy(source.sections[i].voxels, snapSec.voxels, ChunkMath.SECTION_VOLUME);
+
+                    // Skip LightData copy for compact sections — the sky byte carries the information.
+                    if (source.SectionUniformSkyLevel[i] == ChunkData.UNIFORM_SKY_NONE)
+                        Array.Copy(source.sections[i].LightData, snapSec.LightData, ChunkMath.SECTION_VOLUME);
 
                     // Assign to snapshot array
                     snapshot.sections[i] = snapSec;

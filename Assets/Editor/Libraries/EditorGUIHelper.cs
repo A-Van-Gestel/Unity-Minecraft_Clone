@@ -11,8 +11,15 @@ namespace Editor.Libraries
     /// </summary>
     public static class EditorGUIHelper
     {
-        private static Texture2D _checkerboardTexture;
-        private static GUIStyle _centeredIntFieldStyle;
+        private static Texture2D s_checkerboardTexture;
+        private static GUIStyle s_centeredIntFieldStyle;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void DomainReset()
+        {
+            s_checkerboardTexture = null;
+            s_centeredIntFieldStyle = null;
+        }
 
         #region Numeric Inputs
 
@@ -21,7 +28,7 @@ namespace Editor.Libraries
         /// </summary>
         public static int IntFieldWithSteppers(int value, int min = 0, int max = int.MaxValue)
         {
-            _centeredIntFieldStyle ??= new GUIStyle(EditorStyles.numberField)
+            s_centeredIntFieldStyle ??= new GUIStyle(EditorStyles.numberField)
             {
                 alignment = TextAnchor.MiddleCenter,
             };
@@ -33,7 +40,7 @@ namespace Editor.Libraries
                 value = Mathf.Max(min, value - 1);
             }
 
-            value = EditorGUILayout.IntField(value, _centeredIntFieldStyle);
+            value = EditorGUILayout.IntField(value, s_centeredIntFieldStyle);
 
             if (GUILayout.Button("▶", GUILayout.Width(22), GUILayout.Height(18)))
             {
@@ -56,14 +63,14 @@ namespace Editor.Libraries
         /// </summary>
         public static void DrawCheckerboardBackground(Rect rect)
         {
-            if (_checkerboardTexture == null)
+            if (s_checkerboardTexture == null)
             {
-                _checkerboardTexture = CreateCheckerboardTexture();
+                s_checkerboardTexture = CreateCheckerboardTexture();
             }
 
             // Calculate how many times the texture should repeat based on the rect's size.
-            Rect texCoords = new Rect(0, 0, rect.width / _checkerboardTexture.width, rect.height / _checkerboardTexture.height);
-            GUI.DrawTextureWithTexCoords(rect, _checkerboardTexture, texCoords);
+            Rect texCoords = new Rect(0, 0, rect.width / s_checkerboardTexture.width, rect.height / s_checkerboardTexture.height);
+            GUI.DrawTextureWithTexCoords(rect, s_checkerboardTexture, texCoords);
         }
 
         private static Texture2D CreateCheckerboardTexture()

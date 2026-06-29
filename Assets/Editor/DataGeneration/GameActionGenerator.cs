@@ -32,15 +32,14 @@ namespace Editor.DataGeneration
         {
             // --- Find the InputActionAsset ---
             string[] guids = AssetDatabase.FindAssets("t:InputActionAsset");
-            if (guids.Length == 0)
+            switch (guids.Length)
             {
-                Debug.LogError("[GameActionGenerator] Could not find an 'InputActionAsset' in the project.");
-                return false;
-            }
-
-            if (guids.Length > 1)
-            {
-                Debug.LogWarning("[GameActionGenerator] Multiple 'InputActionAsset' assets found. Using the first one.");
+                case 0:
+                    Debug.LogError("[GameActionGenerator] Could not find an 'InputActionAsset' in the project.");
+                    return false;
+                case > 1:
+                    Debug.LogWarning("[GameActionGenerator] Multiple 'InputActionAsset' assets found. Using the first one.");
+                    break;
             }
 
             string assetPath = AssetDatabase.GUIDToAssetPath(guids[0]);

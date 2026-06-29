@@ -21,7 +21,7 @@ Shader "Minecraft/UberLiquidShader"
         _Speed("Flow Speed", Range(0, 2)) = 0.3
         _CrackBrightness("Crack Brightness", Range(0, 3)) = 1.5
         _PulseSpeed("Pulse Speed", Range(0, 5)) = 1.5
-        _HeatDistortionAmount("Heat Distortion", Range(0, 0.1)) = 0.015
+        _HeatDistortionAmount("Heat Distortion", Range(0, 0.1)) = 0.015 // Default mirrored in GraphicsSettingsController.BASE_LAVA_DISTORTION
 
         [Header(Lava Shores and Flow)]
         _LavaShoreWidth("Shore Width", Range(0.01, 1.0)) = 0.4
@@ -39,7 +39,7 @@ Shader "Minecraft/UberLiquidShader"
         _RippleScale("Ripple Scale", Range(1, 20)) = 15.0
         _RippleSpeed("Ripple Speed", Range(0, 5)) = 1.2
         _FoamThreshold("Wave Foam Threshold", Range(0.5, 1.0)) = 0.8
-        _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.02
+        _DistortionAmount("Refraction Distortion", Range(0, 0.1)) = 0.007 // Default mirrored in GraphicsSettingsController.BASE_WATER_DISTORTION
 
         [Header(Water Shores and Flow)]
         _WaterShoreWidth("Shore Width", Range(0.01, 1.0)) = 0.15
@@ -66,6 +66,8 @@ Shader "Minecraft/UberLiquidShader"
             #pragma vertex vertFunction
             #pragma fragment fragFunction
             #pragma target 3.0
+            #pragma multi_compile _ _FLUID_QUALITY_LOW _FLUID_QUALITY_MED
+            #pragma multi_compile _ _FLUID_REFRACTION_OFF
 
             // Shared liquid logic (structs, vertex, noise, shore, evaluate)
             #include "Includes/LiquidCore.hlsl"
@@ -76,6 +78,7 @@ Shader "Minecraft/UberLiquidShader"
 
             // Game-only: global light uniforms from World.cs
             float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
+            half3 SkyLightColor;
 
             LiquidV2F vertFunction(LiquidAppdata v)
             {
@@ -90,8 +93,9 @@ Shader "Minecraft/UberLiquidShader"
                 if (!unity_IsEditorPlaying) finalLiquidType = _EditorPreviewType;
                 #endif
 
-                float shade = CalculateVoxelShade(i.lightLevel,
-                                                  GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
+                half3 litWhite = ApplyVoxelLightingRGB(half3(1, 1, 1), i.sunLight, i.blockRGB,
+                                                       SkyLightColor,
+                                                       GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // --- FLOW MAPPING TIME SETUP ---
                 float time0, time1, weight0, weight1;
@@ -99,55 +103,72 @@ Shader "Minecraft/UberLiquidShader"
 
                 if (finalLiquidType > 0.5) // Lava
                 {
-                    float3 col0, col1;
-                    float2 norm0, norm1;
-
+                    float3 col0;
+                    float2 norm0;
                     EvaluateLava(i, time0, col0, norm0);
-                    EvaluateLava(i, time1, col1, norm1);
 
+                    #if FLUID_ENABLE_DUAL_PHASE
+                    float3 col1;
+                    float2 norm1;
+                    EvaluateLava(i, time1, col1, norm1);
                     half3 lava_col = col0 * weight0 + col1 * weight1;
                     float2 final_normal = norm0 * weight0 + norm1 * weight1;
+                    #else
+                    half3 lava_col = col0;
+                    float2 final_normal = norm0;
+                    #endif
 
+                    #if FLUID_ENABLE_REFRACTION
                     float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
+                    #else
+                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w);
+                    #endif
                     half4 background = half4(SampleSceneColor(distortedUV), 1.0);
 
                     float pulse = (sin(_Time.y * _PulseSpeed) * 0.5 + 0.5) * 0.2 + 0.9;
                     lava_col *= pulse;
 
-                    // Apply gamma shadow in linear space using shared helper
-                    lava_col *= CalculateLinearVoxelShadow(shade);
-
+                    // Lava is self-luminous — skip litWhite tinting so the
+                    // procedural color (cracks, pulse, crust) renders unmodified.
                     lava_col *= i.shadowMultiplier;
                     return lerp(background, half4(lava_col, 1.0), 0.95);
                 }
                 else // Water
                 {
-                    float3 col0, col1;
-                    float foam0, foam1;
-                    float2 norm0, norm1;
-
+                    float3 col0;
+                    float foam0;
+                    float2 norm0;
                     EvaluateWater(i, time0, col0, foam0, norm0);
+
+                    #if FLUID_ENABLE_DUAL_PHASE
+                    float3 col1;
+                    float foam1;
+                    float2 norm1;
                     EvaluateWater(i, time1, col1, foam1, norm1);
-
                     half3 water_surface_color = col0 * weight0 + col1 * weight1;
-
                     // Because foam0 and foam1 are phase-blended here, the shore effect
                     // seamlessly fades and loops along with the flow!
                     float total_foam = foam0 * weight0 + foam1 * weight1;
-
                     float2 final_normal = norm0 * weight0 + norm1 * weight1;
+                    #else
+                    half3 water_surface_color = col0;
+                    float total_foam = foam0;
+                    float2 final_normal = norm0;
+                    #endif
 
+                    #if FLUID_ENABLE_REFRACTION
                     float2 distortedUV = (i.screenPos.xy / i.screenPos.w) + final_normal;
+                    #else
+                    float2 distortedUV = (i.screenPos.xy / i.screenPos.w);
+                    #endif
                     half4 background = half4(SampleSceneColor(distortedUV), 1.0);
 
                     half3 final_color = lerp(water_surface_color, _FoamColor.rgb, total_foam);
 
-                    // Apply gamma shadow in linear space using shared helper
-                    final_color *= CalculateLinearVoxelShadow(shade);
-
+                    final_color *= litWhite;
                     final_color *= i.shadowMultiplier;
 
-                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.lightLevel);
+                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
                     return lerp(background, half4(final_color, 1.0), water_base_color.a);
                 }
             }

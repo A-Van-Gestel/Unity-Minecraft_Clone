@@ -1,27 +1,40 @@
 using System;
 using Data;
+using Jobs;
+using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
-using Random = UnityEngine.Random;
+using Random = Unity.Mathematics.Random;
 
 public static partial class BlockBehavior
 {
     #region Fluid Behavior Methods
 
     // --- Falling Flag Encoding ---
-    // Minecraft Beta 1.3.2 uses metadata >= 8 for falling fluid.
-    // Lower 3 bits (0-7) carry the "effective level" of the upstream block.
-    // FluidLevel 0 = source, 1-7 = horizontal flow, 8 = falling from source, 9-15 = falling from flow.
-    private const byte FALLING_FLAG = 8;
+    // Minecraft Beta 1.3.2 uses metadata >= 8 for falling fluid; the lower 3 bits carry the "effective level" of
+    // the upstream block (0 = source, 1-7 = horizontal flow, 8 = falling from source, 9-15 = falling from flow).
+    // Source of truth: BurstVoxelDataBitMapping — shared with the Burst FluidTickJob so the two cannot drift.
 
     /// <summary>Returns true if the fluid level encodes a vertically falling block (level >= 8).</summary>
-    private static bool IsFalling(byte fluidLevel) => fluidLevel >= FALLING_FLAG;
+    private static bool IsFalling(byte fluidLevel) => BurstVoxelDataBitMapping.IsFluidFalling(fluidLevel);
 
     /// <summary>Strips the falling flag, returning the horizontal level (0-7).</summary>
-    private static byte GetEffectiveLevel(byte fluidLevel) => (byte)(fluidLevel & 0x7);
+    private static byte GetEffectiveLevel(byte fluidLevel) => BurstVoxelDataBitMapping.GetEffectiveFluidLevel(fluidLevel);
 
     /// <summary>Creates a falling metadata value from a horizontal level.</summary>
-    private static byte MakeFalling(byte effectiveLevel) => (byte)(effectiveLevel | FALLING_FLAG);
+    private static byte MakeFalling(byte effectiveLevel) => BurstVoxelDataBitMapping.MakeFluidFalling(effectiveLevel);
+
+    /// <summary>
+    /// The local-space offset of the <paramref name="i"/>-th horizontal fluid-flow neighbor (0=+Z, 1=-Z, 2=+X,
+    /// 3=-X), shared with the Burst path via <see cref="FluidTierClassifier.HorizontalNeighborOffset"/> so the
+    /// spread/BFS direction order stays identical across both implementations.
+    /// </summary>
+    private static Vector3Int HorizontalNeighbor(int i)
+    {
+        int3 o = FluidTierClassifier.HorizontalNeighborOffset(i);
+        return new Vector3Int(o.x, o.y, o.z);
+    }
 
     /// <summary>
     /// Manages the flow logic for a single fluid voxel.
@@ -30,14 +43,14 @@ public static partial class BlockBehavior
     private static void HandleFluidFlow(ChunkData chunkData, Vector3Int localPos, VoxelState fluidState)
     {
         // 1. Setup shared state
-        ushort currentId = fluidState.id;
+        ushort currentId = fluidState.ID;
         byte currentLevel = fluidState.FluidLevel;
         BlockType props = fluidState.Properties;
 
-        Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.position.x, localPos.y, localPos.z + chunkData.position.y);
+        Vector3Int globalPos = new Vector3Int(localPos.x + chunkData.Position.x, localPos.y, localPos.z + chunkData.Position.y);
 
         VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
-        bool belowIsSameFluid = belowState.HasValue && belowState.Value.id == currentId;
+        bool belowIsSameFluid = belowState.HasValue && belowState.Value.ID == currentId;
         bool canFlowDown = belowState.HasValue && !belowState.Value.Properties.isSolid && !belowIsSameFluid;
 
         // 2. Step 1: Calculate Expected Level (Decay / Drainage)
@@ -85,8 +98,12 @@ public static partial class BlockBehavior
 
         if (expectedFluidLevel != currentLevel)
         {
-            // Update our level to match our support
-            Mods.Add(new VoxelMod(globalPos, currentId) { FluidLevel = expectedFluidLevel, ImmediateUpdate = true });
+            // Update our level to match our support. Meta encoded via the legacy fluid rule.
+            Mods.Add(new VoxelMod(globalPos, currentId)
+            {
+                Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, expectedFluidLevel, isFluid: true),
+                ImmediateUpdate = true,
+            });
             currentLevel = expectedFluidLevel; // Update by ref for the orchestrator
             return false; // Still process gravity/spread this tick, but with updated level (caught next tick mostly)
         }
@@ -107,7 +124,7 @@ public static partial class BlockBehavior
         Vector3Int globalBelowPos = new Vector3Int(globalPos.x, globalPos.y - 1, globalPos.z);
         Mods.Add(new VoxelMod(globalBelowPos, currentId)
         {
-            FluidLevel = MakeFalling(effectiveLevel),
+            Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, MakeFalling(effectiveLevel), isFluid: true),
         });
         return true; // Skip horizontal spreading this tick if we pushed downwards
     }
@@ -127,14 +144,17 @@ public static partial class BlockBehavior
         bool canSpreadHorizontally = effectiveLevel == 0 ||
                                      (belowState.HasValue && belowState.Value.Properties.isSolid && !belowIsSameFluid);
 
-        LogWaterDebug($"[WaterDebug FLOW] Step 4 REACHED: pos={globalPos} id={currentId} level={currentLevel} " +
-                      $"canSpread={canSpreadHorizontally} effectiveLevel={effectiveLevel} " +
-                      $"belowSolid={belowState.HasValue && belowState.Value.Properties.isSolid} " +
-                      $"belowIsSameFluid={belowIsSameFluid}");
+        if (IsWaterDebugEnabled)
+        {
+            LogWaterDebug($"[WaterDebug FLOW] Step 4 REACHED: pos={globalPos} id={currentId} level={currentLevel} " +
+                          $"canSpread={canSpreadHorizontally} effectiveLevel={effectiveLevel} " +
+                          $"belowSolid={belowState.HasValue && belowState.Value.Properties.isSolid} " +
+                          $"belowIsSameFluid={belowIsSameFluid}");
+        }
 
         if (!canSpreadHorizontally)
         {
-            LogWaterDebug($"[WaterDebug FLOW] {globalPos} Cannot spread horizontally. Returning.");
+            if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} Cannot spread horizontally. Returning.");
             return;
         }
 
@@ -143,12 +163,19 @@ public static partial class BlockBehavior
         if (newLevel >= props.flowLevels) return;
 
         // Lava Viscosity Randomization (Bug 08)
-        // If a fluid has a spread chance less than 1.0, it will randomly skip horizontal spreading ticks.
-        // E.g., Lava at 0.25 only flows 25% of the time, resulting in thick, blob-like staggering.
-        if (Random.value > props.spreadChance)
+        // A fluid with spreadChance < 1.0 randomly skips horizontal spreading ticks (e.g. lava at 0.25 flows
+        // ~25% of ticks, producing thick, blob-like staggering). Water (1.0) can never skip, so the RNG is
+        // pointless there — guarding on spreadChance < 1 avoids a per-voxel hash + Random construction every
+        // tick for the dominant fluid. TG-3: SeededVoxelRandom mixes a per-tick salt (World.TickCounter) so a
+        // skipped voxel re-rolls next tick instead of freezing forever; seeding by position alone would stick.
+        if (props.spreadChance < 1f)
         {
-            LogWaterDebug($"[WaterDebug FLOW] {globalPos} Random Viscosity Skip (Chance={props.spreadChance}).");
-            return;
+            Random rng = SeededVoxelRandom(globalPos);
+            if (rng.NextFloat() > props.spreadChance)
+            {
+                if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} Random Viscosity Skip (Chance={props.spreadChance}).");
+                return;
+            }
         }
 
         // Pathfind for the optimal flow direction (drops within 4 blocks)
@@ -159,30 +186,30 @@ public static partial class BlockBehavior
             // If this direction is not in the optimal flow mask, skip it to prevent spreading away from drops
             if ((optimalFlowMask & (1 << i)) == 0) continue;
 
-            Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+            Vector3Int neighborPos = localPos + HorizontalNeighbor(i);
             VoxelState? neighborState = chunkData.GetState(neighborPos);
 
             if (!neighborState.HasValue) continue;
 
-            // Flow into air or same fluid with worse level
-            bool neighborIsAir = neighborState.Value.id == BlockIDs.Air;
-            bool neighborIsSameFluidAndWorse = neighborState.Value.id == currentId &&
+            // Flow into air, same fluid with worse level, or replaceable non-solid blocks (e.g. grass)
+            bool neighborIsAir = neighborState.Value.ID == BlockIDs.Air;
+            bool neighborIsReplaceable = !neighborState.Value.Properties.isSolid &&
+                                         (neighborState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0;
+            bool neighborIsSameFluidAndWorse = neighborState.Value.ID == currentId &&
                                                !IsFalling(neighborState.Value.FluidLevel) && // Ensure we do not overwrite falling blocks (waterfalls) with horizontal flow.
                                                GetEffectiveLevel(neighborState.Value.FluidLevel) > newLevel;
 
-            if (neighborIsAir || neighborIsSameFluidAndWorse)
+            if (neighborIsAir || neighborIsReplaceable || neighborIsSameFluidAndWorse)
             {
-                if (neighborState.Value.Properties.isSolid) continue;
-
                 Vector3Int globalNeighborPos = new Vector3Int(
-                    neighborPos.x + chunkData.position.x, neighborPos.y,
-                    neighborPos.z + chunkData.position.y);
+                    neighborPos.x + chunkData.Position.x, neighborPos.y,
+                    neighborPos.z + chunkData.Position.y);
 
-                LogWaterDebug($"[WaterDebug FLOW] {globalPos} SPREADING HORIZONTALLY to {globalNeighborPos} with level {newLevel}");
+                if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug FLOW] {globalPos} SPREADING HORIZONTALLY to {globalNeighborPos} with level {newLevel}");
 
                 Mods.Add(new VoxelMod(globalNeighborPos, currentId)
                 {
-                    FluidLevel = newLevel,
+                    Meta = BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, newLevel, isFluid: true),
                 });
             }
         }
@@ -199,11 +226,11 @@ public static partial class BlockBehavior
         byte currentLevel = voxel.FluidLevel;
         byte effectiveLevel = GetEffectiveLevel(currentLevel);
 
-        LogWaterDebug($"[WaterDebug ACTIVE] Eval pos={localPos} level={currentLevel}");
+        if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug ACTIVE] Eval pos={localPos} level={currentLevel}");
 
         // Reason 1: Can it flow down? (Gravity)
         VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
-        bool belowIsSameFluid = belowState.HasValue && belowState.Value.id == id;
+        bool belowIsSameFluid = belowState.HasValue && belowState.Value.ID == id;
         if (belowState.HasValue && !belowState.Value.Properties.isSolid && !belowIsSameFluid)
         {
             return true;
@@ -224,17 +251,19 @@ public static partial class BlockBehavior
         {
             for (int i = 0; i < 4; i++) // 4 cardinal horizontal directions
             {
-                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                Vector3Int neighborPos = localPos + HorizontalNeighbor(i);
                 VoxelState? neighborState = chunkData.GetState(neighborPos);
 
                 if (!neighborState.HasValue) continue;
 
-                bool neighborIsAir = neighborState.Value.id == BlockIDs.Air;
-                bool neighborIsSameFluidAndWorse = neighborState.Value.id == id &&
+                bool neighborIsAir = neighborState.Value.ID == BlockIDs.Air;
+                bool neighborIsReplaceable = !neighborState.Value.Properties.isSolid &&
+                                             (neighborState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0;
+                bool neighborIsSameFluidAndWorse = neighborState.Value.ID == id &&
                                                    !IsFalling(neighborState.Value.FluidLevel) &&
                                                    GetEffectiveLevel(neighborState.Value.FluidLevel) > expectedNewLevel;
 
-                if ((neighborIsAir || neighborIsSameFluidAndWorse) && !neighborState.Value.Properties.isSolid)
+                if ((neighborIsAir || neighborIsReplaceable || neighborIsSameFluidAndWorse) && !neighborState.Value.Properties.isSolid)
                 {
                     return true;
                 }
@@ -261,7 +290,7 @@ public static partial class BlockBehavior
         }
 
         // If no activation conditions are met, the block is stable and does not need to be ticked this cycle.
-        LogWaterDebug($"[WaterDebug ACTIVE] pos={localPos} Returning FALSE");
+        if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug ACTIVE] pos={localPos} Returning FALSE");
         return false;
     }
 
@@ -270,11 +299,14 @@ public static partial class BlockBehavior
     /// </summary>
     private static void LogWaterDebug(string message)
     {
-        if (World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs)
+        if (IsWaterDebugEnabled)
         {
             Debug.Log(message);
         }
     }
+
+    private static bool IsWaterDebugEnabled => World.Instance != null && World.Instance.settings.enableWaterDiagnosticLogs;
+
 
     /// <summary>
     /// Calculates the expected effective fluid level based on the environment.
@@ -289,7 +321,7 @@ public static partial class BlockBehavior
 
         // 1. Check if fed from above
         VoxelState? aboveState = chunkData.GetState(localPos + Vector3Int.up);
-        if (aboveState.HasValue && aboveState.Value.id == fluidId)
+        if (aboveState.HasValue && aboveState.Value.ID == fluidId)
         {
             isFedFromAbove = true;
             expectedEffectiveLevel = GetEffectiveLevel(aboveState.Value.FluidLevel);
@@ -304,10 +336,10 @@ public static partial class BlockBehavior
             // 2. Check horizontal neighbors for the lowest effective level (closest to source)
             for (int i = 0; i < 4; i++)
             {
-                Vector3Int neighborPos = localPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                Vector3Int neighborPos = localPos + HorizontalNeighbor(i);
                 VoxelState? neighborState = chunkData.GetState(neighborPos);
 
-                if (neighborState.HasValue && neighborState.Value.id == fluidId)
+                if (neighborState.HasValue && neighborState.Value.ID == fluidId)
                 {
                     byte neighborEffective;
                     if (IsFalling(neighborState.Value.FluidLevel) && props.waterfallsMaxSpread)
@@ -316,7 +348,7 @@ public static partial class BlockBehavior
                         // CRITICAL FIX: To prevent infinite decay loops when a waterfall is broken,
                         // a falling block can ONLY act as a horizontal source if it itself is currently fed from above.
                         VoxelState? neighborAbove = chunkData.GetState(neighborPos + Vector3Int.up);
-                        bool isNeighborFed = neighborAbove.HasValue && neighborAbove.Value.id == fluidId;
+                        bool isNeighborFed = neighborAbove.HasValue && neighborAbove.Value.ID == fluidId;
 
                         // If it's a falling block but its source was severed, it provides no support.
                         neighborEffective = isNeighborFed ? (byte)0 : props.flowLevels;
@@ -352,7 +384,7 @@ public static partial class BlockBehavior
             {
                 VoxelState? belowState = chunkData.GetState(localPos + Vector3Int.down);
                 bool belowIsSolid = belowState.HasValue && belowState.Value.Properties.isSolid;
-                bool belowIsSource = belowState.HasValue && belowState.Value.id == fluidId && belowState.Value.FluidLevel == 0;
+                bool belowIsSource = belowState.HasValue && belowState.Value.ID == fluidId && belowState.Value.FluidLevel == 0;
 
                 if (belowIsSolid || belowIsSource)
                 {
@@ -399,7 +431,7 @@ public static partial class BlockBehavior
                     }
                 }
 
-                Vector3Int neighborPos = node.Pos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+                Vector3Int neighborPos = node.Pos + HorizontalNeighbor(i);
 
                 if (visited.Contains(neighborPos)) continue;
                 visited.Add(neighborPos);
@@ -408,14 +440,14 @@ public static partial class BlockBehavior
                 if (!neighborState.HasValue) continue;
 
                 // Stop if we hit a solid block or a source block of the same fluid
-                bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.id != fluidId;
-                bool isSourceFluid = neighborState.Value.id == fluidId && neighborState.Value.FluidLevel == 0;
+                bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.ID != fluidId;
+                bool isSourceFluid = neighborState.Value.ID == fluidId && neighborState.Value.FluidLevel == 0;
 
                 if (isSolid || isSourceFluid) continue;
 
                 // Check for a drop
                 VoxelState? belowNeighbor = chunkData.GetState(neighborPos + Vector3Int.down);
-                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.id != fluidId;
+                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.ID != fluidId;
 
                 if (belowNeighbor.HasValue && !belowIsSolid)
                 {
@@ -426,8 +458,8 @@ public static partial class BlockBehavior
                     return minCost;
                 }
 
-                // If no drop and we haven't reached max depth (4), explore further
-                if (node.Cost + 1 < 4)
+                // If no drop and we haven't reached max depth, explore further
+                if (node.Cost + 1 < FluidTierClassifier.MaxFlowSearchDepth)
                 {
                     queue.Enqueue(new SearchNode { Pos = neighborPos, Cost = node.Cost + 1 });
                 }
@@ -445,26 +477,26 @@ public static partial class BlockBehavior
     /// </summary>
     private static byte GetOptimalFlowDirections(ChunkData chunkData, Vector3Int centerPos, ushort fluidId)
     {
-        int[] flowCost = new int[4];
+        Span<int> flowCost = stackalloc int[4];
         int minCost = 1000;
         byte validDirectionsMask = 0;
 
         for (int i = 0; i < 4; i++)
         {
             flowCost[i] = 1000;
-            Vector3Int neighborPos = centerPos + VoxelData.FaceChecks[VoxelData.HorizontalFaceChecksIndices[i]];
+            Vector3Int neighborPos = centerPos + HorizontalNeighbor(i);
             VoxelState? neighborState = chunkData.GetState(neighborPos);
 
             if (!neighborState.HasValue) continue;
 
-            bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.id != fluidId;
-            bool isSourceFluid = neighborState.Value.id == fluidId && neighborState.Value.FluidLevel == 0;
+            bool isSolid = neighborState.Value.Properties.isSolid && neighborState.Value.ID != fluidId;
+            bool isSourceFluid = neighborState.Value.ID == fluidId && neighborState.Value.FluidLevel == 0;
 
             if (!isSolid && !isSourceFluid)
             {
                 validDirectionsMask |= (byte)(1 << i);
                 VoxelState? belowNeighbor = chunkData.GetState(neighborPos + Vector3Int.down);
-                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.id != fluidId;
+                bool belowIsSolid = belowNeighbor.HasValue && belowNeighbor.Value.Properties.isSolid && belowNeighbor.Value.ID != fluidId;
 
                 // If the block below is not a solid boundary, it's an immediate drop
                 if (belowNeighbor.HasValue && !belowIsSolid)
@@ -484,32 +516,47 @@ public static partial class BlockBehavior
         }
 
         // GetOptimalFlowDirections needs to accurately collect ALL minimum paths.
-        // If minCost is > 4 (the max BFS depth), that means NO drops were found in ANY direction.
+        // If minCost is beyond the max BFS depth, that means NO drops were found in ANY direction.
         // In that case, we MUST return all valid flowing directions minus solid walls, to create the spreading diamond.
 
-        if (minCost > 4)
+        if (minCost > FluidTierClassifier.MaxFlowSearchDepth)
         {
             // No optimal path found, fallback to uniform spread.
-            LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} NO OPTIMAL DROPS. Falling back to mask={Convert.ToString(validDirectionsMask, 2).PadLeft(4, '0')}");
+            if (IsWaterDebugEnabled) LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} NO OPTIMAL DROPS. Falling back to mask={Convert.ToString(validDirectionsMask, 2).PadLeft(4, '0')}");
             return validDirectionsMask;
         }
 
         byte optimalMask = 0;
-        string debugStr = "";
-        for (int i = 0; i < 4; i++)
+
+        if (IsWaterDebugEnabled)
         {
-            if (flowCost[i] == minCost)
+            string debugStr = "";
+            for (int i = 0; i < 4; i++)
             {
-                optimalMask |= (byte)(1 << i);
-                debugStr += $"{i}:{flowCost[i]} ";
+                if (flowCost[i] == minCost)
+                {
+                    optimalMask |= (byte)(1 << i);
+                    debugStr += $"{i}:{flowCost[i]} ";
+                }
+                else
+                {
+                    debugStr += $"({i}:{flowCost[i]}) ";
+                }
             }
-            else
+
+            LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} minCost={minCost} mask={Convert.ToString(optimalMask, 2).PadLeft(4, '0')} dirs={debugStr}");
+        }
+        else
+        {
+            for (int i = 0; i < 4; i++)
             {
-                debugStr += $"({i}:{flowCost[i]}) ";
+                if (flowCost[i] == minCost)
+                {
+                    optimalMask |= (byte)(1 << i);
+                }
             }
         }
 
-        LogWaterDebug($"[WaterDebug PATHFINDING] {centerPos} minCost={minCost} mask={Convert.ToString(optimalMask, 2).PadLeft(4, '0')} dirs={debugStr}");
         return optimalMask;
     }
 

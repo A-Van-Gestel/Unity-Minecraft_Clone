@@ -1,0 +1,13 @@
+<linker>
+  <!--
+    IL2CPP fix: System.Diagnostics.DiagnosticSource (netstandard2.0 build, pulled in
+    transitively by NativeCompressions.LZ4.Core) references the `netstandard` facade.
+    UnityLinker strips netstandard from the player output because no managed user code
+    roots it, but DiagnosticSource still references it, so IL2CPP fails conversion with
+    "All assemblies must be resolved up front ... Missing References for
+    System.Diagnostics.DiagnosticSource ... netstandard".
+    Rooting netstandard here keeps it in the ManagedStripped output and the il2cpp
+    assembly list.
+  -->
+  <assembly fullname="netstandard" preserve="all" />
+</linker>

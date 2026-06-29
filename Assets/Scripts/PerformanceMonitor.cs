@@ -3,6 +3,7 @@ using System.Collections;
 using System.Diagnostics;
 using Helpers;
 using UnityEngine;
+using UnityEngine.Profiling;
 
 /// <summary>
 /// Accurately measures CPU frame timings across different Unity lifecycle phases
@@ -35,6 +36,12 @@ public class PerformanceMonitor : MonoBehaviour
     /// </summary>
     public static PerformanceMonitor Instance { get; private set; }
 
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void DomainReset()
+    {
+        Instance = null;
+    }
+
     /// <summary>
     /// A chronological snapshot of all tracked performance metrics at a specific point in time.
     /// </summary>
@@ -48,6 +55,24 @@ public class PerformanceMonitor : MonoBehaviour
 
         /// <summary>The amount of managed GC memory allocated during the frame in Kilobytes.</summary>
         public float GcAllocKb;
+
+        /// <summary>Frames per second based on wall-clock time.</summary>
+        public float WallFps;
+
+        /// <summary>Frames per second based on CPU work time (excludes VSync/GPU idle).</summary>
+        public float CpuFps;
+
+        /// <summary>Total native memory allocated by Unity's internal allocators, in MB.</summary>
+        public float NativeAllocMb;
+
+        /// <summary>Total native memory reserved by Unity's allocators, in MB.</summary>
+        public float NativeReservedMb;
+
+        /// <summary>Total managed (GC) heap memory, in MB.</summary>
+        public float ManagedMemMb;
+
+        /// <summary>Total memory: native allocated + managed, in MB.</summary>
+        public float TotalMemMb;
     }
 
     [Header("History Tracking")]
@@ -254,7 +279,7 @@ public class PerformanceMonitor : MonoBehaviour
 
     private IEnumerator FramePhaseCoroutine()
     {
-        var waitForEndOfFrame = new WaitForEndOfFrame();
+        WaitForEndOfFrame waitForEndOfFrame = new WaitForEndOfFrame();
 
         while (true)
         {
@@ -304,7 +329,13 @@ public class PerformanceMonitor : MonoBehaviour
                     CpuTimeMs = (float)(CpuFrameTime.GetAverage() * s_tickToMs),
                     WallTimeMs = (float)(WallFrameTime.GetAverage() * s_tickToMs),
                     GcAllocKb = GcAllocationPerFrame.GetAverage() / 1024f,
+                    WallFps = WallFPS,
+                    CpuFps = CpuFPS,
+                    NativeAllocMb = Profiler.GetTotalAllocatedMemoryLong() / (1024f * 1024f),
+                    NativeReservedMb = Profiler.GetTotalReservedMemoryLong() / (1024f * 1024f),
+                    ManagedMemMb = GC.GetTotalMemory(false) / (1024f * 1024f),
                 };
+                snapshot.TotalMemMb = snapshot.NativeAllocMb + snapshot.ManagedMemMb;
 
                 MetricsHistory[HistoryHeadIndex] = snapshot;
                 HistoryHeadIndex = (HistoryHeadIndex + 1) % HistorySize;

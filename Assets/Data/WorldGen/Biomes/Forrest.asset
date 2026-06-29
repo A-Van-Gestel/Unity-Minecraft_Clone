@@ -1,0 +1,604 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 315235deccdab354db2e60ccb94ed992, type: 3}
+  m_Name: Forrest
+  m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
+  biomeName: Forrest
+  debugPreviewColor: {r: 0.15, g: 0.45, b: 0.2, a: 1}
+  biomeWeightNoiseConfig:
+    seedOffset: 875465
+    frequency: 0.010625
+    noiseType: 2
+    rotationType3D: 0
+    fractalType: 0
+    octaves: 1
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 2
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 1
+    domainWarpType: 0
+    domainWarpAmp: 0
+    normalizeToZeroOne: 0
+  blendRadius: 0.4
+  blendWeight: 1
+  blendCurve: 1
+  surfaceBlockDitheringWidth: 0.1
+  baseTerrainHeight: 60
+  continentalnessNoiseConfig:
+    seedOffset: 100
+    frequency: 0.002
+    noiseType: 0
+    rotationType3D: 2
+    fractalType: 1
+    octaves: 4
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 0
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 0
+    domainWarpType: 0
+    domainWarpAmp: 0
+    normalizeToZeroOne: 0
+  continentalnessCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: -1
+      value: -10
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 0
+      value: 2
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 14
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  erosionNoiseConfig:
+    seedOffset: 200
+    frequency: 0.004
+    noiseType: 0
+    rotationType3D: 2
+    fractalType: 1
+    octaves: 3
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 0
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 0
+    domainWarpType: 0
+    domainWarpAmp: 0
+    normalizeToZeroOne: 0
+  erosionCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: -1
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 0
+      value: 0.7
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 0.4
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  peaksAndValleysNoiseConfig:
+    seedOffset: 300
+    frequency: 0.01
+    noiseType: 0
+    rotationType3D: 2
+    fractalType: 1
+    octaves: 2
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 0
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 0
+    domainWarpType: 0
+    domainWarpAmp: 0
+    normalizeToZeroOne: 0
+  peaksAndValleysCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: -1
+      value: -6
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 8
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  enable3DDensity: 1
+  densityNoiseConfig:
+    seedOffset: 400
+    frequency: 0.015
+    noiseType: 0
+    rotationType3D: 2
+    fractalType: 1
+    octaves: 3
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 0
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 0
+    domainWarpType: 0
+    domainWarpAmp: 0
+    normalizeToZeroOne: 0
+  densityAmplitude: 12
+  enableDensityWarp: 1
+  densityWarpConfig:
+    seedOffset: 500
+    frequency: 0.01
+    noiseType: 0
+    rotationType3D: 2
+    fractalType: 0
+    octaves: 0
+    gain: 0
+    lacunarity: 0
+    weightedStrength: 0
+    pingPongStrength: 0
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 0
+    domainWarpType: 0
+    domainWarpAmp: 15
+    normalizeToZeroOne: 0
+  surfaceBlockID: 3
+  subSurfaceBlockID: 3
+  terrainLayers:
+  - blockID: 3
+    depth: 4
+  strataDepthNoiseConfig:
+    seedOffset: 0
+    frequency: 0.05
+    noiseType: 0
+    rotationType3D: 0
+    fractalType: 0
+    octaves: 0
+    gain: 0
+    lacunarity: 0
+    weightedStrength: 0
+    pingPongStrength: 0
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 0
+    domainWarpType: 0
+    domainWarpAmp: 0
+    normalizeToZeroOne: 1
+  underwaterSurfaceBlockID: 3
+  floraZoneNoiseConfig:
+    seedOffset: -99823
+    frequency: 0.5
+    noiseType: 0
+    rotationType3D: 2
+    fractalType: 0
+    octaves: 1
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 2
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 1
+    domainWarpType: 0
+    domainWarpAmp: 0
+    normalizeToZeroOne: 1
+  floraZoneCoverage: 0.86
+  majorFloraPool:
+  - template: {fileID: 11400000, guid: b681e0f84493ae9459643a397510bb5a, type: 2}
+    spacing: 3
+    padding: 0
+    chance: 0.88
+    minPlacementHeight: 0
+    maxPlacementHeight: 256
+    useFloraZone: 1
+    useOverrideFloraZoneNoise: 0
+    overrideFloraZoneNoise:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    overrideFloraZoneCoverage: 0
+  - template: {fileID: 11400000, guid: a14f0799904733d478c5e1a37d6be2b6, type: 2}
+    spacing: 6
+    padding: 0
+    chance: 0.18
+    minPlacementHeight: 0
+    maxPlacementHeight: 256
+    useFloraZone: 1
+    useOverrideFloraZoneNoise: 0
+    overrideFloraZoneNoise:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    overrideFloraZoneCoverage: 0
+  minorFloraPool:
+  - template: {fileID: 11400000, guid: 26bb2246808379641acd51a810d6df9a, type: 2}
+    spacing: 1
+    padding: -1
+    chance: 0.833
+    minPlacementHeight: 0
+    maxPlacementHeight: 256
+    useFloraZone: 1
+    useOverrideFloraZoneNoise: 0
+    overrideFloraZoneNoise:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    overrideFloraZoneCoverage: 0
+  lodes:
+  - nodeName: Dirt
+    previewColor: {r: 0.6784314, g: 0.3254902, b: 0.08627451, a: 1}
+    blockID: 3
+    threshold: 0.5
+    minHeight: 1
+    maxHeight: 255
+    noiseConfig:
+      seedOffset: 0
+      frequency: 0.00625
+      noiseType: 3
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 1
+      gain: 0.5
+      lacunarity: 2
+      weightedStrength: 0
+      pingPongStrength: 2
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 1
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+  - nodeName: Sand
+    previewColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+    blockID: 4
+    threshold: 0.6
+    minHeight: 30
+    maxHeight: 60
+    noiseConfig:
+      seedOffset: 500
+      frequency: 0.0125
+      noiseType: 3
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 1
+      gain: 0.5
+      lacunarity: 2
+      weightedStrength: 0
+      pingPongStrength: 2
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 1
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+  caveZoneNoiseConfig:
+    seedOffset: 0
+    frequency: 0.01
+    noiseType: 0
+    rotationType3D: 0
+    fractalType: 0
+    octaves: 1
+    gain: 0.5
+    lacunarity: 2
+    weightedStrength: 0
+    pingPongStrength: 0
+    cellularDistanceFunction: 0
+    cellularReturnType: 0
+    cellularJitter: 0
+    domainWarpType: 0
+    domainWarpAmp: 0
+    normalizeToZeroOne: 0
+  minCavePocketSize: 12
+  trunkWormModifiers:
+    spawnSuppression: 0
+    verticalBiasOverride: -1
+    yAttractionCenterOverride: -1
+    traversalAllowed: 1
+    traversalFadeSteps: 0
+  caveLayers:
+  - layerName: Root Tunnels
+    previewColor: {r: 0.5, g: 0.3, b: 0.1, a: 1}
+    mode: 2
+    noiseConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    secondaryNoiseConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    threshold: 0.5
+    enableWarp: 0
+    warpConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    zoneAttenuation: 0.42
+    isSeekableByTrunkWorms: 0
+    isSeekableByLocalWorms: 0
+    minHeight: 0
+    maxHeight: 80
+    depthFadeMarginBottom: 5
+    depthFadeMarginTop: 18
+    surfaceFadeMargin: 7
+    surfaceDeflectionStrength: 0.65
+    wormSpawnChance: 0.022
+    maxWormsPerChunk: 2
+    wormBaseRadius: 2.5
+    wormShape:
+      radiusMin: 1.5
+      radiusMax: 3.5
+      squashAxis: 0
+      squashFactor: 1
+      radiusWaveCount: 4
+      radiusNoiseStrength: 0.5
+      radiusNoiseFrequency: 0.12
+    wormWaviness: 0.6
+    wormHorizontalBias: 0.5
+    wormYAttraction:
+      strength: 0.18
+      minY: 12
+      maxY: 56
+    wormMinLength: 40
+    wormMaxLength: 110
+    wormBranching:
+      branchChance: 0.05
+      maxBranchDepth: 2
+    wormNoiseSeeking:
+      checkInterval: 10
+      seekDistance: 12
+      seekChance: 0.55
+      maskSeekChance: 0
+      maskSeekMinSteps: 30
+  - layerName: Forest Chambers
+    previewColor: {r: 1, g: 0.72156864, b: 0, a: 1}
+    mode: 0
+    noiseConfig:
+      seedOffset: 91234
+      frequency: 0.016
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 1
+      gain: 0.5
+      lacunarity: 2
+      weightedStrength: 0
+      pingPongStrength: 2
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 1
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    secondaryNoiseConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    threshold: 0.83
+    enableWarp: 0
+    warpConfig:
+      seedOffset: 0
+      frequency: 0
+      noiseType: 0
+      rotationType3D: 0
+      fractalType: 0
+      octaves: 0
+      gain: 0
+      lacunarity: 0
+      weightedStrength: 0
+      pingPongStrength: 0
+      cellularDistanceFunction: 0
+      cellularReturnType: 0
+      cellularJitter: 0
+      domainWarpType: 0
+      domainWarpAmp: 0
+      normalizeToZeroOne: 0
+    zoneAttenuation: 0.26
+    isSeekableByTrunkWorms: 1
+    isSeekableByLocalWorms: 1
+    minHeight: 0
+    maxHeight: 38
+    depthFadeMarginBottom: 5
+    depthFadeMarginTop: 18
+    surfaceFadeMargin: 0
+    surfaceDeflectionStrength: 0
+    wormSpawnChance: 1
+    maxWormsPerChunk: 3
+    wormBaseRadius: 3
+    wormShape:
+      radiusMin: 2
+      radiusMax: 4
+      squashAxis: 0
+      squashFactor: 1
+      radiusWaveCount: 3
+      radiusNoiseStrength: 0
+      radiusNoiseFrequency: 0.1
+    wormWaviness: 0.5
+    wormHorizontalBias: 0.5
+    wormYAttraction:
+      strength: 0
+      minY: 20
+      maxY: 40
+    wormMinLength: 50
+    wormMaxLength: 200
+    wormBranching:
+      branchChance: 0.05
+      maxBranchDepth: 2
+    wormNoiseSeeking:
+      checkInterval: 10
+      seekDistance: 10
+      seekChance: 0.5
+      maskSeekChance: 0
+      maskSeekMinSteps: 30

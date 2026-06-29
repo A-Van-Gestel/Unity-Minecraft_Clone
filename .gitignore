@@ -75,6 +75,9 @@ sysinfo.txt
 *.unitypackage
 *.app
 
+# Android build
+/.utmp/*
+
 # Crashlytics generated file
 crashlytics-build.properties
 
@@ -87,3 +90,21 @@ crashlytics-build.properties
 
 # Auto generated backup files
 *.*~
+
+# Repomix
+/repomix-output.*
+
+# Added by tirth8205/code-review-graph
+/.code-review-graph/
+
+# colbymchenry/CodeGraph
+/.codegraph/
+
+# Python tooling (see Tools/Python/, python-scripting skill)
+/Tools/Python/.venv/
+/Tools/Python/output/
+__pycache__/
+*.pyc
+
+# MCP
+.mcp.json

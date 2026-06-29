@@ -57,6 +57,22 @@ public class Clouds : MonoBehaviour
         UpdateClouds();
     }
 
+    /// <summary>
+    /// Destroys all existing cloud tiles and re-creates them with the current cloud style setting.
+    /// Called when the cloud style is changed at runtime (e.g. from the pause menu settings).
+    /// </summary>
+    public void Reinitialize()
+    {
+        foreach (GameObject cloud in _clouds.Values)
+        {
+            if (cloud != null) Destroy(cloud);
+        }
+
+        _clouds.Clear();
+        _isInitialized = false;
+        Initialize();
+    }
+
     private void LoadCloudData()
     {
         // Ensure the texture is readable. If not, disable clouds to prevent errors.
@@ -191,9 +207,9 @@ public class Clouds : MonoBehaviour
         }
 
         Mesh mesh = new Mesh();
-        mesh.vertices = vertices.ToArray();
-        mesh.triangles = triangles.ToArray();
-        mesh.normals = normals.ToArray();
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(triangles, 0);
+        mesh.SetNormals(normals);
 
         return mesh;
     }
@@ -214,10 +230,10 @@ public class Clouds : MonoBehaviour
 
                 if (_cloudData[xVal, zVal])
                 {
-                    // Loop though neighbour points using faceCheck array.
+                    // Loop though neighbor points using faceCheck array.
                     for (int p = 0; p < 6; p++)
                     {
-                        // If the current neighbour has no cloud, draw this face.
+                        // If the current neighbor has no cloud, draw this face.
                         if (!CheckCloudData(new Vector3Int(xVal, 0, zVal) + VoxelData.FaceChecks[p]))
                         {
                             // Add our 4 vertices for this face.
@@ -247,9 +263,12 @@ public class Clouds : MonoBehaviour
         }
 
         Mesh mesh = new Mesh();
-        mesh.vertices = vertices.ToArray();
-        mesh.triangles = triangles.ToArray();
-        mesh.normals = normals.ToArray();
+        // Assign via the List-accepting mesh API (vertices before triangles, since triangles
+        // index into the vertex buffer and Unity validates on assignment). Avoids the three
+        // temporary managed arrays that .ToArray() would allocate per tile (MR-9).
+        mesh.SetVertices(vertices);
+        mesh.SetTriangles(triangles, 0);
+        mesh.SetNormals(normals);
 
         return mesh;
     }
@@ -278,7 +297,9 @@ public class Clouds : MonoBehaviour
         GameObject newCloudTile = new GameObject();
         newCloudTile.transform.position = position;
         newCloudTile.transform.parent = transform;
+#if UNITY_EDITOR
         newCloudTile.name = $"Cloud {position.x}, {position.z}";
+#endif
         MeshFilter mF = newCloudTile.AddComponent<MeshFilter>();
         MeshRenderer mR = newCloudTile.AddComponent<MeshRenderer>();
 

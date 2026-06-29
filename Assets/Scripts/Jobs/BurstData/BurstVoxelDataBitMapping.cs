@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Unity.Burst;
-using Unity.Mathematics;
 
 namespace Jobs.BurstData
 {
@@ -13,22 +12,40 @@ namespace Jobs.BurstData
     public static class BurstVoxelDataBitMapping
     {
         // --- Constants for Bit Packing ---
-        // Using Hex for clarity with bit positions
+        // Layout: [ID: 16][Reserved: 8][Meta: 8] = 32 bits
+        // Bits 16-23 are reserved for future use (formerly sunlight + blocklight).
         public const uint ID_MASK = 0x0000FFFF; // Bits 0-15  (16-bits, Values 0-65,535)
-        public const uint SUNLIGHT_MASK = 0x000F0000; // Bits 16-19 (4-bits, Values 0-15)
-        public const uint BLOCKLIGHT_MASK = 0x00F00000; // Bits 20-23 (4-bits, Values 0-15)
         public const uint META_MASK = 0xFF000000; // Bits 24-31 (8-bits, Values 0-255)
-        // All 32 bits are used.
 
         public const int ID_SHIFT = 0;
-        public const int SUNLIGHT_SHIFT = 16;
-        public const int BLOCKLIGHT_SHIFT = 20;
         public const int META_SHIFT = 24;
 
         // --- Internal Masks within the 8-bit Metadata field ---
         // These apply AFTER shifting the meta bits down to 0.
         public const byte META_VAL_FLUID_MASK = 0xF; // 4 bits (0-15)
         public const byte META_VAL_ORIENT_MASK = 0x7; // 3 bits (0-7)
+
+        // --- Fluid falling-flag sub-encoding (within the 4-bit fluid-level nibble) ---
+        // Minecraft Beta 1.3.2 uses fluid level >= 8 to mark a vertically falling block; the lower 3 bits carry
+        // the "effective level" of the upstream block. Source of truth for both the managed BlockBehavior.Fluids
+        // tick and the Burst FluidTickJob — keep the encoding here so the two paths can never drift.
+        public const byte FLUID_FALLING_FLAG = 8; // level >= 8 means falling
+        public const byte FLUID_EFFECTIVE_LEVEL_MASK = 0x7; // lower 3 bits = effective level
+
+        /// <summary>Returns true if the fluid level encodes a vertically falling block (level &gt;= 8).</summary>
+        /// <param name="fluidLevel">The 4-bit fluid level (0-15).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsFluidFalling(byte fluidLevel) => fluidLevel >= FLUID_FALLING_FLAG;
+
+        /// <summary>Strips the falling flag, returning the horizontal effective level (0-7).</summary>
+        /// <param name="fluidLevel">The 4-bit fluid level (0-15).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte GetEffectiveFluidLevel(byte fluidLevel) => (byte)(fluidLevel & FLUID_EFFECTIVE_LEVEL_MASK);
+
+        /// <summary>Builds a falling-flagged fluid level from a horizontal effective level (0-7).</summary>
+        /// <param name="effectiveLevel">The horizontal effective level (0-7).</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte MakeFluidFalling(byte effectiveLevel) => (byte)(effectiveLevel | FLUID_FALLING_FLAG);
 
         // --- Helpers ---
 
@@ -54,42 +71,49 @@ namespace Jobs.BurstData
         // --- Packing ---
 
         /// <summary>
-        /// Packs all component data into a single uint.
-        /// Orientation and FluidLevel share the same 8-bit Metadata space.
+        /// Packs voxel data into a single uint with the given raw metadata byte.
         /// </summary>
         /// <param name="id">The block ID (0-65535).</param>
-        /// <param name="sunLight">The sunlight level (0-15).</param>
-        /// <param name="blockLight">The blocklight level (0-15).</param>
-        /// <param name="orientation">The world orientation (face index).</param>
-        /// <param name="fluidLevel">The fluid level (0-15).</param>
-        /// <param name="isFluid">Whether the block is a fluid type. If true, fluidLevel is packed. If false, orientation is packed.</param>
+        /// <param name="meta">The raw 8-bit metadata byte. Schema-aware callers should encode this value
+        /// using <c>BurstVoxelMetadataUtility</c> (per <c>PER_BLOCK_METADATA_SCHEMAS.md §7.1</c>).
+        /// Transitional callers that still use legacy orientation/fluid-level inputs can compute the
+        /// byte via <see cref="BuildMetaLegacy"/>.</param>
         /// <returns>A packed uint containing all the voxel state data.</returns>
+        /// <remarks>
+        /// Layout: [ID:16][Reserved:8][Meta:8]. Bits 16-23 are reserved (zeroed) for future use.
+        /// Light data is stored separately in the <c>ushort LightData[]</c> array per section.
+        /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte orientation, byte fluidLevel, bool isFluid = false)
+        public static uint PackVoxelData(ushort id, byte meta)
         {
-            uint packedData = 0;
-            packedData |= (uint)(id << ID_SHIFT); // ID: 16 bits
-            packedData |= (uint)((sunLight & 0xF) << SUNLIGHT_SHIFT); // Sunlight: 4 bits
-            packedData |= (uint)((blockLight & 0xF) << BLOCKLIGHT_SHIFT); // Blocklight: 4 bits
+            return (uint)(id << ID_SHIFT) | (uint)(meta << META_SHIFT);
+        }
 
-            // Metadata Logic:
-            // Since Fluid and Orientation share the same bits, we prioritize FluidLevel if it is a fluid block.
-            // A block defined as a Fluid in BlockTypes should use FluidLevel.
-            // A block defined as Solid should use Orientation.
-
-            byte meta;
+        /// <summary>
+        /// Computes a metadata byte using the legacy "fluid-level OR orientation-storage-index" rule.
+        /// </summary>
+        /// <param name="orientation">The world orientation (face index 0-5).</param>
+        /// <param name="fluidLevel">The fluid level (0-15).</param>
+        /// <param name="isFluid">If <see langword="true"/>, force the fluid-level encoding even when <paramref name="fluidLevel"/> is zero.</param>
+        /// <returns>A raw metadata byte: fluid level (bits 0-3) when <paramref name="isFluid"/> or <paramref name="fluidLevel"/> &gt; 0; otherwise the legacy orientation storage index (bits 0-2).</returns>
+        /// <remarks>
+        /// <para>Transitional helper per <c>PER_BLOCK_METADATA_SCHEMAS.md §7.1</c>. Use it only at call sites
+        /// that have not yet migrated to schema-aware meta encoding via
+        /// <c>BurstVoxelMetadataUtility</c>. After Phase 2 callsite migration this helper can be removed
+        /// alongside the other legacy compatibility shims.</para>
+        /// <para>This is the same encoding the old 6-argument <c>PackVoxelData</c> performed internally —
+        /// extracted into a named helper so each transitional callsite is explicit about using legacy
+        /// semantics rather than schema-aware semantics.</para>
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static byte BuildMetaLegacy(byte orientation, byte fluidLevel, bool isFluid)
+        {
             if (isFluid || fluidLevel > 0)
             {
-                meta = (byte)(fluidLevel & META_VAL_FLUID_MASK);
-            }
-            else
-            {
-                meta = GetOrientationIndex(orientation);
+                return (byte)(fluidLevel & META_VAL_FLUID_MASK);
             }
 
-            packedData |= (uint)(meta << META_SHIFT); // Meta: 8 bits
-
-            return packedData;
+            return GetOrientationIndex(orientation);
         }
 
         // --- Unpacking / Getters ---
@@ -114,42 +138,6 @@ namespace Jobs.BurstData
         public static byte GetMeta(uint packedData)
         {
             return (byte)((packedData & META_MASK) >> META_SHIFT);
-        }
-
-        /// <summary>
-        /// Returns the highest light level between sunlight and blocklight
-        /// </summary>
-        /// <param name="packedData">The packed uint data.</param>
-        /// <returns>The highest light level (0-15).</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static byte GetLight(uint packedData)
-        {
-            // NOTE: Actual types are byte, but we use uint here to make sure the math.max function works correctly.
-            uint sunLightLevel = GetSunLight(packedData);
-            uint blockLightLevel = GetBlockLight(packedData);
-            return (byte)math.max(sunLightLevel, blockLightLevel);
-        }
-
-        /// <summary>
-        /// Extracts the sunlight level from the packed voxel data.
-        /// </summary>
-        /// <param name="packedData">The packed uint data.</param>
-        /// <returns>The sunlight level (0-15).</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static byte GetSunLight(uint packedData)
-        {
-            return (byte)((packedData & SUNLIGHT_MASK) >> SUNLIGHT_SHIFT);
-        }
-
-        /// <summary>
-        /// Extracts the blocklight level from the packed voxel data.
-        /// </summary>
-        /// <param name="packedData">The packed uint data.</param>
-        /// <returns>The blocklight level (0-15).</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static byte GetBlockLight(uint packedData)
-        {
-            return (byte)((packedData & BLOCKLIGHT_MASK) >> BLOCKLIGHT_SHIFT);
         }
 
         /// <summary>
@@ -206,30 +194,6 @@ namespace Jobs.BurstData
         public static uint SetId(uint packedData, ushort id)
         {
             return (packedData & ~ID_MASK) | (uint)(id << ID_SHIFT);
-        }
-
-        /// <summary>
-        /// Updates the sunlight level within the packed voxel data.
-        /// </summary>
-        /// <param name="packedData">The original packed uint data.</param>
-        /// <param name="sunLightLevel">The new sunlight level to set.</param>
-        /// <returns>The updated packed uint data.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static uint SetSunLight(uint packedData, byte sunLightLevel)
-        {
-            return (packedData & ~SUNLIGHT_MASK) | (uint)((sunLightLevel & 0xF) << SUNLIGHT_SHIFT);
-        }
-
-        /// <summary>
-        /// Updates the blocklight level within the packed voxel data.
-        /// </summary>
-        /// <param name="packedData">The original packed uint data.</param>
-        /// <param name="blockLightLevel">The new blocklight level to set.</param>
-        /// <returns>The updated packed uint data.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static uint SetBlockLight(uint packedData, byte blockLightLevel)
-        {
-            return (packedData & ~BLOCKLIGHT_MASK) | (uint)((blockLightLevel & 0xF) << BLOCKLIGHT_SHIFT);
         }
 
         /// <summary>

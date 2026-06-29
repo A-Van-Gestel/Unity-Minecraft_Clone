@@ -2,7 +2,6 @@ using System;
 using System.Runtime.CompilerServices;
 using MyBox;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace Data
 {
@@ -20,7 +19,12 @@ namespace Data
         [InitializationField]
         public Sprite icon;
 
+        [Header("Meshing")]
+        [Tooltip("The mesh generation strategy used for this block.")]
+        public RenderShape renderShape = RenderShape.Cube;
+
         [Tooltip("The custom mesh data for this block, if it's not a standard cube.")]
+        [ConditionalField(nameof(renderShape), false, RenderShape.CustomMesh)]
         [InitializationField]
         public VoxelMeshData meshData;
 
@@ -31,7 +35,11 @@ namespace Data
         [Tooltip("Indicates whether the player collides with this block.")]
         public bool isSolid;
 
-        [Tooltip("Indicates whether the neighbouring faces should still be rendered when this block is placed.")]
+        [Tooltip("Defines the sub-voxel shape of the collision volume if not a standard full block.")]
+        [ConditionalField(nameof(isSolid), false, true)]
+        public BlockCollisionBounds collisionBounds = BlockCollisionBounds.FullBlock;
+
+        [Tooltip("Indicates whether the neighboring faces should still be rendered when this block is placed.")]
         public bool renderNeighborFaces;
 
         [Header("Fluid Properties")]
@@ -73,6 +81,10 @@ namespace Data
         [Range(0, 15)]
         public byte lightEmission;
 
+        [Tooltip("The color of light emitted by this block. Combined with Light Emission intensity to produce per-channel RGB values (0-15).")]
+        [ColorUsage(false)]
+        public Color lightEmissionColor = Color.white;
+
         [Header("Placement Rules")]
         [Tooltip("Apply a preset for the tags below. This is a workflow helper and doesn't affect the game directly. After applying, the values are copied to the fields below.")]
         public BlockTagPreset tagPreset;
@@ -80,13 +92,30 @@ namespace Data
         [Tooltip("What tags does this block have? A block can have multiple tags.")]
         public BlockTags tags;
 
-        [FormerlySerializedAs("canBeReplacedByTags")]
         [Tooltip("What tags can this block replace? If NONE, it can only replace Air. If ALL tags are selected, it can replace anything (except Unbreakable).")]
         public BlockTags canReplaceTags;
 
         [Header("Block Behavior")]
         [Tooltip("Indicates whether the block has any block behavior.")]
         public bool isActive;
+
+        [Header("Metadata")]
+        [Tooltip(
+            "How the 8-bit voxel metadata byte should be interpreted for this block.\n" +
+            "Determines orientation, fluid level, or other per-voxel state semantics.\n" +
+            "See MetadataSchema for the frozen bit layouts.")]
+        public MetadataSchema metadataSchema = MetadataSchema.None;
+
+        [Tooltip(
+            "How player placement should author this block's metadata.\n" +
+            "'None' means placement writes defaultMetadata unchanged.")]
+        public PlacementMetadataMode placementMetadataMode = PlacementMetadataMode.None;
+
+        [Tooltip(
+            "Default metadata value written when this block is placed without explicit metadata.\n" +
+            "Must fit within the chosen schema's valid range (see MetadataSchema).")]
+        [Range(0, 255)]
+        public byte defaultMetadata;
 
         [Header("Texture Values")]
         [Tooltip("Texture ID for the Negative Z face.")]
@@ -162,6 +191,18 @@ namespace Data
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => opacity == 0;
+        }
+
+        /// <summary>
+        /// Returns true if this block can act as a support base for blocks with
+        /// the <see cref="BlockTags.REQUIRES_SUPPORT"/> tag.
+        /// Currently equivalent to <see cref="isSolid"/>, but exists as a dedicated
+        /// property so the definition of "support" can diverge independently.
+        /// </summary>
+        public bool ProvidesSupport
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => isSolid;
         }
 
         /// <summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Helpers;
 using JetBrains.Annotations;
 using Jobs;
 using Unity.Collections;
@@ -40,7 +41,7 @@ namespace Data
         {
             this.worldName = worldName;
             this.seed = seed;
-            creationDate = DateTime.Now.Ticks;
+            creationDate = DateTime.UtcNow.Ticks;
         }
 
         /// <summary>
@@ -232,30 +233,62 @@ namespace Data
         /// <returns>Jobs compatible array of voxels</returns>
         public NativeArray<uint> GetChunkMapForJob(Vector2Int chunkVoxelPos, Allocator allocator)
         {
-            ChunkData chunk = RequestChunk(chunkVoxelPos, false);
+            // UninitializedMemory is safe: FillChunkMapForJob writes every element.
+            NativeArray<uint> jobArray = new NativeArray<uint>(
+                VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth,
+                allocator, NativeArrayOptions.UninitializedMemory);
 
-            // Allocate the full height array for the job
-            NativeArray<uint> jobArray = new NativeArray<uint>(VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth, allocator);
-
-            if (chunk != null)
-            {
-                // Copy sections into the flat native array
-                const int sectionSize = 16 * 16 * 16;
-                for (int i = 0; i < chunk.sections.Length; i++)
-                {
-                    if (chunk.sections[i] != null)
-                    {
-                        // Fast native copy
-                        NativeArray<uint>.Copy(
-                            chunk.sections[i].voxels, 0,
-                            jobArray, i * sectionSize,
-                            sectionSize);
-                    }
-                    // If null, the jobArray already contains 0 (Air) from initialization
-                }
-            }
-
+            FillChunkMapForJob(chunkVoxelPos, jobArray);
             return jobArray;
+        }
+
+        /// <summary>
+        /// Fills a caller-provided full-chunk buffer with the raw voxel map for jobs.
+        /// Writes EVERY element of <paramref name="jobArray"/> (null sections are zero-filled),
+        /// so it is safe to use with stale pooled buffers from <see cref="Helpers.ChunkJobArrayPool"/>.
+        /// </summary>
+        /// <param name="chunkVoxelPos">The global chunk coordinates of the given chunk</param>
+        /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth to fill.</param>
+        public void FillChunkMapForJob(Vector2Int chunkVoxelPos, NativeArray<uint> jobArray)
+        {
+            ChunkData chunk = RequestChunk(chunkVoxelPos, false);
+            if (chunk != null)
+                chunk.FillJobVoxelMap(jobArray);
+            else
+                ChunkData.FillEmptyVoxelMap(jobArray);
+        }
+
+        /// <summary>
+        /// Creates a flat NativeArray copy of the chunk's ushort light data for Burst job processing.
+        /// </summary>
+        public NativeArray<ushort> GetChunkLightMapForJob(Vector2Int chunkVoxelPos, Allocator allocator)
+        {
+            // UninitializedMemory is safe: FillChunkLightMapForJob writes every element.
+            NativeArray<ushort> jobArray = new NativeArray<ushort>(
+                VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth,
+                allocator, NativeArrayOptions.UninitializedMemory);
+
+            FillChunkLightMapForJob(chunkVoxelPos, jobArray);
+            return jobArray;
+        }
+
+        /// <summary>
+        /// Fills a caller-provided full-chunk buffer with the chunk's ushort light data for jobs.
+        /// Writes EVERY element of <paramref name="jobArray"/> (null sections are zero-filled),
+        /// so it is safe to use with stale pooled buffers from <see cref="Helpers.ChunkJobArrayPool"/>.
+        /// </summary>
+        /// <param name="chunkVoxelPos">The global chunk coordinates of the given chunk</param>
+        /// <param name="jobArray">A buffer of length ChunkWidth × ChunkHeight × ChunkWidth to fill.</param>
+        public void FillChunkLightMapForJob(Vector2Int chunkVoxelPos, NativeArray<ushort> jobArray)
+        {
+            ChunkData chunk = RequestChunk(chunkVoxelPos, false);
+            if (chunk != null)
+                chunk.FillJobLightMap(jobArray);
+            else
+                ChunkData.FillEmptyLightMap(jobArray);
+
+            if (World.Instance != null && !World.Instance.settings.enableLighting)
+                LightingHelper.StampFullBrightSunlight(jobArray);
         }
 
         #endregion
@@ -268,7 +301,8 @@ namespace Data
         /// <param name="worldPos">The world position of the voxel</param>
         /// <param name="oldLightLevel">The old light level of the voxel (Defaults to `0`)</param>
         /// <param name="channel">The light channel to update (Defaults to `Block Channel`)</param>
-        public void QueueLightUpdate(Vector3 worldPos, byte oldLightLevel = 0, LightChannel channel = LightChannel.Block)
+        public void QueueLightUpdate(Vector3 worldPos, byte oldLightLevel = 0, LightChannel channel = LightChannel.Block,
+            byte oldBlockR = 0, byte oldBlockG = 0, byte oldBlockB = 0)
         {
             if (!IsVoxelInWorld(worldPos)) return;
 
@@ -276,10 +310,9 @@ namespace Data
 
             if (Chunks.TryGetValue(chunkVoxelPos, out ChunkData chunkData) && chunkData.IsPopulated)
             {
-                // Add the *modified block's position* to the chunk's internal light queue.
                 Vector3Int localVoxelPos = GetLocalVoxelPositionInChunk(worldPos);
                 if (channel == LightChannel.Block)
-                    chunkData.AddToBlockLightQueue(localVoxelPos, oldLightLevel);
+                    chunkData.AddToBlockLightQueue(localVoxelPos, oldLightLevel, oldBlockR, oldBlockG, oldBlockB);
                 else
                     chunkData.AddToSunLightQueue(localVoxelPos, oldLightLevel);
 

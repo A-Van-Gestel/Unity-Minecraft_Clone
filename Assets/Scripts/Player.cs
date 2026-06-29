@@ -1,6 +1,9 @@
+using Benchmarks;
+using Data;
+using Data.Enums;
+using DebugVisualizations;
 using Physics;
 using Serialization;
-using UnityEditor;
 using UnityEngine;
 
 [RequireComponent(typeof(PlayerInteraction))]
@@ -12,24 +15,25 @@ public class Player : MonoBehaviour
     private Transform _playerCamera;
     private World _world;
     private InputManager _input;
+    private TerrainGenDebugOverlay _terrainDebugOverlay;
 
     [Tooltip("Makes the player not be affected by gravity.")]
-    public bool isFlying
+    public bool IsFlying
     {
         get => VoxelRigidbody.isFlying;
         set => VoxelRigidbody.isFlying = value;
     }
 
     [Tooltip("Allows the player to fly through blocks.")]
-    public bool isNoclipping
+    public bool IsNoclipping
     {
         get => VoxelRigidbody.isNoclipping;
         set => VoxelRigidbody.isNoclipping = value;
     }
 
-    public bool isGrounded => VoxelRigidbody.IsGrounded;
+    public bool IsGrounded => VoxelRigidbody.IsGrounded;
 
-    public bool isSprinting
+    public bool IsSprinting
     {
         get => VoxelRigidbody.isSprinting;
         set => VoxelRigidbody.isSprinting = value;
@@ -69,25 +73,36 @@ public class Player : MonoBehaviour
             playerBody.localPosition = playerBodyLocalPosition;
         }
 
-        _world.inUI = false;
+        if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark)
+        {
+            gameObject.AddComponent<BenchmarkController>();
+            IsFlying = true;
+            IsNoclipping = true;
+        }
+        else if (WorldLaunchState.CurrentMode == RuntimeMode.FluidStress)
+        {
+            gameObject.AddComponent<FluidStressController>();
+            IsFlying = true;
+            IsNoclipping = true;
+        }
     }
 
     private void Update()
     {
-        if (_input.ToggleInventoryPressed)
+        if (WorldLaunchState.IsAutomatedMode)
         {
-            _world.inUI = !_world.inUI;
+            // The active automated controller (BenchmarkController / FluidStressController) drives movement.
+            VoxelRigidbody.SetMovementIntent(Vector3.zero);
         }
-
-        if (!_world.inUI)
+        else if (!World.InUI)
         {
             GetPlayerInputs();
 
             // Rotates the player on the X axis
-            transform.Rotate(Vector3.up * (_mouseHorizontal * _world.settings.mouseSensitivityX));
+            transform.Rotate(Vector3.up * (_mouseHorizontal * _world.settings.lookSensitivity));
 
             // Rotates the camera on the Y axis
-            float angle = (_playerCamera.localEulerAngles.x - _mouseVertical * _world.settings.mouseSensitivityY + 360) % 360;
+            float angle = (_playerCamera.localEulerAngles.x - _mouseVertical * _world.settings.lookSensitivity + 360) % 360;
             if (angle > 180)
                 angle -= 360;
 
@@ -116,18 +131,18 @@ public class Player : MonoBehaviour
             orientation = 4; // Player is facing west.
     }
 
+    private void EnsureTerrainDebugOverlay()
+    {
+        if (_terrainDebugOverlay != null) return;
+        _terrainDebugOverlay = FindAnyObjectByType<TerrainGenDebugOverlay>();
+        if (_terrainDebugOverlay != null) return;
+        GameObject go = new GameObject("TerrainGenDebugOverlay");
+        _terrainDebugOverlay = go.AddComponent<TerrainGenDebugOverlay>();
+        _terrainDebugOverlay.SetPlayer(this);
+    }
+
     private void GetPlayerInputs()
     {
-        // CLOSE GAME ON ESC BUTTON PRESS
-        if (_input.EscapePressed)
-        {
-#if UNITY_EDITOR
-            EditorApplication.isPlaying = false;
-#else
-            Application.Quit();
-#endif
-        }
-
         // MOVEMENT & CAMERA
         Vector2 move = _input.MoveInput;
         _horizontal = move.x;
@@ -138,9 +153,9 @@ public class Player : MonoBehaviour
 
         // SPRINTING
         if (_input.SprintPressed)
-            isSprinting = true;
+            IsSprinting = true;
         if (_input.SprintReleased)
-            isSprinting = false;
+            IsSprinting = false;
 
         // --- DEBUG ACTIONS ---
         if (_input.ToggleDebugScreenPressed)
@@ -150,35 +165,38 @@ public class Player : MonoBehaviour
             _world.SaveWorldData();
 
         if (_input.ToggleChunkBordersPressed)
-            _world.settings.showChunkBorders = !_world.settings.showChunkBorders;
+            _world.ShowChunkBorders = !_world.ShowChunkBorders;
 
         if (_input.CycleVisModePressed)
             _world.CycleVisualizationMode();
 
         if (_input.DebugCodePressed)
         {
-            // Debug method here
-            _world.DebugLogFluidSurfaceMath();
+            EnsureTerrainDebugOverlay();
+            if (_input.AltModifierHeld)
+                _terrainDebugOverlay.CycleMode();
+            else
+                _terrainDebugOverlay.Toggle();
         }
 
 
         // FLYING
         if (_input.ToggleFlyingPressed)
         {
-            isFlying = !isFlying;
-            if (!isFlying) isNoclipping = false; // Disable noclip when flight is disabled
+            IsFlying = !IsFlying;
+            if (!IsFlying) IsNoclipping = false; // Disable noclip when flight is disabled
         }
 
         // NOCLIP (GHOST MODE)
         if (_input.ToggleNoclipPressed)
         {
-            isNoclipping = !isNoclipping;
-            if (isNoclipping) isFlying = true; // Noclip requires flying
+            IsNoclipping = !IsNoclipping;
+            if (IsNoclipping) IsFlying = true; // Noclip requires flying
         }
 
-        if (!isFlying)
+        if (!IsFlying)
         {
-            if (isGrounded && _input.JumpHeld)
+            if (IsGrounded && _input.JumpHeld)
                 VoxelRigidbody.RequestJump();
         }
         else
@@ -218,8 +236,8 @@ public class Player : MonoBehaviour
             rotation = combinedRotation,
             capabilities = new PlayerCapabilityData
             {
-                isFlying = isFlying,
-                isNoclipping = isNoclipping,
+                isFlying = IsFlying,
+                isNoclipping = IsNoclipping,
             },
         };
 
@@ -251,8 +269,8 @@ public class Player : MonoBehaviour
         }
 
         // 3. Capabilities
-        isFlying = data.capabilities.isFlying;
-        isNoclipping = data.capabilities.isNoclipping;
+        IsFlying = data.capabilities.isFlying;
+        IsNoclipping = data.capabilities.isNoclipping;
     }
 
     #endregion

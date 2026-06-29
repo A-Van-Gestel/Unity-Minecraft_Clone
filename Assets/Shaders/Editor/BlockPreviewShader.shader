@@ -6,6 +6,7 @@ Shader "Hidden/Editor/BlockPreview"
     Properties
     {
         _MainTex ("Texture Atlas", 2D) = "white" {}
+        _Color ("Tint Color", Color) = (1,1,1,1)
         [HideInInspector] _ForceOpaque("Force Opaque", Float) = 0.0
     }
 
@@ -35,6 +36,7 @@ Shader "Hidden/Editor/BlockPreview"
             #include "../Includes/VoxelLighting.hlsl"
 
             float _ForceOpaque;
+            half4 _Color;
 
             VoxelV2F vertFunction(VoxelAppdata v)
             {
@@ -50,13 +52,17 @@ Shader "Hidden/Editor/BlockPreview"
 
                 // Apply voxel lighting with hardcoded editor daylight defaults
                 // (VoxelData.MinLightLevel = 0.15, MaxLightLevel = 1.0, full daylight = 1.0)
-                col.rgb = ApplyVoxelLighting(col.rgb, i.color.a,
-                                             1.0, // globalLight  — full daylight
-                                             0.15, // minLight     — VoxelData.MinLightLevel
-                                             1.0); // maxLight     — VoxelData.MaxLightLevel
+                col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba,
+                                                half3(1, 1, 1), // skyColor — white in editor
+                                                1.0, // globalLight  — full daylight
+                                                0.15, // minLight     — VoxelData.MinLightLevel
+                                                1.0); // maxLight     — VoxelData.MaxLightLevel
 
                 // Multiply by vertex RGB (supports BlockIconGenerator isometric shadows)
                 col.rgb *= i.color.rgb;
+
+                // Multiply by tint color (supports Structure Preview component coloring)
+                col.rgb *= _Color.rgb;
 
                 // Dynamically force alpha to 1.0 when _ForceOpaque is enabled (e.g. for UI icons)
                 col.a = lerp(col.a, 1.0, _ForceOpaque);

@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using Data;
 using Unity.Collections;
 using Unity.Jobs;
@@ -34,7 +34,11 @@ namespace DebugVisualizations
         /// <param name="parent">The parent transform to attach the GameObject to.</param>
         public VisualizerChunkData(ChunkCoord chunkCoord, Material mat, Transform parent)
         {
-            ChunkObject = new GameObject($"Visualizer_{chunkCoord.X}_{chunkCoord.Z}");
+#if UNITY_EDITOR
+            ChunkObject = new GameObject($"Visualizer_{chunkCoord.X.ToString()}_{chunkCoord.Z.ToString()}");
+#else
+            ChunkObject = new GameObject();
+#endif
             ChunkObject.transform.SetParent(parent);
             ChunkObject.transform.position = chunkCoord.ToWorldPosition();
 
@@ -61,7 +65,9 @@ namespace DebugVisualizations
         {
             ChunkObject.transform.SetParent(parent);
             ChunkObject.transform.position = chunkCoord.ToWorldPosition();
-            ChunkObject.name = $"Visualizer_{chunkCoord.X}_{chunkCoord.Z}";
+#if UNITY_EDITOR
+            ChunkObject.name = $"Visualizer_{chunkCoord.X.ToString()}_{chunkCoord.Z.ToString()}";
+#endif
             ChunkObject.SetActive(true);
 
             // Ensure material is correct (in case setting changed)
@@ -133,6 +139,22 @@ namespace DebugVisualizations
             _mesh.SetColors(Colors.AsArray());
             _mesh.RecalculateBounds();
             IsMeshApplied = true; // Mark as applied.
+        }
+
+        /// <summary>
+        /// Applies line topology vertices, indices, and colors to the mesh for non-Burst debug overlays.
+        /// </summary>
+        /// <param name="vertices">The line mesh vertices.</param>
+        /// <param name="indices">The line index buffer.</param>
+        /// <param name="colors">The vertex colors.</param>
+        public void ApplyLineMesh(List<Vector3> vertices, List<int> indices, List<Color> colors)
+        {
+            _mesh.Clear();
+            _mesh.SetVertices(vertices);
+            _mesh.SetIndices(indices, MeshTopology.Lines, 0);
+            _mesh.SetColors(colors);
+            _mesh.RecalculateBounds();
+            IsMeshApplied = true;
         }
 
         /// <summary>

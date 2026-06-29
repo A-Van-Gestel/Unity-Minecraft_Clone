@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 927538490966982780}
   - component: {fileID: 3602352557729800983}
+  - component: {fileID: 715589282694584058}
   m_Layer: 0
   m_Name: World
   m_TagString: Untagged
@@ -45,37 +46,105 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   settings:
-    version: 0.0.01
-    loadSaveDataOnStartup: 0
-    loadDistance: 7
-    viewDistance: 5
-    maxLightJobsPerFrame: 8
-    enableLighting: 1
-    clouds: 2
-    mouseSensitivityX: 1.2
-    mouseSensitivityY: 1.2
-    enableSecondPass: 1
-    enableMajorFloraPass: 1
+    windowMode: 0
+    resolution: 
+    uiScale: 1
+    itemTooltipDetail: 0
     enableChunkLoadAnimations: 0
-    showChunkBorders: 0
-  biomes:
-  - {fileID: 11400000, guid: 159c3e2bbfcf09d4bb338c3c44faa01e, type: 2}
+    lookSensitivity: 1.2
+    fieldOfView: 70
+    viewDistance: 5
+    fluidQuality: 2
+    fluidRefraction: 100
+    smoothLighting: 1
+    clouds: 2
+    vSync: 1
+    unlimitedFps: 0
+    maxFps: 120
+    enableLighting: 1
+    enableCaves: 1
+    enableLodes: 1
+    enableWater: 1
+    enableMajorFloraPass: 1
+    enableMinorFloraPass: 1
+    saveCompression: 2
+    maxInitialLoadRadius: 10
+    maxMeshRebuildsPerFrame: 10
+    maxLightJobsPerFrame: 32
+    maxStructureModsPerFrame: 5000
+    maxInFlightMeshJobs: 20
+    chunkJobArrayPoolRetention: 512
+    calibrationVersion: 0
+    benchmarkRegionSize: 64
+    benchmarkGenerationSpeeds: 10; 20; 50; 100; 200
+    benchmarkLoadingSpeeds: 50; 100; 200
+    enableDiagnosticLogs: 0
+    enableWaterDiagnosticLogs: 0
+    enableSaveSystemDiagnosticLogs: 0
+    enableVolatileSaveData: 1
+  _worldTypeRegistry: {fileID: 11400000, guid: 3038e8b8e1ab9ae44802528aa73aa06a, type: 2}
   globalLightLevel: 1
   day: {r: 0, g: 0.90980387, b: 1, a: 1}
   night: {r: 0.03137255, g: 0, b: 0.44705883, a: 1}
+  _skyLightGradient:
+    serializedVersion: 2
+    key0: {r: 1, g: 1, b: 1, a: 1}
+    key1: {r: 1, g: 1, b: 1, a: 1}
+    key2: {r: 0, g: 0, b: 0, a: 0}
+    key3: {r: 0, g: 0, b: 0, a: 0}
+    key4: {r: 0, g: 0, b: 0, a: 0}
+    key5: {r: 0, g: 0, b: 0, a: 0}
+    key6: {r: 0, g: 0, b: 0, a: 0}
+    key7: {r: 0, g: 0, b: 0, a: 0}
+    ctime0: 0
+    ctime1: 65535
+    ctime2: 0
+    ctime3: 0
+    ctime4: 0
+    ctime5: 0
+    ctime6: 0
+    ctime7: 0
+    atime0: 0
+    atime1: 65535
+    atime2: 0
+    atime3: 0
+    atime4: 0
+    atime5: 0
+    atime6: 0
+    atime7: 0
+    m_Mode: 0
+    m_ColorSpace: -1
+    m_NumColorKeys: 2
+    m_NumAlphaKeys: 2
   player: {fileID: 0}
   spawnPosition: {x: 0, y: 0, z: 0}
   spawnPositionOffset: {x: 0.5, y: 1.1, z: 0.5}
-  material: {fileID: 2100000, guid: 310749baead051949ad82e332a06680f, type: 2}
-  transparentMaterial: {fileID: 2100000, guid: 451dc07c0cc41a649bf3ac4fe7a9e1b0, type: 2}
-  liquidMaterial: {fileID: 2100000, guid: f63c05e024046bb46bbe8f67612602e9, type: 2}
-  blockDatabase: {fileID: 11400000, guid: 6aebc05383d66d242886f3518fb31bb0, type: 2}
   debugScreen: {fileID: 0}
-  creativeInventoryWindow: {fileID: 0}
-  cursorSlot: {fileID: 0}
   clouds: {fileID: 0}
   worldData:
     worldName: Prototype
     seed: 0
+    creationDate: 0
   appSaveDataPath: 
   chunkBorderPrefab: {fileID: 2348571843614231521, guid: 0c5d03a94304a4b4bbf7153e8f2675e4, type: 3}
+  voxelVisualizer: {fileID: 0}
+  visualizationMode: 0
+  _enableFluidBurstTick: 1
+  _enableParallelFluidTick: 1
+  _enableFluidBorderBurst: 1
+  _enableFluidBandGather: 1
+--- !u!114 &715589282694584058
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2574360936984693049}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 574141ffbde709a4686017b494fc0a4c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UI.WorldUIManager
+  creativeInventoryWindow: {fileID: 0}
+  cursorSlot: {fileID: 0}
+  pauseMenuController: {fileID: 0}

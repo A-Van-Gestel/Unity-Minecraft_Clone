@@ -58,4 +58,47 @@ half3 ApplyVoxelLighting(half3 color, float lightLevel,
     return color * CalculateLinearVoxelShadow(shade);
 }
 
+/// Applies the shared shade curve to a single light channel, returning a
+/// linear-space brightness multiplier (0 = dark, 1 = full brightness).
+///
+/// @param lightLevel   Per-vertex light level (0..1).
+/// @param globalLight  Day/night cycle (0..1) — pass 1.0 for blocklight.
+/// @param minLight     Minimum ambient (VoxelData.MinLightLevel = 0.15).
+/// @param maxLight     Maximum light (VoxelData.MaxLightLevel = 1.0).
+float VoxelLightToShadow(float lightLevel,
+                         float globalLight, float minLight, float maxLight)
+{
+    float shade = CalculateVoxelShade(lightLevel, globalLight, minLight, maxLight);
+    return CalculateLinearVoxelShadow(shade);
+}
+
+/// Applies the voxel lighting model with separate sunlight and RGB blocklight channels.
+/// Sunlight is a scalar tinted by SkyLightColor (time-of-day gradient).
+/// Blocklight is per-channel RGB, each going through the same shade curve independently.
+///
+/// @param color            Base texture color (RGB).
+/// @param sunLuminance     Per-vertex sunlight scalar (0..1).
+/// @param blockRGB         Per-vertex blocklight RGB (0..1 per channel).
+/// @param skyColor         Sky light tint color (from World.cs gradient, white at noon).
+/// @param globalLight      Day/night cycle (0..1) — modulates sunlight only.
+/// @param minLight         Minimum ambient (0.15).
+/// @param maxLight         Maximum light (1.0).
+half3 ApplyVoxelLightingRGB(half3 color,
+                            float sunLuminance, half3 blockRGB,
+                            half3 skyColor,
+                            float globalLight, float minLight, float maxLight)
+{
+    // Sunlight: scalar luminance × shade curve × sky color tint
+    float sunShadow = VoxelLightToShadow(sunLuminance, globalLight, minLight, maxLight);
+    half3 sunContrib = color * sunShadow * skyColor;
+
+    // Blocklight: RGB channels × same shade curve, always full intensity
+    float blockR_shadow = VoxelLightToShadow(blockRGB.r, 1.0, minLight, maxLight);
+    float blockG_shadow = VoxelLightToShadow(blockRGB.g, 1.0, minLight, maxLight);
+    float blockB_shadow = VoxelLightToShadow(blockRGB.b, 1.0, minLight, maxLight);
+    half3 blockContrib = color * half3(blockR_shadow, blockG_shadow, blockB_shadow);
+
+    return max(sunContrib, blockContrib);
+}
+
 #endif // VOXEL_LIGHTING_INCLUDED

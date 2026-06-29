@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Data;
+using Data.Enums;
+using Data.WorldTypes;
 using Serialization;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -11,7 +14,29 @@ public static class SaveSystem
     //          All V1 worlds are automatically migrated by MigrationV1ToV2RegionRepack.
     // v2 → v3: Removed bug where 'IsEmpty' sections (all-air w/ light) were skipped.
     //          Migration triggers full initial lighting job for existing chunks to restore sky & cave light.
-    public const int CURRENT_VERSION = 3;
+    // v3 → v4: Added WorldType metadata to level.dat. See Migration_v3_to_v4_WorldTypes.cs.
+    // v4 → v5: Collapsed VoxelMod's (Orientation, FluidLevel) byte pair into a single Meta byte
+    //          per PER_BLOCK_METADATA_SCHEMAS.md §7.4. Rewrites pending_mods.bin layout.
+    //          See Migration_v4_to_v5_VoxelModMeta.cs.
+    // v5 → v6: Converted every voxel's metadata to schema-aware encoding per its target schema:
+    //          OakLog → Axis3, Water/Lava → FluidLevel4, ordinary cubes → HorizontalOnly,
+    //          Air/Facade/Cactus/GrassBlades → None. StoneHalfSlab and DirectionalBlock kept on
+    //          legacy semantics; their schema migration is deferred to a future version.
+    //          First chunk-format migration in the project; bumps chunk format version to 4.
+    //          Affects chunks AND pending mods. See Migration_v5_to_v6_LegacyToSchemaBased.cs.
+    // v6 → v7: Added global structural dimensions (chunkHeight, chunkWidth, worldSizeInChunks)
+    //          to level.dat for future extensibility, and standardized the naming of the
+    //          pending_lighting.bin file. See Migration_v6_to_v7_SaveFormatExtensibility.cs.
+    // v8 (RGB): Expanded light queue entries from 13 to 16 bytes per entry (added OldBlockR/G/B).
+    //           See Migration_v7_to_v8_RGBLightQueues.cs.
+    // v9 (RGB): Persists ushort[] LightData per section with flag-based format (0x00 voxels-only,
+    //           0x01 voxels+light, 0x02 light-only). See Migration_v8_to_v9_LightDataSerialization.cs.
+    // v10 (RGB): Strips legacy light bits from uint voxels (bits 16-23 zeroed/reserved). Introduces
+    //            uniform-sky-level optimization (flags 0x00/0x02 store 1B sky level instead of full
+    //            LightData). New flag 0x03 for light-only+full. See Migration_v9_to_v10_StripLightBitsAndNewFlags.cs.
+    // v10 → v11: Added spawnPosition (ChunkRelativePosition: _chunkX/_chunkZ ints + Vector3 localPosition)
+    //            to level.dat for persistent spawn point support. See Migration_v10_to_v11_SpawnPosition.cs.
+    public const int CURRENT_VERSION = 11;
 
     /// <summary>
     /// Resolves the absolute directory path where a world's save files are stored.
@@ -21,9 +46,12 @@ public static class SaveSystem
     /// <returns>The absolute physical folder path.</returns>
     public static string GetSavePath(string worldName, bool useVolatilePath)
     {
-        string baseFolder = useVolatilePath
-            ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
-            : Path.Combine(Application.persistentDataPath, "Saves");
+        string baseFolder = WorldLaunchState.CurrentMode switch
+        {
+            RuntimeMode.Benchmark => Path.Combine(Application.persistentDataPath, "Benchmark_Saves"),
+            RuntimeMode.FluidStress => Path.Combine(Application.persistentDataPath, "FluidStress_Saves"),
+            _ => useVolatilePath ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves") : Path.Combine(Application.persistentDataPath, "Saves"),
+        };
 
         return Path.Combine(baseFolder, worldName);
     }
@@ -46,8 +74,10 @@ public static class SaveSystem
             version = CURRENT_VERSION,
             worldName = worldName,
             seed = world.worldData.seed,
-            creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.Now.Ticks,
-            lastPlayed = DateTime.Now.Ticks,
+            worldType = world.ActiveWorldType != null ? world.ActiveWorldType.typeID : WorldTypeID.Legacy,
+            creationDate = world.worldData.creationDate > 0 ? world.worldData.creationDate : DateTime.UtcNow.Ticks,
+            lastPlayed = DateTime.UtcNow.Ticks,
+            spawnPosition = world.WorldSpawnPoint,
 
             worldState = new WorldStateData
             {
@@ -126,10 +156,13 @@ public static class SaveSystem
         world.globalLightLevel = data.worldState.timeOfDay;
         world.SetGlobalLightValue(); // Apply to shader immediately
 
+        // 2. Restore Spawn Point
+        world.SetSpawnPoint(data.spawnPosition);
+
         // If the player doesn't exist, do nothing
         if (world.player == null) return;
 
-        // 2. Apply Player State
+        // 3. Apply Player State
         world.player.LoadSaveData(data.player);
 
         // Apply Inventory
@@ -178,7 +211,7 @@ public static class SaveSystem
             // Skip backup worlds
             if (IsWorldBackup(worldName))
             {
-                Debug.LogWarning($"Backup world: {worldName}");
+                Debug.Log($"Backup world: {worldName}");
                 continue;
             }
 
@@ -205,6 +238,19 @@ public static class SaveSystem
 
         Directory.Delete(path, true); // Recursive delete
         Debug.Log($"Deleted world: {worldName}");
+    }
+
+    /// <summary>
+    /// Permanently deletes all benchmark saves to free up disk space.
+    /// </summary>
+    public static void ClearAllBenchmarks()
+    {
+        string path = Path.Combine(Application.persistentDataPath, "Benchmark_Saves");
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, true);
+            Debug.Log("Cleared all benchmark saves.");
+        }
     }
 
     // --- Helper methods ---

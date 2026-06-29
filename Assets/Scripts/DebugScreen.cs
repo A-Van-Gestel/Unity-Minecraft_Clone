@@ -1,13 +1,15 @@
 using System;
 using System.Text;
 using Data;
+using DebugVisualizations;
+using Helpers;
 using Helpers.UI;
 using JetBrains.Annotations;
+using Jobs.BurstData;
 using MyBox;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Profiling;
-using Stopwatch = System.Diagnostics.Stopwatch;
 
 public class DebugScreen : MonoBehaviour
 {
@@ -82,9 +84,6 @@ public class DebugScreen : MonoBehaviour
     private readonly StringBuilder _middleRightBuilder = new StringBuilder();
     private readonly StringBuilder _bottomRightBuilder = new StringBuilder();
 
-    // --- Cached Conversion Factor ---
-    private static readonly double s_tickToMs = 1000.0 / Stopwatch.Frequency;
-
     // --- Cached Data (updated periodically) ---
     private VoxelState? _groundVoxelState;
     private Vector3Int? _groundVoxelPos;
@@ -93,6 +92,9 @@ public class DebugScreen : MonoBehaviour
 
     [CanBeNull]
     private Chunk _currentChunk;
+
+    // Graphics API name is constant for the session; cache it once to avoid per-refresh enum ToString() garbage.
+    private string _graphicsApiName;
 
     // --- Timers ---
     private float _textUpdateTimer;
@@ -135,6 +137,9 @@ public class DebugScreen : MonoBehaviour
         // Get references once.
         _world = World.Instance;
         _input = InputManager.Instance;
+
+        // The graphics device type never changes during a session — format it once.
+        _graphicsApiName = SystemInfo.graphicsDeviceType.ToString();
 
         // Fail-safe if references aren't set in the inspector
         if (!_player)
@@ -296,7 +301,7 @@ public class DebugScreen : MonoBehaviour
 
         // We ALWAYS populate the top left, as it contains the FPS counter
         PopulateTopLeftBuilder();
-        _topLeftText.text = _topLeftBuilder.ToString();
+        _topLeftText.SetText(_topLeftBuilder);
 
         // Skip building the rest of the strings if we are in FPS Only mode
         if (CurrentMode == DebugMode.FPSOnly) return;
@@ -306,7 +311,7 @@ public class DebugScreen : MonoBehaviour
         {
             _topRightBuilder.Clear();
             PopulateTopRightBuilder();
-            _topRightText.text = _topRightBuilder.ToString();
+            _topRightText.SetText(_topRightBuilder);
             return;
         }
 
@@ -326,11 +331,11 @@ public class DebugScreen : MonoBehaviour
         PopulateBottomRightBuilder();
 
         // Set the text property once per UI element.
-        _middleLeftText.text = _middleLeftBuilder.ToString();
-        _bottomLeftText.text = _bottomLeftBuilder.ToString();
-        _topRightText.text = _topRightBuilder.ToString();
-        _middleRightText.text = _middleRightBuilder.ToString();
-        _bottomRightText.text = _bottomRightBuilder.ToString();
+        _middleLeftText.SetText(_middleLeftBuilder);
+        _bottomLeftText.SetText(_bottomLeftBuilder);
+        _topRightText.SetText(_topRightBuilder);
+        _middleRightText.SetText(_middleRightBuilder);
+        _bottomRightText.SetText(_bottomRightBuilder);
     }
 
     private void PopulateTopLeftBuilder()
@@ -342,8 +347,9 @@ public class DebugScreen : MonoBehaviour
         _topLeftBuilder.AppendLine("Minecraft Clone in Unity");
         if (CurrentMode != DebugMode.FPSOnly)
         {
-            _topLeftBuilder.Append("Graphics API: ").AppendLine(SystemInfo.graphicsDeviceType.ToString());
+            _topLeftBuilder.Append("Graphics API: ").AppendLine(_graphicsApiName);
         }
+
         PerformanceMonitor perf = PerformanceMonitor.Instance;
         int wallFps = perf != null ? Mathf.RoundToInt(perf.WallFPS) : 0;
         _topLeftBuilder.Append(wallFps).AppendLine(" fps");
@@ -357,42 +363,59 @@ public class DebugScreen : MonoBehaviour
         _topLeftBuilder.Append("XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
             .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
-        _topLeftBuilder.Append(" | Eye Level: ").AppendFormat("{0:F2}", playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f).AppendLine();
-        _topLeftBuilder.Append("Looking Angle H / V: ").AppendFormat("{0:F2} / {1:F2}", lookingDirection.x, lookingDirection.y)
-            .Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
+        _topLeftBuilder.Append(" | Eye Level: ");
+        _topLeftBuilder.AppendFixed(playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f, 2);
+        _topLeftBuilder.AppendLine();
+        _topLeftBuilder.Append("Looking Angle H / V: ");
+        _topLeftBuilder.AppendFixed(lookingDirection.x, 2);
+        _topLeftBuilder.Append(" / ");
+        _topLeftBuilder.AppendFixed(lookingDirection.y, 2);
+        _topLeftBuilder.Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
         _topLeftBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
         _topLeftBuilder.Append("Seed: ").Append(_world.worldData.seed).AppendLine();
         _topLeftBuilder.AppendLine();
 
         // --- Player & Speed Info ---
         _topLeftBuilder.AppendLine("PLAYER:");
-        _topLeftBuilder.Append("isGrounded: ").Append(_player.isGrounded)
-            .Append(" | isFlying (").Append(_input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.isFlying)
-            .Append(" | isNoclipping (").Append(_input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.isNoclipping)
+        _topLeftBuilder.Append("isGrounded: ").Append(_player.IsGrounded)
+            .Append(" | isFlying (").Append(_input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.IsFlying)
+            .Append(" | isNoclipping (").Append(_input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.IsNoclipping)
             .Append(" | showHighlight (").Append(_input.GetBindingDisplayString(GameAction.ToggleBlockHighlight)).Append("): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
-        _topLeftBuilder.Append("SPEED: Current: ").AppendFormat("{0:F1}", _player.MoveSpeed)
-            .Append(" | Flying: ").AppendFormat("{0:F1}", _player.VoxelRigidbody.flyingSpeed).AppendLine();
-        _topLeftBuilder.Append("Velocity XYZ: ").AppendFormat("{0:F4} / {1:F4} / {2:F4}", _player.Velocity.x, _player.Velocity.y, _player.Velocity.z).AppendLine();
+        _topLeftBuilder.Append("SPEED: Current: ");
+        _topLeftBuilder.AppendFixed(_player.MoveSpeed, 1);
+        _topLeftBuilder.Append(" | Flying: ");
+        _topLeftBuilder.AppendFixed(_player.VoxelRigidbody.flyingSpeed, 1);
+        _topLeftBuilder.AppendLine();
+        _topLeftBuilder.Append("Velocity XYZ: ");
+        _topLeftBuilder.AppendFixed(_player.Velocity.x, 4);
+        _topLeftBuilder.Append(" / ");
+        _topLeftBuilder.AppendFixed(_player.Velocity.y, 4);
+        _topLeftBuilder.Append(" / ");
+        _topLeftBuilder.AppendFixed(_player.Velocity.z, 4);
+        _topLeftBuilder.AppendLine();
         _topLeftBuilder.AppendLine();
 
         // --- Chunk Info ---
         _topLeftBuilder.AppendLine("CHUNK:");
-        string activeBlockBehaviorVoxelsCount = _currentChunk != null ? _currentChunk.GetActiveVoxelCount().ToString() : "NULL";
-        string totalActiveVoxels = _world.GetTotalActiveVoxelsInWorld().ToString();
-        string activeChunksCount = _world.ChunkPool.ActiveChunks.ToString();
-        string pooledChunksCount = _world.ChunkPool.PooledChunks.ToString();
-        string pooledChunkBordersCount = _world.ChunkPool.PooledBorders.ToString();
-        string pooledChunkDataCount = _world.ChunkPool.PooledData.ToString();
-        string pooledChunkSectionsCount = _world.ChunkPool.PooledSections.ToString();
-        string chunksToBuildMeshInfo = World.Instance.GetMeshQueueDebugInfo();
-        string voxelModificationsCount = _world.GetVoxelModificationsCount().ToString();
-        _topLeftBuilder.Append("Active Voxels in Chunk: ").AppendLine(activeBlockBehaviorVoxelsCount);
-        _topLeftBuilder.Append("Total Active Voxels in World: ").AppendLine(totalActiveVoxels);
-        _topLeftBuilder.Append("Total Active Chunks: ").AppendLine(activeChunksCount);
-        _topLeftBuilder.AppendLine($" ├ Chunks unused in Pool: {pooledChunksCount} | Borders unused in Pool: {pooledChunkBordersCount}");
-        _topLeftBuilder.AppendLine($" └ Data unused in Pool: {pooledChunkDataCount} | Sections unused in Pool: {pooledChunkSectionsCount}");
-        _topLeftBuilder.Append("Total Chunks to Build Mesh: ").AppendLine(chunksToBuildMeshInfo);
-        _topLeftBuilder.Append("Total Voxel Modifications: ").AppendLine(voxelModificationsCount);
+        _topLeftBuilder.Append("Active Voxels in Chunk: ");
+        if (_currentChunk != null)
+            _topLeftBuilder.Append(_currentChunk.GetActiveVoxelCount());
+        else
+            _topLeftBuilder.Append("NULL");
+        _topLeftBuilder.AppendLine();
+        _topLeftBuilder.Append("Total Active Voxels in World: ").Append(_world.GetTotalActiveVoxelsInWorld()).AppendLine();
+        _topLeftBuilder.Append("Total Active Chunks: ").Append(_world.ChunkPool.ActiveChunks).AppendLine();
+        _topLeftBuilder.Append(" ├ Chunks unused in Pool: ").Append(_world.ChunkPool.PooledChunks)
+            .Append(" | Borders unused in Pool: ").Append(_world.ChunkPool.PooledBorders).AppendLine();
+        _topLeftBuilder.Append(" └ Data unused in Pool: ").Append(_world.ChunkPool.PooledData)
+            .Append(" | Sections unused in Pool: ").Append(_world.ChunkPool.PooledSections).AppendLine();
+        _topLeftBuilder.Append("Total Chunks to Build Mesh: ");
+        _world.AppendMeshQueueDebugInfo(_topLeftBuilder);
+        _topLeftBuilder.AppendLine();
+        _topLeftBuilder.Append("Total Voxel Modifications: ").Append(_world.GetVoxelModificationsCount()).AppendLine();
+
+        // --- Section Info ---
+        AppendSectionInfo(playerPosition);
 
         // --- Voxel Info ---
         _topLeftBuilder.AppendLine();
@@ -414,7 +437,7 @@ public class DebugScreen : MonoBehaviour
 
     private void PopulateTopRightBuilder()
     {
-        var perf = PerformanceMonitor.Instance;
+        PerformanceMonitor perf = PerformanceMonitor.Instance;
 
         // --- Performance Info ---
         _topRightBuilder.AppendLine("PERFORMANCE:");
@@ -426,20 +449,20 @@ public class DebugScreen : MonoBehaviour
         else
         {
             // --- FPS & Frame Time ---
-            _topRightBuilder.Append("CPU FPS:  ").AppendLine(Mathf.RoundToInt(perf.CpuFPS).ToString());
-            _topRightBuilder.Append("Wall FPS: ").AppendLine(Mathf.RoundToInt(perf.WallFPS).ToString());
-            _topRightBuilder.Append("CPU Time:   ").AppendLine(FormatTicksAsMs(perf.CpuFrameTime.GetAverage()));
-            _topRightBuilder.Append("Wall Time:  ").AppendLine(FormatTicksAsMs(perf.WallFrameTime.GetAverage()));
-            _topRightBuilder.Append("Idle/Other: ").Append(perf.IdleTimeMs.ToString("F2")).AppendLine(" ms");
+            _topRightBuilder.Append("CPU FPS:  ").Append(Mathf.RoundToInt(perf.CpuFPS)).AppendLine();
+            _topRightBuilder.Append("Wall FPS: ").Append(Mathf.RoundToInt(perf.WallFPS)).AppendLine();
+            _topRightBuilder.Append("CPU Time:   ").AppendMs(perf.CpuFrameTime.GetAverage()).AppendLine();
+            _topRightBuilder.Append("Wall Time:  ").AppendMs(perf.WallFrameTime.GetAverage()).AppendLine();
+            _topRightBuilder.Append("Idle/Other: ").AppendFixed(perf.IdleTimeMs, 2).Append(" ms").AppendLine();
             _topRightBuilder.AppendLine();
 
             // --- Phase Breakdown ---
             _topRightBuilder.AppendLine("--- CPU Phases ---");
-            _topRightBuilder.Append("FixedUpdate: ").AppendLine(FormatTicksAsMs(perf.FixedUpdateTime.GetAverage()));
-            _topRightBuilder.Append("Update:      ").AppendLine(FormatTicksAsMs(perf.UpdatePhaseTime.GetAverage()));
-            _topRightBuilder.Append("Coroutine:   ").AppendLine(FormatTicksAsMs(perf.CoroutinePhaseTime.GetAverage()));
-            _topRightBuilder.Append("LateUpdate:  ").AppendLine(FormatTicksAsMs(perf.LateUpdateTime.GetAverage()));
-            _topRightBuilder.Append("Render/GUI:  ").AppendLine(FormatTicksAsMs(perf.RenderTime.GetAverage()));
+            _topRightBuilder.Append("FixedUpdate: ").AppendMs(perf.FixedUpdateTime.GetAverage()).AppendLine();
+            _topRightBuilder.Append("Update:      ").AppendMs(perf.UpdatePhaseTime.GetAverage()).AppendLine();
+            _topRightBuilder.Append("Coroutine:   ").AppendMs(perf.CoroutinePhaseTime.GetAverage()).AppendLine();
+            _topRightBuilder.Append("LateUpdate:  ").AppendMs(perf.LateUpdateTime.GetAverage()).AppendLine();
+            _topRightBuilder.Append("Render/GUI:  ").AppendMs(perf.RenderTime.GetAverage()).AppendLine();
             _topRightBuilder.AppendLine();
 
             // --- Memory ---
@@ -448,22 +471,22 @@ public class DebugScreen : MonoBehaviour
             // Unity Native Memory
             long totalAllocated = Profiler.GetTotalAllocatedMemoryLong();
             long totalReserved = Profiler.GetTotalReservedMemoryLong();
-            _topRightBuilder.Append("Native Alloc: ").AppendLine(FormatBytes(totalAllocated));
-            _topRightBuilder.Append("Native Rsvd:  ").AppendLine(FormatBytes(totalReserved));
+            _topRightBuilder.Append("Native Alloc: ").AppendBytes(totalAllocated).AppendLine();
+            _topRightBuilder.Append("Native Rsvd:  ").AppendBytes(totalReserved).AppendLine();
 
             // Managed GC Memory
             long gcMemory = GC.GetTotalMemory(false);
-            _topRightBuilder.Append("Managed GC:   ").AppendLine(FormatBytes(gcMemory));
+            _topRightBuilder.Append("Managed GC:   ").AppendBytes(gcMemory).AppendLine();
 
             // GC Allocation per frame: directly shows how much managed garbage each frame produces.
             // A high value here indicates excessive allocations that will trigger frequent GC collections.
-            _topRightBuilder.Append("GC Alloc/frame: ").AppendLine(FormatBytes(perf.GcAllocationPerFrame.GetAverage()));
+            _topRightBuilder.Append("GC Alloc/frame: ").AppendBytes(perf.GcAllocationPerFrame.GetAverage()).AppendLine();
 
             // Read generational collections directly, offset by the session baseline.
             for (int g = 0; g <= GC.MaxGeneration; g++)
             {
                 int sessionHits = GC.CollectionCount(g) - perf.BaselineGcCounts[g];
-                _topRightBuilder.Append("GC Gen").Append(g).Append(" Hits: ").AppendLine(sessionHits.ToString());
+                _topRightBuilder.Append("GC Gen").Append(g).Append(" Hits: ").Append(sessionHits).AppendLine();
             }
         }
 
@@ -471,7 +494,7 @@ public class DebugScreen : MonoBehaviour
 
         // --- Display Current Visualization Mode ---
         _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
-        _topRightBuilder.Append("Mode (").Append(_input.GetBindingDisplayString(GameAction.CycleVisMode)).Append(" to cycle): ").AppendLine(_world.visualizationMode.ToString());
+        _topRightBuilder.Append("Mode (").Append(_input.GetBindingDisplayString(GameAction.CycleVisMode)).Append(" to cycle): ").AppendLine(VisualizationModeToString(_world.visualizationMode));
         _topRightBuilder.AppendLine(" └ Unused in Pool: ").Append(_world.ChunkPool.PooledVisualizers);
 
         _topRightBuilder.AppendLine();
@@ -488,6 +511,57 @@ public class DebugScreen : MonoBehaviour
     #region Inspector Methods
 
     /// <summary>
+    /// Appends section-level debug information for the chunk section the player currently occupies.
+    /// </summary>
+    private void AppendSectionInfo(Vector3 playerPosition)
+    {
+        _topLeftBuilder.AppendLine();
+        _topLeftBuilder.AppendLine("SECTION:");
+
+        if (_currentChunk == null)
+        {
+            _topLeftBuilder.AppendLine("None");
+            return;
+        }
+
+        ChunkData chunkData = _currentChunk.ChunkData;
+        int playerY = Mathf.FloorToInt(playerPosition.y);
+        int sectionIndex = Mathf.Clamp(playerY / ChunkMath.SECTION_SIZE, 0, chunkData.sections.Length - 1);
+        ChunkSection section = chunkData.sections[sectionIndex];
+        byte uniformSky = chunkData.SectionUniformSkyLevel[sectionIndex];
+        bool isCompact = uniformSky != ChunkData.UNIFORM_SKY_NONE;
+
+        _topLeftBuilder.Append("Index: ").Append(sectionIndex)
+            .Append(" (Y ").Append(sectionIndex * ChunkMath.SECTION_SIZE)
+            .Append("-").Append((sectionIndex + 1) * ChunkMath.SECTION_SIZE - 1).Append(')').AppendLine();
+
+        if (isCompact && section == null)
+        {
+            _topLeftBuilder.AppendLine("State: Compact (not allocated)");
+            _topLeftBuilder.Append("Uniform Sky Level: ").Append(uniformSky).AppendLine();
+        }
+        else if (isCompact)
+        {
+            _topLeftBuilder.AppendLine("State: Compact (voxels only)");
+            _topLeftBuilder.Append("Uniform Sky Level: ").Append(uniformSky).AppendLine();
+            _topLeftBuilder.Append("Non-Air: ").Append(section.nonAirCount)
+                .Append(" | Opaque: ").Append(section.opaqueCount).AppendLine();
+        }
+        else if (section == null)
+        {
+            _topLeftBuilder.AppendLine("State: Null (no data)");
+        }
+        else
+        {
+            _topLeftBuilder.AppendLine("State: Full (allocated)");
+            _topLeftBuilder.Append("Non-Air: ").Append(section.nonAirCount)
+                .Append(" | Opaque: ").Append(section.opaqueCount).AppendLine();
+            _topLeftBuilder.Append("Empty: ").Append(BoolToYesNoString(section.IsEmpty))
+                .Append(" | Fully Solid: ").Append(BoolToYesNoString(section.IsFullySolid)).AppendLine();
+        }
+    }
+
+    /// <summary>
     /// Appends a streamlined set of voxel properties to a StringBuilder,
     /// showing only the data relevant to the block's type.
     /// </summary>
@@ -499,31 +573,66 @@ public class DebugScreen : MonoBehaviour
             Vector3Int voxelPos = posNullable.Value;
             BlockType props = state.Properties;
 
-            // Determine if the voxel is active.
+            // Determine if the voxel is active and read light data from the section.
             Chunk targetChunk = _world.GetChunkFromVector3(voxelPos);
             bool isVoxelActive = false;
+            byte skyLight = 0;
+            byte blockLight = 0;
             if (targetChunk != null)
             {
                 Vector3Int localPos = targetChunk.GetVoxelPositionInChunkFromGlobalVector3(voxelPos);
                 isVoxelActive = targetChunk.IsVoxelActive(localPos);
+                ushort lightData = targetChunk.ChunkData.GetLightData(localPos.x, localPos.y, localPos.z);
+                skyLight = LightBitMapping.GetSkyLight(lightData);
+                blockLight = LightBitMapping.GetMaxBlocklight(lightData);
             }
 
             // --- Always-on Information ---
             builder.Append("Name: ").AppendLine(props.blockName);
             builder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
             builder.Append("Is Active: ").AppendLine(BoolToYesNoString(isVoxelActive));
-            builder.Append("Light (Sun/Block/Total): ").Append(state.Sunlight).Append(" / ").Append(state.Blocklight).Append(" / ").Append(state.light).AppendLine();
+            builder.Append("Light (Sky/Block/Max): ").Append(skyLight).Append(" / ").Append(blockLight).Append(" / ").Append(Math.Max(skyLight, blockLight)).AppendLine();
+            builder.Append("Meta: 0x").AppendHex2(state.Meta).AppendLine();
 
             // --- Context-Specific Information ---
-            if (props.fluidType != FluidType.None)
+            if (props.fluidType != FluidType.None || props.metadataSchema == MetadataSchema.FluidLevel4)
             {
                 // For fluids, show fluid-related properties.
-                builder.Append("Fluid Level: ").AppendLine(state.FluidLevel.ToString());
+                builder.Append("Fluid Level: ")
+                    .Append(BurstVoxelMetadataUtility.DecodeFluidLevel(state.Meta)).AppendLine();
             }
             else
             {
-                // For non-fluids (solids), show orientation.
-                builder.Append("Orientation: ").AppendLine(state.orientation.ToString());
+                switch (props.metadataSchema)
+                {
+                    case MetadataSchema.Axis3:
+                    {
+                        byte defaultMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Axis3, props.defaultMetadata, BurstVoxelMetadataUtility.AXIS_Y);
+                        byte normalizedMeta = BurstVoxelMetadataUtility.NormalizeMeta(
+                            MetadataSchema.Axis3, state.Meta, defaultMeta);
+                        byte axis = BurstVoxelMetadataUtility.DecodeAxis3(normalizedMeta);
+
+                        builder.Append("Axis: ").Append(AxisToString(axis)).Append(" (").Append(axis).Append(')');
+                        if (normalizedMeta != state.Meta)
+                        {
+                            builder.Append(" [normalized]");
+                        }
+
+                        builder.AppendLine();
+                        break;
+                    }
+
+                    case MetadataSchema.HorizontalOnly:
+                        builder.Append("Yaw: ")
+                            .Append(BurstVoxelMetadataUtility.DecodeHorizontalOnly(state.Meta)).AppendLine();
+                        break;
+
+                    default:
+                        builder.Append("Orientation: ")
+                            .Append(state.GetOrientation(props.metadataSchema)).AppendLine();
+                        break;
+                }
             }
 
             // --- General Properties & Tags ---
@@ -532,7 +641,9 @@ public class DebugScreen : MonoBehaviour
                 .Append(" | Opaque: ").Append(BoolToYesNoString(props.IsOpaque))
                 .Append(" | Light Source: ").Append(BoolToYesNoString(props.IsLightSource))
                 .AppendLine();
-            builder.Append("Tags: ").AppendLine(props.tags.ToString());
+            builder.Append("Tags: ");
+            AppendTags(builder, props.tags);
+            builder.AppendLine();
         }
         else
         {
@@ -545,25 +656,73 @@ public class DebugScreen : MonoBehaviour
     #region Formatting Methods
 
     /// <summary>
-    /// Formats Stopwatch ticks into a human-readable milliseconds string.
+    /// Maps a <see cref="DebugVisualizationMode"/> to its display name without the per-refresh
+    /// allocation that <see cref="Enum.ToString()"/> would incur (returns interned literals).
     /// </summary>
-    private static string FormatTicksAsMs(long ticks)
+    private static string VisualizationModeToString(DebugVisualizationMode mode)
     {
-        double milliseconds = ticks * s_tickToMs;
-        return $"{milliseconds:F2} ms";
+        return mode switch
+        {
+            DebugVisualizationMode.None => "None",
+            DebugVisualizationMode.ActiveVoxels => "ActiveVoxels",
+            DebugVisualizationMode.Sunlight => "Sunlight",
+            DebugVisualizationMode.Blocklight => "Blocklight",
+            DebugVisualizationMode.FluidLevel => "FluidLevel",
+            DebugVisualizationMode.SunlightChunkBorder => "SunlightChunkBorder",
+            DebugVisualizationMode.CollisionBounds => "CollisionBounds",
+            DebugVisualizationMode.SmoothLightingData => "SmoothLightingData",
+            _ => "Unknown",
+        };
     }
 
     /// <summary>
-    /// Formats a byte count into a human-readable string (B, KB, MB).
+    /// Appends the set <see cref="BlockTags"/> flags as a comma-separated list (matching
+    /// <c>Enum.ToString()</c> output for the <c>[Flags]</c> enum) without allocating. Emits
+    /// "NONE" when no flags are set.
     /// </summary>
-    private static string FormatBytes(long bytes)
+    /// <param name="builder">The builder to append to.</param>
+    /// <param name="tags">The flags to format.</param>
+    private static void AppendTags(StringBuilder builder, BlockTags tags)
     {
-        return bytes switch
+        if (tags == BlockTags.NONE)
         {
-            > 1024 * 1024 => $"{bytes / (1024f * 1024f):F2} MB",
-            > 1024 => $"{bytes / 1024f:F1} KB",
-            _ => $"{bytes} B",
-        };
+            builder.Append("NONE");
+            return;
+        }
+
+        bool first = true;
+        AppendTagIfSet(builder, tags, BlockTags.SOLID, "SOLID", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.LIQUID, "LIQUID", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.UNBREAKABLE, "UNBREAKABLE", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.GRAVITY_AFFECTED, "GRAVITY_AFFECTED", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.SOIL, "SOIL", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.WOOD, "WOOD", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.PLANT, "PLANT", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.LEAVES, "LEAVES", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.ROCK, "ROCK", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.MINERAL, "MINERAL", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.ORGANIC, "ORGANIC", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.MAN_MADE, "MAN_MADE", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.CLIMBABLE, "CLIMBABLE", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.REPLACEABLE, "REPLACEABLE", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.REQUIRES_SUPPORT, "REQUIRES_SUPPORT", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.IGNORE_RAYCAST, "IGNORE_RAYCAST", ref first);
+        AppendTagIfSet(builder, tags, BlockTags.DEBUG, "DEBUG", ref first);
+    }
+
+    /// <summary>
+    /// Appends a single tag name (prefixed with ", " unless it is the first) when its bit is set.
+    /// </summary>
+    private static void AppendTagIfSet(StringBuilder builder, BlockTags tags, BlockTags flag, string name, ref bool first)
+    {
+        if ((tags & flag) == 0)
+            return;
+
+        if (!first)
+            builder.Append(", ");
+
+        builder.Append(name);
+        first = false;
     }
 
     /// <summary>
@@ -607,6 +766,17 @@ public class DebugScreen : MonoBehaviour
     }
 
     private static string BoolToYesNoString(bool value) => value ? "Yes" : "No";
+
+    private static string AxisToString(byte axis)
+    {
+        return axis switch
+        {
+            0 => "Y",
+            1 => "X",
+            2 => "Z",
+            _ => "Invalid",
+        };
+    }
 
     #endregion
 }

@@ -25,17 +25,40 @@ namespace Editor.Libraries
 
         public bool ForceOpaque { get; set; } = false;
         public Color BackgroundColor { get; set; } = new Color(0, 0, 0, 0);
-        public Vector3 CameraPosition { get; set; } = new Vector3(0, 0, -3.5f);
+        private Vector3 _cameraPosition = new Vector3(0, 0, -3.5f);
+
+        public Vector3 CameraPosition
+        {
+            get => _cameraPosition;
+            set
+            {
+                _cameraPosition = value;
+                if (_previewRenderUtility != null)
+                {
+                    _previewRenderUtility.camera.transform.position = _cameraPosition;
+                }
+            }
+        }
+
         public float CameraFieldOfView { get; set; } = 30f;
         public float LightIntensity { get; set; } = 1.2f;
+
+        /// <summary>
+        /// Offset applied before rotation so the camera orbits around this point
+        /// instead of the origin. Set to the center of visible content when clipping.
+        /// </summary>
+        public Vector3 PivotOffset { get; set; }
+
+        public Bounds? WireframeBounds { get; set; }
+        public Color WireframeColor { get; set; } = Color.green;
 
         private Material _blockPreviewMaterial;
         private Material _fluidPreviewMaterial;
         private Material _activePreviewMaterial;
         private Mesh _previewMesh;
 
-        private static readonly int s_mainTexId = Shader.PropertyToID("_MainTex");
         private static readonly int s_forceOpaqueId = Shader.PropertyToID("_ForceOpaque");
+        private static readonly int s_color = Shader.PropertyToID("_Color");
 
         public bool HasMesh => _previewMesh != null;
 
@@ -62,8 +85,8 @@ namespace Editor.Libraries
                 _previewRenderUtility = new PreviewRenderUtility();
 
                 // --- Enhanced Camera Setup ---
-                _previewRenderUtility.camera.nearClipPlane = 0.1f;
-                _previewRenderUtility.camera.farClipPlane = 10f;
+                _previewRenderUtility.camera.nearClipPlane = 0.01f;
+                _previewRenderUtility.camera.farClipPlane = 10000f;
 
                 // Make the camera background transparent to reveal the checkerboard.
                 _previewRenderUtility.camera.cameraType = CameraType.Preview;
@@ -80,26 +103,9 @@ namespace Editor.Libraries
                 light.transform.rotation = Quaternion.Euler(30, 30, 0);
 
                 // Initialize preview materials with dedicated editor shaders.
-                // These shaders share includes with the game shaders but substitute
-                // hardcoded lighting defaults and solid backgrounds for SampleSceneColor.
-                _blockPreviewMaterial = CreatePreviewMaterial("Hidden/Editor/BlockPreview");
-                _fluidPreviewMaterial = CreatePreviewMaterial("Hidden/Editor/FluidPreview");
+                EditorPreviewMaterialUtility.GetConfiguredMaterial(false, null, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
+                EditorPreviewMaterialUtility.GetConfiguredMaterial(true, null, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
             }
-        }
-
-        /// <summary>
-        /// Creates a preview material from a shader name with a fallback to URP/Unlit.
-        /// </summary>
-        private static Material CreatePreviewMaterial(string shaderName)
-        {
-            Shader shader = Shader.Find(shaderName);
-            if (shader == null)
-            {
-                Debug.LogError($"MeshPreviewWidget: Could not find '{shaderName}' shader. Using URP/Unlit fallback.");
-                shader = Shader.Find("Universal Render Pipeline/Unlit");
-            }
-
-            return new Material(shader);
         }
 
         /// <summary>
@@ -114,22 +120,23 @@ namespace Editor.Libraries
                 _previewRenderUtility = null;
             }
 
+            if (_wireCubeMesh != null)
+                Object.DestroyImmediate(_wireCubeMesh);
+            if (_wireMaterial != null)
+                Object.DestroyImmediate(_wireMaterial);
+
             if (_previewMesh != null)
             {
                 Object.DestroyImmediate(_previewMesh);
                 _previewMesh = null;
             }
 
-            if (_blockPreviewMaterial != null)
-            {
-                Object.DestroyImmediate(_blockPreviewMaterial);
-                _blockPreviewMaterial = null;
-            }
+            EditorPreviewMaterialUtility.DisposeCachedMaterials(ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
 
-            if (_fluidPreviewMaterial != null)
+            if (_planeMesh != null)
             {
-                Object.DestroyImmediate(_fluidPreviewMaterial);
-                _fluidPreviewMaterial = null;
+                Object.DestroyImmediate(_planeMesh);
+                _planeMesh = null;
             }
 
             _activePreviewMaterial = null;
@@ -153,24 +160,17 @@ namespace Editor.Libraries
 
             if (targetMaterial == null) return;
 
-            if (isFluid)
-            {
-                // Fluid blocks: use dedicated fluid preview shader with all material properties
-                _activePreviewMaterial = _fluidPreviewMaterial;
-                if (_activePreviewMaterial != null)
-                {
-                    _activePreviewMaterial.CopyPropertiesFromMaterial(targetMaterial);
-                }
-            }
-            else
-            {
-                // Standard/transparent blocks: use block preview shader with texture atlas only
-                _activePreviewMaterial = _blockPreviewMaterial;
-                if (_activePreviewMaterial != null && targetMaterial.HasTexture(s_mainTexId))
-                {
-                    _activePreviewMaterial.SetTexture(s_mainTexId, targetMaterial.GetTexture(s_mainTexId));
-                }
-            }
+            _activePreviewMaterial = EditorPreviewMaterialUtility.GetConfiguredMaterial(
+                isFluid, targetMaterial, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
+        }
+
+        /// <summary>
+        /// Updates the shared materials used for multi-mesh previews.
+        /// </summary>
+        public void SetMaterialTargets(Material blockMaterial, Material fluidMaterial)
+        {
+            EditorPreviewMaterialUtility.GetConfiguredMaterial(false, blockMaterial, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
+            EditorPreviewMaterialUtility.GetConfiguredMaterial(true, fluidMaterial, ref _blockPreviewMaterial, ref _fluidPreviewMaterial);
         }
 
         /// <summary>
@@ -216,12 +216,230 @@ namespace Editor.Libraries
                     _previewRenderUtility.DrawMesh(_previewMesh, rotationMatrix, _activePreviewMaterial, 1);
                 }
 
+                if (WireframeBounds.HasValue)
+                {
+                    // Center the AABB around 0,0,0 (subtract 0.5)
+                    Vector3 center = WireframeBounds.Value.center - new Vector3(0.5f, 0.5f, 0.5f);
+                    DrawWireCube(center, WireframeBounds.Value.size, WireframeColor, Vector3.zero);
+                }
+
                 _previewRenderUtility.Render();
                 Texture previewTexture = _previewRenderUtility.EndPreview();
 
                 // Draw the rendered object on top of the checkerboard
                 GUI.DrawTexture(previewRect, previewTexture);
             }
+        }
+
+        /// <summary>
+        /// Begins a custom multi-mesh drawing session.
+        /// </summary>
+        public void BeginDraw(Rect previewRect)
+        {
+            if (Event.current.type == EventType.Repaint)
+            {
+                EditorGUIHelper.DrawCheckerboardBackground(previewRect);
+            }
+
+            if (_previewRenderUtility != null)
+            {
+                PreviewRotation = EditorGUIHelper.HandleDragRotation(previewRect, PreviewRotation, DragSensitivity);
+                _previewRenderUtility.BeginPreview(previewRect, GUIStyle.none);
+            }
+        }
+
+        private MaterialPropertyBlock _previewPropertyBlock;
+
+        /// <summary>
+        /// Draws a single mesh within a multi-mesh drawing session.
+        /// </summary>
+        public void DrawMesh(Mesh mesh, Vector3 localPosition, bool isFluid, Color? overrideColor = null)
+        {
+            if (_previewRenderUtility == null || mesh == null) return;
+
+            Material mat = isFluid ? _fluidPreviewMaterial : _blockPreviewMaterial;
+            if (mat == null) return;
+
+            _previewPropertyBlock ??= new MaterialPropertyBlock();
+
+            // We must clear the block each time to avoid applying old properties, but we actually
+            // want to preserve any existing material properties and just override what we need.
+            _previewPropertyBlock.Clear();
+            _previewPropertyBlock.SetFloat(s_forceOpaqueId, ForceOpaque ? 1.0f : 0.0f);
+            _previewPropertyBlock.SetColor(s_color, overrideColor ?? Color.white);
+
+            // The rotation matrix pivots around (0,0,0) (the center of the structure view)
+            Matrix4x4 rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
+            // The position matrix moves the block to its local position
+            Matrix4x4 positionMatrix = Matrix4x4.Translate(localPosition);
+
+            // Apply rotation first, then translation
+            Matrix4x4 finalMatrix = rotationMatrix * positionMatrix;
+
+            _previewRenderUtility.DrawMesh(mesh, finalMatrix, mat, 0, _previewPropertyBlock);
+
+            if (mesh.subMeshCount > 1)
+            {
+                _previewRenderUtility.DrawMesh(mesh, finalMatrix, mat, 1, _previewPropertyBlock);
+            }
+        }
+
+        /// <summary>
+        /// Ends a custom multi-mesh drawing session and draws the result to the GUI.
+        /// </summary>
+        public void EndDraw(Rect previewRect)
+        {
+            if (_previewRenderUtility != null)
+            {
+                _previewRenderUtility.Render();
+                Texture previewTexture = _previewRenderUtility.EndPreview();
+                GUI.DrawTexture(previewRect, previewTexture);
+            }
+        }
+
+        private Mesh _wireCubeMesh;
+        private Material _wireMaterial;
+
+        /// <summary>
+        /// Draws a mesh with an explicit material and local-to-world transform, bypassing the
+        /// block preview material pipeline. Used for rendering section meshes from the meshing job.
+        /// Must be called between <see cref="BeginDraw"/> and <see cref="EndDraw"/>.
+        /// </summary>
+        /// <param name="mesh">The mesh to draw.</param>
+        /// <param name="localToWorld">The local-to-world transform matrix (before preview rotation).</param>
+        /// <param name="material">The material to use for rendering.</param>
+        /// <param name="submesh">The submesh index to draw.</param>
+        public void DrawMeshDirect(Mesh mesh, Matrix4x4 localToWorld, Material material, int submesh)
+        {
+            if (_previewRenderUtility == null || mesh == null || material == null) return;
+            if (submesh >= mesh.subMeshCount) return;
+
+            Matrix4x4 rotationMatrix = Matrix4x4.TRS(
+                Vector3.zero,
+                Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0),
+                Vector3.one);
+
+            Matrix4x4 pivotShift = Matrix4x4.Translate(-PivotOffset);
+            _previewRenderUtility.DrawMesh(mesh, rotationMatrix * pivotShift * localToWorld, material, submesh);
+        }
+
+        /// <summary>
+        /// Handles scroll-wheel zoom by adjusting the camera's Z position.
+        /// Call this during <see cref="BeginDraw"/> or before drawing.
+        /// </summary>
+        /// <param name="previewRect">The rect of the preview area to capture scroll events in.</param>
+        /// <param name="zoomSpeed">How fast scrolling zooms the camera.</param>
+        /// <param name="minDistance">Minimum camera distance (closest zoom).</param>
+        /// <param name="maxDistance">Maximum camera distance (furthest zoom).</param>
+        public void HandleScrollZoom(Rect previewRect, float zoomSpeed = 0.5f, float minDistance = 1f, float maxDistance = 200f)
+        {
+            if (_previewRenderUtility == null) return;
+
+            Event e = Event.current;
+            if (e.type == EventType.ScrollWheel && previewRect.Contains(e.mousePosition))
+            {
+                Vector3 pos = _previewRenderUtility.camera.transform.position;
+                pos.z = Mathf.Clamp(pos.z + e.delta.y * zoomSpeed, -maxDistance, -minDistance);
+                _previewRenderUtility.camera.transform.position = pos;
+                _cameraPosition = pos;
+                e.Use();
+            }
+        }
+
+        /// <summary>
+        /// Draws a wireframe cube within a custom drawing session.
+        /// </summary>
+        /// <param name="center">The center position of the cube relative to the preview pivot.</param>
+        /// <param name="size">The size dimensions of the cube.</param>
+        /// <param name="color">The color of the wireframe lines.</param>
+        /// <param name="localPosition">The overall offset applied to the object in the preview.</param>
+        public void DrawWireCube(Vector3 center, Vector3 size, Color color, Vector3 localPosition)
+        {
+            if (_previewRenderUtility == null) return;
+
+            if (_wireCubeMesh == null)
+            {
+                // Create a basic cube mesh and set topology to Lines
+                _wireCubeMesh = new Mesh();
+                _wireCubeMesh.vertices = new[]
+                {
+                    new Vector3(-0.5f, -0.5f, -0.5f), new Vector3(0.5f, -0.5f, -0.5f), new Vector3(0.5f, 0.5f, -0.5f), new Vector3(-0.5f, 0.5f, -0.5f),
+                    new Vector3(-0.5f, -0.5f, 0.5f), new Vector3(0.5f, -0.5f, 0.5f), new Vector3(0.5f, 0.5f, 0.5f), new Vector3(-0.5f, 0.5f, 0.5f),
+                };
+                _wireCubeMesh.SetIndices(new[]
+                {
+                    0, 1, 1, 2, 2, 3, 3, 0, // Front
+                    4, 5, 5, 6, 6, 7, 7, 4, // Back
+                    0, 4, 1, 5, 2, 6, 3, 7, // Connections
+                }, MeshTopology.Lines, 0);
+            }
+
+            if (_wireMaterial == null)
+            {
+                _wireMaterial = new Material(Shader.Find("Hidden/Internal-Colored"));
+            }
+
+            _previewPropertyBlock ??= new MaterialPropertyBlock();
+            _previewPropertyBlock.Clear();
+            _previewPropertyBlock.SetColor(s_color, color);
+
+            Matrix4x4 rotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
+            Matrix4x4 positionMatrix = Matrix4x4.Translate(localPosition + center) * Matrix4x4.Scale(size);
+            Matrix4x4 finalMatrix = rotationMatrix * positionMatrix;
+
+            _previewRenderUtility.DrawMesh(_wireCubeMesh, finalMatrix, _wireMaterial, 0, _previewPropertyBlock);
+        }
+
+        private Mesh _planeMesh;
+
+        /// <summary>
+        /// Draws a transparent plane within a custom drawing session.
+        /// </summary>
+        /// <param name="center">The center position of the plane relative to the preview pivot.</param>
+        /// <param name="size">The size dimensions of the plane.</param>
+        /// <param name="color">The color of the plane (supports transparency via alpha).</param>
+        public void DrawTransparentPlane(Vector3 center, Vector2 size, Color color)
+        {
+            DrawTransparentPlane(center, size, color, Quaternion.identity);
+        }
+
+        /// <summary>
+        /// Draws a transparent plane within a custom drawing session.
+        /// </summary>
+        /// <param name="center">The center position of the plane relative to the preview pivot.</param>
+        /// <param name="size">The size dimensions of the plane.</param>
+        /// <param name="color">The color of the plane (supports transparency via alpha).</param>
+        /// <param name="rotation">The rotation of the plane.</param>
+        public void DrawTransparentPlane(Vector3 center, Vector2 size, Color color, Quaternion rotation)
+        {
+            if (_previewRenderUtility == null) return;
+
+            if (_planeMesh == null)
+            {
+                _planeMesh = new Mesh();
+                _planeMesh.vertices = new[]
+                {
+                    new Vector3(-0.5f, 0, -0.5f), new Vector3(0.5f, 0, -0.5f),
+                    new Vector3(-0.5f, 0, 0.5f), new Vector3(0.5f, 0, 0.5f),
+                };
+                _planeMesh.SetIndices(new[] { 0, 2, 1, 2, 3, 1 }, MeshTopology.Triangles, 0);
+            }
+
+            if (_wireMaterial == null)
+            {
+                _wireMaterial = new Material(Shader.Find("Hidden/Internal-Colored"));
+            }
+
+            _previewPropertyBlock ??= new MaterialPropertyBlock();
+            _previewPropertyBlock.Clear();
+            _previewPropertyBlock.SetColor(s_color, color);
+
+            Matrix4x4 cameraRotationMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.Euler(PreviewRotation.y, 0, 0) * Quaternion.Euler(0, PreviewRotation.x, 0), Vector3.one);
+            Matrix4x4 pivotShift = Matrix4x4.Translate(-PivotOffset);
+            Matrix4x4 planeTRS = Matrix4x4.TRS(center, rotation, new Vector3(size.x, 1, size.y));
+            Matrix4x4 finalMatrix = cameraRotationMatrix * pivotShift * planeTRS;
+
+            _previewRenderUtility.DrawMesh(_planeMesh, finalMatrix, _wireMaterial, 0, _previewPropertyBlock);
         }
     }
 }

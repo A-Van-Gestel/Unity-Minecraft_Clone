@@ -1,4 +1,4 @@
-﻿// ReSharper disable InconsistentNaming
+// ReSharper disable InconsistentNaming
 
 using System;
 
@@ -34,6 +34,11 @@ namespace Data
         MAN_MADE = 1 << 11, // 2048
         CLIMBABLE = 1 << 12, // 4096 (Ladders, Vines, etc.)
         REPLACEABLE = 1 << 13, // 8192 (Tall grass, etc. can be replaced by placing a block)
+        REQUIRES_SUPPORT = 1 << 14, // 16384 (Breaks when supporting block beneath becomes non-solid)
+        IGNORE_RAYCAST = 1 << 15, // 32768 (Raymarcher always passes through this block)
+
+        // --- Debug Tags ---
+        DEBUG = 1 << 16, // 65536 (Used for debugging purposes, will not be in inventory in production builds)
     }
 
     /// <summary>
@@ -55,5 +60,51 @@ namespace Data
         /// A common override: only allow placement if the target block is Air.
         /// </summary>
         OnlyReplaceAir,
+    }
+
+    /// <summary>
+    /// Utility class for evaluating block tag interactions.
+    /// </summary>
+    public static class BlockTagUtility
+    {
+        /// <summary>
+        /// Evaluates whether an incoming block is allowed to replace an existing block
+        /// based on the tag definitions and replacement rules of both blocks.
+        /// </summary>
+        /// <param name="incomingProps">The block properties of the block being placed.</param>
+        /// <param name="existingProps">The block properties of the block being replaced.</param>
+        /// <returns>True if the replacement is allowed, false otherwise.</returns>
+        public static bool CanReplace(BlockType incomingProps, BlockType existingProps)
+        {
+            // Rule A: Nothing can replace an Unbreakable block.
+            if ((existingProps.tags & BlockTags.UNBREAKABLE) != 0)
+            {
+                return false;
+            }
+
+            // Rule B: If the incoming block has specific replacement rules...
+            if (incomingProps.canReplaceTags != BlockTags.NONE)
+            {
+                // ...and the existing block has NO tags that match, it can't be placed.
+                // The bitwise AND (&) will be 0 if there are no common flags.
+                if ((existingProps.tags & incomingProps.canReplaceTags) == 0)
+                {
+                    // We make one exception: anything can replace "Air", which we define as a block with NONE tags.
+                    if (existingProps.tags != BlockTags.NONE)
+                    {
+                        return false;
+                    }
+                }
+            }
+            // Rule C: If the incoming block is set to NONE, it means it can only
+            // replace Air or any block with the REPLACEABLE tag.
+            else if (existingProps.tags != BlockTags.NONE &&
+                     (existingProps.tags & BlockTags.REPLACEABLE) == 0)
+            {
+                return false;
+            }
+
+            return true;
+        }
     }
 }

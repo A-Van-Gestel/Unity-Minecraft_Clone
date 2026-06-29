@@ -4,10 +4,13 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using Data;
+using Helpers;
 using Jobs;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
@@ -37,8 +40,39 @@ namespace Benchmarks
         /// </summary>
         private enum ChunkDataType
         {
-            Solid, // Easiest case: very few faces to generate.
-            Checkerboard, // Worst case: maximum number of faces to generate.
+            /// <summary>All-stone chunk. Almost no exposed faces — measures vertex-throughput floor.</summary>
+            Solid,
+
+            /// <summary>Alternating stone/air. Worst-case face-generation throughput for the standard cube path.</summary>
+            Checkerboard,
+
+            /// <summary>All-stone with cycling orientation values 0-5. Exercises the per-face rotation
+            /// and `GetTranslatedFaceIndex` paths that the existing `Solid` pattern leaves at identity.
+            /// This is the path Phase 2's meshing rewrite touches.</summary>
+            OrientedCubes,
+
+            /// <summary>Alternating stone/air at <see cref="Checkerboard"/> density, with the stone
+            /// voxels cycling through the 4 supported horizontal orientations. Combines maximum face
+            /// exposure (each stone has 6 air neighbors → 6 faces drawn) with non-identity rotations,
+            /// so the per-face rotation hot path is exercised on ~98k faces/chunk instead of just
+            /// the ~1.5k boundary faces that <see cref="OrientedCubes"/> sees. Strongest detector for
+            /// Phase 2b regressions in the rotation/face-translation code.</summary>
+            OrientedCheckerboard,
+
+            /// <summary>All-water chunk. Exercises `GenerateFluidMeshData` (case 1) end-to-end.</summary>
+            Fluid,
+
+            /// <summary>Alternating leaves/air. Exercises the transparent triangle path with
+            /// <c>renderNeighborFaces=true</c> at the same vertex throughput as <see cref="Checkerboard"/>.
+            /// An all-leaves variant would render every leaf-leaf face twice (because
+            /// <c>renderNeighborFaces</c> disables same-block culling), producing ~55 MB of native
+            /// output per chunk and overwhelming Editor RAM at typical chunk counts.</summary>
+            Transparent,
+
+            /// <summary>Realistic mix: ~70% stone, ~10% air, ~5% directional block (custom mesh),
+            /// ~5% grass blades (cross mesh), ~5% leaves (transparent), ~5% water (fluid). Closest
+            /// proxy to in-game terrain, exercises all four `MeshGenerationJob` render cases.</summary>
+            MixedTerrain,
         }
 
         #endregion
@@ -64,6 +98,26 @@ namespace Benchmarks
         private int _chunksToMesh = 256;
 
 
+        [Header("Upload Benchmark (MR-2 vertex-format win)")]
+        [Tooltip("If checked, the full comparison also times the GPU vertex upload path " +
+                 "(SectionRenderer.UpdateMeshNative → Mesh.SetVertexBufferData) for one chunk's worth " +
+                 "of sections. This is the path the MR-2 vertex-format packing targets; the generation " +
+                 "loop above does not touch it.")]
+        [SerializeField]
+        private bool _runUploadBenchmark = true;
+
+        [Tooltip("The voxel pattern whose generated mesh is repeatedly re-uploaded to measure upload " +
+                 "throughput. Denser patterns (Checkerboard) give a stronger, more stable bandwidth signal.")]
+        [SerializeField]
+        private ChunkDataType _uploadPattern = ChunkDataType.Checkerboard;
+
+        [Tooltip("How many times the full set of section meshes is re-uploaded inside the timed loop. " +
+                 "Higher = more stable per-upload average.")]
+        [SerializeField]
+        [Min(1)]
+        private int _uploadRepeats = 200;
+
+
         [Header("Single Run Settings (Used if Full Comparison is false)")]
         [Tooltip("The scheduling method to test for a single run.")]
         [SerializeField]
@@ -83,6 +137,12 @@ namespace Benchmarks
         [SerializeField]
         private bool _runOnStart = true;
 
+        [Tooltip("If checked, the report (with system-info header and rich-text tags stripped) is written " +
+                 "to a timestamped file under Application.persistentDataPath/Benchmarks/. The file path is " +
+                 "logged to the console after each run.")]
+        [SerializeField]
+        private bool _writeReportToFile = true;
+
 
         [Header("Keybinding")]
         [Tooltip("Press this key to manually trigger the benchmark.")]
@@ -95,6 +155,15 @@ namespace Benchmarks
 
         private World _world;
         private bool _isBenchmarking;
+
+        /// <summary>
+        /// Per-pattern mesh output sizes (vertex + per-submesh triangle-index counts), captured once
+        /// from each scenario's warm-up job. These are the surface-chunk medians the MR-6 pre-size
+        /// constants (<see cref="MeshDataJobOutput"/> capacity hints) are derived from. Keyed by the
+        /// same <c>"{dataType}_{mode}"</c> string the timing results use.
+        /// </summary>
+        private readonly Dictionary<string, MeshOutputCounts> _meshOutputCounts =
+            new Dictionary<string, MeshOutputCounts>();
 
         #endregion
 
@@ -147,15 +216,8 @@ namespace Benchmarks
                 return;
             }
 
-            if (_runFullComparison)
-            {
-                StartCoroutine(RunFullComparisonBenchmark());
-            }
-            else
-            {
-                // Run a single test using the Inspector settings.
-                StartCoroutine(RunSingleBenchmarkFromInspector());
-            }
+            // Run a single test using the Inspector settings.
+            StartCoroutine(_runFullComparison ? RunFullComparisonBenchmark() : RunSingleBenchmarkFromInspector());
         }
 
         /// <summary>
@@ -173,23 +235,42 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// The master coroutine that orchestrates the full comparison benchmark, running all four possible test combinations.
+        /// The master coroutine that orchestrates the full comparison benchmark, running every
+        /// (data type × mode) combination sequentially.
         /// </summary>
         private IEnumerator RunFullComparisonBenchmark()
         {
             _isBenchmarking = true;
             Debug.Log("--- Starting Full Comparison Benchmark ---");
 
+            // Total runtime covers every pattern × mode combination plus per-scenario warm-up and
+            // cleanup. Logged in the report so cross-machine comparisons can spot anomalies in
+            // total wall-clock cost (which scales with `_chunksToMesh` × `_benchmarkRuns` × scenarios).
+            Stopwatch totalStopwatch = Stopwatch.StartNew();
+
             Dictionary<string, long> results = new Dictionary<string, long>();
 
-            // --- Run all 4 combinations sequentially ---
-            yield return StartCoroutine(ExecuteBenchmarkRun(BenchmarkMode.WithDiagonals, ChunkDataType.Solid, result => results["Solid_WithDiagonals"] = result));
-            yield return StartCoroutine(ExecuteBenchmarkRun(BenchmarkMode.CardinalsOnly, ChunkDataType.Solid, result => results["Solid_CardinalsOnly"] = result));
-            yield return StartCoroutine(ExecuteBenchmarkRun(BenchmarkMode.WithDiagonals, ChunkDataType.Checkerboard, result => results["Checkerboard_WithDiagonals"] = result));
-            yield return StartCoroutine(ExecuteBenchmarkRun(BenchmarkMode.CardinalsOnly, ChunkDataType.Checkerboard, result => results["Checkerboard_CardinalsOnly"] = result));
+            // Iterate every data type × every mode in declaration order.
+            foreach (ChunkDataType dataType in Enum.GetValues(typeof(ChunkDataType)))
+            {
+                foreach (BenchmarkMode mode in Enum.GetValues(typeof(BenchmarkMode)))
+                {
+                    string key = $"{dataType}_{mode}";
+                    yield return StartCoroutine(ExecuteBenchmarkRun(mode, dataType, result => results[key] = result));
+                }
+            }
+
+            // Time the GPU upload path separately (the generation loop above never touches it).
+            UploadBenchmarkResult uploadResult = default;
+            if (_runUploadBenchmark)
+            {
+                yield return StartCoroutine(RunUploadBenchmark(result => uploadResult = result));
+            }
+
+            totalStopwatch.Stop();
 
             Debug.Log("--- All Benchmark Runs Complete. Generating Report... ---");
-            GenerateReport(results);
+            GenerateReport(results, totalStopwatch.Elapsed, uploadResult);
             _isBenchmarking = false;
         }
 
@@ -209,6 +290,32 @@ namespace Benchmarks
 
             // Generate the source data ONCE for this set of runs to ensure consistency.
             BenchmarkVoxelData benchmarkData = GenerateBenchmarkData(dataType, Allocator.Persistent);
+
+            // --- Discarded warm-up run ---
+            // Schedule and complete one job before the timed loop to absorb Burst JIT compilation
+            // cost, JobsUtility setup, and first-touch allocator overhead. Without this, the first
+            // iteration of `_benchmarkRuns` is consistently 5-10× slower than subsequent ones,
+            // which contaminates the average. The warm-up's timing is intentionally discarded.
+            {
+                BenchmarkVoxelData warmupInput = new BenchmarkVoxelData(Allocator.Persistent);
+                warmupInput.CopyFrom(benchmarkData);
+                (JobHandle warmupHandle, MeshDataJobOutput warmupOutput) = ScheduleBenchmarkMeshing(warmupInput, mode);
+                warmupHandle.Complete();
+
+                // Capture this pattern's mesh output sizes before disposal — the warm-up job already
+                // produced the exact buffers a real chunk of this pattern emits, so its lengths are the
+                // pre-size reference for MR-6 (vertex counts are backend-independent and deterministic).
+                _meshOutputCounts[$"{dataType}_{mode}"] = new MeshOutputCounts
+                {
+                    Vertices = warmupOutput.Vertices.Length,
+                    OpaqueTris = warmupOutput.Triangles.Length,
+                    TransparentTris = warmupOutput.TransparentTriangles.Length,
+                    FluidTris = warmupOutput.FluidTriangles.Length,
+                };
+
+                warmupOutput.Dispose();
+                warmupInput.Dispose();
+            }
 
             for (int run = 0; run < _benchmarkRuns; run++)
             {
@@ -283,48 +390,32 @@ namespace Benchmarks
         /// <returns>A tuple containing the final JobHandle and the job's output data struct.</returns>
         private (JobHandle handle, MeshDataJobOutput output) ScheduleBenchmarkMeshing(BenchmarkVoxelData data, BenchmarkMode mode)
         {
-            MeshDataJobOutput meshOutput = new MeshDataJobOutput(Allocator.Persistent);
-
-            // If we're in CardinalsOnly mode, create a temporary empty array to pass to the unused job fields.
-            NativeArray<uint> emptyArray = mode == BenchmarkMode.CardinalsOnly
-                ? new NativeArray<uint>(0, Allocator.TempJob)
-                : default;
-
-            MeshGenerationJob job = new MeshGenerationJob
+            // Job field wiring + per-schedule scratch lives in the shared IsolatedJobProbe so the
+            // benchmark and the OM-1 startup calibrator schedule the identical job. Here the live world
+            // supplies the injected job data.
+            // Light maps left default — the benchmark runs only in player builds (job-safety off), and the
+            // job reads zero light for uncreated maps. This preserves the original benchmark's measured path.
+            MeshProbeInput input = new MeshProbeInput
             {
-                Map = data.Center,
-                BlockTypes = _world.JobDataManager.BlockTypesJobData,
-                NeighborBack = data.Back,
-                NeighborFront = data.Front,
-                NeighborLeft = data.Left,
-                NeighborRight = data.Right,
-                NeighborFrontRight = mode == BenchmarkMode.WithDiagonals ? data.FrontRight : emptyArray,
-                NeighborBackRight = mode == BenchmarkMode.WithDiagonals ? data.BackRight : emptyArray,
-                NeighborBackLeft = mode == BenchmarkMode.WithDiagonals ? data.BackLeft : emptyArray,
-                NeighborFrontLeft = mode == BenchmarkMode.WithDiagonals ? data.FrontLeft : emptyArray,
-                CustomMeshes = _world.JobDataManager.CustomMeshesJobData,
-                CustomFaces = _world.JobDataManager.CustomFacesJobData,
-                CustomVerts = _world.JobDataManager.CustomVertsJobData,
-                CustomTris = _world.JobDataManager.CustomTrisJobData,
-                WaterVertexTemplates = _world.FluidVertexTemplates.WaterVertexTemplates,
-                LavaVertexTemplates = _world.FluidVertexTemplates.LavaVertexTemplates,
-                Output = meshOutput,
+                Center = data.Center,
+                Back = data.Back,
+                Front = data.Front,
+                Left = data.Left,
+                Right = data.Right,
+                FrontRight = data.FrontRight,
+                BackRight = data.BackRight,
+                BackLeft = data.BackLeft,
+                FrontLeft = data.FrontLeft,
+                IncludeDiagonals = mode == BenchmarkMode.WithDiagonals,
             };
 
-            // Schedule the job. If we created an empty array, chain its disposal to the job's handle.
-            JobHandle handle = job.Schedule();
-            if (emptyArray.IsCreated)
-            {
-                handle = emptyArray.Dispose(handle);
-            }
-
-            return (handle, meshOutput);
+            return IsolatedJobProbe.ScheduleMesh(input, _world.JobDataManager, _world.FluidVertexTemplates);
         }
 
         /// <summary>
         /// Generates a set of 9 chunk maps filled with a specific voxel pattern for testing.
         /// </summary>
-        /// <param name="type">The pattern to generate (Solid or Checkerboard).</param>
+        /// <param name="type">The pattern to generate.</param>
         /// <param name="allocator">The memory allocator to use for the NativeArrays.</param>
         /// <returns>A BenchmarkVoxelData struct containing the generated maps.</returns>
         private BenchmarkVoxelData GenerateBenchmarkData(ChunkDataType type, Allocator allocator)
@@ -332,8 +423,8 @@ namespace Benchmarks
             BenchmarkVoxelData data = new BenchmarkVoxelData(allocator);
             for (int i = 0; i < data.Center.Length; i++)
             {
-                byte idToPlace = GetVoxelIDForPattern(type, i);
-                uint packed = BurstVoxelDataBitMapping.PackVoxelData(idToPlace, 15, 0, 1, 0);
+                (ushort idToPlace, byte meta) = GetVoxelForPattern(type, i);
+                uint packed = BurstVoxelDataBitMapping.PackVoxelData(idToPlace, meta);
                 data.FillAll(i, packed);
             }
 
@@ -341,26 +432,111 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Determines the block ID for a given index based on the desired data pattern.
+        /// The four horizontal orientations supported by <c>VoxelHelper.GetRotationAngle</c> at v5
+        /// (0=South/Back, 1=North/Front, 4=West/Left, 5=East/Right). Top (2) and Bottom (3) are
+        /// storage-encodable but not yet runtime-supported — passing them to the meshing job triggers
+        /// a `Debug.LogWarning` per voxel from inside Burst, which floods Unity's log queue and leaks
+        /// memory at benchmark scale. Phase 2b adds full support; this array can grow to {0..5} then.
+        /// </summary>
+        private static readonly byte[] s_supportedHorizontalOrientations = { 0, 1, 4, 5 };
+
+        /// <summary>
+        /// Determines the block ID and meta byte for a given voxel index based on the desired data pattern.
         /// </summary>
         /// <param name="type">The data pattern type.</param>
         /// <param name="index">The flat array index of the voxel.</param>
-        /// <returns>The ushort ID of the block to place.</returns>
-        private static byte GetVoxelIDForPattern(ChunkDataType type, int index)
+        /// <returns>A (block ID, meta) tuple. Meta is encoded with the legacy rule appropriate to each pattern.</returns>
+        private static (ushort id, byte meta) GetVoxelForPattern(ChunkDataType type, int index)
         {
             switch (type)
             {
                 case ChunkDataType.Solid:
-                    return 1; // Stone
+                    return (BlockIDs.Stone, BuildSolidMeta(orientation: 1));
+
                 case ChunkDataType.Checkerboard:
+                {
                     int x = index % VoxelData.ChunkWidth;
                     int y = index / VoxelData.ChunkWidth % VoxelData.ChunkHeight;
                     int z = index / (VoxelData.ChunkWidth * VoxelData.ChunkHeight);
-                    return (x + y + z) % 2 == 0 ? (byte)1 : (byte)0; // Stone or Air
+                    bool stone = (x + y + z) % 2 == 0;
+                    return stone
+                        ? (BlockIDs.Stone, BuildSolidMeta(orientation: 1))
+                        : (BlockIDs.Air, (byte)0);
+                }
+
+                case ChunkDataType.OrientedCubes:
+                {
+                    // Cycle through the four runtime-supported horizontal orientations. This still
+                    // exercises the per-face Y-rotation path (0°/90°/180°/270° all hit), which is
+                    // what the Phase 2b rewrite touches. Top/Bottom would also be valuable coverage
+                    // but are blocked on Phase 2b — see s_supportedHorizontalOrientations.
+                    byte orient = s_supportedHorizontalOrientations[index % 4];
+                    return (BlockIDs.Stone, BuildSolidMeta(orient));
+                }
+
+                case ChunkDataType.OrientedCheckerboard:
+                {
+                    // Stone half of a Checkerboard with non-identity orientations. Air neighbors mean
+                    // every stone draws all 6 faces, so the per-face rotation/translation paths run
+                    // ~64× more often than in OrientedCubes (where interior cull dominates).
+                    int x = index % VoxelData.ChunkWidth;
+                    int y = index / VoxelData.ChunkWidth % VoxelData.ChunkHeight;
+                    int z = index / (VoxelData.ChunkWidth * VoxelData.ChunkHeight);
+                    bool stone = (x + y + z) % 2 == 0;
+                    if (!stone) return (BlockIDs.Air, 0);
+
+                    byte orient = s_supportedHorizontalOrientations[index % 4];
+                    return (BlockIDs.Stone, BuildSolidMeta(orient));
+                }
+
+                case ChunkDataType.Fluid:
+                    // Source water (level 0). Exercises GenerateFluidMeshData on every voxel.
+                    return (BlockIDs.Water, BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, fluidLevel: 0, isFluid: true));
+
+                case ChunkDataType.Transparent:
+                {
+                    // Alternating leaves/air — same density as Checkerboard but routed through the
+                    // transparent submesh. Each leaf has air neighbors so all 6 faces are drawn,
+                    // exercising `ShouldDrawFace` with `renderNeighborFaces=true` at a memory budget
+                    // that matches Checkerboard (~25 MB native output per chunk).
+                    int x = index % VoxelData.ChunkWidth;
+                    int y = index / VoxelData.ChunkWidth % VoxelData.ChunkHeight;
+                    int z = index / (VoxelData.ChunkWidth * VoxelData.ChunkHeight);
+                    bool leaves = (x + y + z) % 2 == 0;
+                    return leaves
+                        ? (BlockIDs.OakLeaves, BuildSolidMeta(orientation: 1))
+                        : (BlockIDs.Air, (byte)0);
+                }
+
+                case ChunkDataType.MixedTerrain:
+                {
+                    // Deterministic distribution by index modulo 20:
+                    //   0    → water        (5%, fluid path)
+                    //   1    → grass blades (5%, cross mesh)
+                    //   2    → leaves       (5%, transparent)
+                    //   3    → directional  (5%, custom mesh w/ rotation)
+                    //   4-5  → air          (10%)
+                    //   6-19 → stone        (70%, baseline standard cube)
+                    int bucket = index % 20;
+                    return bucket switch
+                    {
+                        0 => (BlockIDs.Water, BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 0, fluidLevel: 0, isFluid: true)),
+                        1 => (BlockIDs.GrassBlades, BuildSolidMeta(orientation: 1)),
+                        2 => (BlockIDs.OakLeaves, BuildSolidMeta(orientation: 1)),
+                        3 => (BlockIDs.DirectionalBlock, BuildSolidMeta(orientation: s_supportedHorizontalOrientations[(index / 20) % 4])), // cycle through supported horizontals only
+                        4 or 5 => (BlockIDs.Air, 0),
+                        _ => (BlockIDs.Stone, BuildSolidMeta(orientation: 1)),
+                    };
+                }
+
                 default:
-                    return 0; // Air
+                    return (BlockIDs.Air, 0);
             }
         }
+
+        /// <summary>Helper for the common solid-block meta encoding.</summary>
+        private static byte BuildSolidMeta(byte orientation)
+            => BurstVoxelDataBitMapping.BuildMetaLegacy(orientation, fluidLevel: 0, isFluid: false);
 
         #endregion
 
@@ -369,40 +545,83 @@ namespace Benchmarks
         /// <summary>
         /// Generates the final, formatted report from the collected results and logs it to the console.
         /// </summary>
-        /// <param name="results">A dictionary containing the average times for each test configuration.</param>
-        private void GenerateReport(Dictionary<string, long> results)
+        /// <param name="results">A dictionary containing the average ms-per-run for each test configuration.</param>
+        /// <param name="totalElapsed">Wall-clock time of the full <c>RunFullComparisonBenchmark</c> coroutine, including warm-ups and cleanup.</param>
+        private void GenerateReport(Dictionary<string, long> results, TimeSpan totalElapsed, UploadBenchmarkResult uploadResult)
         {
+            // Build the system/build/Burst header once. Goes into both console and on-disk file
+            // so a captured baseline can be cross-referenced with the build it was captured against.
+            string systemInfo = BenchmarkEnvironment.DescribeSystem();
+
             StringBuilder report = new StringBuilder();
             report.AppendLine("<color=lime><b>--- MESH GENERATION BENCHMARK REPORT ---</b></color>");
-            report.AppendLine($"Test configuration: {_chunksToMesh} chunks per run, averaged over {_benchmarkRuns} runs.\n");
+            report.AppendLine($"Test configuration: {_chunksToMesh} chunks per run, averaged over {_benchmarkRuns} runs.");
+            report.AppendLine($"All numbers are: <i>ms per run</i> ({_chunksToMesh} chunks) | <i>μs per chunk</i> (derived).");
+            report.AppendLine($"Total wall-clock runtime: {BenchmarkEnvironment.FormatDuration(totalElapsed)}");
+            report.AppendLine();
+            report.Append(systemInfo);
+            report.AppendLine("=== Benchmark results ===");
 
-            // --- Solid Data Report ---
-            long solidDiagonals = results["Solid_WithDiagonals"];
-            long solidCardinals = results["Solid_CardinalsOnly"];
-            report.AppendLine("<b>--- Test Case: Solid Chunks (Best Case) ---</b>");
-            report.AppendLine($"  - With Diagonals: {solidDiagonals} ms");
-            report.AppendLine($"  - Cardinals Only: {solidCardinals} ms");
-            AppendWinner(report, solidDiagonals, solidCardinals, BenchmarkMode.WithDiagonals, BenchmarkMode.CardinalsOnly);
+            // Iterate every pattern × mode combination in declaration order so the report mirrors the run.
+            foreach (ChunkDataType dataType in Enum.GetValues(typeof(ChunkDataType)))
+            {
+                long withDiagonals = results.GetValueOrDefault($"{dataType}_{BenchmarkMode.WithDiagonals}", 0);
+                long cardinalsOnly = results.GetValueOrDefault($"{dataType}_{BenchmarkMode.CardinalsOnly}", 0);
 
-            // --- Checkerboard Data Report ---
-            long checkerDiagonals = results["Checkerboard_WithDiagonals"];
-            long checkerCardinals = results["Checkerboard_CardinalsOnly"];
-            report.AppendLine("\n<b>--- Test Case: Checkerboard Chunks (Worst Case) ---</b>");
-            report.AppendLine($"  - With Diagonals: {checkerDiagonals} ms");
-            report.AppendLine($"  - Cardinals Only: {checkerCardinals} ms");
-            AppendWinner(report, checkerDiagonals, checkerCardinals, BenchmarkMode.WithDiagonals, BenchmarkMode.CardinalsOnly);
+                report.AppendLine($"<b>--- {dataType} ---</b>");
+                AppendModeRow(report, "With Diagonals", withDiagonals);
+                AppendModeRow(report, "Cardinals Only", cardinalsOnly);
+                AppendWinner(report, withDiagonals, cardinalsOnly, BenchmarkMode.WithDiagonals, BenchmarkMode.CardinalsOnly);
+                report.AppendLine();
+            }
 
-            Debug.Log(report.ToString());
+            AppendMeshOutputSizes(report);
+            AppendUploadReport(report, uploadResult);
+
+            string fullReport = report.ToString();
+            Debug.Log(fullReport);
+
+            if (_writeReportToFile)
+            {
+                BenchmarkEnvironment.WriteReportToDisk(fullReport, "MeshGenerationBenchmark");
+            }
         }
 
         /// <summary>
-        /// A helper method to compare two timings, determine the winner, and append a formatted result string to the report.
+        /// Appends the per-pattern mesh output sizes captured during warm-up (vertex + per-submesh
+        /// triangle counts). This is the MR-6 pre-size reference: the typical surface-chunk vertex
+        /// count to seed <see cref="MeshDataJobOutput"/> capacities with, versus the dense worst case.
+        /// Uses the WithDiagonals capture (full neighbor context = production face culling).
         /// </summary>
-        /// <param name="sb">The StringBuilder to append the results to.</param>
-        /// <param name="timeA">The timing for the first mode.</param>
-        /// <param name="timeB">The timing for the second mode.</param>
-        /// <param name="nameA">The name of the first mode.</param>
-        /// <param name="nameB">The name of the second mode.</param>
+        /// <param name="sb">The report builder to append to.</param>
+        private void AppendMeshOutputSizes(StringBuilder sb)
+        {
+            sb.AppendLine("=== Mesh output sizes (MR-6 pre-size reference) ===");
+            sb.AppendLine("  Per chunk (all sections), WithDiagonals: verts | opaque | transparent | fluid tri-indices");
+
+            foreach (ChunkDataType dataType in Enum.GetValues(typeof(ChunkDataType)))
+            {
+                if (!_meshOutputCounts.TryGetValue($"{dataType}_{BenchmarkMode.WithDiagonals}", out MeshOutputCounts c))
+                    continue;
+
+                sb.AppendLine($"  - {dataType,-22}: {c.Vertices,7} verts | {c.OpaqueTris,7} | {c.TransparentTris,7} | {c.FluidTris,7}");
+            }
+
+            sb.AppendLine();
+        }
+
+        /// <summary>Formats one row of the report with both ms-per-run and μs-per-chunk.</summary>
+        private void AppendModeRow(StringBuilder sb, string label, long msPerRun)
+        {
+            float microsPerChunk = _chunksToMesh > 0
+                ? msPerRun * 1000f / _chunksToMesh
+                : 0f;
+            sb.AppendLine($"  - {label,-16}: {msPerRun,5} ms  ({microsPerChunk,7:F1} μs/chunk)");
+        }
+
+        /// <summary>
+        /// Compares the WithDiagonals vs CardinalsOnly timings for a single pattern and appends a winner row.
+        /// </summary>
         private static void AppendWinner(StringBuilder sb, long timeA, long timeB, BenchmarkMode nameA, BenchmarkMode nameB)
         {
             if (timeA == timeB)
@@ -416,9 +635,206 @@ namespace Benchmarks
             string winnerName = timeA < timeB ? nameA.ToString() : nameB.ToString();
 
             long difference = loserTime - winnerTime;
-            float percentage = difference / (float)loserTime * 100f;
+            float percentage = loserTime == 0 ? 0f : difference / (float)loserTime * 100f;
 
             sb.AppendLine($"  - <color=cyan>Winner: {winnerName} by {difference} ms ({percentage:F1}% faster)</color>");
+        }
+
+        #endregion
+
+        #region Upload Benchmark
+
+        /// <summary>
+        /// One pattern's mesh output sizes, captured from its warm-up job. The vertex count is the
+        /// surface-chunk pre-size reference for MR-6; the triangle counts show the per-submesh split.
+        /// </summary>
+        private struct MeshOutputCounts
+        {
+            /// <summary>Total vertices emitted (all sections of one chunk).</summary>
+            public int Vertices;
+
+            /// <summary>Opaque submesh triangle-index count.</summary>
+            public int OpaqueTris;
+
+            /// <summary>Transparent submesh triangle-index count.</summary>
+            public int TransparentTris;
+
+            /// <summary>Fluid submesh triangle-index count.</summary>
+            public int FluidTris;
+        }
+
+        /// <summary>Result of the GPU vertex-upload timing pass (MR-2). <see cref="Ran"/> is false when the upload benchmark is disabled.</summary>
+        private struct UploadBenchmarkResult
+        {
+            public bool Ran;
+            public ChunkDataType Pattern;
+            public int Repeats;
+            public int SectionsUploaded; // non-empty sections uploaded per pass
+            public int VerticesPerPass;
+            public long VertexBytesPerPass;
+            public int BytesPerVertex;
+            public double MsPerPass; // average wall-clock ms to upload one chunk's sections
+        }
+
+        /// <summary>
+        /// Times the production GPU upload path (<see cref="SectionRenderer.UpdateMeshNative"/> →
+        /// <c>Mesh.SetVertexBufferData</c>) by generating one chunk of <see cref="_uploadPattern"/>, running the
+        /// real <see cref="MeshPostProcessJob"/>, then re-uploading its section meshes <see cref="_uploadRepeats"/>
+        /// times against a reused renderer pool. This is the path MR-2's vertex-format packing shrinks; the
+        /// generation loop never touches it. Reuses the production apply method so the measurement tracks any
+        /// layout change automatically.
+        /// </summary>
+        /// <param name="onComplete">Callback receiving the measured upload result.</param>
+        private IEnumerator RunUploadBenchmark(Action<UploadBenchmarkResult> onComplete)
+        {
+            Debug.Log($"--- Running Upload Benchmark: {_uploadPattern} ({_uploadRepeats} repeats) ---");
+
+            // All native/GameObject allocations happen INSIDE the try so a throw during setup
+            // (job scheduling, SectionRenderer construction) still hits the finally and cannot leak
+            // Persistent NativeArrays or orphan scene objects.
+            BenchmarkVoxelData data = default;
+            MeshDataJobOutput output = default;
+            GameObject parent = null;
+            SectionRenderer[] renderers = null;
+            UploadBenchmarkResult result = default;
+            try
+            {
+                // 1. Generate one chunk and complete meshing.
+                data = GenerateBenchmarkData(_uploadPattern, Allocator.Persistent);
+                (JobHandle handle, MeshDataJobOutput meshOutput) = ScheduleBenchmarkMeshing(data, BenchmarkMode.WithDiagonals);
+                output = meshOutput;
+                handle.Complete();
+
+                // 2. Run the real post-process so vertices are section-local and InterleavedStream3 is built
+                //    (mirrors WorldJobManager.ScheduleMeshing → Chunk.ApplyMeshData).
+                MeshPostProcessJob postJob = new MeshPostProcessJob
+                {
+                    Vertices = output.Vertices,
+                    OpaqueTris = output.Triangles,
+                    TransparentTris = output.TransparentTriangles,
+                    FluidTris = output.FluidTriangles,
+                    Stats = output.SectionStats,
+                    Normals = output.Normals,
+                    LightData = output.LightData,
+                    InterleavedStream3 = output.InterleavedStream3,
+                    SectionHeight = ChunkMath.SECTION_SIZE,
+                };
+                postJob.Schedule().Complete();
+
+                // 3. Build a reusable section-renderer pool under a temp parent.
+                parent = new GameObject("UploadBenchmarkParent");
+                int sectionCount = output.SectionStats.Length;
+                renderers = new SectionRenderer[sectionCount];
+                for (int i = 0; i < sectionCount; i++) renderers[i] = new SectionRenderer(parent.transform, i);
+
+                NativeArray<Vector3> verts = output.Vertices.AsArray();
+                NativeArray<half4> uvs = output.Uvs.AsArray();
+                NativeArray<Color32> colors = output.Colors.AsArray();
+                NativeArray<NormalLightVertex> stream3 = output.InterleavedStream3.AsArray();
+                NativeArray<int> opaque = output.Triangles.AsArray();
+                NativeArray<int> trans = output.TransparentTriangles.AsArray();
+                NativeArray<int> fluid = output.FluidTriangles.AsArray();
+                NativeArray<MeshSectionStats> stats = output.SectionStats;
+
+                int sectionsUploaded = 0;
+                for (int i = 0; i < stats.Length; i++)
+                {
+                    if (stats[i].VertexCount > 0) sectionsUploaded++;
+                }
+
+                // Warm-up upload (absorbs first-touch buffer allocation + MR-3 material-cache build).
+                UploadPass(renderers, stats, verts, uvs, colors, stream3, opaque, trans, fluid);
+
+                Stopwatch sw = Stopwatch.StartNew();
+                for (int r = 0; r < _uploadRepeats; r++)
+                {
+                    UploadPass(renderers, stats, verts, uvs, colors, stream3, opaque, trans, fluid);
+                }
+
+                sw.Stop();
+
+                // Per-vertex byte total is summed from the actual stream element types, so it auto-updates
+                // from 60 B to ~32 B once MR-2 repacks these buffers — no hardcoded sizes to keep in sync.
+                int bytesPerVertex = UnsafeUtility.SizeOf<Vector3>() + UnsafeUtility.SizeOf<half4>()
+                                                                     + UnsafeUtility.SizeOf<Color32>() + UnsafeUtility.SizeOf<NormalLightVertex>();
+                int verticesPerPass = output.Vertices.Length;
+
+                result = new UploadBenchmarkResult
+                {
+                    Ran = true,
+                    Pattern = _uploadPattern,
+                    Repeats = _uploadRepeats,
+                    SectionsUploaded = sectionsUploaded,
+                    VerticesPerPass = verticesPerPass,
+                    VertexBytesPerPass = (long)verticesPerPass * bytesPerVertex,
+                    BytesPerVertex = bytesPerVertex,
+                    MsPerPass = sw.Elapsed.TotalMilliseconds / Mathf.Max(1, _uploadRepeats),
+                };
+            }
+            finally
+            {
+                if (renderers != null)
+                {
+                    foreach (SectionRenderer renderer in renderers)
+                        renderer?.Destroy();
+                }
+
+                if (parent != null) Destroy(parent);
+                if (output.Vertices.IsCreated) output.Dispose();
+                data.Dispose(); // BenchmarkVoxelData.Dispose guards each array with IsCreated, safe on default.
+            }
+
+            onComplete(result);
+            yield break;
+        }
+
+        /// <summary>Uploads every section of one generated chunk via the production apply path (mirrors <c>Chunk.ApplyMeshData</c>).</summary>
+        private static void UploadPass(
+            SectionRenderer[] renderers,
+            NativeArray<MeshSectionStats> stats,
+            NativeArray<Vector3> verts, NativeArray<half4> uvs, NativeArray<Color32> colors,
+            NativeArray<NormalLightVertex> stream3,
+            NativeArray<int> opaque, NativeArray<int> trans, NativeArray<int> fluid)
+        {
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                MeshSectionStats s = stats[i];
+                if (s.VertexCount == 0)
+                {
+                    renderers[i].UpdateMeshNative(default, default, default, default, 0, 0,
+                        default, 0, 0, default, 0, 0, default, 0, 0);
+                    continue;
+                }
+
+                renderers[i].UpdateMeshNative(
+                    verts, uvs, colors, stream3, s.VertexStartIndex, s.VertexCount,
+                    opaque, s.OpaqueTriStartIndex, s.OpaqueTriCount,
+                    trans, s.TransparentTriStartIndex, s.TransparentTriCount,
+                    fluid, s.FluidTriStartIndex, s.FluidTriCount);
+            }
+        }
+
+        /// <summary>Appends the upload-benchmark section to the report (a "(disabled)" note when it did not run).</summary>
+        private static void AppendUploadReport(StringBuilder sb, UploadBenchmarkResult r)
+        {
+            sb.AppendLine("<b>=== Upload benchmark (MR-2 vertex format) ===</b>");
+            if (!r.Ran)
+            {
+                sb.AppendLine("  - (disabled)");
+                sb.AppendLine();
+                return;
+            }
+
+            double usPerPass = r.MsPerPass * 1000.0;
+            double vertexMB = r.VertexBytesPerPass / (1024.0 * 1024.0);
+            double vertexMBs = r.MsPerPass > 0 ? vertexMB / (r.MsPerPass / 1000.0) : 0.0;
+
+            sb.AppendLine($"  - Pattern                : {r.Pattern} ({r.SectionsUploaded} non-empty sections, {r.Repeats} repeats)");
+            sb.AppendLine($"  - Vertex format          : {r.BytesPerVertex} B/vertex");
+            sb.AppendLine($"  - Vertices per upload    : {r.VerticesPerPass,8:N0}  ({vertexMB:F2} MB vertex data/chunk)");
+            sb.AppendLine($"  - Upload time per chunk  : {usPerPass,8:F1} μs  ({r.MsPerPass:F3} ms)");
+            sb.AppendLine($"  - Vertex upload rate     : {vertexMBs,8:F0} MB/s");
+            sb.AppendLine();
         }
 
         #endregion

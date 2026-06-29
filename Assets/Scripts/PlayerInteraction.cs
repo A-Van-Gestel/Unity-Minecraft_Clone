@@ -1,6 +1,9 @@
 using Data;
+using Helpers;
+using Jobs.BurstData;
 using MyBox;
 using Physics;
+using Unity.Mathematics;
 using UnityEngine;
 
 public class PlayerInteraction : MonoBehaviour
@@ -23,6 +26,8 @@ public class PlayerInteraction : MonoBehaviour
     /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
     /// </summary>
     private bool _blockPlaceable;
+
+    private VoxelRaycastResult _lastRaycastResult;
 
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
@@ -48,7 +53,7 @@ public class PlayerInteraction : MonoBehaviour
 
     private void Update()
     {
-        if (_world.inUI) return;
+        if (World.InUI || WorldLaunchState.IsAutomatedMode) return;
 
         PlaceCursorBlocks();
         HandleBlockModificationInput();
@@ -78,9 +83,14 @@ public class PlayerInteraction : MonoBehaviour
                 if (!_blockPlaceable) return;
 
                 UIItemSlot itemSlot = toolbar.slots[toolbar.slotIndex];
-                _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), blockId: itemSlot.ItemSlot.Stack.ID)
+                ushort placedBlockId = itemSlot.ItemSlot.Stack.ID;
+                BlockType placedBlockType = _world.BlockTypes[placedBlockId];
+
+                byte meta = ComputePlacementMeta(placedBlockType, _lastRaycastResult);
+
+                _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), placedBlockId)
                 {
-                    Orientation = _player.orientation,
+                    Meta = meta,
                     ImmediateUpdate = true,
                 });
                 itemSlot.ItemSlot.Take(1);
@@ -90,12 +100,78 @@ public class PlayerInteraction : MonoBehaviour
 
 
     /// <summary>
+    /// Computes the metadata byte for a freshly-placed block based on its
+    /// configured <see cref="PlacementMetadataMode"/>. Fluids always start at
+    /// meta=0 so <c>BlockBehavior.Fluids</c> can fill them from a source on
+    /// the first simulation tick.
+    /// </summary>
+    private byte ComputePlacementMeta(BlockType placedBlockType, VoxelRaycastResult raycastResult)
+    {
+        if (placedBlockType.fluidType != FluidType.None)
+        {
+            return 0;
+        }
+
+        return placedBlockType.placementMetadataMode switch
+        {
+            PlacementMetadataMode.PlayerYawCardinal when placedBlockType.metadataSchema == MetadataSchema.Axis3 =>
+                BurstVoxelMetadataUtility.Axis3FromLegacyWorldOrientation(_player.orientation),
+            PlacementMetadataMode.PlayerYawCardinal =>
+                BurstVoxelDataBitMapping.BuildMetaLegacy(
+                    _player.orientation, fluidLevel: 0, isFluid: false),
+            PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Axis3 =>
+                BurstVoxelMetadataUtility.DominantAxisFromLookVector(_playerCamera.forward),
+            PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Facing6 =>
+                BurstVoxelMetadataUtility.Facing6FromLookVector(_playerCamera.forward),
+            PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.Facing6Roll2 =>
+                ComputeFacing6Roll2Meta(_playerCamera.forward),
+            PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.HorizontalOnly =>
+                BurstVoxelMetadataUtility.HorizontalOnlyFromLookVector(_playerCamera.forward),
+            PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.Facing6 =>
+                BurstVoxelMetadataUtility.Facing6FromHitNormal(raycastResult.HitNormal),
+            PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.Facing6Roll2 =>
+                ComputeFacing6Roll2Meta(_playerCamera.forward, raycastResult.HitNormal),
+            PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.HorizontalOnly =>
+                BurstVoxelMetadataUtility.HorizontalOnlyFromHitNormal(raycastResult.HitNormal),
+            _ => placedBlockType.defaultMetadata,
+        };
+    }
+
+    /// <summary>
+    /// Computes Facing6Roll2 metadata from the player's look direction (for
+    /// <see cref="PlacementMetadataMode.PlayerLookAxis"/>). Facing is derived from
+    /// the dominant look axis; roll aligns the block's +Y toward the player when
+    /// placed on a floor/ceiling.
+    /// </summary>
+    private static byte ComputeFacing6Roll2Meta(Vector3 lookForward)
+    {
+        byte facing = BurstVoxelMetadataUtility.Facing6FromLookVector(lookForward);
+        byte roll = BurstVoxelMetadataUtility.RollFromLookVector(facing, lookForward);
+        return BurstVoxelMetadataUtility.EncodeFacing6Roll2(facing, roll);
+    }
+
+    /// <summary>
+    /// Computes Facing6Roll2 metadata from the hit surface normal (for
+    /// <see cref="PlacementMetadataMode.SurfaceFacing"/>). Facing is derived from
+    /// the surface normal; roll aligns the block's +Y toward the player when
+    /// placed on a floor/ceiling.
+    /// </summary>
+    private static byte ComputeFacing6Roll2Meta(Vector3 lookForward, int3 hitNormal)
+    {
+        byte facing = BurstVoxelMetadataUtility.Facing6FromHitNormal(hitNormal);
+        byte roll = BurstVoxelMetadataUtility.RollFromLookVector(facing, lookForward);
+        return BurstVoxelMetadataUtility.EncodeFacing6Roll2(facing, roll);
+    }
+
+    /// <summary>
     /// Centralized method to cast a ray from the player's camera to find a voxel.
     /// Uses mathematical fractional offsets to accurately determine the placed block face.
     /// </summary>
     /// <param name="overrideInteractWithFluids">If set, overrides the component's interactWithFluids toggle.</param>
+    /// <param name="skipTags">Block tags the ray should pass through (derived from the held block's canReplaceTags).</param>
     /// <returns>A VoxelRaycastResult struct containing information about the hit.</returns>
-    public VoxelRaycastResult RaycastForVoxel(bool? overrideInteractWithFluids = null)
+    public VoxelRaycastResult RaycastForVoxel(bool? overrideInteractWithFluids = null,
+        BlockTags skipTags = BlockTags.NONE)
     {
         float step = checkIncrement;
 
@@ -106,7 +182,7 @@ public class PlayerInteraction : MonoBehaviour
         {
             Vector3 pos = _playerCamera.position + _playerCamera.forward * step;
 
-            if (_world.CheckForVoxel(pos, checkFluids))
+            if (_world.CheckForVoxel(pos, checkFluids, includeNonSolid: true, skipTags: skipTags))
             {
                 VoxelRaycastResult result = new VoxelRaycastResult { DidHit = true };
                 result.HitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
@@ -117,11 +193,13 @@ public class PlayerInteraction : MonoBehaviour
                 float zCheck = GetCoordinateOffset(pos.z);
 
                 if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
-                    result.PlacePosition = result.HitPosition + (xCheck < 0 ? Vector3Int.right : Vector3Int.left);
+                    result.HitNormal = xCheck < 0 ? Int3Directions.Right : Int3Directions.Left;
                 else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
-                    result.PlacePosition = result.HitPosition + (zCheck < 0 ? Vector3Int.forward : Vector3Int.back);
+                    result.HitNormal = zCheck < 0 ? Int3Directions.Forward : Int3Directions.Back;
                 else
-                    result.PlacePosition = result.HitPosition + (yCheck < 0 ? Vector3Int.up : Vector3Int.down);
+                    result.HitNormal = yCheck < 0 ? Int3Directions.Up : Int3Directions.Down;
+
+                result.PlacePosition = result.HitPosition + new Vector3Int(result.HitNormal.x, result.HitNormal.y, result.HitNormal.z);
 
                 return result;
             }
@@ -145,10 +223,48 @@ public class PlayerInteraction : MonoBehaviour
 
     private void PlaceCursorBlocks()
     {
-        VoxelRaycastResult result = RaycastForVoxel();
+        // When holding a block, let the ray pass through blocks it can replace,
+        // so the player can target the solid surface behind them (e.g. ocean floor through water).
+        // When holding nothing, skipTags stays NONE so all blocks are targetable for punching.
+        BlockTags skipTags = BlockTags.NONE;
+        if (toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem)
+        {
+            ushort heldBlockId = toolbar.slots[toolbar.slotIndex].ItemSlot.Stack.ID;
+            skipTags = _world.BlockTypes[heldBlockId].canReplaceTags;
+        }
+
+        VoxelRaycastResult result = RaycastForVoxel(skipTags: skipTags);
+        _lastRaycastResult = result;
 
         if (result.DidHit)
         {
+            // If the targeted block is replaceable (e.g. grass), the place position
+            // should be the block itself (replace it) rather than adjacent to it.
+            VoxelState? hitState = _world.GetVoxelState(result.HitPosition);
+            if (hitState.HasValue)
+            {
+                bool isReplaceable;
+
+                // Also check if the currently held block has explicit tags allowing it to replace the hit block
+                if (toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem)
+                {
+                    ushort heldBlockId = toolbar.slots[toolbar.slotIndex].ItemSlot.Stack.ID;
+                    BlockType heldProps = _world.BlockTypes[heldBlockId];
+
+                    isReplaceable = BlockTagUtility.CanReplace(heldProps, hitState.Value.Properties);
+                }
+                else
+                {
+                    // Fallback if not holding anything
+                    isReplaceable = (hitState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0;
+                }
+
+                if (isReplaceable)
+                {
+                    result.PlacePosition = result.HitPosition;
+                }
+            }
+
             highlightBlock.position = result.HitPosition;
             placeBlock.position = result.PlacePosition;
 
@@ -173,7 +289,7 @@ public class PlayerInteraction : MonoBehaviour
             _blockPlaceable =
                 !isInsidePlayer &&
                 _world.worldData.IsVoxelInWorld(result.PlacePosition) &&
-                !_world.CheckForCollision(result.PlacePosition) &&
+                !_world.IsCellOccupiedForPlacement(result.PlacePosition) &&
                 toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem;
 
             // Set highlight objects active state
@@ -195,5 +311,6 @@ public struct VoxelRaycastResult
 {
     public bool DidHit;
     public Vector3Int HitPosition;
+    public int3 HitNormal;
     public Vector3Int PlacePosition;
 }

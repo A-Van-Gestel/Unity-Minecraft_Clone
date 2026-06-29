@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Data;
@@ -8,27 +8,83 @@ using UnityEngine.Pool;
 namespace Serialization
 {
     /// <summary>
-    /// Manages the persistence of pending sunlight recalculations for unloaded chunks.
+    /// Manages the persistence of pending lighting work for unloaded chunks: sunlight column
+    /// recalculations (<c>pending_lighting.bin</c>) and cross-chunk blocklight modifications
+    /// (<c>pending_blocklight.bin</c>) awaiting their target chunk.
     /// </summary>
-    public class LightingStateManager
+    public class LightingStateManager : IPendingLightStore
     {
+        /// <summary>
+        /// A persisted cross-chunk blocklight modification awaiting an unloaded target chunk.
+        /// Mirrors the RGB payload of a job-emitted <c>LightModification</c>; replayed through
+        /// <c>CrossChunkLightModApplier</c> when the chunk is loaded from disk.
+        /// </summary>
+        public struct PendingBlocklightMod
+        {
+            /// <summary>The red blocklight channel the modification wants to set (0-15).</summary>
+            public byte R;
+
+            /// <summary>The green blocklight channel the modification wants to set (0-15).</summary>
+            public byte G;
+
+            /// <summary>The blue blocklight channel the modification wants to set (0-15).</summary>
+            public byte B;
+
+            /// <summary>True when emitted by a darkness/removal pass (zero channels mean "remove";
+            /// false means zero channels are merely "no contribution" and may never lower light).</summary>
+            public bool IsRemoval;
+        }
+
+        // pending_blocklight.bin format version. The file is self-describing (unlike
+        // pending_lighting.bin) so future layout changes can migrate it in isolation.
+        private const byte BLOCKLIGHT_FILE_VERSION = 1;
+
         private readonly string _filePath;
+        private readonly string _blocklightFilePath;
+
+        // When true, this store has no backing files: the constructor created no directory and
+        // Save()/Load() are no-ops. Used by disk-free consumers (e.g. the lighting validation harness)
+        // that exercise the real in-memory persist/replay logic without touching the filesystem.
+        private readonly bool _inMemoryOnly;
 
         // Pending sunlight recalculations for chunks that aren't loaded yet (or were saved while waiting).
         // Key: Chunk Coordinate
         // Value: List of LOCAL column coordinates (0-15, 0-15) stored as Vector2Int
         private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _pendingRecalcs = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
 
+        // Pending cross-chunk blocklight modifications for chunks that aren't loaded/populated yet.
+        // Key: Chunk Coordinate; inner key: LOCAL voxel position. Last write per voxel wins —
+        // every mod carries absolute target channel values, so a newer mod fully supersedes an
+        // older one for the same voxel.
+        private readonly Dictionary<ChunkCoord, Dictionary<Vector3Int, PendingBlocklightMod>> _pendingBlocklightMods = new Dictionary<ChunkCoord, Dictionary<Vector3Int, PendingBlocklightMod>>();
+
         public LightingStateManager(string worldName, bool useVolatilePath)
         {
-            string basePath = useVolatilePath
-                ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
-                : Path.Combine(Application.persistentDataPath, "Saves");
-
-            string folder = Path.Combine(basePath, worldName);
+            string folder = SaveSystem.GetSavePath(worldName, useVolatilePath);
             if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
-            _filePath = Path.Combine(folder, "lighting_pending.bin");
+            _filePath = Path.Combine(folder, "pending_lighting.bin");
+            _blocklightFilePath = Path.Combine(folder, "pending_blocklight.bin");
         }
+
+        /// <summary>
+        /// Private constructor for the in-memory-only variant: creates no save directory and leaves the
+        /// file paths null so <see cref="Save"/>/<see cref="Load"/> become no-ops. The in-memory
+        /// dictionaries and all persist/replay logic are otherwise identical to a disk-backed instance.
+        /// Use <see cref="CreateInMemory"/> to construct one.
+        /// </summary>
+        private LightingStateManager()
+        {
+            _inMemoryOnly = true;
+        }
+
+        /// <summary>
+        /// Creates a pending-light store that lives entirely in memory and never touches the filesystem.
+        /// Intended for disk-free consumers (e.g. the lighting validation harness) that need to exercise
+        /// the real persist/replay logic. The returned instance's <see cref="Save"/>/<see cref="Load"/>
+        /// are no-ops; consume the data through the <see cref="IPendingLightStore"/> surface instead.
+        /// </summary>
+        /// <returns>A new in-memory-only <see cref="LightingStateManager"/>.</returns>
+        public static LightingStateManager CreateInMemory() => new LightingStateManager();
 
         /// <summary>
         /// Adds a set of local column coordinates that need sunlight recalculation to the pending store.
@@ -45,7 +101,7 @@ namespace Serialization
                 if (col.x < 0 || col.x >= VoxelData.ChunkWidth ||
                     col.y < 0 || col.y >= VoxelData.ChunkWidth)
                 {
-                    Debug.LogError($"[LightingStateManager] Invalid local column {col} for chunk {chunkCoord}. Must be 0-15!");
+                    Debug.LogError($"[LightingStateManager] Invalid local column {col.ToString()} for chunk {chunkCoord.ToString()}. Must be 0-15!");
                 }
             }
 
@@ -78,33 +134,158 @@ namespace Serialization
         }
 
         /// <summary>
-        /// Saves the pending sunlight recalculation queues to disk.
+        /// Records a cross-chunk blocklight modification targeting an unloaded/unpopulated chunk so
+        /// it can be replayed when the chunk is loaded from disk. Sunlight column recalculations
+        /// cannot restore RGB data — without this store, blocklight removals (broken lamps) and
+        /// uplifts that crossed into an unloaded chunk would be permanently lost (Bug 08, path 1).
+        /// </summary>
+        /// <param name="chunkCoord">The target chunk coordinate.</param>
+        /// <param name="localPos">The LOCAL voxel position inside the target chunk.</param>
+        /// <param name="r">The red blocklight channel the modification wants to set (0-15).</param>
+        /// <param name="g">The green blocklight channel the modification wants to set (0-15).</param>
+        /// <param name="b">The blue blocklight channel the modification wants to set (0-15).</param>
+        /// <param name="isRemoval">True when emitted by a darkness/removal pass (zero channels mean "remove").</param>
+        public void AddPendingBlocklight(ChunkCoord chunkCoord, Vector3Int localPos, byte r, byte g, byte b, bool isRemoval)
+        {
+            // VALIDATION: Ensure the position is truly local.
+            if (localPos.x < 0 || localPos.x >= VoxelData.ChunkWidth ||
+                localPos.y < 0 || localPos.y >= VoxelData.ChunkHeight ||
+                localPos.z < 0 || localPos.z >= VoxelData.ChunkWidth)
+            {
+                Debug.LogError($"[LightingStateManager] Invalid local position {localPos.ToString()} for pending blocklight in chunk {chunkCoord.ToString()}.");
+                return;
+            }
+
+            if (!_pendingBlocklightMods.TryGetValue(chunkCoord, out Dictionary<Vector3Int, PendingBlocklightMod> mods))
+            {
+                mods = DictionaryPool<Vector3Int, PendingBlocklightMod>.Get(); // POOLING
+                _pendingBlocklightMods[chunkCoord] = mods;
+            }
+
+            // Guard against a placement mod overwriting a prior removal mod for the same voxel:
+            // the removal's darkness wave must still run to clear the old lamp's propagated light;
+            // the placement's uplift will be recomputed by SyncEmissionToLightArray on load since
+            // the block's emission is baked into the packed uint data. A removal may always overwrite
+            // a placement (the block is gone), and same-type overwrites keep the latest state.
+            if (!isRemoval && mods.TryGetValue(localPos, out PendingBlocklightMod existing) && existing.IsRemoval)
+                return;
+
+            mods[localPos] = new PendingBlocklightMod { R = r, G = g, B = b, IsRemoval = isRemoval };
+        }
+
+        /// <summary>
+        /// Attempts to retrieve and remove the pending cross-chunk blocklight modifications for a
+        /// chunk. The caller takes ownership of the returned dictionary and must release it via
+        /// <c>DictionaryPool&lt;Vector3Int, PendingBlocklightMod&gt;</c> after replaying.
+        /// </summary>
+        /// <param name="chunkCoord">The chunk coordinate to query.</param>
+        /// <param name="mods">The pending modifications keyed by LOCAL voxel position, if any.</param>
+        /// <returns>True if pending modifications were found; otherwise, false.</returns>
+        public bool TryGetAndRemovePendingBlocklight(ChunkCoord chunkCoord, out Dictionary<Vector3Int, PendingBlocklightMod> mods)
+        {
+            return _pendingBlocklightMods.Remove(chunkCoord, out mods);
+        }
+
+        /// <summary>
+        /// Discards any pending cross-chunk blocklight modifications for a chunk. Used when the
+        /// chunk is freshly GENERATED (not loaded from disk): initial lighting recomputes all light
+        /// from current neighbor data, so mods recorded while the chunk was absent are obsolete.
+        /// </summary>
+        /// <param name="chunkCoord">The chunk coordinate whose pending modifications are discarded.</param>
+        public void DiscardPendingBlocklight(ChunkCoord chunkCoord)
+        {
+            if (_pendingBlocklightMods.Remove(chunkCoord, out Dictionary<Vector3Int, PendingBlocklightMod> mods))
+            {
+                DictionaryPool<Vector3Int, PendingBlocklightMod>.Release(mods);
+            }
+        }
+
+        /// <summary>
+        /// Saves the pending sunlight recalculation queues and pending blocklight modifications to disk.
         /// </summary>
         public void Save()
         {
-            using FileStream stream = new FileStream(_filePath, FileMode.Create);
+            // In-memory-only stores have no backing files. Save() is unreachable through
+            // IPendingLightStore (by design); this guard defends against misuse via the concrete type.
+            if (_inMemoryOnly)
+            {
+                Debug.LogError("[LightingStateManager] Save() called on an in-memory-only store; ignoring.");
+                return;
+            }
+
+            using (FileStream stream = new FileStream(_filePath, FileMode.Create))
+            using (BinaryWriter writer = new BinaryWriter(stream))
+            {
+                writer.Write(_pendingRecalcs.Count);
+                foreach (KeyValuePair<ChunkCoord, HashSet<Vector2Int>> kvp in _pendingRecalcs)
+                {
+                    writer.Write(kvp.Key.X);
+                    writer.Write(kvp.Key.Z);
+                    writer.Write(kvp.Value.Count);
+
+                    foreach (Vector2Int col in kvp.Value)
+                    {
+                        // Local columns are always 0-15, so byte is sufficient (optimizes disk space)
+                        writer.Write((byte)col.x);
+                        writer.Write((byte)col.y);
+                    }
+                }
+            }
+
+            SavePendingBlocklight();
+        }
+
+        /// <summary>
+        /// Saves the pending cross-chunk blocklight modifications to <c>pending_blocklight.bin</c>.
+        /// </summary>
+        private void SavePendingBlocklight()
+        {
+            using FileStream stream = new FileStream(_blocklightFilePath, FileMode.Create);
             using BinaryWriter writer = new BinaryWriter(stream);
 
-            writer.Write(_pendingRecalcs.Count);
-            foreach (KeyValuePair<ChunkCoord, HashSet<Vector2Int>> kvp in _pendingRecalcs)
+            writer.Write(BLOCKLIGHT_FILE_VERSION);
+            writer.Write(_pendingBlocklightMods.Count);
+            foreach (KeyValuePair<ChunkCoord, Dictionary<Vector3Int, PendingBlocklightMod>> kvp in _pendingBlocklightMods)
             {
                 writer.Write(kvp.Key.X);
                 writer.Write(kvp.Key.Z);
                 writer.Write(kvp.Value.Count);
 
-                foreach (Vector2Int col in kvp.Value)
+                foreach (KeyValuePair<Vector3Int, PendingBlocklightMod> mod in kvp.Value)
                 {
-                    // Local columns are always 0-15, so byte is sufficient (optimizes disk space)
-                    writer.Write((byte)col.x);
-                    writer.Write((byte)col.y);
+                    // Local positions fit in bytes (x/z: 0-15, y: 0-127); channels are nibbles.
+                    writer.Write((byte)mod.Key.x);
+                    writer.Write((byte)mod.Key.y);
+                    writer.Write((byte)mod.Key.z);
+                    writer.Write(mod.Value.R);
+                    writer.Write(mod.Value.G);
+                    writer.Write(mod.Value.B);
+                    writer.Write(mod.Value.IsRemoval);
                 }
             }
         }
 
         /// <summary>
-        /// Loads the pending sunlight recalculation queues from disk.
+        /// Loads the pending sunlight recalculation queues and pending blocklight modifications from disk.
         /// </summary>
         public void Load()
+        {
+            // In-memory-only stores have no backing files. Load() is unreachable through
+            // IPendingLightStore (by design); this guard defends against misuse via the concrete type.
+            if (_inMemoryOnly)
+            {
+                Debug.LogError("[LightingStateManager] Load() called on an in-memory-only store; ignoring.");
+                return;
+            }
+
+            LoadPendingColumns();
+            LoadPendingBlocklight();
+        }
+
+        /// <summary>
+        /// Loads the pending sunlight recalculation queues from <c>pending_lighting.bin</c>.
+        /// </summary>
+        private void LoadPendingColumns()
         {
             if (!File.Exists(_filePath)) return;
 
@@ -173,7 +354,7 @@ namespace Serialization
             }
             catch (EndOfStreamException)
             {
-                Debug.LogWarning("[LightingStateManager] lighting_pending.bin was truncated. Some pending lighting updates may be lost, but the pool remains safe.");
+                Debug.LogWarning("[LightingStateManager] pending_lighting.bin was truncated. Some pending lighting updates may be lost, but the pool remains safe.");
             }
             catch (Exception ex)
             {
@@ -182,7 +363,61 @@ namespace Serialization
         }
 
         /// <summary>
-        /// Safely releases all remaining pooled HashSets.
+        /// Loads the pending cross-chunk blocklight modifications from <c>pending_blocklight.bin</c>.
+        /// The file's absence is normal (worlds saved before the store existed, or nothing pending).
+        /// </summary>
+        private void LoadPendingBlocklight()
+        {
+            if (!File.Exists(_blocklightFilePath)) return;
+
+            try
+            {
+                using FileStream stream = new FileStream(_blocklightFilePath, FileMode.Open);
+                using BinaryReader reader = new BinaryReader(stream);
+
+                byte version = reader.ReadByte();
+                if (version != BLOCKLIGHT_FILE_VERSION)
+                {
+                    Debug.LogError($"[LightingStateManager] Unknown pending_blocklight.bin version {version.ToString()} (expected {BLOCKLIGHT_FILE_VERSION.ToString()}). Skipping load.");
+                    return;
+                }
+
+                int chunkCount = reader.ReadInt32();
+                for (int i = 0; i < chunkCount; i++)
+                {
+                    int x = reader.ReadInt32();
+                    int z = reader.ReadInt32();
+                    ChunkCoord chunkCoord = new ChunkCoord(x, z);
+
+                    int modCount = reader.ReadInt32();
+                    for (int m = 0; m < modCount; m++)
+                    {
+                        byte lx = reader.ReadByte();
+                        byte ly = reader.ReadByte();
+                        byte lz = reader.ReadByte();
+                        byte r = reader.ReadByte();
+                        byte g = reader.ReadByte();
+                        byte b = reader.ReadByte();
+                        bool isRemoval = reader.ReadBoolean();
+
+                        // AddPendingBlocklight validates bounds (rejecting corrupted disk data),
+                        // handles pooled inner dictionaries, and merges duplicate chunk entries.
+                        AddPendingBlocklight(chunkCoord, new Vector3Int(lx, ly, lz), r, g, b, isRemoval);
+                    }
+                }
+            }
+            catch (EndOfStreamException)
+            {
+                Debug.LogWarning("[LightingStateManager] pending_blocklight.bin was truncated. Some pending blocklight modifications may be lost, but the pool remains safe.");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[LightingStateManager] Error loading pending blocklight: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Safely releases all remaining pooled HashSets and Dictionaries.
         /// Call this when destroying the world to prevent pool leaks.
         /// </summary>
         public void Clear()
@@ -193,6 +428,13 @@ namespace Serialization
             }
 
             _pendingRecalcs.Clear();
+
+            foreach (Dictionary<Vector3Int, PendingBlocklightMod> mods in _pendingBlocklightMods.Values)
+            {
+                DictionaryPool<Vector3Int, PendingBlocklightMod>.Release(mods);
+            }
+
+            _pendingBlocklightMods.Clear();
         }
     }
 }

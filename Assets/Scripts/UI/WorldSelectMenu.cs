@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Data;
+using Data.WorldTypes;
 using Helpers;
 using Serialization;
 using Serialization.Migration;
+using Serialization.Migration.Exceptions;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -17,41 +20,86 @@ namespace UI
         public Transform listContentParent;
 
         [Header("Panels")]
-        public GameObject selectPanel;
+        [SerializeField]
+        private GameObject _selectPanel;
 
-        public GameObject createPanel;
+        [SerializeField]
+        private GameObject _createPanel;
 
         [Header("Migration UI")]
-        public GameObject migrationProgressPanel;
+        [SerializeField]
+        private GameObject _migrationProgressPanel;
 
-        public Slider progressBar;
-        public TextMeshProUGUI progressText;
+        [SerializeField]
+        private Slider _progressBar;
+
+        [SerializeField]
+        private TextMeshProUGUI _progressText;
 
         [Header("Error UI")]
-        public GameObject errorPanel;
+        [SerializeField]
+        private GameObject _errorPanel;
 
-        public TextMeshProUGUI errorTitleText;
-        public TextMeshProUGUI errorMessageText;
+        [SerializeField]
+        private TextMeshProUGUI _errorTitleText;
+
+        [SerializeField]
+        private TextMeshProUGUI _errorMessageText;
+
+        [Header("Correctable Error Prompt UI")]
+        [SerializeField]
+        private GameObject _migrationCorrectableErrorPanel;
+
+        [SerializeField]
+        private TextMeshProUGUI _migrationCorrectableTitleText;
+
+        [SerializeField]
+        private TextMeshProUGUI _migrationCorrectableMessageText;
+
+        [SerializeField]
+        private Button _migrationCorrectableContinueButton;
+
+        [SerializeField]
+        private Button _migrationCorrectableRollbackButton;
 
         [Header("Info UI")]
-        public GameObject infoPanel;
+        [SerializeField]
+        private GameObject _infoPanel;
 
-        public TextMeshProUGUI infoDetailsText;
-        public RawImage minimapImage; // Uses RawImage to display a dynamically generated Texture2D
-        public Button infoButton;
+        [SerializeField]
+        private TextMeshProUGUI _infoDetailsText;
+
+        [SerializeField]
+        private RawImage _minimapImage; // Uses RawImage to display a dynamically generated Texture2D
+
+        [SerializeField]
+        private Button _infoButton;
 
         [Header("Selection Buttons")]
-        public Button loadButton;
+        [SerializeField]
+        private Button _loadButton;
 
-        public Button deleteButton;
+        [SerializeField]
+        private Button _deleteButton;
 
         [Header("Creation Inputs")]
-        public TMP_InputField newWorldNameInput;
+        [SerializeField]
+        private TMP_InputField _newWorldNameInput;
 
-        public TMP_InputField seedInput;
+        [SerializeField]
+        private TMP_InputField _seedInput;
+
+        [Tooltip("Dropdown for selecting the world generation type (Legacy, Standard, etc.).")]
+        [SerializeField]
+        private TMP_Dropdown _worldTypeDropdown;
+
+        [Tooltip("Reference to the global world type registry.")]
+        [SerializeField]
+        private WorldTypeRegistry _worldTypeRegistry;
 
         private WorldSaveData _selectedWorld;
         private List<WorldListItem> _spawnedItems = new List<WorldListItem>();
+        private readonly List<WorldTypeID> _dropdownMapping = new List<WorldTypeID>();
 
         private Settings _settings;
 
@@ -59,7 +107,6 @@ namespace UI
         {
             LoadSettings();
         }
-
 
         private void LoadSettings()
         {
@@ -149,9 +196,9 @@ namespace UI
         private void UpdateButtons()
         {
             bool hasSelection = _selectedWorld != null;
-            if (loadButton) loadButton.interactable = hasSelection;
-            if (deleteButton) deleteButton.interactable = hasSelection;
-            if (infoButton) infoButton.interactable = hasSelection; // Dynamically toggle Info button
+            if (_loadButton) _loadButton.interactable = hasSelection;
+            if (_deleteButton) _deleteButton.interactable = hasSelection;
+            if (_infoButton) _infoButton.interactable = hasSelection; // Dynamically toggle Info button
         }
 
         // --- BUTTON EVENTS ---
@@ -162,8 +209,8 @@ namespace UI
             if (_selectedWorld == null) return;
 
             // Prevent double clicks
-            if (loadButton != null) loadButton.interactable = false;
-            if (deleteButton != null) deleteButton.interactable = false;
+            if (_loadButton != null) _loadButton.interactable = false;
+            if (_deleteButton != null) _deleteButton.interactable = false;
 
             MigrationManager migrationManager = new MigrationManager();
             bool migrationSucceeded = false;
@@ -173,17 +220,17 @@ namespace UI
                 // 1. Check for Downgrades BEFORE touching UI state
                 if (migrationManager.RequiresMigration(_selectedWorld.version))
                 {
-                    selectPanel.SetActive(false);
+                    _selectPanel.SetActive(false);
 
-                    if (migrationProgressPanel != null)
-                        migrationProgressPanel.SetActive(true);
+                    if (_migrationProgressPanel != null)
+                        _migrationProgressPanel.SetActive(true);
 
                     Progress<MigrationProgress> progress = new Progress<MigrationProgress>(status =>
                     {
-                        if (progressBar != null)
-                            progressBar.value = status.PercentComplete;
-                        if (progressText != null)
-                            progressText.text = $"{status.CurrentTask} ({status.ProcessedItems}/{status.TotalItems})";
+                        if (_progressBar != null)
+                            _progressBar.value = status.PercentComplete;
+                        if (_progressText != null)
+                            _progressText.text = $"{status.CurrentTask} ({status.ProcessedItems}/{status.TotalItems})";
                     });
 
                     // 2. AOT Execution
@@ -193,7 +240,8 @@ namespace UI
                         isVolatile,
                         _settings.saveCompression, // Explicitly decoupled from World.Instance
                         _selectedWorld.version,
-                        progress
+                        progress,
+                        OnCorrectableErrorDetected
                     );
                 }
 
@@ -211,6 +259,13 @@ namespace UI
             {
                 Debug.LogError($"[UI] Downgrade Exception: {downgradeEx.Message}");
                 ShowErrorPrompt("Incompatible World Version", downgradeEx.Message);
+            }
+            catch (MigrationAbortedException abortEx)
+            {
+                Debug.Log($"[UI] Migration aborted by user: {abortEx.Message}");
+                ShowErrorPrompt("Migration Cancelled",
+                    "You chose to rollback. Your world has been restored to its original state.\n\n" +
+                    "No data was lost.");
             }
             catch (Exception ex)
             {
@@ -231,24 +286,116 @@ namespace UI
             }
         }
 
+        /// <summary>
+        /// Callback invoked by the MigrationManager when corrupted chunks are detected.
+        /// Pauses migration and presents the user with a Continue/Rollback choice.
+        /// </summary>
+        /// <param name="corruptedCount">Number of chunks that could not be migrated.</param>
+        /// <param name="totalProcessed">Total number of chunks successfully processed.</param>
+        /// <returns>True if the user chose to continue; false to rollback.</returns>
+        private Task<bool> OnCorrectableErrorDetected(int corruptedCount, int totalProcessed)
+        {
+            TaskCompletionSource<bool> tcs = new TaskCompletionSource<bool>();
+
+            // Hide the progress panel
+            if (_migrationProgressPanel != null)
+                _migrationProgressPanel.SetActive(false);
+
+            // Calculate percentage for the user
+            int totalChunks = totalProcessed + corruptedCount;
+            float percentage = totalChunks > 0 ? (float)corruptedCount / totalChunks * 100f : 0f;
+
+            string message =
+                $"<b>{corruptedCount}</b> of <b>{totalChunks:N0}</b> chunks (<b>{percentage:F2}%</b>) could not be migrated " +
+                "due to data corruption.\n\n" +
+                "<b>Continue:</b> The corrupted chunks will be deleted and regenerated from the world seed. " +
+                "Any player-made changes in those chunks will be lost.\n\n" +
+                "<b>Rollback:</b> Your world will be restored to its original state. No data will be lost.";
+
+            ShowCorrectableErrorPrompt("Corrupted Chunks Detected", message, tcs);
+
+            return tcs.Task;
+        }
+
         private void ShowErrorPrompt(string title, string message)
         {
-            if (errorPanel != null)
+            if (_errorPanel != null)
             {
-                selectPanel.SetActive(false);
-                errorTitleText.text = title;
-                errorMessageText.text = message;
-                errorPanel.SetActive(true);
+                _selectPanel.SetActive(false);
+                _errorTitleText.text = title;
+                _errorMessageText.text = message;
+                _errorPanel.SetActive(true);
             }
         }
 
         // Hook this method up to a "Close" or "Okay" button on your Error Panel!
         public void CloseErrorPrompt()
         {
-            if (errorPanel != null)
-                errorPanel.SetActive(false);
+            if (_errorPanel != null)
+                _errorPanel.SetActive(false);
 
             SwitchToSelectMode();
+        }
+
+        // -------------------------------------------------------------------------
+        // --- CORRECTABLE ERROR PROMPT LOGIC ---
+        // -------------------------------------------------------------------------
+
+        /// <summary>
+        /// The active TaskCompletionSource for the corruption prompt.
+        /// Set by <see cref="ShowCorrectableErrorPrompt"/> and resolved by the Continue/Rollback button handlers.
+        /// </summary>
+        private TaskCompletionSource<bool> _corruptionPromptTcs;
+
+        /// <summary>
+        /// Displays the corruption prompt panel and wires up the Continue/Rollback buttons
+        /// to resolve the provided <see cref="TaskCompletionSource{T}"/>.
+        /// </summary>
+        private void ShowCorrectableErrorPrompt(string title, string message, TaskCompletionSource<bool> tcs)
+        {
+            _corruptionPromptTcs = tcs;
+
+            if (_migrationCorrectableErrorPanel != null)
+            {
+                if (_migrationCorrectableTitleText != null) _migrationCorrectableTitleText.text = title;
+                if (_migrationCorrectableMessageText != null) _migrationCorrectableMessageText.text = message;
+                _migrationCorrectableErrorPanel.SetActive(true);
+            }
+            else
+            {
+                // Fallback: if no corruption panel is wired up, auto-continue.
+                Debug.LogWarning("[WorldSelectMenu] migrationCorrectableErrorPanel is not assigned. Auto-continuing migration.");
+                tcs.TrySetResult(true);
+            }
+        }
+
+        /// <summary>
+        /// Button handler: User chose to continue the migration despite corrupted chunks.
+        /// Hook this up to the "Continue" button on the Corruption Prompt Panel.
+        /// </summary>
+        public void OnCorrectableErrorContinueClicked()
+        {
+            if (_migrationCorrectableErrorPanel != null)
+                _migrationCorrectableErrorPanel.SetActive(false);
+
+            if (_migrationProgressPanel != null)
+                _migrationProgressPanel.SetActive(true);
+
+            _corruptionPromptTcs?.TrySetResult(true);
+            _corruptionPromptTcs = null;
+        }
+
+        /// <summary>
+        /// Button handler: User chose to rollback the migration.
+        /// Hook this up to the "Rollback" button on the Corruption Prompt Panel.
+        /// </summary>
+        public void OnCorrectableErrorRollbackClicked()
+        {
+            if (_migrationCorrectableErrorPanel != null)
+                _migrationCorrectableErrorPanel.SetActive(false);
+
+            _corruptionPromptTcs?.TrySetResult(false);
+            _corruptionPromptTcs = null;
         }
 
         public void OnDeleteClicked()
@@ -262,13 +409,41 @@ namespace UI
 
         public void OnCreateNewClicked()
         {
-            selectPanel.SetActive(false);
+            _selectPanel.SetActive(false);
 
-            createPanel.SetActive(true);
+            _createPanel.SetActive(true);
 
             // Defaults
-            newWorldNameInput.text = "New World";
-            seedInput.text = "";
+            _newWorldNameInput.text = "New World";
+            _seedInput.text = "";
+
+            PopulateWorldTypeDropdown();
+        }
+
+        private void PopulateWorldTypeDropdown()
+        {
+            if (_worldTypeDropdown == null || _worldTypeRegistry == null) return;
+
+            _worldTypeDropdown.ClearOptions();
+            _dropdownMapping.Clear();
+
+            List<TMP_Dropdown.OptionData> options = new List<TMP_Dropdown.OptionData>();
+
+            foreach (WorldTypeDefinition typeDef in _worldTypeRegistry.types)
+            {
+                if (typeDef == null) continue;
+
+                options.Add(new TMP_Dropdown.OptionData(typeDef.displayName));
+                _dropdownMapping.Add(typeDef.typeID);
+            }
+
+            _worldTypeDropdown.AddOptions(options);
+
+            // Try to default to "Standard"
+            int defaultIndex = _dropdownMapping.IndexOf(WorldTypeID.Standard);
+            _worldTypeDropdown.value = defaultIndex >= 0 ? defaultIndex : 0;
+
+            _worldTypeDropdown.RefreshShownValue();
         }
 
         public void OnCancelCreateClicked()
@@ -278,29 +453,41 @@ namespace UI
 
         public void OnConfirmCreateClicked()
         {
-            string worldName = newWorldNameInput.text;
+            string worldName = _newWorldNameInput.text;
             if (string.IsNullOrWhiteSpace(worldName)) return;
 
             // Calculate Seed
-            int seed = VoxelData.CalculateSeed(seedInput.text);
+            int seed = VoxelData.CalculateSeed(_seedInput.text);
 
             // Setup Launch State
             WorldLaunchState.WorldName = worldName;
             WorldLaunchState.Seed = seed;
             WorldLaunchState.IsNewGame = true;
 
+            // Map dropdown selection to WorldTypeID using a safe lookup list
+            if (_worldTypeDropdown != null && _worldTypeDropdown.value < _dropdownMapping.Count)
+            {
+                WorldLaunchState.SelectedWorldType = _dropdownMapping[_worldTypeDropdown.value];
+            }
+            else
+            {
+                WorldLaunchState.SelectedWorldType = WorldTypeID.Standard; // Default for new worlds
+            }
+
             LoadGameScene();
         }
 
         private void SwitchToSelectMode()
         {
-            createPanel.SetActive(false);
+            _createPanel.SetActive(false);
 
-            // Ensure the migration panel hides when returning to the select menu.
-            if (migrationProgressPanel != null)
-                migrationProgressPanel.SetActive(false);
+            // Ensure the migration and corruption panels hide when returning to the select menu.
+            if (_migrationProgressPanel != null)
+                _migrationProgressPanel.SetActive(false);
+            if (_migrationCorrectableErrorPanel != null)
+                _migrationCorrectableErrorPanel.SetActive(false);
 
-            selectPanel.SetActive(true);
+            _selectPanel.SetActive(true);
             RefreshList();
             UpdateButtons();
         }
@@ -318,15 +505,15 @@ namespace UI
         {
             if (_selectedWorld == null) return;
 
-            selectPanel.SetActive(false);
+            _selectPanel.SetActive(false);
 
-            if (infoDetailsText != null)
-                infoDetailsText.text = "Loading world data...\nScanning region files...";
+            if (_infoDetailsText != null)
+                _infoDetailsText.text = "Loading world data...\nScanning region files...";
 
-            if (minimapImage != null)
-                minimapImage.texture = null;
+            if (_minimapImage != null)
+                _minimapImage.texture = null;
 
-            infoPanel.SetActive(true);
+            _infoPanel.SetActive(true);
 
             bool isVolatile = Application.isEditor && _settings != null && _settings.enableVolatileSaveData;
             string savePath = SaveSystem.GetSavePath(_selectedWorld.worldName, isVolatile);
@@ -343,10 +530,10 @@ namespace UI
 
                 // 3. Generate texture on main thread
                 int maxTextureSize = 256; // Default fallback
-                if (minimapImage != null && minimapImage.rectTransform != null)
+                if (_minimapImage != null && _minimapImage.rectTransform != null)
                 {
                     // Get the physical UI bounds of the RawImage
-                    Rect uiRect = minimapImage.rectTransform.rect;
+                    Rect uiRect = _minimapImage.rectTransform.rect;
                     // Use the largest dimension to ensure the map fits perfectly
                     maxTextureSize = Mathf.CeilToInt(Mathf.Max(uiRect.width, uiRect.height));
 
@@ -386,35 +573,37 @@ namespace UI
                     : "None";
 
                 string migrationText = "";
-                if (saveVersion < SaveSystem.CURRENT_VERSION)
+                switch (saveVersion)
                 {
-                    try
-                    {
-                        MigrationManager migrationManager = new MigrationManager();
-                        List<WorldMigrationStep> steps = migrationManager.GetRequiredMigrations(saveVersion);
-                        if (steps.Count > 0)
+                    case < SaveSystem.CURRENT_VERSION:
+                        try
                         {
-                            migrationText = "\n\n<b><color=#FFA500>Pending Migrations:</color></b>";
-                            foreach (WorldMigrationStep step in steps)
+                            MigrationManager migrationManager = new MigrationManager();
+                            List<WorldMigrationStep> steps = migrationManager.GetRequiredMigrations(saveVersion);
+                            if (steps.Count > 0)
                             {
-                                migrationText += $"\n• <b>v{step.SourceWorldVersion} → v{step.TargetWorldVersion}:</b> {step.ChangeSummary}";
+                                migrationText = "\n\n<b><color=#FFA500>Pending Migrations:</color></b>";
+                                foreach (WorldMigrationStep step in steps)
+                                {
+                                    migrationText += $"\n• <b>v{step.SourceWorldVersion} → v{step.TargetWorldVersion}:</b> {step.ChangeSummary}";
+                                }
                             }
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        migrationText = $"\n\n<b><color=#FF0000>Migration Error:</color></b>\n{ex.Message}";
-                    }
-                }
-                else if (saveVersion > SaveSystem.CURRENT_VERSION)
-                {
-                    migrationText = $"\n\n<b><color=#FF0000>Unsupported Future Version:</color></b>\nThis world was created in a newer version of the game (v{saveVersion}) and cannot be loaded.";
+                        catch (Exception ex)
+                        {
+                            migrationText = $"\n\n<b><color=#FF0000>Migration Error:</color></b>\n{ex.Message}";
+                        }
+
+                        break;
+                    case > SaveSystem.CURRENT_VERSION:
+                        migrationText = $"\n\n<b><color=#FF0000>Unsupported Future Version:</color></b>\nThis world was created in a newer version of the game (v{saveVersion}) and cannot be loaded.";
+                        break;
                 }
 
                 // 5. Update UI Text with Legend & Stats
-                if (infoDetailsText != null)
+                if (_infoDetailsText != null)
                 {
-                    infoDetailsText.text =
+                    _infoDetailsText.text =
                         $"<b>Name:</b> {_selectedWorld.worldName}\n" +
                         $"<b>Seed:</b> {_selectedWorld.seed}\n" +
                         $"<b>Save Version:</b> v{saveVersion}\n" +
@@ -434,25 +623,25 @@ namespace UI
                 }
 
                 // 6. Apply the minimap texture
-                if (minimapImage != null && mapData.Texture != null)
+                if (_minimapImage != null && mapData.Texture != null)
                 {
                     // Clean up the old texture if there is one to prevent memory leaks
-                    if (minimapImage.texture != null) Destroy(minimapImage.texture);
+                    if (_minimapImage.texture != null) Destroy(_minimapImage.texture);
 
-                    minimapImage.texture = mapData.Texture;
+                    _minimapImage.texture = mapData.Texture;
                 }
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Failed to load world info: {ex}");
-                if (infoDetailsText != null)
-                    infoDetailsText.text = $"Error loading world data:\n{ex.Message}";
+                if (_infoDetailsText != null)
+                    _infoDetailsText.text = $"Error loading world data:\n{ex.Message}";
             }
         }
 
         public void CloseInfoPanel()
         {
-            if (infoPanel != null) infoPanel.SetActive(false);
+            if (_infoPanel != null) _infoPanel.SetActive(false);
             SwitchToSelectMode();
         }
     }

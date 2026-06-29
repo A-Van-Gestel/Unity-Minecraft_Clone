@@ -1,0 +1,254 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f80b67036dc9d2b47ac044551ecb7bf9, type: 3}
+  m_Name: CreditsDatabase
+  m_EditorClassIdentifier: Assembly-CSharp::Data.CreditsDatabase
+  _entries:
+  - name: NativeCompressions
+    author: Cysharp
+    category: 0
+    licenseType: 0
+    customLicenseText: 
+    url: https://github.com/Cysharp/NativeCompressions
+    usageDescription: High-performance native LZ4 bindings for Chunk Serialization.
+    sourceFiles: []
+    projectFiles: []
+    version: 0.6.0
+    notes: 
+  - name: Starlight / ScalableLux
+    author: RelativityMC
+    category: 0
+    licenseType: 4
+    customLicenseText: 
+    url: https://github.com/RelativityMC/ScalableLux
+    usageDescription: Reference implementation for the BFS flood-fill lighting propagation
+      and optimization details.
+    sourceFiles: []
+    projectFiles: []
+    version: 
+    notes: 
+  - name: FastNoiseLite
+    author: Auburn
+    category: 0
+    licenseType: 0
+    customLicenseText: 
+    url: https://github.com/Auburn/FastNoiseLite
+    usageDescription: Burst-compatible port of the v1.1 C# version used for high-performance
+      'Standard" terrain generation.
+    sourceFiles: []
+    projectFiles:
+    - Assets/Scripts/Libraries/FastNoiseLite.cs
+    version: 1.1
+    notes: Burst port by Project Developer
+  - name: Perlin Noise
+    author: Unity Technologies
+    category: 0
+    licenseType: 8
+    customLicenseText: 
+    url: 
+    usageDescription: Used via 'Mathf.PerlinNoise' for 'Legacy' world terrain generation.
+    sourceFiles: []
+    projectFiles: []
+    version: 
+    notes: 
+  - name: Spiral Loop
+    author: Unity Discussions
+    category: 0
+    licenseType: 9
+    customLicenseText: 
+    url: https://discussions.unity.com/t/how-to-generate-a-grid-from-the-center/171186/2
+    usageDescription: Math logic for chunk loading iteration in a Spiral Loop.
+    sourceFiles: []
+    projectFiles:
+    - Assets/Scripts/Helpers/SpiralLoop.cs
+    version: 
+    notes: 
+  - name: FPSCounter
+    author: ManlyMarco
+    category: 0
+    licenseType: 1
+    customLicenseText: 
+    url: https://github.com/ManlyMarco/FPSCounter
+    usageDescription: Implementation reference for the 'PerformanceMonitor' dual-hook
+      'Stopwatch' architecture and per-phase CPU timing methodology.
+    sourceFiles: []
+    projectFiles:
+    - Assets/Scripts/PerformanceMonitor.cs
+    - Assets/Scripts/Helpers/MovingAverage.cs
+    version: 3.3.1
+    notes: FPS counter plugin for BepInEx - measure frame time and plugin performance
+  - name: 50 free textures 5 (with Normalmaps)
+    author: rubberduck
+    category: 1
+    licenseType: 5
+    customLicenseText: 
+    url: https://opengameart.org/content/50-free-textures-5-with-normalmaps
+    usageDescription: Block Textures
+    sourceFiles: []
+    projectFiles: []
+    version: 
+    notes: 
+  - name: High-res texture pack 1
+    author: rubberduck
+    category: 1
+    licenseType: 5
+    customLicenseText: 
+    url: https://opengameart.org/content/high-res-texture-pack-1
+    usageDescription: Block Textures
+    sourceFiles: []
+    projectFiles: []
+    version: 
+    notes: 
+  - name: 60 CC0 Vegetation textures
+    author: rubberduck
+    category: 1
+    licenseType: 5
+    customLicenseText: 
+    url: https://opengameart.org/content/60-cc0-vegetation-textures
+    usageDescription: Block Textures
+    sourceFiles: []
+    projectFiles:
+    - Oak Leaves
+    version: 
+    notes: 
+  - name: Terrain textures pack (from Stunt Rally 2.3)
+    author: CryHam
+    category: 1
+    licenseType: 5
+    customLicenseText: 
+    url: https://opengameart.org/content/terrain-textures-pack-from-stunt-rally-23
+    usageDescription: Block Textures
+    sourceFiles: []
+    projectFiles: []
+    version: 
+    notes: 
+  - name: Tree Bark
+    author: qubodup
+    category: 1
+    licenseType: 5
+    customLicenseText: 
+    url: https://opengameart.org/node/8005
+    usageDescription: Block Textures
+    sourceFiles: []
+    projectFiles:
+    - Oak Logs
+    version: 
+    notes: 
+  - name: Seamless, tiling tree bark texture
+    author: Bart K.
+    category: 1
+    licenseType: 6
+    customLicenseText: 
+    url: https://opengameart.org/node/7789
+    usageDescription: Block Textures
+    sourceFiles: []
+    projectFiles:
+    - Oak Logs
+    version: 
+    notes: 
+  - name: paramecij's tree trunks and stumps texture pack 1
+    author: pare
+    category: 1
+    licenseType: 5
+    customLicenseText: 
+    url: https://opengameart.org/content/paramecijs-tree-trunks-and-stumps-texture-pack-1
+    usageDescription: Block Textures
+    sourceFiles: []
+    projectFiles:
+    - Oak Logs
+    version: 
+    notes: 
+  - name: Grass 2
+    author: virtushda
+    category: 1
+    licenseType: 5
+    customLicenseText: 
+    url: https://opengameart.org/content/grass-2-0
+    usageDescription: Used for the grass blades block.
+    sourceFiles: []
+    projectFiles:
+    - 255-grass_blades.png
+    version: 
+    notes: 
+  - name: Block Icons
+    author: TABmk
+    category: 2
+    licenseType: 0
+    customLicenseText: 
+    url: https://github.com/TABmk/minecraft-blocks-render
+    usageDescription: Block Icons where originally generated using Minecraft Blocks
+      Render by TABmk. Now used as an implementation reference for the project's
+      own in-editor block icon renderer.
+    sourceFiles: []
+    projectFiles: []
+    version: 3
+    notes: 
+  - name: Crosshair
+    author: 
+    category: 2
+    licenseType: 9
+    customLicenseText: 
+    url: 
+    usageDescription: 
+    sourceFiles: []
+    projectFiles: []
+    version: 
+    notes: Custom made
+  - name: Hotbar, UI Slot's, Buttons & Dirt Main Menu background
+    author: Minecraft
+    category: 2
+    licenseType: 8
+    customLicenseText: 
+    url: 
+    usageDescription: 
+    sourceFiles: []
+    projectFiles: []
+    version: 
+    notes: Ripped from Minecraft. To be replaced with own versions.
+  - name: Monocraft
+    author: IdreesInc
+    category: 3
+    licenseType: 7
+    customLicenseText: 
+    url: https://github.com/IdreesInc/Monocraft
+    usageDescription: Used as main project font.
+    sourceFiles: []
+    projectFiles:
+    - Assets/Fonts/Monocraft/Monocraft.ttc
+    version: 4.2.1
+    notes: A monospaced font inspired by the Minecraft typeface.
+  - name: FireCuda
+    author: tonsky
+    category: 3
+    licenseType: 7
+    customLicenseText: 
+    url: https://github.com/tonsky/FiraCode
+    usageDescription: Used as fallback for Monocraft for "Box Drawing" characters.
+    sourceFiles: []
+    projectFiles:
+    - Assets/Fonts/FireCuda/FireCuda.ttf
+    version: 6.2
+    notes: Free monospaced font with programming ligatures.
+  - name: MaskedUIBlur
+    author: cician
+    category: 4
+    licenseType: 9
+    customLicenseText: 
+    url: https://forum.unity3d.com/threads/simple-optimized-blur-shader.185327/#post-1267642
+    usageDescription: Implementation reference for own URP rendering pipeline compatible
+      Kawase UI Blur implementation.
+    sourceFiles: []
+    projectFiles:
+    - Assets/Scripts/Rendering/UIBlurRendererFeature.cs
+    - Assets/Shaders/UIBlurBlit.shader
+    version: 
+    notes: Optimized grab-pass blur for inventory backgrounds.
