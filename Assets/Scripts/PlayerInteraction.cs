@@ -225,13 +225,12 @@ public class PlayerInteraction : MonoBehaviour
     {
         // When holding a block, let the ray pass through blocks it can replace,
         // so the player can target the solid surface behind them (e.g. ocean floor through water).
-        // When holding nothing, skipTags stays NONE so all blocks are targetable for punching.
-        BlockTags skipTags = BlockTags.NONE;
-        if (toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem)
-        {
-            ushort heldBlockId = toolbar.slots[toolbar.slotIndex].ItemSlot.Stack.ID;
-            skipTags = _world.BlockTypes[heldBlockId].canReplaceTags;
-        }
+        // When holding nothing, heldBlock stays null so all blocks are targetable for punching.
+        UIItemSlot heldSlot = toolbar.slots[toolbar.slotIndex];
+        BlockType heldBlock = heldSlot.ItemSlot.HasItem
+            ? _world.BlockTypes[heldSlot.ItemSlot.Stack.ID]
+            : null;
+        BlockTags skipTags = PlacementResolver.GetRaycastSkipTags(heldBlock);
 
         VoxelRaycastResult result = RaycastForVoxel(skipTags: skipTags);
         _lastRaycastResult = result;
@@ -243,21 +242,11 @@ public class PlayerInteraction : MonoBehaviour
             VoxelState? hitState = _world.GetVoxelState(result.HitPosition);
             if (hitState.HasValue)
             {
-                bool isReplaceable;
-
-                // Also check if the currently held block has explicit tags allowing it to replace the hit block
-                if (toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem)
-                {
-                    ushort heldBlockId = toolbar.slots[toolbar.slotIndex].ItemSlot.Stack.ID;
-                    BlockType heldProps = _world.BlockTypes[heldBlockId];
-
-                    isReplaceable = BlockTagUtility.CanReplace(heldProps, hitState.Value.Properties);
-                }
-                else
-                {
-                    // Fallback if not holding anything
-                    isReplaceable = (hitState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0;
-                }
+                // Decide whether the held block replaces the hit block (place into its
+                // cell) or lands adjacent. Keyed off the held block's canReplaceTags via
+                // BlockTagUtility.CanReplace; falls back to the REPLACEABLE tag when the
+                // hand is empty.
+                bool isReplaceable = PlacementResolver.ResolvesToReplace(heldBlock, hitState.Value.Properties);
 
                 if (isReplaceable)
                 {
@@ -290,7 +279,7 @@ public class PlayerInteraction : MonoBehaviour
                 !isInsidePlayer &&
                 _world.worldData.IsVoxelInWorld(result.PlacePosition) &&
                 !_world.IsCellOccupiedForPlacement(result.PlacePosition) &&
-                toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem;
+                heldSlot.ItemSlot.HasItem;
 
             // Set highlight objects active state
             _highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
