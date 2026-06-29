@@ -10,17 +10,17 @@ namespace Editor.Validation.Placement
     /// <c>PlayerInteraction.PlaceCursorBlocks</c> (extracted into <see cref="Data.PlacementResolver"/>) composed with
     /// the real <c>World.CheckForVoxel</c> / <c>World.IsCellOccupiedForPlacement</c> seams.
     /// <para>
-    /// Scenarios come in three categories, mirroring the lighting/meshing suites:
+    /// Scenarios come in categories, mirroring the lighting/meshing suites. All currently registered scenarios are
+    /// <b>baselines</b> (must stay green); the runner also supports <b>known-bug</b> scenarios (a non-null
+    /// <c>KnownBugId</c>, EXPECTED to fail until fixed) for any future placement bug authored test-first.
     /// <list type="bullet">
-    /// <item><b>Baseline</b> (regression) scenarios run against a controlled, correctly-configured palette and must
-    /// always pass — a failure means the placement mechanism itself regressed.</item>
-    /// <item><b>Data-audit</b> scenarios inspect the <b>real</b> shipping <c>BlockDatabase.asset</c> for tag
-    /// misconfigurations that break placement; they are reported as known-bug reproductions (EXPECTED to fail until
-    /// the data is retuned) so they don't fail the suite.</item>
-    /// <item><b>Known-bug</b> scenarios reproduce the player-visible symptom (a block that can't be placed on top of
-    /// another) against the real database, test-first.</item>
+    /// <item><b>Baseline</b> scenarios run against a controlled, correctly-configured palette and pin the placement
+    /// mechanism (<c>.Baseline.cs</c>).</item>
+    /// <item><b>Data-audit</b> inspects the <b>real</b> shipping <c>BlockDatabase.asset</c> — asserts no block's
+    /// <c>placementCanReplaceTags</c> contains a tag that would tunnel the placement ray (<c>.DataAudit.cs</c>).</item>
+    /// <item><b>Regression</b> guards reproduce the formerly-broken PLAYER_BUGS §03 cases against the real database
+    /// (Coal Ore / Directional Block / Oak Log land-on-top), promoted to baselines after the fix (<c>.Regression.cs</c>).</item>
     /// </list>
-    /// Scenario implementations live in the partial files (<c>.Baseline.cs</c>, <c>.DataAudit.cs</c>, <c>.KnownBugs.cs</c>).
     /// </para>
     /// </summary>
     public static partial class PlacementValidationSuite
@@ -58,7 +58,7 @@ namespace Editor.Validation.Placement
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
             AddDataAuditScenarios(scenarios);
-            AddKnownBugScenarios(scenarios);
+            AddRegressionScenarios(scenarios);
 
             int baselinePassed = 0;
             int baselineFailed = 0;
@@ -134,7 +134,7 @@ namespace Editor.Validation.Placement
         /// <summary>Registers the real-database tag-audit scenarios (implemented in PlacementValidationSuite.DataAudit.cs).</summary>
         static partial void AddDataAuditScenarios(List<Scenario> scenarios);
 
-        /// <summary>Registers the known-bug reproduction scenarios (implemented in PlacementValidationSuite.KnownBugs.cs).</summary>
-        static partial void AddKnownBugScenarios(List<Scenario> scenarios);
+        /// <summary>Registers the PLAYER_BUGS §03 regression guards (implemented in PlacementValidationSuite.Regression.cs).</summary>
+        static partial void AddRegressionScenarios(List<Scenario> scenarios);
     }
 }

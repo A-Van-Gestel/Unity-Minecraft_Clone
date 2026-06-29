@@ -195,7 +195,7 @@ Collision handling is separated into **three** distinct APIs:
 /// replaceable blocks (BlockTags.REPLACEABLE) or incoming-vs-existing
 /// replacement rules. The authoritative placement validation remains in
 /// the existing placement pipeline (PlayerInteraction / World.ModifyVoxel),
-/// which checks canReplaceTags and incoming block compatibility.
+/// which checks placementCanReplaceTags and incoming block compatibility.
 ///
 /// If full placement semantics are needed at the query site, use
 /// CanPlaceBlockAt(Vector3Int, ushort incomingBlockId) instead (Phase 6b).

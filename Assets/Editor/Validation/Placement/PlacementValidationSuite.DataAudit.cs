@@ -9,8 +9,8 @@ namespace Editor.Validation.Placement
     /// <summary>
     /// Data-integrity audit of the <b>real</b> shipping <c>BlockDatabase.asset</c>. This is the check that catches the
     /// "world-gen tags leak into player placement" class of bug (PLAYER_BUGS §03) at the data layer, before it ever
-    /// reaches a player's hand. Registered as a known-bug reproduction so the suite reports — but does not fail on —
-    /// the current misconfiguration; it flips to a fix candidate once the offending blocks are retuned.
+    /// reaches a player's hand. A baseline (must stay green): it re-reds if any block's <c>placementCanReplaceTags</c>
+    /// regains a tag outside the soft player set, so the §03 misconfiguration cannot silently return.
     /// </summary>
     public static partial class PlacementValidationSuite
     {
@@ -29,9 +29,8 @@ namespace Editor.Validation.Placement
         static partial void AddDataAuditScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario(
-                "Data audit: canReplaceTags contains no world-gen structural tags",
-                CanReplaceTagsArePlayerSafe,
-                knownBugId: "PA-DATA-1 (PLAYER_BUGS §03)"));
+                "Data audit: placementCanReplaceTags contains only soft (REPLACEABLE|LIQUID) tags",
+                CanReplaceTagsArePlayerSafe));
         }
 
         /// <summary>

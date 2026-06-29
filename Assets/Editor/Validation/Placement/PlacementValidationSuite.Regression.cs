@@ -7,34 +7,29 @@ using UnityEngine;
 namespace Editor.Validation.Placement
 {
     /// <summary>
-    /// Known-bug reproductions for PLAYER_BUGS §03, driven against the <b>real</b> <c>BlockDatabase.asset</c> so they
-    /// reproduce the player-visible symptom exactly: holding one of the misconfigured blocks, the placement ray
-    /// tunnels through the targeted surface instead of letting the block land on top of it. Each asserts the
-    /// <i>desired</i> outcome (<see cref="PlacementOutcome.LandsOnTop"/>), so it fails today and flips green once the
-    /// offending block's <c>placementCanReplaceTags</c> is retuned to the soft player-placement set.
+    /// Regression guards for PLAYER_BUGS §03 (promoted from the original known-bug repros after the fix landed and was
+    /// confirmed in-game). Driven against the <b>real</b> <c>BlockDatabase.asset</c>, each asserts that holding a
+    /// formerly-misconfigured block lets it land on top of the targeted surface instead of tunnelling through it. These
+    /// are baselines — a regression in the placement masks or the <c>placementCanReplaceTags</c> split re-reds them.
     /// </summary>
     public static partial class PlacementValidationSuite
     {
-        static partial void AddKnownBugScenarios(List<Scenario> scenarios)
+        static partial void AddRegressionScenarios(List<Scenario> scenarios)
         {
-            scenarios.Add(new Scenario("Known bug: Coal Ore lands on top of Stone",
-                () => HeldBlockLandsOnTopOf(BlockIDs.CoalOre, BlockIDs.Stone),
-                knownBugId: "PA-KB-CoalOre (PLAYER_BUGS §03)"));
+            scenarios.Add(new Scenario("Regression: Coal Ore lands on top of Stone",
+                () => HeldBlockLandsOnTopOf(BlockIDs.CoalOre, BlockIDs.Stone)));
 
-            scenarios.Add(new Scenario("Known bug: Directional Block lands on top of Stone",
-                () => HeldBlockLandsOnTopOf(BlockIDs.DirectionalBlock, BlockIDs.Stone),
-                knownBugId: "PA-KB-DirectionalBlock (PLAYER_BUGS §03)"));
+            scenarios.Add(new Scenario("Regression: Directional Block lands on top of Stone",
+                () => HeldBlockLandsOnTopOf(BlockIDs.DirectionalBlock, BlockIDs.Stone)));
 
-            scenarios.Add(new Scenario("Known bug: Oak Log lands on top of Oak Leaves",
-                () => HeldBlockLandsOnTopOf(BlockIDs.OakLog, BlockIDs.OakLeaves),
-                knownBugId: "PA-KB-OakLog (PLAYER_BUGS §03)"));
+            scenarios.Add(new Scenario("Regression: Oak Log lands on top of Oak Leaves",
+                () => HeldBlockLandsOnTopOf(BlockIDs.OakLog, BlockIDs.OakLeaves)));
         }
 
         /// <summary>
         /// Seeds the real <paramref name="targetId"/> block (with air above it) and asserts that holding
         /// <paramref name="heldId"/> lets it land on top: the top-down probe stops on the target, does not replace it,
-        /// and the cell above is free. Returns the actual outcome, so a still-broken block reproduces the bug (red)
-        /// and a retuned one passes.
+        /// and the cell above is free.
         /// </summary>
         /// <param name="heldId">The real block id held by the player.</param>
         /// <param name="targetId">The real block id the player aims at.</param>

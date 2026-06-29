@@ -637,6 +637,21 @@ Furthermore, applying animations from the pool caused a 1-frame visual flash, an
 
 ---
 
+### ~~World-gen replacement tags leak into player placement~~
+
+**Severity:** Bug  
+**Files:** `BlockType.cs`, `BlockTagPreset.cs`, `PlacementRules.cs`, `VoxelMod.cs`, `World.cs` (`ApplyModifications`), `WorldJobManager.cs`, `PlacementResolver.cs`, `BlockDatabase.asset`  
+**Validation:** `Minecraft Clone/Dev/Validate Placement` (`PlacementValidationSuite`) — baselines + the promoted regression guards (Coal Ore / Directional Block / Oak Log land-on-top + the `placementCanReplaceTags` data audit).  
+**Fixed:** June 2026
+
+**Symptom:** Some blocks could not be placed **on top of** others. Holding Coal Ore, the cursor tunneled through stone (and replaced it); Directional Block tunneled through nearly every solid; Oak Log tunneled through leaves.
+
+**Root Cause:** A single `BlockType.canReplaceTags` field served two unrelated consumers: the **world-gen** write gate in `World.ApplyModifications` (where a structure log legitimately overwrites leaves while stacking, ore replaces stone, etc.) **and** player placement (the `PlacementResolver` raycast skip-mask + replace decision). The shipping values were tuned for generation, so structural tags (`ROCK`, `LEAVES`, the Directional Block's near-everything mask) leaked into the player's hand and made the placement ray pass through those surfaces.
+
+**Fix:** Split `canReplaceTags` into `worldGenCanReplaceTags` (carried the old values via `[FormerlySerializedAs]`) and `placementCanReplaceTags`. `BlockTagUtility.CanReplace` now takes the mask explicitly, with `CanReplaceForWorldGen` / `CanReplaceForPlacement` wrappers; `VoxelMod.Source` (`Live` vs `WorldGen`, stamped on generation mods in `WorldJobManager`) routes the `ApplyModifications` Default-rule gate to the right field. The player placement mask was retuned to the soft set `REPLACEABLE | LIQUID` for all blocks — notably **dropping `PLANT`**, which also tags solid Oak Leaves (every genuinely replaceable plant is also `REPLACEABLE`, so leaves are now buildable-on). World-gen masks were left untouched, so generation behavior is byte-identical.
+
+---
+
 ## World Generation & Data
 
 ### ~~02. `ProcessGenerationJobs` always uses `biomes[0]` for flora generation~~
