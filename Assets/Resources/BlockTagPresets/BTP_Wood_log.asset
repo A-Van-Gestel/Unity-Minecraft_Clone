@@ -14,4 +14,4 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::Data.BlockTagPreset
   tags: 1057
   worldGenCanReplaceTags: 8386
-  placementCanReplaceTags: 8386
+  placementCanReplaceTags: 8194

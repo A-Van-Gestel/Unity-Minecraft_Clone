@@ -16,12 +16,15 @@ namespace Editor.Validation.Placement
     {
         /// <summary>
         /// The only tags a <i>player-held</i> block may list in <see cref="BlockType.placementCanReplaceTags"/>: soft,
-        /// transient blocks the player legitimately places through/over. Any structural tag here (e.g.
-        /// <see cref="BlockTags.ROCK"/> or <see cref="BlockTags.LEAVES"/>) makes the placement ray tunnel through that
-        /// surface — the §03 symptom. The separate <see cref="BlockType.worldGenCanReplaceTags"/> is unconstrained here.
+        /// transient blocks the player legitimately places through/over (tall grass via <see cref="BlockTags.REPLACEABLE"/>,
+        /// water via <see cref="BlockTags.LIQUID"/>). Any other tag — structural (<see cref="BlockTags.ROCK"/>,
+        /// <see cref="BlockTags.LEAVES"/>) or <see cref="BlockTags.PLANT"/> (which also tags solid Oak Leaves) — makes the
+        /// placement ray tunnel through that surface (the §03 symptom). <see cref="BlockTags.PLANT"/> is intentionally
+        /// excluded: every replaceable plant is also <see cref="BlockTags.REPLACEABLE"/>, while leaves are PLANT-but-solid.
+        /// The separate <see cref="BlockType.worldGenCanReplaceTags"/> is unconstrained here.
         /// </summary>
         private const BlockTags AllowedPlayerCanReplace =
-            BlockTags.REPLACEABLE | BlockTags.PLANT | BlockTags.LIQUID;
+            BlockTags.REPLACEABLE | BlockTags.LIQUID;
 
         static partial void AddDataAuditScenarios(List<Scenario> scenarios)
         {

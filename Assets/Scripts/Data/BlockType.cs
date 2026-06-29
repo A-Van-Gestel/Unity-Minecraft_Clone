@@ -101,7 +101,8 @@ namespace Data
 
         [Tooltip("What tags can this block replace when PLACED BY THE PLAYER?\n" +
                  "If NONE, it can only replace Air or REPLACEABLE blocks. This should normally be the soft, transient set " +
-                 "(REPLACEABLE, PLANT, LIQUID) — structural tags here make the placement ray tunnel through that surface.")]
+                 "(REPLACEABLE, LIQUID) — any other tag (structural, or PLANT which also tags solid leaves) makes the " +
+                 "placement ray tunnel through that surface.")]
         public BlockTags placementCanReplaceTags;
 
         [Header("Block Behavior")]

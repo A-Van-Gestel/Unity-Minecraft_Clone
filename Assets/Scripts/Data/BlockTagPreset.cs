@@ -13,7 +13,7 @@ namespace Data
         [FormerlySerializedAs("canReplaceTags")]
         public BlockTags worldGenCanReplaceTags;
 
-        [Tooltip("The tags of blocks that this block type can replace when placed by the player (normally the soft set: REPLACEABLE, PLANT, LIQUID).")]
+        [Tooltip("The tags of blocks that this block type can replace when placed by the player (normally the soft set: REPLACEABLE, LIQUID).")]
         public BlockTags placementCanReplaceTags;
     }
 }

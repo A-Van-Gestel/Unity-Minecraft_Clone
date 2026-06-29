@@ -34,9 +34,13 @@ namespace Editor.Validation.Placement.Framework
             public const ushort Fluid = 4;
         }
 
-        /// <summary>The sane player-placement skip/replace mask: replace only soft, transient blocks — never structural ones.</summary>
+        /// <summary>
+        /// The sane player-placement skip/replace mask: replace only tall grass (<see cref="BlockTags.REPLACEABLE"/>)
+        /// and water (<see cref="BlockTags.LIQUID"/>) — never structural blocks, and never bare <see cref="BlockTags.PLANT"/>
+        /// (which also tags solid leaves).
+        /// </summary>
         public const BlockTags SanePlayerCanReplace =
-            BlockTags.REPLACEABLE | BlockTags.PLANT | BlockTags.LIQUID;
+            BlockTags.REPLACEABLE | BlockTags.LIQUID;
 
         /// <summary>Length of the palette array.</summary>
         public const int Count = Id.Fluid + 1;

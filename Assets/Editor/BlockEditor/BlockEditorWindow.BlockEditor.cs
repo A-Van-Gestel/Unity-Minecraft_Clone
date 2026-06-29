@@ -614,7 +614,7 @@ namespace Editor.BlockEditor
                 // --- Editable Tag Fields ---
                 _selectedBlock.tags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Tags", "What tags does this block have? A block can have multiple tags."), _selectedBlock.tags);
                 _selectedBlock.worldGenCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("World-Gen Can Replace", "What tags can this block replace during world generation (structures, flora, ores)?"), _selectedBlock.worldGenCanReplaceTags);
-                _selectedBlock.placementCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Placement Can Replace", "What tags can this block replace when placed by the player? Normally the soft set: REPLACEABLE, PLANT, LIQUID."), _selectedBlock.placementCanReplaceTags);
+                _selectedBlock.placementCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Placement Can Replace", "What tags can this block replace when placed by the player? Normally the soft set: REPLACEABLE, LIQUID."), _selectedBlock.placementCanReplaceTags);
 
 
                 EditorUILayoutHelper.DrawSeparator();
