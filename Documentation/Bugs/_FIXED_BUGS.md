@@ -648,7 +648,23 @@ Furthermore, applying animations from the pool caused a 1-frame visual flash, an
 
 **Root Cause:** A single `BlockType.canReplaceTags` field served two unrelated consumers: the **world-gen** write gate in `World.ApplyModifications` (where a structure log legitimately overwrites leaves while stacking, ore replaces stone, etc.) **and** player placement (the `PlacementResolver` raycast skip-mask + replace decision). The shipping values were tuned for generation, so structural tags (`ROCK`, `LEAVES`, the Directional Block's near-everything mask) leaked into the player's hand and made the placement ray pass through those surfaces.
 
-**Fix:** Split `canReplaceTags` into `worldGenCanReplaceTags` (carried the old values via `[FormerlySerializedAs]`) and `placementCanReplaceTags`. `BlockTagUtility.CanReplace` now takes the mask explicitly, with `CanReplaceForWorldGen` / `CanReplaceForPlacement` wrappers; `VoxelMod.Source` (`Live` vs `WorldGen`, stamped on generation mods in `WorldJobManager`) routes the `ApplyModifications` Default-rule gate to the right field. The player placement mask was retuned to the soft set `REPLACEABLE | LIQUID` for all blocks — notably **dropping `PLANT`**, which also tags solid Oak Leaves (every genuinely replaceable plant is also `REPLACEABLE`, so leaves are now buildable-on). World-gen masks were left untouched, so generation behavior is byte-identical.
+**Fix:** Split `canReplaceTags` into `worldGenCanReplaceTags` (carried the old values via `[FormerlySerializedAs]`) and `placementCanReplaceTags`. `BlockTagUtility.CanReplace` now takes the mask explicitly, with `CanReplaceForWorldGen` / `CanReplaceForPlacement` wrappers; `VoxelMod.Source` (`Live` vs `WorldGen`, stamped on generation mods in `WorldJobManager`) routes the `ApplyModifications` Default-rule gate to the right field. The player placement mask was retuned to the soft set `REPLACEABLE | LIQUID` for all blocks — notably **dropping `PLANT`**,
+which also tags solid Oak Leaves (every genuinely replaceable plant is also `REPLACEABLE`, so leaves are now buildable-on). World-gen masks were left untouched, so generation behavior is byte-identical.
+
+---
+
+### ~~REQUIRES_SUPPORT blocks can be placed without support~~
+
+**Severity:** Bug  
+**Files:** `PlayerInteraction.cs`, `World.cs` (`CanPlayerPlaceAt`), `PlacementResolver.cs`  
+**Validation:** `Minecraft Clone/Dev/Validate Placement` (`PlacementValidationSuite`) — promoted regression guards "Grass Blades cannot be placed floating above water" + synthetic "REQUIRES_SUPPORT block rejected above a non-supporting block", plus over-rejection tripwire baselines.  
+**Fixed:** June 2026
+
+**Symptom:** A block tagged `REQUIRES_SUPPORT` (e.g. Grass Blades, id 22) could be placed even when the cell directly below provided no support — most visibly, grass blades placed floating on top of water.
+
+**Root Cause:** The `REQUIRES_SUPPORT` system was implemented only as a *reactive break-cascade* in `World.ApplyModifications` (when an existing supporting block becomes non-solid, the block above it is broken). There was **no placement-time gate** — the player placement permission checked only world bounds + cell occupancy, never that a `REQUIRES_SUPPORT` block had a support-providing block beneath it.
+
+**Fix:** Extracted the player placement-permission decision into `World.CanPlayerPlaceAt(placeCell, placedBlock)` (shared by `PlayerInteraction` and the placement validation harness). It now rejects a `REQUIRES_SUPPORT` block unless the cell directly below `ProvidesSupport`, via the pure `PlacementResolver.HasRequiredSupport`. The placement highlight reflects the rejection. Code-only — Grass Blades was already correctly tagged.
 
 ---
 

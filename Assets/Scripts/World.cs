@@ -3299,6 +3299,42 @@ public class World : MonoBehaviour
     }
 
     /// <summary>
+    /// Decides whether the player may place <paramref name="placedBlock"/> into <paramref name="placeCell"/>,
+    /// independent of the player-AABB overlap and held-item checks that stay in <c>PlayerInteraction</c>. The cell
+    /// must be in-world and not already occupied by a solid (non-fluid) block.
+    /// <para>
+    /// Extracted from <c>PlayerInteraction.PlaceCursorBlocks</c> so the placement validation suite can drive the
+    /// real decision; <paramref name="placedBlock"/> is consumed by the <see cref="BlockTags.REQUIRES_SUPPORT"/>
+    /// gate (see the placement-support rule layered on this method).
+    /// </para>
+    /// </summary>
+    /// <param name="placeCell">The world voxel cell the block would occupy.</param>
+    /// <param name="placedBlock">The block type being placed, or <c>null</c> when nothing is held.</param>
+    /// <returns>True if placement into the cell is permitted.</returns>
+    public bool CanPlayerPlaceAt(Vector3Int placeCell, BlockType placedBlock)
+    {
+        if (!worldData.IsVoxelInWorld(placeCell) || IsCellOccupiedForPlacement(placeCell))
+        {
+            return false;
+        }
+
+        // A REQUIRES_SUPPORT block (e.g. grass blades) needs a support-providing block directly beneath it,
+        // so it cannot be placed floating on water or air. Guarded by the tag check so ordinary placements
+        // skip the extra voxel lookup.
+        if (placedBlock != null && (placedBlock.tags & BlockTags.REQUIRES_SUPPORT) != 0)
+        {
+            VoxelState? below = worldData.GetVoxelState(placeCell + Vector3Int.down);
+            BlockType belowProps = below.HasValue ? BlockTypes[below.Value.ID] : null;
+            if (!PlacementResolver.HasRequiredSupport(placedBlock, belowProps))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Tests whether an entity AABB overlaps any solid collision geometry along a
     /// specific movement axis and direction. Aggregates across all overlapping blocks
     /// and returns the correction that fully resolves ALL overlaps on this axis.

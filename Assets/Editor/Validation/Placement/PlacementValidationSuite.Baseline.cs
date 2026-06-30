@@ -15,13 +15,13 @@ namespace Editor.Validation.Placement
     public static partial class PlacementValidationSuite
     {
         /// <summary>The column the scenarios probe (well inside the origin chunk).</summary>
-        private const int ColX = 8;
+        private const int COL_X = 8;
 
         /// <summary>The column the scenarios probe (well inside the origin chunk).</summary>
-        private const int ColZ = 8;
+        private const int COL_Z = 8;
 
         /// <summary>The Y a scenario's primary target block is seeded at, with room above for a "land on top" cell.</summary>
-        private const int TargetY = 8;
+        private const int TARGET_Y = 8;
 
         static partial void AddBaselineScenarios(List<Scenario> scenarios)
         {
@@ -30,6 +30,8 @@ namespace Editor.Validation.Placement
             scenarios.Add(new Scenario("Baseline: solid placed where a plant grows replaces it", SolidReplacesSoftPlant));
             scenarios.Add(new Scenario("Baseline: empty hand replaces only REPLACEABLE", EmptyHandReplacesOnlyReplaceable));
             scenarios.Add(new Scenario("Baseline: lands on top of unbreakable (never replaces)", LandsOnTopOfUnbreakable));
+            scenarios.Add(new Scenario("Baseline: REQUIRES_SUPPORT block is placeable above a solid support", SupportNeedingPlaceableAboveSolid));
+            scenarios.Add(new Scenario("Baseline: non-support block stays placeable above water (no over-rejection)", NonSupportBlockPlaceableAboveWater));
         }
 
         /// <summary>
@@ -59,15 +61,15 @@ namespace Editor.Validation.Placement
         private static bool SolidLandsOnTopOfSolid()
         {
             using PlacementTestWorld world = new PlacementTestWorld(TestPlacementBlockPalette.Create());
-            world.SetBlock(ColX, TargetY, ColZ, Id.Ground);
+            world.SetBlock(COL_X, TARGET_Y, COL_Z, Id.Ground);
 
-            PlacementOutcome o = world.ResolveTopDownPlacement(Id.Ground, ColX, ColZ);
+            PlacementOutcome o = world.ResolveTopDownPlacement(Id.Ground, COL_X, COL_Z);
 
             bool ok = true;
             ok &= Expect(o.DidHit, "probe should stop at the solid target (not tunnel through it)");
-            ok &= Expect(o.HitCell == new Vector3Int(ColX, TargetY, ColZ), "probe should hit the seeded solid block");
+            ok &= Expect(o.HitCell == new Vector3Int(COL_X, TARGET_Y, COL_Z), "probe should hit the seeded solid block");
             ok &= Expect(!o.Replaces, "a solid should not replace another solid — it lands on top");
-            ok &= Expect(o.PlaceCell == new Vector3Int(ColX, TargetY + 1, ColZ), "place cell should be the cell above the target");
+            ok &= Expect(o.PlaceCell == new Vector3Int(COL_X, TARGET_Y + 1, COL_Z), "place cell should be the cell above the target");
             ok &= Expect(o.LandsOnTop, "net outcome: the block lands on top of the target");
             return ok;
         }
@@ -75,21 +77,21 @@ namespace Editor.Validation.Placement
         /// <summary>
         /// Holding a solid and aiming down a column where a REPLACEABLE plant sits on solid ground: the engine skips
         /// the plant (the held block can replace it) and the block lands in the plant's vacated cell — the intended
-        /// "place a block where tall grass grows" behaviour. This is the skip-then-place mechanism the §03 bug abuses
+        /// "place a block where tall grass grows" behavior. This is the skip-then-place mechanism the §03 bug abuses
         /// for structural blocks.
         /// </summary>
         private static bool SolidReplacesSoftPlant()
         {
             using PlacementTestWorld world = new PlacementTestWorld(TestPlacementBlockPalette.Create());
-            world.SetBlock(ColX, TargetY, ColZ, Id.SoftPlant);
-            world.SetBlock(ColX, TargetY - 1, ColZ, Id.Ground); // the surface the plant grows on
+            world.SetBlock(COL_X, TARGET_Y, COL_Z, Id.SoftPlant);
+            world.SetBlock(COL_X, TARGET_Y - 1, COL_Z, Id.Ground); // the surface the plant grows on
 
-            PlacementOutcome o = world.ResolveTopDownPlacement(Id.Ground, ColX, ColZ);
+            PlacementOutcome o = world.ResolveTopDownPlacement(Id.Ground, COL_X, COL_Z);
 
             bool ok = true;
             ok &= Expect(o.DidHit, "probe should skip the plant and stop on the ground beneath it");
-            ok &= Expect(o.HitCell == new Vector3Int(ColX, TargetY - 1, ColZ), "probe should hit the ground under the plant");
-            ok &= Expect(o.PlaceCell == new Vector3Int(ColX, TargetY, ColZ), "block should land in the plant's cell (replacing it)");
+            ok &= Expect(o.HitCell == new Vector3Int(COL_X, TARGET_Y - 1, COL_Z), "probe should hit the ground under the plant");
+            ok &= Expect(o.PlaceCell == new Vector3Int(COL_X, TARGET_Y, COL_Z), "block should land in the plant's cell (replacing it)");
             ok &= Expect(o.Placeable, "the plant cell is not solid-occupied, so it is placeable");
             return ok;
         }
@@ -98,12 +100,12 @@ namespace Editor.Validation.Placement
         private static bool EmptyHandReplacesOnlyReplaceable()
         {
             using PlacementTestWorld world = new PlacementTestWorld(TestPlacementBlockPalette.Create());
-            world.SetBlock(ColX, TargetY, ColZ, Id.SoftPlant);
-            world.SetBlock(ColX + 2, TargetY, ColZ, Id.Ground);
+            world.SetBlock(COL_X, TARGET_Y, COL_Z, Id.SoftPlant);
+            world.SetBlock(COL_X + 2, TARGET_Y, COL_Z, Id.Ground);
 
             // Empty hand → skipTags NONE → the probe stops directly on the target (no tunnel-through).
-            PlacementOutcome plant = world.ResolveTopDownPlacement(null, ColX, ColZ);
-            PlacementOutcome ground = world.ResolveTopDownPlacement(null, ColX + 2, ColZ);
+            PlacementOutcome plant = world.ResolveTopDownPlacement(null, COL_X, COL_Z);
+            PlacementOutcome ground = world.ResolveTopDownPlacement(null, COL_X + 2, COL_Z);
 
             bool ok = true;
             ok &= Expect(plant.DidHit && plant.Replaces, "empty hand should resolve a REPLACEABLE plant to replace in place");
@@ -111,13 +113,39 @@ namespace Editor.Validation.Placement
             return ok;
         }
 
+        /// <summary>
+        /// A <see cref="BlockTags.REQUIRES_SUPPORT"/> block placed directly above a solid support is permitted —
+        /// the support gate must let legitimately-supported placements through (tripwire against over-rejection).
+        /// </summary>
+        private static bool SupportNeedingPlaceableAboveSolid()
+        {
+            using PlacementTestWorld world = new PlacementTestWorld(TestPlacementBlockPalette.Create());
+            world.SetBlock(COL_X, TARGET_Y, COL_Z, Id.Ground); // solid support directly beneath the place cell
+
+            bool placeable = world.EvaluatePlacementAt(Id.SupportNeeding, new Vector3Int(COL_X, TARGET_Y + 1, COL_Z));
+            return Expect(placeable, "a REQUIRES_SUPPORT block should be placeable directly above a solid support");
+        }
+
+        /// <summary>
+        /// A non-<see cref="BlockTags.REQUIRES_SUPPORT"/> block remains placeable above water — the support gate is
+        /// scoped to REQUIRES_SUPPORT blocks only and must not start rejecting ordinary floating placements.
+        /// </summary>
+        private static bool NonSupportBlockPlaceableAboveWater()
+        {
+            using PlacementTestWorld world = new PlacementTestWorld(TestPlacementBlockPalette.Create());
+            world.SetBlock(COL_X, TARGET_Y, COL_Z, Id.Fluid); // non-solid water directly beneath the place cell
+
+            bool placeable = world.EvaluatePlacementAt(Id.Ground, new Vector3Int(COL_X, TARGET_Y + 1, COL_Z));
+            return Expect(placeable, "a non-REQUIRES_SUPPORT block should remain placeable above water (gate must not over-reject)");
+        }
+
         /// <summary>An UNBREAKABLE target is never replaced, but a block can still be placed on top of it.</summary>
         private static bool LandsOnTopOfUnbreakable()
         {
             using PlacementTestWorld world = new PlacementTestWorld(TestPlacementBlockPalette.Create());
-            world.SetBlock(ColX, TargetY, ColZ, Id.Unbreakable);
+            world.SetBlock(COL_X, TARGET_Y, COL_Z, Id.Unbreakable);
 
-            PlacementOutcome o = world.ResolveTopDownPlacement(Id.Ground, ColX, ColZ);
+            PlacementOutcome o = world.ResolveTopDownPlacement(Id.Ground, COL_X, COL_Z);
 
             bool ok = true;
             ok &= Expect(o.DidHit, "probe should stop at the unbreakable target");

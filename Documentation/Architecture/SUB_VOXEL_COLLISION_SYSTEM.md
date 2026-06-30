@@ -197,8 +197,12 @@ Collision handling is separated into **three** distinct APIs:
 /// the existing placement pipeline (PlayerInteraction / World.ModifyVoxel),
 /// which checks placementCanReplaceTags and incoming block compatibility.
 ///
-/// If full placement semantics are needed at the query site, use
-/// CanPlaceBlockAt(Vector3Int, ushort incomingBlockId) instead (Phase 6b).
+/// The player placement-permission gate is World.CanPlayerPlaceAt(Vector3Int,
+/// BlockType), which composes this occupancy check + world bounds + the
+/// REQUIRES_SUPPORT rule (a support-needing block, e.g. grass blades, is
+/// rejected unless the cell below ProvidesSupport — see PlacementResolver.
+/// HasRequiredSupport). Replaceability is still resolved separately upstream
+/// in PlacementResolver before the place cell is passed here.
 /// </remarks>
 public bool IsCellOccupiedForPlacement(Vector3 pos)
 {

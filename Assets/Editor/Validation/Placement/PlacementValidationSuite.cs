@@ -59,6 +59,7 @@ namespace Editor.Validation.Placement
             AddBaselineScenarios(scenarios);
             AddDataAuditScenarios(scenarios);
             AddRegressionScenarios(scenarios);
+            AddKnownBugScenarios(scenarios);
 
             int baselinePassed = 0;
             int baselineFailed = 0;
@@ -136,5 +137,8 @@ namespace Editor.Validation.Placement
 
         /// <summary>Registers the PLAYER_BUGS §03 regression guards (implemented in PlacementValidationSuite.Regression.cs).</summary>
         static partial void AddRegressionScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers expected-red known-bug reproductions (implemented in PlacementValidationSuite.KnownBugs.cs).</summary>
+        static partial void AddKnownBugScenarios(List<Scenario> scenarios);
     }
 }

@@ -30,7 +30,7 @@ namespace Data
         /// </returns>
         public static BlockTags GetRaycastSkipTags(BlockType heldBlock)
         {
-            return heldBlock != null ? heldBlock.placementCanReplaceTags : BlockTags.NONE;
+            return heldBlock?.placementCanReplaceTags ?? BlockTags.NONE;
         }
 
         /// <summary>
@@ -54,6 +54,25 @@ namespace Data
             }
 
             return (hitBlock.tags & BlockTags.REPLACEABLE) != 0;
+        }
+
+        /// <summary>
+        /// Decides whether a block that needs a foundation may be placed, given the block directly beneath the
+        /// place cell. A block tagged <see cref="BlockTags.REQUIRES_SUPPORT"/> (e.g. grass blades) may only be
+        /// placed when the cell below holds a block whose <see cref="BlockType.ProvidesSupport"/> is true — so it
+        /// cannot float on water or air. Every other block (and an empty hand) is unconstrained.
+        /// </summary>
+        /// <param name="placedBlock">The block type being placed, or <c>null</c> when nothing is held.</param>
+        /// <param name="blockBelow">The block type in the cell directly beneath the place cell, or <c>null</c> when that cell is out of world.</param>
+        /// <returns>True if the support requirement (if any) is satisfied.</returns>
+        public static bool HasRequiredSupport(BlockType placedBlock, BlockType blockBelow)
+        {
+            if (placedBlock == null || (placedBlock.tags & BlockTags.REQUIRES_SUPPORT) == 0)
+            {
+                return true;
+            }
+
+            return blockBelow != null && blockBelow.ProvidesSupport;
         }
     }
 }

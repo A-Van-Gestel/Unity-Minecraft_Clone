@@ -277,8 +277,7 @@ public class PlayerInteraction : MonoBehaviour
 
             _blockPlaceable =
                 !isInsidePlayer &&
-                _world.worldData.IsVoxelInWorld(result.PlacePosition) &&
-                !_world.IsCellOccupiedForPlacement(result.PlacePosition) &&
+                _world.CanPlayerPlaceAt(result.PlacePosition, heldBlock) &&
                 heldSlot.ItemSlot.HasItem;
 
             // Set highlight objects active state

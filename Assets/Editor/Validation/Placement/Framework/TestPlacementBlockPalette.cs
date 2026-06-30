@@ -32,6 +32,9 @@ namespace Editor.Validation.Placement.Framework
 
             /// <summary>A non-solid water-like fluid (the "water" stand-in).</summary>
             public const ushort Fluid = 4;
+
+            /// <summary>A non-solid <see cref="BlockTags.REQUIRES_SUPPORT"/> plant (the "grass blades" stand-in) — needs a solid block beneath it.</summary>
+            public const ushort SupportNeeding = 5;
         }
 
         /// <summary>
@@ -43,7 +46,7 @@ namespace Editor.Validation.Placement.Framework
             BlockTags.REPLACEABLE | BlockTags.LIQUID;
 
         /// <summary>Length of the palette array.</summary>
-        public const int Count = Id.Fluid + 1;
+        public const int Count = Id.SupportNeeding + 1;
 
         /// <summary>Builds the controlled baseline palette.</summary>
         /// <returns>A <see cref="BlockType"/> array indexed by <see cref="Id"/>.</returns>
@@ -101,6 +104,18 @@ namespace Editor.Validation.Placement.Framework
                 worldGenCanReplaceTags = SanePlayerCanReplace,
                 placementCanReplaceTags = SanePlayerCanReplace,
                 fluidType = FluidType.WaterLike,
+            };
+
+            // Mirrors Grass Blades (id 22): non-solid, REQUIRES_SUPPORT, and able to be placed into the soft set
+            // (REPLACEABLE|LIQUID) — so the only thing that should stop it floating on water is the support gate.
+            palette[Id.SupportNeeding] = new BlockType
+            {
+                blockName = "TestSupportNeeding",
+                isSolid = false,
+                tags = BlockTags.REPLACEABLE | BlockTags.PLANT | BlockTags.REQUIRES_SUPPORT,
+                worldGenCanReplaceTags = SanePlayerCanReplace,
+                placementCanReplaceTags = SanePlayerCanReplace,
+                fluidType = FluidType.None,
             };
 
             return palette;

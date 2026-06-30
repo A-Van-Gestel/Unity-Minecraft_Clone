@@ -141,13 +141,13 @@ namespace Editor.Validation.Placement.Framework
         /// sequence of <c>PlayerInteraction.PlaceCursorBlocks</c> with the real production seams. Marching downward
         /// from <paramref name="startY"/>, each cell is sampled with <c>World.CheckForVoxel</c> under the held block's
         /// skip mask (<see cref="PlacementResolver.GetRaycastSkipTags"/>); air and skipped cells are passed through
-        /// (the engine's tunnel-through behaviour) until the first cell registers a hit. That hit then feeds
+        /// (the engine's tunnel-through behavior) until the first cell registers a hit. That hit then feeds
         /// <see cref="PlacementResolver.ResolvesToReplace"/> (replace-in-place vs. land in the cell above) and the
         /// resolved destination is checked against <c>World.IsCellOccupiedForPlacement</c> + world bounds.
         /// <para>
         /// This unifies both production mechanisms in one model: a structural block the held item can replace gets
         /// skipped and the ray tunnels past it (the §03 bug when it should have been a target), while a soft block
-        /// gets skipped and the item lands in its vacated cell (the intended "replace the plant" behaviour).
+        /// gets skipped and the item lands in its vacated cell (the intended "replace the plant" behavior).
         /// </para>
         /// </summary>
         /// <param name="heldId">The held block id, or <c>null</c> for an empty hand.</param>
@@ -182,10 +182,25 @@ namespace Editor.Validation.Placement.Framework
             // the held block replaces the hit cell in place.
             Vector3Int placeCell = replaces ? hitCell : new Vector3Int(x, hitY + 1, z);
 
-            bool placeable = _world.worldData.IsVoxelInWorld(placeCell) &&
-                             !_world.IsCellOccupiedForPlacement(placeCell);
+            bool placeable = _world.CanPlayerPlaceAt(placeCell, held);
 
             return new PlacementOutcome(didHit: true, hitCell, replaces, placeCell, placeable);
+        }
+
+        /// <summary>
+        /// Directly evaluates the production player placement-permission decision
+        /// (<c>World.CanPlayerPlaceAt</c>) for an explicit place cell, bypassing the top-down probe geometry. Used by
+        /// scenarios that must control the block <i>directly beneath</i> the place cell — e.g. the
+        /// <see cref="BlockTags.REQUIRES_SUPPORT"/>-over-water repro, which the held block's skip mask would otherwise
+        /// tunnel the probe through. This is still the REAL production function, fed synthetic inputs.
+        /// </summary>
+        /// <param name="heldId">The held block id, or <c>null</c> for an empty hand.</param>
+        /// <param name="placeCell">The world voxel cell the block would occupy.</param>
+        /// <returns>True if the production decision permits placement into the cell.</returns>
+        public bool EvaluatePlacementAt(ushort? heldId, Vector3Int placeCell)
+        {
+            BlockType held = heldId.HasValue ? _palette[heldId.Value] : null;
+            return _world.CanPlayerPlaceAt(placeCell, held);
         }
 
         /// <summary>Restores the previous <c>World.Instance</c> and destroys every object the harness created.</summary>
