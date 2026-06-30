@@ -1,4 +1,6 @@
-namespace Data
+using Data;
+
+namespace Placement
 {
     /// <summary>
     /// Pure decision logic for player-driven block placement, extracted from
