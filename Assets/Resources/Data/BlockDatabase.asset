@@ -581,7 +581,7 @@ MonoBehaviour:
     tagPreset: {fileID: 11400000, guid: 40c769fe208bc7d45a9682a06a87e461, type: 2}
     tags: 1217
     worldGenCanReplaceTags: 0
-    placementCanReplaceTags: 0
+    placementCanReplaceTags: 2
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -616,8 +616,8 @@ MonoBehaviour:
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
     tagPreset: {fileID: 11400000, guid: 371aa74a265a2b448911164183310f2e, type: 2}
     tags: 24640
-    worldGenCanReplaceTags: 0
-    placementCanReplaceTags: 0
+    worldGenCanReplaceTags: 8192
+    placementCanReplaceTags: 8194
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -833,7 +833,7 @@ MonoBehaviour:
     tagPreset: {fileID: 11400000, guid: 371aa74a265a2b448911164183310f2e, type: 2}
     tags: 24640
     worldGenCanReplaceTags: 8192
-    placementCanReplaceTags: 8192
+    placementCanReplaceTags: 8194
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
