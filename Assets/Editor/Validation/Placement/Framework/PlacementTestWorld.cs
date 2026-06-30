@@ -123,7 +123,7 @@ namespace Editor.Validation.Placement.Framework
                 _world.worldData.Chunks[new Vector2Int(0, 0)] = ChunkData;
 
                 // The REAL production decision object the scenarios drive (no reimplementation in the harness).
-                _controller = new PlacementController(_world, PROBE_REACH, PROBE_INCREMENT);
+                _controller = new PlacementController(_world);
             }
             catch
             {
@@ -169,7 +169,7 @@ namespace Editor.Validation.Placement.Framework
 
             // "Player looking straight down the column" — feed the real production probe a downward ray.
             Vector3 origin = new Vector3(x + 0.5f, startY + 0.5f, z + 0.5f);
-            PlacementProbe probe = _controller.Probe(origin, Vector3.down, held, includeFluids: false);
+            PlacementProbe probe = _controller.Probe(origin, Vector3.down, held, includeFluids: false, PROBE_REACH, PROBE_INCREMENT);
 
             return new PlacementOutcome(probe.DidHit, probe.HitCell, probe.Replaces, probe.PlaceCell, probe.WorldPlaceable);
         }

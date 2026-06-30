@@ -21,18 +21,16 @@ namespace Placement
     public sealed class PlacementController
     {
         private readonly World _world;
-        private readonly float _reach;
-        private readonly float _checkIncrement;
 
-        /// <summary>Creates a controller bound to a world and the player's reach / ray-march resolution.</summary>
+        /// <summary>
+        /// Creates a controller bound to a world. Ray-march reach and resolution are supplied <i>per probe</i>
+        /// (not captured here), so live tweaks to the player's <c>reach</c> / <c>checkIncrement</c> take effect the
+        /// next frame.
+        /// </summary>
         /// <param name="world">The world whose voxel-data primitives the decision reads.</param>
-        /// <param name="reach">Maximum ray distance (in blocks) the player can target.</param>
-        /// <param name="checkIncrement">Ray-march step size; smaller is more accurate.</param>
-        public PlacementController(World world, float reach, float checkIncrement)
+        public PlacementController(World world)
         {
             _world = world;
-            _reach = reach;
-            _checkIncrement = checkIncrement;
         }
 
         /// <summary>
@@ -44,12 +42,15 @@ namespace Placement
         /// <param name="rayDir">Ray direction (the player camera forward).</param>
         /// <param name="heldBlock">The held block, or <c>null</c> for an empty hand.</param>
         /// <param name="includeFluids">Whether the ray treats fluids as hittable surfaces.</param>
+        /// <param name="reach">Maximum ray distance (in blocks) the player can target.</param>
+        /// <param name="checkIncrement">Ray-march step size; smaller is more accurate.</param>
         /// <returns>The resolved <see cref="PlacementProbe"/>, or <see cref="PlacementProbe.Miss"/> when nothing is in reach.</returns>
-        public PlacementProbe Probe(Vector3 rayOrigin, Vector3 rayDir, BlockType heldBlock, bool includeFluids)
+        public PlacementProbe Probe(Vector3 rayOrigin, Vector3 rayDir, BlockType heldBlock, bool includeFluids,
+            float reach, float checkIncrement)
         {
             BlockTags skipTags = PlacementResolver.GetRaycastSkipTags(heldBlock);
 
-            if (!MarchRay(rayOrigin, rayDir, includeFluids, skipTags,
+            if (!MarchRay(rayOrigin, rayDir, includeFluids, skipTags, reach, checkIncrement,
                     out Vector3Int hitCell, out int3 normal, out Vector3Int adjacentCell))
             {
                 return PlacementProbe.Miss;
@@ -74,14 +75,17 @@ namespace Placement
         /// <param name="rayDir">Ray direction (the player camera forward).</param>
         /// <param name="includeFluids">Whether the ray treats fluids as hittable surfaces.</param>
         /// <param name="skipTags">Block tags the ray passes through (e.g. the held block's replaceable set).</param>
+        /// <param name="reach">Maximum ray distance (in blocks) the player can target.</param>
+        /// <param name="checkIncrement">Ray-march step size; smaller is more accurate.</param>
         /// <param name="hitCell">The cell the ray stopped on (valid only when the method returns true).</param>
         /// <param name="hitNormal">The entered face normal (valid only when the method returns true).</param>
         /// <param name="adjacentCell">The cell adjacent to the hit face — where a non-replacing block lands.</param>
         /// <returns>True if a voxel was hit within reach.</returns>
         public bool MarchRay(Vector3 rayOrigin, Vector3 rayDir, bool includeFluids, BlockTags skipTags,
+            float reach, float checkIncrement,
             out Vector3Int hitCell, out int3 hitNormal, out Vector3Int adjacentCell)
         {
-            for (float step = _checkIncrement; step < _reach; step += _checkIncrement)
+            for (float step = checkIncrement; step < reach; step += checkIncrement)
             {
                 Vector3 pos = rayOrigin + rayDir * step;
                 if (!_world.CheckForVoxel(pos, includeFluids, includeNonSolid: true, skipTags: skipTags))

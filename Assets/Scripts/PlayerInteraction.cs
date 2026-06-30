@@ -50,7 +50,7 @@ public class PlayerInteraction : MonoBehaviour
         _world = World.Instance;
         _input = InputManager.Instance;
         _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
-        _placement = new PlacementController(_world, reach, checkIncrement);
+        _placement = new PlacementController(_world);
     }
 
     private void Update()
@@ -178,7 +178,7 @@ public class PlayerInteraction : MonoBehaviour
         // Use the override if provided, otherwise fall back to the player's current setting.
         bool checkFluids = overrideInteractWithFluids ?? interactWithFluids;
 
-        if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags,
+        if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags, reach, checkIncrement,
                 out Vector3Int hitCell, out int3 hitNormal, out Vector3Int adjacentCell))
         {
             return new VoxelRaycastResult
@@ -204,7 +204,7 @@ public class PlayerInteraction : MonoBehaviour
             ? _world.BlockTypes[heldSlot.ItemSlot.Stack.ID]
             : null;
 
-        PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock, interactWithFluids);
+        PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock, interactWithFluids, reach, checkIncrement);
         _lastProbe = probe;
 
         if (!probe.DidHit)
