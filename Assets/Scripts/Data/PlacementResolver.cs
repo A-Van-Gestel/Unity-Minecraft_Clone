@@ -9,10 +9,10 @@ namespace Data
     /// These methods only interpret <see cref="BlockType"/> tag data — they hold no
     /// reference to <c>World</c> or any scene object, so the geometric ray march and
     /// the player-AABB occupancy checks stay in <c>PlayerInteraction</c>. Both the
-    /// raycast skip mask and the replace-vs-place-on-top decision currently key off
-    /// the held block's <see cref="BlockType.canReplaceTags"/>, which is the same
-    /// field the world generator and <c>World.ApplyModifications</c> consume; the
-    /// suite exists to pin that shared semantics before it is retuned.
+    /// raycast skip mask and the replace-vs-place-on-top decision key off the held
+    /// block's <see cref="BlockType.placementCanReplaceTags"/> — the player-facing
+    /// replacement mask, distinct from the broad <see cref="BlockType.worldGenCanReplaceTags"/>
+    /// the world generator uses; the suite exists to pin that placement semantics.
     /// </para>
     /// </summary>
     public static class PlacementResolver
@@ -25,7 +25,7 @@ namespace Data
         /// </summary>
         /// <param name="heldBlock">The block type currently held, or <c>null</c> when the hand is empty.</param>
         /// <returns>
-        /// The held block's <see cref="BlockType.canReplaceTags"/>, or
+        /// The held block's <see cref="BlockType.placementCanReplaceTags"/>, or
         /// <see cref="BlockTags.NONE"/> when nothing is held (so all blocks are targetable for punching).
         /// </returns>
         public static BlockTags GetRaycastSkipTags(BlockType heldBlock)
