@@ -2,6 +2,7 @@ using System;
 using Data;
 using Editor.Validation.Framework;
 using Jobs.BurstData;
+using Placement;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -55,7 +56,7 @@ namespace Editor.Validation.Placement.Framework
 
     /// <summary>
     /// Single-chunk, edit-mode harness that drives the <b>real</b> production placement seams
-    /// (<c>World.CheckForVoxel</c>, <see cref="PlacementResolver"/>, <c>World.IsCellOccupiedForPlacement</c>) over a
+    /// (<c>World.CheckForVoxel</c>, <see cref="PlacementController"/>, <c>World.IsCellOccupiedForPlacement</c>) over a
     /// synthetic <see cref="ChunkData"/>, mirroring the tag-driven half of <c>PlayerInteraction.PlaceCursorBlocks</c>
     /// without a camera, toolbar, or geometric ray march. The march geometry is not where placement bugs live —
     /// the held block's <see cref="BlockType.placementCanReplaceTags"/> driving the skip mask and the replace decision is.
@@ -78,7 +79,14 @@ namespace Editor.Validation.Placement.Framework
         private readonly BlockDatabase _stubDatabase;
         private readonly World _world;
         private readonly World _previousInstance;
+        private readonly PlacementController _controller;
         private bool _disposed;
+
+        /// <summary>Reach for the harness probe — generous enough to march the full 0-127 column from any start Y.</summary>
+        private const float PROBE_REACH = 256f;
+
+        /// <summary>Ray-march step; matches the production <c>checkIncrement</c> default.</summary>
+        private const float PROBE_INCREMENT = 0.05f;
 
         /// <summary>The palette backing <c>World.Instance.BlockTypes</c> — exposed so scenarios can read tag data by id.</summary>
         public BlockType[] Palette => _palette;
@@ -113,6 +121,9 @@ namespace Editor.Validation.Placement.Framework
                 // 1:1 to a world voxel inside IsVoxelInWorld, so seeding/querying uses plain small coordinates.
                 ChunkData = new ChunkData(new Vector2Int(0, 0));
                 _world.worldData.Chunks[new Vector2Int(0, 0)] = ChunkData;
+
+                // The REAL production decision object the scenarios drive (no reimplementation in the harness).
+                _controller = new PlacementController(_world, PROBE_REACH, PROBE_INCREMENT);
             }
             catch
             {
@@ -137,15 +148,12 @@ namespace Editor.Validation.Placement.Framework
 
         /// <summary>
         /// Resolves a placement attempt by a <b>top-down</b> probe ray down the (<paramref name="x"/>,
-        /// <paramref name="z"/>) column — the player looking down at the column — mirroring the tag-driven decision
-        /// sequence of <c>PlayerInteraction.PlaceCursorBlocks</c> with the real production seams. Marching downward
-        /// from <paramref name="startY"/>, each cell is sampled with <c>World.CheckForVoxel</c> under the held block's
-        /// skip mask (<see cref="PlacementResolver.GetRaycastSkipTags"/>); air and skipped cells are passed through
-        /// (the engine's tunnel-through behavior) until the first cell registers a hit. That hit then feeds
-        /// <see cref="PlacementResolver.ResolvesToReplace"/> (replace-in-place vs. land in the cell above) and the
-        /// resolved destination is checked against <c>World.IsCellOccupiedForPlacement</c> + world bounds.
+        /// <paramref name="z"/>) column — the player looking straight down at the column — by running the
+        /// <b>real</b> <see cref="PlacementController.Probe"/> with a synthesized downward ray. The held block's skip
+        /// mask, the replace-vs-land-adjacent decision, and the world placeability (bounds + occupancy + support) are
+        /// all the production decision, not a harness reimplementation.
         /// <para>
-        /// This unifies both production mechanisms in one model: a structural block the held item can replace gets
+        /// This exercises both production mechanisms in one model: a structural block the held item can replace gets
         /// skipped and the ray tunnels past it (the §03 bug when it should have been a target), while a soft block
         /// gets skipped and the item lands in its vacated cell (the intended "replace the plant" behavior).
         /// </para>
@@ -158,41 +166,20 @@ namespace Editor.Validation.Placement.Framework
         public PlacementOutcome ResolveTopDownPlacement(ushort? heldId, int x, int z, int startY = DefaultStartY)
         {
             BlockType held = heldId.HasValue ? _palette[heldId.Value] : null;
-            BlockTags skipTags = PlacementResolver.GetRaycastSkipTags(held);
 
-            int hitY = -1;
-            for (int y = startY; y >= 0; y--)
-            {
-                Vector3 sample = new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
-                if (_world.CheckForVoxel(sample, includeFluids: false, includeNonSolid: true, skipTags: skipTags))
-                {
-                    hitY = y;
-                    break;
-                }
-            }
+            // "Player looking straight down the column" — feed the real production probe a downward ray.
+            Vector3 origin = new Vector3(x + 0.5f, startY + 0.5f, z + 0.5f);
+            PlacementProbe probe = _controller.Probe(origin, Vector3.down, held, includeFluids: false);
 
-            if (hitY < 0)
-                return new PlacementOutcome(didHit: false, hitCell: default, replaces: false, placeCell: default, placeable: false);
-
-            Vector3Int hitCell = new Vector3Int(x, hitY, z);
-            VoxelState? hit = _world.GetVoxelState(hitCell);
-            bool replaces = hit.HasValue && PlacementResolver.ResolvesToReplace(held, hit.Value.Properties);
-
-            // From above, the place position is the cell directly above the hit (the last air/skipped cell) unless
-            // the held block replaces the hit cell in place.
-            Vector3Int placeCell = replaces ? hitCell : new Vector3Int(x, hitY + 1, z);
-
-            bool placeable = _world.CanPlayerPlaceAt(placeCell, held);
-
-            return new PlacementOutcome(didHit: true, hitCell, replaces, placeCell, placeable);
+            return new PlacementOutcome(probe.DidHit, probe.HitCell, probe.Replaces, probe.PlaceCell, probe.WorldPlaceable);
         }
 
         /// <summary>
-        /// Directly evaluates the production player placement-permission decision
-        /// (<c>World.CanPlayerPlaceAt</c>) for an explicit place cell, bypassing the top-down probe geometry. Used by
-        /// scenarios that must control the block <i>directly beneath</i> the place cell — e.g. the
-        /// <see cref="BlockTags.REQUIRES_SUPPORT"/>-over-water repro, which the held block's skip mask would otherwise
-        /// tunnel the probe through. This is still the REAL production function, fed synthetic inputs.
+        /// Directly evaluates the production placement gate <see cref="PlacementController.CanPlaceAt"/> for an
+        /// explicit place cell, bypassing the probe geometry. Used by scenarios that must control the block
+        /// <i>directly beneath</i> the place cell — e.g. the <see cref="BlockTags.REQUIRES_SUPPORT"/>-over-water repro,
+        /// which the held block's skip mask would otherwise tunnel the probe through. Still the REAL production
+        /// function, fed synthetic inputs.
         /// </summary>
         /// <param name="heldId">The held block id, or <c>null</c> for an empty hand.</param>
         /// <param name="placeCell">The world voxel cell the block would occupy.</param>
@@ -200,7 +187,7 @@ namespace Editor.Validation.Placement.Framework
         public bool EvaluatePlacementAt(ushort? heldId, Vector3Int placeCell)
         {
             BlockType held = heldId.HasValue ? _palette[heldId.Value] : null;
-            return _world.CanPlayerPlaceAt(placeCell, held);
+            return _controller.CanPlaceAt(placeCell, held);
         }
 
         /// <summary>Restores the previous <c>World.Instance</c> and destroys every object the harness created.</summary>

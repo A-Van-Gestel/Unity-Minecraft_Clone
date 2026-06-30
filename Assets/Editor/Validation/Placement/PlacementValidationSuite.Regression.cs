@@ -18,7 +18,7 @@ namespace Editor.Validation.Placement
     /// floating on a non-supporting cell (water / air).</item>
     /// </list>
     /// These are baselines — a regression in the placement masks, the <c>placementCanReplaceTags</c> split, or the
-    /// <c>World.CanPlayerPlaceAt</c> support gate re-reds them.
+    /// <c>PlacementController.CanPlaceAt</c> support gate re-reds them.
     /// </summary>
     public static partial class PlacementValidationSuite
     {

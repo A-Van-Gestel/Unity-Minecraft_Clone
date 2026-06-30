@@ -6,9 +6,10 @@ using UnityEngine;
 namespace Editor.Validation.Placement
 {
     /// <summary>
-    /// Entry point and runner for the player block-<b>placement</b> validation suite — the tag-driven decisions in
-    /// <c>PlayerInteraction.PlaceCursorBlocks</c> (extracted into <see cref="Data.PlacementResolver"/>) composed with
-    /// the real <c>World.CheckForVoxel</c> / <c>World.IsCellOccupiedForPlacement</c> seams.
+    /// Entry point and runner for the player block-<b>placement</b> validation suite — the placement decision now
+    /// owned by <c>Placement.PlacementController</c> (which composes the pure <c>Placement.PlacementResolver</c> tag
+    /// logic with the real <c>World.CheckForVoxel</c> / <c>World.IsCellOccupiedForPlacement</c> seams), driven by the
+    /// same controller <c>PlayerInteraction</c> uses in-game.
     /// <para>
     /// Scenarios come in categories, mirroring the lighting/meshing suites. All currently registered scenarios are
     /// <b>baselines</b> (must stay green); the runner also supports <b>known-bug</b> scenarios (a non-null
