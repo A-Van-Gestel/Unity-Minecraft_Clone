@@ -1,6 +1,5 @@
 using System;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace Data
 {
@@ -42,19 +41,16 @@ namespace Data
     [Serializable]
     public struct BlockCollisionBounds
     {
-        [FormerlySerializedAs("Mode")]
         [Tooltip("How the collision volume is defined.\n\n" +
                  "• Full Block — standard 1×1×1 cube (fast path).\n" +
                  "• Custom AABB — manually authored sub-voxel box.\n" +
                  "• Match Visual Mesh — auto-derived from the mesh bounding box.")]
         public CollisionBoundsMode mode;
 
-        [FormerlySerializedAs("Min")]
         [Tooltip("Minimum corner of the collision AABB in block-local space [0,1]³.\n" +
                  "For a bottom half-slab: (0, 0, 0).")]
         public Vector3 min;
 
-        [FormerlySerializedAs("Max")]
         [Tooltip("Maximum corner of the collision AABB in block-local space [0,1]³.\n" +
                  "For a bottom half-slab: (1, 0.5, 1).")]
         public Vector3 max;

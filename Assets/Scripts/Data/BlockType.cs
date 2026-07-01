@@ -2,7 +2,6 @@ using System;
 using System.Runtime.CompilerServices;
 using MyBox;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace Data
 {
@@ -96,7 +95,6 @@ namespace Data
         [Tooltip("What tags can this block replace during WORLD GENERATION (structures, flora, ores)?\n" +
                  "If NONE, it can only replace Air. If ALL tags are selected, it can replace anything (except Unbreakable).\n" +
                  "This is the broad, generation-time mask (e.g. a structure log overwriting leaves while stacking).")]
-        [FormerlySerializedAs("canReplaceTags")]
         public BlockTags worldGenCanReplaceTags;
 
         [Tooltip("What tags can this block replace when PLACED BY THE PLAYER?\n" +

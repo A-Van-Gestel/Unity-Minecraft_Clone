@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace Data
 {
@@ -10,7 +9,6 @@ namespace Data
         public BlockTags tags;
 
         [Tooltip("The tags of blocks that this block type can replace during world generation (structures, flora, ores).")]
-        [FormerlySerializedAs("canReplaceTags")]
         public BlockTags worldGenCanReplaceTags;
 
         [Tooltip("The tags of blocks that this block type can replace when placed by the player (normally the soft set: REPLACEABLE, LIQUID).")]
