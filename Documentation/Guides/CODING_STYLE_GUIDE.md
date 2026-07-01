@@ -60,20 +60,24 @@ for(int i=0;i<VoxelData.ChunkWidth;i++)
 
 ## 3. Commenting
 
-Good comments explain the *why*, not the *what*.
+Comments explain the **why** — the intent, the constraint, the non-obvious reason a line exists. They must not restate the **what** that the code already makes obvious. A comment that only narrates the next statement is noise; delete it.
 
 ### XML Documentation Comments (`///`)
 
 **All public methods, properties, and classes must have XML documentation.** This allows for rich tooltips in the IDE and helps enforce a clear API design.  
 **Private methods, properties, and classes do not need XML documentation, but are allowed to have it.** Complex private methods should be documented, but small, easy to follow methods might be better off with a single line summary or no documentation at all.
 
+Keep summaries **brief**:
+
+- **Type-level** summaries (`class` / `struct` / `interface`) may run a little longer — they describe a whole unit's role and aren't sitting inline with the code.
+- **Member-level** summaries (methods, properties) should stay tight: one line where the member allows it. Lean on `<param>` / `<returns>` for specifics instead of padding the `<summary>`.
+
 ```csharp
 /// <summary>
-/// A robust method to get a VoxelState from any local position relative to the current chunk's origin.
-/// It correctly handles positions that are outside the chunk's bounds.
+/// Gets a VoxelState from any local position relative to the chunk origin, resolving into loaded neighbors when out of bounds.
 /// </summary>
 /// <param name="pos">The local position to check (e.g., (-1, 10, 16)).</param>
-/// <returns>A VoxelState if the position is in a loaded neighbor chunk, otherwise null.</returns>
+/// <returns>The VoxelState if the position is in a loaded neighbor chunk, otherwise null.</returns>
 private VoxelState? GetVoxelStateFromLocalPos(Vector3Int pos)
 {
     // ...
@@ -84,6 +88,8 @@ private VoxelState? GetVoxelStateFromLocalPos(Vector3Int pos)
 
 Use inline comments to explain complex, non-obvious, or tricky lines of code.
 
+Keep them **brief — a single line wherever possible, three lines maximum.** Exceed three lines only when it is genuinely justifiable, e.g. a passage of truly complex logic that cannot be understood without it. When a comment gets that long, treat it as a smell: the code itself may need refactoring (extract a well-named method, simplify the branch). **Flag that possibility to the user rather than silently shipping the wall of text.**
+
 ```csharp
 // Good: Explains the purpose of the line.
 y = 1f - y - VoxelData.NormalizedBlockTextureSize; // To start reading the atlas from the top left
@@ -91,6 +97,23 @@ y = 1f - y - VoxelData.NormalizedBlockTextureSize; // To start reading the atlas
 // Bad: Restates the obvious.
 // Increment i by 1.
 i++;
+```
+
+### Describe the current code, not its history
+
+Comments and doc comments document the code **as it stands now** — never how it used to behave.
+
+- When you fix a bug, **update the comment or `<summary>` to describe the corrected behavior.** Do not leave (or add) text describing the old broken behavior, the symptom, or the fix.
+- No "war stories" in the source. The narrative of what was wrong and why belongs in the archived bug report at `Documentation/Bugs/_FIXED_BUGS.md`, not in a code comment.
+
+```csharp
+// Bad: war story — describes history, not current behavior.
+// NOTE: used to read from the wrong neighbor and leak light across the seam;
+// fixed 2026-06-21 by clamping to the local section.
+skyLight = SampleLocalSection(pos);
+
+// Good: describes what the code does now, and why.
+skyLight = SampleLocalSection(pos); // Clamp to the local section so light never crosses the chunk seam.
 ```
 
 ## 4. Attributes

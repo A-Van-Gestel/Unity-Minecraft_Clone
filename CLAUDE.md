@@ -77,8 +77,8 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
     - `private const` fields must use `SCREAMING_CASE` (e.g., `private const uint SUNLIGHT_MASK = 0x00000F00;`).
 - **Naming:** Use `_camelCase` for private fields, `PascalCase` for public members and methods.
 - **Inspector:** Expose variables using `[SerializeField] private` (never `public` fields).
-- **Docstrings:** Automatically generate complete XML docstrings (`<summary>`, `<param>`, `<returns>`) for ANY new public method or class you create.
-- **Preservation:** NEVER delete existing XML Docstrings (`///`), inline comments, or `#region` tags unless the code they describe is explicitly being deleted.
+- **Docstrings:** Automatically generate complete XML docstrings (`<summary>`, `<param>`, `<returns>`) for ANY new public method or class you create. Keep summaries brief — type-level may run longer, member-level stays tight. Comments explain *why*, not *what*; keep inline comments to ≤3 lines and flag over-long ones as a refactor smell. See `@Documentation/Guides/CODING_STYLE_GUIDE.md` §3.
+- **Preservation:** NEVER delete existing XML Docstrings (`///`), inline comments, or `#region` tags unless the code they describe is explicitly being deleted. When a fix changes behavior, update the comment/docstring to match the *current* code — describe what it does now, not the old bug or the fix ("war stories" belong in `Documentation/Bugs/_FIXED_BUGS.md`).
 - **Modification:** Do not rewrite entire files to make minor changes. Apply targeted diffs.
 
 ## Execution Protocol & Verification
