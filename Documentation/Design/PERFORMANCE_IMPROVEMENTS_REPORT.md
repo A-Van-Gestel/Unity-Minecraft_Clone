@@ -114,7 +114,7 @@ instead of a crash.
 | MT-1   | `List.Insert(0)` / `RemoveAt(i)` O(n) mesh priority queue  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
 | MT-2   | Light scheduler snapshots the full dirty set every frame   |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
 | MT-3 ✅ | `DebugScreen` intermediate string allocations per refresh  |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| MT-4   | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| MT-4 ✅ | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | MT-5 ✅ | Startup `.ToArray()` intermediates feeding `NativeArray`   |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | MT-6 ✅ | `CompressionFactory` "GZip" actually writes raw Deflate    |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
 
@@ -985,9 +985,18 @@ interpolated `AppendLine($"...")` with chained `Append` calls. Zero-alloc refres
 
 ---
 
-### MT-4. Startup `List.Contains` / `.IndexOf` — O(n) custom-mesh lookup
+### MT-4. Startup `List.Contains` / `.IndexOf` — O(n) custom-mesh lookup ✅ DONE
 
 *(Absorbed from `CODEBASE_IMPROVEMENTS.md` §3.2.)*
+
+**Resolution (2026-07-01):** The flatten logic had since moved out of `World.PrepareGlobalJobData`
+into `JobDataManagerFactory.Create` (`JobDataManagerFactory.cs`) — the shared SoT for runtime, editor
+tools, and the OM-1 calibrator. Added a `Dictionary<VoxelMeshData, int>` (`meshToIndex`) built in
+Step 1 alongside `uniqueCustomMeshes`, with value == list index. The dedupe check (Step 1) and the
+mesh→index resolve (Step 4) are now O(1) `ContainsKey`/indexer lookups instead of O(n)
+`List.Contains`/`IndexOf`. The list is retained for ordered iteration (Step 2's offset accumulation).
+Output is byte-identical: same insertion order, and `Dictionary` uses the same
+`EqualityComparer<VoxelMeshData>.Default` as the old `List` scans, so dedupe semantics are unchanged.
 
 **Observed:** `World.PrepareGlobalJobData` collects unique custom meshes into a `List` and searches
 with `.Contains()` / `.IndexOf()` — O(n) each (`World.cs` ~lines 1338–1346). Startup-only.
@@ -1322,7 +1331,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 
 1. **Quick wins, near-zero risk (one sitting each):**
    ~~MR-1 (Euler hoist) ✅ done — marginal~~, ~~MR-5 ✅ done — chain post-process~~, ~~MR-3 + MR-4 ✅ done — SectionRenderer~~, ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
-   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~, ~~MT-5 ✅ done — ToPersistentArray helper, no .ToArray() intermediates~~. Remaining: MT-4. ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~.
+   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~, ~~MT-5 ✅ done — ToPersistentArray helper, no .ToArray() intermediates~~, ~~MT-4 ✅ done — Dictionary<VoxelMeshData,int> O(1) mesh-index lookup~~, ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~. All MT-* items complete.
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side) →

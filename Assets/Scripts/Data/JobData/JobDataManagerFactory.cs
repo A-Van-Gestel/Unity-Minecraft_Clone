@@ -27,10 +27,12 @@ namespace Data.JobData
         {
             // --- Step 1: Collect all unique custom mesh assets ---
             List<VoxelMeshData> uniqueCustomMeshes = new List<VoxelMeshData>();
+            Dictionary<VoxelMeshData, int> meshToIndex = new Dictionary<VoxelMeshData, int>();
             foreach (BlockType blockType in blockDatabase.blockTypes)
             {
-                if (blockType.meshData != null && !uniqueCustomMeshes.Contains(blockType.meshData))
+                if (blockType.meshData != null && !meshToIndex.ContainsKey(blockType.meshData))
                 {
+                    meshToIndex.Add(blockType.meshData, uniqueCustomMeshes.Count);
                     uniqueCustomMeshes.Add(blockType.meshData);
                 }
             }
@@ -92,7 +94,7 @@ namespace Data.JobData
                 int customMeshIndex = -1;
                 if (blockDatabase.blockTypes[i].meshData != null)
                 {
-                    customMeshIndex = uniqueCustomMeshes.IndexOf(blockDatabase.blockTypes[i].meshData);
+                    customMeshIndex = meshToIndex[blockDatabase.blockTypes[i].meshData];
                 }
 
                 blockTypesJobData[i] = new BlockTypeJobData(blockDatabase.blockTypes[i], customMeshIndex);
