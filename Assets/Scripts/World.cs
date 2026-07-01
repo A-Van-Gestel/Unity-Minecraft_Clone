@@ -106,8 +106,7 @@ public class World : MonoBehaviour
 
     private ChunkCoord _playerLastChunkCoord = new ChunkCoord(int.MinValue, int.MinValue);
 
-    private readonly List<Chunk> _chunksToBuildMesh = new List<Chunk>();
-    private readonly HashSet<ChunkCoord> _chunksToBuildMeshSet = new HashSet<ChunkCoord>();
+    private readonly MeshBuildQueue _meshBuildQueue = new MeshBuildQueue();
 
     public readonly Queue<Chunk> ChunksToDraw = new Queue<Chunk>();
 
@@ -433,9 +432,8 @@ public class World : MonoBehaviour
         // Ensure orphaned lighting sets are returned to the pool
         LightingStateManager?.Clear();
 
-        // Cleanup mesh generation lists
-        _chunksToBuildMesh.Clear();
-        _chunksToBuildMeshSet.Clear();
+        // Cleanup mesh generation queue
+        _meshBuildQueue.Clear();
 
         // Cleanup world data
         if (worldData != null)
@@ -1678,12 +1676,13 @@ public class World : MonoBehaviour
         //    NOTE: If too many mesh jobs are already in flight, pause scheduling new ones to let the
         //          Job System catch up. The cap is device-calibrated (OM-1) — see Settings.maxInFlightMeshJobs.
         int inFlightMeshCap = Mathf.Max(1, settings.maxInFlightMeshJobs);
-        if (_chunksToBuildMesh.Count > 0 && JobManager.MeshJobs.Count < inFlightMeshCap)
+        if (_meshBuildQueue.Count > 0 && JobManager.MeshJobs.Count < inFlightMeshCap)
         {
             int meshJobsScheduled = 0;
-            // Iterate forwards to respect priority (Index 0 is highest priority).
-            // We manipulate 'i' when removing items.
-            for (int i = 0; i < _chunksToBuildMesh.Count; i++)
+            // Walk in priority order (head = highest priority). The enumerator removes the current node in
+            // O(1) and keeps iterating from the successor it captured before the body ran.
+            MeshBuildQueue.Enumerator it = _meshBuildQueue.GetEnumerator();
+            while (it.MoveNext())
             {
                 if (meshJobsScheduled >= settings.maxMeshRebuildsPerFrame) break;
 
@@ -1694,28 +1693,20 @@ public class World : MonoBehaviour
                 // frame overshoot the native-memory ceiling the cap exists to enforce (OM-1).
                 if (JobManager.MeshJobs.Count >= inFlightMeshCap) break;
 
-                Chunk chunk = _chunksToBuildMesh[i];
+                Chunk chunk = it.Current;
 
                 // Validate chunk state before attempting to mesh.
                 if (chunk == null || !chunk.IsActive)
                 {
-                    // Remove from both list and HashSet to keep them in sync
-                    if (chunk != null)
-                        _chunksToBuildMeshSet.Remove(chunk.Coord);
-
-                    _chunksToBuildMesh.RemoveAt(i);
-                    i--; // Adjust index since we removed an element
+                    it.RemoveCurrent();
                     continue;
                 }
 
                 // JobManager.ScheduleMeshing will return false if deps (neighbors/lighting) aren't ready.
-                // In that case, we leave the chunk in both the list and HashSet to try again next frame.
+                // In that case, we leave the chunk queued (in place) to try again next frame.
                 if (JobManager.ScheduleMeshing(chunk))
                 {
-                    // Successfully scheduled - remove from both tracking structures
-                    _chunksToBuildMeshSet.Remove(chunk.Coord);
-                    _chunksToBuildMesh.RemoveAt(i);
-                    i--; // Decrement index
+                    it.RemoveCurrent();
                     meshJobsScheduled++;
                 }
             }
@@ -2238,8 +2229,7 @@ public class World : MonoBehaviour
         // NotifyChunkModified (reached via ChunkData.ModifyVoxel during ApplyModifications) enqueues the modified
         // chunk into these mesh/visualization queues; drain them too so no stale coord for a torn-down synthetic
         // chunk survives into a later run.
-        _chunksToBuildMesh.Clear();
-        _chunksToBuildMeshSet.Clear();
+        _meshBuildQueue.Clear();
         _chunksToUpdateVisualization.Clear();
     }
 #endif
@@ -2248,26 +2238,21 @@ public class World : MonoBehaviour
 
     /// <summary>
     /// Adds a chunk to the queue to have its mesh rebuilt.
-    /// For priority, add it to the front of the list.
+    /// For priority, immediate requests are placed at the front of the queue; an immediate re-request of a
+    /// chunk that is already queued promotes it to the front.
     /// </summary>
     /// <param name="chunk">The chunk to rebuild</param>
     /// <param name="immediate">If true, rebuild the chunk as soon as possible</param>
     public void RequestChunkMeshRebuild([CanBeNull] Chunk chunk, bool immediate = false)
     {
-        // Validate chunk state and check for duplicates using O(1) HashSet.
+        // Validate chunk state before queuing.
         // 1. Don't queue null chunks.
         // 2. Don't queue inactive chunks (they are out of view or being destroyed).
-        // 3. Don't queue chunks that are already in the queue (prevents duplicates).
-        if (chunk == null || !chunk.IsActive || _chunksToBuildMeshSet.Contains(chunk.Coord))
+        if (chunk == null || !chunk.IsActive)
             return;
 
-        // Add to tracking set (O(1) operation)
-        _chunksToBuildMeshSet.Add(chunk.Coord);
-
-        if (immediate)
-            _chunksToBuildMesh.Insert(0, chunk); // Insert at the front
-        else
-            _chunksToBuildMesh.Add(chunk);
+        // TryEnqueue rejects duplicates by coordinate (O(1)); immediate links at the head, normal at the tail.
+        _meshBuildQueue.TryEnqueue(chunk, immediate);
     }
 
     /// <summary>
@@ -2432,12 +2417,9 @@ public class World : MonoBehaviour
                     _chunkBorders.Remove(chunkCoord);
                 }
 
-                // Remove from mesh queue before returning to pool.
-                // This prevents dead chunk references from lingering in the list (Memory Leak / Logic Error).
-                if (_chunksToBuildMeshSet.Remove(chunkCoord))
-                {
-                    _chunksToBuildMesh.Remove(chunkObj);
-                }
+                // Remove from mesh queue before returning to pool (O(1)).
+                // This prevents dead chunk references from lingering in the queue (Memory Leak / Logic Error).
+                _meshBuildQueue.Remove(chunkCoord);
 
                 // Return to pool
                 ChunkPool.Return(chunkObj);
@@ -2577,11 +2559,8 @@ public class World : MonoBehaviour
             // Deactivate chunk itself
             if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
             {
-                // Remove from mesh queue to prevent processing deactivated chunks
-                if (_chunksToBuildMeshSet.Remove(chunkCoord))
-                {
-                    _chunksToBuildMesh.Remove(chunk);
-                }
+                // Remove from mesh queue to prevent processing deactivated chunks (O(1))
+                _meshBuildQueue.Remove(chunkCoord);
 
                 // POOLING: Return chunk to pool instead of just deactivating
                 ChunkPool.Return(chunk);
@@ -3629,8 +3608,7 @@ public class World : MonoBehaviour
         _chunkBorders.Clear();
 
         // 5. Clear mesh build queue
-        _chunksToBuildMesh.Clear();
-        _chunksToBuildMeshSet.Clear();
+        _meshBuildQueue.Clear();
 
         // 6. Return all ChunkData to pool and clear world data
         foreach (ChunkData data in worldData.Chunks.Values)
@@ -3694,7 +3672,7 @@ public class World : MonoBehaviour
     /// <returns>The mesh build queue count.</returns>
     public int GetChunksToBuildMeshCount()
     {
-        return _chunksToBuildMesh.Count;
+        return _meshBuildQueue.Count;
     }
 
     /// <summary>
@@ -3733,28 +3711,7 @@ public class World : MonoBehaviour
     /// <param name="sb">The <see cref="StringBuilder"/> to append the formatted statistics to.</param>
     public void AppendMeshQueueDebugInfo(StringBuilder sb)
     {
-        int active = 0;
-        int inactive = 0;
-        int destroyed = 0;
-        int nullCount = 0;
-
-        foreach (Chunk c in _chunksToBuildMesh)
-        {
-            if (c == null)
-                nullCount++;
-            else if (c.ChunkGameObject == null)
-                destroyed++;
-            else if (!c.IsActive)
-                inactive++;
-            else
-                active++;
-        }
-
-        sb.Append(_chunksToBuildMesh.Count).Append(" total\n")
-            .Append(" └ Active: ").Append(active)
-            .Append(", Inactive: ").Append(inactive)
-            .Append(", Destroyed: ").Append(destroyed)
-            .Append(", Null: ").Append(nullCount);
+        _meshBuildQueue.AppendDebugInfo(sb);
     }
 
     #endregion

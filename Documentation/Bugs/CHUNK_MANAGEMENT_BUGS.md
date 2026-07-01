@@ -6,16 +6,7 @@ This document outlines **open** bugs related to chunk loading, unloading, poolin
 
 ---
 
-## 01. `_chunksToBuildMesh` uses `List.Remove()` which is O(n)
-
-**Severity:** Improvement (performance)  
-**Files:** `World.cs` — `CheckViewDistance`, `UnloadChunks`
-
-When deactivating or unloading a chunk, `_chunksToBuildMesh.Remove(chunk)` performs an O(n) linear scan. While the `HashSet` (`_chunksToBuildMeshSet`) provides O(1) duplicate detection, the actual removal from the ordered list is still slow. With many pending rebuild chunks, this could bottleneck rapid player movement.
-
----
-
-## 02. `PopulateFromFlattened` reuses an existing section without clearing its `LightData`
+## 01. `PopulateFromFlattened` reuses an existing section without clearing its `LightData`
 
 **Severity:** Minor (likely masked by the initial lighting pass)
 **Confidence:** Medium — stale-data path verified by inspection; unclear whether a real flow re-populates a section that still holds light.

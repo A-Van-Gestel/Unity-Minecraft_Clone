@@ -138,7 +138,7 @@ flowchart TD
     C --> D["4. ProcessLightingJobs()<br/>(from PREVIOUS frame)"]
     D --> E["5. Lighting Dirty-Set Scan<br/>(iterates _chunksNeedingLightWork)"]
     E --> F["6. ProcessMeshJobs()<br/>(from PREVIOUS frame)"]
-    F --> G["7. Schedule New Mesh Jobs<br/>(from _chunksToBuildMesh)"]
+    F --> G["7. Schedule New Mesh Jobs<br/>(from _meshBuildQueue)"]
     G --> H["8. ChunksToDraw.Dequeue()<br/>(apply to GPU)"]
     style E fill: #ff6b6b, color: #fff
     style G fill: #ffa07a, color: #fff
@@ -308,7 +308,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph "Mesh Scheduling (Step 7 of Update)"
-        M1["Iterate _chunksToBuildMesh<br/>(ordered list, index 0 = highest priority)"]
+        M1["Walk _meshBuildQueue head→tail<br/>(MeshBuildQueue: head = highest priority)"]
         M1 --> M2{"meshJobsScheduled >= maxMeshRebuildsPerFrame (10)?"}
         M2 -- Yes --> M_DONE["Stop scheduling this frame"]
         M2 -- No --> M3["ScheduleMeshing(chunk)"]
@@ -516,9 +516,9 @@ check eventually fires with the weaker gate.
 - `LoadOrGenerateChunk` (when loading from disk with stable lighting)
 - `CheckViewDistance` (when activating a chunk that already has data)
 
-If the chunk is not added to `_chunksToBuildMesh` (e.g., because `chunk.isActive` was false at the time, or the chunk wasn't in the `_chunkMap` yet), and no subsequent code path re-adds it, the chunk is **permanently orphaned** from the mesh queue.
+If the chunk is not added to `_meshBuildQueue` (e.g., because `chunk.isActive` was false at the time, or the chunk wasn't in the `_chunkMap` yet), and no subsequent code path re-adds it, the chunk is **permanently orphaned** from the mesh queue.
 
-**Risk Level:** Medium. The guards in `RequestChunkMeshRebuild` (`chunk == null || !chunk.IsActive || _chunksToBuildMeshSet.Contains(chunk.Coord)`) can filter out valid requests if timing is unfortunate.
+**Risk Level:** Medium. The guards in `RequestChunkMeshRebuild` (`chunk == null || !chunk.IsActive`, plus `MeshBuildQueue.TryEnqueue`'s by-coordinate duplicate rejection) can filter out valid requests if timing is unfortunate.
 
 ### 9.6 Unload Stranding — Confirmed Deadlock Vector ⚠️
 

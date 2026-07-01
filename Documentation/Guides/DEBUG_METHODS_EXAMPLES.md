@@ -89,9 +89,9 @@ public void DebugRaycastChunkState()
     }
 
     // 3. Check Queue State
-    bool inMeshQueue = _chunksToBuildMeshSet.Contains(coord);
-    bool inLightDict = JobManager.lightingJobs.ContainsKey(coord);
-    bool inMeshDict = JobManager.meshJobs.ContainsKey(coord);
+    bool inMeshQueue = _meshBuildQueue.Contains(coord);
+    bool inLightDict = JobManager.LightingJobs.ContainsKey(coord);
+    bool inMeshDict = JobManager.MeshJobs.ContainsKey(coord);
 
     sb.AppendLine($"[System State]");
     sb.AppendLine($"  - In Mesh Queue: {inMeshQueue}");
@@ -104,19 +104,19 @@ public void DebugRaycastChunkState()
 
 ## 2. Stuck Generation Diagnosis (`DebugAnalyzeStuckChunks`)
 
-**Use Case:** The `_chunksToBuildMesh` queue is not emptying. Chunks stay at the edge of view and never load.
+**Use Case:** The mesh build queue (`_meshBuildQueue`) is not emptying. Chunks stay at the edge of view and never load.
 **Usage:** Add to `World.cs`. Call when queue count > 0 for extended periods.
 
 ```csharp
 public void DebugAnalyzeStuckChunks()
 {
-    Debug.Log($"--- Analyzing {_chunksToBuildMesh.Count} Stuck Chunks ---");
-    foreach (var chunk in _chunksToBuildMesh)
+    Debug.Log($"--- Analyzing {_meshBuildQueue.Count} Stuck Chunks ---");
+    foreach (Chunk chunk in _meshBuildQueue)
     {
         if (chunk == null) continue;
         
         ChunkCoord coord = chunk.Coord;
-        Debug.Log($"Checking Stuck Chunk {coord} (Active: {chunk.isActive})...");
+        Debug.Log($"Checking Stuck Chunk {coord} (Active: {chunk.IsActive})...");
 
         // Check neighbors
         foreach (int faceIndex in VoxelData.HorizontalFaceChecksIndices)
@@ -128,9 +128,9 @@ public void DebugAnalyzeStuckChunks()
             if (worldData.Chunks.TryGetValue(neighborPos, out ChunkData nData))
             {
                 bool isLit = !nData.HasLightChangesToProcess && !nData.NeedsInitialLighting;
-                bool jobRunning = JobManager.lightingJobs.ContainsKey(neighborCoord);
+                bool jobRunning = JobManager.LightingJobs.ContainsKey(neighborCoord);
                 bool hasObject = nData.Chunk != null;
-                bool isActive = nData.Chunk != null && nData.Chunk.isActive;
+                bool isActive = nData.Chunk != null && nData.Chunk.IsActive;
                 
                 // Logic check: Is the neighbor holding us back?
                 if (!isLit || jobRunning)
@@ -148,29 +148,33 @@ public void DebugAnalyzeStuckChunks()
 }
 ```
 
-### 3. Mesh Queue Sync Validator & Repair
+### 3. Mesh Queue Health Check & Purge
 
-**Use Case:** Suspected desync between `_chunksToBuildMesh` (List) and `_chunksToBuildMeshSet` (HashSet).
-**Usage:** Call `DebugLogMeshQueueState` to check health. If errors are found, call `DebugCleanMeshQueue` to force a re-sync during runtime.
+**Use Case:** Inspecting the mesh build queue for null / inactive chunks that are wasting drain iterations.
+
+> **Note (MT-1):** The old "List vs HashSet desync" failure mode no longer exists. `_meshBuildQueue`
+> is a single `MeshBuildQueue` (intrusive linked list + `coord → slot` map) — the ordered structure
+> and the membership map cannot drift apart, so there is nothing to re-sync. The same Active /
+> Inactive / Destroyed / Null breakdown this section produced is now available live in the debug
+> overlay via `World.AppendMeshQueueDebugInfo` (→ `MeshBuildQueue.AppendDebugInfo`).
+
+**Usage:** Call `DebugLogMeshQueueState` to check health. Dead entries are already dropped by the
+scheduling drain and removed by coordinate on unload, so `DebugCleanMeshQueue` is rarely needed — use
+it only to force an immediate purge during a diagnostic session.
 
 ```csharp
 /// <summary>
-/// DEBUG: Logs detailed information about the current state of _chunksToBuildMesh
-/// Call this from your DebugScreen or via a keyboard shortcut
+/// DEBUG: Logs the count and any null / inactive entries currently in _meshBuildQueue.
+/// Call this from your DebugScreen or via a keyboard shortcut.
 /// </summary>
 public void DebugLogMeshQueueState()
 {
-    Debug.Log($"[Mesh Queue Diagnostic] List Count: {_chunksToBuildMesh.Count} | HashSet Count: {_chunksToBuildMeshSet.Count}");
-    
-    if (_chunksToBuildMesh.Count != _chunksToBuildMeshSet.Count)
-    {
-        Debug.LogError("[Mesh Queue Diagnostic] DESYNC DETECTED!");
-    }
+    Debug.Log($"[Mesh Queue Diagnostic] Count: {_meshBuildQueue.Count}");
 
     int inactiveCount = 0;
-    foreach (var c in _chunksToBuildMesh)
+    foreach (Chunk c in _meshBuildQueue)
     {
-        if (c == null || !c.isActive) inactiveCount++;
+        if (c == null || !c.IsActive) inactiveCount++;
     }
 
     if (inactiveCount > 0)
@@ -180,21 +184,24 @@ public void DebugLogMeshQueueState()
 }
 
 /// <summary>
-/// Emergency cleanup method. Rebuilds the HashSet from the List and purges nulls.
+/// Emergency cleanup method. Purges null / inactive chunks from the queue via the mutating enumerator
+/// (RemoveCurrent is O(1) and also drops the coordinate's map entry).
 /// </summary>
 public void DebugCleanMeshQueue()
 {
-    // Remove dead references from the List
-    int removed = _chunksToBuildMesh.RemoveAll(c => c == null || !c.isActive);
-    
-    // Rebuild the HashSet to match the List exactly
-    _chunksToBuildMeshSet.Clear();
-    foreach (var c in _chunksToBuildMesh)
+    int removed = 0;
+    MeshBuildQueue.Enumerator it = _meshBuildQueue.GetEnumerator();
+    while (it.MoveNext())
     {
-        _chunksToBuildMeshSet.Add(c.Coord);
+        Chunk c = it.Current;
+        if (c == null || !c.IsActive)
+        {
+            it.RemoveCurrent();
+            removed++;
+        }
     }
 
-    Debug.Log($"[Mesh Queue Diagnostic] Queue cleaned (Removed {removed}) and re-synced.");
+    Debug.Log($"[Mesh Queue Diagnostic] Queue cleaned (Removed {removed}).");
 }
 ```
 
@@ -786,7 +793,7 @@ private float GetDebugSmoothHeight(byte centerLevel, VoxelState? n1, VoxelState?
 
 ## 6. Mesh Queue Deadlock Detector (`DiagnosticStuckChunkScan`)
 
-**Use Case:** Chunks remain in the `_chunksToBuildMesh` queue for extended periods (5+ seconds) without being scheduled for meshing. Produces a detailed per-chunk report showing exactly which flags and which neighbors are blocking `ScheduleMeshing`.
+**Use Case:** Chunks remain in the mesh build queue (`_meshBuildQueue`) for extended periods (5+ seconds) without being scheduled for meshing. Produces a detailed per-chunk report showing exactly which flags and which neighbors are blocking `ScheduleMeshing`.
 **Usage:** Add to `World.cs`. Runs automatically every 5 seconds when `settings.enableDiagnosticLogs = true`. Call from `Update()` after the mesh scheduling loop.
 
 **Key insights this tool revealed:**
@@ -805,17 +812,17 @@ private const float DIAGNOSTIC_SCAN_INTERVAL = 5f;
 private const float STUCK_CHUNK_THRESHOLD = 5f;
 ```
 
-**Entry-time tracking (add to `RequestChunkMeshRebuild`):**
+**Entry-time tracking (add to `RequestChunkMeshRebuild`, after `_meshBuildQueue.TryEnqueue`):**
 
 ```csharp
-// After adding to _chunksToBuildMeshSet:
+// After enqueuing into _meshBuildQueue:
 if (settings.enableDiagnosticLogs && !_meshQueueEntryTime.ContainsKey(chunk.Coord))
 {
     _meshQueueEntryTime[chunk.Coord] = Time.time;
 }
 ```
 
-**Cleanup (add at both mesh queue removal points in the scheduling loop):**
+**Cleanup (add wherever the scheduling loop calls `it.RemoveCurrent()` — chunk scheduled or invalidated):**
 
 ```csharp
 _meshQueueEntryTime.Remove(chunk.Coord);  // When chunk is scheduled or invalidated
@@ -839,7 +846,7 @@ private void DiagnosticStuckChunkScan()
     List<ChunkCoord> staleKeys = ListPool<ChunkCoord>.Get();
     foreach (ChunkCoord coord in _meshQueueEntryTime.Keys)
     {
-        if (!_chunksToBuildMeshSet.Contains(coord))
+        if (!_meshBuildQueue.Contains(coord))
             staleKeys.Add(coord);
     }
     foreach (ChunkCoord key in staleKeys)
@@ -850,9 +857,9 @@ private void DiagnosticStuckChunkScan()
     int stuckCount = 0;
     StringBuilder report = new StringBuilder();
 
-    foreach (Chunk chunk in _chunksToBuildMesh)
+    foreach (Chunk chunk in _meshBuildQueue)
     {
-        if (chunk == null || !chunk.isActive) continue;
+        if (chunk == null || !chunk.IsActive) continue;
 
         if (!_meshQueueEntryTime.TryGetValue(chunk.Coord, out float entryTime)) continue;
         float waitTime = Time.time - entryTime;
@@ -873,9 +880,9 @@ private void DiagnosticStuckChunkScan()
                           $"NeedsEdgeCheck={data.NeedsEdgeCheck}, " +
                           $"IsAwaitingMainThread={data.IsAwaitingMainThreadProcess}");
         report.AppendLine($"  Active Jobs: " +
-                          $"LightingJob={JobManager.lightingJobs.ContainsKey(coord)}, " +
-                          $"GenJob={JobManager.generationJobs.ContainsKey(coord)}, " +
-                          $"MeshJob={JobManager.meshJobs.ContainsKey(coord)}");
+                          $"LightingJob={JobManager.LightingJobs.ContainsKey(coord)}, " +
+                          $"GenJob={JobManager.GenerationJobs.ContainsKey(coord)}, " +
+                          $"MeshJob={JobManager.MeshJobs.ContainsKey(coord)}");
 
         // Determine blocking reason
         if (data.HasLightChangesToProcess)
@@ -908,7 +915,7 @@ private void DiagnosticStuckChunkScan()
             }
 
             // Check AreNeighborsMeshReady conditions
-            bool genJob = JobManager.generationJobs.ContainsKey(neighborCoord);
+            bool genJob = JobManager.GenerationJobs.ContainsKey(neighborCoord);
             bool needsInit = neighborData.NeedsInitialLighting;
 
             bool isBlocking = genJob || needsInit;
