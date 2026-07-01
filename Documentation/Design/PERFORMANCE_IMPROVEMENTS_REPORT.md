@@ -929,7 +929,11 @@ in steady state. `PriorityQueue<,>` (the distance-keyed option below) was reject
 Unity's Mono/.NET Standard 2.1 runtime and supports neither arbitrary removal nor retain-in-place.
 In-game confirmed; the O(n) unload-removal bug (`CHUNK_MANAGEMENT_BUGS.md #01`) is archived.
 A **normal→immediate priority promotion** on re-request was identified as a latent behavior gap and
-deferred to a separate follow-up (kept out of this no-op refactor).
+kept out of this no-op refactor, then shipped as a separate follow-up (2026-07-01): an immediate
+re-request of an already-queued chunk now promotes it to the head (O(1) `MoveToHead` in `TryEnqueue`),
+so a fresh player edit meshes ahead of streaming work it was previously stuck behind. Guarded by
+baseline B9 in the Mesh Build Queue suite (prove-red confirmed; B2 narrowed to the surviving
+normal-dedup no-reorder guarantee).
 
 **Observed:** The meshing pipeline uses `List<Chunk> _chunksToBuildMesh` as a priority queue —
 `Insert(0, chunk)` and mid-list `RemoveAt(i)` are O(n) shifts (`World.cs`, scheduling loop ~line

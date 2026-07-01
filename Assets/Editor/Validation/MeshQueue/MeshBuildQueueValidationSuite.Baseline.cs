@@ -17,13 +17,14 @@ namespace Editor.Validation.MeshQueue
         static partial void AddBaselineScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("B1: immediate links head (LIFO), normal links tail (FIFO), all immediates ahead", B1_PriorityOrdering));
-            scenarios.Add(new Scenario("B2: duplicate coord rejected, no normal→immediate promotion", B2_DedupNoPromotion));
+            scenarios.Add(new Scenario("B2: normal re-request rejected (dedup), no reorder", B2_NormalDedupNoReorder));
             scenarios.Add(new Scenario("B3: drain removes ready in order, retains not-ready in place", B3_RetainOnNotReady));
             scenarios.Add(new Scenario("B4: Remove(coord)/Contains are O(1) and order-preserving", B4_RemoveByCoord));
             scenarios.Add(new Scenario("B5: Clear empties and the queue is reusable afterward", B5_ClearAndReuse));
             scenarios.Add(new Scenario("B6: grow past capacity then recycle slots stays consistent", B6_GrowAndRecycle));
             scenarios.Add(new Scenario("B7: warm enqueue+drain cycle allocates zero bytes", B7_ZeroAllocSteadyState));
             scenarios.Add(new Scenario("B8: AppendDebugInfo reports count and category breakdown", B8_DebugInfo));
+            scenarios.Add(new Scenario("B9: immediate re-request promotes a queued chunk to the head", B9_ImmediatePromotesToHead));
         }
 
         /// <summary>
@@ -50,13 +51,12 @@ namespace Editor.Validation.MeshQueue
         }
 
         /// <summary>
-        /// B2 — A coordinate already queued is rejected (return false, count unchanged) and, crucially, an
-        /// <c>immediate</c> re-request does NOT move the existing entry to the head. This pins the current
-        /// no-promotion behavior; the deferred promotion follow-up will land as a known-bug scenario that
-        /// intentionally flips this expectation.
-        /// <para><b>Prove-red:</b> have <c>TryEnqueue</c> return true / re-link on a duplicate.</para>
+        /// B2 — A <c>normal</c> re-request of an already-queued coordinate is a no-op: it is rejected (return
+        /// false, count unchanged) and does NOT reorder the queue (no demotion). This is the dedup guarantee
+        /// that survives the promotion follow-up; only <c>immediate</c> re-requests reorder (see B9).
+        /// <para><b>Prove-red:</b> have a normal duplicate re-link the node (e.g. call <c>MoveToHead</c>).</para>
         /// </summary>
-        private static bool B2_DedupNoPromotion()
+        private static bool B2_NormalDedupNoReorder()
         {
             MeshBuildQueue queue = new MeshBuildQueue();
             ChunkCoord a = new ChunkCoord(0, 0), b = new ChunkCoord(1, 0);
@@ -64,11 +64,45 @@ namespace Editor.Validation.MeshQueue
             queue.TryEnqueue(MakeChunk(a.X, a.Z), immediate: false);
             queue.TryEnqueue(MakeChunk(b.X, b.Z), immediate: false);
 
-            bool rejected = !queue.TryEnqueue(MakeChunk(a.X, a.Z), immediate: true);
-            bool passed = Check("B2 duplicate immediate re-request returns false", rejected);
+            bool rejected = !queue.TryEnqueue(MakeChunk(a.X, a.Z), immediate: false);
+            bool passed = Check("B2 normal re-request returns false", rejected);
             passed &= Check("B2 count still 2", queue.Count == 2);
-            // A must stay in its original (tail-relative) position — no promotion to head.
-            passed &= CheckOrder("B2 order unchanged (no promotion)", queue, a, b);
+            // A must stay in place — a normal re-request never reorders.
+            passed &= CheckOrder("B2 order unchanged (normal re-request)", queue, a, b);
+            return passed;
+        }
+
+        /// <summary>
+        /// B9 — An <c>immediate</c> re-request of an already-queued chunk promotes it to the head so a fresh
+        /// player edit meshes first, without adding a duplicate entry (returns false, count unchanged). A
+        /// second immediate re-request of the now-head chunk is a no-op, and promotion jumps ahead of prior
+        /// immediates too (consistent with immediate LIFO ordering).
+        /// <para><b>Prove-red:</b> revert the promotion branch in <c>TryEnqueue</c> (the pre-follow-up
+        /// behavior left a queued chunk in place on an immediate re-request).</para>
+        /// </summary>
+        private static bool B9_ImmediatePromotesToHead()
+        {
+            MeshBuildQueue queue = new MeshBuildQueue();
+            ChunkCoord a = new ChunkCoord(0, 0), b = new ChunkCoord(1, 0), c = new ChunkCoord(2, 0);
+
+            queue.TryEnqueue(MakeChunk(a.X, a.Z), immediate: false);
+            queue.TryEnqueue(MakeChunk(b.X, b.Z), immediate: false);
+            queue.TryEnqueue(MakeChunk(c.X, c.Z), immediate: false);
+
+            // Immediate re-request of the middle chunk B promotes it to the head; not a new entry.
+            bool notNew = !queue.TryEnqueue(MakeChunk(b.X, b.Z), immediate: true);
+            bool passed = Check("B9 promotion returns false (not a new entry)", notNew);
+            passed &= Check("B9 count still 3", queue.Count == 3);
+            passed &= Check("B9 B still contained", queue.Contains(b));
+            passed &= CheckOrder("B9 B promoted to head", queue, b, a, c);
+
+            // Re-promoting the current head is a no-op.
+            queue.TryEnqueue(MakeChunk(b.X, b.Z), immediate: true);
+            passed &= CheckOrder("B9 re-promoting head is a no-op", queue, b, a, c);
+
+            // Promotion jumps ahead of an existing immediate (LIFO-consistent): promote A to the head.
+            queue.TryEnqueue(MakeChunk(a.X, a.Z), immediate: true);
+            passed &= CheckOrder("B9 promotion jumps ahead of prior immediate", queue, a, b, c);
             return passed;
         }
 

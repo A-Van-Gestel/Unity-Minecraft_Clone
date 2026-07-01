@@ -63,17 +63,27 @@ namespace Helpers
         public int Count => _count;
 
         /// <summary>
-        /// Enqueues <paramref name="chunk"/> for a mesh rebuild, rejecting duplicates by coordinate.
-        /// Immediate requests jump ahead of all normal (streaming) requests.
+        /// Enqueues <paramref name="chunk"/> for a mesh rebuild. A coordinate is queued at most once; a
+        /// re-request of an already-queued coordinate adds no new entry. Immediate requests jump ahead of all
+        /// normal (streaming) requests, and an <b>immediate re-request promotes</b> an already-queued chunk to
+        /// the head — so a fresh player edit is meshed first even if the chunk was already waiting behind
+        /// streaming work. A normal re-request never reorders (no demotion).
         /// </summary>
         /// <param name="chunk">The chunk to queue. Must be non-null (callers guard chunk state first).</param>
-        /// <param name="immediate">If true, link at the head (highest priority); otherwise at the tail.</param>
-        /// <returns>True if newly enqueued; false if this coordinate was already queued.</returns>
+        /// <param name="immediate">If true, link/promote at the head (highest priority); otherwise at the tail.</param>
+        /// <returns>True if a new entry was added; false if this coordinate was already queued (whether or not
+        /// it was promoted).</returns>
         public bool TryEnqueue(Chunk chunk, bool immediate)
         {
             ChunkCoord coord = chunk.Coord;
-            if (_coordToNode.ContainsKey(coord))
+            if (_coordToNode.TryGetValue(coord, out int existing))
+            {
+                // Already queued — not a new entry. An immediate (player-edit) re-request promotes it to the
+                // head; a normal re-request leaves it in place. Either way the count is unchanged.
+                if (immediate)
+                    MoveToHead(existing);
                 return false;
+            }
 
             int node = AllocNode();
             _chunk[node] = chunk;
@@ -207,6 +217,24 @@ namespace Helpers
         /// <summary>Unlinks a live slot, clears it, removes its map entry, and returns it to the free-list.</summary>
         private void RemoveNode(int node)
         {
+            UnlinkNode(node);
+
+            _coordToNode.Remove(_coord[node]);
+            _chunk[node] = null;
+
+            // Recycle the slot onto the free-list.
+            _next[node] = _freeHead;
+            _freeHead = node;
+            _count--;
+        }
+
+        /// <summary>
+        /// Detaches a live slot from the list, patching its neighbors' links (and the head/tail ends). The
+        /// slot's own <c>_next</c>/<c>_prev</c> are left stale; the caller must either free it
+        /// (<see cref="RemoveNode"/>) or re-link it (<see cref="MoveToHead"/>).
+        /// </summary>
+        private void UnlinkNode(int node)
+        {
             int prev = _prev[node];
             int next = _next[node];
 
@@ -219,14 +247,19 @@ namespace Helpers
                 _prev[next] = prev;
             else
                 _tail = prev;
+        }
 
-            _coordToNode.Remove(_coord[node]);
-            _chunk[node] = null;
+        /// <summary>
+        /// Promotes an already-linked slot to the head (highest priority) in O(1). No-op if it is already the
+        /// head. The slot stays mapped and counted — only its position changes.
+        /// </summary>
+        private void MoveToHead(int node)
+        {
+            if (node == _head)
+                return;
 
-            // Recycle the slot onto the free-list.
-            _next[node] = _freeHead;
-            _freeHead = node;
-            _count--;
+            UnlinkNode(node);
+            LinkHead(node);
         }
 
         /// <summary>Doubles the backing arrays and threads the newly-added slots onto the free-list.</summary>

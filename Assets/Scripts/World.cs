@@ -2238,7 +2238,8 @@ public class World : MonoBehaviour
 
     /// <summary>
     /// Adds a chunk to the queue to have its mesh rebuilt.
-    /// For priority, immediate requests are placed at the front of the queue.
+    /// For priority, immediate requests are placed at the front of the queue; an immediate re-request of a
+    /// chunk that is already queued promotes it to the front.
     /// </summary>
     /// <param name="chunk">The chunk to rebuild</param>
     /// <param name="immediate">If true, rebuild the chunk as soon as possible</param>
