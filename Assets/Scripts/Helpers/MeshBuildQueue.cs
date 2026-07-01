@@ -78,8 +78,11 @@ namespace Helpers
             ChunkCoord coord = chunk.Coord;
             if (_coordToNode.TryGetValue(coord, out int existing))
             {
-                // Already queued — not a new entry. An immediate (player-edit) re-request promotes it to the
-                // head; a normal re-request leaves it in place. Either way the count is unchanged.
+                // Already queued — not a new entry. Refresh the stored reference to the latest instance (a
+                // pool-recycled chunk can be a different object for the same coord), then, for an immediate
+                // (player-edit) re-request, promote it to the head; a normal re-request leaves it in place.
+                // Either way the count is unchanged.
+                _chunk[existing] = chunk;
                 if (immediate)
                     MoveToHead(existing);
                 return false;
@@ -137,6 +140,9 @@ namespace Helpers
         /// Returns a struct enumerator that walks the queue in priority order (head → tail) and supports
         /// removing the current node in O(1) via <see cref="Enumerator.RemoveCurrent"/>. Enables both
         /// <c>foreach</c> (read-only) and the scheduling drain (remove-as-you-go). Allocation-free.
+        /// <para>The only mutation allowed while an enumerator is live is <see cref="Enumerator.RemoveCurrent"/>;
+        /// calling <see cref="TryEnqueue"/> / <see cref="Remove"/> / <see cref="Clear"/> mid-iteration can
+        /// re-link the cached successor or recycle its slot and corrupt the walk.</para>
         /// </summary>
         /// <returns>A forward enumerator positioned before the head.</returns>
         public Enumerator GetEnumerator() => new Enumerator(this);
@@ -293,7 +299,8 @@ namespace Helpers
         /// <summary>
         /// Forward, mutating struct enumerator over <see cref="MeshBuildQueue"/> (head → tail). The
         /// successor is captured in <see cref="MoveNext"/> before the body runs, so
-        /// <see cref="RemoveCurrent"/> can drop the current node without breaking iteration.
+        /// <see cref="RemoveCurrent"/> can drop the current node without breaking iteration. The queue must
+        /// not otherwise be mutated while the enumerator is live (see <see cref="GetEnumerator"/>).
         /// </summary>
         public struct Enumerator
         {
@@ -310,8 +317,11 @@ namespace Helpers
                 _next = queue._head;
             }
 
-            /// <summary>The chunk at the current position. Valid only after a true <see cref="MoveNext"/>.</summary>
-            public Chunk Current => _queue._chunk[_current];
+            /// <summary>
+            /// The chunk at the current position, or null when there is no current node — before the first
+            /// <see cref="MoveNext"/>, after it returns false, or after <see cref="RemoveCurrent"/>.
+            /// </summary>
+            public Chunk Current => _current == NIL ? null : _queue._chunk[_current];
 
             /// <summary>Advances to the next node, caching its successor so the body may remove it.</summary>
             /// <returns>True if a node is now current; false once the queue is exhausted.</returns>
@@ -330,10 +340,14 @@ namespace Helpers
 
             /// <summary>
             /// Removes the node at the current position in O(1). Iteration continues from the successor
-            /// captured by the preceding <see cref="MoveNext"/>. Call at most once per <see cref="MoveNext"/>.
+            /// captured by the preceding <see cref="MoveNext"/>. A no-op when there is no current node, so a
+            /// stray double-call cannot recycle the wrong slot or corrupt the free-list.
             /// </summary>
             public void RemoveCurrent()
             {
+                if (_current == NIL)
+                    return;
+
                 _queue.RemoveNode(_current);
                 _current = NIL;
             }
