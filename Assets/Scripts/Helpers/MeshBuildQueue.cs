@@ -104,6 +104,11 @@ namespace Helpers
             return true;
         }
 
+        /// <summary>Returns whether a chunk is currently queued under <paramref name="coord"/>. O(1).</summary>
+        /// <param name="coord">The coordinate to test.</param>
+        /// <returns>True if the coordinate is queued.</returns>
+        public bool Contains(ChunkCoord coord) => _coordToNode.ContainsKey(coord);
+
         /// <summary>Empties the queue, releasing all chunk references and recycling every slot.</summary>
         public void Clear()
         {
