@@ -14,8 +14,9 @@ namespace Editor.Validation.MeshQueue
     /// world state — so it is tested in isolation here, directly asserting the "bit-identical to the old
     /// <c>List</c> + <c>HashSet</c>" contract that the refactor promised.
     /// <para>All scenarios are <b>baselines</b> (must stay green); a failure is a regression in the queue.
-    /// The known-bug channel is kept for parity with the other suites — the deferred normal→immediate
-    /// priority-promotion change will land here as a known-bug scenario that intentionally flips B2.</para>
+    /// The known-bug channel is kept for parity with the other suites but is currently unused — every
+    /// scenario is a baseline. (The normal→immediate priority-promotion follow-up shipped as baseline B9,
+    /// with B2 narrowed to the surviving normal-dedup guarantee.)</para>
     /// <para><b>Prove-red:</b> each scenario names, in its docstring, the one-line mutation that should
     /// turn it red (the project's manual prove-red discipline — break it, run, confirm red, revert).</para>
     /// <para>Scenario bodies live in <c>MeshBuildQueueValidationSuite.Baseline.cs</c>.</para>
