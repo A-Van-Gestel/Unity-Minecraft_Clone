@@ -582,6 +582,19 @@ Furthermore, applying animations from the pool caused a 1-frame visual flash, an
 
 ---
 
+### ~~07. `_chunksToBuildMesh` uses `List.Remove()` / `Insert(0)` / `RemoveAt(i)` which are O(n)~~
+
+**Severity:** Improvement (performance)
+**Files:** `World.cs` — `RequestChunkMeshRebuild`, mesh scheduling loop, `CheckViewDistance`, `UnloadChunks`; new `Helpers/MeshBuildQueue.cs`
+**Fixed:** July 2026 (MT-1)
+
+**Root Cause:** The mesh-rebuild queue was a `List<Chunk>` used as a priority queue. Front-insertion for immediate requests (`Insert(0)`), mid-list removal in the scheduling drain (`RemoveAt(i)`), and by-value removal on unload (`Remove(chunk)`) are all O(n) shifts/scans. Under a large meshing backlog (rapid player movement, streaming) the per-frame drain went quadratic. The companion `HashSet` only made *duplicate detection* O(1); the ordered list operations stayed slow.
+
+**Fix:** Replaced the list + set pair with `Helpers/MeshBuildQueue.cs` — a pooled intrusive doubly-linked list (parallel `next`/`prev`/`chunk`/`coord` arrays threaded by a free-list) plus a `coord → slot` map serving both dedup and O(1) removal. Every operation is now O(1): immediate enqueue links at the head (LIFO), normal at the tail (FIFO), the drain removes the current node via a mutating struct enumerator, and unload removes by coordinate. Ordering is bit-identical to the old list (all immediates ahead of all normals; retain-on-not-ready preserved),
+and slot recycling makes the queue zero-GC in steady state.
+
+---
+
 ## Player
 
 ### ~~01. Mouse input uses `Time.timeScale` instead of frame-rate independent delta~~

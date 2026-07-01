@@ -111,7 +111,7 @@ instead of a crash.
 
 | ID     | Finding                                                    | Effort | Risk | Benefit | Seed | Save |
 |--------|------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| MT-1   | `List.Insert(0)` / `RemoveAt(i)` O(n) mesh priority queue  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+| MT-1 ✅ | `List.Insert(0)` / `RemoveAt(i)` O(n) mesh priority queue  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
 | MT-2   | Light scheduler snapshots the full dirty set every frame   |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
 | MT-3 ✅ | `DebugScreen` intermediate string allocations per refresh  |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | MT-4 ✅ | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
@@ -912,9 +912,24 @@ dispose-path no-leak invariant is documented on `GenerationJobData.Dispose`.
 
 ## Detailed findings — Main Thread & Miscellaneous
 
-### MT-1. `List.Insert(0)` / `RemoveAt(i)` — O(n) mesh priority queue
+### MT-1. `List.Insert(0)` / `RemoveAt(i)` — O(n) mesh priority queue ✅ DONE
 
 *(Absorbed from `CODEBASE_IMPROVEMENTS.md` §3.1; overlaps pipeline doc §5.1.)*
+
+**Resolution (2026-07-01):** Replaced the `List<Chunk> _chunksToBuildMesh` + companion
+`HashSet<ChunkCoord>` with a single dedicated `Helpers/MeshBuildQueue.cs` — a **pooled intrusive
+doubly-linked list** (parallel `next`/`prev`/`chunk`/`coord` arrays threaded by a free-list) plus a
+`coord → slot` `Dictionary` serving both duplicate rejection and O(1) removal. Every operation is now
+O(1): immediate enqueue links at the head (newest-first / LIFO — matches the old `Insert(0)`), normal
+enqueue links at the tail (FIFO — matches `Add`), the scheduling drain removes the current node via a
+mutating struct `Enumerator` (replaces mid-list `RemoveAt(i)`), and the unload paths remove by
+coordinate (replaces O(n) `Remove(chunk)`). Ordering is **bit-identical** to the old list (all
+immediates ahead of all normals; retain-on-not-ready preserved), and slot recycling makes it zero-GC
+in steady state. `PriorityQueue<,>` (the distance-keyed option below) was rejected: it is absent from
+Unity's Mono/.NET Standard 2.1 runtime and supports neither arbitrary removal nor retain-in-place.
+In-game confirmed; the O(n) unload-removal bug (`CHUNK_MANAGEMENT_BUGS.md #01`) is archived.
+A **normal→immediate priority promotion** on re-request was identified as a latent behavior gap and
+deferred to a separate follow-up (kept out of this no-op refactor).
 
 **Observed:** The meshing pipeline uses `List<Chunk> _chunksToBuildMesh` as a priority queue —
 `Insert(0, chunk)` and mid-list `RemoveAt(i)` are O(n) shifts (`World.cs`, scheduling loop ~line
