@@ -1,8 +1,8 @@
 using Data;
-using Helpers;
 using Jobs.BurstData;
 using MyBox;
 using Physics;
+using Placement;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -27,7 +27,8 @@ public class PlayerInteraction : MonoBehaviour
     /// </summary>
     private bool _blockPlaceable;
 
-    private VoxelRaycastResult _lastRaycastResult;
+    private PlacementController _placement;
+    private PlacementProbe _lastProbe;
 
     [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
     public float checkIncrement = 0.05f;
@@ -49,6 +50,7 @@ public class PlayerInteraction : MonoBehaviour
         _world = World.Instance;
         _input = InputManager.Instance;
         _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
+        _placement = new PlacementController(_world);
     }
 
     private void Update()
@@ -86,7 +88,7 @@ public class PlayerInteraction : MonoBehaviour
                 ushort placedBlockId = itemSlot.ItemSlot.Stack.ID;
                 BlockType placedBlockType = _world.BlockTypes[placedBlockId];
 
-                byte meta = ComputePlacementMeta(placedBlockType, _lastRaycastResult);
+                byte meta = ComputePlacementMeta(placedBlockType, _lastProbe.HitNormal);
 
                 _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), placedBlockId)
                 {
@@ -105,7 +107,7 @@ public class PlayerInteraction : MonoBehaviour
     /// meta=0 so <c>BlockBehavior.Fluids</c> can fill them from a source on
     /// the first simulation tick.
     /// </summary>
-    private byte ComputePlacementMeta(BlockType placedBlockType, VoxelRaycastResult raycastResult)
+    private byte ComputePlacementMeta(BlockType placedBlockType, int3 hitNormal)
     {
         if (placedBlockType.fluidType != FluidType.None)
         {
@@ -128,11 +130,11 @@ public class PlayerInteraction : MonoBehaviour
             PlacementMetadataMode.PlayerLookAxis when placedBlockType.metadataSchema == MetadataSchema.HorizontalOnly =>
                 BurstVoxelMetadataUtility.HorizontalOnlyFromLookVector(_playerCamera.forward),
             PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.Facing6 =>
-                BurstVoxelMetadataUtility.Facing6FromHitNormal(raycastResult.HitNormal),
+                BurstVoxelMetadataUtility.Facing6FromHitNormal(hitNormal),
             PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.Facing6Roll2 =>
-                ComputeFacing6Roll2Meta(_playerCamera.forward, raycastResult.HitNormal),
+                ComputeFacing6Roll2Meta(_playerCamera.forward, hitNormal),
             PlacementMetadataMode.SurfaceFacing when placedBlockType.metadataSchema == MetadataSchema.HorizontalOnly =>
-                BurstVoxelMetadataUtility.HorizontalOnlyFromHitNormal(raycastResult.HitNormal),
+                BurstVoxelMetadataUtility.HorizontalOnlyFromHitNormal(hitNormal),
             _ => placedBlockType.defaultMetadata,
         };
     }
@@ -173,136 +175,83 @@ public class PlayerInteraction : MonoBehaviour
     public VoxelRaycastResult RaycastForVoxel(bool? overrideInteractWithFluids = null,
         BlockTags skipTags = BlockTags.NONE)
     {
-        float step = checkIncrement;
-
-        // Use the override if provided, otherwise fall back to the player's current setting
+        // Use the override if provided, otherwise fall back to the player's current setting.
         bool checkFluids = overrideInteractWithFluids ?? interactWithFluids;
 
-        while (step < reach)
+        if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags, reach, checkIncrement,
+                out Vector3Int hitCell, out int3 hitNormal, out Vector3Int adjacentCell))
         {
-            Vector3 pos = _playerCamera.position + _playerCamera.forward * step;
-
-            if (_world.CheckForVoxel(pos, checkFluids, includeNonSolid: true, skipTags: skipTags))
+            return new VoxelRaycastResult
             {
-                VoxelRaycastResult result = new VoxelRaycastResult { DidHit = true };
-                result.HitPosition = new Vector3Int(Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
-
-                // Find the fractional position within the voxel to determine which face was intersected
-                float xCheck = GetCoordinateOffset(pos.x);
-                float yCheck = GetCoordinateOffset(pos.y);
-                float zCheck = GetCoordinateOffset(pos.z);
-
-                if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
-                    result.HitNormal = xCheck < 0 ? Int3Directions.Right : Int3Directions.Left;
-                else if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
-                    result.HitNormal = zCheck < 0 ? Int3Directions.Forward : Int3Directions.Back;
-                else
-                    result.HitNormal = yCheck < 0 ? Int3Directions.Up : Int3Directions.Down;
-
-                result.PlacePosition = result.HitPosition + new Vector3Int(result.HitNormal.x, result.HitNormal.y, result.HitNormal.z);
-
-                return result;
-            }
-
-            step += checkIncrement;
+                DidHit = true,
+                HitPosition = hitCell,
+                HitNormal = hitNormal,
+                PlacePosition = adjacentCell,
+            };
         }
 
-        // If we get here, we didn't hit anything.
         return new VoxelRaycastResult { DidHit = false };
-    }
-
-    /// <summary>
-    /// Calculates the signed fractional distance from the nearest voxel boundary.
-    /// </summary>
-    private static float GetCoordinateOffset(float coordinate)
-    {
-        float frac = coordinate - Mathf.Floor(coordinate);
-        if (frac > 0.5f) frac -= 1f;
-        return frac;
     }
 
     private void PlaceCursorBlocks()
     {
-        // When holding a block, let the ray pass through blocks it can replace,
-        // so the player can target the solid surface behind them (e.g. ocean floor through water).
-        // When holding nothing, skipTags stays NONE so all blocks are targetable for punching.
-        BlockTags skipTags = BlockTags.NONE;
-        if (toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem)
-        {
-            ushort heldBlockId = toolbar.slots[toolbar.slotIndex].ItemSlot.Stack.ID;
-            skipTags = _world.BlockTypes[heldBlockId].canReplaceTags;
-        }
+        // When holding a block, the placement ray passes through blocks it can replace (e.g. ocean floor through
+        // water); when holding nothing, heldBlock stays null so all blocks are targetable for punching. The whole
+        // tag-driven decision (skip mask, replace-vs-adjacent, world placeability incl. support) lives in the
+        // PlacementController — only the camera ray, the player-overlap veto, and the highlight visuals stay here.
+        UIItemSlot heldSlot = toolbar.slots[toolbar.slotIndex];
+        BlockType heldBlock = heldSlot.ItemSlot.HasItem
+            ? _world.BlockTypes[heldSlot.ItemSlot.Stack.ID]
+            : null;
 
-        VoxelRaycastResult result = RaycastForVoxel(skipTags: skipTags);
-        _lastRaycastResult = result;
+        PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock, interactWithFluids, reach, checkIncrement);
+        _lastProbe = probe;
 
-        if (result.DidHit)
-        {
-            // If the targeted block is replaceable (e.g. grass), the place position
-            // should be the block itself (replace it) rather than adjacent to it.
-            VoxelState? hitState = _world.GetVoxelState(result.HitPosition);
-            if (hitState.HasValue)
-            {
-                bool isReplaceable;
-
-                // Also check if the currently held block has explicit tags allowing it to replace the hit block
-                if (toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem)
-                {
-                    ushort heldBlockId = toolbar.slots[toolbar.slotIndex].ItemSlot.Stack.ID;
-                    BlockType heldProps = _world.BlockTypes[heldBlockId];
-
-                    isReplaceable = BlockTagUtility.CanReplace(heldProps, hitState.Value.Properties);
-                }
-                else
-                {
-                    // Fallback if not holding anything
-                    isReplaceable = (hitState.Value.Properties.tags & BlockTags.REPLACEABLE) != 0;
-                }
-
-                if (isReplaceable)
-                {
-                    result.PlacePosition = result.HitPosition;
-                }
-            }
-
-            highlightBlock.position = result.HitPosition;
-            placeBlock.position = result.PlacePosition;
-
-            // Check if the placement position is valid.
-            // Using an AABB intersection to ensure the placed block does not overlap the player entity dynamically.
-            Vector3 playerPosition = transform.position;
-            VoxelRigidbody rb = _player.VoxelRigidbody;
-            float extX = rb.CollisionHalfWidthX;
-            float extZ = rb.CollisionHalfDepthZ;
-            Vector3 pMin = new Vector3(playerPosition.x - extX, playerPosition.y, playerPosition.z - extZ);
-            Vector3 pMax = new Vector3(playerPosition.x + extX, playerPosition.y + rb.collisionHeight, playerPosition.z + extZ);
-
-            // The block AABB is exactly 1x1x1 at integer coordinates
-            Vector3 bMin = result.PlacePosition;
-            Vector3 bMax = result.PlacePosition + Vector3.one;
-
-            bool isInsidePlayer =
-                pMin.x < bMax.x && pMax.x > bMin.x &&
-                pMin.y < bMax.y && pMax.y > bMin.y &&
-                pMin.z < bMax.z && pMax.z > bMin.z;
-
-            _blockPlaceable =
-                !isInsidePlayer &&
-                _world.worldData.IsVoxelInWorld(result.PlacePosition) &&
-                !_world.IsCellOccupiedForPlacement(result.PlacePosition) &&
-                toolbar.slots[toolbar.slotIndex].ItemSlot.HasItem;
-
-            // Set highlight objects active state
-            _highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
-            highlightBlock.gameObject.SetActive(true);
-            placeBlock.gameObject.SetActive(_blockPlaceable);
-        }
-        else
+        if (!probe.DidHit)
         {
             // If we didn't hit a block, hide the highlights.
             highlightBlock.gameObject.SetActive(false);
             placeBlock.gameObject.SetActive(false);
+            return;
         }
+
+        highlightBlock.position = probe.HitCell;
+        placeBlock.position = probe.PlaceCell;
+
+        // The controller already decided world placeability (bounds + occupancy + support). The player-AABB overlap
+        // is player-entity state, so it stays here as a final veto: the placed block must not intersect the player.
+        _blockPlaceable =
+            probe.WorldPlaceable &&
+            !PlaceCellOverlapsPlayer(probe.PlaceCell) &&
+            heldSlot.ItemSlot.HasItem;
+
+        // Set highlight objects active state
+        _highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
+        highlightBlock.gameObject.SetActive(true);
+        placeBlock.gameObject.SetActive(_blockPlaceable);
+    }
+
+    /// <summary>
+    /// True when a 1×1×1 block occupying <paramref name="placeCell"/> would intersect the player's collision AABB —
+    /// the player-entity veto layered on top of the controller's world placeability.
+    /// </summary>
+    /// <param name="placeCell">The cell a block would be placed in.</param>
+    private bool PlaceCellOverlapsPlayer(Vector3Int placeCell)
+    {
+        Vector3 playerPosition = transform.position;
+        VoxelRigidbody rb = _player.VoxelRigidbody;
+        float extX = rb.CollisionHalfWidthX;
+        float extZ = rb.CollisionHalfDepthZ;
+        Vector3 pMin = new Vector3(playerPosition.x - extX, playerPosition.y, playerPosition.z - extZ);
+        Vector3 pMax = new Vector3(playerPosition.x + extX, playerPosition.y + rb.collisionHeight, playerPosition.z + extZ);
+
+        // The block AABB is exactly 1x1x1 at integer coordinates.
+        Vector3 bMin = placeCell;
+        Vector3 bMax = placeCell + Vector3.one;
+
+        return pMin.x < bMax.x && pMax.x > bMin.x &&
+               pMin.y < bMax.y && pMax.y > bMin.y &&
+               pMin.z < bMax.z && pMax.z > bMin.z;
     }
 }
 

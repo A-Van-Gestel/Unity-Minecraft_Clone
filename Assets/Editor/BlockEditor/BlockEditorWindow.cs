@@ -166,7 +166,8 @@ namespace Editor.BlockEditor
                     lightEmissionColor = blockType.lightEmissionColor,
                     tagPreset = blockType.tagPreset,
                     tags = blockType.tags,
-                    canReplaceTags = blockType.canReplaceTags,
+                    worldGenCanReplaceTags = blockType.worldGenCanReplaceTags,
+                    placementCanReplaceTags = blockType.placementCanReplaceTags,
                     isActive = blockType.isActive,
                     metadataSchema = blockType.metadataSchema,
                     placementMetadataMode = blockType.placementMetadataMode,
@@ -264,12 +265,14 @@ namespace Editor.BlockEditor
         /// </summary>
         /// <param name="defaultFileName">Default filename shown in the save dialog.</param>
         /// <param name="initialTags">Initial tags to assign to the new preset.</param>
-        /// <param name="initialCanReplaceTags">Initial canReplaceTags to assign to the new preset.</param>
+        /// <param name="initialWorldGenCanReplaceTags">Initial world-gen canReplaceTags to assign to the new preset.</param>
+        /// <param name="initialPlacementCanReplaceTags">Initial placement canReplaceTags to assign to the new preset.</param>
         /// <returns>The created preset, or null if the user cancelled.</returns>
         private static BlockTagPreset CreateTagPresetAsset(
             string defaultFileName,
             BlockTags initialTags = BlockTags.NONE,
-            BlockTags initialCanReplaceTags = BlockTags.NONE)
+            BlockTags initialWorldGenCanReplaceTags = BlockTags.NONE,
+            BlockTags initialPlacementCanReplaceTags = BlockTags.NONE)
         {
             string path = EditorUtility.SaveFilePanelInProject(
                 "Save New Block Tag Preset",
@@ -283,7 +286,8 @@ namespace Editor.BlockEditor
 
             BlockTagPreset newPreset = CreateInstance<BlockTagPreset>();
             newPreset.tags = initialTags;
-            newPreset.canReplaceTags = initialCanReplaceTags;
+            newPreset.worldGenCanReplaceTags = initialWorldGenCanReplaceTags;
+            newPreset.placementCanReplaceTags = initialPlacementCanReplaceTags;
 
             AssetDatabase.CreateAsset(newPreset, path);
             AssetDatabase.SaveAssets();

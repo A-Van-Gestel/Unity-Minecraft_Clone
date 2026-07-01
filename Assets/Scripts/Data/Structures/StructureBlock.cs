@@ -1,7 +1,6 @@
 using System;
 using Attributes;
 using UnityEngine;
-using UnityEngine.Serialization;
 
 namespace Data.Structures
 {
@@ -37,7 +36,6 @@ namespace Data.Structures
             "• Facing6: 0=S, 1=N, 2=Top, 3=Bottom, 4=W, 5=E\n" +
             "• FluidLevel4: 0-15\n" +
             "• None: 0")]
-        [FormerlySerializedAs("orientation")]
         public byte meta;
 
         /// <summary>

@@ -519,19 +519,24 @@ namespace Editor.BlockEditor
                 if (_selectedBlock.tagPreset != null)
                 {
                     BlockTags presetTags = _selectedBlock.tagPreset.tags;
-                    BlockTags presetCanReplace = _selectedBlock.tagPreset.canReplaceTags;
+                    BlockTags presetWorldGen = _selectedBlock.tagPreset.worldGenCanReplaceTags;
+                    BlockTags presetPlacement = _selectedBlock.tagPreset.placementCanReplaceTags;
                     BlockTags currentTags = _selectedBlock.tags;
-                    BlockTags currentCanReplace = _selectedBlock.canReplaceTags;
+                    BlockTags currentWorldGen = _selectedBlock.worldGenCanReplaceTags;
+                    BlockTags currentPlacement = _selectedBlock.placementCanReplaceTags;
 
                     // Bitwise delta: what was added / removed vs the preset
                     BlockTags tagsAdded = currentTags & ~presetTags;
                     BlockTags tagsRemoved = presetTags & ~currentTags;
-                    BlockTags canReplaceAdded = currentCanReplace & ~presetCanReplace;
-                    BlockTags canReplaceRemoved = presetCanReplace & ~currentCanReplace;
+                    BlockTags worldGenAdded = currentWorldGen & ~presetWorldGen;
+                    BlockTags worldGenRemoved = presetWorldGen & ~currentWorldGen;
+                    BlockTags placementAdded = currentPlacement & ~presetPlacement;
+                    BlockTags placementRemoved = presetPlacement & ~currentPlacement;
 
                     bool hasTagOverrides = tagsAdded != BlockTags.NONE || tagsRemoved != BlockTags.NONE;
-                    bool hasCanReplaceOverrides = canReplaceAdded != BlockTags.NONE || canReplaceRemoved != BlockTags.NONE;
-                    bool hasAnyOverride = hasTagOverrides || hasCanReplaceOverrides;
+                    bool hasWorldGenOverrides = worldGenAdded != BlockTags.NONE || worldGenRemoved != BlockTags.NONE;
+                    bool hasPlacementOverrides = placementAdded != BlockTags.NONE || placementRemoved != BlockTags.NONE;
+                    bool hasAnyOverride = hasTagOverrides || hasWorldGenOverrides || hasPlacementOverrides;
 
                     // --- Override Summary ---
                     if (hasAnyOverride)
@@ -546,12 +551,21 @@ namespace Editor.BlockEditor
                             summary = summary.TrimEnd();
                         }
 
-                        if (hasCanReplaceOverrides)
+                        if (hasWorldGenOverrides)
                         {
                             if (summary.Length > 0) summary += "\n";
-                            summary += "CanReplace: ";
-                            if (canReplaceAdded != BlockTags.NONE) summary += $"+[{canReplaceAdded}] ";
-                            if (canReplaceRemoved != BlockTags.NONE) summary += $"-[{canReplaceRemoved}]";
+                            summary += "WorldGen CanReplace: ";
+                            if (worldGenAdded != BlockTags.NONE) summary += $"+[{worldGenAdded}] ";
+                            if (worldGenRemoved != BlockTags.NONE) summary += $"-[{worldGenRemoved}]";
+                            summary = summary.TrimEnd();
+                        }
+
+                        if (hasPlacementOverrides)
+                        {
+                            if (summary.Length > 0) summary += "\n";
+                            summary += "Placement CanReplace: ";
+                            if (placementAdded != BlockTags.NONE) summary += $"+[{placementAdded}] ";
+                            if (placementRemoved != BlockTags.NONE) summary += $"-[{placementRemoved}]";
                             summary = summary.TrimEnd();
                         }
 
@@ -570,7 +584,8 @@ namespace Editor.BlockEditor
                     if (GUILayout.Button(new GUIContent("↩️ Revert to Base Preset", "Discard local tag changes and revert to the preset's values.")))
                     {
                         _selectedBlock.tags = presetTags;
-                        _selectedBlock.canReplaceTags = presetCanReplace;
+                        _selectedBlock.worldGenCanReplaceTags = presetWorldGen;
+                        _selectedBlock.placementCanReplaceTags = presetPlacement;
                         hasUnsavedChanges = true;
                     }
 
@@ -585,7 +600,8 @@ namespace Editor.BlockEditor
                         {
                             Undo.RecordObject(_selectedBlock.tagPreset, "Update Tag Preset");
                             _selectedBlock.tagPreset.tags = currentTags;
-                            _selectedBlock.tagPreset.canReplaceTags = currentCanReplace;
+                            _selectedBlock.tagPreset.worldGenCanReplaceTags = currentWorldGen;
+                            _selectedBlock.tagPreset.placementCanReplaceTags = currentPlacement;
                             EditorUtility.SetDirty(_selectedBlock.tagPreset);
                             AssetDatabase.SaveAssets();
                         }
@@ -597,7 +613,8 @@ namespace Editor.BlockEditor
 
                 // --- Editable Tag Fields ---
                 _selectedBlock.tags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Tags", "What tags does this block have? A block can have multiple tags."), _selectedBlock.tags);
-                _selectedBlock.canReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Can Replace Tags", "What tags can this block replace?"), _selectedBlock.canReplaceTags);
+                _selectedBlock.worldGenCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("World-Gen Can Replace", "What tags can this block replace during world generation (structures, flora, ores)?"), _selectedBlock.worldGenCanReplaceTags);
+                _selectedBlock.placementCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(new GUIContent("Placement Can Replace", "What tags can this block replace when placed by the player? Normally the soft set: REPLACEABLE, LIQUID."), _selectedBlock.placementCanReplaceTags);
 
 
                 EditorUILayoutHelper.DrawSeparator();
@@ -765,7 +782,8 @@ namespace Editor.BlockEditor
                 lightEmissionColor = _selectedBlock.lightEmissionColor,
                 tagPreset = _selectedBlock.tagPreset,
                 tags = _selectedBlock.tags,
-                canReplaceTags = _selectedBlock.canReplaceTags,
+                worldGenCanReplaceTags = _selectedBlock.worldGenCanReplaceTags,
+                placementCanReplaceTags = _selectedBlock.placementCanReplaceTags,
                 isActive = _selectedBlock.isActive,
                 metadataSchema = _selectedBlock.metadataSchema,
                 placementMetadataMode = _selectedBlock.placementMetadataMode,
@@ -824,7 +842,8 @@ namespace Editor.BlockEditor
             BlockTagPreset newPreset = CreateTagPresetAsset(
                 $"BTP_{_selectedBlock.blockName}.asset",
                 _selectedBlock.tags,
-                _selectedBlock.canReplaceTags);
+                _selectedBlock.worldGenCanReplaceTags,
+                _selectedBlock.placementCanReplaceTags);
 
             // Automatically assign the newly created preset to the current block.
             if (newPreset != null)

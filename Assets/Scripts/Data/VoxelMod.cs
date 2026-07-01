@@ -32,6 +32,13 @@ namespace Data
         /// </summary>
         public ReplacementRule Rule;
 
+        /// <summary>
+        /// Which context produced this mod, selecting which <c>canReplaceTags</c> field the
+        /// <see cref="ReplacementRule.Default"/> gate consults. Defaults to <see cref="VoxelModSource.Live"/>
+        /// (player / behavior / replayed edit); world-generation expansion sets <see cref="VoxelModSource.WorldGen"/>.
+        /// </summary>
+        public VoxelModSource Source;
+
         // --- Constructors ---
 
         #region Constructors
@@ -55,6 +62,7 @@ namespace Data
             Meta = 0; // Front/North storage index for solid blocks; fluid level 0 for fluids.
             ImmediateUpdate = false;
             Rule = ReplacementRule.Default;
+            Source = VoxelModSource.Live;
         }
 
         /// <summary>
@@ -71,6 +79,7 @@ namespace Data
             Meta = 0; // Front/North storage index for solid blocks; fluid level 0 for fluids.
             ImmediateUpdate = false;
             Rule = ReplacementRule.Default;
+            Source = VoxelModSource.Live;
         }
 
         #endregion

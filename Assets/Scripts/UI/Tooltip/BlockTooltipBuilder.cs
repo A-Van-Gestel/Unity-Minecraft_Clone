@@ -137,11 +137,11 @@ namespace UI.Tooltip
                 sb.Append("Collision: ").Append(FormatPascalCase(blockType.collisionBounds.mode.ToString()));
             }
 
-            // Can replace tags (only if non-empty)
-            if (blockType.canReplaceTags != BlockTags.NONE)
+            // Can replace tags — the player-facing placement mask (only if non-empty)
+            if (blockType.placementCanReplaceTags != BlockTags.NONE)
             {
                 sb.Append('\n');
-                sb.Append("Can Replace: ").Append(FormatFlags(blockType.canReplaceTags));
+                sb.Append("Can Replace: ").Append(FormatFlags(blockType.placementCanReplaceTags));
             }
         }
 

@@ -165,9 +165,13 @@ namespace Editor.BlockEditor
                     new GUIContent("Tags", "The tags included in this preset."),
                     _selectedPreset.tags);
 
-                _selectedPreset.canReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(
-                    new GUIContent("Can Replace Tags", "The replacement tags included in this preset."),
-                    _selectedPreset.canReplaceTags);
+                _selectedPreset.worldGenCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(
+                    new GUIContent("World-Gen Can Replace", "The world-generation replacement tags included in this preset."),
+                    _selectedPreset.worldGenCanReplaceTags);
+
+                _selectedPreset.placementCanReplaceTags = (BlockTags)EditorGUILayout.EnumFlagsField(
+                    new GUIContent("Placement Can Replace", "The player-placement replacement tags included in this preset."),
+                    _selectedPreset.placementCanReplaceTags);
 
                 if (EditorGUI.EndChangeCheck())
                 {
@@ -224,7 +228,8 @@ namespace Editor.BlockEditor
             BlockTagPreset newPreset = CreateTagPresetAsset(
                 $"{_selectedPreset.name} (Copy).asset",
                 _selectedPreset.tags,
-                _selectedPreset.canReplaceTags);
+                _selectedPreset.worldGenCanReplaceTags,
+                _selectedPreset.placementCanReplaceTags);
 
             if (newPreset == null) return;
 

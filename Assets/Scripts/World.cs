@@ -2111,10 +2111,16 @@ public class World : MonoBehaviour
                         case ReplacementRule.Default:
                         default:
                             // --- Use the default Block Tag system ---
+                            // World-gen and player edits consult different replacement masks: a structure may
+                            // overwrite leaves while stacking, but the player holding that block must not.
                             BlockType incomingProps = BlockTypes[v.ID];
                             BlockType existingProps = BlockTypes[existingState.Value.ID];
 
-                            if (!BlockTagUtility.CanReplace(incomingProps, existingProps))
+                            bool canReplace = v.Source == VoxelModSource.WorldGen
+                                ? BlockTagUtility.CanReplaceForWorldGen(incomingProps, existingProps)
+                                : BlockTagUtility.CanReplaceForPlacement(incomingProps, existingProps);
+
+                            if (!canReplace)
                             {
                                 canPlace = false;
                             }

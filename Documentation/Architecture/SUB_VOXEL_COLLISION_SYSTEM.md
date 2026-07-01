@@ -195,10 +195,16 @@ Collision handling is separated into **three** distinct APIs:
 /// replaceable blocks (BlockTags.REPLACEABLE) or incoming-vs-existing
 /// replacement rules. The authoritative placement validation remains in
 /// the existing placement pipeline (PlayerInteraction / World.ModifyVoxel),
-/// which checks canReplaceTags and incoming block compatibility.
+/// which checks placementCanReplaceTags and incoming block compatibility.
 ///
-/// If full placement semantics are needed at the query site, use
-/// CanPlaceBlockAt(Vector3Int, ushort incomingBlockId) instead (Phase 6b).
+/// The player placement-permission gate is Placement.PlacementController
+/// .CanPlaceAt(Vector3Int, BlockType), which composes this occupancy check +
+/// world bounds + the REQUIRES_SUPPORT rule (a support-needing block, e.g.
+/// grass blades, is rejected unless the cell below ProvidesSupport — see
+/// Placement.PlacementResolver.HasRequiredSupport). The whole player placement
+/// decision (skip mask, ray march, replace-vs-adjacent, placeability) lives in
+/// PlacementController; PlayerInteraction is the thin camera/input/highlight
+/// shell over it.
 /// </remarks>
 public bool IsCellOccupiedForPlacement(Vector3 pos)
 {

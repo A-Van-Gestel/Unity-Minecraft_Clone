@@ -596,7 +596,9 @@ namespace Editor.Validation.Behavior.Framework
                 case ReplacementRule.OnlyReplaceAir:
                     return oldId == BlockIDs.Air;
                 default:
-                    return BlockTagUtility.CanReplace(newProps, oldProps);
+                    // Behavior emissions are Live mods → resolve against the placement replacement mask
+                    // (matches World.ApplyModifications for VoxelModSource.Live).
+                    return BlockTagUtility.CanReplaceForPlacement(newProps, oldProps);
             }
         }
 

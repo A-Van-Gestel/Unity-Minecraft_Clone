@@ -13,4 +13,5 @@ MonoBehaviour:
   m_Name: BTP_Debug_Lamp
   m_EditorClassIdentifier: Assembly-CSharp::Data.BlockTagPreset
   tags: 65536
-  canReplaceTags: 8258
+  worldGenCanReplaceTags: 8258
+  placementCanReplaceTags: 8194
