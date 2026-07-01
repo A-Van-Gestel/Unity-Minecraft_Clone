@@ -162,7 +162,7 @@ The file is divided into 4KB **sectors** (Anvil-style):
 **Implementation Details:**
 
 * Each location table entry is a 4-byte int: the high 3 bytes are the chunk's starting **sector index**, the low byte is its **sector count** (max 255 sectors ≈ 1MB per chunk). An entry of 0 means "chunk not present".
-* Each chunk record on disk is: `int totalLength` (payload + 1), `byte compressionAlgorithm` (0=None, 1=GZip, 2=LZ4), the compressed payload, then zero-padding up to the next sector boundary.
+* Each chunk record on disk is: `int totalLength` (payload + 1), `byte compressionAlgorithm` (0=None, 1=Deflate, 2=LZ4), the compressed payload, then zero-padding up to the next sector boundary.
 * **Fragmentation management:** `RegionFile` keeps an in-memory sector usage map. On save it overwrites in place when the new size needs the same sector count, otherwise it frees the old sectors and finds the first contiguous free run (or appends at the end). There is no defragmentation pass yet.
 * **Thread safety:** `FileStream` position is not thread-safe, so each `RegionFile` takes an exclusive `_fileLock` for **both** reads and writes. Chunks in different regions still save/load concurrently.
 
@@ -176,21 +176,21 @@ The file is divided into 4KB **sectors** (Anvil-style):
 * **Default:** **LZ4** (High performance)
 * **Supported Algorithms:**
     * `None (0)`: Raw bytes. Useful for debugging size overhead.
-    * `GZip (1)`: High compression ratio, slower speed. Uses .NET `DeflateStream`.
+    * `Deflate (1)`: High compression ratio, slower speed. Uses .NET `DeflateStream` (raw DEFLATE — no GZip header/CRC). Formerly named `GZip`; renamed for accuracy, on-disk value 1 is unchanged.
     * `LZ4 (2)`: Low compression ratio, extreme speed. Uses `NativeCompressions` library (Native C++ bindings).
 
 **Implementation Details:**
 
-* Each chunk record stores its own algorithm byte (immediately after the length header), allowing mixed compression types within the same world (e.g., migrating from GZip to LZ4 incrementally).
+* Each chunk record stores its own algorithm byte (immediately after the length header), allowing mixed compression types within the same world (e.g., migrating from Deflate to LZ4 incrementally).
 * `ChunkSerializer` requests a stream from `CompressionFactory`, which handles the wrapping (and disposal) of the underlying compression stream.
-* **Safety:** `CompressionFactory` includes a robust `IsLZ4Available` check to fallback to GZip if the native DLL is missing, preventing data loss. (Reading LZ4 data without the DLL cannot fall back and throws.)
+* **Safety:** `CompressionFactory` includes a robust `IsLZ4Available` check to fallback to Deflate if the native DLL is missing, preventing data loss. (Reading LZ4 data without the DLL cannot fall back and throws.)
 * **Safety:** Before decompressing LZ4, the factory validates the LZ4 Frame magic number (`04 22 4D 18`) — NativeCompressions' `LZ4Stream` spins forever on non-frame input instead of throwing (see `Documentation/Bugs/SERIALIZATION_BUGS.md` #03). Corrupt payloads become an `InvalidDataException`, which the deserializer turns into "warn → regenerate chunk".
 * The per-world default algorithm comes from `World.settings.saveCompression`.
 
 **Performance Profile (LZ4):**
 
-* **Save Time:** ~0.15ms per chunk (vs ~4ms GZip)
-* **Load Time:** ~0.2ms per chunk (vs ~3ms GZip)
+* **Save Time:** ~0.15ms per chunk (vs ~4ms Deflate)
+* **Load Time:** ~0.2ms per chunk (vs ~3ms Deflate)
 
 ### 3.4. Cubic Chunks Compatibility
 
@@ -885,13 +885,13 @@ An edge chunk at (0, 50) only waits for its in-world neighbors. Out-of-bounds ne
 
 ### 9.1. Achieved Metrics
 
-| Operation                   | Target  | Measured | Status |
-|-----------------------------|---------|----------|--------|
-| Chunk Save (Main Thread)    | < 1ms   | ~0.3ms   | ✅      |
-| Chunk Load (Async)          | < 5ms   | ~3ms     | ✅      |
-| Lighting Restoration        | < 2ms   | ~1ms     | ✅      |
-| Memory (Active Chunks)      | < 1000  | ~500-800 | ✅      |
-| File Size (Per Chunk, GZip) | < 100KB | ~50KB    | ✅      |
+| Operation                      | Target  | Measured | Status |
+|--------------------------------|---------|----------|--------|
+| Chunk Save (Main Thread)       | < 1ms   | ~0.3ms   | ✅      |
+| Chunk Load (Async)             | < 5ms   | ~3ms     | ✅      |
+| Lighting Restoration           | < 2ms   | ~1ms     | ✅      |
+| Memory (Active Chunks)         | < 1000  | ~500-800 | ✅      |
+| File Size (Per Chunk, Deflate) | < 100KB | ~50KB    | ✅      |
 
 ### 9.2. Bottleneck Analysis
 
@@ -1176,8 +1176,9 @@ Pre-migration backups are created as sibling world folders named `{WorldName}_Ba
 * **v1.5** - Comprehensive update with all implementation details, bug resolutions, and future plans
 * **v1.6** - Added LZ4 Compression implementation details and documented resolution of Chunk Regeneration bugs
 * **v1.7** - Synced with codebase: sector-based region file layout, versioned region addressing (`RegionAddressCodec` V1/V2), chunk format v7 (flag-based sections, uniform-sky optimization, RGB light queues), v5+ pending mods Meta byte, `pending_lighting.bin` rename + `pending_blocklight.bin` format, save snapshotting/cancellation, 8-neighbor data-ready gate, completed player state & AOT migration checklist items
+* **v1.8** - Renamed `CompressionAlgorithm.GZip` → `Deflate` for accuracy (value 1 has always been raw headerless DEFLATE, not GZip). On-disk value 1 unchanged, so existing saves stay byte-compatible — source-only rename, no format bump/migration (MT-6)
 
 ---
 
-**Last Updated:** 2026-06-13  
+**Last Updated:** 2026-07-01  
 **Next Review:** Chunk prioritization or Defragmentation

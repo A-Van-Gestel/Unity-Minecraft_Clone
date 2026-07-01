@@ -8,9 +8,9 @@ namespace Serialization
     public enum CompressionAlgorithm : byte
     {
         None = 0,
-        GZip = 1,
+        Deflate = 1,
         LZ4 = 2,
-        // Zlib = 3, // Reserved for future use (e.g. Zstd)
+        // GZip = 3, // Reserved: true GZip (with header/CRC) or another codec (e.g. Zstd)
     }
 
 

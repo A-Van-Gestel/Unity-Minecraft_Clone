@@ -44,7 +44,7 @@ namespace Serialization
             }
             catch (Exception ex) // Catches DllNotFoundException and TypeInitializationException
             {
-                Debug.LogError($"[CompressionFactory] LZ4 native library not found or failed to initialize. Falling back to GZip. Error: {ex.Message}");
+                Debug.LogError($"[CompressionFactory] LZ4 native library not found or failed to initialize. Falling back to Deflate. Error: {ex.Message}");
                 s_lz4Available = false;
                 return false;
             }
@@ -60,7 +60,7 @@ namespace Serialization
                 case CompressionAlgorithm.None:
                     return outputStream;
 
-                case CompressionAlgorithm.GZip:
+                case CompressionAlgorithm.Deflate:
                     return new DeflateStream(outputStream, CompressionMode.Compress, leaveOpen);
 
                 case CompressionAlgorithm.LZ4:
@@ -70,7 +70,7 @@ namespace Serialization
                     }
 
                     // Fallback ensures the game can still save even if the plugin breaks
-                    Debug.LogWarning("[CompressionFactory] LZ4 requested but not available. Fallback to GZip.");
+                    Debug.LogWarning("[CompressionFactory] LZ4 requested but not available. Fallback to Deflate.");
                     return new DeflateStream(outputStream, CompressionMode.Compress, leaveOpen);
 
                 default:
@@ -88,7 +88,7 @@ namespace Serialization
                 case CompressionAlgorithm.None:
                     return inputStream;
 
-                case CompressionAlgorithm.GZip:
+                case CompressionAlgorithm.Deflate:
                     return new DeflateStream(inputStream, CompressionMode.Decompress, leaveOpen);
 
                 case CompressionAlgorithm.LZ4:

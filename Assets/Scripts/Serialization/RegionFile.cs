@@ -100,7 +100,7 @@ namespace Serialization
                 {
                     int index = localX + localZ * CHUNKS_PER_SIDE;
                     int offsetData = _offsets[index];
-                    if (offsetData == 0) return (null, CompressionAlgorithm.GZip);
+                    if (offsetData == 0) return (null, CompressionAlgorithm.Deflate);
 
                     int sectorOffset = (offsetData >> 8) & 0xFFFFFF;
                     long filePosition = (long)sectorOffset * SECTOR_SIZE;
@@ -108,7 +108,7 @@ namespace Serialization
                     if (filePosition >= _fileStream.Length)
                     {
                         // File truncated or corrupt header
-                        return (null, CompressionAlgorithm.GZip);
+                        return (null, CompressionAlgorithm.Deflate);
                     }
 
                     _fileStream.Seek(filePosition, SeekOrigin.Begin);
@@ -116,7 +116,7 @@ namespace Serialization
                     // 1. Read Length (4 bytes)
                     byte[] lengthBytes = new byte[4];
                     int headerBytesRead = _fileStream.Read(lengthBytes, 0, 4);
-                    if (headerBytesRead < 4) return (null, CompressionAlgorithm.GZip);
+                    if (headerBytesRead < 4) return (null, CompressionAlgorithm.Deflate);
 
                     // Convert Big Endian (if standard) or Little Endian.
                     // BinaryWriter matches BitConverter.ToInt32 on the same system.
@@ -126,7 +126,7 @@ namespace Serialization
                     if (length is <= 1 or > 16 * 1024 * 1024)
                     {
                         Debug.LogWarning($"RegionFile corrupt: Invalid length {length.ToString()} at {localX.ToString()},{localZ.ToString()}");
-                        return (null, CompressionAlgorithm.GZip);
+                        return (null, CompressionAlgorithm.Deflate);
                     }
 
                     // 2. Read Compression Type (1 byte)
@@ -139,7 +139,7 @@ namespace Serialization
                     if (!Enum.IsDefined(typeof(CompressionAlgorithm), algo))
                     {
                         Debug.LogError($"RegionFile: Unsupported compression type {compressionByte.ToString()} at {localX.ToString()},{localZ.ToString()}");
-                        return (null, CompressionAlgorithm.GZip);
+                        return (null, CompressionAlgorithm.Deflate);
                     }
 
                     // 3. Read Payload
@@ -147,14 +147,14 @@ namespace Serialization
                     byte[] data = new byte[payloadLength];
                     int payloadBytesRead = _fileStream.Read(data, 0, payloadLength);
 
-                    if (payloadBytesRead < payloadLength) return (null, CompressionAlgorithm.GZip);
+                    if (payloadBytesRead < payloadLength) return (null, CompressionAlgorithm.Deflate);
 
                     return (data, algo);
                 }
                 catch (Exception e)
                 {
                     Debug.LogError($"RegionFile IO Error: {e.Message}");
-                    return (null, CompressionAlgorithm.GZip);
+                    return (null, CompressionAlgorithm.Deflate);
                 }
             }
         }

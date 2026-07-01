@@ -350,7 +350,7 @@ public class Settings
     [SettingField(SettingsTab.Performance, Label = "Save Compression", Order = 0)]
     [Tooltip("Sets the compression algorithm used for saving chunk data to disk.\n\n" +
              TooltipTags.BulletOptionStart + "LZ4" + TooltipTags.BulletOptionEnd + "Recommended balance of speed and size.\n" +
-             TooltipTags.BulletOptionStart + "GZip" + TooltipTags.BulletOptionEnd + "Maximum compression, slower save/load times.\n" +
+             TooltipTags.BulletOptionStart + "Deflate" + TooltipTags.BulletOptionEnd + "Maximum compression, slower save/load times.\n" +
              TooltipTags.BulletOptionStart + "None" + TooltipTags.BulletOptionEnd + "Fastest saving, largest file size.")]
     public CompressionAlgorithm saveCompression = CompressionAlgorithm.LZ4;
 

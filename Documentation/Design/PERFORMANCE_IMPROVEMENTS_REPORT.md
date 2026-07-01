@@ -116,7 +116,7 @@ instead of a crash.
 | MT-3 ✅ | `DebugScreen` intermediate string allocations per refresh  |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | MT-4   | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | MT-5   | Startup `.ToArray()` intermediates feeding `NativeArray`   |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| MT-6   | `CompressionFactory` "GZip" actually writes raw Deflate    |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
+| MT-6 ✅ | `CompressionFactory` "GZip" actually writes raw Deflate    |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
 
 ### GPU & Shaders
 
@@ -1015,7 +1015,14 @@ build in a `NativeList<T>` from the start.
 
 ---
 
-### MT-6. `CompressionFactory` "GZip" actually writes raw Deflate
+### MT-6. `CompressionFactory` "GZip" actually writes raw Deflate ✅ DONE
+
+**Resolution (2026-07-01):** Renamed enum member `CompressionAlgorithm.GZip` → `Deflate`, keeping the
+on-disk value `= 1`. Since the region format stores the numeric byte (not the name) and settings
+persist the enum as an integer via `JsonUtility`, this is a source-only rename with **zero save
+breakage** — no format-version bump or migration step. All call sites, the settings tooltip, and
+`INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md` (§3.2/§3.3, v1.8) updated. Value `3` is
+reserved for a *true* GZip codec (header/CRC) should it ever be wanted, added via AOT migration.
 
 **Observed:** `CompressionFactory.CreateOutputStream`/`CreateInputStream`
 (`CompressionFactory.cs` ~lines 65–66, 93–94) construct `DeflateStream` for
@@ -1308,7 +1315,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 
 1. **Quick wins, near-zero risk (one sitting each):**
    ~~MR-1 (Euler hoist) ✅ done — marginal~~, ~~MR-5 ✅ done — chain post-process~~, ~~MR-3 + MR-4 ✅ done — SectionRenderer~~, ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
-   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~. Remaining: MT-4, MT-5. MT-6 (doc/rename only).
+   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~. Remaining: MT-4, MT-5. ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~.
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side) →
