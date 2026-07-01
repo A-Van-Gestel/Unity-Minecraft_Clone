@@ -115,7 +115,7 @@ instead of a crash.
 | MT-2   | Light scheduler snapshots the full dirty set every frame   |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
 | MT-3 ✅ | `DebugScreen` intermediate string allocations per refresh  |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | MT-4   | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| MT-5   | Startup `.ToArray()` intermediates feeding `NativeArray`   |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| MT-5 ✅ | Startup `.ToArray()` intermediates feeding `NativeArray`   |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | MT-6 ✅ | `CompressionFactory` "GZip" actually writes raw Deflate    |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
 
 ### GPU & Shaders
@@ -999,13 +999,20 @@ with `.Contains()` / `.IndexOf()` — O(n) each (`World.cs` ~lines 1338–1346).
 
 ---
 
-### MT-5. Startup `.ToArray()` intermediates feeding `NativeArray`
+### MT-5. Startup `.ToArray()` intermediates feeding `NativeArray` ✅ DONE
 
 *(Absorbed from `CODEBASE_IMPROVEMENTS.md` §4.2.)*
 
+**Resolution (2026-07-01):** The flatten logic had since moved out of `World.PrepareGlobalJobData`
+into `JobDataManagerFactory.Create` (`JobDataManagerFactory.cs`, Step 3). The four
+`new NativeArray<T>(list.ToArray(), Allocator.Persistent)` calls now route through a private
+`ToPersistentArray<T>(List<T>)` helper that allocates at `list.Count` and fills via a loop
+(mirroring the existing `blockTypesJobData` pattern in Step 4) — no throwaway managed array. Copy is
+element-order- and allocator-identical; startup-only, so no runtime path changed.
+
 **Observed:** `new NativeArray<T>(list.ToArray(), Allocator.Persistent)` ×4 in
-`World.PrepareGlobalJobData` (`World.cs` ~lines 1384–1387) — temporary managed arrays immediately
-discarded.
+`JobDataManagerFactory.Create` (`JobDataManagerFactory.cs` ~lines 75–82) — temporary managed arrays
+immediately discarded.
 
 **Recommendation:** Allocate the `NativeArray` at `list.Count` and fill via `CopyFrom`/loop, or
 build in a `NativeList<T>` from the start.
@@ -1315,7 +1322,7 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
 
 1. **Quick wins, near-zero risk (one sitting each):**
    ~~MR-1 (Euler hoist) ✅ done — marginal~~, ~~MR-5 ✅ done — chain post-process~~, ~~MR-3 + MR-4 ✅ done — SectionRenderer~~, ~~MR-6 ✅ done — pre-size + pool~~, ~~MR-7 ✅ done — −18% fluid~~,
-   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~. Remaining: MT-4, MT-5. ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~.
+   ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~, ~~MT-5 ✅ done — ToPersistentArray helper, no .ToArray() intermediates~~. Remaining: MT-4. ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~.
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
    OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side) →

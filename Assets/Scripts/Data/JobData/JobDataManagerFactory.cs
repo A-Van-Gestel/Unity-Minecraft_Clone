@@ -72,14 +72,10 @@ namespace Data.JobData
             }
 
             // --- Step 3: Convert lists to persistent NativeArrays ---
-            NativeArray<CustomMeshData> customMeshesJobData =
-                new NativeArray<CustomMeshData>(customMeshesList.ToArray(), Allocator.Persistent);
-            NativeArray<CustomFaceData> customFacesJobData =
-                new NativeArray<CustomFaceData>(customFacesList.ToArray(), Allocator.Persistent);
-            NativeArray<CustomVertData> customVertsJobData =
-                new NativeArray<CustomVertData>(customVertsList.ToArray(), Allocator.Persistent);
-            NativeArray<int> customTrisJobData =
-                new NativeArray<int>(customTrisList.ToArray(), Allocator.Persistent);
+            NativeArray<CustomMeshData> customMeshesJobData = NativeArrayHelper.ToNativeArray(customMeshesList);
+            NativeArray<CustomFaceData> customFacesJobData = NativeArrayHelper.ToNativeArray(customFacesList);
+            NativeArray<CustomVertData> customVertsJobData = NativeArrayHelper.ToNativeArray(customVertsList);
+            NativeArray<int> customTrisJobData = NativeArrayHelper.ToNativeArray(customTrisList);
 
             // --- Step 4: Populate blockTypesJobData, including the custom mesh index ---
             NativeArray<BlockTypeJobData> blockTypesJobData =
