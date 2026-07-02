@@ -1,6 +1,6 @@
 # Advanced Visibility Culling (Graph Connectivity)
 
-- **Status:** Planned (Prerequisites Complete)
+- **Status:** Planned (Phase 0 complete; the §7.3 ownership split — the remaining hard prerequisite — is still open, verified 2026-07-02)
 - **Current Implementation:** Standard Frustum Culling + Empty Section Skipping
 - **Target:** Advanced Occlusion Culling via Graph Traversal
 - **Context:** Solving the "Underground Overdraw" problem where caves render while the player is on the surface.
@@ -92,6 +92,15 @@ Every frame (or every time the camera moves a significant distance), we run a Br
 - [x] **Section Rendering:** Switched from Monolithic Chunks to `SectionRenderer` (`Chunk.cs`).
 - [x] **Data Tracking:** Implemented `IsEmpty` and `IsFullySolid` tracking in `ChunkSection` and `SectionJobData`.
 - [x] **Generation Optimization:** Implemented Empty Section skipping in `MeshGenerationJob`.
+
+### Phase 0.5: Renderer-Ownership Split (Open — hard prerequisite, see §7.3)
+
+- [ ] **Ownership split:** occlusion visibility moves to `MeshRenderer.forceRenderingOff`, owned
+  exclusively by the future `VisibilityManager`; `GameObject.SetActive` stays owned by
+  `SectionRenderer` ("has geometry"). Ship as its own small PR *before* any culling code exists —
+  it is independently harmless. *(Verified 2026-07-02: not yet implemented —
+  `SectionRenderer.UpdateMeshNative`/`Clear()` and `Chunk` still toggle visibility exclusively via
+  `SetActive`; no `forceRenderingOff` exists in the codebase.)*
 
 ### Phase 1: Data Generation (The Hard Part)
 
@@ -228,14 +237,21 @@ surface frustum culling already does the work).
   `IsFullySolid` sections skip the fill entirely (exact masks known).
 - **No save-format impact:** masks are derived data, recomputed on mesh. Do not persist them. ✅
 - **Prerequisites / links:**
-  - `PERFORMANCE_IMPROVEMENTS_REPORT.md` `MR-3`/`MR-4` touch the same `SectionRenderer` code —
-    land them first or together to avoid churn.
-  - The §7.3 ownership split is a hard prerequisite — implement it as its own small PR before the
-    culler exists, it is independently harmless.
-  - `WORLD_SCALING_ANALYSIS.md`: taller worlds (Tier A) multiply subsurface section counts — this
-    system's value grows ~linearly with world height, and cubic chunks (Tier C) would consume the
-    same per-section masks unchanged. Design the mask storage per-section (not per-chunk-column)
-    so it carries over.
+    - `PERFORMANCE_IMPROVEMENTS_REPORT.md` `MR-3`/`MR-4` touch the same `SectionRenderer` code —
+      land them first or together to avoid churn. *(Both ✅ done 2026-06-18.)*
+    - The §7.3 ownership split is a hard prerequisite — implement it as its own small PR before the
+      culler exists, it is independently harmless. *(Still open as of 2026-07-02 — tracked as
+      Phase 0.5 in §5.)*
+    - `PERFORMANCE_IMPROVEMENTS_REPORT.md` `GS-6` (BatchRendererGroup conversion) would replace the
+      per-renderer `forceRenderingOff` mechanism with culling-callback visibility indices. Design the
+      `VisibilityManager` to *output a visible-section set* consumed by a thin, swappable
+      presentation layer (today: `forceRenderingOff` toggles; under BRG: the culling callback), so
+      the culler survives a later BRG conversion unchanged — and if GS-6 is ever scheduled, decide
+      its ordering against this system first.
+    - `WORLD_SCALING_ANALYSIS.md`: taller worlds (Tier A) multiply subsurface section counts — this
+      system's value grows ~linearly with world height, and cubic chunks (Tier C) would consume the
+      same per-section masks unchanged. Design the mask storage per-section (not per-chunk-column)
+      so it carries over.
 - **Verification:** the corruption mode to test for is *holes* (over-culling): fly/noclip through
   cave networks while toggling a debug overlay that renders culled sections in wireframe; any
   visible-through-hole means an entry-face or staleness bug. Add a `VisibilityManager` debug stat

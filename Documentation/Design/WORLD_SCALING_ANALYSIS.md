@@ -5,7 +5,7 @@
 >
 > - **Tier A** — Taller bounded world with depth (e.g. Y from −128 to +512, still column chunks).
 > - **Tier B** — Unbounded XZ: remove `WorldSizeInChunks`, allow negative-quadrant generation,
->   floating origin for render/physics precision.
+    > floating origin for render/physics precision.
 > - **Tier C** — Full cubic chunks: unbounded Y as well (infinite height and depth).
 >
 > Each tier builds on the previous one. For every tier: the hard-coded assumptions that break,
@@ -27,22 +27,22 @@ strong synergies — see §6), `Design/CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`.
 
 ## 1. Inventory — current hard-coded assumptions
 
-| # | Assumption | Where | Breaks at tier |
-|---|------------|-------|:--------------:|
-| 1 | `ChunkHeight = 128` compile-time const | `VoxelData.cs:7`, mirrored in `ChunkMath.CHUNK_HEIGHT` | A |
-| 2 | World Y range is `[0, ChunkHeight)` — no negative Y anywhere | `WorldData.IsVoxelInWorld`, lighting jobs, heightmap, physics | A |
-| 3 | `WorldSizeInChunks = 100`; chunk indices `0–99`; voxel coords `0–1599` | `VoxelData.cs:8`, `ChunkCoord` doc contract, `IsVoxelInWorld` XZ test | B |
-| 4 | `WorldCentre = WorldSizeInVoxels / 2` spawn anchor | `VoxelData.cs:35` | B |
-| 5 | All-positive coordinates → truncating `/` and `%` "just work" | e.g. `RegionAddressCodec.V2Codec` step 1 (`chunkVoxelPos.x / ChunkWidth` — **already wrong for negatives**, see §3.2); audit every `/ 16`, `% 16`, `% 32` | B |
-| 6 | Chunk identity is 2D: `ChunkCoord(X, Z)`, `Vector2Int` dictionary keys, `Vector2Int` sunlight columns | `ChunkCoord.cs`, `WorldData.Chunks`, lighting column queues, region addressing | C |
-| 7 | A chunk is a full-height column: per-column `heightMap` (16×16 `ushort`), `SectionUniformSkyLevel` per section array, sunlight recalc walks `ChunkHeight−1 → 0` | `ChunkData.cs` | C (strained by A) |
-| 8 | Lighting job cache key packs Y into `[0, 255]` | `NeighborhoodLightingJob.EncodeNeighborKey` (`y * 48 * 48`, comment "Y: [0,255]") | A (at height > 256, and at any negative Y) |
-| 9 | Lighting/meshing jobs take a 3×3 *column* neighborhood (8 XZ neighbors, no vertical neighbors) | `WorldJobManager.ScheduleLightingUpdate` / `ScheduleMeshing` | C |
-| 10 | Job buffer sizes derive from `ChunkWidth² × ChunkHeight` (32,768 voxels) — pooled at fixed counts | `ChunkJobArrayPool`, `FillChunkMapForJob` | A (memory ×N) |
-| 11 | Region file = 32×32 chunk *columns*, filename `r.{x}.{z}.bin`, no Y | `RegionAddressCodec`, `ChunkStorageManager.GetRegion` | C |
-| 12 | Absolute float world positions for transforms, camera, player, shader `worldPos` | `Chunk.ChunkPosition`, `SectionRenderer` transforms, `LiquidCore.hlsl` noise/shore coords | B (precision) |
-| 13 | Seed mangled to small positive int (`Mathf.Abs(hash) / 10000` — "world generation shit itself" hack) | `VoxelData.CalculateSeed` | B (symptom of #14) |
-| 14 | Noise sampled at absolute float coordinates | `StandardChunkGenerationJob` → `FastNoiseLite` (float precision) | B (far from origin) |
+| #  | Assumption                                                                                                                                                      | Where                                                                                                                                                     |               Breaks at tier               |
+|----|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------:|
+| 1  | `ChunkHeight = 128` compile-time const                                                                                                                          | `VoxelData.cs:7`, mirrored in `ChunkMath.CHUNK_HEIGHT`                                                                                                    |                     A                      |
+| 2  | World Y range is `[0, ChunkHeight)` — no negative Y anywhere                                                                                                    | `WorldData.IsVoxelInWorld`, lighting jobs, heightmap, physics                                                                                             |                     A                      |
+| 3  | `WorldSizeInChunks = 100`; chunk indices `0–99`; voxel coords `0–1599`                                                                                          | `VoxelData.cs:8`, `ChunkCoord` doc contract, `IsVoxelInWorld` XZ test                                                                                     |                     B                      |
+| 4  | `WorldCentre = WorldSizeInVoxels / 2` spawn anchor                                                                                                              | `VoxelData.cs:35`                                                                                                                                         |                     B                      |
+| 5  | All-positive coordinates → truncating `/` and `%` "just work"                                                                                                   | e.g. `RegionAddressCodec.V2Codec` step 1 (`chunkVoxelPos.x / ChunkWidth` — **already wrong for negatives**, see §3.2); audit every `/ 16`, `% 16`, `% 32` |                     B                      |
+| 6  | Chunk identity is 2D: `ChunkCoord(X, Z)`, `Vector2Int` dictionary keys, `Vector2Int` sunlight columns                                                           | `ChunkCoord.cs`, `WorldData.Chunks`, lighting column queues, region addressing                                                                            |                     C                      |
+| 7  | A chunk is a full-height column: per-column `heightMap` (16×16 `ushort`), `SectionUniformSkyLevel` per section array, sunlight recalc walks `ChunkHeight−1 → 0` | `ChunkData.cs`                                                                                                                                            |             C (strained by A)              |
+| 8  | Lighting job cache key packs Y into `[0, 255]`                                                                                                                  | `NeighborhoodLightingJob.EncodeNeighborKey` (`y * 48 * 48`, comment "Y: [0,255]")                                                                         | A (at height > 256, and at any negative Y) |
+| 9  | Lighting/meshing jobs take a 3×3 *column* neighborhood (8 XZ neighbors, no vertical neighbors)                                                                  | `WorldJobManager.ScheduleLightingUpdate` / `ScheduleMeshing`                                                                                              |                     C                      |
+| 10 | Job buffer sizes derive from `ChunkWidth² × ChunkHeight` (32,768 voxels) — pooled at fixed counts                                                               | `ChunkJobArrayPool`, `FillChunkMapForJob`                                                                                                                 |               A (memory ×N)                |
+| 11 | Region file = 32×32 chunk *columns*, filename `r.{x}.{z}.bin`, no Y                                                                                             | `RegionAddressCodec`, `ChunkStorageManager.GetRegion`                                                                                                     |                     C                      |
+| 12 | Absolute float world positions for transforms, camera, player, shader `worldPos`                                                                                | `Chunk.ChunkPosition`, `SectionRenderer` transforms, `LiquidCore.hlsl` noise/shore coords                                                                 |               B (precision)                |
+| 13 | Seed mangled to small positive int (`Mathf.Abs(hash) / 10000` — "world generation shit itself" hack)                                                            | `VoxelData.CalculateSeed`                                                                                                                                 |             B (symptom of #14)             |
+| 14 | Noise sampled at absolute float coordinates                                                                                                                     | `StandardChunkGenerationJob` → `FastNoiseLite` (float precision)                                                                                          |            B (far from origin)             |
 
 The good news: **sub-chunk sections (16³) already exist** (`ChunkSection`, `SectionRenderer`,
 per-section meshing with `MeshSectionStats`, per-section `IsEmpty`/`IsFullySolid` skips). That is
@@ -69,14 +69,14 @@ offsets, not signed per-voxel Y).
 
 ### 2.1 What must change
 
-| Change | Notes | Save impact |
-|--------|-------|:-----------:|
-| `ChunkHeight`/`CHUNK_HEIGHT` consts (two copies — unify first) + `WorldMinY` | Section count becomes `ChunkHeight/16` everywhere it's derived (it already is) | ⚠️ Format — chunk files store per-section data; version bump + migration that re-anchors old `[0,128)` data at the new offset |
-| `EncodeNeighborKey` Y packing | `[0,255]` cap breaks at 640. Repack: `(long)y * 48 * 48` with y up to 640 still fits a `long` trivially — just fix the comment/derivation; or switch to bit-packed `x:6 z:6 y:12` | ✅ runtime only |
-| `heightMap` (`ushort`) | Fine to 65k — no change with offset convention | ✅ (values reinterpreted via migration) |
-| Sea level / biome terrain anchors | `SeaLevel`, terrain splines, lode/cave Y ranges are authored against `[0,128)` — all `StandardBiomeAttributes` assets need re-authoring or an import-time offset | ✅ (assets, not saves) |
-| Sunlight column recalc | Walks from `ChunkHeight−1` down — works as-is, but now walks 640 voxels/column; see §2.2 | ✅ |
-| `MeshClipBounds` / benchmark/editor paths using 128 | Mechanical | ✅ |
+| Change                                                                       | Notes                                                                                                                                                                             |                                                          Save impact                                                          |
+|------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------:|
+| `ChunkHeight`/`CHUNK_HEIGHT` consts (two copies — unify first) + `WorldMinY` | Section count becomes `ChunkHeight/16` everywhere it's derived (it already is)                                                                                                    | ⚠️ Format — chunk files store per-section data; version bump + migration that re-anchors old `[0,128)` data at the new offset |
+| `EncodeNeighborKey` Y packing                                                | `[0,255]` cap breaks at 640. Repack: `(long)y * 48 * 48` with y up to 640 still fits a `long` trivially — just fix the comment/derivation; or switch to bit-packed `x:6 z:6 y:12` |                                                        ✅ runtime only                                                         |
+| `heightMap` (`ushort`)                                                       | Fine to 65k — no change with offset convention                                                                                                                                    |                                            ✅ (values reinterpreted via migration)                                             |
+| Sea level / biome terrain anchors                                            | `SeaLevel`, terrain splines, lode/cave Y ranges are authored against `[0,128)` — all `StandardBiomeAttributes` assets need re-authoring or an import-time offset                  |                                                     ✅ (assets, not saves)                                                     |
+| Sunlight column recalc                                                       | Walks from `ChunkHeight−1` down — works as-is, but now walks 640 voxels/column; see §2.2                                                                                          |                                                               ✅                                                               |
+| `MeshClipBounds` / benchmark/editor paths using 128                          | Mechanical                                                                                                                                                                        |                                                               ✅                                                               |
 
 ### 2.2 Performance implications (the real cost of Tier A)
 
@@ -89,7 +89,9 @@ A 640-high column is **5× the voxels** of today's 128. Every per-chunk full-vol
   becomes a prerequisite.** At minimum, jobs must become *section-ranged*: only copy/process the
   Y-range that actually has content (the per-section `IsEmpty` flags and `SectionUniformSkyLevel`
   already identify uniform air/sky regions — exploit them to skip whole sections in fills,
-  lighting BFS seeds, and the `ApplyLightingJobResult` merge).
+  lighting BFS seeds, and the `ApplyLightingJobResult` merge). The lighting-side version of this is
+  now tracked as **`LI-2`** in `PERFORMANCE_IMPROVEMENTS_REPORT.md` (Y-band / section-ranged halo
+  gather — copy mechanism proven by the TG-4 fluid Y-band).
 - **`ApplyLightingJobResult` merge scan** (§2 of pipeline doc): 32,768 → 163,840 iterations per
   completed job on the main thread. `P-3` (jobified merge + dirty-section mask) likewise graduates
   from "should" to "must".
@@ -185,7 +187,8 @@ This also removes the current float-roundtrip idiom (`Mathf.FloorToInt((float)x 
 breaks in a truly infinite world. Audit checklist (grep targets): `/ VoxelData.ChunkWidth`,
 `/ ChunkMath.CHUNK_WIDTH`, `% CHUNK`, `/ 32f`, `% 32`, `FloorToInt`, plus `Mathf.Abs` on
 coordinates. Centralize all of it into `ChunkMath` (shift/mask helpers) and forbid inline chunk
-math by convention.
+math by convention. *(Tracked as **`WS-1`** in `PERFORMANCE_IMPROVEMENTS_REPORT.md` since
+2026-07-02.)*
 
 Region filenames `r.{x}.{z}.bin` handle negative integers fine; the region *header/slot* math is
 covered by the shift/mask fix. Bump the region codec version (V3) anyway so the migration system
@@ -366,4 +369,5 @@ LI-1 padded lighting volume ────────────────┘ 
 - **LI-1 / P-2** should be designed with 3D keys and halo padding so Tier C never forces a rewrite.
 - Tier B's floor-div/shift-mask cleanup (§3.2) is also a micro-optimization win on its own
   (removes float roundtrips from every chunk lookup) — it can ship early and independently, and it
-  is the only part of this document with **zero** save/seed risk when done correctly.
+  is the only part of this document with **zero** save/seed risk when done correctly. Now tracked
+  as **`WS-1`** in `PERFORMANCE_IMPROVEMENTS_REPORT.md`.

@@ -10,6 +10,17 @@
 **Last audited:** 2026-06-12, at commit `39c92ef` (branch `feat/Modular-World-Generation-&-World-Types`).
 **Implementation status synced:** 2026-06-20, at commit `ea2aec0` — all Meshing & Rendering items
 except MR-8 (greedy meshing) are now closed and in-game confirmed (MR-1 through MR-7, MR-9).
+**Third-pass audit:** 2026-07-02, at commit `99c3e6e` — added `WG-1..3`, `LI-2`, `GS-6`, `WS-1`;
+re-scoped `P-1` (see the pipeline table note).
+**Fourth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `SL-1..4` (serialization save/load),
+`VQ-1..2` + `PH-1` (voxel query layer, interaction, physics), `SU-1..2` (startup/world load): the
+last previously-unaudited runtime systems.
+**Fifth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `DT-1..4` (debug tooling: voxel
+visualizer modes, debug screen / perf HUD, terrain-gen overlay), lifting the fourth pass's
+debug-tooling exemption.
+**Sixth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `ET-1..4` (editor tooling, deep pass
+on `Assets/Editor/WorldTools/` + quick pass on the remaining editor tools). The validation suites
+remain unaudited — earmarked as their own future pass.
 Findings are from static code review unless stated otherwise — capture a baseline per
 `Documentation/Performance/README.md` before implementing the larger items.
 
@@ -21,6 +32,48 @@ observed during benchmark/stress runs with fast movement. The `OM-*` items are t
 and ceiling-side* complement to `P-4` (production-side backpressure in the pipeline doc §3): P-4
 stops over-scheduling, OM-* makes sure that even when the backlog wins, the result is degradation
 instead of a crash.
+
+**Audit scope note (third pass, 2026-07-02):** the `WG-*` (World Generation) section, `LI-2`, `GS-6`,
+and `WS-1` were added after a third review pass targeting gaps the first two passes never examined:
+the standard world-generation pipeline (schedule-side buffer churn, the main-thread populate/scan,
+managed structure expansion), the post-P-2-Phase-1 lighting gather (full-height copies regardless of
+content), draw-call submission architecture, and the world-scaling enablers analyzed in
+`WORLD_SCALING_ANALYSIS.md` but never tracked here. `P-1` was re-scoped in place (see the pipeline
+table note).
+
+**Audit scope note (fourth pass, 2026-07-02):** the `SL-*` (Serialization & Save/Load), `VQ-*`/`PH-*`
+(Voxel Queries, Interaction & Physics), and `SU-*` (Startup & World Load) sections were added after a
+fourth review pass over the last runtime systems no prior pass had examined: the disk **read** path
+(OM-3 only covered save-burst scheduling), the `GetVoxelState` query layer and its per-frame consumers
+(the physics solver, the placement ray march), and the world-load boot sequence. Explicitly exempt
+from auditing: `Legacy/` (deprecated), `Serialization/Migration/` (one-shot upgrade code),
+`DebugVisualizations/` + editor tooling + benchmarks (not shipped), and UI/Input (event-driven, cold
+— `MT-3` already covered the one hot piece).
+
+**Audit scope note (fifth pass, 2026-07-02):** the `DT-*` (Debug Tooling) section lifts the fourth
+pass's `DebugVisualizations/` exemption. The rating rationale differs from every other section:
+these items are ⚪ *because they only cost while a developer is debugging* — but that is exactly when
+measurement fidelity matters most. A visualizer that hitches on toggle or allocates per frame
+distorts the very captures it exists to read (the same rationale that justified `MT-3`), and the
+lighting/fluid modes will be pointed at the engine's most perf-sensitive systems during LI-2/GS-5
+work. Covered: `VoxelVisualizer`/`VisualizerChunkData` + the `World.HandleVisualization` driver, the
+`DebugScreen` + `PerformanceMonitor` + `GraphRenderer` HUD stack, `TerrainGenDebugOverlay`, and
+`ChunkBorderVisualizer` (clean — see the section's baseline note).
+
+**Audit scope note (sixth pass, 2026-07-02):** the `ET-*` (Editor Tooling) section covers the
+in-editor world tools at the user's request — deep on `Assets/Editor/WorldTools/` (the
+`ChunkPreview3DWindow` + `WorldGenPreviewWindow` stacks and `EditorChunkPipelineRunner`, which
+drive the *production* generation/lighting/meshing jobs plus their own managed preview paths — and
+run under Mono with no IL2CPP boost for the managed halves), quick on the rest. The quick pass came
+back largely clean: `BlockIconGenerator`/`AtlasPacker`/`StructurePreviewWindow`/`CaveDensityAnalyzer`/
+`BiomeConfigValidator` are on-demand tools using sane patterns (PreviewRenderUtility, real pipeline
+jobs, dirty-flag-gated validation); the only recurring-cost nit is
+`WorldGenPreviewWindow.PollForAssetChanges` stat-ing a file timestamp every editor-update tick
+(throttle to ~0.5 s when convenient). **The validation suites are deliberately excluded — they are
+their own future audit pass.** Production-parity scoreboard for the 3D preview: MR-2 ✅ (shares
+`SectionRenderer.Layout` with an anti-drift comment), P-2 Phase 1 ✅ (worker-thread halo gather),
+MR-6 pre-size ✅ (inherited via constructor) / pooling intentionally absent (TG-6 convention);
+MR-5 ❌ (`ET-4`), and the remaining gaps are the `ET-*` items themselves.
 
 **Relationship to other documents:**
 
@@ -50,10 +103,14 @@ instead of a crash.
 | **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ — see entry (changes some runtime-deterministic behavior, but never terrain)                   |
 | **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill)                |
 
-> **Seed-breaking note:** None of the items in this report modify world-generation noise, biome
-> selection, structure placement, or any code in the generation jobs. **No item can change the
-> terrain produced by a given seed.** The ⚠️ markers under *Seed* flag changes to *runtime* RNG or
-> lighting determinism only, with details in the entry.
+> **Seed-breaking note:** With one flagged exception, the items in this report do not modify
+> world-generation noise, biome selection, structure placement, or any generation-job logic — they
+> cannot change the terrain produced by a given seed. The ⚠️ markers under *Seed* flag changes to
+> *runtime* RNG or lighting determinism, with details in the entry. The exceptions are `WG-3`
+> (structure-expansion refactor) and `ET-2` (shared column-evaluator extraction): both touch
+> worldgen *plumbing*, so they are gated on a byte-identical-output acceptance criterion (same
+> discipline as LI-1's lighting bit-identity) — done correctly they change nothing, but they are
+> the items whose implementation *could* break seeds if that gate is skipped.
 
 ---
 
@@ -85,6 +142,19 @@ instead of a crash.
 | ID   | Finding                                                                                                                                          | Effort | Risk | Benefit | Seed | Save |
 |------|--------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | LI-1 | ✅ Branchy 9-map dispatch + hashmap cache → halo-padded volume; layout validated, **shipped net-positive via P-2 Phase 1** (worker-thread gather) |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
+| LI-2 | Halo gather/extract copies the full 128-voxel column height regardless of content (Y-band / section-ranged volume)                               |   🟡   |  🔴  |   🟢    |  ⚠️  |  ✅   |
+
+### World Generation
+
+| ID   | Finding                                                                               | Effort | Risk | Benefit | Seed | Save |
+|------|---------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| WG-1 | ~230 KB of Persistent generation buffers allocated + freed per generated chunk        |   🟡   |  🟡  |   ⚪⁴    |  ✅   |  ✅   |
+| WG-2 | Main-thread section copy + per-section empty scan in `ChunkData.Populate`             |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| WG-3 | Structure expansion is a managed main-thread iterator over ScriptableObject templates |   🟡   |  🟡  |   🟡    |  ⚠️  |  ✅   |
+
+> ⁴ WG-1 benefit is TG-6-class today (native churn, mostly off the frame) but the byte volume
+> multiplies ~5× under `WORLD_SCALING_ANALYSIS.md` Tier A heights — pool sizing should be
+> height-parameterized from the start (same rule as OM-1 budgets).
 
 ### Tick & Gameplay
 
@@ -127,6 +197,7 @@ instead of a crash.
 | GS-3 | Voxel lighting math (4× `pow`) runs per-fragment on per-vertex data               |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | GS-4 | Render pipeline tier audit: shadow variants, TwoSided casting, MSAA, render scale |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | GS-5 | Section occlusion culling (underground sections render despite being sealed)      |   🔴   |  🟡  |   🟢    |  ✅   |  ✅   |
+| GS-6 | Per-section GameObject + MeshRenderer submission (BatchRendererGroup conversion)  |   🔴   |  🔴  |   🟡    |  ✅   |  ✅   |
 
 ### CPU-Starved Device / OOM Hardening
 
@@ -135,6 +206,67 @@ instead of a crash.
 | OM-1 | All budgets/caps are desktop-tuned absolute constants — no device-tier scaling        |   🟢   |  🟢  |   🟢    |  ✅   |  ✅   |
 | OM-2 | No memory-pressure response: `Application.lowMemory` unused, no resident-chunk budget |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
 | OM-3 | Unbounded concurrent chunk saves on mass unload (one `Task` per chunk)                |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
+
+### Serialization & Save/Load
+
+| ID   | Finding                                                                                           | Effort | Risk | Benefit | Seed | Save |
+|------|---------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| SL-1 | Per-chunk managed allocations on the load/save path (payload `byte[]`, wrappers, padding)         |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| SL-2 | Disk-load apply path runs unbudgeted on the main thread (no per-frame cap)                        |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| SL-3 | `SaveChunkAsync` snapshots up to ~190 KB per chunk on the main thread at unload                   |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| SL-4 | Whole-file region lock serializes chunk loads behind saves (design: `REGION_FILE_CONCURRENCY.md`) |   🟡   |  🔴  |   🟡    |  ✅   |  ✅   |
+
+### Voxel Queries, Interaction & Physics
+
+| ID   | Finding                                                                                       | Effort | Risk | Benefit | Seed | Save |
+|------|-----------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| VQ-1 | `GetVoxelState` float path: chunk coord computed twice, ~7 `FloorToInt` + nullable per query  |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| VQ-2 | Placement ray uses fixed-increment sampling (~reach/step queries per frame) instead of DDA    |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
+| PH-1 | Collision solver re-queries the same voxel neighborhood across up to 7 sweeps × substeps/tick |   🟡   |  🟡  |   ⚪⁵    |  ✅   |  ✅   |
+
+> ⁵ VQ-2/PH-1 benefits are ⚪ with a single player entity — but `VoxelRigidbody` is the collision
+> solver any future entity (mobs, items) will reuse, and both scale linearly with entity count.
+> VQ-1 is 🟡 because every per-frame consumer funnels through it.
+
+### Startup & World Load
+
+| ID   | Finding                                                                                        | Effort | Risk | Benefit | Seed | Save |
+|------|------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| SU-1 | Loading screen throttled by gameplay-tuned per-frame budgets                                   |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
+| SU-2 | Initial load schedules generation + disk loads for the whole radius at once (no in-flight cap) |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+
+### Debug Tooling
+
+| ID   | Finding                                                                                            | Effort | Risk | Benefit | Seed | Save |
+|------|----------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| DT-1 | Debug visualization refresh has no per-frame budget (full-world burst on toggle, per-edit rescans) |   🟢   |  🟢  |   ⚪⁶    |  ✅   |  ✅   |
+| DT-2 | `VisualizerChunkData` per-update Persistent container churn + `ToArray()`/bounds per apply         |   🟢   |  🟢  |   ⚪⁶    |  ✅   |  ✅   |
+| DT-3 | Visualization update-set fed on every voxel edit even when the mode is `None`                      |   🟢   |  🟢  |   ⚪⁶    |  ✅   |  ✅   |
+| DT-4 | Debug HUD/overlay allocation leftovers post-MT-3 (graph sample arrays, label `Format`, IMGUI)      |   🟢   |  🟢  |   ⚪⁶    |  ✅   |  ✅   |
+
+> ⁶ ⚪ by definition (debug-only) — but these directly protect **measurement fidelity**: DT-1/DT-2
+> make the lighting/fluid visualization modes usable *while* profiling the systems they visualize,
+> and DT-3/DT-4 keep the disabled/idle debug stack at true zero so it never shows up in a capture.
+
+### Editor Tooling (WorldTools)
+
+| ID   | Finding                                                                                              | Effort | Risk | Benefit | Seed | Save |
+|------|------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| ET-1 | Cross-Section preview evaluates terrain columns in serial managed code on the main thread            |   🟡   |  🟢  |   ⚪⁷    |  ✅   |  ✅   |
+| ET-2 | Preview replicates production logic (column shaping ~300 lines; replacement rules **diverge**)       |   🔴   |  🟡  |   🟡    |  ⚠️  |  ✅   |
+| ET-3 | 3D-preview pipeline: full snapshot copies per job + full-grid ×5 lighting re-passes + dead copy-back |   🟡   |  🟢  |   ⚪⁷    |  ✅   |  ✅   |
+| ET-4 | `MeshPostProcessJob` runs `Schedule().Complete()` per chunk in the preview (MR-5 not mirrored)       |   🟢   |  🟢  |   ⚪⁷    |  ✅   |  ✅   |
+
+> ⁷ ⚪ = dev-time only, but these set iteration speed for worldgen authoring: at high preview
+> resolutions/radii the managed paths freeze the editor for seconds per regenerate — under Mono,
+> with no IL2CPP to hide it. ET-2 is 🟡 because it is also a **correctness** issue: the preview's
+> hand-rolled replacement rules can show structures the game would not place (and vice versa).
+
+### World Scaling Enablers
+
+| ID   | Finding                                                                             | Effort | Risk | Benefit | Seed | Save |
+|------|-------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| WS-1 | Truncating / float-roundtrip chunk coordinate math → `ChunkMath` shift/mask helpers |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
 
 ### Chunk Pipeline (deep-dive in `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`)
 
@@ -150,6 +282,12 @@ implementing any of these.**
 | P-4 | Backpressure: in-flight caps, out-of-range discard, time budgets, panic gate (§3)                                                                                                                                                                      |   🟡   | 🟡→🔴 |   🟢    |  ✅   |     ✅     |
 | P-5 | "Lighting stable" save bit to skip edge checks on load (§4.4)                                                                                                                                                                                          |   🟡   |  🟡   |   🟢    |  ✅   | ⚠️ Format |
 | P-6 | Smaller observations: O(n) removals, fail-safe scan counter, draw-queue trickle (§5)                                                                                                                                                                   |   🟢   |  🟢   |   🟡    |  ✅   |     ✅     |
+
+> **P-1 re-scope note (2026-07-02):** P-1 was written when the lighting neighborhood was gathered on
+> the main thread at schedule time. P-2 Phase 1 moved that gather to worker threads, so P-1's win is
+> now worker-side copy bandwidth, not main-thread schedule time. Re-evaluate it together with `LI-2`
+> (section-ranged gather) — both attack the same copies on different axes; implement at most one of
+> them first and re-measure before touching the other.
 
 ---
 
@@ -590,6 +728,144 @@ satisfy both if the persistent layout itself is halo-padded.
 > *darkening* quadrant too:
 > [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
 > **C3 (B54/B55, CLOSED 2026-06-21)** — keep it green when freezing any halo-vs-9-map diff for LI-1.
+
+---
+
+### LI-2. Halo gather/extract copies the full column height regardless of content
+
+*(Surfaced by the 2026-07-02 third-pass audit. This is the concrete, tracked form of
+`WORLD_SCALING_ANALYSIS.md` §2.2's "jobs must become section-ranged" Tier A prerequisite.)*
+
+**Observed:** P-2 Phase 1's worker-thread gather fills the full 20×128×20 halo volume (and the
+extract walks it back out) for every lighting job, regardless of how much of that height can
+actually carry light changes. Most columns are vertically dominated by uniform regions — sky above
+the heightmap (which `SectionUniformSkyLevel` already identifies per section) and unlit/uniform
+depths — that are copied, seed-scanned, and extracted anyway. The tooling for a bounded copy already
+exists and is proven: the TG-4 Y-band ships on `ChunkMath.GatherPaddedRange`, whose `[0,128]` case
+*is* the full-height case, and its serial fluid A/B cut worst-tick tails −24…−46%. Notably, the
+fluid Y-band came back frame-neutral in-game precisely because the flood frame is **Light-bound
+(~66–70%)** — the lighting gather/extract is where the same idea has frame-level payoff, and it is
+the next open item on the "lighting line" that TG-4's closing analysis pointed at.
+
+**Recommendation:** Bound the lighting gather/extract (and BFS seed scans) to the Y-range that can
+carry non-uniform light, derived conservatively from: the 3×3 neighborhood's column heightmaps,
+`SectionUniformSkyLevel` / per-section `IsEmpty` flags, the Y-extent of the queued BFS nodes, and
+`MAX_LIGHTING_BFS_REACH` padding. **This is harder than the fluid band:** sunlight propagates
+vertically through the whole column and the darkening path reads ±2 across seams — a too-tight band
+produces exactly the cross-chunk darkening bugs C3 guards against. Treat the band derivation as the
+design problem; the copy mechanics are done.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — band derivation + plumbing through the P-2 Phase 1 gather; the ranged
+    > copy machinery already exists.
+> - **Risk:** 🔴 High — lighting semantics; a too-tight band truncates sunlight columns or darkening
+    > waves. Hard acceptance criterion: **bit-identical light output**, full lighting suite green
+    > (incl. C3 darkening baselines B54/B55) plus a fixed-seed in-game light-map diff.
+> - **Benefit:** 🟢 High — attacks the dominant sustained cost (lighting, ~66–70% of flood/ocean
+    > frames) and is simultaneously the Tier A scaling prerequisite (640-high columns make
+    > full-height copies prohibitive — `WORLD_SCALING_ANALYSIS.md` §2.2).
+> - **Seed/Save:** ⚠️ same contract as LI-1 (terrain-safe, but light output must remain identical —
+    > any divergence re-dirties the edge-check cascade on old saves) / ✅.
+
+---
+
+## Detailed findings — World Generation
+
+> **Context:** the generation pipeline never had a dedicated audit pass (the first two passes
+> covered meshing, lighting, tick, GPU, and OOM hardening). These three items are the
+> schedule-side, apply-side, and structure-side findings of the 2026-07-02 pass over
+> `StandardChunkGenerator.ScheduleGeneration` → `WorldJobManager.ProcessGenerationJobs`.
+
+### WG-1. Per-chunk Persistent generation buffers allocated and freed per chunk
+
+**Observed:** `StandardChunkGenerator.ScheduleGeneration` (`StandardChunkGenerator.cs` ~line 351)
+freshly allocates per scheduled chunk, all `Allocator.Persistent`: the 128 KB `outputMap`
+(`NativeArray<uint>`, 32,768 voxels), `outputHeightMap` (512 B), `wormMask` (`NativeBitArray`,
+4 KB), `caveMask` (32 KB) + `preCaveBlockIDs` (64 KB) when caves are enabled, two `NativeQueue`s
+(legacy mods + structure spawns), and the worm-telemetry list — ~230 KB of native alloc/free churn
+per generated chunk during streaming. TG-6 pooled exactly one of these (the 8 KB `ActiveVoxels`
+list) and measured ~0.95 µs/chunk of main-thread schedule/release time for it; the remaining
+buffers are an order of magnitude more bytes through the same allocator, still unpooled — the
+repeated alloc/free pattern CLAUDE.md mandates pooling for.
+
+**Recommendation:** Extend the TG-6 pattern to the fixed-size buffers: a `GenerationBufferPool`
+mirroring `ChunkJobArrayPool` / `MeshOutputPool` / `ActiveVoxelListPool`, rented in
+`ScheduleGeneration` and returned in `WorldJobManager.ReleaseGenerationJobData` — the terminal
+release helper the TG-6 double-dispose review established as the single correct release site.
+Reset discipline matters (the MR-6/B17 lesson): `wormMask`/`caveMask` are written sparsely and
+conditionally, so pooled instances must be cleared on rent or return, or stale bits carve phantom
+caves. Keep editor/benchmark callers on the fresh-alloc path via the same optional-pool parameter
+convention TG-6 added to `IChunkGenerator.ScheduleGeneration`.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — pool type + rent/return threading + reset discipline across the terminal
+    > and shutdown release paths.
+> - **Risk:** 🟡 Medium — native-container lifetime (the exact double-dispose class the TG-6 review
+    > caught) and stale-data reuse; both have established mitigations (single terminal-release
+    > helper, `ClearForReuse` + a B17-style pooled-reuse guard).
+> - **Benefit:** ⚪ Low today (native, mostly off-frame, TG-6-class µs/chunk) — but the byte volume
+    > multiplies ~5× under Tier A heights, so pool sizing should be height-parameterized from day one.
+> - **Seed/Save:** ✅ (buffers fully rewritten per chunk once reset discipline holds) / ✅.
+
+---
+
+### WG-2. Main-thread section copy + per-section empty scan in `ChunkData.Populate`
+
+**Observed:** `WorldJobManager.ProcessGenerationJobs` STAGE 1 calls `ChunkData.Populate` →
+`PopulateFromFlattened` (`ChunkData.cs` ~line 335), which per generated chunk, on the main thread:
+copies all 32,768 voxels from the job map into the 8 section arrays (128 KB of memcpy), then
+**linearly scans each section for a non-zero voxel** to decide pruning. The scan early-exits on the
+first non-zero, so occupied sections cost ~1 read — but every *empty* section pays the full 4,096
+reads, which makes the worst case the common case (air-dominated sky sections). The comment at the
+copy site already flags it as optimizable. This is the generation-path sibling of P-3 (the
+lighting-merge main-thread scan).
+
+**Recommendation:** The generation path already ends with a Burst pass over every voxel
+(`ActiveVoxelScanJob`) — extend it (or the terrain job) to emit a per-section occupancy summary
+(8-bit non-empty mask, or per-section nonAir counts). `PopulateFromFlattened` then skips both the
+copy and the scan for empty sections and drops the scan for occupied ones. Load-from-save and
+pool-recycle replay paths keep the current scan (the same fallback split TG-2 established). Longer
+term this folds into palettes (`Design/CHUNK_PALETTE_MAPPING.md`): uniform sections should never
+materialize 4,096-entry arrays at all.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — job output field + populate fast path, load-path fallback kept intact.
+> - **Risk:** 🟡 Medium — a wrong empty mask silently prunes real terrain; gate with a TG-2-style
+    > differential (jobified summary vs full managed scan over the same finalized maps, zero diff).
+> - **Benefit:** 🟡 Medium — removes up to ~32k managed-array reads plus some section copies per
+    > chunk from the streaming apply path; scales with section count under Tier A.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### WG-3. Structure expansion is managed, main-thread, per-mod work
+
+**Observed:** `StandardChunkGenerator.ExpandStructure` (`StandardChunkGenerator.cs` ~line 847) is a
+C# `yield` iterator walking managed `CompositeStructureTemplate` / `StructureComponent`
+ScriptableObjects. `ProcessGenerationJobs` STAGE 2 enumerates it per structure marker and feeds
+`World.EnqueueVoxelModification` one `VoxelMod` at a time under the `maxStructureModsPerFrame`
+budget. Costs, all on the main thread during streaming: an iterator state machine + enumerator per
+structure, cache-hostile managed template traversal, per-mod enqueue work — and when the budget
+exhausts, the whole generation job parks (`jobFullyProcessed = false`) and is re-visited next
+frame, trickling tree-dense chunks across many frames. Every other generator input was flattened
+into NativeArrays at `Initialize`; structure templates are the one managed survivor.
+
+**Recommendation:** Profile first — confirm structure expansion registers on tree-dense streaming
+captures before paying the complexity. If it does: flatten templates at `Initialize` (component
+positions, block IDs, variant tables into NativeArrays — the established pattern), expand markers
+in a Burst job emitting a `NativeList<VoxelMod>` chained onto the generation job, and turn STAGE 2
+into a bulk application. The rotation/stacking/variant selection logic and its RNG must be ported
+verbatim.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium → 🔴 High — template flattening + a faithful RNG port.
+> - **Risk:** 🟡 Medium — expansion is deterministic worldgen; a regression changes structures.
+> - **Benefit:** 🟡 Medium — removes managed expansion + the per-mod trickle from tree-dense chunk
+    > streaming; situational elsewhere.
+> - **Seed/Save:** ⚠️ **Seed-sensitive** — the Burst port must reproduce the exact
+    > `Unity.Mathematics.Random` seed derivation and call order, or identical seeds place different
+    > structures. Hard acceptance criterion: byte-identical mod stream for fixed seeds across
+    > representative biomes (this is the exception in the report's seed-breaking note). / ✅.
 
 ---
 
@@ -1254,6 +1530,37 @@ culling overhead scale with loaded sections), growing further with taller worlds
 
 ---
 
+### GS-6. Per-section GameObject + MeshRenderer submission — BatchRendererGroup conversion
+
+*(Surfaced by the 2026-07-02 third-pass audit — the structural complement to GS-5.)*
+
+**Observed:** Every 16³ section is a pooled GameObject with its own `MeshFilter` + `MeshRenderer`
+(`SectionRenderer`). At normal view distances that is thousands of live renderers, each paying
+Unity's per-renderer overhead every frame: main-thread culling bookkeeping, transform/hierarchy
+management, and per-object draw submission. GS-5 reduces *how many* sections render; this item
+changes *what each section costs* to exist and be submitted. The two compound — but they also
+interact (see below).
+
+**Recommendation:** Long-horizon only; needs its own design doc when picked up. Convert section
+rendering to `BatchRendererGroup` (BRG): meshes registered with a batch group, per-section
+matrices and visibility handled in BRG's culling callback instead of per-GameObject renderers.
+**Ordering interaction with GS-5:** BRG has no `forceRenderingOff` — visibility is expressed in the
+culling callback's index output. Design the GS-5 `VisibilityManager` to *output a visible-section
+set* consumed by a thin, swappable presentation layer (today: `forceRenderingOff` toggles; under
+BRG: the culling callback), so the culler survives a later BRG conversion unchanged. A matching
+note lives in `VISIBILITY_CULLING_ARCHITECTURE.md` §8.
+
+> **Impact Analysis:**
+> - **Effort:** 🔴 High — replaces the renderer layer (`SectionRenderer`, pooling, material paths).
+> - **Risk:** 🔴 High — bespoke rendering path; per-platform validation, and every
+    > renderer-adjacent behavior (mesh upload, bounds, layers, shadow-casting mode) must be
+    > re-derived.
+> - **Benefit:** 🟡 Medium on desktop today → 🟢 High at scale (thousands of sections, weak CPUs,
+    > and any Tier A height increase that multiplies section counts).
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
 ## Detailed findings — CPU-Starved Device / OOM Hardening
 
 > **Context:** on a fast desktop (i9-9900K class), production and consumption rates stay roughly
@@ -1360,6 +1667,580 @@ already models this).
 
 ---
 
+## Detailed findings — Serialization & Save/Load
+
+> **Context:** the disk **read** path had never been audited (OM-3 covers only the save-*burst*
+> scheduling side; MT-6 was a naming fix). These items are the 2026-07-02 fourth-pass findings over
+> `RegionFile` → `ChunkSerializer` → `ChunkStorageManager` → `World.LoadOrGenerateChunk`. All edits
+> here are byte-layout-neutral — but this is save-system code, so the `serialization-safety` rules
+> apply to every change regardless.
+
+### SL-1. Per-chunk managed allocations on the load/save path
+
+**Observed:** Each streamed-in chunk allocates on the load path: the compressed payload `byte[]`
+(`RegionFile.LoadChunkData`, `RegionFile.cs` ~line 147 — typically tens of KB), a 4-byte length
+header array, a 512 B `reader.ReadBytes(...)` heightmap array (`ChunkSerializer.cs` ~line 209 —
+inconsistent with the sections, which correctly stream into pooled arrays via `ReadBulkData`),
+`Enum.IsDefined` reflection per load (`RegionFile.cs` ~line 139), plus per-load
+decompression-stream/`BinaryReader` wrapper objects and the `Task.Run` closure. Each saved chunk
+allocates: two `BitConverter.GetBytes` arrays, a zero `pad` array up to ~4 KB
+(`RegionFile.cs` ~line 231), a `new ChunkSection[8]` snapshot array (`WriteChunkInternal`), and
+`MemoryStream`/`BinaryWriter`/compression-stream wrappers. The `SerializationBufferPool` exists but
+covers only the serialize-side output buffer. All of this runs on ThreadPool threads, but GC is
+process-wide — the allocation rate scales with streaming speed and contributes to the collections
+that pause the main thread.
+
+**Recommendation:** Extend `SerializationBufferPool` with a length-aware rent for the read payload
+(`Deserialize` already takes `ReadOnlySpan<byte>`, so a pooled oversized buffer slices for free);
+read the heightmap via the existing `ReadBulkData` span path into a pooled/stack buffer; replace
+`Enum.IsDefined` with a range check against the known enum values; keep a static zero-pad buffer;
+write the two 4-byte headers via stackalloc spans (`Stream.Write(ReadOnlySpan<byte>)`).
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — mechanical, but spread across three files and both directions.
+> - **Risk:** 🟡 Medium — save-system code (bytes must stay identical — verify with a
+    > round-trip diff of a saved world before/after); pooled-buffer lifetime across `Task.Run`.
+> - **Benefit:** 🟡 Medium — removes the dominant steady-state GC source outside the main thread
+    > during streaming; biggest on weak devices where GC pauses are longest.
+> - **Seed/Save:** ✅ / ✅ — identical bytes, allocation strategy only.
+
+---
+
+### SL-2. Disk-load apply path runs unbudgeted on the main thread
+
+**Observed:** After `await StorageManager.LoadChunkAsync(...)`, the continuation of
+`World.LoadOrGenerateChunk` (`World.cs` ~lines 779–941) runs on the main thread and performs, per
+loaded chunk: `PopulateFromSave` (section ownership transfer + light-queue re-enqueue),
+`OnDataPopulated` (the TG-2 bitmask scan — up to 32k reads on this path by design), pending-mod
+replay, pending-blocklight replay, a `new HashSet<Vector2Int>` for restored lighting columns (the
+generation twin in `ProcessGenerationJobs` uses `HashSetPool` — this path doesn't), and — when
+neighbors are ready — `RecalculateSunLightLight()`, a full 16×16-column sunlight seed walk.
+**There is no per-frame budget:** every load whose I/O completes gets its continuation the same
+frame. The generation path drains through `ProcessGenerationJobs` under `maxStructureModsPerFrame`;
+the load path has no equivalent, so a fast flight over saved terrain produces uncapped
+multi-chunk apply bursts in single frames.
+
+**Recommendation:** Instead of applying in the continuation, push loaded `ChunkData` into a
+completion queue drained by a budgeted per-frame pump (mirror `ProcessGenerationJobs`, which
+already handles the identical staging steps for generated chunks — potential to share the code).
+Pool the lighting-columns `HashSet` while there. ⚠ The apply steps fire pipeline events
+(`PromoteNeighborhood`, staging callbacks) — respect the flag-pairing invariants
+(`chunk-lifecycle` skill) when moving them.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — a queue + pump; the steps themselves move verbatim.
+> - **Risk:** 🟡 Medium — pipeline-adjacent (deferred apply changes when neighbor-readiness flips);
+    > the unload-during-await guard at `World.cs:781` must carry over to the queued form.
+> - **Benefit:** 🟡 Medium — converts load-burst frame spikes into bounded per-frame work, exactly
+    > like the generation side already does; most visible when re-visiting saved terrain fast.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### SL-3. `SaveChunkAsync` snapshots up to ~190 KB per chunk on the main thread
+
+**Observed:** `ChunkStorageManager.CreateSerializationSnapshot` (`ChunkStorageManager.cs` ~line 214)
+runs on the calling (main) thread before each async save: per non-null section it rents a pooled
+section and copies 16 KB of voxels plus (for non-compact sections) 8 KB of LightData — up to
+~190 KB of memcpy per chunk — plus both BFS queues under lock. During a mass-unload burst this
+multiplies by OM-3's unbounded save count: hundreds of snapshots in one frame, each also renting
+pooled sections that stay checked out until the ThreadPool worker finishes.
+
+**Recommendation:** Solve together with OM-3's bounded save queue: enqueue the *chunk reference*
+and take the snapshot at **dequeue** time inside the bounded writer's main-thread slot (a few per
+frame), so both the memcpy and the pooled-section retention are capped by the queue bound instead
+of the unload burst size. Independent extra: skip the LightData copy for compact sections is
+already implemented — the remaining copy is voxels, which a dirty-section mask (sections unchanged
+since load need no save at all) would shrink further; that needs per-section dirty tracking and
+should be its own follow-up if profiling justifies it.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — folds into the OM-3 implementation; snapshot-at-dequeue needs a
+    > "chunk still loaded & unchanged" revalidation.
+> - **Risk:** 🟡 Medium — a chunk can be modified between unload-request and snapshot; the dequeue
+    > slot must snapshot the *current* state (which is also more correct than today's
+    > frozen-at-burst state).
+> - **Benefit:** 🟡 Medium — caps the unload-burst main-thread memcpy and pool pressure; pairs with
+    > OM-3's memory-spike cap.
+> - **Seed/Save:** ✅ / ✅ — same bytes, taken later.
+
+---
+
+### SL-4. Whole-file region lock serializes chunk loads behind saves
+
+**Observed:** All `RegionFile` reads and writes share one `lock (_fileLock)`
+(`RegionFile.cs` ~line 25 — the TODO there already names the problem): a chunk load stalls behind
+any in-flight save to the same region, and concurrent loads of neighboring chunks (which cluster
+in the same region file by construction) serialize each other. During streaming-while-saving the
+read path — which gameplay is waiting on — queues behind write I/O.
+
+**Recommendation:** The full analysis and the recommended design (concurrent reads via
+`System.IO.RandomAccess` stateless offset reads or a `FileStream` pool + single-writer discipline,
+with the metadata tables under an exclusive lock) already exists in
+**[`REGION_FILE_CONCURRENCY.md`](REGION_FILE_CONCURRENCY.md)** — this entry tracks it in the master
+backlog. Implement the hybrid (§3 of that doc) or `RandomAccess` (§4) variant; keep every
+`_offsets`/`_sectorUsage` mutation exclusive.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — the read side is a contained change; the invariants are documented.
+> - **Risk:** 🔴 High — concurrency bugs here corrupt saves; the doc's §"Critical Requirements"
+    > (metadata sync, resize safety, atomic offset-table update) are hard gates, and a
+    > corruption-focused stress test (parallel load/save hammering one region) must exist first.
+> - **Benefit:** 🟡 Medium — removes load-behind-save stalls during streaming; compounds with SL-2
+    > (budgeted apply) and OM-3 (bounded writers, which also shrink the write side of the contention).
+> - **Seed/Save:** ✅ / ✅ — same bytes; only lock granularity changes.
+
+---
+
+## Detailed findings — Voxel Queries, Interaction & Physics
+
+> **Context:** every per-frame gameplay consumer — the physics solver, the interaction ray, the
+> placement probe, pending-mod application, and the managed grass tick (TG-1's residual) — funnels
+> through one query API. TG-1/TG-4 fixed this *for the fluid tick* by bypassing it; the API itself
+> and its remaining consumers were never audited until this fourth pass.
+
+### VQ-1. `GetVoxelState` float path — duplicated chunk math, nullable + managed deref per query
+
+**Observed:** `WorldData.GetVoxelState(Vector3)` (`WorldData.cs` ~line 189) costs, per query:
+float world-bounds compares (`IsVoxelInWorld`), `GetChunkCoordFor` (2 float divides + 2
+`FloorToInt`), a dictionary `TryGetValue`, then `GetLocalVoxelPositionInChunk` — which **calls
+`GetChunkCoordFor` again** (the chunk coord is computed twice per query) — plus 3 more
+`FloorToInt`, a `VoxelState?` nullable wrap, and at most callers a managed `BlockType` array deref.
+Integer-coordinate callers (`CheckPhysicsCollision` passes `Vector3Int` voxel positions) round-trip
+int → float → floored int. Per-frame call volume: the physics solver (12–18 cells × up to 7 sweeps
+× substeps per FixedUpdate — see PH-1), the placement march (~reach/checkIncrement calls per frame
+— see VQ-2), pending-mod apply, and the grass tick.
+
+**Recommendation:** Add an integer fast path — `bool TryGetVoxel(int x, int y, int z, out
+VoxelState state)` — built on the WS-1 shift/mask helpers (this item is the *runtime API half of
+WS-1*; implement them together): one chunk-coord computation, no floats, no nullable. Add a
+one-entry "last chunk" cache (query bursts — an AABB scan, a ray march — overwhelmingly hit the
+same chunk, turning the dictionary lookup into a compare). Keep the `Vector3` overload as a
+floor-then-delegate wrapper. Migrate the hot consumers (physics, march, mods) first.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — new overload + WS-1 helpers + consumer migration.
+> - **Risk:** 🟡 Medium — the float→int floor semantics at negative-fraction boundaries must be
+    > preserved exactly (guard with an equivalence sweep, same harness as WS-1); the placement
+    > suite (13 baselines) covers the interaction consumers.
+> - **Benefit:** 🟡 Medium — cuts the constant per-frame query tax for every consumer at once, and
+    > removes the last float coordinate path standing in Tier B's way.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### VQ-2. Placement ray marches by fixed increment instead of DDA
+
+**Observed:** `PlacementController.MarchRay` (`PlacementController.cs` ~line 88) samples the ray at
+fixed `checkIncrement` steps, calling `World.CheckForVoxel` → `GetVoxelState` per step —
+~reach/checkIncrement queries per call, and `PlayerInteraction.PlaceCursorBlocks` probes **every
+frame**. Fixed-step sampling also has two correctness edges: a step can skip a cell clipped
+diagonally (block-corner misses at any increment), and the entered-face normal is *derived after
+the fact* from the hit point's fractional offsets (`FaceNormal`), which can name the wrong face on
+near-corner hits.
+
+**Recommendation:** Replace the march with a DDA voxel traversal (Amanatides–Woo): visits exactly
+the cells the ray crosses (≤ ~3 × reach queries instead of reach/increment), never skips a cell,
+and yields the entered face as a byproduct (deleting the `FaceNormal` fractional heuristic).
+`checkIncrement` disappears as a setting. ⚠ This intentionally *changes* behavior on the edge
+cases (more correct hits); the placement validation suite's 13 baselines gate the change, and any
+baseline that encoded a sampling artifact needs re-derivation with eyes on it — treat baseline
+diffs as findings, not failures.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — a contained, well-known algorithm; the decision layer above is untouched.
+> - **Risk:** 🟡 Medium — player-facing targeting feel; corner-case behavior changes by design.
+> - **Benefit:** ⚪ Low as pure perf (one ray/frame) — the win is correctness + removing a tuning
+    > knob; perf becomes real if rays multiply (mobs, projectiles).
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### PH-1. Collision solver re-queries the same voxel neighborhood across sweeps and substeps
+
+**Observed:** `VoxelRigidbody.ResolveMovement` (`VoxelRigidbody.cs` ~line 224) calls
+`World.CheckPhysicsCollision` up to ~7 times per resolve (horizontal pre-pass ×2, step-up probe ×2
+
++ downward sweep, per-axis resolve ×2, vertical/ground check), and each call independently rescans
+  the entity's AABB voxel range (typically 12–18 cells) through the full VQ-1 float path — nullable
+  unwrap, managed `BlockType` deref, and (for custom-bounds blocks) a rotation-matrix computation
+  per cell *per sweep*. Fast movement multiplies the whole resolve by up to
+  `ceil(displacement / 0.125)` substeps (`CalculateVelocity`), each also writing
+  `transform.position` twice. Worst case is a few hundred voxel queries per FixedUpdate for one
+  entity.
+
+**Recommendation:** Gather once, sweep many: at the top of `ResolveMovement` (or once per
+substep chain over the union AABB), collect the overlapped cells into a stack buffer of
+`(blockBounds, isSolid)` entries — computing each cell's custom-bounds rotation exactly once — and
+run all sweeps against that buffer. Combine with VQ-1's integer path for the gather itself. The
+substep transform writes can accumulate into a local and apply once.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — restructures the solver's query pattern; the resolution math is untouched.
+> - **Risk:** 🟡 Medium — the step-up sweep reads *lifted* AABBs (cells outside the initial range —
+    > the gather must cover the step-height envelope); physics feel regressions are subtle, so
+    > verify with the sub-voxel collision doc's test scenarios (`SUB_VOXEL_COLLISION_SYSTEM.md`).
+> - **Benefit:** ⚪ Low with one player — linear with future entity count; this is the solver every
+    > mob/item will run.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+## Detailed findings — Startup & World Load
+
+> **Context:** MT-4/MT-5 fixed two specific startup allocations and OM-1 added device calibration,
+> but the world-load coroutine (`World.cs` STEP 2/3 + `ForceCompleteDataJobsCoroutine`) was never
+> audited end-to-end. The existing per-phase stopwatch instrumentation is good — keep it; these two
+> items are about *throughput*, not measurement.
+
+### SU-1. Loading screen throttled by gameplay-tuned per-frame budgets
+
+**Observed:** The blocking startup phases run through the same per-frame budgets that protect
+gameplay frame time: `ForceCompleteDataJobsCoroutine` PHASE 1 yields a frame per sweep with
+`ProcessGenerationJobs` bounded by `maxStructureModsPerFrame`, and after STEP 3 hands off to
+`Update()`, the initial *meshing* wave drains at `maxMeshRebuildsPerFrame` (10) and the in-flight
+mesh cap (20) — budgets tuned to preserve 60 FPS for a player who, at this moment, is looking at a
+loading screen. Nothing during the load screen needs frame-rate protection; the budgets purely
+stretch time-to-playable.
+
+**Recommendation:** Introduce a loading-mode budget multiplier (e.g. ×4–8 on the per-frame counts,
+or switch to a time-sliced ~100 ms/frame budget) active while `_isWorldLoaded == false`, reverting
+on handoff. OM-1's device tier supplies the safe ceiling (a phone's loading mode is smaller than a
+desktop's). Keep the safety-break iteration caps — scale them with the multiplier so the timeout
+semantics don't tighten.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — a multiplier read at the existing budget sites.
+> - **Risk:** 🟡 Medium — bigger bursts stress the same queues P-4 wants to bound; the lighting
+    > fail-safes and safety breaks must scale with the multiplier, not race it.
+> - **Benefit:** 🟡 Medium — directly cuts time-to-playable, the most user-visible startup metric.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### SU-2. Initial load schedules generation + disk loads for the whole radius at once
+
+**Observed:** STEP 2 (`World.cs` ~lines 630–665) fires `LoadOrGenerateChunk` for every chunk in
+the `(initialLoadRadius + 1)` square simultaneously: each disk miss immediately calls
+`JobManager.ScheduleGeneration` — there is no in-flight cap on this path — so a radius-10 start
+allocates ~440+ concurrent `GenerationJobData` buffer sets (~230 KB each per WG-1: ≈ **~100 MB of
+native buffers live at once**), and each disk hit spawns a ThreadPool load task in the same burst
+(the read-side mirror of OM-3's write burst). On memory-tight devices the startup burst is the
+first OOM opportunity, before streaming ever begins.
+
+**Recommendation:** Schedule the initial wave ring-by-ring (inner rings first — they're also the
+ones `chunksToWaitFor` blocks on) with a bounded in-flight count. P-4's in-flight caps give this
+for free if implemented globally — implement SU-2 as "P-4's caps also apply during startup" rather
+than a separate mechanism, sized by the OM-1 tier and raised by SU-1's loading-mode multiplier.
+WG-1's pooling then bounds the buffer memory to the cap × per-chunk size.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — folds into P-4; standalone ring scheduling is also simple.
+> - **Risk:** 🟡 Medium — ordering interacts with the lighting-neighbor gates (the +1 buffer ring
+    > must still land before the wait ring finishes lighting); the startup coroutine's convergence
+    > loop already tolerates arbitrary completion order.
+> - **Benefit:** 🟡 Medium — caps startup native-memory and ThreadPool bursts; prerequisite-grade
+    > on mobile (pairs with OM-1/OM-2).
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+## Detailed findings — Debug Tooling
+
+> **Baseline note (what is already right — keep these patterns):** `ChunkBorderVisualizer` builds
+> **one static shared mesh** for all chunks (submesh-split topologies, uploaded + non-readable) — the
+> model citizen of this section. `TerrainGenDebugOverlay` time-slices its minimap regeneration
+> (512 px/frame) and early-outs when inactive. `VoxelVisualizer` meshes in a Burst job with pooled
+> `VisualizerChunkData` GameObjects. `DebugScreen` post-MT-3 is zero-alloc with mode-gated
+> components, throttled text/infrequent-data refresh, and is fully `SetActive(false)` when hidden.
+> The findings below are the gaps left around those good bones. Note for GS-5: the culled-section
+> wireframe overlay its §8 verification plan calls for should be built on this system — DT-1/DT-2
+> are worth landing first so that overlay is usable at full view distance.
+
+### DT-1. Debug visualization refresh has no per-frame budget
+
+**Observed:** Switching `visualizationMode` queues **every active chunk** for visualization
+(`World.HandleVisualization`, `World.cs` ~line 2734), and the processing loop (~line 2767) drains
+**all ready chunks in a single frame**: per chunk, a full section scan (`Sunlight`/`Blocklight`/
+`FluidLevel` visit every voxel of every non-empty section and insert every lit/non-air voxel into a
+`Dictionary<Vector3Int, Color>` — thousands of entries per chunk), then the DT-2 conversion + job
+schedule; `VoxelVisualizer.LateUpdate` then completes and applies every finished mesh, also
+unbudgeted. At a few hundred active chunks the toggle is a multi-hundred-ms hitch. Worse, **while a
+mode is active** every voxel modification re-queues the chunk plus border neighbors
+(`World.cs` ~line 1853) for a *full rescan* — an ocean flood with the FluidLevel overlay on
+re-scans the entire flood front every tick batch, precisely when you're trying to watch it.
+
+**Recommendation:** Drain the update set through a small per-frame budget (K chunks/frame,
+nearest-player first — the `MeshBuildQueue` pattern at debug scale), and rate-limit re-visualization
+of the same chunk (minimum interval, e.g. 250 ms) so tick-driven churn coalesces instead of
+rescanning per edit. Apply the same budget to the `LateUpdate` apply loop.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — a counter + interval check around existing loops.
+> - **Risk:** 🟢 Low — debug-only; slightly stale overlays are acceptable by design (the readiness
+    > gate already skips chunks mid-lighting).
+> - **Benefit:** ⚪ — but converts the overlay from "unusable during heavy simulation" to a real
+    > diagnostic tool for exactly those scenarios (fluid floods, lighting waves).
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### DT-2. `VisualizerChunkData` per-update native churn and apply-path allocations
+
+**Observed:** Every chunk visualization update allocates **eight `Allocator.Persistent`
+containers** (5 `NativeHashMap` + 3 `NativeList`, `VisualizerChunkData.PrepareJobData`) and
+disposes them after apply — the exact alloc/free-per-use pattern MR-6/TG-6/WG-1 eliminate
+elsewhere, at ~N-chunks-per-refresh frequency under DT-1's churn. The apply path adds:
+`Triangles.AsArray().ToArray()` — a **managed index array per apply** (`VisualizerChunkData.cs`
+~line 138; `SetIndices`/`SetIndexBufferData` accept the `NativeArray` directly) — and
+`RecalculateBounds()` per apply despite the constant 16×128×16 chunk cell (the MR-4 twin). Finally,
+`VoxelVisualizer.UpdateChunkVisualization` (~line 127) calls `JobHandle.Complete()` on re-entry — a
+synchronous stall whenever a chunk is re-visualized while its previous job is still running (DT-1's
+churn makes that common).
+
+**Recommendation:** Retain the containers across updates on the pooled `VisualizerChunkData`
+(allocate once, `Clear()` per use — capacity survives; dispose only in `Destroy()`, per the
+pool-reset-safety rules for native containers). Replace `ToArray()` with
+`_mesh.SetIndices(Triangles.AsArray(), MeshTopology.Triangles, 0)`, and assign the constant chunk
+bounds instead of recalculating. On re-entry, skip-and-requeue instead of blocking on the in-flight
+job.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — established patterns, one class.
+> - **Risk:** 🟢 Low — debug-only; retained containers must follow pool-reset-safety (clear on
+    > reuse, dispose in `Destroy()`).
+> - **Benefit:** ⚪ — removes native churn + GC from active-overlay sessions so captures taken with
+    > an overlay up stay representative.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### DT-3. Visualization update-set fed on every voxel edit even when disabled
+
+**Observed:** The voxel-modification path calls `AddChunksToUpdateVisualization` unconditionally
+(`World.cs` ~lines 1853–1859) — including when `visualizationMode == None`, which is every frame of
+normal play. The `_chunksToUpdateVisualization` set only drains while a mode is active, so during
+normal play it just accumulates (a `HashSet` op per modified chunk per tick batch on the hot
+modification path, plus growth to every-chunk-ever-touched, including long-unloaded coords that the
+next mode activation then processes as dead lookups).
+
+**Recommendation:** Gate the adds on `visualizationMode != None` (one branch — the mode-switch
+handler already queues all active chunks, so nothing is lost while disabled) and clear the set when
+switching to `None`.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — a guard + a `Clear()`.
+> - **Risk:** 🟢 Low.
+> - **Benefit:** ⚪ — makes the disabled debug stack genuinely zero-cost on the modification hot
+    > path (fluid ticks), and keeps stale coords out of the first activation.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### DT-4. Debug HUD/overlay allocation leftovers post-MT-3
+
+**Observed:** MT-3 made the `DebugScreen` text refresh zero-alloc, but three neighbors missed the
+pass: (1) `DebugScreen.HandleNewMetrics` allocates two temp `float[]`s per metrics sample
+(`new[] { snapshot.CpuTimeMs, ... }`, ~20 Hz while the perf panel is visible — allocations that
+appear **in the GC graph being displayed**); (2) `GraphRenderer` label refreshes go through
+`string.Format(yFormat, …)` / `string.Format(xFormat, …)` per label (`GraphRenderer.cs` lines
+235/258/311/334); (3) `TerrainGenDebugOverlay.OnGUI` builds interpolated strings per IMGUI event
+(layout + repaint ≥2×/frame while active) for its ~10 labels. Related always-on note:
+`PerformanceMonitor` samples its phase stopwatches every frame regardless of HUD visibility —
+**this is deliberate and must stay**: the history ring buffer is what makes a hitch that happened
+*while the HUD was closed* still visible when it is opened afterwards (`SyncGraphsWithHistory` →
+`InjectHistory`). Cost is ~µs/frame, accepted by design — do not gate it on HUD visibility.
+
+**Recommendation:** Give `GraphRenderer.AddSamples` a fixed-arity overload (or a reused sample
+buffer); route graph labels through the shared `StringBuilderFormat` helpers MT-3 created (and only
+on value change — grid labels rarely change); convert the overlay's static labels to cached strings
+
++ `StringBuilderFormat` for the dynamic ones (or migrate the panel off IMGUI onto the DebugScreen's
+  TMP stack). `PerformanceMonitor`'s always-on sampling is out of scope (deliberate, see above).
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — MT-3's helpers already exist; this is finishing the sweep.
+> - **Risk:** 🟢 Low.
+> - **Benefit:** ⚪ — the perf HUD stops polluting its own GC metric; overlay sessions stop adding
+    > IMGUI noise to captures.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+## Detailed findings — Editor Tooling (WorldTools)
+
+> **Context:** these tools drive the *production* Burst jobs (generation, `NeighborhoodLightingJob`,
+> `MeshGenerationJob`) plus managed preview paths of their own — and the managed halves run under
+> editor Mono, with no IL2CPP to soften them. The audit's parity scoreboard is in the sixth-pass
+> audit note at the top of this report. What is already right and worth protecting:
+> `ChunkPreview3DWindow.Rendering` shares `SectionRenderer.Layout` (MR-2) with an explicit
+> anti-drift comment; `EditorChunkPipelineRunner.ScheduleLighting` mirrors P-2 Phase 1's
+> worker-thread halo gather (also commented); `WorldGenPreviewWindow` debounces regeneration
+> (`EditorDebounceTimer`) and its Noise Channels / World Blending tabs render through parallel
+> Burst jobs (`NoisePreviewJob`, `WorldBlendingPreviewJob`) into RGBA32 textures — the pattern
+> ET-1 asks the Cross-Section tab to adopt.
+
+### ET-1. Cross-Section preview evaluates terrain columns in serial managed code
+
+**Observed:** `WorldGenPreviewWindow.CrossSection`'s `GenerateThreePanelPreview` evaluates every
+column of up to three panels via the managed `EvaluateColumn` (`WorldGenPreviewWindow.CrossSection.cs`
+~line 1068) — serial, on the main thread, span up to 2048 columns × 128 voxels each, per panel, per
+regeneration (debounced to 0.1 s, so effectively per slider tick with live update on). Per-column
+managed allocations compound it (`new ushort[128]` per column, `new byte[128]`×2 with the cave
+filter, a `Color[span×128]` per panel — 16 B/pixel), and the result goes through the slow
+`SetPixels(Color[])` path. The sibling tabs already solved this: `NoisePreviewJob` /
+`WorldBlendingPreviewJob` are `IJobParallelFor` Burst jobs writing RGBA32. At X512+ the
+Cross-Section tab visibly freezes the editor per regenerate; higher resolutions are seconds.
+
+**Recommendation:** Port the column evaluation to an `IJobParallelFor` over columns (the input
+structs — `CrossSectionNativeData`, `FastNoiseLite`, `BurstSpline`, `BiomeBlender` — are already
+Burst-compatible; the worm masks are already `NativeBitArray`), write `Color32` into a
+`NativeArray` uploaded via `LoadRawTextureData`, and keep the flora/crosshair annotations as a
+managed post-pass. Best implemented **on top of ET-2's shared evaluator** so the port doesn't
+duplicate the logic a third time.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — the job pattern exists in-repo; the evaluator port is the work (see ET-2).
+> - **Risk:** 🟢 Low — preview-only output; compare screenshots before/after.
+> - **Benefit:** ⚪ (dev-time) — seconds → tens of ms per regenerate at high resolution; makes live
+    > slider scrubbing actually live.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### ET-2. Preview replicates production logic — column shaping and replacement rules diverge
+
+**Observed:** Two replications, different severity:
+
+1. **Terrain column shaping.** `EvaluateColumn` is a ~300-line managed re-implementation of
+   `StandardChunkGenerationJob`'s per-column logic (its own docstring says "replicating
+   StandardChunkGenerationJob logic"): biome selection, multi-noise height, density band, strata,
+   caves, lodes, water. It shares the *primitives* (`BiomeBlender`, `BurstSpline`, `FastNoiseLite`)
+   but not the *sequence* — every generator change must be hand-mirrored or the Cross-Section
+   preview silently drifts from what the game generates. This is the same drift class the meshing
+   suite exists to prevent, with no guard.
+2. **Replacement rules (live divergence).** `ChunkPreview3DWindow.ApplyVoxelModToMap`
+   (`ChunkPreview3DWindow.Pipeline.cs` ~line 205) hand-rolls the structure-mod replacement decision
+   (`Default` ≈ "replace unless solid && !transparent-for-mesh"), while production routes
+   `VoxelModSource.WorldGen` mods through the `worldGenCanReplaceTags` tag mask. **The 3D preview
+   can therefore show structure placements the game would reject, and vice versa** — a correctness
+   gap in the authoring tool, not just hygiene.
+
+**Recommendation:** Extract shared single-source implementations callable from both sides, the
+`BiomeBlender` pattern scaled up: (a) a static Burst-compatible **single-column evaluator** that
+`StandardChunkGenerationJob` calls per column and the preview calls per pixel-column — gated on
+**byte-identical generation output** (fixed-seed differential over representative chunks, plus the
+`ChunkGenerationBenchmark` as regression canary); (b) a shared **worldgen replacement-rule
+resolver** used by `ProcessGenerationJobs`' apply path and the preview's `ApplyVoxelModToMap`.
+Add a small editor validation ("preview column == job column for N random columns") so the drift
+class stays dead.
+
+> **Impact Analysis:**
+> - **Effort:** 🔴 High — restructures the generation job's inner loop into a shared evaluator;
+    > the replacement-rule share (b) is 🟢-sized and can ship first.
+> - **Risk:** 🟡 Medium — touching the generation job carries seed risk; the differential gate is
+    > mandatory, not optional.
+> - **Benefit:** 🟡 Medium — kills a permanent hand-sync tax and an active preview-vs-game
+    > correctness gap; ET-1's Burst port then comes almost for free.
+> - **Seed/Save:** ⚠️ **Seed-sensitive** — same contract as WG-3: the extraction must be
+    > output-preserving, byte-identical for fixed seeds (this is the second exception in the
+    > report's seed-breaking note). / ✅.
+
+---
+
+### ET-3. 3D-preview pipeline: snapshot copies, full-grid lighting re-passes, dead copy-back
+
+**Observed:** Three compounding costs in `ChunkPreview3DWindow.Pipeline` + `EditorChunkPipelineRunner`,
+all `Allocator.Persistent` traffic on the editor main thread:
+
+1. **Full snapshot copies per job.** `ScheduleLighting` copies the center + 8 neighbor voxel maps,
+   heightmap, and 9 light maps into fresh Persistent arrays (~18 full-chunk copies ≈ ~2.5 MB per
+   job); `ScheduleMeshing` does the same 19-buffer dance with a disposal-handle array. The sources
+   are the window's own `_chunkMaps`/`_chunkLightMaps` dictionaries, which are **stable during each
+   phase** — the copies exist only as lifetime insurance.
+2. **Full-grid ×5 lighting fixpoint.** `ScheduleAllLighting` re-schedules **every** chunk each
+   iteration (up to `MAX_LIGHTING_ITERATIONS = 5`) regardless of which chunks reported
+   `IsStable` — production re-lights only dirty chunks. A radius-4 preview is ~100 chunks × up to
+   5 passes × the item-1 copies ≈ **~1.5 GB of transient native allocations per preview build**.
+3. **Dead voxel-map copy-back.** `PollLighting` (~line 321) disposes and re-copies the *voxel* map
+   from the completed job every pass — but the lighting job never writes voxels (light lives in
+   the ushort light map since the RGB split). 128 KB × chunks × passes of pure waste. Similarly,
+   `PollGeneration` copies `data.Map` into storage instead of taking ownership of the job's buffer
+   it is about to dispose.
+
+**Recommendation:** In order of value: drop the copy-back (3 — one-line class of fix); track
+per-chunk stability and re-light only unstable chunks + mod-touched neighbors (2); transfer
+ownership of generation outputs instead of copying, and let lighting/meshing jobs read the stored
+dictionaries directly with the phase acting as the lifetime fence (1) — falling back to a pooled
+copy only where aliasing is real. The runner also allocates the two padded halo volumes (~306 KB)
+fresh per lighting job — reuse per-slot buffers across the passes.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — lifetime reasoning in (1) is the care point; (2)/(3) are contained.
+> - **Risk:** 🟢 Low — editor-only; wrong lifetimes fail loudly with the safety system on.
+> - **Benefit:** ⚪ (dev-time) — preview builds drop from multi-GB churn + long waits to roughly
+    > production-shaped costs; radius stops being capped by patience.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### ET-4. `MeshPostProcessJob` runs synchronously per chunk in the preview (MR-5 not mirrored)
+
+**Observed:** `ChunkPreview3DWindow.ConvertMeshOutput` (`ChunkPreview3DWindow.Rendering.cs` ~line 37)
+runs `postProcessJob.Schedule().Complete()` on the main thread per meshed chunk — the exact
+pattern MR-5 removed from production, where the post-process is chained onto the mesh job at
+schedule time and is already done by the time the poll sees the handle complete. Minor sibling:
+`mesh.RecalculateBounds()` per section (~line 122) despite the constant 16³ section cell (MR-4's
+constant-bounds fix applies; the clip-bounds feature only shrinks geometry, so the constant cell
+stays a valid conservative bound).
+
+**Recommendation:** Chain the post-process inside `EditorChunkPipelineRunner.ScheduleMeshing`
+(`postJob.Schedule(meshJobHandle)`), exactly as `WorldJobManager.ScheduleMeshing` does, and return
+the combined handle; assign constant section bounds in `ConvertMeshOutput`.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — mirror an existing production change.
+> - **Risk:** 🟢 Low — same data-flow guarantees as production (B10 proved the chaining
+    > byte-identical there).
+> - **Benefit:** ⚪ (dev-time) — removes a per-chunk main-thread stall from the preview's meshing
+    > phase.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+## Detailed findings — World Scaling Enablers
+
+### WS-1. Truncating / float-roundtrip chunk coordinate math → `ChunkMath` shift/mask helpers
+
+*(Promoted from `WORLD_SCALING_ANALYSIS.md` §3.2/§6, which analyzed it but never tracked it in this
+backlog. It is the only part of the world-scaling work with zero save/seed risk that can ship early
+and independently — and it is a micro-optimization win on its own.)*
+
+**Observed:** Chunk/region coordinate math currently mixes three idioms (48 `FloorToInt` sites
+across 13 files as of 2026-07-02, plus the truncating `/`/`%` sites): float-roundtrip floors
+(`Mathf.FloorToInt((float)x / 16)` — correct today but silently wrong beyond ±2²⁴), truncating
+integer division (wrong for negative coordinates — one latent instance is already live in
+`RegionAddressCodec.V2Codec` step 1), and ad-hoc correct forms. All-positive coordinates hide the
+differences today; Tier B (negative quadrants) turns every wrong site into a silent
+world-corruption bug.
+
+**Recommendation:** Centralize into `ChunkMath` shift/mask helpers (`voxel >> 4`, `voxel & 15`,
+`chunk >> 5`, `chunk & 31` — simultaneously the fastest and the only always-correct option),
+migrate every call site, forbid inline chunk math by convention, and fix the region codec as V3.
+Full audit checklist and grep targets: `WORLD_SCALING_ANALYSIS.md` §3.2/§5.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — the audit is the work; each individual fix is mechanical.
+> - **Risk:** 🟡 Medium — a single wrong mask silently corrupts chunk/region addressing; guard with
+    > an exhaustive old-vs-new equivalence sweep over representative coordinate ranges (trivially
+    > scriptable) before swapping call sites.
+> - **Benefit:** ⚪ Low today (removes float conversions from every chunk lookup) — but it is the
+    > first Tier B prerequisite and the cheapest insurance against the negative-coordinate bug class.
+> - **Seed/Save:** ✅ / ✅ — outputs are identical for all-positive coordinates; the defensive
+    > region-codec V3 version bump is format-adjacent (see the scaling doc §3.2).
+
+---
+
 ## Suggested implementation order
 
 Grouped into waves by value-for-effort; within a wave, order is free. Capture the relevant
@@ -1370,23 +2251,55 @@ benchmark baseline (`Performance/README.md`) before each wave that touches meshi
    ~~MR-9 ✅ done — clouds SetVertices/SetTriangles/SetNormals~~, ~~TG-2 ✅ done — jobified emission + bitmask fallback~~, ~~TG-3 ✅ done — seeded Unity.Mathematics.Random (grass + lava)~~, ~~MT-3 ✅ done — zero-alloc DebugScreen refresh~~, ~~MT-5 ✅ done — ToPersistentArray helper, no .ToArray() intermediates~~, ~~MT-4 ✅ done — Dictionary<VoxelMeshData,int> O(1) mesh-index lookup~~, ~~MT-6 ✅ done — enum rename GZip→Deflate, no save breakage~~. All MT-* items complete.
    GPU side: GS-3 (vertex-stage lighting) and GS-4 (pipeline tier audit) belong here too.
 2. **Android-survivability wave (prerequisite for shipping on weak hardware):**
-   OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side) →
-   OM-2 (memory budget + `lowMemory` handler) → OM-3 (bounded save queue) →
+   OM-1 (device-tier scaling) → P-4 backpressure (pipeline doc §3 — production side; **SU-2** rides
+   along: apply the same in-flight caps to the startup wave) →
+   OM-2 (memory budget + `lowMemory` handler) → OM-3 (bounded save queue; **SL-3** rides along:
+   snapshot at dequeue inside the bounded writer) → SL-2 (budgeted load-apply pump — the load-side
+   twin of the generation pump) → SL-1 (pooled load/save buffers) →
    GS-2 (opaque-texture opt-out — the biggest mobile GPU lever after GS-1).
+   SU-1 (loading-mode budget multiplier) slots anywhere after OM-1 supplies the tier ceiling.
 3. **Pipeline stabilization (from the pipeline doc, already ordered there):**
    P-5 stable-save bit (⚠️ save migration) → P-3 jobified merge.
 4. **Benchmark-gated structural work:**
    ~~MR-2 ✅ done — vertex format (60 B → 32 B/vertex, upload −57%)~~.
    ~~TG-6 ✅ done — pooled the per-chunk `ActiveVoxels` `NativeList` (`ActiveVoxelListPool`); benefit ⚪ (native, off-main-thread, frame-neutral), shipped as no-regression + CLAUDE.md/MR-6 pooling mandate~~ →
    GS-1 (baked-noise liquid shader) →
+   LI-2 (section-ranged lighting gather — the next lighting-line item after P-2 Phase 1; hard gate:
+   bit-identical light output, C3 darkening baselines B54/B55 stay green) →
+   WG-1/WG-2 (generation-path buffer pooling + jobified section occupancy — gate with
+   `ChunkGenerationBenchmark` + a TG-2-style differential) →
+   WG-3 (structure expansion — profile a tree-dense streaming capture first; byte-identical mod
+   stream is the acceptance gate) →
    ~~LI-1 ✅ done — padded lighting volume; layout validated (2.4–3× in-job BFS) but on-demand gather is the cost → NOT shipped standalone, folded into P-2~~ →
    ~~TG-1 (tick path) / TG-4 (full split) — ✅ TG-4 done (Phases 0–1+3+4a+4b+Y-band, all default-on); TG-1 ⏭️ obviated for the fluid hot path (grass residual negligible)~~.
    The GS-5 §7.3 ownership split (`forceRenderingOff` vs `SetActive`) is a small, independently
-   harmless PR — now unblocked (MR-3/MR-4 done); do it early so GS-5 stays unblocked.
+   harmless PR — now unblocked (MR-3/MR-4 done); do it early so GS-5 stays unblocked. *(Verified
+   still open 2026-07-02 — no `forceRenderingOff` exists in the codebase yet.)*
 5. **Long-horizon architecture:**
    **P-2 Layer 1 (worker-thread gather) ✅ SHIPPED 2026-06-22 — banks the LI-1 win net-positive ([benchmark](../Performance/LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md)); P-2 Layer 2 (persistent zero-copy storage) remains 🔴 profiler-gated, not triggered ([design](PERSISTENT_CHUNK_STORAGE_P2.md))** →
    GS-5 (section occlusion culling — phased plan in `VISIBILITY_CULLING_ARCHITECTURE.md` §5+§7) →
+   GS-6 (BatchRendererGroup conversion — own design doc; decide its ordering against GS-5 first,
+   see the GS-6 entry) →
    MR-8 (greedy meshing — own design doc first).
+
+WS-1 (chunk-math shift/mask centralization) is wave-independent: zero save/seed risk, ships any
+time, and is the first Tier B enabler (`WORLD_SCALING_ANALYSIS.md` §6). **VQ-1** (integer voxel
+query fast path) is WS-1's runtime-API half — implement the two together, then PH-1
+(gather-once collision sweeps) and VQ-2 (DDA ray march) build on it. SL-4 (region-file read
+concurrency, design in `REGION_FILE_CONCURRENCY.md`) is benchmark-gated and corruption-risk 🔴 —
+schedule it only with its stress test in place, after SL-1/SL-2 land the cheap wins.
+
+DT-1..4 (debug tooling) are also wave-independent: all 🟢/🟢, batchable into one small PR. Land
+DT-1/DT-2 *before* the next debugging session that points the lighting/fluid overlays at a
+perf-sensitive investigation (LI-2, GS-5's wireframe overlay) — that is when their ⚪ rating
+temporarily stops being ⚪.
+
+ET-1..4 (editor tooling) are wave-independent dev-time items with one internal ordering: ET-4 and
+ET-3's items (2)/(3) are cheap standalone wins; ET-2's replacement-rule share (its part b) is
+🟢-sized and fixes the preview-vs-game correctness gap — do it early; ET-2's shared column
+evaluator (part a, 🔴, seed-gated) should be scheduled like any generator change (fixed-seed
+differential mandatory) and ideally alongside the next planned worldgen feature work, with ET-1's
+Burst port landing on top of it.
 
 ---
 
