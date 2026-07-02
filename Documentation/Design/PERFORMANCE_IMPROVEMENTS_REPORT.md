@@ -19,8 +19,9 @@ last previously-unaudited runtime systems.
 visualizer modes, debug screen / perf HUD, terrain-gen overlay), lifting the fourth pass's
 debug-tooling exemption.
 **Sixth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `ET-1..4` (editor tooling, deep pass
-on `Assets/Editor/WorldTools/` + quick pass on the remaining editor tools). The validation suites
-remain unaudited — earmarked as their own future pass.
+on `Assets/Editor/WorldTools/` + quick pass on the remaining editor tools).
+**Seventh-pass audit:** 2026-07-02 — added `VS-1..3` (editor validation suites), completing the
+audit coverage: every system in the repository has now had at least one audit pass.
 Findings are from static code review unless stated otherwise — capture a baseline per
 `Documentation/Performance/README.md` before implementing the larger items.
 
@@ -74,6 +75,28 @@ their own future audit pass.** Production-parity scoreboard for the 3D preview: 
 `SectionRenderer.Layout` with an anti-drift comment), P-2 Phase 1 ✅ (worker-thread halo gather),
 MR-6 pre-size ✅ (inherited via constructor) / pooling intentionally absent (TG-6 convention);
 MR-5 ❌ (`ET-4`), and the remaining gaps are the `ET-*` items themselves.
+
+**Audit scope note (seventh pass, 2026-07-02):** the `VS-*` (Validation Suites) section covers the
+six editor validation suites (Lighting, Meshing, Behavior, Placement, MeshQueue, LightScheduler)
+plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests`,
+`ChunkRelativePositionTests`) — 14 menu entry points, ~13k lines. **The verdict is strongly
+positive**: the suites' *testing architecture* is in excellent shape — oracle + differential +
+golden-master layering, prove-red discipline written into scenario docstrings, fuzz layers with a
+50-seed baseline / 2000-seed nightly split, synthetic block palettes deliberately decoupled from
+`BlockDatabase.asset`, shared `ValidationReflection`/`GoldenMaster` framework helpers extracted
+exactly where drift had started, and test worlds that exercise production code paths (e.g. B21 via
+the real `ChunkData.FillJobVoxelMap`). Coverage backlogs live in the three fidelity docs
+(`Architecture/Testing Framework/*_FIDELITY.md`) and are **not** duplicated here — the `VS-*` items
+are purely *operational*: runner duplication, automation, and the stale-assembly foot-gun. Minor
+notes not worth IDs: the three small suites (Placement/MeshQueue/LightScheduler) have no fidelity
+doc (their scope fits their file headers — fine at current size), and `FastNoiseLiteTests` mixes a
+30-run benchmark into its validation menu item (harmless, but worth splitting if it ever slows the
+gate). **Which currently-uncovered systems deserve suites of their own** — serialization
+round-trip, worldgen determinism, pipeline state machine, physics, coordinate math, pool reset —
+is ranked with scope sketches in
+[`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) (`NS-1..6`); several
+`⚠️`-gated backlog items (`SL-4`, `WG-3`, `ET-2`, `WS-1`) name those suites as their acceptance
+gates.
 
 **Relationship to other documents:**
 
@@ -261,6 +284,14 @@ MR-5 ❌ (`ET-4`), and the remaining gaps are the `ET-*` items themselves.
 > resolutions/radii the managed paths freeze the editor for seconds per regenerate — under Mono,
 > with no IL2CPP to hide it. ET-2 is 🟡 because it is also a **correctness** issue: the preview's
 > hand-rolled replacement rules can show structures the game would not place (and vice versa).
+
+### Validation Suites
+
+| ID   | Finding                                                                                    | Effort | Risk | Benefit | Seed | Save |
+|------|--------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| VS-1 | Suite-runner scaffolding copy-pasted across all six suites (~90 near-identical lines each) |   🟡   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| VS-2 | Suites are human-in-the-loop only: no aggregate run-all, no CI/headless entry point        |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| VS-3 | No stale-assembly guard — a suite can silently validate stale code after an edit           |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 
 ### World Scaling Enablers
 
@@ -2208,6 +2239,99 @@ the combined handle; assign constant section bounds in `ConvertMeshOutput`.
 
 ---
 
+## Detailed findings — Validation Suites
+
+> **Context:** what these suites already do right is the seventh-pass audit note's list (top of this
+> report) — the testing architecture itself needs no rework, and coverage gaps stay tracked in the
+> fidelity docs. Suites that *don't exist yet* (serialization, worldgen determinism, pipeline state
+> machine, physics, coordinate math, pool reset) are ranked in
+> [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md). The three items
+> below are the operational layer around the existing tests: the runner, the way the suites are
+> invoked, and one documented foot-gun. All three are behavior-preserving for
+> the scenarios themselves — after VS-1, every suite must produce the same pass/fail verdicts it
+> does today (run each before/after as its own gate).
+
+### VS-1. Suite-runner scaffolding copy-pasted across all six suites
+
+**Observed:** Every suite entry file re-declares the same private `Scenario` struct and the same
+`RunAll` body — scenario loop, try/catch, baseline vs known-bug counting, colorized summary — as
+near-byte-identical copies (~90 lines × 6: `LightingValidationSuite.cs`,
+`MeshingValidationSuite.cs`, `BehaviorValidationSuite.cs`, `PlacementValidationSuite.cs`,
+`MeshBuildQueueValidationSuite.cs`, `LightWorkSchedulerValidationSuite.cs` — diff the first two to
+see the drift already starting: "may be fixed → archive" vs "may be implemented → promote").
+Per-suite `Check(label, condition)` PASS/FAIL logging primitives repeat the same way, and the three
+standalone test files use a third ad-hoc pattern each. The shared `Framework/` folder already
+proves the extraction works (`ValidationReflection` was created precisely because two harness
+copies were drifting; `GoldenMaster` likewise).
+
+**Recommendation:** Extract a `Framework/ValidationSuiteRunner`: public `Scenario` type
+(name, body, known-bug id), the categorized run loop, the summary formatting, and — while there —
+**per-scenario and total wall-clock timing** in the summary (today a scenario that becomes
+pathologically slow gives no signal; the lighting suite's 55 baselines including 50-seed fuzzes
+would get a per-line ms column for free). Each suite's entry file shrinks to its menu item + suite
+name + scenario registration. VS-2 and VS-3 then land in one place instead of six.
+
+> **Impact Analysis:**
+> - **Effort:** 🟡 Medium — mechanical but touches all six entry files + three standalone tests.
+> - **Risk:** 🟢 Low — behavior-preserving; gate = every suite reports identical verdicts
+    > before/after.
+> - **Benefit:** ⚪ (dev-time) — ~500 duplicated lines gone, message drift ended, timing signal
+    > gained, and the next suite (there will be one — six exist) starts from a real framework.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### VS-2. Suites are human-in-the-loop only — no aggregate run, no CI entry point
+
+**Observed:** Running the full regression surface means manually clicking **14 menu items** (six
+suites, three standalone test files, two nightly fuzz deep-runs, three fluid-determinism
+variants), reading colorized console output per run. There is no "run everything" aggregate, and no
+headless mode: `RunAll` returns `void` with console-only results, so
+`-batchmode -executeMethod` has nothing to exit non-zero on. Consequences: a cross-cutting change
+(`ChunkData`, pooling, a `Helpers/` refactor) relies on the developer remembering which suites
+apply; the 2000-seed nightly fuzzes only run when someone thinks of them.
+
+**Recommendation:** On top of VS-1's shared runner: (a) a `Validate All` menu item running every
+registered suite with one combined summary (suites self-register with the runner so new ones are
+included automatically); (b) a CI/headless entry point that runs the same set and calls
+`EditorApplication.Exit(1)` on any baseline failure — making scheduled runs (including the nightly
+fuzz tier) possible without a human; (c) keep the individual menu items for focused iteration.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — registration list + two entry points over the shared runner.
+> - **Risk:** 🟢 Low — additive; individual workflows unchanged.
+> - **Benefit:** 🟡 Medium — the regression gate becomes one click for cross-cutting changes and
+    > automatable for nightly fuzz depth; "which suites did you run?" stops being a review question.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
+### VS-3. No stale-assembly guard — a suite can silently validate stale code
+
+**Observed:** A documented operational foot-gun (workflow memory + the `dotnet build` notes in
+CLAUDE.md): after editing code, the menu-item suites can execute against the *previous* compiled
+assembly if Unity's script compilation didn't actually run (`dotnet build` alone never recompiles
+the editor domain; even `IsCompiling == false` has produced stale runs). A green suite on stale
+code is worse than no run — it launders a regression. Today the only defense is tribal knowledge
+("confirm with a fresh `Unity_RunCommand` wave").
+
+**Recommendation:** Make the runner self-checking (one place, via VS-1): at `RunAll` start, warn
+loudly if `EditorApplication.isCompiling` or if pending script updates exist
+(`EditorApplication.isUpdating` / `CompilationPipeline` state), and print the validation assembly's
+load timestamp vs its on-disk `Library/ScriptAssemblies` write time — a mismatch means the loaded
+code is not the code on disk. Cheap, and it converts the documented gotcha into an automatic,
+visible warning on every run.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — a preamble in the shared runner.
+> - **Risk:** 🟢 Low — diagnostic only; false-positive warnings are acceptable (they prompt a
+    > recompile, which is the safe action anyway).
+> - **Benefit:** ⚪ (dev-time) — eliminates the "suite passed on stale code" failure mode that has
+    > already cost debugging sessions.
+> - **Seed/Save:** ✅ / ✅.
+
+---
+
 ## Detailed findings — World Scaling Enablers
 
 ### WS-1. Truncating / float-roundtrip chunk coordinate math → `ChunkMath` shift/mask helpers
@@ -2300,6 +2424,11 @@ ET-3's items (2)/(3) are cheap standalone wins; ET-2's replacement-rule share (i
 evaluator (part a, 🔴, seed-gated) should be scheduled like any generator change (fixed-seed
 differential mandatory) and ideally alongside the next planned worldgen feature work, with ET-1's
 Burst port landing on top of it.
+
+VS-1..3 (validation suites) form one small dependency chain: VS-1's shared runner first (each suite
+re-verified against its own pre-refactor verdicts), then VS-2's aggregate + CI entry points and
+VS-3's stale-assembly preamble land in that runner in one place. Worth scheduling before the next
+multi-suite regression campaign (LI-2 and GS-5 will both lean on several suites at once).
 
 ---
 
