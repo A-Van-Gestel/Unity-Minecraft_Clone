@@ -2252,7 +2252,8 @@ the combined handle; assign constant section bounds in `ConvertMeshOutput`.
 > does today (run each before/after as its own gate).
 >
 > **Framework decision (2026-07-02):** migrating these suites to the Unity Test Framework was
-> evaluated and rejected — see the status header in [`TESTING.md`](TESTING.md) for the full
+> evaluated and rejected — see the status header in
+> [`UNITY_TEST_FRAMEWORK_MIGRATION.md`](UNITY_TEST_FRAMEWORK_MIGRATION.md) for the full
 > verdict. The operational gaps UTF would have closed (CI entry point, machine-readable results,
 > coverage reports) land instead as the VS-1/VS-2 extensions below; the required packages are
 > already installed via `com.unity.feature.development`.
