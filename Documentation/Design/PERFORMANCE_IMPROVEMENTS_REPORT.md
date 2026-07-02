@@ -2250,6 +2250,12 @@ the combined handle; assign constant section bounds in `ConvertMeshOutput`.
 > invoked, and one documented foot-gun. All three are behavior-preserving for
 > the scenarios themselves — after VS-1, every suite must produce the same pass/fail verdicts it
 > does today (run each before/after as its own gate).
+>
+> **Framework decision (2026-07-02):** migrating these suites to the Unity Test Framework was
+> evaluated and rejected — see the status header in [`TESTING.md`](TESTING.md) for the full
+> verdict. The operational gaps UTF would have closed (CI entry point, machine-readable results,
+> coverage reports) land instead as the VS-1/VS-2 extensions below; the required packages are
+> already installed via `com.unity.feature.development`.
 
 ### VS-1. Suite-runner scaffolding copy-pasted across all six suites
 
@@ -2270,6 +2276,12 @@ copies were drifting; `GoldenMaster` likewise).
 pathologically slow gives no signal; the lighting suite's 55 baselines including 50-seed fuzzes
 would get a per-line ms column for free). Each suite's entry file shrinks to its menu item + suite
 name + scenario registration. VS-2 and VS-3 then land in one place instead of six.
+
+**Design constraint:** the runner's headless entry must return a **result object**
+(baseline pass/fail counts, known-bug repro counts, per-scenario timings) rather than `void`.
+That one signature is simultaneously VS-2's CI exit-code source, the input for VS-2's NUnit-XML
+emission, and the future UTF bridge (a thin `[Test]` wrapper per suite — see the framework
+decision note above), so it must be designed in here rather than retrofitted.
 
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — mechanical but touches all six entry files + three standalone tests.
@@ -2295,7 +2307,15 @@ apply; the 2000-seed nightly fuzzes only run when someone thinks of them.
 registered suite with one combined summary (suites self-register with the runner so new ones are
 included automatically); (b) a CI/headless entry point that runs the same set and calls
 `EditorApplication.Exit(1)` on any baseline failure — making scheduled runs (including the nightly
-fuzz tier) possible without a human; (c) keep the individual menu items for focused iteration.
+fuzz tier) possible without a human; (c) keep the individual menu items for focused iteration;
+(d) emit an **NUnit-format XML results file** from the same result object (~50 lines: scenario →
+test-case, known-bug repro → inconclusive) so CI and external tooling consume the verdicts the
+same way they would UTF output; (e) wrap the headless run in **coverage recording** via the
+already-installed Code Coverage package (`CodeCoverage.StartRecording()`/`StopRecording()` in
+`UnityEditor.TestTools.CodeCoverage` works outside the Test Runner, or `-enableCodeCoverage
+-coverageOptions` on the batchmode invocation). Coverage caveat: coverage instruments IL, so
+Burst-compiled job code only registers when Burst compilation is disabled for the coverage run —
+and the numbers reflect editor-Mono execution either way.
 
 > **Impact Analysis:**
 > - **Effort:** 🟢 Low — registration list + two entry points over the shared runner.

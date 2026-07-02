@@ -1,5 +1,35 @@
 # Unity Test Framework Implementation Guide
 
+> Status: **Reference only — migration rejected (evaluated 2026-07-02).** The custom editor
+> validation framework (`Assets/Editor/Validation/`, six suites + three standalone test files —
+> see `VALIDATION_SUITE_COVERAGE_ROADMAP.md` for the coverage map) is the project's testing system
+> of record. Migrating it to the Unity Test Framework was evaluated and rejected as wasted effort:
+>
+> 1. **The asmdef restructure is the real cost.** Test assemblies cannot reference the predefined
+     > `Assembly-CSharp`, so *any* UTF test touching game code first requires the runtime-assembly
+     > migration in §1 below — a restructure that ripples into the `dotnet build
+>    "Assembly-CSharp.csproj"` verification loop, the editor validation assembly, and Burst AOT
+     > settings, and which the project has deliberately not done.
+> 2. **UTF would replace the wrong 95%.** The suites' value is the scenarios, oracles, test worlds,
+     > and simulators — UTF replaces only the ~90-line runner scaffold that `VS-1`
+     > (`PERFORMANCE_IMPROVEMENTS_REPORT.md`) extracts into a shared runner anyway, while forcing a
+     > verdict-parity re-verification of every suite for no behavioral gain.
+> 3. **UTF does not enable `dotnet test`.** Unity code executes only editor-hosted; UTF's CLI story
+     > (`-batchmode -runTests`) is the same class of entry point as VS-2's planned
+     > `-executeMethod` one. This limitation is Unity's, not the framework choice's.
+> 4. **The operational gaps close without UTF.** CI/headless runs, NUnit-format XML results, and
+     > coverage reports all land on the custom runner via the VS-2 extensions — the required
+     > packages (`com.unity.test-framework`, `com.unity.testtools.codecoverage`,
+     > `com.unity.test-framework.performance`) are already installed via
+     > `com.unity.feature.development`.
+>
+> **Conditional future role:** if the asmdef split is ever done *on its own merits* (compile-time
+> isolation, enforced layering), adopt UTF additively — the pure-function tests
+> (`FastNoiseLiteTests`, `VoxelMetadataUtilityTests`, `ChunkRelativePositionTests`, and the NS-5/
+> NS-6 roadmap suites) as plain `[Test]`s, plus one thin `[Test]` wrapper per suite asserting the
+> VS-1 runner's headless result — never a scenario migration. The sections below remain the
+> correct recipe for that scenario.
+
 This document outlines the architectural requirements and code generation strategies for implementing NUnit testing in this voxel engine project.
 
 ## Assembly Definition Migration
@@ -10,24 +40,25 @@ All runtime scripts currently reside within the predefined `Assembly-CSharp.dll`
 
 An Assembly Definition file must be created to encapsulate the core game logic:
 **Path:** `Assets/Scripts/MinecraftClone.Runtime.asmdef`
+
 ```json
 {
-    "name": "MinecraftClone.Runtime",
-    "rootNamespace": "",
-    "references": [
-        "Unity.Mathematics",
-        "Unity.Burst",
-        "Unity.Collections"
-    ],
-    "includePlatforms": [],
-    "excludePlatforms": [],
-    "allowUnsafeCode": true,
-    "overrideReferences": false,
-    "precompiledReferences": [],
-    "autoReferenced": true,
-    "defineConstraints": [],
-    "versionDefines": [],
-    "noEngineReferences": false
+  "name": "MinecraftClone.Runtime",
+  "rootNamespace": "",
+  "references": [
+    "Unity.Mathematics",
+    "Unity.Burst",
+    "Unity.Collections"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": true,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
 }
 ```
 
@@ -35,6 +66,7 @@ An Assembly Definition file must be created to encapsulate the core game logic:
 
 A dedicated Assembly Definition file must be created to house the test suite:
 **Path:** `Assets/Scripts/Tests/EditMode/MinecraftClone.Tests.asmdef`
+
 ```json
 {
     "name": "MinecraftClone.Tests",
@@ -67,7 +99,9 @@ A dedicated Assembly Definition file must be created to house the test suite:
 Testing core systems (like `VoxelRigidbody` physics sweeps) mathematically requires decoupling them from heavy singletons like `World.Instance`, which would otherwise attempt to generate entire chunk meshes during a physics unit test.
 
 ### Step 1: Interface Definition
+
 Extract environment dependencies into interfaces. For example:
+
 ```csharp
 public interface IVoxelCollisionProvider
 {
@@ -76,7 +110,9 @@ public interface IVoxelCollisionProvider
 ```
 
 ### Step 2: Production Implementation
+
 Implement the interface in the singleton:
+
 ```csharp
 public class World : MonoBehaviour, IVoxelCollisionProvider
 {
@@ -85,7 +121,9 @@ public class World : MonoBehaviour, IVoxelCollisionProvider
 ```
 
 ### Step 3: Injection
+
 Modify dependent classes to accept the interface (defaulting to the singleton for backward compatibility in production scenes):
+
 ```csharp
 public class VoxelRigidbody : MonoBehaviour
 {
@@ -103,6 +141,7 @@ public class VoxelRigidbody : MonoBehaviour
 With the dependencies inverted, test suites can inject a lightweight `MockCollisionProvider` that fakes a mathematical block grid.
 
 **Path:** `Assets/Scripts/Tests/EditMode/VoxelRigidbodyTests.cs`
+
 ```csharp
 using NUnit.Framework;
 using UnityEngine;

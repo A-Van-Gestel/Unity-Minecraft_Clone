@@ -16,6 +16,9 @@ standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` te
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic
 repro first, prove-red before trusting green, promote repros to baselines). New suites should land
 on the shared runner proposed in `VS-1` — schedule `VS-1` before or alongside the first of these.
+All suites stay on the custom validation framework: migrating to the Unity Test Framework was
+evaluated 2026-07-02 and rejected (see the status header in [`TESTING.md`](TESTING.md)); the
+CI/coverage/XML gaps close via the VS-2 extensions instead.
 
 ---
 
