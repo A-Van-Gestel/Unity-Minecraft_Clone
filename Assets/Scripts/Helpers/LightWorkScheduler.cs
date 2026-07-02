@@ -155,7 +155,9 @@ namespace Helpers
             _ready.Clear();
             _waiting.Clear();
             // .NET Framework compatibility: ConcurrentQueue has no Clear() — drain it.
-            while (_staging.TryDequeue(out _)) { }
+            while (_staging.TryDequeue(out _))
+            {
+            }
         }
 
         /// <summary>Whether the per-frame scan will visit this chunk. Diagnostic/test accessor.</summary>
