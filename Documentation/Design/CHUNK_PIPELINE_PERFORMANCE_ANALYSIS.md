@@ -200,8 +200,9 @@ Production is unbounded while consumption is fixed-per-frame:
 4. **Time-based budgets instead of count-based.** Give `ProcessGenerationJobs` / lighting
    scheduling / mesh applies a millisecond budget (Stopwatch) so throughput per *second* stays
    roughly constant regardless of FPS.
-5. **Panic gate.** When `GenerationJobs.Count` (or `_chunksNeedingLightWork.Count`) exceeds a
-   threshold, stop scheduling new generation entirely until the backlog drains.
+5. **Panic gate.** When `GenerationJobs.Count` (or the light scheduler's
+   `ReadyCount + WaitingCount`, see `LightWorkScheduler`) exceeds a threshold, stop scheduling
+   new generation entirely until the backlog drains.
 
 > **Impact Analysis:**
 > - **Effort:** 🟡 Medium — items 1, 2, 4, 5 are localized; item 3 touches pipeline invariants.

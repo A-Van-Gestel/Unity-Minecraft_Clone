@@ -103,18 +103,18 @@ When a player places or breaks a block (`ChunkData.ModifyVoxel`):
 
 ### 3.2 Job Scheduling (`WorldJobManager.ScheduleLightingUpdate`)
 
-On the main thread each frame, `World.Update()` iterates a **dirty set** (`_chunksNeedingLightWork`) containing only chunks with pending work, rather than scanning all loaded chunks:
+On the main thread each frame, `World.Update()` iterates the **ready set** of the lighting dirty-set scheduler (`LightWorkScheduler`, MT-2) — chunks with pending work whose readiness gates can plausibly pass — rather than scanning all loaded chunks or the full dirty set:
 
-1. **Drain staging queue:** Background threads (e.g., deserialization) enqueue positions into a `ConcurrentQueue<Vector2Int>`. The main thread drains this into the `HashSet` at the start of each frame.
-2. **Iterate dirty set:** For each chunk in the set, check flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`).
+1. **Drain staging queue:** Background threads (e.g., deserialization) enqueue positions into a `ConcurrentQueue<Vector2Int>`. The main thread drains this into the ready set at the start of each frame.
+2. **Iterate ready set:** For each chunk in the set, check flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`).
 3. Check that all 8 neighbors have finished terrain generation (`AreNeighborsDataReady`).
 4. Create snapshot copies of the center chunk map (writable) and all 8 neighbor maps (read-only).
 5. Transfer the managed light queues to `NativeQueue`s for the job.
 6. Check `SkylightRecalculationQueue` for pending column recalculations (from unloaded neighbor recovery).
 7. Schedule the `NeighborhoodLightingJob`.
-8. **Self-clean:** Remove the chunk from the dirty set when all flags are clear.
+8. **Self-clean / park:** Remove the chunk from the scheduler when all flags are clear; if flags remain but a readiness gate blocked scheduling, the chunk is parked in a **waiting set** the scan does not visit. Parked chunks are promoted back on the events that can flip their gate (neighbor generation/load completed, lighting job completed, own flag re-set).
 
-A time-based fail-safe full scan (every ~1 second) re-populates the dirty set from `worldData.Chunks.Values` to catch any missed registrations. See [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) Section 4 for the full pseudocode.
+A time-based fail-safe full scan (every ~1 second) re-populates the ready set from `worldData.Chunks.Values` and re-promotes the entire waiting set, so any missed registration or promotion degrades to ≤1 s of latency instead of a stall. See [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) Section 4 for the full pseudocode.
 
 ### 3.3 The Job (`NeighborhoodLightingJob`)
 

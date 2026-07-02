@@ -771,6 +771,10 @@ public class WorldJobManager : IDisposable
         foreach (ChunkCoord chunkCoord in _completedGenJobs)
         {
             GenerationJobs.Remove(chunkCoord);
+
+            // The job's removal is what flips AreNeighborsDataReady for the 8 neighbors — wake any
+            // parked light work now instead of waiting for the fail-safe scan (MT-2).
+            _world.PromoteLightWorkNeighborhood(chunkCoord.ToVoxelOrigin());
         }
     }
 
@@ -1088,6 +1092,11 @@ public class WorldJobManager : IDisposable
         foreach (ChunkCoord chunkCoord in _completedLightJobs)
         {
             LightingJobs.Remove(chunkCoord);
+
+            // Completion is the last event in an AreNeighborsReadyAndLit unblock chain (the neighbor
+            // flags it also reads clear at schedule time, while the job is still in-flight) and is what
+            // un-parks the chunk itself if it was re-flagged mid-flight — promote the 3×3 now (MT-2).
+            _world.PromoteLightWorkNeighborhood(chunkCoord.ToVoxelOrigin());
         }
     }
 
