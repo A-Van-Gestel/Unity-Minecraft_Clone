@@ -112,7 +112,7 @@ instead of a crash.
 | ID     | Finding                                                    | Effort | Risk | Benefit | Seed | Save |
 |--------|------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
 | MT-1 ✅ | `List.Insert(0)` / `RemoveAt(i)` O(n) mesh priority queue  |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
-| MT-2   | Light scheduler snapshots the full dirty set every frame   |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
+| MT-2 ✅ | Light scheduler snapshots the full dirty set every frame   |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
 | MT-3 ✅ | `DebugScreen` intermediate string allocations per refresh  |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | MT-4 ✅ | Startup `List.Contains`/`.IndexOf` O(n) custom-mesh lookup |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 | MT-5 ✅ | Startup `.ToArray()` intermediates feeding `NativeArray`   |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
@@ -952,7 +952,24 @@ distance, or two queues (priority/normal) if only front-insertion matters. Keep 
 
 ---
 
-### MT-2. Light scheduler snapshots the full dirty set every frame
+### MT-2. ✅ DONE (2026-07-02) — Light scheduler snapshots the full dirty set every frame
+
+> **Closed:** ready/waiting split shipped and in-game verified. The dirty set now lives in
+> `LightWorkScheduler` (`Assets/Scripts/Helpers/LightWorkScheduler.cs`): the per-frame scan iterates
+> only a **ready** set, and a chunk whose readiness gate fails (unpopulated, lighting job in-flight,
+> or all schedule branches blocked) is parked in a **waiting** set the scan never visits. Parked
+> chunks re-enter ready only on the events that can flip their gate — terrain generation completed
+> (`ProcessGenerationJobs` removal sweep), disk load hydrated (`PopulateFromSave` in
+> `LoadOrGenerateChunk`), lighting job completed (`ProcessLightingJobs` removal sweep), or the chunk's
+> own flag transition (staging callback) — via `World.PromoteLightWorkNeighborhood` → move-only 3×3
+> `PromoteNeighborhood`. The 1-second fail-safe scan is retained and now also calls `PromoteAll()`, so
+> a missed promotion degrades to ≤1 s of latency instead of a permanent stall; under
+> `enableDiagnosticLogs` a recurring non-zero fail-safe-promotion count is logged as a missing-hook
+> sentinel. **In-game wave-front stress logged zero fail-safe promotions** — every unblock path is
+> event-covered, the backstop never fired. Guarded by the `Validate Light Work Scheduler` editor suite
+> (9 baselines, prove-red B2/B4 confirmed); `Validate Lighting Engine` stayed 47/47 green. Docs synced:
+> `CHUNK_LIFECYCLE_PIPELINE.md` §4/§9.1/§10, `LIGHTING_SYSTEM_OVERVIEW.md` §3.2,
+> `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md` panic-gate note.
 
 **Observed:** `World.Update` (`World.cs` ~lines 1171–1256) copies the entire
 `_chunksNeedingLightWork` set into a pooled list every frame and iterates all of it — even when

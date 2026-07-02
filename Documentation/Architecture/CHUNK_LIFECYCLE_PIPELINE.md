@@ -136,7 +136,7 @@ flowchart TD
     A["1. CheckViewDistance()"] --> B["2. ProcessGenerationJobs()"]
     B --> C["3. ApplyModifications()"]
     C --> D["4. ProcessLightingJobs()<br/>(from PREVIOUS frame)"]
-    D --> E["5. Lighting Dirty-Set Scan<br/>(iterates _chunksNeedingLightWork)"]
+    D --> E["5. Lighting Ready-Set Scan<br/>(iterates LightWorkScheduler's ready set)"]
     E --> F["6. ProcessMeshJobs()<br/>(from PREVIOUS frame)"]
     F --> G["7. Schedule New Mesh Jobs<br/>(from _meshBuildQueue)"]
     G --> H["8. ChunksToDraw.Dequeue()<br/>(apply to GPU)"]
@@ -144,33 +144,45 @@ flowchart TD
     style G fill: #ffa07a, color: #fff
 ```
 
-### Step 5: Lighting Dirty-Set Scan (The Critical Section)
+### Step 5: Lighting Ready-Set Scan (The Critical Section)
 
-This is where most pipeline stalls originate. The scan iterates `_chunksNeedingLightWork` — a `HashSet<Vector2Int>` containing only chunks whose lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) have been set to `true`.
+This is where most pipeline stalls originate. The dirty set lives in `LightWorkScheduler` (`Assets/Scripts/Helpers/LightWorkScheduler.cs`, MT-2), split into two `HashSet<Vector2Int>`s of chunks whose lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) have been set to `true`:
 
-**Registration:** The three lighting flags on `ChunkData` are properties with setters. When any flag transitions to `true`, a static callback (`ChunkData.OnLightWorkFlagged`) enqueues the chunk's position into a `ConcurrentQueue<Vector2Int>` — this is thread-safe and supports flag-setting from background deserialization threads (`ChunkSerializer.ReadChunkInternal` via `Task.Run`). The main thread drains this queue into the `HashSet` at the start of each frame.
+- **Ready** — visited by the per-frame scan.
+- **Waiting** — parked chunks whose readiness gate failed (or whose lighting job is in-flight); invisible to the scan until a promotion event moves them back. This keeps the per-frame cost at O(schedulable) instead of O(dirty) — under a backlog, blocked chunks no longer pay 8-neighbor gate evaluations every frame.
 
-**Fail-safe:** Every ~1 second (`FULL_LIGHT_SCAN_SECONDS`), a full scan of `worldData.Chunks.Values` runs to catch any chunks that were missed by the callback (e.g., flags set before the callback was registered). This prevents permanent stalls.
+**Registration:** The three lighting flags on `ChunkData` are properties with setters. When any flag transitions to `true`, a static callback (`ChunkData.OnLightWorkFlagged` → `LightWorkScheduler.Flag`) enqueues the chunk's position into a `ConcurrentQueue<Vector2Int>` — this is thread-safe and supports flag-setting from background deserialization threads (`ChunkSerializer.ReadChunkInternal` via `Task.Run`). The main thread drains this queue into the ready set at the start of the scan (promoting parked entries).
 
-**Self-cleaning:** When the scan encounters a position whose chunk was unloaded (`TryGetValue` returns false), the stale entry is removed automatically. When a chunk's flags are all clear after processing, it is also removed.
+**Demotion (parking):** A visited ready chunk is moved to waiting when it cannot make progress: it is unpopulated, its lighting job is still in-flight, or its flags remain set but no branch could schedule (a readiness gate failed).
+
+**Promotion:** A parked chunk re-enters the ready set on exactly the events that can flip its gate (`PromoteNeighborhood` promotes the parked entries of a 3×3 neighborhood, move-only):
+
+1. **Terrain generation completed** — the completed-job sweep in `ProcessGenerationJobs` (the `GenerationJobs.Remove` is what flips `AreNeighborsDataReady` for the 8 neighbors).
+2. **Disk load hydrated** — after `PopulateFromSave` in `LoadOrGenerateChunk` (same gate, load path).
+3. **Lighting job completed** — the completed-job sweep in `ProcessLightingJobs` (the last event in an `AreNeighborsReadyAndLit` unblock chain, and what un-parks a chunk re-flagged mid-flight).
+4. **Own flag transition** — `Flag` → staging drain (covers e.g. cross-chunk mods landing on a parked chunk).
+
+**Fail-safe:** Every ~1 second (`FULL_LIGHT_SCAN_SECONDS`), a full scan of `worldData.Chunks.Values` runs to catch any chunks that were missed by the callback (e.g., flags set before the callback was registered), and `PromoteAll` moves the entire waiting set back to ready. This prevents permanent stalls: a missed promotion event degrades to ≤1 s of latency, never a deadlock. With `enableDiagnosticLogs`, a recurring non-zero fail-safe promotion count is logged — it means an unblock event lacks a promotion hook.
+
+**Self-cleaning:** When the scan encounters a position whose chunk was unloaded (`TryGetValue` returns false), the stale entry is removed from both sets automatically. When a chunk's flags are all clear after processing, it is also removed.
 
 ```
-// Drain thread-safe staging queue into main-thread HashSet:
-while _lightWorkQueue.TryDequeue(pos):
-    _chunksNeedingLightWork.Add(pos)
+// Drain thread-safe staging queue into main-thread ready set (promotes parked entries):
+_lightWork.DrainStaging()
 
 // Fail-safe full scan (every ~1 second):
 foreach chunkData in worldData.Chunks.Values:
     if populated AND any lighting flag set:
-        _chunksNeedingLightWork.Add(position)
+        _lightWork.AddReady(position)
+_lightWork.PromoteAll()                                       ← waiting → ready backstop
 
-// Dirty-set iteration:
-snapshot = ListPool.Get(_chunksNeedingLightWork)
+// Ready-set iteration (waiting set is NOT visited):
+snapshot = ListPool.Get(_lightWork ready set)
 foreach pos in snapshot:
-    if lightJobsScheduled >= maxLightJobsPerFrame (32): BREAK  ← throttle
-    if !worldData.Chunks.TryGetValue(pos): REMOVE, SKIP       ← self-clean
-    if !chunkData.IsPopulated: SKIP
-    if lightingJobs.ContainsKey(coord): SKIP  ← already running
+    if lightJobsScheduled >= maxLightJobsPerFrame (32): BREAK  ← throttle (rest stays ready)
+    if !worldData.Chunks.TryGetValue(pos): REMOVE, SKIP        ← self-clean (both sets)
+    if !chunkData.IsPopulated: PARK, SKIP                      ← promoted on population
+    if lightingJobs.ContainsKey(coord): PARK, SKIP             ← promoted on job completion
 
     if chunkData.NeedsInitialLighting:
         if AreNeighborsDataReady(coord):
@@ -191,9 +203,11 @@ foreach pos in snapshot:
 
         if scheduled: lightJobsScheduled++
 
-    // Remove if all flags are clear
+    // Remove if all flags are clear; otherwise PARK if nothing was scheduled (gate failed)
     if !NeedsInitialLighting AND !HasLightChangesToProcess AND !NeedsEdgeCheck:
-        _chunksNeedingLightWork.Remove(pos)
+        _lightWork.Remove(pos)
+    else if nothing scheduled this visit:
+        _lightWork.MarkWaiting(pos)                            ← promoted by events above
 ```
 
 > [!IMPORTANT]
@@ -469,7 +483,8 @@ Combined with the `maxLightJobsPerFrame = 32` throttle and the `break`, certain 
 
 **Risk Level:** Low. ~~Medium~~.
 
-**Status:** ✅ **MITIGATED** — The lighting scan now iterates a dirty set (`_chunksNeedingLightWork`) containing only chunks with pending work, instead of all loaded chunks. This drastically reduces iteration count during steady state (0–5 entries vs 625+). The `HashSet` iteration order is still non-deterministic, but with far fewer entries, throttle starvation is effectively eliminated.
+**Status:** ✅ **MITIGATED** — The lighting scan now iterates a dirty set containing only chunks with pending work, instead of all loaded chunks. This drastically reduces iteration count during steady state (0–5 entries vs 625+). The `HashSet` iteration order is still non-deterministic, but with far fewer entries, throttle starvation is effectively eliminated. MT-2 further split the dirty set into ready/waiting subsets (`LightWorkScheduler`), so under a backlog the scan visits only schedulable chunks — gate-blocked chunks are parked and re-enter via
+event-driven promotion (see Step 5).
 
 ### 9.2 Cross-Chunk Mod Ping-Pong
 
@@ -589,6 +604,7 @@ if (isJobRunning || isProcessingLight) continue; // Skip unload
 | `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs`                                                                                                                                   | Per-voxel cross-chunk mod decision (sunlight guards, Bug 11 veto, wake-up nodes); shared with the validation suite |
 | `Assets/Scripts/Helpers/LightingJobProcessor.cs`                                                                                                                                        | Cross-chunk mod routing (drop/persist/defer/apply) + effective-stability override                                  |
 | `Assets/Scripts/Helpers/LightingScheduleDecision.cs`                                                                                                                                    | Extracted `ScheduleLightingUpdate` guard logic (shared with frame-simulator tests)                                 |
+| `Assets/Scripts/Helpers/LightWorkScheduler.cs`                                                                                                                                          | MT-2 dirty-set bookkeeping: ready/waiting split, staging queue, event-driven promotion (own validation suite)      |
 | [SettingsManager.cs](file:///k:/Documenten/Projects/Unity%20-%20Make%20Minecraft%20in%20Unity%203D%20Tutorial/Minecraft%20Clone/Assets/Scripts/SettingsManager.cs)                      | `maxLightJobsPerFrame` (32), `maxMeshRebuildsPerFrame` (10)                                                        |
 
 ---

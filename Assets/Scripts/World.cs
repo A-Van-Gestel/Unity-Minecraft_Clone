@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -125,11 +124,11 @@ public class World : MonoBehaviour
     /// </summary>
     public int TickCounter => _tickCounter;
 
-    // Lighting dirty-set: tracks only chunks with pending lighting work instead of scanning all loaded chunks.
-    // The ConcurrentQueue is the thread-safe staging buffer written to by the callback (which may fire
-    // from background deserialization threads). It is drained into the HashSet on the main thread each frame.
-    private readonly ConcurrentQueue<Vector2Int> _lightWorkQueue = new ConcurrentQueue<Vector2Int>();
-    private readonly HashSet<Vector2Int> _chunksNeedingLightWork = new HashSet<Vector2Int>();
+    // Lighting dirty-set: tracks only chunks with pending lighting work instead of scanning all loaded
+    // chunks, split into a per-frame ready set and a parked waiting set with event-driven promotion (MT-2).
+    // The scheduler's internal staging queue is the thread-safe entry point for the flag callback (which
+    // may fire from background deserialization threads); it is drained on the main thread each frame.
+    private readonly LightWorkScheduler _lightWork = new LightWorkScheduler();
     private float _fullLightScanTimer;
     private const float FULL_LIGHT_SCAN_SECONDS = 1.0f;
 
@@ -342,9 +341,9 @@ public class World : MonoBehaviour
             PrepareGlobalJobData();
 
             // Register the dirty-set callback so ChunkData flag setters automatically register work.
-            // Route through ConcurrentQueue for thread safety — deserialization can set flags
-            // from background threads (ChunkSerializer.ReadChunkInternal via Task.Run).
-            ChunkData.OnLightWorkFlagged = pos => _lightWorkQueue.Enqueue(pos);
+            // Flag routes through the scheduler's staging queue for thread safety — deserialization can
+            // set flags from background threads (ChunkSerializer.ReadChunkInternal via Task.Run).
+            ChunkData.OnLightWorkFlagged = _lightWork.Flag;
         }
     }
 
@@ -448,8 +447,8 @@ public class World : MonoBehaviour
             worldData.ModifiedChunks.Clear();
         }
 
-        // Cleanup lighting dirty set and callback
-        _chunksNeedingLightWork.Clear();
+        // Cleanup lighting work sets and callback
+        _lightWork.Clear();
         ChunkData.OnLightWorkFlagged = null;
 
         // Cleanup chunk pool
@@ -803,6 +802,11 @@ public class World : MonoBehaviour
                 ChunkPool.ReturnChunkData(
                     loaded); // Recycle the outer shell of the loaded data now that we've extracted its contents.
                 data.Chunk?.OnDataPopulated();
+
+                // Becoming populated is what flips AreNeighborsDataReady for the 8 neighbors — wake any
+                // parked light work now instead of waiting for the fail-safe scan (MT-2). The chunk's own
+                // flags fire the staging callback from PopulateFromSave, so this is for the neighbors.
+                _lightWork.PromoteNeighborhood(chunkVoxelPos);
 
                 // Apply Pending Mods (Trees, etc that spilled over)
                 if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
@@ -1551,19 +1555,21 @@ public class World : MonoBehaviour
         long lightStart = WorldFrameProfiler.Begin();
         JobManager.ProcessLightingJobs();
 
-        // 4. Schedule lighting jobs from the dirty set (only chunks with pending work).
+        // 4. Schedule lighting jobs from the ready set (only chunks whose gates can plausibly pass —
+        //    parked chunks re-enter via promotion events or the fail-safe scan; see LightWorkScheduler).
         if (settings.enableLighting)
         {
-            // Drain the thread-safe staging queue into the main-thread HashSet.
+            // Drain the thread-safe staging queue into the main-thread ready set.
             // Background deserialization threads may enqueue positions here.
-            while (_lightWorkQueue.TryDequeue(out Vector2Int queuedPos))
-                _chunksNeedingLightWork.Add(queuedPos);
+            _lightWork.DrainStaging();
 
             int lightJobsScheduled = 0;
 
             // Fail-safe: periodic full scan to catch any chunks whose dirty-set registration
             // was missed (e.g., from a code path that set a flag before the callback was registered).
-            // This runs every ~1 second and ensures the system can never permanently stall.
+            // It also re-promotes every parked chunk, so a missed promotion event degrades to at most
+            // ~1 second of extra latency instead of a permanent stall. This runs every ~1 second and
+            // ensures the system can never permanently stall.
             _fullLightScanTimer += Time.deltaTime;
             if (_fullLightScanTimer >= FULL_LIGHT_SCAN_SECONDS)
             {
@@ -1573,96 +1579,126 @@ public class World : MonoBehaviour
                     if (cd.IsPopulated && (cd.NeedsInitialLighting ||
                                            cd.HasLightChangesToProcess || cd.NeedsEdgeCheck))
                     {
-                        _chunksNeedingLightWork.Add(cd.Position);
+                        _lightWork.AddReady(cd.Position);
                     }
                 }
+
+                int failSafePromoted = _lightWork.PromoteAll();
+
+                // A recurring non-zero count means an unblock event lacks a promotion hook — work only
+                // progressed because of this backstop. Investigate before it reads as "slow lighting".
+                if (failSafePromoted > 0 && settings.enableDiagnosticLogs)
+                    Debug.Log($"[LIGHTING] Fail-safe promoted {failSafePromoted.ToString()} parked chunk(s) to the ready set.");
             }
 
-            // Snapshot the dirty set into a pooled list to allow safe modification during iteration.
-            List<Vector2Int> dirtySnapshot = ListPool<Vector2Int>.Get();
+            // Snapshot the ready set into a pooled list to allow safe modification during iteration.
+            List<Vector2Int> readySnapshot = ListPool<Vector2Int>.Get();
             try
             {
-                foreach (Vector2Int pos in _chunksNeedingLightWork)
-                    dirtySnapshot.Add(pos);
+                _lightWork.SnapshotReady(readySnapshot);
 
-                foreach (Vector2Int pos in dirtySnapshot)
+                foreach (Vector2Int pos in readySnapshot)
                 {
                     if (lightJobsScheduled >= settings.maxLightJobsPerFrame) break; // Respect the throttle
 
                     // If the chunk was unloaded, clean up the stale entry
                     if (!worldData.Chunks.TryGetValue(pos, out ChunkData chunkData))
                     {
-                        _chunksNeedingLightWork.Remove(pos);
+                        _lightWork.Remove(pos);
                         continue;
                     }
 
-                    // Skip placeholder data that hasn't generated terrain yet
-                    if (!chunkData.IsPopulated) continue;
+                    // Placeholder data that hasn't generated terrain yet cannot schedule anything —
+                    // park it; population promotes it back (flag callback + neighborhood promotion).
+                    if (!chunkData.IsPopulated)
+                    {
+                        _lightWork.MarkWaiting(pos);
+                        continue;
+                    }
 
                     // Create coord from position
                     ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
 
-                    // If no job is currently running...
-                    if (!JobManager.LightingJobs.ContainsKey(chunkCoord))
+                    // A job is already running for this chunk — park it; its completion promotes it
+                    // (ProcessLightingJobs), and any flag set mid-flight re-stages it as well.
+                    if (JobManager.LightingJobs.ContainsKey(chunkCoord))
                     {
-                        // --- Prioritize initial lighting ---
-                        if (chunkData.NeedsInitialLighting)
+                        _lightWork.MarkWaiting(pos);
+                        continue;
+                    }
+
+                    bool scheduledAny = false;
+
+                    // --- Prioritize initial lighting ---
+                    if (chunkData.NeedsInitialLighting)
+                    {
+                        // Before scheduling, we must still ensure neighbors have their data ready.
+                        if (AreNeighborsDataReady(chunkCoord))
                         {
-                            // Before scheduling, we must still ensure neighbors have their data ready.
-                            if (AreNeighborsDataReady(chunkCoord))
+                            // This is the first lighting pass, so we trigger the full recalculation.
+                            chunkData.RecalculateSunLightLight();
+                            if (JobManager.ScheduleLightingUpdate(chunkData))
                             {
-                                // This is the first lighting pass, so we trigger the full recalculation.
-                                chunkData.RecalculateSunLightLight();
-                                if (JobManager.ScheduleLightingUpdate(chunkData))
-                                {
-                                    // The request has been fulfilled, so clear the flag.
-                                    chunkData.NeedsInitialLighting = false;
-                                    lightJobsScheduled++;
-                                }
+                                // The request has been fulfilled, so clear the flag.
+                                chunkData.NeedsInitialLighting = false;
+                                lightJobsScheduled++;
+                                scheduledAny = true;
                             }
                         }
-                        else
+                    }
+                    else
+                    {
+                        bool scheduled = false;
+
+                        // --- Edge consistency check ---
+                        // After initial lighting stabilizes, validate border light against neighbors.
+                        // Requires all neighbors to be lit so the edge comparison is meaningful.
+                        if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
                         {
-                            bool scheduled = false;
+                            // Schedule a lighting job with edge checking enabled.
+                            // The job's PerformEdgeCheck flag is set from chunkData.NeedsEdgeCheck
+                            // inside ScheduleLightingUpdate, which also clears the flag.
+                            chunkData.HasLightChangesToProcess = true;
+                            scheduled = JobManager.ScheduleLightingUpdate(chunkData);
+                        }
 
-                            // --- Edge consistency check ---
-                            // After initial lighting stabilizes, validate border light against neighbors.
-                            // Requires all neighbors to be lit so the edge comparison is meaningful.
-                            if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
-                            {
-                                // Schedule a lighting job with edge checking enabled.
-                                // The job's PerformEdgeCheck flag is set from chunkData.NeedsEdgeCheck
-                                // inside ScheduleLightingUpdate, which also clears the flag.
-                                chunkData.HasLightChangesToProcess = true;
-                                scheduled = JobManager.ScheduleLightingUpdate(chunkData);
-                            }
+                        // --- Regular lighting updates ---
+                        // If no edge check was scheduled (or it was skipped), check for regular updates.
+                        // We use `!scheduled` so that if an edge check WAS scheduled, the job covers it,
+                        // but if NeedsEdgeCheck was true and AreNeighborsReadyAndLit was false,
+                        // we STILL try to process regular lighting changes if neighbors generated.
+                        if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
+                        {
+                            scheduled = JobManager.ScheduleLightingUpdate(chunkData);
+                        }
 
-                            // --- Regular lighting updates ---
-                            // If no edge check was scheduled (or it was skipped), check for regular updates.
-                            // We use `!scheduled` so that if an edge check WAS scheduled, the job covers it,
-                            // but if NeedsEdgeCheck was true and AreNeighborsReadyAndLit was false,
-                            // we STILL try to process regular lighting changes if neighbors generated.
-                            if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
-                            {
-                                scheduled = JobManager.ScheduleLightingUpdate(chunkData);
-                            }
-
-                            if (scheduled) lightJobsScheduled++;
+                        if (scheduled)
+                        {
+                            lightJobsScheduled++;
+                            scheduledAny = true;
                         }
                     }
 
-                    // Remove from dirty set if chunk has no remaining work
+                    // Remove from the work sets if the chunk has no remaining work
                     if (!chunkData.NeedsInitialLighting &&
                         !chunkData.HasLightChangesToProcess &&
                         !chunkData.NeedsEdgeCheck)
                     {
-                        _chunksNeedingLightWork.Remove(pos);
+                        _lightWork.Remove(pos);
+                    }
+                    else if (!scheduledAny)
+                    {
+                        // Flags remain but nothing could be scheduled — a readiness gate failed and will
+                        // keep failing until a neighbor changes state. Park the chunk; the matching
+                        // unblock events (neighbor generation/load completion, lighting job completion)
+                        // promote it back, with the fail-safe scan as backstop.
+                        _lightWork.MarkWaiting(pos);
                     }
                 }
             }
             finally
             {
-                ListPool<Vector2Int>.Release(dirtySnapshot);
+                ListPool<Vector2Int>.Release(readySnapshot);
             }
         }
 
@@ -1853,6 +1889,18 @@ public class World : MonoBehaviour
     /// </summary>
     /// <param name="chunkCoord">The coordinate of the central chunk whose neighbors are to be checked.</param>
     /// <returns>True if all neighbors are fully generated and lit; otherwise, false.</returns>
+    /// <summary>
+    /// Promotes parked light work in a chunk's 3×3 neighborhood back into the scheduler's ready set.
+    /// Called when an event occurs that can flip a lighting readiness gate: the chunk finished terrain
+    /// generation, or its lighting job completed (MT-2). Parked chunks are otherwise only retried by
+    /// the ~1 s fail-safe scan.
+    /// </summary>
+    /// <param name="chunkPos">Voxel-origin position of the chunk whose state changed.</param>
+    public void PromoteLightWorkNeighborhood(Vector2Int chunkPos)
+    {
+        _lightWork.PromoteNeighborhood(chunkPos);
+    }
+
     public bool AreNeighborsReadyAndLit(ChunkCoord chunkCoord)
     {
         // Check all 4 horizontal neighbors
@@ -3619,8 +3667,8 @@ public class World : MonoBehaviour
         worldData.Chunks.Clear();
         worldData.ModifiedChunks.Clear();
 
-        // 7. Clear lighting dirty-set and active chunk tracking
-        _chunksNeedingLightWork.Clear();
+        // 7. Clear lighting work sets and active chunk tracking
+        _lightWork.Clear();
         _activeChunks.Clear();
 
         // 8. Invalidate player chunk coord so CheckViewDistance re-evaluates fully
