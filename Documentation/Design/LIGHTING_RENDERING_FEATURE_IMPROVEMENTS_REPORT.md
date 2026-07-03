@@ -11,6 +11,11 @@
 **Audited:** 2026-07-02, at commit `a458173` (branch `main`).
 **Amended:** 2026-07-03 — second gap sweep added RF-7 (weather), alongside TF-10..TF-14 in the
 sibling worldgen report.
+**Amended:** 2026-07-03 — RF-1 extended with the effective-light query layer + subtractive shader
+parity (§9–§10, `SkyDarken` model): stored skylight is time-invariant *sky exposure*; gameplay
+reads derived effective light, never raw storage. Second pass: §3 gained the blue-moonlight
+authoring rules (global sky tint is exact, brightness-in-curve/color-in-gradient split) and §4's
+event tint changed from multiply to lerp/replace.
 Findings are from static review of the light engine (`ushort LightData` RGB model, BFS jobs,
 `LightWorkScheduler`), the shader stack (`VoxelLighting.hlsl` + the three block shaders +
 `UberLiquidShader`), the URP configuration (`Assets/Settings/Rendering/`), and the `World.cs`
@@ -102,6 +107,24 @@ blocklight contribution). No BFS or light-storage change is needed or wanted: th
 is purely **time**: a driver that animates `globalLightLevel`/`SkyLightColor`, correct save
 semantics, and sky visuals (RF-2).
 
+**Storage semantics (important):** the stored 0–15 sky-light value is hereby defined as
+**sky exposure** — a *time-invariant structural property* of the terrain, computed once by the
+BFS and never mutated for time of day. At night a fully sky-exposed voxel still *stores* 15;
+darkening is applied at read time (shader: §10; gameplay: §9). Gameplay systems (mob spawning,
+plant growth, etc.) must therefore **never read raw skylight** for time-dependent decisions —
+they read the §9 effective-light query. Two storage-mutating alternatives were evaluated and
+rejected:
+
+- *Full sunlight re-BFS at source `15 − N`:* dusk crosses ~15 discrete levels; each step is a
+  full-world removal + re-propagation pass (removal is the expensive direction) that dirties
+  every sky-lit section → repeated full-world remesh, twice a day. It is also semantically wrong:
+  sky columns propagate downward without attenuation only at level 15, so a re-flood at 14
+  disables the column rule and ravine bottoms decay toward black with depth. Saved light would
+  additionally depend on wall-clock time at save.
+- *In-place subtraction written back to storage:* `max(x − N, 0)` is not invertible — every voxel
+  clamped to 0 at night (originals `1..N`) cannot be restored at dawn without keeping the
+  original anyway; every write still dirties sections and forces remeshes.
+
 **Proposed design.**
 
 1. **`WorldTimeManager`** (plain C# class owned by `World`, ticked from `World.Update()` — not a
@@ -114,20 +137,46 @@ semantics, and sky visuals (RF-2).
 2. **Light curve, designer-owned:** `globalLightLevel = _lightLevelOverDay.Evaluate(DayFraction)`
    — a new `AnimationCurve` on `World` (or a small `TimeOfDaySettings` ScriptableObject, preferred
    so day length + curves + gradients travel together). Author it with a plateau at 1.0 through
-   midday, fast falloff at dusk, and a **moonlight floor ≈ 0.25** at night (with the shader's
-   `MinLightLevel = 0.15` ambient floor, `VoxelData.cs:11`, full black is already impossible;
-   0.25 keeps night readable).
+   midday, fast falloff at dusk, and a **moonlight floor of effective sky light 4 — Minecraft
+   parity** (see §9: `SkyDarken` caps at 11, so `15 − 11 = 4`; visually `4/15 ≈ 0.27`, and with
+   the shader's `MinLightLevel = 0.15` ambient floor, `VoxelData.cs:11`, full black is already
+   impossible). Matching MC's floor keeps its well-tested gameplay thresholds (e.g. hostile
+   spawns at light ≤ 7 vs. moonlight 4) directly reusable.
 3. **Re-anchor the sky gradient to time:** `_skyLightGradient` is currently evaluated at the light
    *level* (`World.cs:1368`) which collapses dawn and dusk onto the same colors. Evaluate it at
    `DayFraction` instead — then blue-shifted moonlight (night keys), warm sunrise (~0.25), white
    noon (0.5), red-orange dusk (~0.75) are just gradient authoring. Same for the
    `lerp(night, day, ...)` background color → replace with a background gradient over
    `DayFraction` (or derive from RF-2's skybox horizon color).
-4. **Blood moon / event tinting:** `SetGlobalLightValue()` gains an event multiplier:
-   `SkyLightColor *= _activeSkyEvent?.tint ?? white`, where a `SkyEvent` (blood moon: deep red
-   tint + optionally a raised `globalLightLevel` floor) is set by gameplay for the night. Because
-   tinting is shader-only (per `SMOOTH_AND_RGB_LIGHTING.md`'s sky-tint decision), a blood moon
-   costs zero relighting — this is exactly the payoff of that architecture.
+
+   **Blue moonlight — authoring rules (pure content, no code):** the night keys carry a
+   desaturated Purkinje-style blue (≈ `RGB(0.65, 0.75, 1.0)`), and this is the architecturally
+   *correct* mechanism, not a shortcut:
+    - *Global tint is exact, not an approximation:* moonlight color is uniform across all sky
+      sources, so tinting the sky channel via `SkyLightColor` produces the identical result that
+      per-voxel RGB skylight storage would — at zero storage/BFS cost (RGB skylight was already
+      rejected in `SMOOTH_AND_RGB_LIGHTING.md`: 4b→12b, 3× sky BFS). Per-voxel data only ever
+      needs *intensity* (the stored exposure).
+    - *Torches stay warm and caves stay neutral for free:* the tint multiplies only the sky
+      contribution before the per-channel `max()` in `ApplyVoxelLightingRGB`
+      (`VoxelLighting.hlsl:86-102`), so torch-lit interiors take the torch's R/G channels, and at
+      sky exposure 0 the untinted blocklight ambient floor wins the `max()` — no special-casing.
+    - *Brightness lives in the curve, color lives in the gradient:* author night keys with
+      **B held at 1.0 and only R/G reduced** — never scale all three channels down, which would
+      double-dip with the §2 brightness curve and push the moonlight floor (effective 4) below
+      readable. Tint applies after the §10 subtractive shade, so it recolors but never re-darkens
+      the effective level.
+    - *RF-2 coordination:* author the night background/fog color in the same blue family so the
+      horizon doesn't clash with the terrain tint.
+4. **Blood moon / event tinting:** `SetGlobalLightValue()` gains an event **override, not a
+   multiplier**: `SkyLightColor = lerp(gradientColor, _activeSkyEvent.tint, _activeSkyEvent.weight)`
+   (identity when no event is active). A multiply (`SkyLightColor *= tint`) would compose with
+   §3's blue moonlight — red × blue = muddy purple instead of blood red — so the event tint must
+   replace/lerp over the gradient output. The `SkyEvent` (blood moon: deep red tint + optionally
+   a raised `globalLightLevel` floor) is set by gameplay for the night, and `weight` gives a
+   smooth fade-in for free. Because tinting is shader-only (per `SMOOTH_AND_RGB_LIGHTING.md`'s
+   sky-tint decision), a blood moon costs zero relighting — this is exactly the payoff of that
+   architecture.
 5. **Per-frame update:** call `SetGlobalLightValue()` every frame — it is two `Shader.SetGlobal*`
     + one gradient eval; epsilon-gate if profiling ever cares. Remove the two one-shot call sites'
       uniqueness assumption.
@@ -140,13 +189,38 @@ semantics, and sky visuals (RF-2).
    length (`DATA_DRIVEN_SETTINGS_UI` reflection pattern picks it up from `Settings`).
 8. **TF-4 tie-in:** dimensions with `hasSkyLight = false` ignore the time system and use their
    profile's `fixedGlobalLightLevel` (see the `TF-4` lighting-profile design).
+9. **Effective-light query layer (gameplay reads — required):** `WorldTimeManager` exposes
+   `int SkyDarken` in `[0, 11]` (**Minecraft parity**: 0 at day, 11 at deepest night → moonlight
+   floor `15 − 11 = 4`), derived from the *same* curve that drives `globalLightLevel` — one
+   source of truth, so rendering and gameplay can never disagree about how dark it is. Query
+   helpers (next to `LightBitMapping`, or on `World`):
+    - `GetEffectiveSkyLight(pos) = max(0, storedSkyLight − SkyDarken)`
+    - `GetEffectiveLight(pos) = max(effectiveSkyLight, maxRGBBlocklightChannel)` — the value all
+      time-sensitive gameplay (mob spawning, growth, …) consumes.
+
+   Pure integer math on the existing `ushort` — zero relighting, zero remeshing, no save impact,
+   Burst-safe (pass `SkyDarken` in as job data if a job ever needs it). The subtraction is also
+   exactly MC's `skyDarken` model, so its gameplay rules transfer verbatim. `DebugScreen` (which
+   reads raw skylight at `DebugScreen.cs:585`) should display both values: raw ("exposure") and
+   effective.
+10. **Shader parity (subtractive — required, not optional):** switch the sky term in
+    `ApplyVoxelLightingRGB` from multiplicative (`sky × GlobalLightLevel`) to subtractive
+    (`max(sky − SkyDarken/15, 0)` on the normalized channel) so **a voxel that looks like level 4
+    *is* effective level 4** — visual darkness and the §9 gameplay value agree exactly at every
+    time of day. The `GlobalLightLevel` shader global then carries the normalized `SkyDarken`
+    (or is replaced by a `SkyDarken` global); `globalLightLevel` remains the C#-side curve
+    output that both derive from. Shader-only change; the sky-channel-only invariant (see Risks)
+    is unchanged.
 
 **Dependencies / ordering.** None — fully independent. RF-2 consumes its outputs.
 
-**Risks.** 🟢 — no lighting-job, storage, or meshing change; the one invariant to respect is that
-`GlobalLightLevel` stays a *sky-channel-only* modulator (never multiply blocklight by it — that
-would break the torches-at-night contract that `ApplyVoxelLightingRGB` currently guarantees).
-Verify editor preview parity (previews keep hardcoded noon). Save ⚠️ as described.
+**Risks.** 🟢 — no lighting-job, storage, or meshing change; two invariants to respect:
+(1) the time-of-day darkening stays a *sky-channel-only* modulator (never apply `SkyDarken` /
+`GlobalLightLevel` to blocklight — that would break the torches-at-night contract that
+`ApplyVoxelLightingRGB` currently guarantees); (2) gameplay code must never read raw stored
+skylight for time-dependent logic — always the §9 effective-light query (raw skylight = sky
+*exposure*, permanently 15 under open sky). Verify editor preview parity (previews keep
+hardcoded noon, i.e. `SkyDarken = 0`). Save ⚠️ as described.
 
 ---
 
