@@ -1,4 +1,4 @@
-﻿# Building a Validation Suite for a New System
+# Building a Validation Suite for a New System
 
 Checklist for standing up a suite for another engine system (fluids, chunk pipeline, meshing, …), mirroring how the lighting suite was built. Budget roughly four phases, one commit each.
 

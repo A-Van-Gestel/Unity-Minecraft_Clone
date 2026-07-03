@@ -1,4 +1,4 @@
-﻿# Reference Implementation: the Lighting Validation Suite
+# Reference Implementation: the Lighting Validation Suite
 
 Everything lives under `Assets/Editor/Validation/Lighting/`. Menu item: **`Minecraft Clone/Dev/Validate Lighting Engine`**.
 
