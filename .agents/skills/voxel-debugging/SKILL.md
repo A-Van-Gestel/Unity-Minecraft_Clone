@@ -1,6 +1,6 @@
 ---
 name: voxel-debugging
-description: Use when the user asks you to fix a complex bug, undefined behavior, lighting issues, fluid flow problems, or chunk generation glitches.
+description: Instrument-first diagnostic protocol for complex engine bugs — check known-bugs docs, locate code via CodeGraph, inspect live editor state, ship a diagnostic patch, and wait for logs before fixing. Use when the user asks you to fix a complex bug, undefined behavior, lighting issues, fluid flow problems, or chunk generation glitches. Once the root cause is understood and the system has a validation suite, hand off to the validation-driven-bugfix skill.
 ---
 
 # Diagnostic Debugging Protocol

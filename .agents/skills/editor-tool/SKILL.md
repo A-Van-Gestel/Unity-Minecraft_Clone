@@ -1,6 +1,6 @@
 ---
 name: editor-tool
-description: Use when creating or modifying Unity Editor tools (EditorWindows, custom inspectors, editor utilities). Covers lifecycle management, shared library usage, UI/UX consistency, performance, and stability patterns.
+description: Standards and patterns for building custom Unity Editor tools in this project — shared UI libraries, window/tab architecture, lifecycle cleanup, SerializedObject editing, and Burst-powered preview generation. Use when creating or modifying Unity Editor tools (EditorWindows, custom inspectors, editor utilities), or when debugging editor memory leaks (textures, meshes, materials not cleaned up).
 ---
 
 # Editor Tool Development Guide

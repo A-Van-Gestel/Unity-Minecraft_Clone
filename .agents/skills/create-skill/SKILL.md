@@ -28,7 +28,7 @@ session, so the description must earn its seat.
 
 ```
 .agents/skills/<skill-name>/
-├── SKILL.md          # required — UPPERCASE filename (one legacy lowercase skill.md exists; do not copy that)
+├── SKILL.md          # required — UPPERCASE filename
 ├── references/       # optional — docs loaded on demand
 ├── scripts/          # optional — runnable helpers
 └── assets/           # optional — templates, static resources
@@ -53,7 +53,8 @@ description: <what it does + when to use it, ≤1024 chars>
 ```
 
 (`license`, `compatibility`, `metadata`, `allowed-tools` exist in the spec — see the reference —
-but are unused here; add them only with a concrete reason.)
+add them only with a concrete reason. Precedent: `unity-mcp` uses `metadata` to pin the package
+version it was authored against, so version drift is detectable.)
 
 **The description is the skill's only always-loaded surface** — the agent decides whether to
 activate the skill from the description alone. Write it as:

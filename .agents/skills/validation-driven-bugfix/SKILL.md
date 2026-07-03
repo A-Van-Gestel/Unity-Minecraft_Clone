@@ -1,4 +1,4 @@
-﻿---
+---
 name: validation-driven-bugfix
 description: Test-driven workflow for fixing documented engine bugs using an editor validation suite — deterministic repro scenarios, oracle comparison, baseline regression guards, and the red→green→promote→archive lifecycle. Use when fixing any bug documented in Documentation/Bugs/ for a system that has (or warrants) a validation suite, or when the user asks to "add a repro", "validate the engine", or "promote a scenario".
 ---

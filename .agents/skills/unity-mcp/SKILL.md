@@ -1,6 +1,9 @@
 ---
 name: unity-mcp
 description: Reference card and recipes for the Unity MCP tools — live editor interaction, runtime inspection, profiling, visual capture, and programmatic code generation. Use when you need to interact with the running Unity Editor rather than just reading/writing files.
+metadata:
+  unity-mcp-authored-against: com.unity.ai.assistant v2.6.0-pre.1
+  unity-mcp-last-verified: "2026-05-10"
 ---
 
 <objective>
@@ -30,6 +33,8 @@ ALWAYS confirm with the user before calling `Unity_ManageEditor` with `Play`, `P
 **Camera_Capture is expensive** — it renders a full frame. Only use when visual verification is genuinely needed.
 
 **ValidateScript at "standard" level may produce false positives.** Treat output as hints, not hard failures.
+
+**Version drift check.** This skill was authored against the `com.unity.ai.assistant` package version pinned in the frontmatter `metadata` field. If `Unity_PackageManager_GetData` reports a newer installed version, tool parameters/behavior may have drifted from this reference — verify against the live tools and update the skill (and its `metadata` pin) if so.
 
 </essential_principles>
 
@@ -94,8 +99,3 @@ This skill is used correctly when:
 - You confirmed with the user before Play/Pause/Stop actions
 - You verified profiler data exists before calling profiler tools
 </success_criteria>
-
-<metadata>
-- **Last modified:** 2026-05-10
-- **Unity MCP package:** `com.unity.ai.assistant` v2.6.0-pre.1
-</metadata>

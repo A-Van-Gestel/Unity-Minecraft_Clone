@@ -1,6 +1,6 @@
 ---
 name: cave-tuning
-description: Use when tuning cave generation parameters for biomes, analyzing cave density, or debugging why caves appear too dense, too sparse, or fail to suppress in certain zones.
+description: Tunes cave generation on StandardBiomeAttributes biomes using the CaveDensityAnalyzer editor tool — baseline analysis, trunk-vs-local worm attribution, ranked density levers, and zone attenuation/suppression math. Use when tuning cave generation parameters for biomes, analyzing cave density, running the CaveDensityAnalyzer, or debugging why caves appear too dense, too sparse, or fail to suppress in certain zones.
 ---
 
 # Cave Tuning Protocol
@@ -153,17 +153,11 @@ density ∝ worm_count × avg_length × avg_radius²
 
 The r² factor dominates. A radius change from 4 to 6 triples volume (~2.25x from r² alone). This is the most sensitive lever for WormCarver density.
 
-### Critical knowledge: the 0.99f threshold cap
+### Critical knowledge: no threshold cap may exist
 
-The codebase previously capped `zoneBoostedThreshold` at `0.99f` via `math.min(..., 0.99f)`. This prevented full cave suppression because noodle values peak at exactly `1.0` — so even a `0.99` threshold always allows a thin band of carving at every zero-crossing.
+`zoneBoostedThreshold` must NOT be capped below `1.0` (e.g. `math.min(..., 0.99f)`). Noodle carve values peak at exactly `1.0` at noise zero-crossings, so any cap below `1.0` always allows a thin band of carving at every zero-crossing and makes full cave suppression impossible.
 
-**This cap was removed** from all three evaluation paths:
-
-- `StandardChunkGenerationJob.cs` (line ~399)
-- `StandardChunkGenerator.cs` (line ~514)
-- `WorldGenPreviewWindow.CrossSection.cs` (line ~1224)
-
-If caves appear everywhere despite high attenuation, check whether this cap has been reintroduced.
+If caves appear everywhere despite high attenuation, grep the three evaluation paths — `StandardChunkGenerationJob.cs`, `StandardChunkGenerator.cs`, and `WorldGenPreviewWindow.CrossSection.cs` — for a `math.min` cap on the boosted threshold; none may exist.
 
 ### Full suppression requirements
 
@@ -234,7 +228,7 @@ return result;
 
 ## WormCarver zone attenuation — scope and expectations
 
-WormCarver `zoneAttenuation` (implemented in `StandardWormCarverJob.cs:229-236`) modulates the **local worm spawn probability** per chunk using:
+WormCarver `zoneAttenuation` (implemented in `StandardWormCarverJob.cs`) modulates the **local worm spawn probability** per chunk using:
 
 ```
 effectiveSpawnChance = wormSpawnChance * (1 - (1 - zoneNoise) * 0.5 * attn)

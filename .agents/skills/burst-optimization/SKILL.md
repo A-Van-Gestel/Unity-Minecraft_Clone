@@ -1,6 +1,6 @@
 ---
 name: burst-optimization
-description: Use when optimizing code, writing new Burst jobs, refactoring performance bottlenecks, or when the user explicitly asks to make something faster.
+description: Safe optimization protocol for this Burst/DOTS engine — auto-apply low-risk wins (pooling, LINQ removal, caching), stop and consult before high-risk changes (threading, memory layout, lighting algorithm), and drive decisions with Unity MCP profiler data. Use when optimizing code, writing new Burst jobs, refactoring performance bottlenecks, or when the user explicitly asks to make something faster.
 ---
 
 # Safe Optimization Protocol
