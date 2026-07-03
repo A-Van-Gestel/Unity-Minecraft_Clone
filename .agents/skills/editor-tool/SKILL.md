@@ -18,41 +18,35 @@ Standards and patterns for building custom Unity Editor tools in this project. P
 
 ## 1. Shared Libraries — Use Before Writing New Code
 
-Before implementing any UI widget, check if it already exists in the shared libraries:
+Before implementing any UI widget or editor-side generation, check if it already exists. The full API catalog (member tables, wiring patterns) is in [references/shared-libraries.md](references/shared-libraries.md); the tool inventory and pattern-exemplar map is in [references/editor-suite-map.md](references/editor-suite-map.md). Index:
 
-### `Assets/Editor/Libraries/EditorGUIHelper.cs`
+**General-purpose — `Assets/Editor/Libraries/`:**
 
-| Method                                                | Use for                                                          |
-|-------------------------------------------------------|------------------------------------------------------------------|
-| `IntFieldWithSteppers(value, min, max)`               | Int fields with ◀/▶ stepper buttons                              |
-| `DrawSearchableSelectionList<T>(...)`                 | Filterable, scrollable selection lists with custom row rendering |
-| `DrawCheckerboardBackground(rect)`                    | Transparency checkerboard behind preview textures                |
-| `HandleDragRotation(position, rotation, sensitivity)` | Mouse drag rotation for 3D previews                              |
-| `DrawSprite(position, sprite)`                        | Drawing atlas sprites in editor UI                               |
+| Library                         | Owns                                                                          |
+|---------------------------------|--------------------------------------------------------------------------------|
+| `EditorGUIHelper`               | Widgets: stepper int fields, searchable selection lists, checkerboard, drag rotation, sprite drawing |
+| `EditorUILayoutHelper`          | Section headers/notes, groups, separators, validation boxes                   |
+| `EditorDebounceTimer`           | Debounced reactions to GUI changes (`Request`/`Poll`/`Cancel`)                |
+| `EditorPreviewMaterialUtility`  | Cached preview materials — never create preview materials directly            |
+| `MeshPreviewWidget`             | `PreviewRenderUtility` wrapper: 3D mesh previews, camera/lighting/zoom, cleanup |
+| `CrossSectionBlockColorMap`     | Block-ID → preview color palette for cross-section renderers                  |
 
-### `Assets/Editor/Libraries/EditorUILayoutHelper.cs`
+**World-gen tooling — `Assets/Editor/WorldTools/Libraries/`:**
 
-| Method                        | Use for                                                           |
-|-------------------------------|-------------------------------------------------------------------|
-| `SectionHeader(text)`         | 13pt bold section titles (uses `fixedHeight` to prevent clipping) |
-| `SubHeader(text)`             | 11pt bold sub-section titles                                      |
-| `SectionNote(text)`           | Muted grey description text (supports `<b>rich text</b>`)         |
-| `BeginGroup()` / `EndGroup()` | Visually grouped property boxes with padding                      |
-| `DrawSeparator()`             | 1px horizontal divider lines                                      |
+| Library                       | Owns                                                                                 |
+|-------------------------------|----------------------------------------------------------------------------------------|
+| `CrossSectionPanelHelper`     | Cross-section panels: fitted rects, crosshair, chunk borders, sea level, click/scroll, texture management |
+| `EditorChunkPipelineRunner`   | Editor-time run of the REAL runtime chunk pipeline (gen → structures → lighting) without a `World` |
+| `EditorJobDataManagerFactory` | `JobDataManager` + fluid templates from a `BlockDatabase`, no `World` needed          |
+| `WorldGenPreviewSettings`     | Cross-window settings sync broker (`Publish` / `OnSettingsChanged` / `Revision`)      |
+| `BiomeConfigValidator`        | Biome config artifact detection → severity-tagged warnings for the Biome Editor       |
 
-**Rule:** Every editor tool MUST use `EditorUILayoutHelper` for section headers, descriptions, and grouping. Do not create one-off GUIStyles for these purposes.
+**Asset caches — `Assets/Editor/DataGeneration/`:** `EditorBlockDatabaseCache`, `EditorCreditsDatabaseCache` — dictionary caches replacing `AssetDatabase` queries in `OnGUI` loops; copy this pattern for any new frequently-read database asset.
 
-### `Assets/Editor/Libraries/EditorPreviewMaterialUtility.cs`
+**Rules:**
 
-Centralized material caching for 3D mesh previews. Use instead of creating materials directly.
-
-### `Assets/Editor/Libraries/MeshPreviewWidget.cs`
-
-Encapsulates `PreviewRenderUtility` for 3D mesh rendering. Handles camera, lighting, rotation, and cleanup. Call `Initialize()` in `OnEnable`, `Dispose()` in `OnDisable`.
-
-### `Assets/Editor/WorldTools/Libraries/CrossSectionPanelHelper.cs`
-
-Panel drawing, crosshair, click/scroll interaction, chunk borders, sea level overlays, texture management. Use for any cross-section or multi-panel terrain preview.
+- Every editor tool MUST use `EditorUILayoutHelper` for section headers, descriptions, and grouping. Do not create one-off GUIStyles for these purposes.
+- Editor-side chunk/terrain generation MUST go through `EditorChunkPipelineRunner` / `EditorJobDataManagerFactory` — a hand-rolled copy of the pipeline drifts from production behavior.
 
 ---
 
@@ -68,7 +62,7 @@ MyWindow.TabName.cs            — Tab: drawing + generation for one feature
 MyWindow.OtherTab.cs           — Tab: another feature
 ```
 
-Shared state (seed, selection, toggles) lives in the core file. Tab-specific state lives in the tab file.
+Shared state (seed, selection, toggles) lives in the core file. Tab-specific state lives in the tab file. Exemplars: `WorldGenPreviewWindow` (5 tab partials), `ChunkPreview3DWindow` (Pipeline/Rendering/UI partials), `BlockEditorWindow` — see [references/editor-suite-map.md](references/editor-suite-map.md) for the full pattern → exemplar table.
 
 ### Tab implementation pattern
 
@@ -243,3 +237,5 @@ public struct MyPreviewJob : IJobParallelFor
 - Dispose the output array after copying to texture.
 
 **When NOT to use jobs:** If the evaluation has sequential Y-dependencies (e.g., `previousDensity` tracking in column evaluation), it can't be parallelized per-pixel. Parallelize per-column instead, or keep it sequential if performance is acceptable.
+
+**Full chunk pipeline previews:** when the preview needs actual chunk data (not just per-pixel noise), do not write a new job — run the real pipeline via `EditorChunkPipelineRunner` (see section 1). It reuses the runtime Burst jobs and stays correct as the pipeline evolves.
