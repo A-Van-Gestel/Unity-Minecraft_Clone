@@ -113,6 +113,13 @@ gates.
   quadrants / infinite XZ, cubic chunks, and floating origin. Several items in this report (`P-2`,
   `P-4`, `LI-1`, `OM-1`/`OM-2`) are prerequisites for that work and should be designed with its
   requirements in mind (3D-keyed, halo-padded storage; height-parameterized budgets) — see its §6.
+- `WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md` (`TF-*`) and
+  `LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md` (`RF-*`) — the *feature/design* counterparts
+  to this report (2026-07-02 audit): biome borders/climate/hybrid terrain, dimensions, world
+  types, day/night cycle, sky rendering, lighting effects. They cross-link `WG-*`/`LI-*`/`GS-*`
+  IDs here rather than duplicating them; **their Benefit column is redefined** (player-facing
+  value, not frame-time) — do not compare ratings across reports. The combined feature roadmap
+  lives at the end of the `TF-*` report.
 
 ---
 

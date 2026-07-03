@@ -9,6 +9,8 @@
 > Status: **Open backlog.** Items are removed (archived) when implemented and verified.
 
 **Audited:** 2026-07-02, at commit `a458173` (branch `main`).
+**Amended:** 2026-07-03 — second gap sweep added RF-7 (weather), alongside TF-10..TF-14 in the
+sibling worldgen report.
 Findings are from static review of the light engine (`ushort LightData` RGB model, BFS jobs,
 `LightWorkScheduler`), the shader stack (`VoxelLighting.hlsl` + the three block shaders +
 `UberLiquidShader`), the URP configuration (`Assets/Settings/Rendering/`), and the `World.cs`
@@ -61,6 +63,7 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 | RF-4 | Flickering light sources: shader-side global flicker with per-position phase              |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
 | RF-5 | Animated light sources: RGB emission already shipped; *animation* is BFS-bounded          |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
 | RF-6 | "Some form of GI": SSAO is the pragmatic option; colored sky-bounce rejected with reasons |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| RF-7 | Weather: no rain/snow of any kind; precipitation type gated on TF-3's temperature axis    |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
 
 ---
 
@@ -218,7 +221,8 @@ correctly with a skybox behind transparents. Seed/Save ✅.
    or repurposed bits must be coordinated there (and with the meshing validation suite's B-series
    baselines). Cheapest viable encoding: reuse spare bits in the `Color32` tint stream (tint is
    constant 1.0 for standard blocks today — one channel can carry emissive strength without
-   growing the vertex).
+   growing the vertex). **Coordinate with TF-11 (climate foliage tint), which claims the RGB
+   channels of the same stream** — together they exactly fill it; allocate before either ships.
 3. **Quality gating:** bloom + the post stack cost real GPU time on mobile — gate behind the
    settings/device-tier system (`OM1_DEVICE_CALIBRATION.md` budgets; `DATA_DRIVEN_SETTINGS_UI`
    for the toggle). Desktop default on, mobile default off.
@@ -358,8 +362,51 @@ tuned to ~0.5–1 block. Quality-tier gate (off on mobile). Do in the same pass 
 
 ---
 
+### RF-7 — Weather (rain, snow, storm skies)
+
+**Classification:** Polish (but a large ambience gap — there is currently zero weather of any
+kind in the project).
+
+**What exists today.** Nothing: no precipitation rendering, no weather state, no storm sky
+treatment. The relevant hooks all exist elsewhere: RF-1's `SkyEvent` tint mechanism (storm
+darkening is exactly a sky event), RF-2's fog/sky gradients, the `Clouds.cs` cloud plane
+(density/color are natural storm knobs), and — for precipitation *type* — TF-3/TF-11's
+temperature axis in the sibling worldgen report (rain vs. snow by climate, snow above the
+TF-11 snow line).
+
+**Proposed design (v1 — transient, render-only).**
+
+1. **Weather state machine** on `World` (plain manager, `WorldTimeManager` pattern):
+   `Clear / Rain / Storm` with seeded random durations. v1 is deliberately **not persisted** —
+   weather rerolls on load (Save ✅). If persistence is wanted later, one `level.dat` field rides
+   the next migration bump (RF-1/TF-4/TF-12 coordination).
+2. **Precipitation rendering:** a camera-following particle volume (GPU particles or a scrolling
+   textured shell — prototype both; the shell is the mobile-safe option). **Under-cover culling**
+   uses the existing highest-voxel heightmap (`GetHighestVoxel` path): sample the heightmap around
+   the camera into a small texture each frame and discard precipitation fragments below it — no
+   per-particle voxel queries.
+3. **Type by climate:** at the camera position, sample the TF-9 Layer-2 temperature axis (with
+   TF-11's altitude lapse) → rain vs. snow. Degrades gracefully pre-TF-3: a single global type
+   toggle until the climate axis exists.
+4. **Storm sky:** drive RF-1's event multiplier (`SkyLightColor` darkening) + RF-2 fog density +
+   cloud plane color/density from the weather state — all existing or planned uniforms; zero
+   lighting-engine contact (the BFS/per-voxel light is untouched, same shader-only contract as
+   the blood moon).
+5. **Out of scope for v1 (state explicitly):** snow-layer accumulation and ice formation as
+   *block changes* (that is worldgen/tick territory — accumulation would need a budgeted behavior
+   like RF-5's cap), lightning strikes, and gameplay effects (crop growth, mob behavior).
+
+**Dependencies / ordering.** Rendering rides RF-1 (event tinting) + RF-2 (fog/sky) — build after
+both. Precipitation-by-climate wants TF-3/TF-11 but degrades gracefully. Quality-tier gate the
+particle cost (OM-1 budgets), like RF-3.
+
+**Risks.** 🟡 — purely visual, but the under-cover culling and mobile particle cost need real
+tuning; no pipeline, storage, or lighting-semantics contact. Seed ✅ / Save ✅ (v1 transient).
+
+---
+
 ## Roadmap
 
 See the **combined ranked roadmap** at the end of
 [`WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md) — RF items
-rank: RF-1 (#1), RF-2 (#3), RF-4 (#12), RF-3 (#13), RF-6 (#14), RF-5 (#15).
+rank: RF-1 (#1), RF-2 (#5), RF-7 (#17), RF-4 (#18), RF-3 (#19), RF-6 (#20), RF-5 (#21).
