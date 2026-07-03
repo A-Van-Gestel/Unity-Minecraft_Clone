@@ -38,6 +38,9 @@ We implemented iterative `RemainingEdgeCheckRounds = 2` to combat this, but dens
 inverse artifact noted above; fixed June 2026, see [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) Lighting entry 14). With Bug 10 fixed, **all fuzz seeds converge within the production 2 edge-check rounds** — corroborating that in-range 6-connected light paths reconcile within 2 rounds, so a faithful Bug-05 repro (if the bug is still real) is **not synchronously reproducible** (parallel to Bug 09: likely an async/Burst-timing artifact needing in-build instrumentation). The canopy fuzz now guards dense-canopy generation convergence as baseline **B42**; a faithful
 failing repro remains TODO.
 
+**Untried repro axis (2026-07-03 analysis):** the "not synchronously reproducible" verdict above covers the *geometry* axis only — every scenario so far lights all chunks in **one simultaneous wave**. Production lights a moving frontier (chunks join incrementally, readiness flips over time, edge-check rounds are consumed at staggered relative times), which is Bug 05's actual habitat and is fully sync-modelable. A staggered generation-wave fuzz is specced as **AS-3**
+in [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) (fidelity finding C8).
+
 ---
 
 ## Bug 09: Cross-Chunk Blocklight Lost on Rapid Place/Break at Chunk Border
@@ -80,6 +83,9 @@ seed and ordering.
 > geometry fuzz). The retired numbers B17–B21 / B23–B25 are intentionally unused. Coverage of every behavior above is preserved by these survivors.
 
 The Bug 07/08 cross-chunk mod delivery fixes were already present when Bug 09 was last observed — the bug is either a genuine async race condition (Burst job system timing, IL2CPP memory ordering) that synchronous `.Run()` cannot reproduce, or is no longer present in the current codebase. A faithful failing repro is still TODO before this bug's fix can be test-driven; the surviving baselines serve as regression guards.
+
+**Plan update (2026-07-03 analysis — see [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)):** the environment this bug was observed in has since changed twice — MT-2 (`LightWorkScheduler` ready/waiting split, 2026-07-02) replaced the scheduler it raced against, and TG-4 fluid-Burst (June 2026) replaced the managed fluid tick that was its main aggravating factor. Three follow-ups are specced: **AS-2** (model the MT-2 park/promote layer in the frame simulator — a *missed-promotion stall* is exactly this bug's
+symptom shape and is sync-testable), **AS-4** (real-`Schedule()` parallel-determinism gate covering pooled-buffer aliasing, the remaining plausible in-editor race), and **AS-5** (automated in-build stress rig — also the cheap way to **re-verify the bug still exists** before further investment).
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
 
@@ -126,8 +132,12 @@ solidity, geometry, or the throttled stamp).
 solid (opacity 0) over an opaque one. Naturally this also affects player-built large flat opaque roofs spanning chunk
 borders.
 
-**Validation suite:** no faithful failing repro scenario yet. Like Bug 05/09 it likely depends on the multi-chunk
-concurrent generation/edge-check wave + continuous re-scheduling, which the synchronous `.Run()`-based harness does not
-reproduce; a deterministic scenario (a large opaque slab tiled across several chunks asserting **termination** —
-`HasActiveJobs` returns false within a bounded number of rounds — and convergence to the borderless oracle) is **TODO**
-before a fix can be test-driven. Fix is **out of scope** for the session that filed this (2026-06-23).
+**Validation suite:** no faithful failing repro scenario yet — but a synchronous repro is now **believed feasible**
+(2026-07-03 analysis, revising the earlier assumption that this needs the async wave): the suspected mechanism is
+entirely main-thread orchestration logic the harness *shares* with production (`LightingJobProcessor.IsEffectivelyStable`
+re-flagging, cross-chunk mod wake-ups, real edge-round flags), and the in-game repro is already deterministic —
+deterministic non-termination is a logic property, not a race. The scenario (opaque slab spanning all chunks at y≈100
+over a superflat floor; assert `RunToConvergence != -1` under seeded orders/budgets, plus a dynamic-stamp variant
+matching the stress harness) is fully specced as **AS-1** in
+[LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) — the highest-value,
+lowest-effort item on that roadmap. Fix was **out of scope** for the session that filed this (2026-06-23).

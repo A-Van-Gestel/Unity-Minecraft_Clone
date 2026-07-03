@@ -177,7 +177,7 @@ there is invisible.
   the readiness *computation* (`World.AreNeighborsDataReady` itself) is out of scope — only the *handling*
   of its result is pinned. The fuzz layer (C1) still passes `neighborsDataReady: true`.
 
-### B3 — No genuine concurrency (synchronous `.Run()` only)  ·  **WONTFIX (structural)**
+### B3 — No genuine concurrency (synchronous `.Run()` only)  ·  **WONTFIX (structural) · scope amended 2026-07-03**
 
 - The simulator permutes *orderings* (FIFO/Reverse/Shuffled, multi-frame held flights, budget pressure)
   but not Burst-scheduling / memory-ordering races. 29 baselines have **exhausted** synchronous
@@ -185,6 +185,17 @@ there is invisible.
 - **Implication:** the remaining Bug 09 repro, if real, likely needs **in-build instrumentation** (IL2CPP
   master build logging of mod delivery), not another synchronous harness layer. Do not invest in a 6th
   simulator permutation expecting it to catch Bug 09.
+- **Scope amendment (2026-07-03 async-testability analysis,
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)):**
+  the WONTFIX stands for what it covers — synchronous order-permutation of the **pre-MT-2** scheduling
+  model — but it is not a blanket "async is untestable" verdict. Three routes remain open:
+  (a) the MT-2 park/promote layer is a *new*, fully sync-modelable async surface (finding **B6**, roadmap
+  AS-2); (b) genuine concurrency CAN enter the editor deterministically via real `Schedule()` +
+  equivalence-to-serial gating, the `FluidParallelDeterminismValidation` pattern (roadmap AS-4 — covers
+  pooled-buffer aliasing and Burst-side races; Burst codegen is identical editor/player); (c) the
+  in-build instrumentation this finding calls for is now specced as an automated rig (roadmap AS-5).
+  Only IL2CPP managed-code memory ordering and real wall-clock timing remain structurally out of editor
+  reach (roadmap §8).
 
 ### B4 — No pool-recycle / flag-pairing modeling ·  **CLOSED (2026-06-14)**
 
@@ -215,6 +226,30 @@ there is invisible.
 - The suite proves "light **field** is correct", not "the mesh ever rebuilds". The `ScheduleMeshing` gate
   on `HasLightChangesToProcess` / `NeedsInitialLighting` (the recurring deadlock family) is unreachable.
   Reasonable boundary for a lighting-correctness suite — noted so we don't assume otherwise.
+
+### B6 — MT-2 `LightWorkScheduler` park/promote layer is unmodeled ·  **OPEN · MEDIUM-HIGH (new 2026-07-03)**
+
+- **What changed:** MT-2 (`Helpers/LightWorkScheduler`, shipped 2026-07-02 — *after* this document's
+  June audit and the entire Bug-09 sync-repro campaign) split the lighting dirty set into a per-frame
+  **ready** set and a parked **waiting** set. A parked chunk re-enters scheduling ONLY through a
+  promotion event: its own flag transition (`ChunkData.OnLightWorkFlagged` → `Flag`), a 3×3
+  neighborhood unblock (`PromoteNeighborhood` — generation/load completion, lighting job completion at
+  `WorldJobManager.cs:1099`), or the ~1 s `PromoteAll` fail-safe backstop.
+- **The gap:** `LightingFrameSimulator.RunFrame` Phase 2 still scans **`AllChunkCoords()` every frame** —
+  the pre-MT-2 model in which no chunk can ever be forgotten. The harness also **nulls**
+  `ChunkData.OnLightWorkFlagged` for its lifetime (`LightingTestWorld.cs:97-98`), so the
+  flag→staging→ready event path is structurally absent. The `LightWorkSchedulerValidationSuite` (9
+  baselines) tests the scheduler class in isolation; **nobody tests the integration** — whether every
+  unblock event in the pipeline has a matching promotion hook.
+- **Why it matters:** a *missed-promotion stall* (work parked forever, rescued only by the fail-safe or
+  a player edit) is exactly Bug 09's symptom shape, and production explicitly treats a recurring
+  non-zero fail-safe count as a bug to investigate (`World.cs:1588-1591`) — but no suite can turn that
+  red today.
+- **Fix:** roadmap item **AS-2** in
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) —
+  an opt-in frame-simulator mode driving a real `LightWorkScheduler` with mirrored park/promote sites
+  and the fail-safe OFF by default, so "converges without the backstop" becomes a mechanical gate.
+  Legacy mode stays the default so existing baselines are untouched.
 
 ---
 
@@ -362,7 +397,22 @@ there is invisible.
   below darkens to side-bleed → break → re-light) is untested as a dedicated baseline; B3 only opens a shaft.
   Likely caught incidentally by other oracle compares — hence LOW.
 
-> **None of C3–C7 require a new harness capability** — each reuses existing primitives
+### C8 — Initial lighting only ever runs as a single simultaneous wave ·  **OPEN · MEDIUM (Bug 05's untried axis, new 2026-07-03)**
+
+- Every generation-shaped scenario (B8, the B42 canopy fuzz, the B40 geometry fuzz) lights **all chunks
+  in one concurrent wave** with `neighborsDataReady: true` throughout (the C1 remainder). Production
+  lights a **moving frontier**: chunks join incrementally as generation completes, per-chunk readiness
+  flips over time, and each chunk's 2 `RemainingEdgeCheckRounds` are consumed at *different relative
+  times*. Dense canopies at a frontier are exactly Bug 05's habitat — this scheduling axis, unlike the
+  exhausted geometry axis (C2), has never been fuzzed.
+- **Needs no new harness capability** — a scenario driver can maintain a seeded joined-set, flag each
+  chunk's initial lighting only at join time, and derive `MarkNeighborsReady`/`MarkNeighborsNotReady`
+  from the joined-set, interleaved with simulator frames. Spec: roadmap item **AS-3** in
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)
+  (includes the modeling limit: voxel data pre-exists — the stagger models "populated but not yet lit",
+  which is the production initial-lighting environment, not "terrain absent" = B1 territory).
+
+> **None of C3–C8 require a new harness capability** — each reuses existing primitives
 > (`MarkChunkUnloaded`/`MarkChunkLoaded`, `BeginLightingJob`/`CompleteLightingJob`, the pure-channel lamp
 > palette, `GetSkyLight`/`GetBlocklightRGB`). The genuinely open *harness-feature* gaps remain those already
 > catalogued: no failure shrinker (C1/C2), fixed grid sizes (3×3 / 5×5), `neighborsDataReady` is a hand-set
@@ -420,24 +470,26 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 
 ## 6. Priority backlog (snapshot)
 
-| #  | Finding                                                                                   | Status            | Priority         | Effort         |
-|----|-------------------------------------------------------------------------------------------|-------------------|------------------|----------------|
-| C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                        | **CLOSED**        | —                | done           |
-| C5 | Cumulative multi-layer attenuation probe (B45)                                            | **CLOSED**        | —                | done           |
+| #  | Finding                                                                                    | Status            | Priority         | Effort         |
+|----|--------------------------------------------------------------------------------------------|-------------------|------------------|----------------|
+| C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                         | **CLOSED**        | —                | done           |
+| C5 | Cumulative multi-layer attenuation probe (B45)                                             | **CLOSED**        | —                | done           |
 | C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4 | **CLOSED**        | —                | done           |
-| C6 | Per-channel removal independence                                                          | OPEN              | Low–Medium       | small          |
-| C7 | Deterministic corner spill / in-chunk re-shadow                                           | OPEN              | Low              | small          |
-| §5 | Bug-09 fleet (B15–B25) consolidation                                                      | **CLOSED**        | —                | done           |
-| A3 | `ModifyVoxel` heightmap (shared) / enqueue path                                           | **PARTIAL**       | Low              | heightmap done |
-| A4 | Oracle shared-assumption probes                                                           | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
-| B5 | Meshing-gate coverage                                                                     | OPEN              | Low (by design)  | —              |
-| C2 | Bug-05 dense-canopy geometry (found Bug 10)                                               | **CLOSED**        | —                | done           |
-| B2 | `neighborsDataReady` toggle                                                               | **CLOSED**        | —                | done           |
-| C1 | Bug-09 geometry fuzz (randomize geometry)                                                 | **CLOSED**        | —                | done           |
-| B1 | Chunk-unload / persist-replay path                                                        | **CLOSED**        | —                | done           |
-| B4 | Pool-recycle / flag-pairing                                                               | **CLOSED**        | —                | done           |
-| A1 | Section / uniform-sky merge bypass                                                        | **CLOSED**        | —                | done           |
-| A2 | Shared mod-routing decision                                                               | **CLOSED**        | —                | done           |
+| B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                    | OPEN              | **Medium-High**  | medium         |
+| C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3)      | OPEN              | Medium           | medium         |
+| C6 | Per-channel removal independence                                                           | OPEN              | Low–Medium       | small          |
+| C7 | Deterministic corner spill / in-chunk re-shadow                                            | OPEN              | Low              | small          |
+| §5 | Bug-09 fleet (B15–B25) consolidation                                                       | **CLOSED**        | —                | done           |
+| A3 | `ModifyVoxel` heightmap (shared) / enqueue path                                            | **PARTIAL**       | Low              | heightmap done |
+| A4 | Oracle shared-assumption probes                                                            | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
+| B5 | Meshing-gate coverage                                                                      | OPEN              | Low (by design)  | —              |
+| C2 | Bug-05 dense-canopy geometry (found Bug 10)                                                | **CLOSED**        | —                | done           |
+| B2 | `neighborsDataReady` toggle                                                                | **CLOSED**        | —                | done           |
+| C1 | Bug-09 geometry fuzz (randomize geometry)                                                  | **CLOSED**        | —                | done           |
+| B1 | Chunk-unload / persist-replay path                                                         | **CLOSED**        | —                | done           |
+| B4 | Pool-recycle / flag-pairing                                                                | **CLOSED**        | —                | done           |
+| A1 | Section / uniform-sky merge bypass                                                         | **CLOSED**        | —                | done           |
+| A2 | Shared mod-routing decision                                                                | **CLOSED**        | —                | done           |
 
 ---
 
@@ -445,6 +497,8 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 
 - Harness file map & API: `.agents/skills/validation-driven-bugfix/references/lighting-suite.md`
 - Frame simulator architecture: [LIGHTING_FRAME_SIMULATOR_DESIGN.md](LIGHTING_FRAME_SIMULATOR_DESIGN.md)
-- Open lighting bugs (Bug 05, Bug 09): [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)
+- Async-bug testability roadmap (AS-1…AS-5 — B3 amendment, B6, C8, Bug 05/09/13 plans):
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)
+- Open lighting bugs (Bug 05, Bug 09, Bug 13): [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)
 - Lighting system overview: [LIGHTING_SYSTEM_OVERVIEW.md](../LIGHTING_SYSTEM_OVERVIEW.md)
 - Pipeline invariants: `.agents/rules/chunk-pipeline.md`, `.agents/rules/pool-reset-safety.md`
