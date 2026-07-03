@@ -60,7 +60,14 @@ When the user has profiling data available (play mode with profiler recording), 
 
 **Rule:** Always check `Unity_ManageEditor` → `GetState` first to confirm profiling data is available. These tools return empty results without an active profiling session.
 
-### 5. Native Memory Management
+### 5. Prove the win (perf-benchmark)
+
+This skill owns *making* code fast; the `perf-benchmark` skill owns *proving* it paid off —
+baseline captures, benchmark harness runs, append-only `Documentation/Performance/` reports, and
+the frame-level GO/NO-GO shipping verdict. For any optimization with a claimed win (an `MR-*`/
+`TG-*`-style ID, or a change someone will gate on), hand off there before declaring victory.
+
+### 6. Native Memory Management
 
 Whenever you create or modify a `NativeArray`, `NativeList`, or `NativeQueue`:
 
