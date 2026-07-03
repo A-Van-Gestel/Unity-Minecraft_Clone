@@ -6,13 +6,13 @@ metadata:
   unity-mcp-last-verified: "2026-05-10"
 ---
 
-<objective>
+# Unity MCP Reference Card
+
 The Unity Editor exposes tools via the `unity-mcp` MCP server that provide capabilities file reads cannot: inspecting runtime state, reading `[SerializeField]` values from binary scene files, querying the profiler, executing arbitrary C# in the editor, and triggering code generation.
 
 This skill is a **reference card**. Domain-specific workflows (when and why to use these tools) live in the domain skills (`voxel-debugging`, `burst-optimization`, `review-changes`, `unity-file-ops`, `chunk-lifecycle`, `refactor-safely`). This skill is the authoritative source for **how** to call each tool correctly.
-</objective>
 
-<essential_principles>
+## Essential principles
 
 **RunCommand is the most powerful tool — and the most dangerous.**
 
@@ -36,11 +36,7 @@ ALWAYS confirm with the user before calling `Unity_ManageEditor` with `Play`, `P
 
 **Version drift check.** This skill was authored against the `com.unity.ai.assistant` package version pinned in the frontmatter `metadata` field. If `Unity_PackageManager_GetData` reports a newer installed version, tool parameters/behavior may have drifted from this reference — verify against the live tools and update the skill (and its `metadata` pin) if so.
 
-</essential_principles>
-
-<quick_start>
-
-**Quick Reference**
+## Quick reference
 
 | Tool                           | One-liner                                         |
 |--------------------------------|---------------------------------------------------|
@@ -57,9 +53,7 @@ ALWAYS confirm with the user before calling `Unity_ManageEditor` with `Play`, `P
 | `Unity_FindInFile`             | Regex search with SHA256 verification             |
 | **Profiler tools (10)**        | GC allocations, frame timing, bottom-up analysis  |
 
-</quick_start>
-
-<routing>
+## Routing
 
 Based on what you need, read the appropriate reference:
 
@@ -80,22 +74,20 @@ For domain-specific workflows (when and why), consult the domain skill instead:
 | Chunk pipeline state transitions       | `chunk-lifecycle`    |
 | Safe renames, dead code removal        | `refactor-safely`    |
 
-</routing>
+## Reference index
 
-<reference_index>
 All reference material in `references/`:
 
 **Tool details:** tools.md — parameters, rules, and example calls for all 12 named tools
 **Profiler:** profiler.md — all 10 profiler tools organized by category with drill-down workflow
 **Patterns:** recipes.md — 6 end-to-end recipes for common tasks + 8 documented constraints/gotchas
-</reference_index>
 
-<success_criteria>
+## Success criteria
+
 This skill is used correctly when:
 
-- You checked **essential_principles** before calling any unity-mcp tool
+- You checked the **Essential principles** section before calling any unity-mcp tool
 - You loaded the specific reference file you need, not the entire skill
 - You used the correct parameters and followed the tool-specific rules
 - You confirmed with the user before Play/Pause/Stop actions
 - You verified profiler data exists before calling profiler tools
-</success_criteria>
