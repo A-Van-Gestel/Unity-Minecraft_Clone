@@ -123,7 +123,7 @@ there is invisible.
   general differential check. Pre-existing independent probes (`R == 9`, `crossBorder >= 13`) and
   oracle-free invariants (`NoBlocklightInVolume`, `FieldsEqual` baseline-return) remain in force.
 
-### A5 — Shared `ChunkData` accessors are fail-soft: out-of-bounds behavior is a position lottery ·  **OPEN · MEDIUM-HIGH (new 2026-07-04, exposed by B60's failed prove-red)**
+### A5 — Shared `ChunkData` accessors are fail-soft: out-of-bounds behavior is a position lottery ·  **CLOSED (2026-07-05, HF-1)**
 
 - `ChunkData.GetVoxel` / `GetLightData` / `SetLightData` (`ChunkData.cs:853–900`) validate nothing. For an
   out-of-bounds **local** coordinate the outcome depends entirely on the position: a **compacted section**
@@ -138,13 +138,19 @@ there is invisible.
   it) while the *identical* code crashed in-game on real terrain (`ProcessLightingJobs`
   `ObjectDisposedException` cascade — see B7). Any future consumer of local coordinates can land in
   "not reproducible in harness" status the same way.
-- **Fix:** roadmap item **HF-1** in
-  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) —
-  editor/development-build-only bounds assertions in the four accessors (compiled out of IL2CPP master;
-  the reads are the hottest in the engine), preceded by a caller audit confirming nothing legitimately
-  relies on the leniency. Collapses the lottery: every violation is loud at every position, in the harness
-  and in editor play mode alike — and retroactively gives B60 a working prove-red. Pairs with **HF-3**
-  (border heightmap fuzz, the C9 lesson), which widens how many positions scenarios sample.
+- **Closed by roadmap item HF-1** (see
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) §10):
+  `ChunkData.AssertLocalPositionInChunk` — a `[Conditional("UNITY_EDITOR")]`/`("DEVELOPMENT_BUILD")` guard
+  called first in all four accessors (before `GetLightData`'s uniform-sky early-return, so compacted
+  sections no longer read silently), throwing with the offending coordinates and chunk position; compiled
+  out of IL2CPP master (the reads are the hottest in the engine). The prerequisite caller audit (all 69
+  accessor call sites) found **no caller relying on the leniency**: every site is loop-bounded,
+  derived-from-lookup, explicitly guarded, or job-volume-bounded (the Burst job's `GetPackedData` sentinel
+  bounds every emitted mod/claim). Verified by re-running B60's both-guards-off sabotage: it now goes
+  **RED** (`ArgumentOutOfRangeException` at the halo claim `(-1, 49, 8)`) where it previously stayed green —
+  retroactively giving B60 its prove-red — with all 53 baselines green under the live assertions once the
+  guards were restored. Pairs with **HF-3** (border heightmap fuzz, the C9 lesson), which widens how many
+  positions scenarios sample.
 
 ---
 
@@ -466,12 +472,13 @@ there is invisible.
 - **Closed** by baseline **B60** (seam overhang → partially-lit neighbor → border-column edit; asserts
   the cross-border wave fires via `ModsEmitted > 0` + oracle convergence), plus the center-only claim
   contract in the job and defensive bounds-skips in both verifiers.
-- **Residual (honest limitation):** the crash itself is not scenario-provable — at B60's position the
-  harness `ChunkData` tolerates an out-of-bounds read as a benign wrong-voxel read that the verifier's
-  superseded check skips (confirmed by a deliberate both-guards-off sabotage run staying green). B60
-  therefore pins the path's liveness and convergence; the crash protection rests on the guards. Lesson
-  for future scenario authoring: prefer at least one **varied-heightmap-at-seam** geometry per new
-  cross-chunk feature — flat worlds under-sample the shadow-caster and halo-node paths.
+- **Residual — resolved by HF-1 (2026-07-05):** originally the crash itself was not scenario-provable —
+  at B60's position the harness `ChunkData` tolerated the out-of-bounds read as a benign wrong-voxel read
+  that the verifier's superseded check skipped (a deliberate both-guards-off sabotage run stayed green),
+  so B60 only pinned path liveness/convergence. With HF-1's fail-fast accessor assertions (see A5) the
+  same sabotage now reds B60 loudly, so the scenario guards the crash class too. Standing lesson for
+  scenario authoring: prefer at least one **varied-heightmap-at-seam** geometry per new cross-chunk
+  feature — flat worlds under-sample the shadow-caster and halo-node paths.
 
 > **None of C3–C9 require a new harness capability** — each reuses existing primitives
 > (`MarkChunkUnloaded`/`MarkChunkLoaded`, `BeginLightingJob`/`CompleteLightingJob`, the pure-channel lamp
@@ -536,7 +543,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                         | **CLOSED**        | —                | done           |
 | C5 | Cumulative multi-layer attenuation probe (B45)                                             | **CLOSED**        | —                | done           |
 | C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4 | **CLOSED**        | —                | done           |
-| A5 | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (→ roadmap HF-1)     | OPEN              | **Medium-High**  | small          |
+| A5 | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)     | **CLOSED**        | —                | done           |
 | B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                    | OPEN              | **Medium-High**  | medium         |
 | B7 | `ProcessLightingJobs` pass bookkeeping production-only (→ roadmap HF-2, long-term HF-4)    | OPEN              | Medium           | small (HF-2)   |
 | C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3)      | OPEN              | Medium           | medium         |

@@ -393,7 +393,7 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
 
 | Item | One-liner                                                                       | Closes                  | Effort                   |
 |------|---------------------------------------------------------------------------------|-------------------------|--------------------------|
-| HF-1 | Editor/dev-only bounds assertions in the `ChunkData` accessors                  | fidelity A5             | 🟢                       |
+| HF-1 | Editor/dev-only bounds assertions in the `ChunkData` accessors                  | fidelity A5             | ✅ DONE 2026-07-05        |
 | HF-2 | Per-job fault isolation in `ProcessLightingJobs` (eliminate the cascade class)  | fidelity B7 (near-term) | 🟢                       |
 | HF-3 | Border heightmap fuzz baseline (B62+) — varied heights at seams + border edits  | C9 extension            | 🟡                       |
 | HF-4 | Extract the lighting pass skeleton into a shared, harness-drivable orchestrator | fidelity B7 (full)      | 🔴 — fold into AS-2/NS-3 |
@@ -410,6 +410,19 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
   verifier bounds-skip) — with HF-1 in place it must go RED at every position, retroactively giving B60
   the prove-red it could not have before. Then a full suite run (all baselines green) and an editor
   play-mode frame-cost sanity check (assertions are branch-only, but measure, don't assume).
+
+> **Outcome (2026-07-05): DONE.** `ChunkData.AssertLocalPositionInChunk` (dual `[Conditional]`
+> `UNITY_EDITOR`/`DEVELOPMENT_BUILD`, throws with coordinates + chunk position) called first in all four
+> accessors — including before `GetLightData`'s uniform-sky early-return, collapsing the fully-silent
+> compacted-section case. Caller audit (69 call sites, 17 files): **no caller relied on the leniency** —
+> every site is loop-bounded, lookup-derived, explicitly guarded, or bounded by the Burst job's
+> `GetPackedData` sentinel (which also bounds every emitted mod/claim y). B60 sabotage re-run: **RED**
+> (`ArgumentOutOfRangeException: local position out of range: (-1, 49, 8)` in the harness claim
+> verifier — the exact halo claim the position lottery used to swallow; 1 of 53 red, sabotage-only).
+> Guards restored → **53/53 baselines green with the assertions live**. Fidelity **A5 CLOSED**; C9's
+> "crash not scenario-provable" residual resolved. Play-mode frame-cost sanity check: PENDING user
+> play session (expected noise-level — main-thread accessor traffic is not the per-voxel hot loop;
+> jobs read `NativeArray` snapshots).
 
 ### HF-2 — Per-job fault isolation in `ProcessLightingJobs`
 

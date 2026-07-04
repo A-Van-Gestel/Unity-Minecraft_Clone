@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Helpers;
 using JetBrains.Annotations;
 using Jobs.BurstData;
 using Unity.Collections;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace Data
 {
@@ -779,6 +781,29 @@ namespace Data
         #region Chunk Section Methods
 
         /// <summary>
+        /// Editor/development-build bounds guard for the local-coordinate accessors: throws when
+        /// x/z is outside [0, ChunkWidth) or y is outside [0, ChunkHeight). Without it, an
+        /// out-of-bounds local is a position lottery — silent uniform-sky read, silent wrong-voxel
+        /// alias, or a throw depending on the coordinates — which hides contract violations
+        /// (lighting fidelity finding A5). Compiles to nothing in non-development builds; the
+        /// accessors are the engine's hottest reads.
+        /// </summary>
+        /// <param name="x">Local X to validate.</param>
+        /// <param name="y">Local Y to validate.</param>
+        /// <param name="z">Local Z to validate.</param>
+        [Conditional("UNITY_EDITOR"), Conditional("DEVELOPMENT_BUILD")]
+        private void AssertLocalPositionInChunk(int x, int y, int z)
+        {
+            if ((uint)x >= VoxelData.ChunkWidth ||
+                (uint)z >= VoxelData.ChunkWidth ||
+                (uint)y >= VoxelData.ChunkHeight)
+                throw new ArgumentOutOfRangeException(nameof(x),
+                    $"ChunkData local position out of range: ({x.ToString()}, {y.ToString()}, {z.ToString()}) " +
+                    $"in chunk {Position.ToString()} — x/z must be in [0, {VoxelData.ChunkWidth.ToString()}), " +
+                    $"y in [0, {VoxelData.ChunkHeight.ToString()}).");
+        }
+
+        /// <summary>
         /// Sets the packed voxel data at the specified local coordinates.
         /// Automatically handles the creation of ChunkSections if they don't exist.
         /// </summary>
@@ -790,6 +815,8 @@ namespace Data
         /// <param name="oldBlockProperties">The properties of the block being replaced (can be null).</param>
         public void SetVoxel(int x, int y, int z, uint value, [CanBeNull] BlockType newBlockProperties, [CanBeNull] BlockType oldBlockProperties)
         {
+            AssertLocalPositionInChunk(x, y, z);
+
             int sectionY = y / ChunkMath.SECTION_SIZE;
             int localY = y % ChunkMath.SECTION_SIZE;
 
@@ -852,6 +879,8 @@ namespace Data
         /// <returns>The packed uint data.</returns>
         public uint GetVoxel(int x, int y, int z)
         {
+            AssertLocalPositionInChunk(x, y, z);
+
             int sectionY = y / ChunkMath.SECTION_SIZE;
 
             // If section is null, it's implicitly Air
@@ -869,6 +898,8 @@ namespace Data
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public ushort GetLightData(int x, int y, int z)
         {
+            AssertLocalPositionInChunk(x, y, z);
+
             int sectionY = y / ChunkMath.SECTION_SIZE;
             byte uniformSky = SectionUniformSkyLevel[sectionY];
             if (uniformSky != UNIFORM_SKY_NONE)
@@ -886,6 +917,8 @@ namespace Data
         /// </summary>
         public void SetLightData(int x, int y, int z, ushort value)
         {
+            AssertLocalPositionInChunk(x, y, z);
+
             int sectionY = y / ChunkMath.SECTION_SIZE;
             PromoteCompactSection(sectionY);
             if (sections[sectionY] == null)
