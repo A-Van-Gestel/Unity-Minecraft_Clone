@@ -1,7 +1,8 @@
 # Lighting Async-Bug Validation Roadmap (AS-1 … AS-5)
 
-> **Status:** In progress — **AS-1 implemented 2026-07-04 and RED** (first faithful synchronous Bug-13
-> repro; see §3 outcome). AS-2 … AS-5 remain proposals.
+> **Status:** In progress — **AS-1 CLOSED 2026-07-04** (Bugs 13 + 14 both reproduced, fixed, confirmed
+> in-game, and archived — see §3 outcome; suite at B61, 53 baselines). AS-2 … AS-5 remain proposals,
+> plus the **§10 harness-hardening follow-ups HF-1 … HF-4** filed from the AS-1 session's lessons.
 > **Created:** 2026-07-03 (async-testability analysis session, repo @ `a458173`)
 > **Scope:** making the async-flavored open lighting bugs (**Bug 05 / Bug 09 / Bug 13**,
 > [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)) testable, and closing the async surfaces the
@@ -373,3 +374,76 @@ standing fidelity-B3 lesson):
 - AS-2 / AS-3 / AS-4 completions flip their fidelity findings (B6 / C8 / B3-amendment) and
   should update the suite counts in `VALIDATION_SUITE_COVERAGE_ROADMAP.md`'s "existing
   coverage" line.
+
+---
+
+## 10. Harness hardening — HF-1 … HF-4 (filed 2026-07-04, from the AS-1 / Bug 13+14 session)
+
+**Origin.** The Bug 14 hotfix exposed a "not reproducible in harness" class that AS-1's outcome analysis
+did not predict: baseline B60's prove-red **failed honestly** — with the fix's guards deliberately
+removed, the scenario stayed green while identical code crashed real worlds. The root is NOT a
+harness/production code divergence (both run the same `ChunkData`): it is that shared out-of-bounds
+accesses are a **position lottery** (silent uniform-sky read / silent wrong-voxel alias / throw, depending
+on coordinates), and the crash's visible form (per-frame `ObjectDisposedException` spam) additionally
+required `ProcessLightingJobs`' **production-only pass bookkeeping** (release-inside-loop /
+remove-after-loop). Fidelity findings: **A5** (fail-soft accessors) and **B7** (pass bookkeeping),
+plus the already-closed **C9** (flat worlds never make border shadow-casters). "Fully matching"
+production is asymptotic (the standing B3 lesson); the strategy below instead makes shared code
+fail-fast, shrinks the production-only surface, and widens geometry sampling.
+
+| Item | One-liner                                                                       | Closes                  | Effort                   |
+|------|---------------------------------------------------------------------------------|-------------------------|--------------------------|
+| HF-1 | Editor/dev-only bounds assertions in the `ChunkData` accessors                  | fidelity A5             | 🟢                       |
+| HF-2 | Per-job fault isolation in `ProcessLightingJobs` (eliminate the cascade class)  | fidelity B7 (near-term) | 🟢                       |
+| HF-3 | Border heightmap fuzz baseline (B62+) — varied heights at seams + border edits  | C9 extension            | 🟡                       |
+| HF-4 | Extract the lighting pass skeleton into a shared, harness-drivable orchestrator | fidelity B7 (full)      | 🔴 — fold into AS-2/NS-3 |
+
+### HF-1 — Fail-fast `ChunkData` accessors (editor/development builds only)
+
+- Add bounds assertions to `GetVoxel` / `GetLightData` / `SetLightData` / `SetVoxel`
+  (`ChunkData.cs:853–900`): local x/z in `[0,16)`, y in `[0,128)`; throw with the offending coordinate
+  and chunk position in the message. Must compile to **zero cost in IL2CPP master** — these are the
+  hottest reads in the engine (`[Conditional]`-gated helper or `#if UNITY_EDITOR || DEVELOPMENT_BUILD`).
+- **Prerequisite:** a caller audit (CodeGraph `codegraph_callers` + exhaustive Grep) confirming no caller
+  legitimately relies on the leniency today. Any that do are themselves latent A5-class bugs — fix first.
+- **Verification:** re-run B60's prove-red sabotage (remove the Bug-14 `IsInCenterChunk` guard + the
+  verifier bounds-skip) — with HF-1 in place it must go RED at every position, retroactively giving B60
+  the prove-red it could not have before. Then a full suite run (all baselines green) and an editor
+  play-mode frame-cost sanity check (assertions are branch-only, but measure, don't assume).
+
+### HF-2 — Per-job fault isolation in `ProcessLightingJobs`
+
+- Wrap the per-job block so an exception: logs one error (errors = regression signal, per suite
+  convention), still **releases** that job's containers and adds it to `_completedLightJobs` (so the
+  after-loop removal happens), clears `IsAwaitingMainThreadProcess` in a `finally` (flag-pairing
+  invariant, `.agents/rules/chunk-pipeline.md`), and lets the pass continue. A new diagnostic counter
+  (`LastFaultedLightJobs`, following the `Last*` family) makes recurrences observable.
+- This intentionally *eliminates* the cascade class instead of modeling it in the harness — the spam hid
+  the true thrower behind hundreds of repeats and cost a full diagnosis round.
+- **Scope check while there:** audit `ProcessGenerationJobs` / `ProcessMeshJobs` for the same
+  release-then-remove split; apply the same isolation if present.
+- **Caution:** swallow-and-continue can mask corruption — the log must be an ERROR, and the chunk should
+  be left in a re-schedulable state (`HasLightChangesToProcess = true`) rather than silently dropped.
+  Update `CHUNK_LIFECYCLE_PIPELINE.md` in the same commit (chunk-pipeline rule).
+
+### HF-3 — Border heightmap fuzz (baseline B62+)
+
+- A seeded geometry fixture varying per-column heights across all seams (the terrain shape flat worlds
+  never produce — C9's lesson), plus seeded border edits, swept over ~25 seeds per suite run with a
+  nightly higher-seed tier (the C1/C2/B42 pattern). Assert termination + `MatchesOracle` per seed.
+- With HF-1 in place this becomes a genuine crash-class detector: the fuzz samples many lottery
+  positions, the assertions make every bad one loud. Prefer building it AFTER HF-1 so a found violation
+  reds immediately instead of wrong-reading.
+
+### HF-4 — Shared lighting-pass orchestrator (deferred; fold into AS-2 / NS-3)
+
+- The only way the harness can truly replay the pass bookkeeping (B7's full closure): extract the
+  iterate/complete/release/remove skeleton into a pure orchestrator both `WorldJobManager` and the frame
+  simulator drive — the same extraction pattern as `LightingJobProcessor` (A2) and
+  `LightingScheduleDecision` (B2). A meaningful refactor of `ProcessLightingJobs`; do it as part of
+  **AS-2** (which already restructures the simulator's frame loop around a real `LightWorkScheduler`)
+  or the NS-3 chunk-lifecycle suite — not standalone.
+
+**Sequencing:** HF-1 first (small, unlocks HF-3's detector value and B60's prove-red), HF-2 second
+(independent, small), HF-3 third, HF-4 whenever AS-2 lands. On completion, flip fidelity A5/B7 and record
+the new baseline numbers here and in the fidelity backlog.

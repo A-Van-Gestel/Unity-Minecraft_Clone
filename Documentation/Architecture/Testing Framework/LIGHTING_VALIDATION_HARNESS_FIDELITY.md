@@ -123,6 +123,29 @@ there is invisible.
   general differential check. Pre-existing independent probes (`R == 9`, `crossBorder >= 13`) and
   oracle-free invariants (`NoBlocklightInVolume`, `FieldsEqual` baseline-return) remain in force.
 
+### A5 — Shared `ChunkData` accessors are fail-soft: out-of-bounds behavior is a position lottery ·  **OPEN · MEDIUM-HIGH (new 2026-07-04, exposed by B60's failed prove-red)**
+
+- `ChunkData.GetVoxel` / `GetLightData` / `SetLightData` (`ChunkData.cs:853–900`) validate nothing. For an
+  out-of-bounds **local** coordinate the outcome depends entirely on the position: a **compacted section**
+  returns the uniform sky value for ANY x/z (fully silent, no array touched); most other positions alias a
+  *different in-range voxel* (`index = x + 16·localY + 256·z` usually stays inside `[0, 4096)` — silent
+  wrong-read); only the extremes (e.g. `x = −1` with `localY = 0, z = 0`, or `y` outside `[0, 128)`)
+  actually throw.
+- **Why this is a false-pass surface even though the code is shared:** the same contract violation is
+  invisible, silently corrupting, or crashing depending on geometry — so any pinned scenario samples one
+  lottery ticket. Proven during the Bug 14 hotfix: B60's deliberate both-guards-off sabotage run stayed
+  **green** (its halo position wrong-read benignly, and the claim verifier's superseded check then skipped
+  it) while the *identical* code crashed in-game on real terrain (`ProcessLightingJobs`
+  `ObjectDisposedException` cascade — see B7). Any future consumer of local coordinates can land in
+  "not reproducible in harness" status the same way.
+- **Fix:** roadmap item **HF-1** in
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) —
+  editor/development-build-only bounds assertions in the four accessors (compiled out of IL2CPP master;
+  the reads are the hottest in the engine), preceded by a caller audit confirming nothing legitimately
+  relies on the leniency. Collapses the lottery: every violation is loud at every position, in the harness
+  and in editor play mode alike — and retroactively gives B60 a working prove-red. Pairs with **HF-3**
+  (border heightmap fuzz, the C9 lesson), which widens how many positions scenarios sample.
+
 ---
 
 ## 3. Missing harness features (whole bug classes unreachable)
@@ -250,6 +273,26 @@ there is invisible.
   an opt-in frame-simulator mode driving a real `LightWorkScheduler` with mirrored park/promote sites
   and the fail-safe OFF by default, so "converges without the backstop" becomes a mechanical gate.
   Legacy mode stays the default so existing baselines are untouched.
+
+### B7 — `ProcessLightingJobs` per-pass bookkeeping is production-only ·  **OPEN · MEDIUM (new 2026-07-04)**
+
+- The harness replays per-**job** logic (`CompleteLightingJob` mirrors merge → deferred drain →
+  pull-back-claim verification → mod routing) and the frame simulator replays scheduling decisions — but
+  nobody replays the production **pass skeleton**: iterate the `LightingJobs` dictionary, release each
+  completed job's containers *inside* the loop, remove entries from the dictionary only *after* the loop
+  (via `_completedLightJobs`).
+- **The failure class this hides:** any exception mid-pass strands already-released jobs in the dictionary
+  → per-frame `ObjectDisposedException` spam re-touching disposed containers (observed in-game during the
+  Bug 14 hotfix — the original thrower was hidden behind hundreds of cascade repeats). In the suite the
+  same exception presents as **one red scenario** (the runner's per-scenario try/catch), never as a
+  cascade — the class is structurally invisible, like B3/B5/B6 it lives in code the harness does not run.
+- **Fix:** roadmap item **HF-2** in
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) —
+  per-job fault isolation in production (an exception logs once, still releases + removes that job, clears
+  `IsAwaitingMainThreadProcess` in a `finally`, and the pass continues), which *eliminates* the class
+  instead of modeling it. The full-fidelity alternative — extracting the pass skeleton into a shared
+  orchestrator the harness can drive — is **HF-4**, deliberately folded into AS-2 / NS-3 rather than done
+  standalone.
 
 ---
 
@@ -493,8 +536,11 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                         | **CLOSED**        | —                | done           |
 | C5 | Cumulative multi-layer attenuation probe (B45)                                             | **CLOSED**        | —                | done           |
 | C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4 | **CLOSED**        | —                | done           |
+| A5 | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (→ roadmap HF-1)     | OPEN              | **Medium-High**  | small          |
 | B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                    | OPEN              | **Medium-High**  | medium         |
+| B7 | `ProcessLightingJobs` pass bookkeeping production-only (→ roadmap HF-2, long-term HF-4)    | OPEN              | Medium           | small (HF-2)   |
 | C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3)      | OPEN              | Medium           | medium         |
+| C9 | Flat scenario worlds never exercise border shadow-casters (B60; fuzz extension → HF-3)     | **CLOSED**        | —                | done           |
 | C6 | Per-channel removal independence                                                           | OPEN              | Low–Medium       | small          |
 | C7 | Deterministic corner spill / in-chunk re-shadow                                            | OPEN              | Low              | small          |
 | §5 | Bug-09 fleet (B15–B25) consolidation                                                       | **CLOSED**        | —                | done           |
@@ -515,8 +561,9 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 
 - Harness file map & API: `.agents/skills/validation-driven-bugfix/references/lighting-suite.md`
 - Frame simulator architecture: [LIGHTING_FRAME_SIMULATOR_DESIGN.md](LIGHTING_FRAME_SIMULATOR_DESIGN.md)
-- Async-bug testability roadmap (AS-1…AS-5 — B3 amendment, B6, C8, Bug 05/09/13 plans):
+- Async-bug testability roadmap (AS-1…AS-5 — B3 amendment, B6, C8, Bug 05/09 plans) + harness-hardening
+  follow-ups (HF-1…HF-4 — A5, B7, C9 remediations):
   [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)
-- Open lighting bugs (Bug 05, Bug 09, Bug 13): [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)
+- Open lighting bugs (Bug 05, Bug 09): [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)
 - Lighting system overview: [LIGHTING_SYSTEM_OVERVIEW.md](../LIGHTING_SYSTEM_OVERVIEW.md)
 - Pipeline invariants: `.agents/rules/chunk-pipeline.md`, `.agents/rules/pool-reset-safety.md`
