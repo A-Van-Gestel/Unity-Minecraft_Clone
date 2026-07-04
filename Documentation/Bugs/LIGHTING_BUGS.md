@@ -11,7 +11,7 @@ This document outlines **open** bugs related to the current lighting implementat
 
 ---
 
-> All previously listed lighting bugs (01–04, 06–08) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
+> All previously listed lighting bugs (01–04, 06–08, 10–13) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
 
 ## Bug 05: Persistent Chunk-Border Shadow Patches in Dense Biomes
 
@@ -91,95 +91,6 @@ symptom shape and is sync-testable), **AS-4** (real-`Schedule()` parallel-determ
 
 ---
 
-## Bug 13: Large Suspended Opaque Slab Never Settles (Oscillating Cross-Chunk Skylight)
-
-**Severity:** Medium
-**Status:** Fixed in code (July 2026) — awaiting in-game confirmation
-**Files:** `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`CrossChunkSunlightSupport`, the extended
-Bug-11 veto), `Assets/Scripts/WorldJobManager.cs` (`ApplyCrossChunkLightMod` + emitter-carrying
-`DeferredLightMod`), mirrored in `Assets/Editor/Validation/Lighting/Framework/LightingTestWorld.cs`
-
-**Description:**
-A large, flat **opaque** block layer (opacity 15) suspended in otherwise sky-lit air and **spanning a contiguous
-multi-chunk region** never reaches a stable lighting state. The columns directly under the slab are shadowed while
-the surrounding air stays full-bright, so light spills in from the slab's perimeter and forms a cross-chunk skylight
-gradient beneath it. That gradient **oscillates / never converges**: the lighting jobs keep re-scheduling so
-`WorldJobManager.HasActiveJobs` never returns to `false`, and in the scene view the slab's lit surfaces visibly
-**flicker** (light values churn frame-to-frame) rather than settling.
-
-This is distinct from **Bug 05** (dense-canopy shadow patches that converge to a *wrong but static* state until a
-reload): there the system reaches a fixed point (an incorrect one); here it appears to reach **no fixed point at all**
-within the production scheduling — a non-termination / live-oscillation symptom rather than a static artifact. It is
-the same cross-chunk-convergence family, at the opposite extreme (one large hard shadow boundary tiled across many
-chunk seams, instead of many small diagonal light pockets).
-
-**Root Cause (confirmed 2026-07-04, via the K13c repro + oscillation probe + emit-neuter attribution):**
-Not the edge-check rounds as originally suspected — a **mutual-removal machine between the Bug 12 cross-seam
-removal initiator and the Bug 11 veto's in-chunk-only support model**, at the slab region's interior seams. The
-under-slab gradient is *perimeter-fed*: a border voxel V in slab chunk A holds sky 14 supplied across a
-*different* seam by the sky-lit ring chunk — support the Bug 11 veto (`InChunkSunlightSupport`) cannot see,
-because it deliberately credits only in-chunk neighbors (V's in-chunk best is 13 < 14 → no veto). Meanwhile the
-adjacent slab chunk B's darkness wave sees V at exactly the removed level, not sky-lit — the Bug 12
-mutual-2-cycle signature — and emits a removal at it. The removal applies (no veto), V's chunk re-lights V via
-the seam pull-back from the ring's live 15, the re-spread crosses back into B as uplift mods, B's next pass
-emits the same removal again: a **period-2 live-lock** (the probe showed the light field hash-repeating with a
-cycle length of 1–2 while work stayed pending, across all 8 ring chunks of the slab, y 11–99). Neutering the
-Bug 12 emit converged the repro in 2 frames — the attribution test.
-
-**Fix (July 2026):** the Bug 11 veto's support model was extended to match reality: independent support is now
-the max of (a) in-chunk neighbors (unchanged) and (b) **live cross-chunk neighbors in chunks other than the
-emitter** (`CrossChunkLightModApplier.CrossChunkSunlightSupport`). Live main-thread data is trustworthy —
-staleness was only ever a property of the *emitting job's snapshot* — and excluding the emitting chunk preserves
-Bug 12's collapse of genuine sourceless seam loops (the emitter is exactly the possibly-stale mutual-loop side,
-and B53's loop pair has no third-party feed). Deferred cross-chunk mods now carry their emitter's origin
-(`WorldJobManager.DeferredLightMod`) so the exclusion survives the defer/drain path. The perimeter-fed seam
-voxel is now vetoed instead of cleared, the counter-wave never launches, and the machine winds down. An
-emitter-side snapshot guard on the Bug 12 emit was tried first and rejected: it also suppressed load-bearing
-initiators whose "supporter" was itself ghost light, worsening the stale-ghost residue (see Bug 14).
-
-**Reproduction (deterministic, via the fluid stress harness):**
-The full-world fluid stress pass (`Assets/Scripts/Benchmarks/FluidStressController.cs`, launched in
-`RuntimeMode.FluidStress`) stamps a flat floor across a `REGION_CHUNKS × REGION_CHUNKS` region at a fixed high
-altitude (y 100) above lower terrain/ocean, then waits for the pipeline to settle. With an **opaque** floor block
-(e.g. `BlockIDs.Stone`, the pre-fix configuration) and `REGION_CHUNKS ≥ 3`, the substrate settle **never completes**
-and the slab flickers. The current harness sidesteps this by using `BlockIDs.Facade` (solid but **opacity 0**) for the
-floor — a light-transparent solid casts no shadow, so the gradient never forms and the region settles immediately.
-That workaround is the empirical confirmation of the root cause (the defect is driven by the slab's *opacity*, not its
-solidity, geometry, or the throttled stamp).
-
-**Workaround:** for any large manufactured platform/ceiling that must span chunks in lit air, prefer a light-transparent
-solid (opacity 0) over an opaque one. Naturally this also affects player-built large flat opaque roofs spanning chunk
-borders.
-
-**Validation suite:** **REPRODUCED SYNCHRONOUSLY** (2026-07-04, roadmap item **AS-1** of
-[LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)) — known-bug scenarios
-**K13a–K13d** in `Assets/Editor/Validation/Lighting/LightingValidationSuite.Bug13Slab.cs`, registered expected-red.
-The **dynamic-stamp** variants — faithful to this repro (slab stamped through the player-edit path onto an
-already-settled world) — are **red**:
-
-- **K13c** (grid 5, slab = center 3×3 chunks inside a sky-lit 16-chunk ring): never settles under unlimited-budget
-  (500 frames) *or* single-slot (1500 frames) scheduling, and the hash-based oscillation probe confirms the light
-  field **repeats an exact cycle** (length 1–2) while work stays pending — a live-lock (no fixed point), not slow
-  convergence. This is the first mechanical confirmation of the bug's "no fixed point" hypothesis.
-- **K13d** (seeded completion-shuffle + budget/cadence sweep): fails on both geometries. Grid-5 inset seed 0
-  live-locks like K13c; grid-3 full-grid seed 1 instead **settles on a massively wrong field** (~32.7k voxels
-  over-bright vs the oracle, worst +14 sky) — the same stamp can also terminate into static ghost light, a
-  Bug-05-shaped outcome. That terminating over-bright exit turned out to be a **distinct defect** (it persists
-  with the live-lock fixed) and is now documented as **Bug 14** with its own scenario **K14a**; K13d asserts
-  termination only.
-
-The **generation-wave** variants (**K13a/K13b**, slab already present during initial lighting) are **green** — the
-live-lock requires the dynamic-stamp path (player-edit removal seeds + opacity-change column recalcs against an
-established bright field), not the initial wave.
-
-**Post-fix state (2026-07-04):** K13a–K13d all **green** (K13c settles in a handful of frames under both budget
-regimes; every sweep seed terminates) with all 47 baselines green — including B48/B50–B55, the Bug 11/12 family the
-extended veto touches. Awaiting in-game confirmation on the fluid-stress opaque-floor config (`FluidStressController`
-with `BlockIDs.Stone` instead of `BlockIDs.Facade`, `REGION_CHUNKS ≥ 3` — the substrate settle must complete and the
-slab must not flicker), then promote the K13 scenarios to baselines **B56+** and archive via `archive-fixed-bug`.
-
----
-
 ## Bug 14: Stale-Snapshot Cross-Chunk Sunlight Ghost Light Survives Dynamic Multi-Chunk Darkening
 
 **Severity:** Medium
@@ -198,6 +109,11 @@ an unrelated nearby edit. This is the **terminating sibling of Bug 13**: the sam
 Bug 13 as the non-terminating exit (fixed July 2026), this defect as the over-bright terminating exit. It is the
 over-bright counterpart of Bug 05's shadow patches, and mechanically adjacent to fixed Bug 12 (sourceless light
 loops) — but here the light is not a mutual loop, it is simply **never re-visited**.
+
+**Observed in-game (2026-07-04, during the Bug 13 fix confirmation):** in the fluid-stress run with an opaque
+Stone floor, the freshly stamped floor's underside shadows were **patchy** in the scene view after the substrate
+settled, and only became correctly shadowed after the water cap was placed (a later mass edit re-triggering
+lighting over the region) — exactly this defect's signature: stable ghost light cleared by a subsequent edit.
 
 **Root Cause Suspected:**
 A job that runs concurrently with its neighbors' darkening re-lights its side of a seam from its
@@ -219,9 +135,9 @@ chunk's live data that it still supplies the claimed level (the mirror of the Bu
 Known-bug scenario **K14a** (`Assets/Editor/Validation/Lighting/LightingValidationSuite.Bug14Ghost.cs`): settle
 a slab-less grid-3 world, stamp a full-grid opaque slab at y100 chunk-by-chunk under the pinned seed-1 schedule
 (per-frame budget 2, 1 frame between stamps, shuffled completion order), wait for settle (terminates — guarded
-green by K13d), then compare to the borderless oracle: ~57.6k voxels over-bright, worst +14 sky. Expected red
-until fixed. Found by the K13d sweep during the AS-1 session (2026-07-04); fix was **out of scope** for the
-Bug 13 fix session that filed this.
+green by baseline **B59**), then compare to the borderless oracle: ~57.6k voxels over-bright, worst +14 sky.
+Expected red until fixed. Found by the Bug-13 sweep (now B59) during the AS-1 session (2026-07-04); fix was
+**out of scope** for the Bug 13 fix session that filed this.
 
 **Workaround:** none needed for normal play observed so far — the repro requires large simultaneous multi-chunk
 darkening under scheduling pressure. A world reload or any nearby light-triggering edit clears the residue.

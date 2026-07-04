@@ -12,16 +12,18 @@ namespace Editor.Validation.Lighting
     /// live-lock (both were exposed by the same AS-1 slab repro; Bug 13's fix removed the
     /// non-termination exit, this defect owns the over-bright exit).
     /// <para>
-    /// <b>K14a</b> replays the first failing sweep case found by K13d: the grid-3 full-grid slab stamped
-    /// chunk-by-chunk under seed 1 (per-frame budget 2, one frame between stamps, shuffled completion).
-    /// The pipeline terminates (guarded by K13d), but ~57k voxels settle over-bright vs the borderless
-    /// oracle (worst +14 sky) — and the field is genuinely stable: sequential convergence afterwards
-    /// finds no pending work. Expected red until Bug 14 is fixed.
+    /// <b>K14a</b> replays the first failing case found by the Bug-13 sweep (now baseline B59): the
+    /// grid-3 full-grid slab stamped chunk-by-chunk under seed 1 (per-frame budget 2, one frame between
+    /// stamps, shuffled completion). The pipeline terminates (guarded by B59), but ~57k voxels settle
+    /// over-bright vs the borderless oracle (worst +14 sky) — and the field is genuinely stable:
+    /// sequential convergence afterwards finds no pending work. Also observed in-game (2026-07-04,
+    /// fluid-stress opaque-floor run): patchy under-slab shadows that only settled after a later edit.
+    /// Expected red until Bug 14 is fixed.
     /// </para>
     /// </summary>
     public static partial class LightingValidationSuite
     {
-        // The K13d sweep parameters of the first observed ghost case (seed 1): budget = 1 + seed % 4,
+        // The B59 sweep parameters of the first observed ghost case (seed 1): budget = 1 + seed % 4,
         // cadence = seed % 3, shuffled completion. Pinned as constants so the repro cannot drift.
         private const int BUG14_SEED = 1;
         private const int BUG14_BUDGET = 2;
@@ -39,7 +41,7 @@ namespace Editor.Validation.Lighting
         /// <summary>
         /// K14a: the deterministic seed-1 ghost case. Settles a slab-less grid-3 world, stamps the
         /// full-grid slab chunk-by-chunk under the pinned seed-1 schedule, and asserts the settled field
-        /// matches the borderless oracle (termination itself is Bug 13's property, guarded by K13c/K13d).
+        /// matches the borderless oracle (termination itself is guarded by baselines B58/B59).
         /// </summary>
         private static bool KnownBug_Bug14StaleGhostLight()
         {
@@ -50,7 +52,8 @@ namespace Editor.Validation.Lighting
             LightingFrameSimulator sim = new LightingFrameSimulator(world, BUG14_SEED);
             return RunBug13StampAndSettle(world, sim, BUG13_FULL_SLAB_MIN, BUG13_FULL_SLAB_MAX,
                 BUG14_BUDGET, LightingFrameSimulator.CompletionOrder.Shuffled, BUG14_STAMP_CADENCE,
-                BUG13_SIM_MAX_FRAMES, "K14a (grid-3 slab stamp, seed 1)", logPass: true, assertOracle: true);
+                BUG13_SIM_MAX_FRAMES, "K14a (grid-3 slab stamp, seed 1)", logPass: true, assertOracle: true,
+                expectedRed: true);
         }
     }
 }

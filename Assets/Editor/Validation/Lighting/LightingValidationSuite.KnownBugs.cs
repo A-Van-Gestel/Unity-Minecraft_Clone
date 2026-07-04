@@ -28,22 +28,18 @@ namespace Editor.Validation.Lighting
         // The conclusion stands: the bug is either a genuine async race (Burst job timing, IL2CPP memory
         // ordering) that synchronous .Run() cannot reproduce, or is no longer present in the codebase.
 
+        // NOTE on Bug 13: reproduced synchronously (K13a–K13d, roadmap item AS-1), fixed July 2026
+        // (extended Bug-11 veto with live third-party cross-chunk support), and promoted to baselines
+        // B56–B59 after in-game confirmation. The sweep that reproduced it also surfaced Bug 14.
+
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
             // Bug 05 and Bug 09 still need faithful repros (see notes above).
-            AddBug13SlabKnownBugScenarios(scenarios);
             AddBug14GhostKnownBugScenarios(scenarios);
         }
 
         /// <summary>
-        /// Registers the Bug-13 suspended-slab termination scenarios (K13a–K13d, roadmap item AS-1;
-        /// implemented in <c>LightingValidationSuite.Bug13Slab.cs</c>).
-        /// </summary>
-        /// <param name="scenarios">The scenario list to append to.</param>
-        static partial void AddBug13SlabKnownBugScenarios(List<Scenario> scenarios);
-
-        /// <summary>
-        /// Registers the Bug-14 stale-ghost-light scenario (K14a, found by the K13d sweep;
+        /// Registers the Bug-14 stale-ghost-light scenario (K14a, found by the Bug-13 sweep;
         /// implemented in <c>LightingValidationSuite.Bug14Ghost.cs</c>).
         /// </summary>
         /// <param name="scenarios">The scenario list to append to.</param>

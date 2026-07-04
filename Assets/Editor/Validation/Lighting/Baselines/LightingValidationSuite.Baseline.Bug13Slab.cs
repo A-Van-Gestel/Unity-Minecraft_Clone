@@ -5,46 +5,49 @@ using UnityEngine;
 namespace Editor.Validation.Lighting
 {
     /// <summary>
-    /// Known-bug termination scenarios for <b>Bug 13</b> — a large suspended opaque slab spanning
-    /// multiple chunks never settles (oscillating cross-chunk skylight; live-lock, not a
-    /// wrong-but-static field). First sync repro attempt, specced as roadmap item <b>AS-1</b> in
-    /// Documentation/Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md: the suspected mechanism
-    /// (<c>IsEffectivelyStable</c> re-flagging, cross-chunk mod wake-ups, real edge-round flags) is
-    /// main-thread orchestration logic the harness shares with production, so deterministic
-    /// non-termination should be reproducible without the async wave.
+    /// Baseline regression scenarios <b>B56–B59</b> — multi-chunk suspended-slab convergence, guarding
+    /// the <b>Bug 13</b> fix (live-locking cross-chunk skylight under a large opaque slab; fixed July
+    /// 2026 by extending the Bug-11 removal veto with live third-party cross-chunk support,
+    /// <see cref="Helpers.CrossChunkLightModApplier.CrossChunkSunlightSupport"/> — see
+    /// <c>Documentation/Bugs/_FIXED_BUGS.md</c>). Promoted from known-bug repros K13a–K13d (roadmap
+    /// item AS-1) after in-game confirmation on the fluid-stress opaque-floor config.
     /// <para>
-    /// Two geometries per variant, because the harness grid boundary IS the world boundary:
+    /// Two geometries throughout, because the harness grid boundary IS the world boundary:
     /// <list type="bullet">
-    /// <item><b>Full-grid</b> (roadmap-literal, grid 3): the slab spans every chunk. Modeling limit —
-    /// with no world beyond the grid there is NO lit perimeter, so the under-slab region has no
-    /// perimeter-fed gradient at all (uniformly dark). Kept as the cheap lower bound.</item>
+    /// <item><b>Full-grid</b> (grid 3): the slab spans every chunk. Modeling limit — with no world
+    /// beyond the grid there is NO lit perimeter, so the under-slab region is uniformly dark. The
+    /// cheap lower bound.</item>
     /// <item><b>Inset</b> (grid 5, slab = centre 3×3 chunks): a 16-chunk sky-lit ring feeds light
-    /// under the slab from its perimeter, forming the cross-chunk gradient the in-game repro
-    /// oscillates on (`FluidStressController` stamps a 5×5-chunk floor at y100 INSIDE a larger
-    /// loaded world). This is the faithful habitat; the in-game threshold was ≥ 3 slab chunks.</item>
+    /// under the slab from its perimeter, forming the cross-chunk gradient at interior seams that
+    /// live-locked pre-fix (`FluidStressController` stamps a 5×5-chunk floor at y100 INSIDE a larger
+    /// loaded world; the in-game threshold was ≥ 3 slab chunks). The faithful habitat and the actual
+    /// fix tripwire.</item>
     /// </list>
     /// </para>
     /// <para>
-    /// Scenarios (all registered expected-red with <c>knownBugId</c> "Bug 13"; promotion after a fix
-    /// takes baseline numbers B56+ per the suite bookkeeping):
-    /// <b>K13a/K13b</b> — generation-wave: slab present from the start, wave-parallel initial lighting
-    /// must terminate. <b>K13c</b> — dynamic-stamp (faithful to the in-game repro): converge a
-    /// slab-less world, then stamp the slab chunk-by-chunk through the player-edit path with frame
-    /// ticks between stamps, under unlimited-budget and single-slot scheduling. <b>K13d</b> — the K13c
-    /// stamp under seeded completion-shuffle + seed-derived budgets/cadence (oscillation may be
-    /// order-sensitive). A red is classified before it is trusted: budget escalation separates slow
-    /// convergence from live-lock, the forced-edge-rounds classifier (C2 precedent) separates
-    /// round-budget shortfall from genuine wrongness, and a hash-based field probe detects an exact
-    /// repeating cycle — the "no fixed point" smoking gun.
+    /// <b>B56/B57</b> — generation-wave: slab present from the start, wave-parallel initial lighting
+    /// terminates on the oracle (green pre-fix too: general convergence guards, not fix tripwires).
+    /// <b>B58</b> — dynamic-stamp: converge a slab-less world, then stamp the slab chunk-by-chunk
+    /// through the player-edit path with frame ticks between stamps, under unlimited-budget and
+    /// single-slot scheduling — the deterministic pre-fix live-lock, the primary fix tripwire.
+    /// <b>B59</b> — the B58 stamp under seeded completion-shuffle + seed-derived budgets/cadence;
+    /// asserts TERMINATION only: shuffled schedules can also settle into stale over-bright ghost
+    /// light, which is open <b>Bug 14</b>, asserted (oracle match) by its own scenario K14a in
+    /// <c>LightingValidationSuite.Bug14Ghost.cs</c>. A red is classified before it is reported:
+    /// budget escalation separates slow convergence from live-lock, the forced-edge-rounds classifier
+    /// (C2 precedent) separates round-budget shortfall from genuine wrongness, and a hash-based field
+    /// probe detects an exact repeating cycle — the "no fixed point" smoking gun.
     /// </para>
+    /// Self-registered via the <see cref="AddBug13SlabBaselineScenarios"/> hook called from
+    /// <c>AddBaselineScenarios</c> (the <c>Baselines/</c> group-partial pattern).
     /// </summary>
     public static partial class LightingValidationSuite
     {
-        // --- Geometry (shared by all K13 scenarios) ---
+        // --- Geometry (shared by the B56-B59 family and Bug 14's K14a) ---
         private const int BUG13_SLAB_Y = 100; // mirrors FluidBenchmarkScenarios.SkyFloorY, the in-game stamp altitude
         private const int BUG13_FLOOR_Y = 10; // superflat stand-in for the terrain/ocean below the in-game region
 
-        private const int BUG13_FULL_GRID = 3; // roadmap-literal config: slab spans the whole grid (no lit perimeter)
+        private const int BUG13_FULL_GRID = 3; // full-grid config: slab spans the whole grid (no lit perimeter)
         private const int BUG13_FULL_SLAB_MIN = 0;
         private const int BUG13_FULL_SLAB_MAX = 2;
 
@@ -69,81 +72,86 @@ namespace Editor.Validation.Lighting
         private const ulong BUG13_FNV_OFFSET_BASIS = 14695981039346656037UL;
         private const ulong BUG13_FNV_PRIME = 1099511628211UL;
 
-        /// <summary>Registers the Bug-13 suspended-slab termination scenarios (roadmap item AS-1).</summary>
+        /// <summary>
+        /// Registers the suspended-slab convergence baselines (B56–B59, promoted from known-bug repros
+        /// K13a–K13d after the July 2026 Bug 13 fix; called from <c>AddBaselineScenarios</c>).
+        /// </summary>
         /// <param name="scenarios">The scenario list to append to.</param>
-        static partial void AddBug13SlabKnownBugScenarios(List<Scenario> scenarios)
+        static partial void AddBug13SlabBaselineScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario(
-                "K13a: A grid-spanning suspended opaque slab terminates generation-wave initial lighting (roadmap-literal geometry, no lit perimeter — Bug 13 / AS-1)",
-                KnownBug_Bug13GenerationWaveFullGrid, "Bug 13"));
+                "B56: A grid-spanning suspended opaque slab terminates generation-wave initial lighting on the oracle (no lit perimeter)",
+                Baseline_Bug13GenerationWaveFullGrid));
             scenarios.Add(new Scenario(
-                "K13b: An inset suspended opaque slab (sky-lit 16-chunk ring, perimeter-fed under-slab gradient) terminates generation-wave initial lighting (Bug 13 / AS-1)",
-                KnownBug_Bug13GenerationWaveInsetPerimeter, "Bug 13"));
+                "B57: An inset suspended opaque slab (sky-lit ring, perimeter-fed under-slab gradient) terminates generation-wave initial lighting on the oracle",
+                Baseline_Bug13GenerationWaveInsetPerimeter));
             scenarios.Add(new Scenario(
-                "K13c: Stamping the inset slab onto a settled world terminates, under unlimited-budget and single-slot scheduling (Bug 13 / AS-1, faithful to the in-game repro)",
-                KnownBug_Bug13DynamicStampDeterministic, "Bug 13"));
+                "B58: Stamping the inset slab onto a settled world settles on the oracle, under unlimited-budget and single-slot scheduling (Bug 13 fix tripwire)",
+                Baseline_Bug13DynamicStampDeterministic));
             scenarios.Add(new Scenario(
-                "K13d: The dynamic slab stamp terminates on every seed of a completion-shuffle + budget/cadence sweep (Bug 13 / AS-1)",
-                KnownBug_Bug13DynamicStampSweep, "Bug 13"));
+                "B59: The dynamic slab stamp terminates on every seed of a completion-shuffle + budget/cadence sweep (Bug 13 fix tripwire; oracle match is Bug 14 / K14a)",
+                Baseline_Bug13DynamicStampSweep));
         }
 
         // --- Scenario bodies ---
 
         /// <summary>
-        /// K13a: generation-wave termination on the roadmap-literal full-grid slab. See the class
-        /// docstring for the modeling limit (no lit perimeter exists at the grid/world boundary).
+        /// B56: generation-wave termination on the full-grid slab. See the class docstring for the
+        /// modeling limit (no lit perimeter exists at the grid/world boundary).
         /// </summary>
-        private static bool KnownBug_Bug13GenerationWaveFullGrid()
+        private static bool Baseline_Bug13GenerationWaveFullGrid()
         {
-            return RunBug13GenerationWaveCase("K13a (grid-3 full-grid slab)",
+            return RunBug13GenerationWaveCase("B56 (grid-3 full-grid slab)",
                 BUG13_FULL_GRID, BUG13_FULL_SLAB_MIN, BUG13_FULL_SLAB_MAX);
         }
 
         /// <summary>
-        /// K13b: generation-wave termination on the faithful inset slab — the sky-lit ring feeds the
+        /// B57: generation-wave termination on the faithful inset slab — the sky-lit ring feeds the
         /// perimeter gradient under the slab across the internal chunk seams (Bug 13's habitat).
         /// </summary>
-        private static bool KnownBug_Bug13GenerationWaveInsetPerimeter()
+        private static bool Baseline_Bug13GenerationWaveInsetPerimeter()
         {
-            return RunBug13GenerationWaveCase("K13b (grid-5 inset slab, perimeter-fed)",
+            return RunBug13GenerationWaveCase("B57 (grid-5 inset slab, perimeter-fed)",
                 BUG13_INSET_GRID, BUG13_INSET_SLAB_MIN, BUG13_INSET_SLAB_MAX);
         }
 
         /// <summary>
-        /// K13c: the dynamic-stamp variant, faithful to the in-game repro (the stress harness stamps
-        /// the floor onto an already-settled world). Converges a slab-less world, then stamps the slab
-        /// chunk-by-chunk via the player-edit path with frame ticks between stamps — so stamps land
-        /// while neighbor lighting jobs are in flight — and asserts the pipeline settles. Runs under
-        /// unlimited budget and under single-slot starvation pressure. (The in-game stamp is emitted
-        /// column-interleaved at 1024 mods/frame; per-chunk stamping is the same granularity class.)
+        /// B58: the dynamic-stamp variant, faithful to the in-game Bug 13 repro (the stress harness
+        /// stamps the floor onto an already-settled world). Converges a slab-less world, then stamps
+        /// the slab chunk-by-chunk via the player-edit path with frame ticks between stamps — so stamps
+        /// land while neighbor lighting jobs are in flight — and asserts the pipeline settles on the
+        /// oracle. Runs under unlimited budget and under single-slot starvation pressure. Pre-fix this
+        /// live-locked with a proven period-2 field cycle — the primary fix tripwire. (The in-game
+        /// stamp is emitted column-interleaved at 1024 mods/frame; per-chunk stamping is the same
+        /// granularity class.)
         /// </summary>
-        private static bool KnownBug_Bug13DynamicStampDeterministic()
+        private static bool Baseline_Bug13DynamicStampDeterministic()
         {
-            bool passed = RunBug13DynamicStampDeterministicLeg("K13c (unlimited budget)",
+            bool passed = RunBug13DynamicStampDeterministicLeg("B58 (unlimited budget)",
                 int.MaxValue, BUG13_SIM_MAX_FRAMES);
-            passed &= RunBug13DynamicStampDeterministicLeg("K13c (single-slot starvation)",
+            passed &= RunBug13DynamicStampDeterministicLeg("B58 (single-slot starvation)",
                 budget: 1, BUG13_SINGLE_SLOT_MAX_FRAMES);
             return passed;
         }
 
         /// <summary>
-        /// K13d: the K13c stamp under seeded orders — completion order shuffled, per-frame budget and
-        /// stamp cadence derived from the seed — because a live-lock's trigger may be order-sensitive.
-        /// Sweeps both geometries; any failing seed reproduces its exact case deterministically.
-        /// Asserts TERMINATION only (Bug 13's property): under shuffled schedules the same stamp can
-        /// also settle into stale over-bright ghost light, which is a distinct defect — documented as
-        /// Bug 14 and asserted (oracle match) by its own scenario K14a in
+        /// B59: the B58 stamp under seeded orders — completion order shuffled, per-frame budget and
+        /// stamp cadence derived from the seed — because the pre-fix live-lock's trigger was
+        /// order-sensitive. Sweeps both geometries; any failing seed reproduces its exact case
+        /// deterministically. Asserts TERMINATION only: under shuffled schedules the same stamp can
+        /// also settle into stale over-bright ghost light, which is a distinct open defect — Bug 14,
+        /// asserted (oracle match) by its own scenario K14a in
         /// <c>LightingValidationSuite.Bug14Ghost.cs</c>.
         /// </summary>
-        private static bool KnownBug_Bug13DynamicStampSweep()
+        private static bool Baseline_Bug13DynamicStampSweep()
         {
             int? failingFull = SweepBug13DynamicStamp(BUG13_FULL_GRID,
                 BUG13_FULL_SLAB_MIN, BUG13_FULL_SLAB_MAX, BUG13_SWEEP_SEEDS_FULL);
-            bool passed = ReportBug13SweepOutcome("K13d (grid-3 full-grid slab)", failingFull, BUG13_SWEEP_SEEDS_FULL);
+            bool passed = ReportBug13SweepOutcome("B59 (grid-3 full-grid slab)", failingFull, BUG13_SWEEP_SEEDS_FULL);
 
             int? failingInset = SweepBug13DynamicStamp(BUG13_INSET_GRID,
                 BUG13_INSET_SLAB_MIN, BUG13_INSET_SLAB_MAX, BUG13_SWEEP_SEEDS_INSET);
-            passed &= ReportBug13SweepOutcome("K13d (grid-5 inset slab)", failingInset, BUG13_SWEEP_SEEDS_INSET);
+            passed &= ReportBug13SweepOutcome("B59 (grid-5 inset slab)", failingInset, BUG13_SWEEP_SEEDS_INSET);
 
             return passed;
         }
@@ -168,17 +176,19 @@ namespace Editor.Validation.Lighting
             int waves = world.RunInitialLightingParallel(BUG13_WAVE_MAX_ROUNDS);
             if (waves < 0)
             {
-                return Bug13ExpectedRed($"{label}: generation-wave initial lighting terminates",
+                return Bug13Fail($"{label}: generation-wave initial lighting terminates",
                     $"no convergence within {BUG13_WAVE_MAX_ROUNDS} waves. " +
-                    ClassifyBug13WaveNonConvergence(gridSize, slabMinChunk, slabMaxChunk));
+                    ClassifyBug13WaveNonConvergence(gridSize, slabMinChunk, slabMaxChunk),
+                    expectedRed: false);
             }
 
             Debug.Log($"[PASS] {label}: generation-wave initial lighting terminates ({waves} wave(s))");
 
             if (!LightingAssert.MatchesOracleQuiet(world, LightingOracle.Solve(world), out string summary))
             {
-                return Bug13ExpectedRed($"{label}: settled field matches the borderless oracle",
-                    $"{summary}. " + ClassifyBug13StaticMismatch(gridSize, slabMinChunk, slabMaxChunk));
+                return Bug13Fail($"{label}: settled field matches the borderless oracle",
+                    $"{summary}. " + ClassifyBug13StaticMismatch(gridSize, slabMinChunk, slabMaxChunk),
+                    expectedRed: false);
             }
 
             Debug.Log($"[PASS] {label}: settled field matches the borderless oracle");
@@ -186,7 +196,7 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// One deterministic K13c leg on the inset geometry: settle a slab-less world, then stamp and
+        /// One deterministic B58 leg on the inset geometry: settle a slab-less world, then stamp and
         /// converge under FIFO completion at the given budget.
         /// </summary>
         /// <param name="label">The console label for this leg.</param>
@@ -202,7 +212,7 @@ namespace Editor.Validation.Lighting
             LightingFrameSimulator sim = new LightingFrameSimulator(world);
             return RunBug13StampAndSettle(world, sim, BUG13_INSET_SLAB_MIN, BUG13_INSET_SLAB_MAX,
                 budget, LightingFrameSimulator.CompletionOrder.Fifo, BUG13_STAMP_FRAMES_BETWEEN,
-                maxFrames, label, logPass: true, assertOracle: true);
+                maxFrames, label, logPass: true, assertOracle: true, expectedRed: false);
         }
 
         /// <summary>
@@ -213,7 +223,7 @@ namespace Editor.Validation.Lighting
         /// <param name="slabMinChunk">Inclusive minimum slab chunk coordinate on both axes.</param>
         /// <param name="slabMaxChunk">Inclusive maximum slab chunk coordinate on both axes.</param>
         /// <param name="iterations">Number of seeds to try.</param>
-        /// <returns>The first failing seed, or null when every seed terminates on the oracle.</returns>
+        /// <returns>The first failing seed, or null when every seed terminates.</returns>
         private static int? SweepBug13DynamicStamp(int gridSize, int slabMinChunk, int slabMaxChunk, int iterations)
         {
             return LightingFrameSimulator.FindFailingSeed(
@@ -229,20 +239,20 @@ namespace Editor.Validation.Lighting
                     LightingFrameSimulator.CompletionOrder.Shuffled,
                     framesBetweenStamps: seed % 3,
                     BUG13_SIM_MAX_FRAMES,
-                    $"K13d seed {seed}", logPass: false,
+                    $"B59 seed {seed}", logPass: false,
                     // Termination only: shuffled schedules can also settle over-bright — that is Bug 14
                     // (stale ghost light), asserted by K14a, not part of Bug 13's live-lock property.
-                    assertOracle: false),
+                    assertOracle: false, expectedRed: false),
                 iterations: iterations);
         }
 
         /// <summary>
-        /// Shared stamp-and-converge body for K13c and K13d: stamps the slab chunk-by-chunk through the
-        /// player-edit path (256 <see cref="LightingTestWorld.PlaceBlock"/> calls per chunk — real
-        /// removal seeds, opacity-change column recalcs, incremental heightmap), running frame ticks
-        /// between stamps so later stamps land while earlier chunks' jobs are in flight, then asserts
-        /// the pipeline settles within the frame budget and matches the oracle. A non-settling run is
-        /// handed to the oscillation probe before being reported.
+        /// Shared stamp-and-converge body for B58/B59 and Bug 14's K14a: stamps the slab chunk-by-chunk
+        /// through the player-edit path (256 <see cref="LightingTestWorld.PlaceBlock"/> calls per chunk
+        /// — real removal seeds, opacity-change column recalcs, incremental heightmap), running frame
+        /// ticks between stamps so later stamps land while earlier chunks' jobs are in flight, then
+        /// asserts the pipeline settles within the frame budget (and, when asserted, matches the
+        /// oracle). A non-settling run is handed to the oscillation probe before being reported.
         /// </summary>
         /// <param name="world">The settled slab-less world to stamp.</param>
         /// <param name="sim">The frame simulator driving the world (seeded for shuffled orders).</param>
@@ -256,11 +266,14 @@ namespace Editor.Validation.Lighting
         /// <param name="logPass">When false, suppresses per-case PASS logs (sweep iterations).</param>
         /// <param name="assertOracle">When false, only termination is asserted — the settled field's
         /// oracle match is a separate property (over-bright residue under shuffled schedules is Bug 14,
-        /// guarded by K14a; Bug 13 owns the live-lock).</param>
+        /// guarded by K14a; the B58/B59 baselines own the live-lock).</param>
+        /// <param name="expectedRed">Failure-reporting mode: false for baselines (a failure is a
+        /// regression, logged as an error), true for known-bug callers like K14a (an expected
+        /// reproduction, logged as a warning).</param>
         /// <returns>True when the pipeline settles (and, when asserted, matches the oracle).</returns>
         private static bool RunBug13StampAndSettle(LightingTestWorld world, LightingFrameSimulator sim,
             int slabMinChunk, int slabMaxChunk, int budget, LightingFrameSimulator.CompletionOrder order,
-            int framesBetweenStamps, int maxFrames, string label, bool logPass, bool assertOracle)
+            int framesBetweenStamps, int maxFrames, string label, bool logPass, bool assertOracle, bool expectedRed)
         {
             for (int cx = slabMinChunk; cx <= slabMaxChunk; cx++)
             {
@@ -275,8 +288,9 @@ namespace Editor.Validation.Lighting
             int frames = sim.RunToConvergence(maxFrames, budget, order);
             if (frames < 0)
             {
-                return Bug13ExpectedRed($"{label}: pipeline settles after the slab stamp",
-                    $"work still pending after {maxFrames} frames. " + ProbeBug13Oscillation(world, sim, budget, order));
+                return Bug13Fail($"{label}: pipeline settles after the slab stamp",
+                    $"work still pending after {maxFrames} frames. " + ProbeBug13Oscillation(world, sim, budget, order),
+                    expectedRed);
             }
 
             if (logPass)
@@ -285,7 +299,7 @@ namespace Editor.Validation.Lighting
             if (assertOracle)
             {
                 if (!LightingAssert.MatchesOracleQuiet(world, LightingOracle.Solve(world), out string summary))
-                    return Bug13ExpectedRed($"{label}: settled field matches the borderless oracle", summary);
+                    return Bug13Fail($"{label}: settled field matches the borderless oracle", summary, expectedRed);
 
                 if (logPass)
                     Debug.Log($"[PASS] {label}: settled field matches the borderless oracle");
@@ -297,8 +311,8 @@ namespace Editor.Validation.Lighting
         // --- World building ---
 
         /// <summary>
-        /// Builds the Bug-13 slab world: a superflat stone floor (the stand-in for the terrain below
-        /// the in-game region) and, when <paramref name="includeSlab"/> is set, a 1-voxel-thick opaque
+        /// Builds the slab world: a superflat stone floor (the stand-in for the terrain below the
+        /// in-game region) and, when <paramref name="includeSlab"/> is set, a 1-voxel-thick opaque
         /// slab at y=<see cref="BUG13_SLAB_Y"/> spanning the given square chunk range. Heightmaps are
         /// recalculated; the world is returned un-lit.
         /// </summary>
@@ -459,8 +473,8 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// Reports one K13d sweep outcome: quiet-red on a failing seed (deterministically reproducible
-        /// by re-running that seed), PASS otherwise.
+        /// Reports one B59 sweep outcome: a failing seed is a regression (deterministically
+        /// reproducible by re-running that seed), PASS otherwise.
         /// </summary>
         /// <param name="label">The console label for the sweep.</param>
         /// <param name="failingSeed">The sweep result.</param>
@@ -474,22 +488,30 @@ namespace Editor.Validation.Lighting
                 return true;
             }
 
-            return Bug13ExpectedRed($"{label}: all {iterations} seeds terminate",
+            return Bug13Fail($"{label}: all {iterations} seeds terminate",
                 $"seed {failingSeed.Value} fails (budget {1 + failingSeed.Value % 4}, cadence {failingSeed.Value % 3} — " +
-                "re-run this seed to reproduce the exact case; details in the warning logged by that iteration).");
+                "re-run this seed to reproduce the exact case; details logged by that iteration).",
+                expectedRed: false);
         }
 
         /// <summary>
-        /// Expected-red reporting for the K13 known-bug scenarios: logs a <b>warning</b> — never
-        /// <c>LogError</c>, which the suite runner and its readers reserve for baseline regressions —
-        /// and returns false so the runner counts the scenario as a (expected) reproduction.
+        /// Failure reporting shared by the B56–B59 baselines and Bug 14's K14a: a baseline failure is a
+        /// regression and logs an error (<c>[FAIL]</c>); a known-bug caller passes
+        /// <paramref name="expectedRed"/> to log a warning instead (<c>[EXPECTED-RED]</c>) — the runner
+        /// and its readers reserve <c>LogError</c> for regressions.
         /// </summary>
         /// <param name="testName">The failed check's name.</param>
         /// <param name="detail">The failure detail, including any classifier/probe verdict.</param>
+        /// <param name="expectedRed">True when the caller is a known-bug scenario whose failure is the
+        /// expected reproduction.</param>
         /// <returns>Always false.</returns>
-        private static bool Bug13ExpectedRed(string testName, string detail)
+        private static bool Bug13Fail(string testName, string detail, bool expectedRed)
         {
-            Debug.LogWarning($"[EXPECTED-RED] {testName}\n{detail}");
+            if (expectedRed)
+                Debug.LogWarning($"[EXPECTED-RED] {testName}\n{detail}");
+            else
+                Debug.LogError($"[FAIL] {testName}\n{detail}");
+
             return false;
         }
     }

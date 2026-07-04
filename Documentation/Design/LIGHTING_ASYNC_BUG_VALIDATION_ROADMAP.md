@@ -54,8 +54,8 @@ Two additional facts ground the per-bug plans:
 
 - **Protocol:** the `validation-driven-bugfix` skill — deterministic repro first, prove-red
   before trusting green, promote repros to baselines after in-game confirmation.
-- **Numbering:** the lighting suite is at **B55**. New baselines take **B56+**. The retired
-  numbers B17–B21 / B23–B25 stay unused (fidelity §5).
+- **Numbering:** the lighting suite is at **B59** (B56–B59 = the promoted AS-1 slab family). New
+  baselines take **B60+**. The retired numbers B17–B21 / B23–B25 stay unused (fidelity §5).
 - **Expected-red scenarios** register via `AddKnownBugScenarios` in
   `Assets/Editor/Validation/Lighting/LightingValidationSuite.KnownBugs.cs` (reported as
   warnings, not regressions).

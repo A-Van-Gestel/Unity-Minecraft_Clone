@@ -336,6 +336,67 @@ via `SetSunlight`'s cross-chunk path). These are pinned as completeness baseline
 
 ---
 
+### ~~17. Large suspended opaque slab never settles (oscillating cross-chunk skylight)~~
+
+**Severity:** Medium
+**Fixed:** July 2026 (was Bug 13 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game (fluid-stress run with an opaque `BlockIDs.Stone` floor at
+`REGION_CHUNKS ≥ 3`: the previously-endless flashing between the placed floor and fluid slabs is gone, the
+substrate settle completes, and higher region counts no longer hang) and via the validation suite (repro flipped
+red→green with all baselines green). Promoted to baselines **B56–B59** from known-bug repros K13a–K13d, grouped in
+`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs` (B58 dynamic-stamp is
+the primary fix tripwire — the deterministic pre-fix live-lock).
+**Found by:** player report from the fluid-stress benchmark; first faithful repro built as roadmap item **AS-1**
+([LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)) — the sync-repro
+analysis that revised the earlier "needs the async wave" assumption.
+**Files:** `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`CrossChunkSunlightSupport`, the extended Bug-11
+veto), `Assets/Scripts/WorldJobManager.cs` (`ApplyCrossChunkLightMod` + emitter-carrying `DeferredLightMod`),
+mirrored in `Assets/Editor/Validation/Lighting/Framework/LightingTestWorld.cs`.
+
+**Description:**
+A large, flat **opaque** block layer (opacity 15) suspended in otherwise sky-lit air and **spanning a contiguous
+multi-chunk region** never reached a stable lighting state. The columns directly under the slab are shadowed while
+the surrounding air stays full-bright, so light spills in from the slab's perimeter and forms a cross-chunk skylight
+gradient beneath it. That gradient **oscillated / never converged**: the lighting jobs kept re-scheduling so
+`WorldJobManager.HasActiveJobs` never returned to `false`, and in the scene view the slab's lit surfaces visibly
+**flickered** (light values churning frame-to-frame) rather than settling. Distinct from Bug 05 (wrong-but-static
+shadow patches): here the system reached **no fixed point at all** — a live-lock, not a static artifact.
+
+**Root Cause (confirmed 2026-07-04, via the repro + oscillation probe + emit-neuter attribution):**
+Not the edge-check rounds as originally suspected — a **mutual-removal machine between the Bug 12 cross-seam
+removal initiator and the Bug 11 veto's in-chunk-only support model**, at the slab region's interior seams. The
+under-slab gradient is *perimeter-fed*: a border voxel V in slab chunk A holds sky 14 supplied across a
+*different* seam by the sky-lit ring chunk — support the Bug 11 veto (`InChunkSunlightSupport`) cannot see,
+because it deliberately credits only in-chunk neighbors (V's in-chunk best is 13 < 14 → no veto). Meanwhile the
+adjacent slab chunk B's darkness wave sees V at exactly the removed level, not sky-lit — the Bug 12
+mutual-2-cycle signature — and emits a removal at it. The removal applies (no veto), V's chunk re-lights V via
+the seam pull-back from the ring's live 15, the re-spread crosses back into B as uplift mods, B's next pass
+emits the same removal again: a **period-2 live-lock** (the probe showed the light field hash-repeating with a
+cycle length of 1–2 while work stayed pending, across all 8 ring chunks of the slab, y 11–99). Neutering the
+Bug 12 emit converged the repro in 2 frames — the attribution test.
+
+**Fix (July 2026):** the Bug 11 veto's support model was extended to match reality: independent support is now
+the max of (a) in-chunk neighbors (unchanged) and (b) **live cross-chunk neighbors in chunks other than the
+emitter** (`CrossChunkLightModApplier.CrossChunkSunlightSupport`). Live main-thread data is trustworthy —
+staleness was only ever a property of the *emitting job's snapshot* — and excluding the emitting chunk preserves
+Bug 12's collapse of genuine sourceless seam loops (the emitter is exactly the possibly-stale mutual-loop side,
+and that loop pair has no third-party feed, so B53 stays guarded). Deferred cross-chunk mods now carry their
+emitter's origin (`WorldJobManager.DeferredLightMod`, mirrored in the harness) so the exclusion survives the
+defer/drain path. The perimeter-fed seam voxel is now vetoed instead of cleared, the counter-wave never launches,
+and the machine winds down. An emitter-side snapshot guard on the Bug 12 emit was tried first and rejected: it
+also suppressed load-bearing initiators whose "supporter" was itself ghost light, worsening the stale-ghost
+residue (see the open **Bug 14**, the terminating over-bright sibling this repro also surfaced).
+
+**Validation suite:** first faithful repro was synchronous (AS-1, 2026-07-04): the B58 geometry (grid 5, slab =
+center 3×3 chunks inside a sky-lit 16-chunk ring — the harness grid edge is the world edge, so an inset slab is
+required to model the perimeter feed) live-locked under unlimited-budget and single-slot scheduling with a proven
+period-2 field cycle; the seeded-shuffle sweep (B59) live-locked on other seeds. Generation-wave variants
+(B56/B57) were green pre-fix — the live-lock required the dynamic player-edit stamp against an established bright
+field, not the initial wave. Post-fix: all four green with every prior baseline green (including B48/B50–B55, the
+Bug 11/12 family the extended veto touches).
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

@@ -87,6 +87,11 @@ namespace Editor.Validation.Lighting
             // --- C3 cross-chunk sunlight darkening family (B54 in-flight race, B55 steady-state) lives in
             // Baselines/LightingValidationSuite.Baseline.C3Darkening.cs and self-registers here. ---
             AddCrossChunkDarkeningBaselineScenarios(scenarios);
+
+            // --- Bug 13 suspended-slab family (B56/B57 generation-wave, B58/B59 dynamic-stamp fix
+            // tripwires; promoted from K13a-K13d) lives in
+            // Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs and self-registers here. ---
+            AddBug13SlabBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
@@ -96,6 +101,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the C3 cross-chunk sunlight darkening baselines (implemented in Baselines/LightingValidationSuite.Baseline.C3Darkening.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCrossChunkDarkeningBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-13 suspended-slab baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug13SlabBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1: A torch placed mid-air in an empty world. Exercises in-chunk RGB placement BFS and
