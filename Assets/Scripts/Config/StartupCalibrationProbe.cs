@@ -13,6 +13,9 @@ using Unity.Jobs;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
+// ReSharper disable HeuristicUnreachableCode
+#pragma warning disable CS0162 // Unreachable code detected
+
 namespace Config
 {
     /// <summary>
