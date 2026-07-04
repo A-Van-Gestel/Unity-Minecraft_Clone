@@ -132,12 +132,24 @@ solidity, geometry, or the throttled stamp).
 solid (opacity 0) over an opaque one. Naturally this also affects player-built large flat opaque roofs spanning chunk
 borders.
 
-**Validation suite:** no faithful failing repro scenario yet — but a synchronous repro is now **believed feasible**
-(2026-07-03 analysis, revising the earlier assumption that this needs the async wave): the suspected mechanism is
-entirely main-thread orchestration logic the harness *shares* with production (`LightingJobProcessor.IsEffectivelyStable`
-re-flagging, cross-chunk mod wake-ups, real edge-round flags), and the in-game repro is already deterministic —
-deterministic non-termination is a logic property, not a race. The scenario (opaque slab spanning all chunks at y≈100
-over a superflat floor; assert `RunToConvergence != -1` under seeded orders/budgets, plus a dynamic-stamp variant
-matching the stress harness) is fully specced as **AS-1** in
-[LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) — the highest-value,
-lowest-effort item on that roadmap. Fix was **out of scope** for the session that filed this (2026-06-23).
+**Validation suite:** **REPRODUCED SYNCHRONOUSLY** (2026-07-04, roadmap item **AS-1** of
+[LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)) — known-bug scenarios
+**K13a–K13d** in `Assets/Editor/Validation/Lighting/LightingValidationSuite.Bug13Slab.cs`, registered expected-red.
+The **dynamic-stamp** variants — faithful to this repro (slab stamped through the player-edit path onto an
+already-settled world) — are **red**:
+
+- **K13c** (grid 5, slab = center 3×3 chunks inside a sky-lit 16-chunk ring): never settles under unlimited-budget
+  (500 frames) *or* single-slot (1500 frames) scheduling, and the hash-based oscillation probe confirms the light
+  field **repeats an exact cycle** (length 1–2) while work stays pending — a live-lock (no fixed point), not slow
+  convergence. This is the first mechanical confirmation of the bug's "no fixed point" hypothesis.
+- **K13d** (seeded completion-shuffle + budget/cadence sweep): fails on both geometries. Grid-5 inset seed 0
+  live-locks like K13c; grid-3 full-grid seed 1 instead **settles on a massively wrong field** (~32.7k voxels
+  over-bright vs the oracle, worst +14 sky) — the same stamp can also terminate into static ghost light, a
+  Bug-05-shaped outcome, suggesting the two bugs are two exits of one reconciliation defect.
+
+The **generation-wave** variants (**K13a/K13b**, slab already present during initial lighting) are **green** — the
+live-lock requires the dynamic-stamp path (player-edit removal seeds + opacity-change column recalcs against an
+established bright field), not the initial wave. All 47 baseline scenarios stay green alongside the repro.
+Next: fix per `validation-driven-bugfix` (red→green with all baselines green), then promote the K13 scenarios to
+baselines **B56+** after in-game confirmation on the fluid-stress opaque-floor config. Fix was **out of scope** for
+the session that filed this (2026-06-23) and for the AS-1 repro session (2026-07-04).

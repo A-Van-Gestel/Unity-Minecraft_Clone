@@ -1,6 +1,7 @@
 # Lighting Async-Bug Validation Roadmap (AS-1 … AS-5)
 
-> **Status:** Proposal / planning — **no item below is implemented.**
+> **Status:** In progress — **AS-1 implemented 2026-07-04 and RED** (first faithful synchronous Bug-13
+> repro; see §3 outcome). AS-2 … AS-5 remain proposals.
 > **Created:** 2026-07-03 (async-testability analysis session, repo @ `a458173`)
 > **Scope:** making the async-flavored open lighting bugs (**Bug 05 / Bug 09 / Bug 13**,
 > [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)) testable, and closing the async surfaces the
@@ -133,6 +134,27 @@ per-op `LastEff*` breakdown, `WorldJobManager.cs:899-905` / `996-1002`).
   remainder), fluid re-flow mods, real per-frame budgets, `PromoteAll` cadence (AS-2) — then
   instrument the in-game `FluidStressController` repro (opaque floor) with the existing
   `Last*` counters to identify which event the sim lacks. Update fidelity doc accordingly.
+
+**Outcome (2026-07-04): RED — implemented as K13a–K13d in
+`Assets/Editor/Validation/Lighting/LightingValidationSuite.Bug13Slab.cs`** (at the suite root per the
+`Bug05Canopy`/`Bug09Fuzz` convention for bug-targeted files, not the `Baselines/` path drafted above —
+that name applies after promotion). Implementation deltas from the spec, and results:
+
+- **Geometry:** the harness grid boundary IS the world boundary (out-of-grid mods are dropped), so the
+  drafted "slab spanning all chunks" has NO lit perimeter — but the in-game gradient is perimeter-fed
+  (the 5×5-chunk stamp sits inside a larger loaded world). An **inset** config was added: grid 5, slab =
+  centre 3×3 chunks inside a sky-lit 16-chunk ring. Both configs were authored.
+- **K13a/K13b (generation-wave, both geometries): GREEN** — slab-from-the-start initial lighting
+  terminates (4–5 waves) on the oracle. The live-lock needs the dynamic stamp, not the initial wave.
+- **K13c (dynamic stamp onto a settled world, inset geometry): RED** — never settles under unlimited
+  (500 frames) or single-slot (1500 frames) budgets; a hash-based oscillation probe confirms the field
+  **repeats an exact cycle (length 1–2) while work stays pending** — live-lock proven, not slow
+  convergence (budget-escalation and forced-edge-round classifiers are built into the scenarios).
+- **K13d (seeded shuffle/budget sweep): RED on both geometries** — grid-5 inset seed 0 live-locks;
+  grid-3 full-grid seed 1 instead SETTLES ~32.7k voxels over-bright (worst +14 sky): the same stamp can
+  also exit into static ghost light, a Bug-05-shaped terminal state.
+- All 47 baselines stayed green. Next step: `validation-driven-bugfix` on Bug 13 using K13c as the
+  primary red, then promote to B56+ after in-game confirmation.
 
 ---
 
