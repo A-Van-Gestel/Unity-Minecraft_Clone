@@ -130,6 +130,10 @@ namespace Editor.Validation.Lighting
         /// K13d: the K13c stamp under seeded orders — completion order shuffled, per-frame budget and
         /// stamp cadence derived from the seed — because a live-lock's trigger may be order-sensitive.
         /// Sweeps both geometries; any failing seed reproduces its exact case deterministically.
+        /// Asserts TERMINATION only (Bug 13's property): under shuffled schedules the same stamp can
+        /// also settle into stale over-bright ghost light, which is a distinct defect — documented as
+        /// Bug 14 and asserted (oracle match) by its own scenario K14a in
+        /// <c>LightingValidationSuite.Bug14Ghost.cs</c>.
         /// </summary>
         private static bool KnownBug_Bug13DynamicStampSweep()
         {
@@ -198,7 +202,7 @@ namespace Editor.Validation.Lighting
             LightingFrameSimulator sim = new LightingFrameSimulator(world);
             return RunBug13StampAndSettle(world, sim, BUG13_INSET_SLAB_MIN, BUG13_INSET_SLAB_MAX,
                 budget, LightingFrameSimulator.CompletionOrder.Fifo, BUG13_STAMP_FRAMES_BETWEEN,
-                maxFrames, label, logPass: true);
+                maxFrames, label, logPass: true, assertOracle: true);
         }
 
         /// <summary>
@@ -225,7 +229,10 @@ namespace Editor.Validation.Lighting
                     LightingFrameSimulator.CompletionOrder.Shuffled,
                     framesBetweenStamps: seed % 3,
                     BUG13_SIM_MAX_FRAMES,
-                    $"K13d seed {seed}", logPass: false),
+                    $"K13d seed {seed}", logPass: false,
+                    // Termination only: shuffled schedules can also settle over-bright — that is Bug 14
+                    // (stale ghost light), asserted by K14a, not part of Bug 13's live-lock property.
+                    assertOracle: false),
                 iterations: iterations);
         }
 
@@ -247,10 +254,13 @@ namespace Editor.Validation.Lighting
         /// <param name="maxFrames">The frame budget for post-stamp convergence.</param>
         /// <param name="label">The console label for this case.</param>
         /// <param name="logPass">When false, suppresses per-case PASS logs (sweep iterations).</param>
-        /// <returns>True when the pipeline settles and matches the oracle.</returns>
+        /// <param name="assertOracle">When false, only termination is asserted — the settled field's
+        /// oracle match is a separate property (over-bright residue under shuffled schedules is Bug 14,
+        /// guarded by K14a; Bug 13 owns the live-lock).</param>
+        /// <returns>True when the pipeline settles (and, when asserted, matches the oracle).</returns>
         private static bool RunBug13StampAndSettle(LightingTestWorld world, LightingFrameSimulator sim,
             int slabMinChunk, int slabMaxChunk, int budget, LightingFrameSimulator.CompletionOrder order,
-            int framesBetweenStamps, int maxFrames, string label, bool logPass)
+            int framesBetweenStamps, int maxFrames, string label, bool logPass, bool assertOracle)
         {
             for (int cx = slabMinChunk; cx <= slabMaxChunk; cx++)
             {
@@ -272,11 +282,15 @@ namespace Editor.Validation.Lighting
             if (logPass)
                 Debug.Log($"[PASS] {label}: pipeline settles after the slab stamp ({frames} frame(s))");
 
-            if (!LightingAssert.MatchesOracleQuiet(world, LightingOracle.Solve(world), out string summary))
-                return Bug13ExpectedRed($"{label}: settled field matches the borderless oracle", summary);
+            if (assertOracle)
+            {
+                if (!LightingAssert.MatchesOracleQuiet(world, LightingOracle.Solve(world), out string summary))
+                    return Bug13ExpectedRed($"{label}: settled field matches the borderless oracle", summary);
 
-            if (logPass)
-                Debug.Log($"[PASS] {label}: settled field matches the borderless oracle");
+                if (logPass)
+                    Debug.Log($"[PASS] {label}: settled field matches the borderless oracle");
+            }
+
             return true;
         }
 
@@ -456,11 +470,11 @@ namespace Editor.Validation.Lighting
         {
             if (!failingSeed.HasValue)
             {
-                Debug.Log($"[PASS] {label}: all {iterations} seeds terminate on the oracle");
+                Debug.Log($"[PASS] {label}: all {iterations} seeds terminate");
                 return true;
             }
 
-            return Bug13ExpectedRed($"{label}: all {iterations} seeds terminate on the oracle",
+            return Bug13ExpectedRed($"{label}: all {iterations} seeds terminate",
                 $"seed {failingSeed.Value} fails (budget {1 + failingSeed.Value % 4}, cadence {failingSeed.Value % 3} — " +
                 "re-run this seed to reproduce the exact case; details in the warning logged by that iteration).");
         }

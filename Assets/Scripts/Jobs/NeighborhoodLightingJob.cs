@@ -457,6 +457,12 @@ namespace Jobs
                         // light-propagation loop, and clearing its cross-seam surface value here would
                         // perturb a sky-exposed wall/floor. Without these guards this would spuriously clear
                         // ordinary sky-lit border voxels whenever a shadow's darkness wave reaches a seam.
+                        // A neighbor that this heuristic wrongly suspects (it IS independently fed, e.g. by
+                        // a sky-lit chunk on its far side) is protected on the apply side instead: the Bug 11
+                        // veto also credits LIVE cross-chunk support from chunks other than this emitter
+                        // (CrossChunkLightModApplier.CrossChunkSunlightSupport, the Bug 13 fix) — emitting
+                        // here from the stale snapshot and adjudicating there against live data keeps the
+                        // initiator aggressive without livelocking perimeter-fed seams.
                         if (neighborLight == node.LightLevel
                             && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque
                             && !IsVerticallySkyLit(neighborPos, neighborPacked))

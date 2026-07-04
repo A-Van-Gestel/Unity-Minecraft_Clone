@@ -32,6 +32,7 @@ namespace Editor.Validation.Lighting
         {
             // Bug 05 and Bug 09 still need faithful repros (see notes above).
             AddBug13SlabKnownBugScenarios(scenarios);
+            AddBug14GhostKnownBugScenarios(scenarios);
         }
 
         /// <summary>
@@ -40,5 +41,12 @@ namespace Editor.Validation.Lighting
         /// </summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug13SlabKnownBugScenarios(List<Scenario> scenarios);
+
+        /// <summary>
+        /// Registers the Bug-14 stale-ghost-light scenario (K14a, found by the K13d sweep;
+        /// implemented in <c>LightingValidationSuite.Bug14Ghost.cs</c>).
+        /// </summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug14GhostKnownBugScenarios(List<Scenario> scenarios);
     }
 }

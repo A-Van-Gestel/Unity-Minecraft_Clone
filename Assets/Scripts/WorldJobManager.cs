@@ -28,6 +28,11 @@ public class WorldJobManager : IDisposable
     // sunlight)? Allocated once so ApplyCrossChunkLightMod doesn't churn a closure per cross-chunk mod.
     private readonly Func<ushort, bool> _isBlockFullyOpaque;
 
+    // Cached lookup for the veto's live third-party support scan (CrossChunkLightModApplier.
+    // CrossChunkSunlightSupport, the Bug 13 fix): chunk voxel origin -> live populated ChunkData, or
+    // null when absent. Allocated once so ApplyCrossChunkLightMod doesn't churn a closure per mod.
+    private readonly Func<Vector2Int, ChunkData> _getLoadedChunkByOrigin;
+
     #region Job Tracking Dictionaries
 
     public Dictionary<ChunkCoord, GenerationJobData> GenerationJobs { get; } = new Dictionary<ChunkCoord, GenerationJobData>();
@@ -118,12 +123,35 @@ public class WorldJobManager : IDisposable
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
     private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _droppedLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
 
+    /// <summary>
+    /// A cross-chunk light modification deferred while its target's job was in flight, paired with the
+    /// voxel origin of the chunk whose job emitted it — the Bug 13 live-support veto must still exclude
+    /// the emitter when the mod is finally drained on a later pass.
+    /// </summary>
+    private readonly struct DeferredLightMod
+    {
+        /// <summary>The emitting chunk's voxel origin (world XZ).</summary>
+        public readonly Vector2Int EmitterOriginXZ;
+
+        /// <summary>The deferred cross-chunk modification.</summary>
+        public readonly LightModification Mod;
+
+        /// <summary>Initializes a deferred modification record.</summary>
+        /// <param name="emitterOriginXZ">The emitting chunk's voxel origin (world XZ).</param>
+        /// <param name="mod">The deferred cross-chunk modification.</param>
+        public DeferredLightMod(Vector2Int emitterOriginXZ, in LightModification mod)
+        {
+            EmitterOriginXZ = emitterOriginXZ;
+            Mod = mod;
+        }
+    }
+
     // Cross-chunk light mods whose target chunk had its own lighting job in flight at apply time.
     // Applying them immediately would be overwritten by that job's full-LightMap merge and the
     // surviving wake-up node would become a no-op — losing the mod permanently (Bug 08, path 2).
     // They are drained right after the target's merge instead. Persists across frames: the
     // target's job may complete on a later frame than the emitter's.
-    private readonly Dictionary<ChunkCoord, List<LightModification>> _deferredCrossChunkMods = new Dictionary<ChunkCoord, List<LightModification>>();
+    private readonly Dictionary<ChunkCoord, List<DeferredLightMod>> _deferredCrossChunkMods = new Dictionary<ChunkCoord, List<DeferredLightMod>>();
 
     #region Constructor
 
@@ -139,6 +167,12 @@ public class WorldJobManager : IDisposable
     {
         _world = world;
         _isBlockFullyOpaque = id => _world.BlockTypes[id].IsOpaque;
+        _getLoadedChunkByOrigin = originXZ =>
+        {
+            if (!World.IsChunkInWorld(ChunkCoord.FromVoxelOrigin(originXZ))) return null;
+            ChunkData chunk = _world.worldData.RequestChunk(originXZ, false);
+            return chunk != null && chunk.IsPopulated ? chunk : null;
+        };
 
         // Strategy Factory.
         // NOTE: This is the SINGLE intentional exception to the "zero legacy references"
@@ -942,6 +976,10 @@ public class WorldJobManager : IDisposable
                     // (Bug 08, path 2). Their wake-up nodes flag the chunk for another lighting pass.
                     DrainDeferredCrossChunkMods(jobEntry.Key, chunkData);
 
+                    // The emitting chunk's voxel origin — excluded from the Bug 13 live-support veto
+                    // (its data is exactly the stale side the removal mods came from).
+                    Vector2Int emitterOriginXZ = jobEntry.Key.ToVoxelOrigin();
+
                     foreach (LightModification mod in jobData.Mods)
                     {
                         Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
@@ -984,13 +1022,13 @@ public class WorldJobManager : IDisposable
                             case LightingJobProcessor.CrossChunkModRoute.Defer:
                                 // Applying now would be overwritten by the target's own full-LightMap
                                 // merge — defer; drained right after that merge (DrainDeferredCrossChunkMods).
-                                if (!_deferredCrossChunkMods.TryGetValue(neighborChunkCoord, out List<LightModification> deferredList))
+                                if (!_deferredCrossChunkMods.TryGetValue(neighborChunkCoord, out List<DeferredLightMod> deferredList))
                                 {
-                                    deferredList = ListPool<LightModification>.Get();
+                                    deferredList = ListPool<DeferredLightMod>.Get();
                                     _deferredCrossChunkMods[neighborChunkCoord] = deferredList;
                                 }
 
-                                deferredList.Add(mod);
+                                deferredList.Add(new DeferredLightMod(emitterOriginXZ, in mod));
                                 continue;
 
                             case LightingJobProcessor.CrossChunkModRoute.ApplyDirect:
@@ -999,7 +1037,7 @@ public class WorldJobManager : IDisposable
                                 // neighbor (plus channel/op breakdown + a sample) to characterize the
                                 // §4.2 non-convergence mode.
                                 LastCrossChunkModsApplyRouted++;
-                                ApplyCrossChunkLightMod(neighborChunk, in mod);
+                                ApplyCrossChunkLightMod(neighborChunk, in mod, emitterOriginXZ);
                                 continue;
                         }
                     }
@@ -1110,29 +1148,36 @@ public class WorldJobManager : IDisposable
     /// </summary>
     /// <param name="targetChunk">The populated chunk the modification targets.</param>
     /// <param name="mod">The cross-chunk modification emitted by a neighbor's lighting job.</param>
+    /// <param name="emitterOriginXZ">The emitting chunk's voxel origin — excluded from the live
+    /// cross-chunk support scan (its data is the stale side the mod came from).</param>
     /// <returns>True if the modification changed the target's light (and enqueued a BFS wake-up node);
     /// false if it was a no-op against the target's current value.</returns>
-    private bool ApplyCrossChunkLightMod(ChunkData targetChunk, in LightModification mod)
+    private bool ApplyCrossChunkLightMod(ChunkData targetChunk, in LightModification mod, Vector2Int emitterOriginXZ)
     {
         Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
 
         ushort currentLight = targetChunk.GetLightData(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z);
-        // Only sunlight REMOVALs (LightLevel == 0) consult in-chunk support — see
-        // CrossChunkLightModApplier.ComputeSunlight. Skip the 6-neighbor scan for placements/uplifts
+        // Only sunlight REMOVALs (LightLevel == 0) consult independent support — see
+        // CrossChunkLightModApplier.ComputeSunlight. Skip the neighbor scans for placements/uplifts
         // (the common case during initial-load sunlight propagation), whose decision ignores it.
-        byte inChunkSunSupport = 0;
+        byte independentSunSupport = 0;
         if (mod.Channel == LightChannel.Sun && mod.LightLevel == 0)
         {
             // Support is attenuated by the target voxel's own opacity (the light enters it), matching
             // NeighborhoodLightingJob.AttenuateLight — a flat air step would over-estimate support into
-            // semi-transparent media and wrongly veto a legitimate removal.
+            // semi-transparent media and wrongly veto a legitimate removal. Independent support is the
+            // max of in-chunk neighbors (Bug 11) and live third-party cross-chunk neighbors (Bug 13).
             ushort targetId = BurstVoxelDataBitMapping.GetId(
                 targetChunk.GetVoxel(localVoxelPos.x, localVoxelPos.y, localVoxelPos.z));
             byte targetOpacity = _world.BlockTypes[targetId].opacity;
-            inChunkSunSupport = CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos, targetOpacity, _isBlockFullyOpaque);
+            byte inChunk = CrossChunkLightModApplier.InChunkSunlightSupport(targetChunk, localVoxelPos, targetOpacity, _isBlockFullyOpaque);
+            byte crossChunk = CrossChunkLightModApplier.CrossChunkSunlightSupport(
+                _world.worldData.GetChunkCoordFor(mod.GlobalPosition), localVoxelPos, targetOpacity,
+                emitterOriginXZ, _getLoadedChunkByOrigin, _isBlockFullyOpaque);
+            independentSunSupport = Math.Max(inChunk, crossChunk);
         }
 
-        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, inChunkSunSupport);
+        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod, independentSunSupport);
 
         if (!decision.ShouldApply)
         {
@@ -1200,14 +1245,14 @@ public class WorldJobManager : IDisposable
     /// <param name="chunkData">The chunk's live data.</param>
     private void DrainDeferredCrossChunkMods(ChunkCoord chunkCoord, ChunkData chunkData)
     {
-        if (!_deferredCrossChunkMods.Remove(chunkCoord, out List<LightModification> deferred)) return;
+        if (!_deferredCrossChunkMods.Remove(chunkCoord, out List<DeferredLightMod> deferred)) return;
 
-        foreach (LightModification mod in deferred)
+        foreach (DeferredLightMod deferredMod in deferred)
         {
-            ApplyCrossChunkLightMod(chunkData, in mod);
+            ApplyCrossChunkLightMod(chunkData, in deferredMod.Mod, deferredMod.EmitterOriginXZ);
         }
 
-        ListPool<LightModification>.Release(deferred);
+        ListPool<DeferredLightMod>.Release(deferred);
     }
 
     /// <summary>
@@ -1219,14 +1264,14 @@ public class WorldJobManager : IDisposable
     /// <param name="chunkCoord">The chunk whose deferred mods can no longer be drained.</param>
     private void DegradeDeferredCrossChunkMods(ChunkCoord chunkCoord)
     {
-        if (!_deferredCrossChunkMods.Remove(chunkCoord, out List<LightModification> deferred)) return;
+        if (!_deferredCrossChunkMods.Remove(chunkCoord, out List<DeferredLightMod> deferred)) return;
 
-        foreach (LightModification mod in deferred)
+        foreach (DeferredLightMod deferredMod in deferred)
         {
-            PersistUndeliverableLightMod(chunkCoord, in mod);
+            PersistUndeliverableLightMod(chunkCoord, in deferredMod.Mod);
         }
 
-        ListPool<LightModification>.Release(deferred);
+        ListPool<DeferredLightMod>.Release(deferred);
     }
 
     /// <summary>
@@ -1316,9 +1361,9 @@ public class WorldJobManager : IDisposable
 
         // In-flight lighting results are discarded wholesale at shutdown, so mods deferred for
         // those jobs are dropped with them — release the pooled lists.
-        foreach (List<LightModification> deferred in _deferredCrossChunkMods.Values)
+        foreach (List<DeferredLightMod> deferred in _deferredCrossChunkMods.Values)
         {
-            ListPool<LightModification>.Release(deferred);
+            ListPool<DeferredLightMod>.Release(deferred);
         }
 
         _deferredCrossChunkMods.Clear();

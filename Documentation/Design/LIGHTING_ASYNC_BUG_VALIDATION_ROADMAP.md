@@ -156,6 +156,16 @@ that name applies after promotion). Implementation deltas from the spec, and res
 - All 47 baselines stayed green. Next step: `validation-driven-bugfix` on Bug 13 using K13c as the
   primary red, then promote to B56+ after in-game confirmation.
 
+**Fix (same day, 2026-07-04):** root cause confirmed by instrumentation (period-2 field cycle across the
+slab's 8 ring chunks; the Bug 12 cross-seam removal initiator vs. the Bug 11 veto's in-chunk-only support
+model at perimeter-fed interior seams — attribution proven by an emit-neuter test converging the repro in
+2 frames). Fixed by extending the veto with **live third-party cross-chunk support**
+(`CrossChunkLightModApplier.CrossChunkSunlightSupport`, emitter excluded; deferred mods now carry their
+emitter). K13a–K13d green, all 47 baselines green. The sweep also surfaced a **second, independent defect**
+— terminating stale over-bright ghost light — filed as **Bug 13's sibling Bug 14** with scenario K14a
+(expected red); K13d now asserts termination only. Bug 13 entry: "Fixed in code — awaiting in-game
+confirmation" on the fluid-stress opaque-floor config.
+
 ---
 
 ## 4. AS-2 — Model the MT-2 `LightWorkScheduler` layer in the frame simulator

@@ -68,10 +68,10 @@ namespace Helpers
         /// <param name="currentLight">The voxel's current packed ushort light value.</param>
         /// <param name="mod">The cross-chunk modification emitted by the lighting job.</param>
         /// <returns>The apply decision, including the new light value and wake-up node old values.</returns>
-        public static ApplyDecision Compute(ushort currentLight, in LightModification mod, byte inChunkSunlightSupport = 0)
+        public static ApplyDecision Compute(ushort currentLight, in LightModification mod, byte independentSunlightSupport = 0)
         {
             return mod.Channel == LightChannel.Sun
-                ? ComputeSunlight(currentLight, mod.LightLevel, inChunkSunlightSupport)
+                ? ComputeSunlight(currentLight, mod.LightLevel, independentSunlightSupport)
                 : ComputeBlocklight(currentLight, mod.BlockR, mod.BlockG, mod.BlockB, mod.IsRemoval);
         }
 
@@ -136,12 +136,78 @@ namespace Helpers
         }
 
         /// <summary>
+        /// The strongest sky light a <b>live cross-chunk</b> neighbor of the target voxel — in a chunk
+        /// OTHER than the one that emitted the removal — could still supply it, attenuated by the entry
+        /// cost. Completes the Bug 11 veto for voxels whose genuine support crosses a <i>different</i>
+        /// seam (the Bug 13 live-lock): a border voxel fed by a sky-lit chunk on its far side (the
+        /// perimeter gradient under a multi-chunk opaque slab) has no in-chunk support ≥ its value, so
+        /// the in-chunk veto alone let the Bug 12 cross-seam removal initiator clear it every pass — the
+        /// seam pull-back then re-lit it, and the pair oscillated forever. Live main-thread data is
+        /// trustworthy (unlike the emitter's schedule-time snapshot). The <b>emitting</b> chunk itself is
+        /// excluded: it is exactly the possibly-stale mutual-loop side the removal is trying to collapse,
+        /// and crediting it would re-arm Bug 12.
+        /// </summary>
+        /// <param name="targetChunkOriginXZ">The receiving chunk's voxel origin (world XZ).</param>
+        /// <param name="localPos">The local voxel position the modification targets.</param>
+        /// <param name="targetOpacity">The opacity of the target voxel (entry cost, minimum 1).</param>
+        /// <param name="emitterChunkOriginXZ">The voxel origin of the chunk whose job emitted the mod.</param>
+        /// <param name="getLoadedChunk">Lookup from a chunk voxel origin (world XZ) to its live,
+        /// populated <see cref="ChunkData"/>, or null when absent/unloaded. Supplied by the caller
+        /// (world store vs. harness grid); cache the delegate to avoid per-mod closures.</param>
+        /// <param name="isBlockFullyOpaque">Predicate returning true when a block id is fully opaque
+        /// (opacity ≥ 15) and therefore cannot propagate sunlight.</param>
+        /// <returns>The maximum attenuated sky a live third-party cross-chunk neighbor supports (0 if none).</returns>
+        public static byte CrossChunkSunlightSupport(Vector2Int targetChunkOriginXZ, Vector3Int localPos,
+            byte targetOpacity, Vector2Int emitterChunkOriginXZ,
+            Func<Vector2Int, ChunkData> getLoadedChunk, Func<ushort, bool> isBlockFullyOpaque)
+        {
+            byte best = 0;
+            for (int i = 0; i < 6; i++)
+            {
+                Vector3Int dir = VoxelData.FaceChecks[i];
+                if (dir.y != 0) continue; // vertical neighbors never cross a chunk boundary
+
+                Vector3Int n = localPos + dir;
+                if (n.x >= 0 && n.x < VoxelData.ChunkWidth &&
+                    n.z >= 0 && n.z < VoxelData.ChunkWidth)
+                    continue; // in-chunk neighbors are InChunkSunlightSupport's job
+
+                Vector2Int ownerOrigin = targetChunkOriginXZ + new Vector2Int(dir.x, dir.z) * VoxelData.ChunkWidth;
+                if (ownerOrigin == emitterChunkOriginXZ) continue; // the emitter is the untrusted side
+
+                ChunkData owner = getLoadedChunk(ownerOrigin);
+                if (owner == null) continue;
+
+                // Wrap the stepped position into the owning chunk's local space (only the stepped axis moved).
+                int lx = n.x - dir.x * VoxelData.ChunkWidth;
+                int lz = n.z - dir.z * VoxelData.ChunkWidth;
+
+                byte s = LightBitMapping.GetSkyLight(owner.GetLightData(lx, n.y, lz));
+                byte support = LightAttenuation.Attenuate(s, targetOpacity);
+                if (support <= best)
+                    continue; // can't improve the best support — skip the voxel read + opacity check
+
+                // A fully-opaque neighbor cannot propagate sunlight — its stored sky is not real support.
+                ushort neighborId = BurstVoxelDataBitMapping.GetId(owner.GetVoxel(lx, n.y, lz));
+                if (isBlockFullyOpaque(neighborId))
+                    continue;
+
+                best = support;
+            }
+
+            return best;
+        }
+
+        /// <summary>
         /// Evaluates a cross-chunk sunlight modification.
         /// </summary>
         /// <param name="currentLight">The voxel's current packed ushort light value.</param>
         /// <param name="modLightLevel">The sunlight level the modification wants to set (0-15).</param>
+        /// <param name="independentSunlightSupport">The strongest attenuated sky an independent source
+        /// still supplies the voxel — max of <see cref="InChunkSunlightSupport"/> (Bug 11) and
+        /// <see cref="CrossChunkSunlightSupport"/> (Bug 13). Consulted only by removals (level 0).</param>
         /// <returns>The apply decision, including the new light value and wake-up node old values.</returns>
-        public static ApplyDecision ComputeSunlight(ushort currentLight, byte modLightLevel, byte inChunkSunlightSupport = 0)
+        public static ApplyDecision ComputeSunlight(ushort currentLight, byte modLightLevel, byte independentSunlightSupport = 0)
         {
             byte currentSunlight = LightBitMapping.GetSkyLight(currentLight);
 
@@ -165,16 +231,20 @@ namespace Helpers
                 return ApplyDecision.Skip;
             }
 
-            // Bug 11 guard: a cross-chunk sunlight removal (level 0) must not clobber a voxel that a
-            // neighbor INSIDE the receiving chunk independently supports. The emitting chunk computed
-            // this removal against a stale snapshot of the receiver; when two adjacent chunks remove
-            // each other's shared seam column in the same wave (e.g. both reloaded mid-darkness-wave),
-            // forcing the receiver's freshly re-lit, independently-supported value back to 0 re-arms the
-            // cycle forever (the sunlight removal/re-placement oscillation that stalls reloaded worlds).
-            // An in-chunk source still supplying >= the current value means the value is NOT dependent on
-            // the removed cross-chunk light, so the removal is spurious and is skipped; a genuinely
-            // dependent voxel (no in-chunk support) still clears, preserving legitimate cross-chunk darkness.
-            if (modLightLevel == 0 && currentSunlight > 0 && inChunkSunlightSupport >= currentSunlight)
+            // Bug 11 guard: a cross-chunk sunlight removal (level 0) must not clobber a voxel that an
+            // INDEPENDENT source still supports. The emitting chunk computed this removal against a
+            // stale snapshot of the receiver; when two adjacent chunks remove each other's shared seam
+            // column in the same wave (e.g. both reloaded mid-darkness-wave), forcing the receiver's
+            // freshly re-lit, independently-supported value back to 0 re-arms the cycle forever (the
+            // sunlight removal/re-placement oscillation that stalls reloaded worlds). Independent support
+            // is the max of (a) in-chunk neighbors (InChunkSunlightSupport — Bug 11) and (b) LIVE
+            // cross-chunk neighbors in chunks other than the emitter (CrossChunkSunlightSupport — Bug 13:
+            // a perimeter-fed border voxel under a multi-chunk slab has no in-chunk support, so without
+            // (b) the Bug 12 removal initiator cleared it every pass and the seam live-locked). A source
+            // still supplying >= the current value means the value is NOT dependent on the removed
+            // cross-chunk light, so the removal is spurious and is skipped; a genuinely dependent voxel
+            // (no independent support) still clears, preserving legitimate cross-chunk darkness.
+            if (modLightLevel == 0 && currentSunlight > 0 && independentSunlightSupport >= currentSunlight)
             {
                 return ApplyDecision.Skip;
             }
