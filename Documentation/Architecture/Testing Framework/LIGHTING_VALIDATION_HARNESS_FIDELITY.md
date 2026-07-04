@@ -412,7 +412,25 @@ there is invisible.
   (includes the modeling limit: voxel data pre-exists — the stagger models "populated but not yet lit",
   which is the production initial-lighting environment, not "terrain absent" = B1 territory).
 
-> **None of C3–C8 require a new harness capability** — each reuses existing primitives
+### C9 — Flat scenario worlds never exercise border shadow-casters ·  **CLOSED (2026-07-04, found by the Bug 14 hotfix)**
+
+- Every scenario terrain is a superflat floor plus hand-placed features, so the column-recalc
+  **shadow-caster** branch (`RecalculateSunlightForColumn` waking the highest block's horizontal
+  neighbors, **including cross-border ones** — the one production path that seeds darkness nodes in the
+  halo) essentially never fired at a seam. Real terrain hits it constantly. Consequence: the Bug 14 fix's
+  pull-back claims could carry out-of-center positions in-game, crash `ProcessLightingJobs`, and leave
+  every suite scenario green — the crash class was structurally invisible to the corpus.
+- **Closed** by baseline **B60** (seam overhang → partially-lit neighbor → border-column edit; asserts
+  the cross-border wave fires via `ModsEmitted > 0` + oracle convergence), plus the center-only claim
+  contract in the job and defensive bounds-skips in both verifiers.
+- **Residual (honest limitation):** the crash itself is not scenario-provable — at B60's position the
+  harness `ChunkData` tolerates an out-of-bounds read as a benign wrong-voxel read that the verifier's
+  superseded check skips (confirmed by a deliberate both-guards-off sabotage run staying green). B60
+  therefore pins the path's liveness and convergence; the crash protection rests on the guards. Lesson
+  for future scenario authoring: prefer at least one **varied-heightmap-at-seam** geometry per new
+  cross-chunk feature — flat worlds under-sample the shadow-caster and halo-node paths.
+
+> **None of C3–C9 require a new harness capability** — each reuses existing primitives
 > (`MarkChunkUnloaded`/`MarkChunkLoaded`, `BeginLightingJob`/`CompleteLightingJob`, the pure-channel lamp
 > palette, `GetSkyLight`/`GetBlocklightRGB`). The genuinely open *harness-feature* gaps remain those already
 > catalogued: no failure shrinker (C1/C2), fixed grid sizes (3×3 / 5×5), `neighborsDataReady` is a hand-set

@@ -459,6 +459,7 @@ namespace Benchmarks
                 SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator),
 
                 Mods = new NativeList<LightModification>(allocator),
+                PullBackClaims = new NativeList<PullBackClaim>(allocator),
                 IsStable = new NativeArray<bool>(1, allocator),
             };
 
@@ -494,6 +495,7 @@ namespace Benchmarks
 
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = data.Mods,
+                PullBackClaims = data.PullBackClaims,
                 IsStable = data.IsStable,
                 PerformEdgeCheck = performEdgeCheck,
             };

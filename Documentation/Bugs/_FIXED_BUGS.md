@@ -397,6 +397,81 @@ Bug 11/12 family the extended veto touches).
 
 ---
 
+### ~~18. Stale-snapshot cross-chunk sunlight ghost light survives dynamic multi-chunk darkening~~
+
+**Severity:** Medium
+**Fixed:** July 2026 (was Bug 14 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game (fluid-stress run with an opaque Stone floor: the under-slab shadows
+begin patchy while the slab chunks are being stamped but now converge to correct shadow **before** the water cap
+is placed — previously they stayed patchy until that later edit rescued them) and via the validation suite
+(repro flipped red→green, all baselines green). Promoted to baselines **B60/B61** in
+`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs` (B61 = the promoted
+K14a seed-1 repro; B60 = the halo-node claim-contract guard from the hotfix), and the B59 sweep was upgraded to
+assert the borderless oracle across its full 75-seed space (previously termination-only because of this bug).
+**Found by:** the Bug 13 (AS-1) seeded sweep — the same slab repro's terminating over-bright exit — and observed
+in-game during Bug 13's fix confirmation (patchy under-slab shadows that only settled after a later mass edit).
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`PullBackClaim` + the recording pull-back in
+`PropagateDarkness`), `Assets/Scripts/WorldJobManager.cs` (`VerifyPullBackClaims`, `LastStalePullBacksCleared`),
+`Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`PullBackClaimStillSupported`), mirrored in
+`Assets/Editor/Validation/Lighting/Framework/LightingTestWorld.cs`.
+
+**Description:**
+When a large multi-chunk region darkened dynamically (e.g. an opaque slab stamped across several chunks of
+sky-lit air) while lighting jobs interleaved under budgeted, out-of-order scheduling, chunks could settle into a
+**stable but massively over-bright field**: stale "ghost" skylight survived under the slab (up to +14 vs the
+borderless oracle) across tens of thousands of voxels. The pipeline terminated normally — no pending light work,
+no flicker — so nothing ever re-examined the region; the ghost persisted until a full relight (world reload) or
+an unrelated nearby edit. The **terminating sibling of Bug 13** (Lighting #17): the same AS-1 slab repro exposed
+both, Bug 13 as the non-terminating exit, this defect as the over-bright terminating exit.
+
+**Root Cause (confirmed by neuter attribution):**
+A job that ran concurrently with its neighbors' darkening re-lit its side of a seam from its **schedule-time
+snapshot** of the neighbor — the `PropagateDarkness` seam pull-back (`CheckEdgeVoxel`), whose value the placement
+BFS then re-spread through the chunk interior and across further seams as uplift mods. If the neighbor darkened
+after the snapshot, the re-lit gradient was sourceless, and no mechanism ever initiated a removal at a voxel
+nobody touched again: `CheckEdgeVoxel` is add-only (the Bug 05 note), the Bug 12 initiator only fires during an
+active darkness wave, and the ghost chunk's own job ended stable. Attribution (seed-1 case): neutering
+cross-chunk sun **uplift mods** only reduced the residue 57.6k → 46.9k voxels, but neutering the **pull-back**
+eliminated it entirely — the pull-back was the sole root; stale uplifts merely re-spread its ghost. The pull-back
+itself is load-bearing and could not be removed: with it neutered, B46 (pending-replay re-brighten), B50 (no
+black spot at a roofed seam), and B58 (the perimeter-fed under-slab gradient, 171k voxels under-bright) all go red.
+
+**Fix (July 2026):** trust-but-verify. The pull-back stays exactly as is inside the Burst job, but every
+pull-back write is recorded as a `PullBackClaim` (center voxel, trusted neighbor voxel, written sky level) in a
+new job output list. At merge time — after `ApplyJobLightMap` and the deferred-mod drain — the main thread
+re-verifies each claim against the neighbor's **live** data (`WorldJobManager.VerifyPullBackClaims`, mirrored in
+the harness): a superseded claim (the voxel no longer holds the written value) is skipped; a claim the live
+neighbor still supports (`CrossChunkLightModApplier.PullBackClaimStillSupported`, the exact `CheckEdgeVoxel`
+write condition against live values) is kept, so fresh snapshots verify for free; an unverifiable claim (neighbor
+absent/unloaded) is kept conservatively; a **stale** claim is routed through the standard cross-chunk
+sunlight-removal veto with the claimed neighbor's chunk as the excluded emitter — a voxel with other genuine
+support survives, a sourceless one clears and wakes the chunk for the corrective darkness wave. Diagnostics:
+`WorldJobManager.LastStalePullBacksCleared`. A stale-**uplift** veto was considered and deliberately NOT added:
+attribution showed uplift ghosts are strictly downstream of pull-back ghosts, and the inbound-removal ordering
+through the defer/drain path self-heals genuine uplift staleness.
+
+**Hotfix (same day, first in-game test):** the initial fix crashed real worlds with per-frame
+`ObjectDisposedException` spam from `ProcessLightingJobs`. The column-recalc **shadow-caster** check
+(`RecalculateSunlightForColumn`) seeds darkness nodes at the highest block's horizontal neighbors *without* an
+in-center guard, so a border column legitimately starts a wave at local x/z = −1/16 — and a pull-back during such
+a **halo node**'s wave recorded a claim whose "center" position lies outside the chunk. The verifier then indexed
+the chunk with that position; the resulting exception aborted the whole `ProcessLightingJobs` pass after some
+jobs were already released but before the end-of-pass `LightingJobs.Remove`, so every later frame re-touched
+disposed containers (note: this abort-cascades-into-spam shape is a pre-existing fragility of the pass, not
+specific to claims). Fixed twofold: claims are only recorded for center voxels (`IsInCenterChunk` guard in the
+job — a halo pull-back surfaces as a cross-chunk uplift mod instead), and both verifiers defensively skip any
+out-of-bounds claim so a malformed claim can never cascade again. Guarded by baseline **B60** (border
+shadow-caster halo-node geometry; asserts the cross-border wave fires + converges on the oracle). The flat suite
+worlds never produced a border shadow caster, which is how this slipped past 52 green scenarios — real terrain
+hits that branch constantly.
+
+**Validation suite:** deterministic repro K14a (grid-3 full-grid slab stamped under the pinned seed-1 schedule:
+budget 2, cadence 1, shuffled completion — settled ~57.6k voxels over-bright pre-fix, worst +14 sky) flipped
+red→green and was promoted to **B61**; a 75-seed oracle-asserting sweep over both slab geometries came back
+fully clean and is now permanent as the upgraded **B59**; **B60** pins the hotfix's claim contract.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

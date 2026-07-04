@@ -11,7 +11,7 @@ This document outlines **open** bugs related to the current lighting implementat
 
 ---
 
-> All previously listed lighting bugs (01–04, 06–08, 10–13) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
+> All previously listed lighting bugs (01–04, 06–08, 10–14) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
 
 ## Bug 05: Persistent Chunk-Border Shadow Patches in Dense Biomes
 
@@ -88,56 +88,3 @@ The Bug 07/08 cross-chunk mod delivery fixes were already present when Bug 09 wa
 symptom shape and is sync-testable), **AS-4** (real-`Schedule()` parallel-determinism gate covering pooled-buffer aliasing, the remaining plausible in-editor race), and **AS-5** (automated in-build stress rig — also the cheap way to **re-verify the bug still exists** before further investment).
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
-
----
-
-## Bug 14: Stale-Snapshot Cross-Chunk Sunlight Ghost Light Survives Dynamic Multi-Chunk Darkening
-
-**Severity:** Medium
-**Status:** Open
-**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`PropagateDarkness` seam pull-back via
-`CheckEdgeVoxel`; `SetSunlight` cross-chunk uplift mods), `Assets/Scripts/WorldJobManager.cs`
-(`ApplyCrossChunkLightMod` uplift path — applied unconditionally when `> current`)
-
-**Description:**
-When a large multi-chunk region darkens dynamically (e.g. an opaque slab stamped across several chunks of
-sky-lit air) while lighting jobs interleave under budgeted, out-of-order scheduling, chunks can settle into a
-**stable but massively over-bright field**: stale "ghost" skylight survives under the slab (up to +14 vs the
-borderless oracle) across tens of thousands of voxels. The pipeline terminates normally — no pending light work,
-no flicker — so nothing ever re-examines the region; the ghost persists until a full relight (world reload) or
-an unrelated nearby edit. This is the **terminating sibling of Bug 13**: the same AS-1 slab repro exposed both,
-Bug 13 as the non-terminating exit (fixed July 2026), this defect as the over-bright terminating exit. It is the
-over-bright counterpart of Bug 05's shadow patches, and mechanically adjacent to fixed Bug 12 (sourceless light
-loops) — but here the light is not a mutual loop, it is simply **never re-visited**.
-
-**Observed in-game (2026-07-04, during the Bug 13 fix confirmation):** in the fluid-stress run with an opaque
-Stone floor, the freshly stamped floor's underside shadows were **patchy** in the scene view after the substrate
-settled, and only became correctly shadowed after the water cap was placed (a later mass edit re-triggering
-lighting over the region) — exactly this defect's signature: stable ghost light cleared by a subsequent edit.
-
-**Root Cause Suspected:**
-A job that runs concurrently with its neighbors' darkening re-lights its side of a seam from its
-**schedule-time snapshot** of the neighbor (the `PropagateDarkness` seam pull-back / `CheckEdgeVoxel`, plus
-cross-chunk sunlight **uplift** mods, which `ApplyCrossChunkLightMod` applies unconditionally whenever they
-exceed the target's current value). If the neighbor has darkened since the snapshot, the re-lit gradient is
-sourceless — and unlike removals (which the Bug 11/13 veto adjudicates against live data), **uplifts have no
-staleness guard**, and no mechanism ever initiates a removal at a voxel nobody touches again: `CheckEdgeVoxel`
-is add-only (the Bug 05 note), the Bug 12 initiator only fires during an active darkness wave, and the ghost
-chunk's own job ends stable. Instrumented evidence (2026-07-04 probe, grid-3 seed-1 case): the over-bright
-volume shrinks monotonically to ~54k voxels as darkness propagates, then **grows back** over the final frames
-(stale re-lights landing as the system quiesces) and freezes at ~57.6k; sequential convergence afterwards finds
-zero pending work; two forced edge rounds reduce it (66k → 29k at the time of the probe) but cannot clear it.
-Candidate fix direction: a symmetric **stale-uplift veto** at the apply site — verify against the *emitting*
-chunk's live data that it still supplies the claimed level (the mirror of the Bug 13 fix, which verified
-*removals* against live third-party data); the in-job seam pull-back needs an equivalent story.
-
-**Reproduction (deterministic, editor validation suite):**
-Known-bug scenario **K14a** (`Assets/Editor/Validation/Lighting/LightingValidationSuite.Bug14Ghost.cs`): settle
-a slab-less grid-3 world, stamp a full-grid opaque slab at y100 chunk-by-chunk under the pinned seed-1 schedule
-(per-frame budget 2, 1 frame between stamps, shuffled completion order), wait for settle (terminates — guarded
-green by baseline **B59**), then compare to the borderless oracle: ~57.6k voxels over-bright, worst +14 sky.
-Expected red until fixed. Found by the Bug-13 sweep (now B59) during the AS-1 session (2026-07-04); fix was
-**out of scope** for the Bug 13 fix session that filed this.
-
-**Workaround:** none needed for normal play observed so far — the repro requires large simultaneous multi-chunk
-darkening under scheduling pressure. A world reload or any nearby light-triggering edit clears the residue.

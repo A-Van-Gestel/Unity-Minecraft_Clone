@@ -63,6 +63,11 @@ namespace Jobs.Data
         public NativeQueue<LightQueueNode> BlockLightQueue;
         public NativeQueue<Vector2Int> SunLightRecalcQueue;
         public NativeList<LightModification> Mods;
+
+        // The job's snapshot-trusting cross-seam re-lights, re-verified against live neighbor data at
+        // merge time (WorldJobManager.VerifyPullBackClaims — the Bug 14 stale-ghost guard).
+        public NativeList<PullBackClaim> PullBackClaims;
+
         public NativeArray<bool> IsStable;
 
         /// A helper to dispose all the containers at once
@@ -82,6 +87,7 @@ namespace Jobs.Data
             if (BlockLightQueue.IsCreated) BlockLightQueue.Dispose();
             if (SunLightRecalcQueue.IsCreated) SunLightRecalcQueue.Dispose();
             if (Mods.IsCreated) Mods.Dispose();
+            if (PullBackClaims.IsCreated) PullBackClaims.Dispose();
             if (IsStable.IsCreated) IsStable.Dispose();
         }
     }

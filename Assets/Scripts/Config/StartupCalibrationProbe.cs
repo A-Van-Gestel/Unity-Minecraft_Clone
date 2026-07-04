@@ -243,6 +243,7 @@ namespace Config
                     NativeQueue<LightQueueNode> blockQueue = new NativeQueue<LightQueueNode>(Allocator.Persistent);
                     NativeQueue<Vector2Int> recalcQueue = new NativeQueue<Vector2Int>(Allocator.Persistent);
                     NativeList<LightModification> mods = new NativeList<LightModification>(Allocator.Persistent);
+                    NativeList<PullBackClaim> pullBackClaims = new NativeList<PullBackClaim>(Allocator.Persistent);
                     NativeArray<bool> isStable = new NativeArray<bool>(1, Allocator.Persistent);
 
                     for (int x = 0; x < VoxelData.ChunkWidth; x++)
@@ -260,6 +261,7 @@ namespace Config
                         Heightmap = heightmap,
                         BlockTypes = jobData.BlockTypesJobData,
                         CrossChunkLightMods = mods,
+                        PullBackClaims = pullBackClaims,
                         IsStable = isStable,
                         PerformEdgeCheck = false,
                     };
@@ -278,6 +280,7 @@ namespace Config
                     blockQueue.Dispose();
                     recalcQueue.Dispose();
                     mods.Dispose();
+                    pullBackClaims.Dispose();
                     isStable.Dispose();
                 }
 

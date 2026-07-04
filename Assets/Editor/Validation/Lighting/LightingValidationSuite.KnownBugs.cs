@@ -28,21 +28,14 @@ namespace Editor.Validation.Lighting
         // The conclusion stands: the bug is either a genuine async race (Burst job timing, IL2CPP memory
         // ordering) that synchronous .Run() cannot reproduce, or is no longer present in the codebase.
 
-        // NOTE on Bug 13: reproduced synchronously (K13a–K13d, roadmap item AS-1), fixed July 2026
-        // (extended Bug-11 veto with live third-party cross-chunk support), and promoted to baselines
-        // B56–B59 after in-game confirmation. The sweep that reproduced it also surfaced Bug 14.
+        // NOTE on Bugs 13/14: both reproduced synchronously via the AS-1 slab repro and fixed July 2026
+        // — Bug 13 (live-lock; extended Bug-11 veto with live third-party cross-chunk support) promoted
+        // to baselines B56–B59, Bug 14 (stale pull-back ghost light; merge-time PullBackClaim
+        // verification) promoted to baselines B60/B61. Entries archived in _FIXED_BUGS.md.
 
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
-            // Bug 05 and Bug 09 still need faithful repros (see notes above).
-            AddBug14GhostKnownBugScenarios(scenarios);
+            // No open known-bug scenarios. Bug 05 and Bug 09 still need faithful repros (see notes above).
         }
-
-        /// <summary>
-        /// Registers the Bug-14 stale-ghost-light scenario (K14a, found by the Bug-13 sweep;
-        /// implemented in <c>LightingValidationSuite.Bug14Ghost.cs</c>).
-        /// </summary>
-        /// <param name="scenarios">The scenario list to append to.</param>
-        static partial void AddBug14GhostKnownBugScenarios(List<Scenario> scenarios);
     }
 }

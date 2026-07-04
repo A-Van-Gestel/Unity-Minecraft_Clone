@@ -30,10 +30,10 @@ namespace Editor.Validation.Lighting
     /// <b>B58</b> — dynamic-stamp: converge a slab-less world, then stamp the slab chunk-by-chunk
     /// through the player-edit path with frame ticks between stamps, under unlimited-budget and
     /// single-slot scheduling — the deterministic pre-fix live-lock, the primary fix tripwire.
-    /// <b>B59</b> — the B58 stamp under seeded completion-shuffle + seed-derived budgets/cadence;
-    /// asserts TERMINATION only: shuffled schedules can also settle into stale over-bright ghost
-    /// light, which is open <b>Bug 14</b>, asserted (oracle match) by its own scenario K14a in
-    /// <c>LightingValidationSuite.Bug14Ghost.cs</c>. A red is classified before it is reported:
+    /// <b>B59</b> — the B58 stamp under seeded completion-shuffle + seed-derived budgets/cadence,
+    /// asserting termination and the oracle across the whole seed space (the space that also exposed
+    /// Bug 14's stale-ghost exit, fixed July 2026 and pinned by B60/B61 in
+    /// <c>Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs</c>). A red is classified before it is reported:
     /// budget escalation separates slow convergence from live-lock, the forced-edge-rounds classifier
     /// (C2 precedent) separates round-budget shortfall from genuine wrongness, and a hash-based field
     /// probe detects an exact repeating cycle — the "no fixed point" smoking gun.
@@ -89,7 +89,7 @@ namespace Editor.Validation.Lighting
                 "B58: Stamping the inset slab onto a settled world settles on the oracle, under unlimited-budget and single-slot scheduling (Bug 13 fix tripwire)",
                 Baseline_Bug13DynamicStampDeterministic));
             scenarios.Add(new Scenario(
-                "B59: The dynamic slab stamp terminates on every seed of a completion-shuffle + budget/cadence sweep (Bug 13 fix tripwire; oracle match is Bug 14 / K14a)",
+                "B59: The dynamic slab stamp settles on the borderless oracle on every seed of a completion-shuffle + budget/cadence sweep (Bug 13 + Bug 14 fix tripwire)",
                 Baseline_Bug13DynamicStampSweep));
         }
 
@@ -138,10 +138,9 @@ namespace Editor.Validation.Lighting
         /// B59: the B58 stamp under seeded orders — completion order shuffled, per-frame budget and
         /// stamp cadence derived from the seed — because the pre-fix live-lock's trigger was
         /// order-sensitive. Sweeps both geometries; any failing seed reproduces its exact case
-        /// deterministically. Asserts TERMINATION only: under shuffled schedules the same stamp can
-        /// also settle into stale over-bright ghost light, which is a distinct open defect — Bug 14,
-        /// asserted (oracle match) by its own scenario K14a in
-        /// <c>LightingValidationSuite.Bug14Ghost.cs</c>.
+        /// deterministically. Asserts termination AND the borderless oracle: the same seed space also
+        /// exposed Bug 14's stale-ghost exit (fixed July 2026), so the oracle assertion doubles as its
+        /// sweep-wide guard (B61 pins the original failing seed; this covers the rest of the space).
         /// </summary>
         private static bool Baseline_Bug13DynamicStampSweep()
         {
@@ -223,7 +222,7 @@ namespace Editor.Validation.Lighting
         /// <param name="slabMinChunk">Inclusive minimum slab chunk coordinate on both axes.</param>
         /// <param name="slabMaxChunk">Inclusive maximum slab chunk coordinate on both axes.</param>
         /// <param name="iterations">Number of seeds to try.</param>
-        /// <returns>The first failing seed, or null when every seed terminates.</returns>
+        /// <returns>The first failing seed, or null when every seed settles on the oracle.</returns>
         private static int? SweepBug13DynamicStamp(int gridSize, int slabMinChunk, int slabMaxChunk, int iterations)
         {
             return LightingFrameSimulator.FindFailingSeed(
@@ -240,9 +239,7 @@ namespace Editor.Validation.Lighting
                     framesBetweenStamps: seed % 3,
                     BUG13_SIM_MAX_FRAMES,
                     $"B59 seed {seed}", logPass: false,
-                    // Termination only: shuffled schedules can also settle over-bright — that is Bug 14
-                    // (stale ghost light), asserted by K14a, not part of Bug 13's live-lock property.
-                    assertOracle: false, expectedRed: false),
+                    assertOracle: true, expectedRed: false),
                 iterations: iterations);
         }
 
@@ -264,9 +261,9 @@ namespace Editor.Validation.Lighting
         /// <param name="maxFrames">The frame budget for post-stamp convergence.</param>
         /// <param name="label">The console label for this case.</param>
         /// <param name="logPass">When false, suppresses per-case PASS logs (sweep iterations).</param>
-        /// <param name="assertOracle">When false, only termination is asserted — the settled field's
-        /// oracle match is a separate property (over-bright residue under shuffled schedules is Bug 14,
-        /// guarded by K14a; the B58/B59 baselines own the live-lock).</param>
+        /// <param name="assertOracle">When false, only termination is asserted. All current baselines
+        /// pass true (the Bug 14 stale-ghost fix made the oracle reachable across the whole seed
+        /// space); false remains available for future known-bug callers that own a weaker property.</param>
         /// <param name="expectedRed">Failure-reporting mode: false for baselines (a failure is a
         /// regression, logged as an error), true for known-bug callers like K14a (an expected
         /// reproduction, logged as a warning).</param>
@@ -484,11 +481,11 @@ namespace Editor.Validation.Lighting
         {
             if (!failingSeed.HasValue)
             {
-                Debug.Log($"[PASS] {label}: all {iterations} seeds terminate");
+                Debug.Log($"[PASS] {label}: all {iterations} seeds settle on the oracle");
                 return true;
             }
 
-            return Bug13Fail($"{label}: all {iterations} seeds terminate",
+            return Bug13Fail($"{label}: all {iterations} seeds settle on the oracle",
                 $"seed {failingSeed.Value} fails (budget {1 + failingSeed.Value % 4}, cadence {failingSeed.Value % 3} — " +
                 "re-run this seed to reproduce the exact case; details logged by that iteration).",
                 expectedRed: false);

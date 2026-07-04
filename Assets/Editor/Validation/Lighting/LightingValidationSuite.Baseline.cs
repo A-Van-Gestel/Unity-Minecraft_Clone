@@ -92,6 +92,10 @@ namespace Editor.Validation.Lighting
             // tripwires; promoted from K13a-K13d) lives in
             // Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs and self-registers here. ---
             AddBug13SlabBaselineScenarios(scenarios);
+
+            // --- Bug 14 fix baselines (B60 halo-node claim contract, B61 promoted ghost repro) live in
+            // Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs and self-register here. ---
+            AddBug14GhostBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
@@ -105,6 +109,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the Bug-13 suspended-slab baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug13SlabBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-14 fix baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug14GhostBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1: A torch placed mid-air in an empty world. Exercises in-chunk RGB placement BFS and

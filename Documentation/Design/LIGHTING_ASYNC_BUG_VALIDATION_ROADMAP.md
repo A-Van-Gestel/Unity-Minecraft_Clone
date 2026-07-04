@@ -163,8 +163,13 @@ model at perimeter-fed interior seams — attribution proven by an emit-neuter t
 (`CrossChunkLightModApplier.CrossChunkSunlightSupport`, emitter excluded; deferred mods now carry their
 emitter). K13a–K13d green, all 47 baselines green. The sweep also surfaced a **second, independent defect**
 — terminating stale over-bright ghost light — filed as **Bug 13's sibling Bug 14** with scenario K14a
-(expected red); K13d now asserts termination only. Bug 13 entry: "Fixed in code — awaiting in-game
-confirmation" on the fluid-stress opaque-floor config.
+(expected red). Bug 13 was confirmed in-game the same day, promoted to baselines **B56–B59**, and archived
+(`_FIXED_BUGS.md` Lighting #17). **Bug 14 was then also fixed, confirmed in-game, and archived the same
+day** (`_FIXED_BUGS.md` Lighting #18 — pull-back-claim verification at merge, `PullBackClaim` /
+`VerifyPullBackClaims`, plus a hotfix for the border shadow-caster halo-node claim contract found by the
+first in-game test): K14a red→green and promoted to **B61**, the halo-node contract pinned as **B60**, and
+the **B59** sweep upgraded to assert the borderless oracle across its full 75-seed space. Fidelity finding
+**C9** (flat worlds never exercise border shadow-casters) filed and closed. Suite tip: **B61, 53 baselines**.
 
 ---
 

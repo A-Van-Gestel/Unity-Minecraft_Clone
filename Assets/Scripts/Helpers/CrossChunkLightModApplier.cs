@@ -199,6 +199,27 @@ namespace Helpers
         }
 
         /// <summary>
+        /// Re-verifies one <see cref="Jobs.PullBackClaim"/> against the claimed neighbor's LIVE data (the
+        /// Bug 14 stale-ghost guard): the darkness-wave pull-back trusted a schedule-time snapshot to
+        /// re-light a border voxel, and the claim holds only if the live neighbor still supplies at least
+        /// the written level after entering the center voxel. A fully-opaque live neighbor supplies
+        /// nothing (surface light is non-propagable — the Bug 10 rule). Mirrors
+        /// <c>NeighborhoodLightingJob.CheckEdgeVoxel</c>'s write condition exactly, so a fresh snapshot
+        /// always verifies; only genuinely stale trust fails and is routed to the removal veto by the
+        /// caller. Centralized so production and the validation harness cannot drift on the rule.
+        /// </summary>
+        /// <param name="liveNeighborSky">The claimed neighbor voxel's live sky level (0-15).</param>
+        /// <param name="neighborFullyOpaque">Whether the live neighbor block is fully opaque.</param>
+        /// <param name="centerOpacity">The re-lit center voxel's opacity (entry cost, minimum 1).</param>
+        /// <param name="writtenSky">The sky level the pull-back wrote from the snapshot.</param>
+        /// <returns>True when the live neighbor still supports the written level.</returns>
+        public static bool PullBackClaimStillSupported(byte liveNeighborSky, bool neighborFullyOpaque,
+            byte centerOpacity, byte writtenSky)
+        {
+            return !neighborFullyOpaque && LightAttenuation.Attenuate(liveNeighborSky, centerOpacity) >= writtenSky;
+        }
+
+        /// <summary>
         /// Evaluates a cross-chunk sunlight modification.
         /// </summary>
         /// <param name="currentLight">The voxel's current packed ushort light value.</param>

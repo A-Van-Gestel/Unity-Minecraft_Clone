@@ -78,6 +78,12 @@ public class WorldJobManager : IDisposable
     /// emissions against stale snapshots.</summary>
     public int LastCrossChunkModsEffective { get; private set; }
 
+    /// <summary>Stale pull-back claims cleared by <see cref="VerifyPullBackClaims"/> in the most recent
+    /// call — snapshot-trusting cross-seam re-lights whose live source no longer supported them (the
+    /// Bug 14 ghost-light guard). Occasional non-zero values under concurrent multi-chunk darkening are
+    /// expected; sustained high counts indicate heavy snapshot churn worth investigating.</summary>
+    public int LastStalePullBacksCleared { get; private set; }
+
     /// <summary>Effective cross-chunk applies in the most recent call, broken down by channel and
     /// operation. A steady non-zero in a removal bucket alongside its matching placement bucket is the
     /// signature of a stale-snapshot darkness/re-placement oscillation across a chunk seam.</summary>
@@ -569,6 +575,7 @@ public class WorldJobManager : IDisposable
             jobData.PaddedLight = AcquirePaddedLight(usePooledBuffers, allocator);
 
             jobData.Mods = new NativeList<LightModification>(allocator);
+            jobData.PullBackClaims = new NativeList<PullBackClaim>(allocator);
             jobData.IsStable = new NativeArray<bool>(1, allocator);
             jobData.SunLightQueue = chunkData.GetSunlightQueueForJob(allocator);
             jobData.BlockLightQueue = chunkData.GetBlocklightQueueForJob(allocator);
@@ -596,6 +603,7 @@ public class WorldJobManager : IDisposable
                 Heightmap = jobData.Input.Heightmap,
                 BlockTypes = _world.JobDataManager.BlockTypesJobData,
                 CrossChunkLightMods = jobData.Mods,
+                PullBackClaims = jobData.PullBackClaims,
                 IsStable = jobData.IsStable,
                 PerformEdgeCheck = chunkData.NeedsEdgeCheck,
             };
@@ -917,6 +925,7 @@ public class WorldJobManager : IDisposable
         if (jobData.BlockLightQueue.IsCreated) jobData.BlockLightQueue.Dispose();
         if (jobData.SunLightRecalcQueue.IsCreated) jobData.SunLightRecalcQueue.Dispose();
         if (jobData.Mods.IsCreated) jobData.Mods.Dispose();
+        if (jobData.PullBackClaims.IsCreated) jobData.PullBackClaims.Dispose();
         if (jobData.IsStable.IsCreated) jobData.IsStable.Dispose();
     }
 
@@ -932,6 +941,7 @@ public class WorldJobManager : IDisposable
         LastEdgeRecycleJobCount = 0;
         LastCrossChunkModsApplyRouted = 0;
         LastCrossChunkModsEffective = 0;
+        LastStalePullBacksCleared = 0;
         LastEffSunPlacement = 0;
         LastEffSunRemoval = 0;
         LastEffBlockPlacement = 0;
@@ -979,6 +989,11 @@ public class WorldJobManager : IDisposable
                     // The emitting chunk's voxel origin — excluded from the Bug 13 live-support veto
                     // (its data is exactly the stale side the removal mods came from).
                     Vector2Int emitterOriginXZ = jobEntry.Key.ToVoxelOrigin();
+
+                    // Re-verify the job's snapshot-trusting cross-seam re-lights against live neighbor
+                    // data, clearing stale ghost light through the removal veto (Bug 14). Runs after the
+                    // merge + deferred drain so superseded claims are recognized.
+                    VerifyPullBackClaims(chunkData, emitterOriginXZ, jobData.PullBackClaims);
 
                     foreach (LightModification mod in jobData.Mods)
                     {
@@ -1135,6 +1150,76 @@ public class WorldJobManager : IDisposable
             // flags it also reads clear at schedule time, while the job is still in-flight) and is what
             // un-parks the chunk itself if it was re-flagged mid-flight — promote the 3×3 now (MT-2).
             _world.PromoteLightWorkNeighborhood(chunkCoord.ToVoxelOrigin());
+        }
+    }
+
+    /// <summary>
+    /// Re-verifies a completed lighting job's <see cref="PullBackClaim"/>s against LIVE neighbor data
+    /// (the Bug 14 stale-ghost guard). The job's darkness-wave pull-back re-lit border voxels from
+    /// schedule-time neighbor snapshots; a snapshot that went stale (the neighbor darkened after it was
+    /// taken) plants sourceless ghost light that nothing ever revisits. For each claim: a superseded
+    /// write (the voxel no longer holds the claimed value) is skipped; a claim the live neighbor still
+    /// supports (<see cref="CrossChunkLightModApplier.PullBackClaimStillSupported"/>) is kept; an
+    /// unverifiable claim (neighbor chunk absent/unloaded) is kept conservatively; a stale claim is
+    /// routed through the standard cross-chunk sunlight-removal veto with the claimed neighbor's chunk
+    /// as the excluded emitter — so a voxel with OTHER genuine support survives, and a genuinely
+    /// sourceless one clears and wakes the chunk for the corrective darkness wave.
+    /// </summary>
+    /// <param name="chunkData">The just-merged chunk whose claims are verified.</param>
+    /// <param name="ownOriginXZ">The chunk's voxel origin (world XZ).</param>
+    /// <param name="claims">The claims the job recorded.</param>
+    private void VerifyPullBackClaims(ChunkData chunkData, Vector2Int ownOriginXZ, NativeList<PullBackClaim> claims)
+    {
+        foreach (PullBackClaim claim in claims)
+        {
+            // Defensive: a claim must target a center voxel (the job guarantees it — see PullBackClaim).
+            // An out-of-bounds position would throw below and abort the WHOLE processing pass, leaving
+            // already-released jobs in LightingJobs to spam ObjectDisposedException every frame after.
+            if ((uint)claim.CenterPos.x >= VoxelData.ChunkWidth ||
+                (uint)claim.CenterPos.z >= VoxelData.ChunkWidth ||
+                (uint)claim.CenterPos.y >= VoxelData.ChunkHeight)
+                continue;
+
+            // Superseded: a later write (same job's wave, a drained inbound mod) replaced the value —
+            // the claim no longer describes live state, so there is nothing to verify.
+            ushort currentLight = chunkData.GetLightData(claim.CenterPos.x, claim.CenterPos.y, claim.CenterPos.z);
+            if (LightBitMapping.GetSkyLight(currentLight) != claim.WrittenSky) continue;
+
+            // Resolve the claimed neighbor voxel in world space (NeighborPos is 3x3-local).
+            Vector3Int neighborGlobal = new Vector3Int(
+                ownOriginXZ.x + claim.NeighborPos.x, claim.NeighborPos.y, ownOriginXZ.y + claim.NeighborPos.z);
+            Vector2Int neighborOriginXZ = _world.worldData.GetChunkCoordFor(neighborGlobal);
+
+            // Unverifiable (neighbor absent/unloaded): keep the value — the trusted snapshot is the best
+            // available data, and the neighbor's own load path re-lights the seam when it returns.
+            ChunkData neighborChunk = _getLoadedChunkByOrigin(neighborOriginXZ);
+            if (neighborChunk == null) continue;
+
+            Vector3Int neighborLocal = new Vector3Int(
+                neighborGlobal.x - neighborOriginXZ.x, neighborGlobal.y, neighborGlobal.z - neighborOriginXZ.y);
+            byte liveNeighborSky = LightBitMapping.GetSkyLight(
+                neighborChunk.GetLightData(neighborLocal.x, neighborLocal.y, neighborLocal.z));
+            bool neighborFullyOpaque = _isBlockFullyOpaque(BurstVoxelDataBitMapping.GetId(
+                neighborChunk.GetVoxel(neighborLocal.x, neighborLocal.y, neighborLocal.z)));
+            byte centerOpacity = _world.BlockTypes[BurstVoxelDataBitMapping.GetId(
+                chunkData.GetVoxel(claim.CenterPos.x, claim.CenterPos.y, claim.CenterPos.z))].opacity;
+
+            if (CrossChunkLightModApplier.PullBackClaimStillSupported(
+                    liveNeighborSky, neighborFullyOpaque, centerOpacity, claim.WrittenSky))
+                continue;
+
+            // Stale: clear through the standard removal veto (emitter = the claimed neighbor's chunk,
+            // the side whose snapshot went stale). Other genuine support still vetoes the removal.
+            LightModification removal = new LightModification
+            {
+                GlobalPosition = new Vector3Int(
+                    ownOriginXZ.x + claim.CenterPos.x, claim.CenterPos.y, ownOriginXZ.y + claim.CenterPos.z),
+                LightLevel = 0,
+                Channel = LightChannel.Sun,
+            };
+
+            if (ApplyCrossChunkLightMod(chunkData, in removal, neighborOriginXZ))
+                LastStalePullBacksCleared++;
         }
     }
 

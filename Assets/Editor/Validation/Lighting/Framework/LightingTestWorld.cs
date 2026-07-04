@@ -238,6 +238,7 @@ namespace Editor.Validation.Lighting.Framework
             internal NeighborhoodLightingJob Job;
             internal NativeArray<bool> IsStable;
             internal NativeList<LightModification> Mods;
+            internal NativeList<PullBackClaim> PullBackClaims;
 
             // LI-1: the center voxel snapshot + center light buffer (the ApplyJobLightMap merge reference
             // and readback target) and the padded light volume the job wrote. Held on the flight so
@@ -285,6 +286,11 @@ namespace Editor.Validation.Lighting.Framework
             /// the drain that would have consumed them) was discarded (production's
             /// DegradeDeferredCrossChunkMods).</summary>
             public int ModsDegraded;
+
+            /// <summary>Stale pull-back claims cleared at merge time — snapshot-trusting cross-seam
+            /// re-lights whose live source no longer supported them (the Bug 14 ghost-light guard,
+            /// mirror of <c>WorldJobManager.VerifyPullBackClaims</c>).</summary>
+            public int StalePullBacksCleared;
         }
 
         /// <summary>
@@ -486,6 +492,7 @@ namespace Editor.Validation.Lighting.Framework
 
             flight.IsStable = NewOwned(flight, new NativeArray<bool>(1, Allocator.Persistent));
             flight.Mods = NewOwned(flight, new NativeList<LightModification>(Allocator.Persistent));
+            flight.PullBackClaims = NewOwned(flight, new NativeList<PullBackClaim>(Allocator.Persistent));
 
             // Bundle the snapshots into a NeighborMapSet (mirrors production's AcquireNeighborMaps) so the
             // compass→job-field mapping lives only in NeighborhoodLightingJob.SetGatherSources.
@@ -508,6 +515,7 @@ namespace Editor.Validation.Lighting.Framework
                 Heightmap = heightmap,
                 BlockTypes = _blockTypesNative,
                 CrossChunkLightMods = flight.Mods,
+                PullBackClaims = flight.PullBackClaims,
                 IsStable = flight.IsStable,
                 PerformEdgeCheck = edgeCheck,
             };
@@ -576,6 +584,12 @@ namespace Editor.Validation.Lighting.Framework
                     foreach (DeferredMod deferredMod in deferred)
                         ApplyModToChunk(chunk, in deferredMod.Mod, deferredMod.EmitterOriginXZ);
                 }
+
+                // Re-verify the job's snapshot-trusting cross-seam re-lights against live neighbor data,
+                // clearing stale ghost light through the removal veto (Bug 14; mirror of
+                // WorldJobManager.VerifyPullBackClaims). After the merge + drain so superseded claims
+                // are recognized.
+                result.StalePullBacksCleared = VerifyPullBackClaims(chunk, flight.PullBackClaims);
 
                 // Apply cross-chunk mods through the SAME shared routing decision as
                 // WorldJobManager.ProcessLightingJobs, so the harness and production can never disagree
@@ -876,6 +890,78 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         // --- Private helpers ---
+
+        /// <summary>
+        /// Re-verifies a completed job's <see cref="PullBackClaim"/>s against LIVE neighbor data — the
+        /// Bug 14 stale-ghost guard, mirror of <c>WorldJobManager.VerifyPullBackClaims</c>. Superseded
+        /// claims (voxel no longer holds the written value) are skipped; claims the live neighbor still
+        /// supports (<see cref="CrossChunkLightModApplier.PullBackClaimStillSupported"/>) are kept;
+        /// unverifiable claims (neighbor outside the grid or unloaded) are kept conservatively; stale
+        /// claims are routed through the standard removal veto with the claimed neighbor's chunk as the
+        /// excluded emitter.
+        /// </summary>
+        /// <param name="chunk">The just-merged chunk whose claims are verified.</param>
+        /// <param name="claims">The claims the job recorded.</param>
+        /// <returns>The number of stale claims that were cleared (and woke the chunk).</returns>
+        private int VerifyPullBackClaims(TestChunk chunk, NativeList<PullBackClaim> claims)
+        {
+            int cleared = 0;
+            for (int i = 0; i < claims.Length; i++)
+            {
+                PullBackClaim claim = claims[i];
+
+                // Defensive: a claim must target a center voxel (the job guarantees it — see
+                // PullBackClaim); mirror of the production guard in WorldJobManager.VerifyPullBackClaims.
+                if ((uint)claim.CenterPos.x >= VoxelData.ChunkWidth ||
+                    (uint)claim.CenterPos.z >= VoxelData.ChunkWidth ||
+                    (uint)claim.CenterPos.y >= VoxelData.ChunkHeight)
+                    continue;
+
+                // Superseded: a later write replaced the value — nothing to verify.
+                ushort currentLight = chunk.Data.GetLightData(claim.CenterPos.x, claim.CenterPos.y, claim.CenterPos.z);
+                if (LightBitMapping.GetSkyLight(currentLight) != claim.WrittenSky) continue;
+
+                // Resolve the claimed neighbor voxel (NeighborPos is 3x3-local) to its live chunk.
+                Vector3Int neighborGlobal = new Vector3Int(
+                    chunk.VoxelOrigin.x + claim.NeighborPos.x, claim.NeighborPos.y,
+                    chunk.VoxelOrigin.y + claim.NeighborPos.z);
+                Vector2Int neighborOriginXZ =
+                    WorldToChunkCoord(new Vector2Int(neighborGlobal.x, neighborGlobal.z)) * VoxelData.ChunkWidth;
+
+                // Unverifiable (outside the grid or unloaded): keep — the snapshot is the best available data.
+                ChunkData neighborData = _getLoadedChunkByOrigin(neighborOriginXZ);
+                if (neighborData == null) continue;
+
+                int neighborLocalX = neighborGlobal.x - neighborOriginXZ.x;
+                int neighborLocalZ = neighborGlobal.z - neighborOriginXZ.y;
+                byte liveNeighborSky = LightBitMapping.GetSkyLight(
+                    neighborData.GetLightData(neighborLocalX, neighborGlobal.y, neighborLocalZ));
+                bool neighborFullyOpaque = _isBlockFullyOpaque(BurstVoxelDataBitMapping.GetId(
+                    neighborData.GetVoxel(neighborLocalX, neighborGlobal.y, neighborLocalZ)));
+                byte centerOpacity = _blockTypes[BurstVoxelDataBitMapping.GetId(
+                    chunk.Data.GetVoxel(claim.CenterPos.x, claim.CenterPos.y, claim.CenterPos.z))].Opacity;
+
+                if (CrossChunkLightModApplier.PullBackClaimStillSupported(
+                        liveNeighborSky, neighborFullyOpaque, centerOpacity, claim.WrittenSky))
+                    continue;
+
+                // Stale: clear through the standard removal veto (emitter = the claimed neighbor's
+                // chunk); other genuine support still vetoes the removal.
+                LightModification removal = new LightModification
+                {
+                    GlobalPosition = new Vector3Int(
+                        chunk.VoxelOrigin.x + claim.CenterPos.x, claim.CenterPos.y,
+                        chunk.VoxelOrigin.y + claim.CenterPos.z),
+                    LightLevel = 0,
+                    Channel = LightChannel.Sun,
+                };
+
+                if (ApplyModToChunk(chunk, in removal, neighborOriginXZ))
+                    cleared++;
+            }
+
+            return cleared;
+        }
 
         /// <summary>
         /// Applies one cross-chunk mod to a live chunk through the shared production decision logic
