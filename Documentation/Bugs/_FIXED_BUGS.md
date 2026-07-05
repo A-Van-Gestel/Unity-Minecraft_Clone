@@ -472,6 +472,71 @@ fully clean and is now permanent as the upgraded **B59**; **B60** pins the hotfi
 
 ---
 
+### ~~19. Cross-chunk sunlight surface stamp permanently lost after a border-column edit~~
+
+**Severity:** Medium
+**Fixed:** July 2026 (was Bug 15 in `LIGHTING_BUGS.md`)
+**Status:** Resolved — confirmed in-game (hand-built 2-thick seam wall whose face voxels' only air exposure is
+across the boundary: in the pre-fix build the cap placement dropped the stored face values to 0 — visible in the
+F3 readout and as black columns in the F7 `VoxelDebugVisualization` sky view — while the fixed build holds 14,
+with 13 on faces fed by a dimmed 14-column, exactly the spec) and via the validation suite (K15b/K15c red→green,
+fuzz stamp seeds 0/9/12/19 green, all baselines green). Promoted to baselines **B62/B63** in
+`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs`.
+**Found by:** the HF-3 border-heightmap fuzz (K15a), on its very first seed. The fuzz's one remaining red
+(seed 14) is **Bug 05's edge-round exhaustion**, a different mechanism — see the Bug 05 entry in
+`LIGHTING_BUGS.md` for the first faithful synchronous repro this fuzz also produced.
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`CheckEdgeVoxel`, `CheckEdgeVoxelRGB`, BFS seeding,
+`PullBackDimmerCrossSeamStamp`, `SampleSnapshotSkyLight`), `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs`
+(`PullBackClaimStillSupported`).
+
+**Description:**
+At a chunk-border height step (a cliff face on the seam), the opaque face voxels carry the sunlight **surface
+stamp** (`source − 1`, the receive-but-don't-propagate rule pinned by baseline B39) fed by the *neighbor chunk's*
+lit border air. An opacity-changing edit higher in the same border column triggered that column's sunlight
+recalculation, which wiped those stamps — and nothing ever re-applied them: the field converged (no pending work)
+with the seam faces at sky 0 where the oracle and the engine's own generation wave put 14. Permanent until a full
+relight or an unrelated nearby edit flooded the seam again — the healing profile that made it the prime candidate
+mechanism for Bug 05's dense-biome border shadows (decoration VoxelMods use the same border-column edit path).
+In-chunk-fed stamps always recovered (the recalc's re-spread revisits in-chunk air); only exclusively
+cross-seam-fed stamps died, because every cross-seam re-derivation path (`CheckEdgeVoxel`/`CheckEdgeVoxelRGB`)
+hard-refused opaque centers. **Visual severity turned out low**: the mesher shades faces from the adjacent air
+voxels, not the opaque voxel's own stored stamp, so the corruption was invisible in normal rendering (it showed
+in the F7 stored-light view) — but it corrupted the light field that oracle comparisons, future features, and
+smooth-lighting samples read.
+
+**Fix (2026-07-05, five parts):**
+
+1. `CheckEdgeVoxel` no longer refuses an opaque center: it receives the surface stamp (`source − 1`), written
+   but never enqueued — the in-chunk opaque-surface rule extended across the seam.
+2. `CheckEdgeVoxelRGB` — the same change per RGB channel.
+3. `CrossChunkLightModApplier.PullBackClaimStillSupported` mirrors the new write condition (a fully-opaque
+   center's claim is supported by `liveNeighborSky − 1`), keeping Bug-14 claim verification from clearing
+   legitimate stamps.
+4. The sun BFS seeding re-spreads an unchanged-but-lit edit node (an opacity-only change — e.g. breaking a
+   stone-top block whose air keeps its old 15 — exposes faces that were never stamped; the in-chunk case).
+5. **Residual fix** (`PullBackDimmerCrossSeamStamp` + `SampleSnapshotSkyLight`): an order-dependent residual
+   (4 of 25 fuzz seeds) survived parts 1–4 — trace attribution showed a job with a *fresh* snapshot wiping the
+   stamp internally: its wake-node darkness wave (old level 14) treated the dimmer live feed (10) as a child,
+   zeroed the feed's halo copy (the removal mod was vetoed remotely — the feed had real support), and every
+   re-derivation path then read the zeroed halo; a second same-job wave re-zeroed the stamp after the first
+   re-derivation. Now a darkness wave meeting a dimmer or already-zeroed cross-seam neighbor re-derives a
+   fully-opaque center's stamp from the pre-zero (or pristine-`[ReadOnly]`-snapshot) value — write-no-enqueue,
+   recorded as a `PullBackClaim` and adjudicated against live data at merge (surviving feed → kept; dead feed →
+   stale → cleared through the removal veto). Opaque-only because stamps cannot propagate: a stale write is one
+   voxel, never a spreading ghost.
+
+**Attempted and REJECTED:** the first dimmer-arm form routed through `CheckEdgeVoxel`'s attenuation —
+inverted from what was needed: `Attenuate` yields 0 for a fully-opaque center (never fired for the stamps)
+while it re-lit AND enqueued *transparent* centers from dimmer stale neighbors, regressing B59/B61 with
+spreading over-bright ghosts (2497 voxels +12 sky). Part 5 is the corrected form: opaque-only, stamp rule,
+write-no-enqueue, claim-verified.
+
+**Validation suite:** distilled repros K15b (seam cliff + cap edit, sun) and K15c (seam wall + torch break, RGB)
+flipped red→green and were promoted to **B62/B63**; the border-heightmap fuzz that found the bug remains
+known-bug repro **K15a** under Bug 05.
+
+---
+
 ## Fluid
 
 ### ~~01. Cross-chunk fluid simulation stops at chunk borders~~

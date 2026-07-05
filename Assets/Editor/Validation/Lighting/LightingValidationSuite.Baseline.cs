@@ -97,8 +97,13 @@ namespace Editor.Validation.Lighting
             // Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs and self-register here. ---
             AddBug14GhostBaselineScenarios(scenarios);
 
-            // The HF-3 border-heightmap fuzz (LightingValidationSuite.BorderHeightFuzz.cs) is registered
-            // as known-bug repro K15a while Bug 15 is open; it takes B62 here after the fix is confirmed.
+            // --- Bug 15 fix baselines (B62 sun stamp, B63 RGB stamp; promoted from K15b/K15c) live in
+            // Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs and self-register here. ---
+            AddBug15StampBaselineScenarios(scenarios);
+
+            // The HF-3 border-heightmap fuzz (LightingValidationSuite.BorderHeightFuzz.cs) remains
+            // known-bug repro K15a — its residual red is Bug 05's edge-round exhaustion; it takes the
+            // next baseline number here after THAT fix is confirmed.
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
@@ -116,6 +121,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the Bug-14 fix baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug14GhostBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-15 stamp baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug15StampBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>
         /// B1: A torch placed mid-air in an empty world. Exercises in-chunk RGB placement BFS and

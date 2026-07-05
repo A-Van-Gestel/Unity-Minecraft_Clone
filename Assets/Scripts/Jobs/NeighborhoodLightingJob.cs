@@ -560,7 +560,7 @@ namespace Jobs
         /// keeps it when the live neighbor still supports it and clears it through the removal veto when
         /// the neighbor genuinely died. Opaque centers only — a stamp is written but never enqueued, so a
         /// stale write cannot spread; re-lighting transparent centers from dimmer stale neighbors plants
-        /// spreading ghost light (attempted and rejected, see the Bug 15 entry).
+        /// spreading ghost light (attempted and rejected, see _FIXED_BUGS.md Lighting #19).
         /// </summary>
         /// <param name="centerPos">The just-darkened voxel whose stamp is re-derived.</param>
         /// <param name="neighborPos">The dimmer lit cross-seam (halo) neighbor.</param>

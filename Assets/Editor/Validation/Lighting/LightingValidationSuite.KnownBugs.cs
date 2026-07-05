@@ -37,29 +37,24 @@ namespace Editor.Validation.Lighting
         // to baselines B56–B59, Bug 14 (stale pull-back ghost light; merge-time PullBackClaim
         // verification) promoted to baselines B60/B61. Entries archived in _FIXED_BUGS.md.
 
+        // NOTE on Bug 15: found 2026-07-05 by the HF-3 border-heightmap fuzz's first seed (cross-chunk
+        // surface stamps on opaque seam faces wiped by border-column edits — every cross-seam
+        // re-derivation path refused opaque centers) and fixed the same day (opaque-center stamps in
+        // CheckEdgeVoxel/RGB + claim-verified dimmer/zeroed-halo pull-back). In-game confirmed via the
+        // F3/F7 stored-light views; distilled repros K15b/K15c promoted to baselines B62/B63
+        // (Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs). Entry archived in _FIXED_BUGS.md.
+
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
             // Bug 09 still needs a faithful repro (see note above).
 
-            // Bug 15 (found 2026-07-05 by the HF-3 border-heightmap fuzz, its first seed; fixed in code
-            // 2026-07-05): a border-column edit's sunlight recalc permanently wiped the cross-chunk
-            // surface stamp on opaque seam-face voxels — every cross-seam re-derivation path refused
-            // opaque centers. K15b/K15c (distilled repros) flipped green with the fix; the fuzz's stamp
-            // seeds (0/9/12/19) are green too. K15a's one remaining red (seed 14) is NOT the stamp bug:
-            // it reproduces Bug 05's edge-round exhaustion (see the Bug 05 note above), so the fuzz is
-            // registered under Bug 05 and promotes to baseline B62 when THAT mechanism is fixed.
+            // The border-heightmap fuzz that found Bug 15 stays registered here: its one remaining red
+            // (seed 14) reproduces Bug 05's edge-round exhaustion (see the Bug 05 note above). It
+            // promotes to a baseline when THAT mechanism is fixed.
             scenarios.Add(new Scenario(
                 "K15a: Border-heightmap fuzz — varied heights at every seam, seam overhangs, and border edits settle on the oracle across randomized seeds (reproduces Bug 05 edge-round exhaustion)",
                 KnownBug_BorderHeightFuzz,
                 knownBugId: "Bug 05"));
-            scenarios.Add(new Scenario(
-                "K15b: A seam cliff face's cross-seam sunlight surface stamp survives a same-column border edit (reproduces Bug 15, distilled)",
-                KnownBug_SeamFaceStampWipedByColumnRecalc,
-                knownBugId: "Bug 15"));
-            scenarios.Add(new Scenario(
-                "K15c: A seam wall's blocklight surface stamp re-derives from a surviving cross-seam torch after a nearer source breaks (reproduces Bug 15, RGB path)",
-                KnownBug_SeamWallBlocklightStampWipedByDarknessWave,
-                knownBugId: "Bug 15"));
         }
     }
 }
