@@ -310,8 +310,18 @@ namespace Editor.Validation.Lighting.Framework
                 FisherYatesShuffle(_readyScratch, _rng);
 
             int scheduled = 0;
-            foreach (Vector2Int pos in _readyScratch)
+            for (int i = 0; i < _readyScratch.Count; i++)
             {
+                // Budget throttle: production breaks the scan when the per-frame cap is hit, leaving the
+                // remaining ready chunks in the ready set for next frame (World.Update). Count them as
+                // starved (diagnostic) and stop — do NOT park/remove them.
+                if (scheduled >= budget)
+                {
+                    result.ChunksStarved += _readyScratch.Count - i;
+                    break;
+                }
+
+                Vector2Int pos = _readyScratch[i];
                 Vector2Int coord = ToGridCoord(pos);
 
                 // Stale entry for a chunk outside the grid (production: worldData.Chunks miss → Remove).
@@ -340,22 +350,19 @@ namespace Editor.Validation.Lighting.Framework
                         result.ChunksParked++;
                         break;
 
-                    default: // one of the Schedule* arms
-                        if (scheduled >= budget)
-                        {
-                            // Budget exhausted — leave the chunk in the ready set (starved), retried next frame.
-                            result.ChunksStarved++;
-                            break;
-                        }
-
-                        // BeginLightingJob clears the chunk's flags; the entry stays in the ready set and is
-                        // parked next frame by the in-flight arm, then un-parked by the completion promotion.
+                    default: // ScheduleInitial / ScheduleEdge / ScheduleRegular
+                        // BeginLightingJob clears every one of the chunk's lighting flags (like a successful
+                        // ScheduleLightingUpdate), so per the LightingScanDecision contract the chunk is
+                        // Removed from the scheduler (production's end-of-loop no-flags → Remove). It re-enters
+                        // the ready set only via its completion's flag callback (if it re-flags unstable) or a
+                        // PromoteNeighborhood event — the faithful MT-2 bookkeeping the Phase 3 prove-red relies on.
                         bool edgeCheck = action == LightingScanDecision.ScanAction.ScheduleEdge;
                         _pendingFlights.Add(new PendingFlight
                         {
                             Flight = _world.BeginLightingJob(coord, edgeCheck),
                             ScheduledOnFrame = _currentFrame,
                         });
+                        _scheduler.Remove(pos);
                         scheduled++;
                         break;
                 }

@@ -1619,80 +1619,59 @@ public class World : MonoBehaviour
                     // Create coord from position
                     ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
 
-                    // A job is already running for this chunk — park it; its completion promotes it
-                    // (ProcessLightingJobs), and any flag set mid-flight re-stages it as well.
-                    if (JobManager.LightingJobs.ContainsKey(chunkCoord))
-                    {
-                        _lightWork.MarkWaiting(pos);
-                        continue;
-                    }
+                    // Decide the per-chunk scan arm via the shared decision — the IDENTICAL logic drives the
+                    // editor LightingFrameSimulator's scheduler mode, so the two can never disagree on which
+                    // arm a ready chunk takes (LightingScanDecision / roadmap AS-2 + HF-4).
+                    LightingScanDecision.ScanAction action = LightingScanDecision.EvaluateReadyChunk(
+                        JobManager.LightingJobs.ContainsKey(chunkCoord),
+                        chunkData.NeedsInitialLighting,
+                        chunkData.NeedsEdgeCheck,
+                        chunkData.HasLightChangesToProcess,
+                        AreNeighborsDataReady(chunkCoord),
+                        AreNeighborsReadyAndLit(chunkCoord));
 
-                    bool scheduledAny = false;
-
-                    // --- Prioritize initial lighting ---
-                    if (chunkData.NeedsInitialLighting)
+                    switch (action)
                     {
-                        // Before scheduling, we must still ensure neighbors have their data ready.
-                        if (AreNeighborsDataReady(chunkCoord))
-                        {
-                            // This is the first lighting pass, so we trigger the full recalculation.
-                            chunkData.RecalculateSunLightLight();
+                        case LightingScanDecision.ScanAction.ScheduleInitial:
+                        case LightingScanDecision.ScanAction.ScheduleEdge:
+                        case LightingScanDecision.ScanAction.ScheduleRegular:
+                            // Initial lighting seeds a full sunlight recalc first; the edge arm sets
+                            // HasLightChangesToProcess so a chunk with only an edge check can schedule (the
+                            // job's PerformEdgeCheck is read+cleared from NeedsEdgeCheck inside
+                            // ScheduleLightingUpdate). On success the schedule clears every lighting flag, so
+                            // the chunk is removed from the work sets — it re-enters via its completion's flag
+                            // callback / PromoteNeighborhood; a declined schedule parks it (MT-2).
+                            if (action == LightingScanDecision.ScanAction.ScheduleInitial)
+                                chunkData.RecalculateSunLightLight();
+                            else if (action == LightingScanDecision.ScanAction.ScheduleEdge)
+                                chunkData.HasLightChangesToProcess = true;
+
                             if (JobManager.ScheduleLightingUpdate(chunkData))
                             {
-                                // The request has been fulfilled, so clear the flag.
-                                chunkData.NeedsInitialLighting = false;
+                                if (action == LightingScanDecision.ScanAction.ScheduleInitial)
+                                    chunkData.NeedsInitialLighting = false;
                                 lightJobsScheduled++;
-                                scheduledAny = true;
+                                _lightWork.Remove(pos);
                             }
-                        }
-                    }
-                    else
-                    {
-                        bool scheduled = false;
+                            else
+                            {
+                                _lightWork.MarkWaiting(pos);
+                            }
 
-                        // --- Edge consistency check ---
-                        // After initial lighting stabilizes, validate border light against neighbors.
-                        // Requires all neighbors to be lit so the edge comparison is meaningful.
-                        if (chunkData.NeedsEdgeCheck && AreNeighborsReadyAndLit(chunkCoord))
-                        {
-                            // Schedule a lighting job with edge checking enabled.
-                            // The job's PerformEdgeCheck flag is set from chunkData.NeedsEdgeCheck
-                            // inside ScheduleLightingUpdate, which also clears the flag.
-                            chunkData.HasLightChangesToProcess = true;
-                            scheduled = JobManager.ScheduleLightingUpdate(chunkData);
-                        }
+                            break;
 
-                        // --- Regular lighting updates ---
-                        // If no edge check was scheduled (or it was skipped), check for regular updates.
-                        // We use `!scheduled` so that if an edge check WAS scheduled, the job covers it,
-                        // but if NeedsEdgeCheck was true and AreNeighborsReadyAndLit was false,
-                        // we STILL try to process regular lighting changes if neighbors generated.
-                        if (!scheduled && chunkData.HasLightChangesToProcess && AreNeighborsDataReady(chunkCoord))
-                        {
-                            scheduled = JobManager.ScheduleLightingUpdate(chunkData);
-                        }
+                        case LightingScanDecision.ScanAction.Remove:
+                            // No lighting flags remain — forget the chunk.
+                            _lightWork.Remove(pos);
+                            break;
 
-                        if (scheduled)
-                        {
-                            lightJobsScheduled++;
-                            scheduledAny = true;
-                        }
-                    }
-
-                    // Remove from the work sets if the chunk has no remaining work
-                    if (!chunkData.NeedsInitialLighting &&
-                        !chunkData.HasLightChangesToProcess &&
-                        !chunkData.NeedsEdgeCheck)
-                    {
-                        _lightWork.Remove(pos);
-                    }
-                    else if (!scheduledAny)
-                    {
-                        // Flags remain but nothing could be scheduled — a readiness gate failed and will
-                        // keep failing until a neighbor changes state. Park the chunk; the matching
-                        // unblock events (neighbor generation/load completion, lighting job completion)
-                        // promote it back, with the fail-safe scan as backstop.
-                        _lightWork.MarkWaiting(pos);
+                        case LightingScanDecision.ScanAction.Park:
+                            // A job is already running for this chunk (its completion promotes it), or a
+                            // readiness gate failed and will keep failing until a neighbor changes state. Park
+                            // the chunk; the matching unblock events (neighbor generation/load completion,
+                            // lighting job completion) promote it back, with the fail-safe scan as backstop.
+                            _lightWork.MarkWaiting(pos);
+                            break;
                     }
                 }
             }

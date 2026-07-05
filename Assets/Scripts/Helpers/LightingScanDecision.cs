@@ -37,6 +37,22 @@ public static class LightingScanDecision
     /// but neighbors are not lit yet). A chunk whose lighting flags are all clear is forgotten; one whose
     /// flags remain but whose gate failed (or whose job is still in flight) is parked for a promotion event.
     /// </summary>
+    /// <remarks>
+    /// <b>Caller contract</b> (both callers must implement it identically):
+    /// <list type="bullet">
+    /// <item><c>Park</c> → <c>MarkWaiting(pos)</c>.</item>
+    /// <item><c>Remove</c> → <c>Remove(pos)</c>.</item>
+    /// <item><c>ScheduleInitial</c> / <c>ScheduleEdge</c> / <c>ScheduleRegular</c> → perform the arm's side
+    /// effects (initial: full sunlight recalc; edge: set <c>HasLightChangesToProcess</c> so a chunk with only
+    /// an edge check can schedule), then attempt the schedule. On <b>success</b> the schedule clears every
+    /// lighting flag, so the caller <c>Remove(pos)</c>s the chunk — it re-enters the ready set only via its
+    /// completion's flag callback (if it re-flags unstable) or a <c>PromoteNeighborhood</c> event. On the
+    /// (in-scan unreachable — the gates are pre-checked here) event that the schedule is declined, the caller
+    /// <c>MarkWaiting(pos)</c>s instead (production's end-of-loop <c>!scheduledAny</c> → park).</item>
+    /// </list>
+    /// This mirrors production's post-schedule bookkeeping (<c>World.Update</c> ready-set loop end): a
+    /// successfully-scheduled chunk has no flags left and is removed, NOT left in the ready set.
+    /// </remarks>
     /// <param name="jobInFlight">A lighting job is already running for this chunk (production: <c>LightingJobs.ContainsKey</c>).</param>
     /// <param name="needsInitialLighting"><c>ChunkData.NeedsInitialLighting</c>.</param>
     /// <param name="needsEdgeCheck"><c>ChunkData.NeedsEdgeCheck</c>.</param>
