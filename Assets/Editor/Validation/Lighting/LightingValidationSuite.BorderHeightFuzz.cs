@@ -1,5 +1,6 @@
 using System.Text;
 using Editor.Validation.Lighting.Framework;
+using Jobs.BurstData;
 using UnityEditor;
 using UnityEngine;
 using Random = System.Random;
@@ -309,6 +310,126 @@ namespace Editor.Validation.Lighting
                 Debug.LogWarning($"{report}\nExpected while Bug 15 is open (see LIGHTING_BUGS.md).");
             else
                 Debug.LogError($"<color=red>{report}</color>");
+        }
+
+        // --- K15b / K15c: distilled deterministic Bug 15 repros (fast fix-iteration companions to
+        // the K15a fuzz; same expected-red switch, so all three promote together) ---
+
+        /// <summary>Superflat floor top for the distilled repros.</summary>
+        private const int BUG15_FLOOR_Y = 10;
+
+        /// <summary>The seam cliff's top surface (K15b).</summary>
+        private const int BUG15_CLIFF_TOP_Y = 40;
+
+        /// <summary>
+        /// K15b: a solid cliff in the west chunk abuts the x=15|16 seam, so a mid-face voxel's only
+        /// transparent neighbor is the east chunk's border air — its sunlight surface stamp
+        /// (15 − 1 = 14, the B39 rule) is fed exclusively cross-seam. Placing one block atop the
+        /// cliff's border column triggers that column's sunlight recalc, which wipes the stamp; the
+        /// removal wave's cross-seam pull-back must re-derive it. Pre-fix, <c>CheckEdgeVoxel</c>
+        /// hard-refuses opaque centers, so the face permanently darkens (Bug 15).
+        /// </summary>
+        private static bool KnownBug_SeamFaceStampWipedByColumnRecalc()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(BUG15_FLOOR_Y, TestBlockPalette.Stone);
+            world.FillBox(new Vector3Int(8, BUG15_FLOOR_Y + 1, 8), new Vector3Int(15, BUG15_CLIFF_TOP_Y, 12),
+                TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            if (world.RunInitialLighting() < 0)
+                return BorderFuzzFail("K15b: initial lighting converges", "no convergence");
+
+            Vector3Int probe = new Vector3Int(15, 25, 10);
+            byte initialStamp = world.GetSkyLight(probe);
+            if (initialStamp != 14)
+            {
+                return BorderFuzzFail(
+                    "K15b: the seam-face voxel carries the cross-seam surface stamp after initial lighting (precondition)",
+                    $"Expected sky 14 at {probe} (east border air 15 − 1), got {initialStamp}");
+            }
+
+            Debug.Log("[PASS] K15b: the seam-face voxel carries the cross-seam surface stamp after initial lighting");
+
+            world.PlaceBlock(new Vector3Int(15, BUG15_CLIFF_TOP_Y + 1, 10), TestBlockPalette.Stone);
+            if (world.RunToConvergence() < 0)
+                return BorderFuzzFail("K15b: post-edit reconciliation converges", "no convergence");
+
+            byte postEditStamp = world.GetSkyLight(probe);
+            if (postEditStamp != 14)
+            {
+                return BorderFuzzFail(
+                    "K15b: the cross-seam surface stamp survives a same-column border edit (Bug 15)",
+                    $"Expected sky 14 at {probe} after the cap placement, got {postEditStamp} — the column recalc " +
+                    "wiped the stamp and the cross-seam pull-back could not re-derive it.");
+            }
+
+            Debug.Log("[PASS] K15b: the cross-seam surface stamp survives a same-column border edit");
+
+            if (!LightingAssert.MatchesOracleQuiet(world, LightingOracle.Solve(world), out string summary))
+                return BorderFuzzFail("K15b: field matches the borderless oracle after the border-column edit", summary);
+
+            Debug.Log("[PASS] K15b: field matches the borderless oracle after the border-column edit");
+            return true;
+        }
+
+        /// <summary>
+        /// K15c: the blocklight twin. A 1-thick wall sits on the west side of the x=15|16 seam; an
+        /// east torch feeds the wall's cross-seam surface stamp, a closer west torch dominates it.
+        /// Breaking the west torch launches the RGB darkness wave that wipes the (west-valued) stamp;
+        /// the cross-seam re-spread pull-back must re-derive the east torch's contribution. Pre-fix,
+        /// <c>CheckEdgeVoxelRGB</c> hard-refuses opaque centers, so the wall face permanently darkens
+        /// (Bug 15, RGB path). Probe expectations are derived from the oracle, not hand-computed.
+        /// </summary>
+        private static bool KnownBug_SeamWallBlocklightStampWipedByDarknessWave()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(BUG15_FLOOR_Y, TestBlockPalette.Stone);
+            world.FillBox(new Vector3Int(15, BUG15_FLOOR_Y + 1, 8), new Vector3Int(15, 20, 12),
+                TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            if (world.RunInitialLighting() < 0)
+                return BorderFuzzFail("K15c: initial lighting converges", "no convergence");
+
+            world.PlaceBlock(new Vector3Int(18, 15, 10), TestBlockPalette.Torch);
+            world.PlaceBlock(new Vector3Int(13, 15, 10), TestBlockPalette.Torch);
+            if (world.RunToConvergence() < 0)
+                return BorderFuzzFail("K15c: two-torch setup converges", "no convergence");
+
+            Vector3Int probe = new Vector3Int(15, 15, 10);
+            (byte r0, byte g0, byte b0) = world.GetBlocklightRGB(probe);
+            if (r0 == 0 && g0 == 0 && b0 == 0)
+            {
+                return BorderFuzzFail(
+                    "K15c: the seam wall carries a blocklight surface stamp with both torches lit (precondition)",
+                    $"Expected a non-zero stamp at {probe}, got (0,0,0)");
+            }
+
+            Debug.Log($"[PASS] K15c: the seam wall carries a blocklight surface stamp with both torches lit ({r0},{g0},{b0})");
+
+            world.BreakBlock(new Vector3Int(13, 15, 10));
+            if (world.RunToConvergence() < 0)
+                return BorderFuzzFail("K15c: post-break reconciliation converges", "no convergence");
+
+            OracleLightField oracle = LightingOracle.Solve(world);
+            (byte r, byte g, byte b) = world.GetBlocklightRGB(probe);
+            byte expectedR = LightBitMapping.GetBlocklightR(oracle.GetLightData(probe));
+            if (r != expectedR)
+            {
+                return BorderFuzzFail(
+                    "K15c: the wall's stamp re-derives from the surviving east torch across the seam (Bug 15, RGB)",
+                    $"Expected R {expectedR} at {probe} after breaking the west torch, got {r} — the darkness wave " +
+                    "wiped the stamp and the cross-seam re-spread could not re-derive it.");
+            }
+
+            Debug.Log("[PASS] K15c: the wall's stamp re-derives from the surviving east torch across the seam");
+
+            if (!LightingAssert.MatchesOracleQuiet(world, oracle, out string summary))
+                return BorderFuzzFail("K15c: field matches the borderless oracle after the west torch break", summary);
+
+            Debug.Log("[PASS] K15c: field matches the borderless oracle after the west torch break");
+            return true;
         }
 
         /// <summary>

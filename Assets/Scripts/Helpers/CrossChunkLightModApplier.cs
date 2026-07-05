@@ -199,14 +199,21 @@ namespace Helpers
         }
 
         /// <summary>
+        /// The opacity at and above which a block is fully opaque (mirrors
+        /// <c>BlockTypeJobData.IsOpaque</c>'s <c>Opacity >= 15</c>).
+        /// </summary>
+        private const byte FULLY_OPAQUE_OPACITY = 15;
+
+        /// <summary>
         /// Re-verifies one <see cref="Jobs.PullBackClaim"/> against the claimed neighbor's LIVE data (the
         /// Bug 14 stale-ghost guard): the darkness-wave pull-back trusted a schedule-time snapshot to
         /// re-light a border voxel, and the claim holds only if the live neighbor still supplies at least
         /// the written level after entering the center voxel. A fully-opaque live neighbor supplies
-        /// nothing (surface light is non-propagable — the Bug 10 rule). Mirrors
-        /// <c>NeighborhoodLightingJob.CheckEdgeVoxel</c>'s write condition exactly, so a fresh snapshot
-        /// always verifies; only genuinely stale trust fails and is routed to the removal veto by the
-        /// caller. Centralized so production and the validation harness cannot drift on the rule.
+        /// nothing (surface light is non-propagable — the Bug 10 rule); a fully-opaque CENTER holds a
+        /// surface stamp (source − 1, the receive-only rule) rather than attenuated propagation (Bug 15).
+        /// Mirrors <c>NeighborhoodLightingJob.CheckEdgeVoxel</c>'s write condition exactly, so a fresh
+        /// snapshot always verifies; only genuinely stale trust fails and is routed to the removal veto
+        /// by the caller. Centralized so production and the validation harness cannot drift on the rule.
         /// </summary>
         /// <param name="liveNeighborSky">The claimed neighbor voxel's live sky level (0-15).</param>
         /// <param name="neighborFullyOpaque">Whether the live neighbor block is fully opaque.</param>
@@ -216,7 +223,13 @@ namespace Helpers
         public static bool PullBackClaimStillSupported(byte liveNeighborSky, bool neighborFullyOpaque,
             byte centerOpacity, byte writtenSky)
         {
-            return !neighborFullyOpaque && LightAttenuation.Attenuate(liveNeighborSky, centerOpacity) >= writtenSky;
+            if (neighborFullyOpaque)
+                return false;
+
+            int support = centerOpacity >= FULLY_OPAQUE_OPACITY
+                ? liveNeighborSky - 1
+                : LightAttenuation.Attenuate(liveNeighborSky, centerOpacity);
+            return support >= writtenSky;
         }
 
         /// <summary>

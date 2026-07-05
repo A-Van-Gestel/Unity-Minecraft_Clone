@@ -263,6 +263,13 @@ namespace Jobs
                     sunlightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.Position, LightLevel = node.OldLightLevel });
                 else if (currentLight > node.OldLightLevel)
                     sunlightPlacementQueue.Enqueue(node.Position);
+                else if (currentLight > 0)
+                    // Unchanged-but-lit: an opacity-only change can keep the voxel's own value while
+                    // altering what its neighbors should receive (e.g. breaking a stone-top block
+                    // leaves the new air at its old stamped 15, but the faces it just exposed were
+                    // never stamped — Bug 15's in-chunk case). Re-spread; a no-deficiency wave is a
+                    // bounded no-op since PropagateLight only writes increases.
+                    sunlightPlacementQueue.Enqueue(node.Position);
             }
 
             while (BlocklightBfsQueue.TryDequeue(out LightQueueNode node))
@@ -453,34 +460,8 @@ namespace Jobs
                     }
                     else
                     {
-                        // The independent sky light lives across the border. The BFS must not
-                        // continue into the neighbor chunk, so pull the neighbor's attenuated
-                        // contribution back into the just-darkened center voxel instead of
-                        // silently dropping the re-spread seed (Bug 07 defect 2). The neighbor value
-                        // is a schedule-time SNAPSHOT that may be stale (the neighbor darkened after
-                        // it was taken), so the write is recorded as a PullBackClaim and re-verified
-                        // against the neighbor's LIVE data at merge time — a claim the live source no
-                        // longer supports is cleared through the standard removal veto (Bug 14).
-                        uint centerPacked = GetPackedData(node.Pos);
-                        if (centerPacked != uint.MaxValue)
-                        {
-                            byte pulledBack = CheckEdgeVoxel(node.Pos, centerPacked, GetLightData(node.Pos),
-                                neighborPacked, neighborLightData, pQueue);
-
-                            // Claims are only recorded for CENTER voxels — the merge-time verifier
-                            // indexes this chunk's live data with CenterPos. A removal node CAN sit in
-                            // the halo (the column-recalc shadow-caster check seeds cross-border
-                            // neighbors), and a pull-back into a halo voxel becomes a cross-chunk
-                            // uplift mod instead (SetSunlight's halo path), whose staleness is
-                            // self-healing via the inbound-removal ordering.
-                            if (pulledBack > 0 && IsInCenterChunk(node.Pos))
-                            {
-                                PullBackClaims.Add(new PullBackClaim
-                                {
-                                    CenterPos = node.Pos, NeighborPos = neighborPos, WrittenSky = pulledBack,
-                                });
-                            }
-                        }
+                        PullBackCrossSeamContribution(node.Pos, neighborPos, neighborPacked,
+                            neighborLightData, pQueue);
 
                         // Bug 12: a cross-seam neighbor sitting at EXACTLY the removed level, whose own
                         // column is NOT independently sky-lit, is the signature of a mutually-supporting
@@ -512,6 +493,49 @@ namespace Jobs
                             EmitCrossChunkSunlightRemoval(neighborPos, ref emittedSunRemovals);
                     }
                 }
+            }
+        }
+
+        /// <summary>
+        /// Pulls a cross-seam neighbor's attenuated sunlight contribution back into a just-darkened
+        /// center voxel — the BFS must not continue into the neighbor chunk, so this re-derives the
+        /// center from the neighbor's snapshot instead of silently dropping the re-spread seed
+        /// (Bug 07 defect 2). The neighbor value is a schedule-time SNAPSHOT that may be stale (the
+        /// neighbor changed after it was taken), so the write is recorded as a
+        /// <see cref="PullBackClaim"/> and re-verified against the neighbor's LIVE data at merge time —
+        /// a claim the live source no longer supports is cleared through the standard removal veto
+        /// (Bug 14). Called for every lit cross-seam neighbor of a darkness node: one that can sustain
+        /// the removed level re-lights the center, and a dimmer one supplies the center's new, lower
+        /// value (Bug 15's residual — without it, a veto on the neighbor's side leaves this seam
+        /// permanently un-revisited).
+        /// </summary>
+        /// <param name="centerPos">The just-darkened voxel being re-derived.</param>
+        /// <param name="neighborPos">The lit cross-seam (halo) neighbor supplying the contribution.</param>
+        /// <param name="neighborPacked">The neighbor's packed voxel data (already bounds-checked).</param>
+        /// <param name="neighborLightData">The neighbor's snapshot light value, captured before any halo write.</param>
+        /// <param name="pQueue">The sunlight placement queue for the re-spread seed.</param>
+        private void PullBackCrossSeamContribution(Vector3Int centerPos, Vector3Int neighborPos,
+            uint neighborPacked, ushort neighborLightData, NativeQueue<Vector3Int> pQueue)
+        {
+            uint centerPacked = GetPackedData(centerPos);
+            if (centerPacked == uint.MaxValue)
+                return;
+
+            byte pulledBack = CheckEdgeVoxel(centerPos, centerPacked, GetLightData(centerPos),
+                neighborPacked, neighborLightData, pQueue);
+
+            // Claims are only recorded for CENTER voxels — the merge-time verifier
+            // indexes this chunk's live data with CenterPos. A removal node CAN sit in
+            // the halo (the column-recalc shadow-caster check seeds cross-border
+            // neighbors), and a pull-back into a halo voxel becomes a cross-chunk
+            // uplift mod instead (SetSunlight's halo path), whose staleness is
+            // self-healing via the inbound-removal ordering.
+            if (pulledBack > 0 && IsInCenterChunk(centerPos))
+            {
+                PullBackClaims.Add(new PullBackClaim
+                {
+                    CenterPos = centerPos, NeighborPos = neighborPos, WrittenSky = pulledBack,
+                });
             }
         }
 
@@ -896,6 +920,10 @@ namespace Jobs
         /// <summary>
         /// Checks a single border voxel's sunlight against its cross-chunk neighbor.
         /// Detects missing light (black spots) where the neighbor has light that should propagate here.
+        /// An opaque center voxel still RECEIVES the surface stamp (source − 1, mirroring
+        /// <see cref="PropagateLight"/>'s opaque-neighbor arm) — it is written but never enqueued,
+        /// since opaque voxels do not propagate. Refusing the stamp here made every cross-seam
+        /// re-derivation path unable to restore a wiped seam-face stamp (Bug 15).
         /// </summary>
         /// <param name="neighborPacked">The cross-chunk neighbor's packed voxel data, used to reject an
         /// opaque neighbor as a light source (its sky value is non-transmissible surface light).</param>
@@ -911,15 +939,25 @@ namespace Jobs
             byte centerLight = LightBitMapping.GetSkyLight(centerLightData);
             byte neighborLight = LightBitMapping.GetSkyLight(neighborLightData);
 
-            BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
-            if (centerProps.IsOpaque) return 0;
-
             // An opaque neighbor cannot transmit sunlight across the border: its sky value is
             // non-propagable surface light (opaque blocks have no sky emission), so seeding from it would
             // leak light out of a wall into the adjacent chunk (Bug 10). Mirror of the IsOpaque source
             // guard in PropagateLight; the add-only edge check could never reconcile the surplus away.
             BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
             if (neighborProps.IsOpaque) return 0;
+
+            BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
+            if (centerProps.IsOpaque)
+            {
+                byte stamp = (byte)math.max(0, neighborLight - 1);
+                if (stamp > centerLight)
+                {
+                    SetSunlight(centerPos, stamp);
+                    return stamp;
+                }
+
+                return 0;
+            }
 
             byte expectedFromNeighbor = AttenuateLight(neighborLight, centerProps.Opacity);
 
@@ -935,14 +973,17 @@ namespace Jobs
 
         /// <summary>
         /// Checks a single border voxel's blocklight RGB against its cross-chunk neighbor.
-        /// Per-channel comparison detects missing light on any channel.
+        /// Per-channel comparison detects missing light on any channel. An opaque center voxel still
+        /// RECEIVES per-channel surface stamps (source − 1, mirroring <see cref="PropagateLightRGB"/>'s
+        /// opaque-neighbor arm) — written but never enqueued, since opaque voxels do not propagate.
+        /// Refusing the stamp here made every cross-seam re-derivation path unable to restore a wiped
+        /// seam-face stamp (Bug 15).
         /// </summary>
         private void CheckEdgeVoxelRGB(
             Vector3Int centerPos, uint centerPacked, Vector3Int neighborPos,
             NativeQueue<Vector3Int> placementQueue)
         {
             BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
-            if (centerProps.IsOpaque) return;
 
             // No light-sentinel check: every caller has already bounds-checked both positions via
             // GetPackedData (0xFFFF is a legitimate fully-lit value).
@@ -971,9 +1012,19 @@ namespace Jobs
                 nB = neighborProps.EmissionB;
             }
 
-            byte expR = AttenuateLight(nR, centerProps.Opacity);
-            byte expG = AttenuateLight(nG, centerProps.Opacity);
-            byte expB = AttenuateLight(nB, centerProps.Opacity);
+            byte expR, expG, expB;
+            if (centerProps.IsOpaque)
+            {
+                expR = (byte)math.max(0, nR - 1);
+                expG = (byte)math.max(0, nG - 1);
+                expB = (byte)math.max(0, nB - 1);
+            }
+            else
+            {
+                expR = AttenuateLight(nR, centerProps.Opacity);
+                expG = AttenuateLight(nG, centerProps.Opacity);
+                expB = AttenuateLight(nB, centerProps.Opacity);
+            }
 
             byte finalR = (byte)math.max(cR, (int)expR);
             byte finalG = (byte)math.max(cG, (int)expG);
@@ -982,7 +1033,8 @@ namespace Jobs
             if (finalR != cR || finalG != cG || finalB != cB)
             {
                 SetBlocklightRGB(centerPos, finalR, finalG, finalB, isRemovalContext: false);
-                placementQueue.Enqueue(centerPos);
+                if (!centerProps.IsOpaque)
+                    placementQueue.Enqueue(centerPos);
             }
         }
 

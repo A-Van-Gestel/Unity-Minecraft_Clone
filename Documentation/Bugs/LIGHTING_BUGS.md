@@ -100,8 +100,8 @@ symptom shape and is sync-testable), **AS-4** (real-`Schedule()` parallel-determ
 ## Bug 15: Cross-Chunk Sunlight Surface Stamp Permanently Lost After a Border-Column Edit
 
 **Severity:** Medium
-**Status:** Open — deterministic synchronous repro available (found 2026-07-05 by the HF-3 border-heightmap fuzz, B62 seed 0)
-**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`RecalculateSunlightForColumn`, `CheckEdgeVoxel`), `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (apply side)
+**Status:** Partially fixed in code (July 2026) — primary mechanism fixed (K15b/K15c flipped green; limited in-game spot-checks 2026-07-05 look correct, but natural terrain rarely generates chunk-border cliffs so full in-game confirmation is pending — a flat/dev world with a hand-built seam cliff is the practical test setup); an order-dependent residual remains OPEN (see below), still reproduced by K15a
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`RecalculateSunlightForColumn`, `CheckEdgeVoxel`, `CheckEdgeVoxelRGB`, BFS seeding, `PullBackCrossSeamContribution`), `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`PullBackClaimStillSupported`)
 
 **Description:**
 At a chunk-border height step (a cliff face sitting on the seam), the opaque face voxels carry the
@@ -155,3 +155,37 @@ next step for fast fix iteration.
 **In-game verification suggestion:** stand at a chunk-border cliff, place a block on top of the
 cliff's border column, and watch whether the cliff face below darkens permanently (also answers
 whether the mesher reads the opaque voxel's own stamped light — the visual-severity question).
+
+**Fix (2026-07-05, four parts — K15b/K15c red→green, all 53 baselines green):**
+
+1. `CheckEdgeVoxel` no longer refuses an opaque center: it receives the surface stamp
+   (`source − 1`, `PropagateLight`'s opaque-neighbor rule), written but never enqueued. This arms
+   every cross-seam re-derivation path (edge rounds + darkness-wave pull-backs).
+2. `CheckEdgeVoxelRGB` — the same change per channel (the K15c blocklight twin).
+3. `CrossChunkLightModApplier.PullBackClaimStillSupported` mirrors the new write condition (a
+   fully-opaque center's claim is supported by `liveNeighborSky − 1`), keeping the Bug-14 claim
+   verification from clearing legitimate stamps.
+4. The sun BFS seeding re-spreads an unchanged-but-lit edit node (an opacity-only change —
+   e.g. breaking a stone-top block whose air keeps its old 15 — exposes faces that were never
+   stamped; the in-chunk case of the same wipe).
+
+**Attempted and REJECTED:** extending the darkness wave's cross-seam pull-back
+(`PullBackCrossSeamContribution`) to also fire for a *dimmer*-but-lit neighbor. It did not fix
+the residual seeds (verified fresh via a build marker — the arm simply never fired for them) and
+it **regressed B59/B61** (stale pull-backs during the slab scenarios' stamp churn reintroduced
+massive over-bright ghost light: 2497 voxels +12 sky at grid-3 seed 1). Reverted; the dimmer arm
+remains the original unconditional `SetSunlight(neighbor, 0)` + in-center re-propagation enqueue.
+The behavior-neutral `PullBackCrossSeamContribution` extraction itself is kept (used by the ≥ arm).
+
+**Residual (OPEN):** the K15a fuzz still reds on 4 of 25 seeds with 1–8 under-bright voxels each
+(pre-fix: 28 at seed 0) — an order-dependent interleaving survives all four repair paths. The
+seed-12 single-voxel timeline (probe `(15,9,35)` stone, feed `(16,9,35)` air across the x=15|16
+seam; sim budget 1, shuffled, seed 12): after the east chunk's cap edit merges, the feed correctly
+drops 15→10 **and the stamp correctly follows 14→9** (the new pull-back/claim machinery working);
+the west chunk is re-flagged, its job runs — and **its merge wipes the correct 9 back to 0** with
+the feed still live at 10, no pending work anywhere, and nothing ever revisiting. The frame-10
+wipe's exact path is not yet attributed (candidate: the west job's snapshot/wake-node interplay
+during its own merge); it needs in-job tracing. Rebuild the diagnostic from the K15a fuzz body
+(sample the probe voxel per frame) to reproduce the timeline exactly. Seeds 9/12/19 are the
+1–2-voxel stone-stamp form; seed 14 also shows *transparent* border voxels 1–2 under (same
+residual class, so not stamp-specific).

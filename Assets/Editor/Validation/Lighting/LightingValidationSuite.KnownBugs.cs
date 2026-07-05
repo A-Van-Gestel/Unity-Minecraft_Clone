@@ -46,6 +46,14 @@ namespace Editor.Validation.Lighting
                 "K15a: Border-heightmap fuzz — varied heights at every seam, seam overhangs, and border edits settle on the oracle across randomized seeds (reproduces Bug 15)",
                 KnownBug_BorderHeightFuzz,
                 knownBugId: "Bug 15"));
+            scenarios.Add(new Scenario(
+                "K15b: A seam cliff face's cross-seam sunlight surface stamp survives a same-column border edit (reproduces Bug 15, distilled)",
+                KnownBug_SeamFaceStampWipedByColumnRecalc,
+                knownBugId: "Bug 15"));
+            scenarios.Add(new Scenario(
+                "K15c: A seam wall's blocklight surface stamp re-derives from a surviving cross-seam torch after a nearer source breaks (reproduces Bug 15, RGB path)",
+                KnownBug_SeamWallBlocklightStampWipedByDarknessWave,
+                knownBugId: "Bug 15"));
         }
     }
 }

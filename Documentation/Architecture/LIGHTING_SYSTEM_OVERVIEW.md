@@ -125,7 +125,7 @@ A time-based fail-safe full scan (every ~1 second) re-populates the ready set fr
 
 1. **Worker-thread gather** *(P-2 Phase 1)* — assemble the 9 voxel + 9 light snapshot maps into the halo-padded `PaddedVoxels`/`PaddedLight` volumes (`ChunkMath.GatherPadded*`). This runs first, on the worker thread inside `Execute()` — **not** on the main thread before scheduling — so the main thread pays only the snapshot fill. A missing neighbor is sentinel-filled (`uint`/`ushort.MaxValue`). All subsequent steps read/write the padded volume.
 2. **Edge check** *(optional)* — If `PerformEdgeCheck` is set, validate light at all 4 horizontal chunk borders against neighbor data. Border voxels with less light than their neighbor could supply are enqueued for re-spreading. See Section 3.6 for details.
-3. **Seed** — Process column recalculation queue, sky light BFS queue, blocklight BFS queue.
+3. **Seed** — Process column recalculation queue, sky light BFS queue, blocklight BFS queue. A sky-queue node whose stored value is unchanged **but still lit** is re-enqueued for spreading anyway: an opacity-only change can keep the voxel's own value while altering what its neighbors should receive (e.g. breaking a stone-top block leaves the new air at its old stamped 15, but the faces it just exposed were never stamped — Bug 15's in-chunk case).
 4. **Sky light darkness removal** → **Sky light spreading**.
 5. **Blocklight darkness removal** → **Blocklight spreading** (per-channel RGB).
 
@@ -141,7 +141,8 @@ A time-based fail-safe full scan (every ~1 second) re-populates the ready set fr
 Back on the main thread:
 
 1. **Merge light data** into live chunk data via `ApplyLightingJobResult` — the `ushort[] LightData` array is copied back from the job's NativeArray. Block changes made to the `uint` voxel array during job execution are preserved (TOCTOU safety).
-2. **Verify pull-back claims** (`VerifyPullBackClaims`, after the merge and the deferred-mod drain): the job records every darkness-wave seam pull-back (§3.7) as a `PullBackClaim` — "I re-lit center voxel X to level L because the neighbor snapshot showed Y" — and the main thread re-checks each claim against the neighbor's **live** data. A superseded claim (the voxel no longer holds L) is skipped; a claim the live neighbor still supports (`CrossChunkLightModApplier.PullBackClaimStillSupported`, the exact `CheckEdgeVoxel` write condition) is kept, so fresh
+2. **Verify pull-back claims** (`VerifyPullBackClaims`, after the merge and the deferred-mod drain): the job records every darkness-wave seam pull-back (§3.7) as a `PullBackClaim` — "I re-lit center voxel X to level L because the neighbor snapshot showed Y" — and the main thread re-checks each claim against the neighbor's **live** data. A superseded claim (the voxel no longer holds L) is skipped; a claim the live neighbor still supports (`CrossChunkLightModApplier.PullBackClaimStillSupported`, the exact `CheckEdgeVoxel` write condition — including its
+   opaque-center arm, where a fully-opaque center is supported by `liveNeighborSky − 1`) is kept, so fresh
    snapshots verify for free; an unverifiable claim (neighbor absent/unloaded) is kept conservatively; a **stale** claim (the neighbor darkened after the snapshot) is routed through the sunlight-removal veto below with the claimed neighbor's chunk as the excluded emitter — clearing sourceless ghost light and waking the chunk for the corrective darkness wave (Bug 14 fix; diagnostics: `LastStalePullBacksCleared`). Claims are recorded for center voxels only — the column-recalc shadow-caster path can seed darkness nodes in the halo, and those
    pull-backs surface as ordinary cross-chunk uplift mods instead (guarded by baseline B60).
 3. **Apply cross-chunk modifications** to loaded neighbor chunks via the shared `LightingJobProcessor` / `CrossChunkLightModApplier` decision logic (the same code the editor lighting validation suite exercises, so production and harness cannot drift). Routing is decided first (`LightingJobProcessor.RouteCrossChunkMod`): out-of-world mods are dropped, mods for unloaded neighbors are persisted (step 3), mods for a neighbor whose own job is in flight are deferred (see In-flight defer below), and the rest are applied directly. Each applied mod is evaluated
@@ -187,18 +188,20 @@ After a chunk's initial lighting stabilizes, its border voxels may have incorrec
 3. `WorldJobManager.ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` into the job's `PerformEdgeCheck` flag and clears it.
 4. The job's edge check runs as "Pass -1" before the normal BFS seeding.
 
-**Algorithm (`CheckEdges`):**
+**Algorithm (`CheckEdges`, per-voxel logic in `CheckEdgeVoxel` / `CheckEdgeVoxelRGB`):**
 
 - Iterates all voxels on the 4 horizontal chunk borders (South z=0, North z=15, West x=0, East x=15).
-- For each border voxel, reads the cross-chunk neighbor's light level.
-- Calculates `expectedFromNeighbor = max(0, neighborLight - 1 - centerOpacity)`.
-- If `expectedFromNeighbor > centerLight`, the center voxel is missing light. Enqueues it in the placement queue for the BFS to correct.
+- For each border voxel, reads the cross-chunk neighbor's light level (fully-opaque neighbors are skipped — an opaque voxel's stored value is not a valid propagation source, see the data-model gotcha in §3.7).
+- **Transparent/semi-transparent center:** calculates `expectedFromNeighbor` via the shared `LightAttenuation.Attenuate`; if it exceeds the center's current light, the voxel is written and enqueued in the placement queue for the BFS to spread onward.
+- **Opaque center (Bug 15 fix, July 2026):** receives the surface stamp `neighborLight − 1` (§1.3 rule 5) as a direct write, never enqueued — the same receive-but-don't-propagate rule `PropagateLight` applies in-chunk, extended across the seam. Before this arm existed every cross-seam re-derivation path refused opaque centers, so a border-column edit's column recalculation permanently wiped cross-chunk-fed surface stamps on seam faces (Bug 15).
+- `CheckEdgeVoxelRGB` applies the same two arms per RGB blocklight channel.
 
 **Design constraint:** The edge check only **adds** missing light (placement queue). It does not remove stale light (no removal queue entries). Removal during edge checks risks propagating false darkness inward when neighbor data is stale or incomplete.
 
 ### 3.7 Why Cross-Chunk Light *Removal* Is Structurally Hard
 
-Cross-chunk light **placement** (spreading brighter values inward) is robust: the edge check (§3.6) re-adds any missing light, and a stale snapshot only ever *under*-reports brightness, which a later pass corrects upward. Cross-chunk **removal** (clearing light whose source disappeared) is the engine's recurring problem area — most open/fixed lighting bugs live here (`Documentation/Bugs/`: Bugs 05, 08, 09, 11, 12, 13, 14) — for three compounding reasons:
+Cross-chunk light **placement** (spreading brighter values inward) is robust: the edge check (§3.6) re-adds any missing light, and a stale snapshot only ever *under*-reports brightness, which a later pass corrects upward. (One long-standing gap in that re-add path: surface stamps on **opaque** border voxels were refused by every cross-seam re-derivation arm until July 2026 — Bug 15, closed by §3.6's opaque-center arm.) Cross-chunk **removal** (clearing light whose source disappeared) is the engine's recurring problem area — most open/fixed lighting bugs
+live here (`Documentation/Bugs/`: Bugs 05, 08, 09, 11, 12, 13, 14, 15) — for three compounding reasons:
 
 1. **Jobs read stale schedule-time snapshots.** A job's neighbor maps are copied when it is scheduled (§3.3), so a removal computed against that snapshot can disagree with the neighbor's now-current light. This is the source of the cross-seam removal/re-placement oscillation (Bug 11, fixed) and of the in-flight defer logic (§3.4, Bug 08).
 2. **Edge checks only ADD, never remove** (§3.6, §4.2). Over-bright stale light at a border is *never* corrected by the edge-check pass — only too-dark light is. The "inverse artifact" (light that refuses to darken) therefore had **no automatic correction path** and persisted until a full relight. Two initiators have since been supplied for its known mechanisms: the Bug 12 cross-seam removal emit (reason 3 below) and the Bug 14 pull-back claim verification (§3.4 step 2 — the dominant planter of border over-bright, a darkness wave's own stale-snapshot
