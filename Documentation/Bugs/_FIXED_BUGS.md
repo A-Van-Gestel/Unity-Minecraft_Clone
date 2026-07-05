@@ -533,7 +533,66 @@ write-no-enqueue, claim-verified.
 
 **Validation suite:** distilled repros K15b (seam cliff + cap edit, sun) and K15c (seam wall + torch break, RGB)
 flipped red→green and were promoted to **B62/B63**; the border-heightmap fuzz that found the bug remains
-known-bug repro **K15a** under Bug 05.
+now baseline **B64** (its seed 14 also drove the Bug 05 fix — see Lighting #20 below).
+
+---
+
+### ~~20. Persistent chunk-border shadow patches in dense biomes (post-edit edge-round exhaustion)~~
+
+**Severity:** Medium
+**Fixed:** July 2026 (was Bug 05 in `LIGHTING_BUGS.md` — the oldest open lighting bug)
+**Status:** Resolved — confirmed in-game (a freshly generated dense-forest world no longer shows the
+persistent dark patches under overlapping canopies near freshly-generated chunk borders that previously
+needed a world reload to clear) and via the validation suite (K15a seed 14 red→green, all baselines green).
+Promoted from known-bug repro **K15a** to baseline **B64**
+(`Assets/Editor/Validation/Lighting/LightingValidationSuite.BorderHeightFuzz.cs`).
+**Found by:** long-standing player-reported symptom (dense forest biomes); the first faithful synchronous
+repro was the HF-3 border-heightmap fuzz's seed 14 (2026-07-05), after the geometry-axis fuzzes (B8 diagonal
+well, B42 dense-canopy) both converged and the "not synchronously reproducible" verdict had stood since June
+
+2026.
+
+**Files:** `Assets/Scripts/Data/ChunkData.cs` (`ModifyVoxel` border-column edge-check re-grant,
+`BORDER_EDIT_EDGE_CHECK_ROUNDS`); mirrored in the harness (`LightingTestWorld.Builder.cs`,
+`LightingTestWorld.RunReGrantedEdgeCheckRound`, `LightingFrameSimulator.RunToConvergence`).
+
+**Description:**
+Persistent dark/shadow patches near the borders of freshly generated chunks in visually dense areas
+(overlapping forest canopies), which only resolved on a full world reload or when an unrelated nearby edit
+forced a light update. The geometry axis was exhausted without a repro (B8 diagonal-well slab and the B42
+dense-canopy fuzz both converge within the production 2 edge-check rounds); the faithful repro lived on the
+**post-edit** axis instead.
+
+**Root Cause:**
+Each chunk starts with `RemainingEdgeCheckRounds = 2`, both consumed during the initial generation wave. A
+later **border-column opacity edit** (dense-biome decoration VoxelMods use this exact path) whose column
+recalc re-spreads against stale cross-seam snapshots can leave a transparent border voxel 1–2 sky levels
+under the borderless oracle — a converged, **stable-but-dark** field with no pending work. Edge checks are
+the only corrector for under-bright border light (add-only, §3.6/§3.7), and after generation there was no
+round left to run one. Classifier-proven: exactly one edge-check round over the settled field heals it (seed
+14 diff: engine sky 12/11/11/12 vs oracle 13 at `(21,21..24,15)`, the column of companion edit
+`place@(21,37,15)` under a z=16-seam overhang).
+
+**Fix (July 2026):** the **re-arm** direction. `ChunkData.ModifyVoxel`, on an opacity-changing edit whose
+column is a chunk-border column (local x/z in {0,15}), tops `RemainingEdgeCheckRounds` back up to
+`BORDER_EDIT_EDGE_CHECK_ROUNDS` (= 1). The existing stabilization machinery
+(`WorldJobManager.ProcessLightingJobs` re-arm + `TriggerNeighborEdgeChecks` + the `AreNeighborsReadyAndLit`
+edge-check gate) then re-runs the reconciling border check on the settled field — no other engine change.
+Add-only and bounded by the counter, so it cannot livelock (B58/B59 stayed green); `RemainingEdgeCheckRounds`
+is `[NonSerialized]` and already reset in `ChunkData.Reset()`, so no pool-reset or save-format work. The
+transparent-center pull-back direction (Bug 15's machinery) was **not** taken — re-lighting transparent
+centers from dimmer stale neighbors spreads over-bright ghosts (rejected, see #19).
+
+**Rejected mid-fix (harness):** a per-completion re-arm in the frame simulator ran the edge check mid-churn,
+and the field settled back to its under-report after the round was spent. The reconciling round must read the
+**settled** field: production gets that from its neighbor-stability edge-gate plus the only-increase mod guard
+that protects a healed border, while the harness models it by consuming the re-granted round at grid
+quiescence (`RunReGrantedEdgeCheckRound`, consistent with how `RunInitialLighting*` already drive generation
+edge rounds as a post-convergence loop). Exact per-frame edge-check scheduling in the harness remains AS-2.
+
+**Validation suite:** K15a seed 14 red→green, promoted to baseline **B64** (25 seeds/suite run, 200 nightly) —
+one varied-heightmap-at-seam geometry axis now guards both Bug 15 (all seeds) and Bug 05 (seed 14). Prove-red:
+neutering the re-grant re-reds seed 14 and only seed 14. All 56 baselines green.
 
 ---
 

@@ -15,11 +15,13 @@ namespace Editor.Validation.Lighting
         // nightly menu) ALSO converges across all seeds once Bug 10 is fixed — the INITIAL-WAVE shadow
         // mechanism is not synchronously reproducible (in-range light paths reconcile within the 2 edge
         // rounds). The canopy fuzz's real catch was Bug 10 (K10a/K10b below). HOWEVER, the border-heightmap
-        // fuzz (K15a below) reproduces the POST-EDIT form synchronously (found 2026-07-05 at its seed 14):
-        // under-bright transparent border voxels persist after border edits with no pending work, because
+        // fuzz (now baseline B64) reproduced the POST-EDIT form synchronously (found 2026-07-05 at seed 14):
+        // under-bright transparent border voxels persisted after border edits with no pending work, because
         // both edge-check rounds were consumed during the generation wave — exactly one forced edge-check
-        // round heals the field to the oracle (classifier-proven). Edge-round exhaustion after edits IS
-        // the Bug-05 mechanism, now testable without in-build instrumentation.
+        // round heals the field to the oracle (classifier-proven). FIXED July 2026: ChunkData.ModifyVoxel
+        // re-grants a bounded edge-check round on a border-column opacity edit, so the post-edit
+        // stabilization re-runs the reconciling border check (archived _FIXED_BUGS.md Lighting #20;
+        // confirmed in-game — no dense-canopy border shadow patches).
 
         // NOTE on Bug 09: fifteen synchronous repro attempts exhausted every production scheduling behavior
         // the harness can model (direct-harness single/both-in-flight, frame-simulator ContainsKey/budget/
@@ -48,13 +50,7 @@ namespace Editor.Validation.Lighting
         {
             // Bug 09 still needs a faithful repro (see note above).
 
-            // The border-heightmap fuzz that found Bug 15 stays registered here: its one remaining red
-            // (seed 14) reproduces Bug 05's edge-round exhaustion (see the Bug 05 note above). It
-            // promotes to a baseline when THAT mechanism is fixed.
-            scenarios.Add(new Scenario(
-                "K15a: Border-heightmap fuzz — varied heights at every seam, seam overhangs, and border edits settle on the oracle across randomized seeds (reproduces Bug 05 edge-round exhaustion)",
-                KnownBug_BorderHeightFuzz,
-                knownBugId: "Bug 05"));
+            // No open lighting bugs currently have a registered known-bug repro.
         }
     }
 }

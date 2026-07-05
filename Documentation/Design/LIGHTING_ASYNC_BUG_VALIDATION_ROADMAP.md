@@ -3,7 +3,9 @@
 > **Status:** In progress — **AS-1 CLOSED 2026-07-04** (Bugs 13 + 14 both reproduced, fixed, confirmed
 > in-game, and archived — see §3 outcome). **§10 harness-hardening HF-1/HF-2/HF-3 DONE 2026-07-05**
 > (HF-3's fuzz found + closed **Bug 15** and produced the first synchronous **Bug 05** repro — see the
-> §10 outcome blocks; suite at B63, 55 baselines). AS-2 … AS-5 remain proposals; HF-4 folds into AS-2.
+> §10 outcome blocks; that seed-14 repro then **closed Bug 05** — border-column edge-check re-grant,
+> fixed + confirmed in-game + archived `_FIXED_BUGS.md` #20, promoted to baseline **B64**; suite at B64,
+> 56 baselines). AS-2 … AS-5 remain proposals; HF-4 folds into AS-2.
 > **Created:** 2026-07-03 (async-testability analysis session, repo @ `a458173`)
 > **Scope:** making the async-flavored open lighting bugs (**Bug 05 / Bug 09 / Bug 13**,
 > [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)) testable, and closing the async surfaces the
@@ -233,12 +235,16 @@ NS-3's convergence/flag-pairing assertion families in mind.
 **Target:** [Bug 05](../Bugs/LIGHTING_BUGS.md) — persistent chunk-border shadow patches in
 dense biomes.
 
-> **Update (2026-07-05, from HF-3):** a faithful synchronous Bug-05 repro now **exists on a different
-> axis** — the border-heightmap fuzz's seed 14 (K15a) reds on *post-edit* edge-round exhaustion, healed
-> by exactly one forced edge-check round (see the Bug 05 entry). The Bug-05 fix can therefore be
-> test-driven from K15a without waiting for this item. AS-3's staggered-frontier axis remains open as
-> the *initial-wave* form's habitat (fidelity C8) and as the natural re-verification sweep once the
-> edge-round fix lands.
+> **Update (2026-07-05, from HF-3):** a faithful synchronous Bug-05 repro was found on a different
+> axis — the border-heightmap fuzz's seed 14 (K15a) red on *post-edit* edge-round exhaustion, healed
+> by exactly one forced edge-check round. The Bug-05 fix was test-driven from K15a without this item.
+>
+> **CLOSED-OUT (2026-07-05): Bug 05 FIXED + confirmed in-game + archived** (`_FIXED_BUGS.md` Lighting
+> #20). The fix is the **re-arm** direction: `ChunkData.ModifyVoxel` re-grants a bounded edge-check
+> round on a border-column opacity edit, so the existing stabilization machinery re-runs the reconciling
+> border check on the settled field. K15a promoted to baseline **B64**. AS-3's staggered-frontier axis
+> remains open only as a *belt-and-braces* re-verification sweep and the *initial-wave* form's habitat
+> (fidelity C8) — no longer needed to reproduce Bug 05, so its priority drops.
 
 **Why this axis.** The geometry axis is exhausted (fidelity C2: canopy fuzz, all seeds
 converge), but every existing scenario lights all chunks in **one simultaneous wave** with
@@ -491,8 +497,10 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
 > red, seed 14, then produced the **first faithful synchronous Bug-05 repro** (the post-edit form:
 > edge-round exhaustion, healed by exactly one forced edge-check round — see the Bug 05 entry in
 > `LIGHTING_BUGS.md`), falsifying the "not synchronously reproducible" verdict that had stood since the
-> canopy fuzz. The fuzz therefore remains known-bug repro **K15a under Bug 05** and takes its baseline
-> number when that fix lands. C9's "varied-heightmap-at-seam geometry per cross-chunk feature" lesson
+> canopy fuzz. **Bug 05 was then fixed** (2026-07-05, the border-column edge-check re-grant in
+> `ChunkData.ModifyVoxel`), confirmed in-game (no dense-canopy border shadow patches), and archived
+> (`_FIXED_BUGS.md` Lighting **#20**); the fuzz was promoted from K15a to baseline **B64** (suite: 56
+> baselines green). C9's "varied-heightmap-at-seam geometry per cross-chunk feature" lesson
 > is upgraded from recommendation to validated practice: one geometry axis, two bugs.
 
 ### HF-4 — Shared lighting-pass orchestrator (deferred; fold into AS-2 / NS-3)

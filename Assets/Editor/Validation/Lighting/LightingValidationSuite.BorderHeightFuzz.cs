@@ -23,20 +23,21 @@ namespace Editor.Validation.Lighting
     /// violation here. HF-3 was deliberately built after HF-1 for exactly this reason.
     /// </para>
     /// <para>
-    /// Tiered like the C1/C2 fuzz layers: <b>K15a</b> sweeps a small seed count on every suite run; the
+    /// Tiered like the C1/C2 fuzz layers: baseline <b>B64</b> sweeps a small seed count on every suite run; the
     /// dedicated <c>Validate Lighting Engine (Border Height Fuzz)</c> menu item sweeps far more seeds
     /// nightly. Every red is classified before it is reported (forced-edge-rounds classifier for
     /// generation-wave failures, the oscillation probe for post-edit non-termination), and a failing
     /// seed reproduces its exact geometry AND scheduling order deterministically.
     /// </para>
     /// <para>
-    /// Registered as known-bug repro <b>K15a</b> (expected red). The fuzz's very first seed found
+    /// Now baseline <b>B64</b> (promoted from known-bug repro K15a after the Bug 05 fix + in-game
+    /// confirmation, July 2026). The fuzz's very first seed found
     /// <b>Bug 15</b> (cross-chunk surface stamps wiped by border-column edits — fixed July 2026,
     /// guarded by baselines B62/B63, archived in <c>Documentation/Bugs/_FIXED_BUGS.md</c>). Its one
     /// remaining red (seed 14) is <b>Bug 05</b>'s edge-round exhaustion: post-edit under-bright border
     /// voxels with no pending work, healed by exactly one forced edge-check round (see the Bug 05
-    /// entry in <c>Documentation/Bugs/LIGHTING_BUGS.md</c>). After THAT fix is confirmed, promote to
-    /// a baseline and flip <see cref="BORDER_FUZZ_EXPECTED_RED"/>.
+    /// entry, now <c>Documentation/Bugs/_FIXED_BUGS.md</c> Lighting #20). Both bugs are fixed, confirmed
+    /// in-game, and archived; one varied-heightmap-at-seam geometry axis, two bugs.
     /// </para>
     /// </summary>
     public static partial class LightingValidationSuite
@@ -72,11 +73,11 @@ namespace Editor.Validation.Lighting
         private const int BORDER_FUZZ_OVERHANG_MIN_GAP = 2;
 
         /// <summary>
-        /// Failure-reporting mode: true while the fuzz is the expected-red Bug-05 repro K15a (failures
-        /// log as <c>[EXPECTED-RED]</c> warnings), false once promoted to a baseline (failures are
-        /// regressions and log as <c>[FAIL]</c> errors).
+        /// Failure-reporting mode: true while the fuzz was the expected-red Bug-05 repro K15a (failures
+        /// logged as <c>[EXPECTED-RED]</c> warnings); now <b>false</b> — promoted to baseline B64 after the
+        /// Bug 05 fix + in-game confirmation, so any failure is a regression and logs as a <c>[FAIL]</c> error.
         /// </summary>
-        private const bool BORDER_FUZZ_EXPECTED_RED = true;
+        private const bool BORDER_FUZZ_EXPECTED_RED = false;
 
         /// <summary>
         /// One randomized border-heightmap world, fully determined by its seed: the per-column terrain
@@ -262,25 +263,25 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// K15a (HF-3): runs <see cref="BORDER_FUZZ_BASELINE_ITERATIONS"/> randomized border-heightmap
-        /// seeds and fails if any seed's generation wave or post-edit pipeline fails to terminate on the
-        /// borderless oracle. Under the HF-1 accessor assertions, any engine defect that produces an
-        /// out-of-bounds local position at these seam geometries reds loudly here instead of
-        /// wrong-reading. Currently expected red: seed 0 reproduces Bug 15's seam surface-stamp wipe.
-        /// The dedicated <c>Validate Lighting Engine (Border Height Fuzz)</c> menu item runs far more
-        /// seeds nightly.
+        /// B64 (HF-3, promoted from K15a): runs <see cref="BORDER_FUZZ_BASELINE_ITERATIONS"/> randomized
+        /// border-heightmap seeds and fails if any seed's generation wave or post-edit pipeline fails to
+        /// terminate on the borderless oracle. Under the HF-1 accessor assertions, any engine defect that
+        /// produces an out-of-bounds local position at these seam geometries reds loudly here instead of
+        /// wrong-reading. Guards the Bug 15 stamp fix (all seeds) and the Bug 05 edge-round-exhaustion fix
+        /// (seed 14, the border-edit edge-check re-grant). The dedicated
+        /// <c>Validate Lighting Engine (Border Height Fuzz)</c> menu item runs far more seeds nightly.
         /// </summary>
-        private static bool KnownBug_BorderHeightFuzz()
+        private static bool Baseline_BorderHeightFuzz()
         {
             int? failingSeed = SweepBorderHeightFuzz(BORDER_FUZZ_BASELINE_ITERATIONS, startSeed: 0);
             if (!failingSeed.HasValue)
             {
-                Debug.Log($"[PASS] K15a: all {BORDER_FUZZ_BASELINE_ITERATIONS} border-heightmap seeds settle on the oracle (generation wave + border edits)");
+                Debug.Log($"[PASS] B64: all {BORDER_FUZZ_BASELINE_ITERATIONS} border-heightmap seeds settle on the oracle (generation wave + border edits)");
                 return true;
             }
 
             return BorderFuzzFail(
-                $"K15a: all {BORDER_FUZZ_BASELINE_ITERATIONS} border-heightmap seeds settle on the oracle (generation wave + border edits)",
+                $"B64: all {BORDER_FUZZ_BASELINE_ITERATIONS} border-heightmap seeds settle on the oracle (generation wave + border edits)",
                 $"seed {failingSeed.Value} fails (details logged by that iteration) — {BorderHeightFuzzCase.FromSeed(failingSeed.Value).Describe()}");
         }
 
@@ -307,8 +308,11 @@ namespace Editor.Validation.Lighting
                 $"Case: {BorderHeightFuzzCase.FromSeed(failingSeed.Value).Describe()}\n" +
                 "The failing iteration's entry above carries the phase and classifier/probe verdict. " +
                 "Re-run this exact seed to reproduce — geometry AND scheduling order are pure functions of the seed.";
+            // BORDER_FUZZ_EXPECTED_RED is false now that the fuzz is baseline B64 (Bugs 15 + 05 fixed);
+            // the warning branch stays so the fuzz can be re-armed as an expected-red repro if it ever
+            // surfaces a new open bug.
             if (BORDER_FUZZ_EXPECTED_RED)
-                Debug.LogWarning($"{report}\nExpected while Bug 05 (edge-round exhaustion) is open (see LIGHTING_BUGS.md).");
+                Debug.LogWarning($"{report}\nExpected while the newly-surfaced bug is open (see LIGHTING_BUGS.md).");
             else
                 Debug.LogError($"<color=red>{report}</color>");
         }
@@ -346,7 +350,7 @@ namespace Editor.Validation.Lighting
         private static bool RunBorderHeightFuzzCase(LightingTestWorld world, LightingFrameSimulator sim,
             BorderHeightFuzzCase fuzzCase, int seed)
         {
-            string label = $"K15a seed {seed}";
+            string label = $"B64 seed {seed}";
             int budget = 1 + seed % 4;
             int cadence = seed % 3;
 

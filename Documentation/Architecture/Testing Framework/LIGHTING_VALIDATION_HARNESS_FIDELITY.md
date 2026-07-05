@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (55 baselines + frame simulator, menu item
+The lighting validation suite (56 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -452,7 +452,7 @@ there is invisible.
   below darkens to side-bleed → break → re-light) is untested as a dedicated baseline; B3 only opens a shaft.
   Likely caught incidentally by other oracle compares — hence LOW.
 
-### C8 — Initial lighting only ever runs as a single simultaneous wave ·  **OPEN · MEDIUM (Bug 05's untried axis, new 2026-07-03)**
+### C8 — Initial lighting only ever runs as a single simultaneous wave ·  **OPEN · LOW (was Bug 05's untried axis; Bug 05 fixed via the post-edit axis 2026-07-05, so this drops to belt-and-braces re-verification)**
 
 - Every generation-shaped scenario (B8, the B42 canopy fuzz, the B40 geometry fuzz) lights **all chunks
   in one concurrent wave** with `neighborsDataReady: true` throughout (the C1 remainder). Production
@@ -491,8 +491,18 @@ there is invisible.
   run found two bugs on the very geometry axis this finding predicted flat worlds were hiding:
   seed 0 → **Bug 15** (cross-seam surface stamps wiped by border-column edits; fixed + confirmed +
   archived `_FIXED_BUGS.md` Lighting #19, distilled repros promoted to baselines **B62/B63**), and
-  seed 14 → the **first faithful synchronous Bug 05 repro** (post-edit edge-round exhaustion — see
-  `LIGHTING_BUGS.md`). The fuzz remains known-bug repro K15a under Bug 05 until that fix lands.
+  seed 14 → the **first faithful synchronous Bug 05 repro** (post-edit edge-round exhaustion). **Bug 05
+  was then fixed** (2026-07-05, `ChunkData.ModifyVoxel` re-grants a bounded edge-check round on a
+  border-column opacity edit), confirmed in-game, and archived (`_FIXED_BUGS.md` Lighting #20); the fuzz
+  was promoted from K15a to baseline **B64**. One geometry axis, two bugs — the lesson paid off twice.
+- **New modeling note from the Bug 05 fix (frame-sim edge-check timing):** driving seed 14 green exposed
+  that the frame simulator lacks production's neighbor-stability **edge-check gate** (`AreNeighborsReadyAndLit`,
+  which naturally defers a re-armed edge check until the neighborhood settles). A per-completion re-arm in
+  the simulator ran the edge check *mid-churn* and the field settled back to its under-report. The fix
+  models the settled-field edge check by consuming the border-edit re-grant at grid **quiescence**
+  (`LightingTestWorld.RunReGrantedEdgeCheckRound`, driven from `LightingFrameSimulator.RunToConvergence`) —
+  outcome-faithful and consistent with how `RunInitialLighting*` already drive generation edge rounds as a
+  post-convergence loop. Modeling the exact per-frame edge-gate is **AS-2**'s scope (the MT-2 scheduler layer).
 
 > **None of C3–C9 require a new harness capability** — each reuses existing primitives
 > (`MarkChunkUnloaded`/`MarkChunkLoaded`, `BeginLightingJob`/`CompleteLightingJob`, the pure-channel lamp
@@ -560,7 +570,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | A5 | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)                                                               | **CLOSED**        | —                | done           |
 | B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                                                                              | OPEN              | **Medium-High**  | medium         |
 | B7 | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 done; full replay → HF-4)                                                               | **CLOSED (near)** | — (HF-4 w/ AS-2) | done           |
-| C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3)                                                                | OPEN              | Medium           | medium         |
+| C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3; Bug 05 fixed via the post-edit axis, so now belt-and-braces)   | OPEN              | Low              | medium         |
 | C9 | Flat scenario worlds never exercise border shadow-casters (B60; HF-3 fuzz shipped 2026-07-05 — found Bug 15 → B62/B63 + the first sync Bug-05 repro) | **CLOSED**        | —                | done           |
 | C6 | Per-channel removal independence                                                                                                                     | OPEN              | Low–Medium       | small          |
 | C7 | Deterministic corner spill / in-chunk re-shadow                                                                                                      | OPEN              | Low              | small          |
@@ -585,6 +595,6 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 - Async-bug testability roadmap (AS-1…AS-5 — B3 amendment, B6, C8, Bug 05/09 plans) + harness-hardening
   follow-ups (HF-1…HF-4 — A5, B7, C9 remediations):
   [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md)
-- Open lighting bugs (Bug 05, Bug 09): [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)
+- Open lighting bugs (Bug 09): [LIGHTING_BUGS.md](../../Bugs/LIGHTING_BUGS.md)
 - Lighting system overview: [LIGHTING_SYSTEM_OVERVIEW.md](../LIGHTING_SYSTEM_OVERVIEW.md)
 - Pipeline invariants: `.agents/rules/chunk-pipeline.md`, `.agents/rules/pool-reset-safety.md`

@@ -101,9 +101,14 @@ namespace Editor.Validation.Lighting
             // Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs and self-register here. ---
             AddBug15StampBaselineScenarios(scenarios);
 
-            // The HF-3 border-heightmap fuzz (LightingValidationSuite.BorderHeightFuzz.cs) remains
-            // known-bug repro K15a — its residual red is Bug 05's edge-round exhaustion; it takes the
-            // next baseline number here after THAT fix is confirmed.
+            // --- Bug 05 fix baseline (B64, promoted from K15a after the July 2026 border-edit
+            // edge-check re-grant + in-game confirmation): the HF-3 border-heightmap fuzz. One
+            // varied-heightmap-at-seam geometry axis guarding two fixes — Bug 15 stamps (all seeds) and
+            // Bug 05 edge-round exhaustion (seed 14). Body + private helpers live in
+            // LightingValidationSuite.BorderHeightFuzz.cs. ---
+            scenarios.Add(new Scenario(
+                "B64: Border-heightmap fuzz — varied heights at every seam, seam overhangs, and border edits settle on the oracle across randomized seeds (Bug 15 + Bug 05 guard)",
+                Baseline_BorderHeightFuzz));
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
