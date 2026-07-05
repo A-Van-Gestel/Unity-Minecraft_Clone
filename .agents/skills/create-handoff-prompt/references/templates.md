@@ -37,6 +37,10 @@ phase. On completion, {CLOSING BOOKKEEPING — e.g. "flip findings {IDS} per {DO
 
 **Provenance:** genericized 2026-07-04 from the HF-1…HF-3 harness-hardening handoff (roadmap §10
 + fidelity A5/B7/C9), itself modeled on the AS-1 kickoff prompt that ran the Bug-13 session.
+That prompt ran successfully 2026-07-05 (HF-1 + HF-2 executed as planned); the template was
+reused the same day for the mid-plan HF-3-only re-handoff — completed items are referenced via
+their doc **Outcome blocks** (not re-explained), and the acceptance test can point at a
+*documented recipe* from a prior item's outcome (HF-3's prove-red re-applies HF-1's B60 sabotage).
 Key lines that earned their place: the per-item **acceptance test** (HF-1's B60 sabotage re-run —
 the proof the work achieved its purpose), the **audit-before-change prerequisite** (a
 session-discovered trap), and the explicit **out-of-scope + destination** (HF-4 → AS-2), which
