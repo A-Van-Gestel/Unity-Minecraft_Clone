@@ -96,6 +96,9 @@ namespace Editor.Validation.Lighting
             // --- Bug 14 fix baselines (B60 halo-node claim contract, B61 promoted ghost repro) live in
             // Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs and self-register here. ---
             AddBug14GhostBaselineScenarios(scenarios);
+
+            // The HF-3 border-heightmap fuzz (LightingValidationSuite.BorderHeightFuzz.cs) is registered
+            // as known-bug repro K15a while Bug 15 is open; it takes B62 here after the fix is confirmed.
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>

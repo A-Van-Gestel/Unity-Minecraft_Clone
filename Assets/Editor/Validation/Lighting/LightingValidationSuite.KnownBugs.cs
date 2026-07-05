@@ -35,7 +35,17 @@ namespace Editor.Validation.Lighting
 
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
-            // No open known-bug scenarios. Bug 05 and Bug 09 still need faithful repros (see notes above).
+            // Bug 05 and Bug 09 still need faithful repros (see notes above) — though Bug 15 below is a
+            // strong candidate mechanism for Bug 05 (identical healing profile; dense-biome decoration
+            // mods run through the same border-column edit path).
+
+            // Bug 15 (found 2026-07-05 by the HF-3 border-heightmap fuzz, its first seed): a border-column
+            // edit's sunlight recalc permanently wipes the cross-chunk surface stamp on opaque seam-face
+            // voxels; no wake ever re-derives it. Promote to baseline B62 after the fix + in-game confirm.
+            scenarios.Add(new Scenario(
+                "K15a: Border-heightmap fuzz — varied heights at every seam, seam overhangs, and border edits settle on the oracle across randomized seeds (reproduces Bug 15)",
+                KnownBug_BorderHeightFuzz,
+                knownBugId: "Bug 15"));
         }
     }
 }

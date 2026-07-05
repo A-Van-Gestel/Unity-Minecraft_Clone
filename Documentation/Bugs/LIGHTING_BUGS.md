@@ -41,6 +41,12 @@ failing repro remains TODO.
 **Untried repro axis (2026-07-03 analysis):** the "not synchronously reproducible" verdict above covers the *geometry* axis only — every scenario so far lights all chunks in **one simultaneous wave**. Production lights a moving frontier (chunks join incrementally, readiness flips over time, edge-check rounds are consumed at staggered relative times), which is Bug 05's actual habitat and is fully sync-modelable. A staggered generation-wave fuzz is specced as **AS-3**
 in [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) (fidelity finding C8).
 
+**Candidate mechanism found (2026-07-05):** the HF-3 border-heightmap fuzz reproduced a
+deterministic, synchronous defect with exactly this bug's healing profile — **Bug 15** (cross-chunk
+sunlight surface stamp on seam faces permanently wiped by a same-column border edit; dense-biome
+decoration VoxelMods run through that same edit path). See the Bug 15 entry below; fixing it may
+resolve or substantially shrink this bug.
+
 ---
 
 ## Bug 09: Cross-Chunk Blocklight Lost on Rapid Place/Break at Chunk Border
@@ -88,3 +94,64 @@ The Bug 07/08 cross-chunk mod delivery fixes were already present when Bug 09 wa
 symptom shape and is sync-testable), **AS-4** (real-`Schedule()` parallel-determinism gate covering pooled-buffer aliasing, the remaining plausible in-editor race), and **AS-5** (automated in-build stress rig — also the cheap way to **re-verify the bug still exists** before further investment).
 
 **Testing environment:** IL2CPP master build, ocean biome (underwater), June 2026.
+
+---
+
+## Bug 15: Cross-Chunk Sunlight Surface Stamp Permanently Lost After a Border-Column Edit
+
+**Severity:** Medium
+**Status:** Open — deterministic synchronous repro available (found 2026-07-05 by the HF-3 border-heightmap fuzz, B62 seed 0)
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`RecalculateSunlightForColumn`, `CheckEdgeVoxel`), `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (apply side)
+
+**Description:**
+At a chunk-border height step (a cliff face sitting on the seam), the opaque face voxels carry the
+sunlight **surface stamp** (`source − 1`, the receive-but-don't-propagate rule pinned by baseline
+B39) fed by the *neighbor chunk's* lit border air. An opacity-changing edit **higher in the same
+border column** (e.g. placing a block above the cliff top) triggers that column's sunlight
+recalculation, which wipes those stamps — and nothing ever re-applies them. The field converges
+(no pending work) with the seam face voxels at sky 0 where the borderless oracle — and the
+engine's own initial generation wave — put 14. Stable-but-wrong and **permanent**: it survives
+re-running both chunks' lighting jobs and only heals when some unrelated edit floods that seam again.
+
+**Empirical facts (seed-0 diagnosis, 2026-07-05, grid-3 harness world):**
+
+- Generation wave over the varied heightmap: **green** (matches oracle, stamps present).
+- After 10 seeded border edits + convergence (17 frames, no pending work): **28 voxels under-bright**,
+  all of them opaque seam-face voxels in the three edited border columns, engine sky 0 vs oracle 14,
+  with the across-seam air neighbor correct at 15/15 (e.g. stamp voxel `(15,12,10)` stone, neighbor
+  `(16,12,10)` air 15/15; edit was `place@(15,45,10)` — same column, 30+ voxels higher).
+- **Re-running the edited chunk's own job + convergence does NOT restore the stamp. Re-running the
+  neighbor's job + convergence does NOT restore it either** — so this is not a missing wake-up: the
+  stamp is only ever produced while a BFS wave is *actively visiting* the neighbor's border air voxel
+  (as during initial lighting, or a nearby edit's flood).
+- A full-relight heal test (queue all 256 columns in every chunk, converge) makes it **worse** —
+  202 under-bright seam-face voxels: every border column recalc wipes its column's cross-chunk-fed
+  stamps chunk-wide, and only the in-chunk-fed ones recover.
+
+**Root Cause Suspected:**
+The sunlight column recalculation rewrites the column's sky values from the vertical rule alone;
+lateral surface stamps on opaque voxels are not derivable from the vertical pass and get zeroed.
+In-chunk stamps recover because the recalc's BFS wake/re-spread revisits the in-chunk lit air;
+cross-chunk stamps cannot: the lit air lives in the neighbor chunk, the neighbor receives no
+mod/wake (its own field is unchanged and correct), and `CheckEdgeVoxel`'s reconciliation evidently
+does not re-stamp an opaque cross-border voxel on a settled chunk (whether it skips opaque targets
+or simply is not armed on a settled world is still to be attributed). Note the job's padded halo
+*contains* the neighbor's lit air — the recalc/wipe side has the data to re-derive the stamp locally.
+
+**Relationship to Bug 05:** the healing profile is identical (full world reload = fresh initial
+wave fixes it; forcing light updates nearby = BFS revisits the seam fixes it), and dense biomes
+stamp tree/canopy decorations through this same edit path (opacity-changing VoxelMods at borders →
+column recalcs). Bug 15 is therefore a strong candidate mechanism for at least part of Bug 05 —
+but unlike Bug 05 it is deterministic, synchronous, and already reproduced in the harness.
+
+**Repro scenario:** known-bug repro **K15a** (border-heightmap fuzz,
+`Assets/Editor/Validation/Lighting/LightingValidationSuite.BorderHeightFuzz.cs`, expected red) reds
+on exactly this defect at seed 0 (its first seed; the whole seed space likely hits it). After the
+fix + in-game confirmation it promotes to baseline **B62** (flip its `BORDER_FUZZ_EXPECTED_RED`
+switch). A distilled minimal deterministic repro (settled seam cliff → place one block atop the
+border column → assert the seam-face stamp against the oracle) is the validation-driven-bugfix
+next step for fast fix iteration.
+
+**In-game verification suggestion:** stand at a chunk-border cliff, place a block on top of the
+cliff's border column, and watch whether the cliff face below darkens permanently (also answers
+whether the mesher reads the opaque voxel's own stamped light — the visual-severity question).
