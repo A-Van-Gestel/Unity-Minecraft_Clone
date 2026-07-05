@@ -12,10 +12,14 @@ namespace Editor.Validation.Lighting
     {
         // NOTE on Bug 05: a minimal repro (single diagonal sky well, baseline B8) converges, and the
         // procedural dense-canopy geometry fuzz (LightingValidationSuite.Bug05Canopy.cs, baseline B42 +
-        // nightly menu) ALSO converges across all seeds once Bug 10 is fixed — so the Bug-05 shadow
+        // nightly menu) ALSO converges across all seeds once Bug 10 is fixed — the INITIAL-WAVE shadow
         // mechanism is not synchronously reproducible (in-range light paths reconcile within the 2 edge
-        // rounds). The canopy fuzz's real catch was Bug 10 (K10a/K10b below). A faithful Bug-05 repro
-        // remains TODO and likely needs in-build instrumentation, not another synchronous layer (cf. B3).
+        // rounds). The canopy fuzz's real catch was Bug 10 (K10a/K10b below). HOWEVER, the border-heightmap
+        // fuzz (K15a below) reproduces the POST-EDIT form synchronously (found 2026-07-05 at its seed 14):
+        // under-bright transparent border voxels persist after border edits with no pending work, because
+        // both edge-check rounds were consumed during the generation wave — exactly one forced edge-check
+        // round heals the field to the oracle (classifier-proven). Edge-round exhaustion after edits IS
+        // the Bug-05 mechanism, now testable without in-build instrumentation.
 
         // NOTE on Bug 09: fifteen synchronous repro attempts exhausted every production scheduling behavior
         // the harness can model (direct-harness single/both-in-flight, frame-simulator ContainsKey/budget/
@@ -35,17 +39,19 @@ namespace Editor.Validation.Lighting
 
         static partial void AddKnownBugScenarios(List<Scenario> scenarios)
         {
-            // Bug 05 and Bug 09 still need faithful repros (see notes above) — though Bug 15 below is a
-            // strong candidate mechanism for Bug 05 (identical healing profile; dense-biome decoration
-            // mods run through the same border-column edit path).
+            // Bug 09 still needs a faithful repro (see note above).
 
-            // Bug 15 (found 2026-07-05 by the HF-3 border-heightmap fuzz, its first seed): a border-column
-            // edit's sunlight recalc permanently wipes the cross-chunk surface stamp on opaque seam-face
-            // voxels; no wake ever re-derives it. Promote to baseline B62 after the fix + in-game confirm.
+            // Bug 15 (found 2026-07-05 by the HF-3 border-heightmap fuzz, its first seed; fixed in code
+            // 2026-07-05): a border-column edit's sunlight recalc permanently wiped the cross-chunk
+            // surface stamp on opaque seam-face voxels — every cross-seam re-derivation path refused
+            // opaque centers. K15b/K15c (distilled repros) flipped green with the fix; the fuzz's stamp
+            // seeds (0/9/12/19) are green too. K15a's one remaining red (seed 14) is NOT the stamp bug:
+            // it reproduces Bug 05's edge-round exhaustion (see the Bug 05 note above), so the fuzz is
+            // registered under Bug 05 and promotes to baseline B62 when THAT mechanism is fixed.
             scenarios.Add(new Scenario(
-                "K15a: Border-heightmap fuzz — varied heights at every seam, seam overhangs, and border edits settle on the oracle across randomized seeds (reproduces Bug 15)",
+                "K15a: Border-heightmap fuzz — varied heights at every seam, seam overhangs, and border edits settle on the oracle across randomized seeds (reproduces Bug 05 edge-round exhaustion)",
                 KnownBug_BorderHeightFuzz,
-                knownBugId: "Bug 15"));
+                knownBugId: "Bug 05"));
             scenarios.Add(new Scenario(
                 "K15b: A seam cliff face's cross-seam sunlight surface stamp survives a same-column border edit (reproduces Bug 15, distilled)",
                 KnownBug_SeamFaceStampWipedByColumnRecalc,

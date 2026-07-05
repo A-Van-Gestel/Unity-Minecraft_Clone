@@ -446,13 +446,25 @@ namespace Jobs
                 ushort neighborLightData = GetLightData(neighborPos);
                 byte neighborLight = LightBitMapping.GetSkyLight(neighborLightData);
 
-                if (neighborLight > 0)
+                if (neighborLight == 0 && !IsInCenterChunk(neighborPos))
+                {
+                    // A dark cross-seam neighbor may have been zeroed by THIS job's own wave earlier
+                    // (halo cells are job-local scratch); the pristine schedule-time snapshot still
+                    // holds its value. Re-derive a fully-opaque center's surface stamp from it —
+                    // claim-verified at merge, so a genuinely dark live neighbor clears it again
+                    // (Bug 15 residual: consecutive same-job waves over a seam stamp).
+                    PullBackDimmerCrossSeamStamp(node.Pos, neighborPos, neighborPacked,
+                        SampleSnapshotSkyLight(neighborPos));
+                }
+                else if (neighborLight > 0)
                 {
                     if (neighborLight < node.LightLevel)
                     {
                         SetSunlight(neighborPos, 0);
                         if (IsInCenterChunk(neighborPos))
                             rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborLight });
+                        else
+                            PullBackDimmerCrossSeamStamp(node.Pos, neighborPos, neighborPacked, neighborLight);
                     }
                     else if (IsInCenterChunk(neighborPos))
                     {
@@ -504,10 +516,9 @@ namespace Jobs
         /// neighbor changed after it was taken), so the write is recorded as a
         /// <see cref="PullBackClaim"/> and re-verified against the neighbor's LIVE data at merge time —
         /// a claim the live source no longer supports is cleared through the standard removal veto
-        /// (Bug 14). Called for every lit cross-seam neighbor of a darkness node: one that can sustain
-        /// the removed level re-lights the center, and a dimmer one supplies the center's new, lower
-        /// value (Bug 15's residual — without it, a veto on the neighbor's side leaves this seam
-        /// permanently un-revisited).
+        /// (Bug 14). Called for a cross-seam neighbor that can sustain the removed level (the ≥ arm);
+        /// a dimmer-but-lit neighbor is handled by <see cref="PullBackDimmerCrossSeamStamp"/> instead,
+        /// which re-derives fully-opaque surface stamps only.
         /// </summary>
         /// <param name="centerPos">The just-darkened voxel being re-derived.</param>
         /// <param name="neighborPos">The lit cross-seam (halo) neighbor supplying the contribution.</param>
@@ -537,6 +548,87 @@ namespace Jobs
                     CenterPos = centerPos, NeighborPos = neighborPos, WrittenSky = pulledBack,
                 });
             }
+        }
+
+        /// <summary>
+        /// Re-derives a just-darkened FULLY-OPAQUE center voxel's surface stamp from a dimmer-but-lit
+        /// cross-seam neighbor (Bug 15's order-dependent residual). The darkness wave zeroes the
+        /// neighbor's halo copy and emits a cross-chunk removal its chunk adjudicates; when that removal
+        /// is vetoed there (the neighbor survives), nothing ever revisits this seam — so the surface
+        /// stamp (<c>neighbor − 1</c>, the PropagateLight opaque-surface rule) is written here from the
+        /// pre-zero snapshot value and recorded as a <see cref="PullBackClaim"/>: merge-time verification
+        /// keeps it when the live neighbor still supports it and clears it through the removal veto when
+        /// the neighbor genuinely died. Opaque centers only — a stamp is written but never enqueued, so a
+        /// stale write cannot spread; re-lighting transparent centers from dimmer stale neighbors plants
+        /// spreading ghost light (attempted and rejected, see the Bug 15 entry).
+        /// </summary>
+        /// <param name="centerPos">The just-darkened voxel whose stamp is re-derived.</param>
+        /// <param name="neighborPos">The dimmer lit cross-seam (halo) neighbor.</param>
+        /// <param name="neighborPacked">The neighbor's packed voxel data (already bounds-checked).</param>
+        /// <param name="neighborLight">The neighbor's sky value captured BEFORE its halo copy was zeroed
+        /// (or its pristine snapshot value when the halo copy already reads 0).</param>
+        private void PullBackDimmerCrossSeamStamp(Vector3Int centerPos, Vector3Int neighborPos,
+            uint neighborPacked, byte neighborLight)
+        {
+            // An opaque neighbor's stored value is a surface stamp, not a valid propagation source.
+            if (BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque)
+                return;
+
+            uint centerPacked = GetPackedData(centerPos);
+            if (centerPacked == uint.MaxValue)
+                return;
+            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)].IsOpaque)
+                return;
+
+            byte stamp = (byte)math.max(0, neighborLight - 1);
+            if (stamp <= LightBitMapping.GetSkyLight(GetLightData(centerPos)))
+                return;
+
+            SetSunlight(centerPos, stamp);
+
+            // Claims are center-only (see PullBackCrossSeamContribution): a halo darkness node's own
+            // position is out-of-center, and its write surfaces as a cross-chunk mod instead.
+            if (IsInCenterChunk(centerPos))
+            {
+                PullBackClaims.Add(new PullBackClaim
+                {
+                    CenterPos = centerPos, NeighborPos = neighborPos, WrittenSky = stamp,
+                });
+            }
+        }
+
+        /// <summary>
+        /// Reads a position's sky light from the PRISTINE schedule-time snapshot maps (the
+        /// <c>[ReadOnly]</c> gather sources), bypassing the padded volume's job-local halo mutations.
+        /// Used by the Bug 15 residual pull-back: a halo cell this job's own darkness wave already
+        /// zeroed still has its schedule-time value here. Missing neighbors and out-of-height
+        /// positions read as 0 (never a stamp source).
+        /// </summary>
+        /// <param name="pos">The BFS-local position (center chunk space; halo positions lie outside [0,16)).</param>
+        /// <returns>The snapshot sky light, or 0 when the source is missing or out of bounds.</returns>
+        private byte SampleSnapshotSkyLight(Vector3Int pos)
+        {
+            if ((uint)pos.y >= VoxelData.ChunkHeight)
+                return 0;
+
+            int cx = pos.x < 0 ? -1 : (pos.x >= VoxelData.ChunkWidth ? 1 : 0);
+            int cz = pos.z < 0 ? -1 : (pos.z >= VoxelData.ChunkWidth ? 1 : 0);
+
+            NativeArray<ushort> source;
+            if (cx < 0)
+                source = cz < 0 ? LightSW : (cz > 0 ? LightNW : LightW);
+            else if (cx > 0)
+                source = cz < 0 ? LightSE : (cz > 0 ? LightNE : LightE);
+            else
+                source = cz < 0 ? LightS : (cz > 0 ? LightN : CenterLight);
+
+            // A missing neighbor is handed to the gather as a zero-length array (sentinel-filled there).
+            if (source.Length == 0)
+                return 0;
+
+            int localX = pos.x - cx * VoxelData.ChunkWidth;
+            int localZ = pos.z - cz * VoxelData.ChunkWidth;
+            return LightBitMapping.GetSkyLight(source[ChunkMath.GetFlattenedIndexInChunk(localX, pos.y, localZ)]);
         }
 
         /// <summary>

@@ -47,6 +47,24 @@ sunlight surface stamp on seam faces permanently wiped by a same-column border e
 decoration VoxelMods run through that same edit path). See the Bug 15 entry below; fixing it may
 resolve or substantially shrink this bug.
 
+**FAITHFUL SYNCHRONOUS REPRO FOUND (2026-07-05) — edge-round exhaustion after border edits:** with
+Bug 15's stamp mechanism fixed, the border-heightmap fuzz (**K15a**,
+`Assets/Editor/Validation/Lighting/LightingValidationSuite.BorderHeightFuzz.cs`) still reds at its
+seed 14: after the seeded border edits, four *transparent* border voxels one step from the z-seam
+sit 1–2 sky levels under the oracle with **no pending work anywhere** — a converged, stable-but-dark
+field, exactly this bug's symptom. Classifier proof: **exactly one forced edge-check round over the
+grid heals the field to the oracle** (4 → 0 mismatches). Mechanism: both production
+`RemainingEdgeCheckRounds` (= 2) are consumed during the generation wave; a *post-edit* cross-seam
+under-report (the edit's darkness/re-spread interleaving across in-flight snapshots) then has no
+edge-check round left to reconcile it, and edge checks are the only corrector for under-bright
+border light (§3.6/§3.7 of LIGHTING_SYSTEM_OVERVIEW). This falsifies the "not synchronously
+reproducible" verdict for the post-edit form (the initial-wave form does still converge in-harness).
+K15a is registered as this bug's known-bug repro; it promotes to baseline B62 (flip
+`BORDER_FUZZ_EXPECTED_RED`) once this mechanism is fixed. Candidate fix directions: re-arm a
+bounded edge-check round when a border-column edit stabilizes, or extend the Bug-15 pull-back
+machinery to transparent centers with claim verification (rejected once for spread risk — see the
+Bug 15 entry's rejected-approach note — but a *claim-verified* variant may be viable).
+
 ---
 
 ## Bug 09: Cross-Chunk Blocklight Lost on Rapid Place/Break at Chunk Border
@@ -100,8 +118,8 @@ symptom shape and is sync-testable), **AS-4** (real-`Schedule()` parallel-determ
 ## Bug 15: Cross-Chunk Sunlight Surface Stamp Permanently Lost After a Border-Column Edit
 
 **Severity:** Medium
-**Status:** Partially fixed in code (July 2026) — primary mechanism fixed (K15b/K15c flipped green; limited in-game spot-checks 2026-07-05 look correct, but natural terrain rarely generates chunk-border cliffs so full in-game confirmation is pending — a flat/dev world with a hand-built seam cliff is the practical test setup); an order-dependent residual remains OPEN (see below), still reproduced by K15a
-**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`RecalculateSunlightForColumn`, `CheckEdgeVoxel`, `CheckEdgeVoxelRGB`, BFS seeding, `PullBackCrossSeamContribution`), `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`PullBackClaimStillSupported`)
+**Status:** Fixed in code (July 2026) — primary mechanism AND the order-dependent residual fixed (K15b/K15c green; fuzz stamp seeds 0/9/12/19 green; seed-12 residual trace-verified fixed). Limited in-game spot-checks 2026-07-05 look correct, but natural terrain rarely generates chunk-border cliffs so full in-game confirmation is pending — a flat/dev world with a hand-built seam cliff is the practical test setup. K15a's one remaining red is Bug 05's edge-round exhaustion, not this bug (see below).
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`RecalculateSunlightForColumn`, `CheckEdgeVoxel`, `CheckEdgeVoxelRGB`, BFS seeding, `PullBackCrossSeamContribution`, `PullBackDimmerCrossSeamStamp`, `SampleSnapshotSkyLight`), `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`PullBackClaimStillSupported`)
 
 **Description:**
 At a chunk-border height step (a cliff face sitting on the seam), the opaque face voxels carry the
@@ -156,7 +174,8 @@ next step for fast fix iteration.
 cliff's border column, and watch whether the cliff face below darkens permanently (also answers
 whether the mesher reads the opaque voxel's own stamped light — the visual-severity question).
 
-**Fix (2026-07-05, four parts — K15b/K15c red→green, all 53 baselines green):**
+**Fix (2026-07-05, five parts — K15b/K15c red→green, fuzz stamp seeds 0/9/12/19 green, all 53
+baselines green):**
 
 1. `CheckEdgeVoxel` no longer refuses an opaque center: it receives the surface stamp
    (`source − 1`, `PropagateLight`'s opaque-neighbor rule), written but never enqueued. This arms
@@ -168,24 +187,36 @@ whether the mesher reads the opaque voxel's own stamped light — the visual-sev
 4. The sun BFS seeding re-spreads an unchanged-but-lit edit node (an opacity-only change —
    e.g. breaking a stone-top block whose air keeps its old 15 — exposes faces that were never
    stamped; the in-chunk case of the same wipe).
+5. **Residual fix — dimmer/zeroed cross-seam stamp pull-back**
+   (`NeighborhoodLightingJob.PullBackDimmerCrossSeamStamp` + `SampleSnapshotSkyLight`): when a
+   darkness wave darkens a **fully-opaque** center and meets a cross-seam neighbor that is
+   dimmer-but-lit (its halo copy is zeroed and a removal mod emitted for remote adjudication) or
+   already-zeroed by an earlier wave of the *same job* (halo cells are job-local scratch; the
+   pristine `[ReadOnly]` snapshot still holds its schedule-time value), the center's stamp is
+   re-derived as `neighbor − 1` — write-no-enqueue, recorded as a `PullBackClaim`. Merge-time
+   verification then adjudicates both outcomes: a surviving neighbor supports the stamp
+   (kept), a genuinely dead one makes it stale (cleared through the removal veto). Restricted to
+   opaque centers precisely because stamps cannot propagate — a stale write is a single voxel,
+   never a spreading ghost.
 
-**Attempted and REJECTED:** extending the darkness wave's cross-seam pull-back
-(`PullBackCrossSeamContribution`) to also fire for a *dimmer*-but-lit neighbor. It did not fix
-the residual seeds (verified fresh via a build marker — the arm simply never fired for them) and
-it **regressed B59/B61** (stale pull-backs during the slab scenarios' stamp churn reintroduced
-massive over-bright ghost light: 2497 voxels +12 sky at grid-3 seed 1). Reverted; the dimmer arm
-remains the original unconditional `SetSunlight(neighbor, 0)` + in-center re-propagation enqueue.
-The behavior-neutral `PullBackCrossSeamContribution` extraction itself is kept (used by the ≥ arm).
+**Residual attribution (2026-07-05, in-harness tracing):** the seed-12 timeline — the east edit's
+merge correctly re-derived the stamp 14→9, then the west chunk's own next job wiped 9→0 with the
+feed live at 10 — was NOT a merge/claim defect: the west job ran with a **fresh, correct snapshot**
+and wiped the stamp internally. Its wake nodes seeded a darkness wave from the stamp's old level
+(14); the wave treated the dimmer live feed (10 < 14) as a child, zeroed the feed's halo copy
+(the removal mod was vetoed remotely — feed has real support), and every re-derivation path then
+read the zeroed halo. A second same-job wave (from another border edit) re-zeroed the stamp after
+the first re-derivation, which is why the pull-back also needs the pristine-snapshot fallback.
 
-**Residual (OPEN):** the K15a fuzz still reds on 4 of 25 seeds with 1–8 under-bright voxels each
-(pre-fix: 28 at seed 0) — an order-dependent interleaving survives all four repair paths. The
-seed-12 single-voxel timeline (probe `(15,9,35)` stone, feed `(16,9,35)` air across the x=15|16
-seam; sim budget 1, shuffled, seed 12): after the east chunk's cap edit merges, the feed correctly
-drops 15→10 **and the stamp correctly follows 14→9** (the new pull-back/claim machinery working);
-the west chunk is re-flagged, its job runs — and **its merge wipes the correct 9 back to 0** with
-the feed still live at 10, no pending work anywhere, and nothing ever revisiting. The frame-10
-wipe's exact path is not yet attributed (candidate: the west job's snapshot/wake-node interplay
-during its own merge); it needs in-job tracing. Rebuild the diagnostic from the K15a fuzz body
-(sample the probe voxel per frame) to reproduce the timeline exactly. Seeds 9/12/19 are the
-1–2-voxel stone-stamp form; seed 14 also shows *transparent* border voxels 1–2 under (same
-residual class, so not stamp-specific).
+**Attempted and REJECTED (first form):** extending the darkness wave's cross-seam pull-back
+(`PullBackCrossSeamContribution`, which routes through `CheckEdgeVoxel`'s attenuation) to also fire
+for a *dimmer*-but-lit neighbor. Inverted from what was needed: `Attenuate` yields 0 for a
+fully-opaque center, so it never fired for the stamps (the actual residual), while it re-lit AND
+enqueued transparent centers from dimmer stale neighbors — **regressing B59/B61** (spreading
+over-bright ghosts: 2497 voxels +12 sky at grid-3 seed 1). Fix part 5 is the corrected form:
+opaque-only, stamp rule, write-no-enqueue, claim-verified.
+
+**Remaining fuzz red — different bug:** K15a's sole remaining red (seed 14: four *transparent*
+border voxels 1–2 under, healed by exactly one forced edge-check round) is **Bug 05's edge-round
+exhaustion**, not this bug — see the Bug 05 entry's "faithful synchronous repro" section. K15a is
+re-registered under Bug 05; its B62 promotion rides on that fix.
