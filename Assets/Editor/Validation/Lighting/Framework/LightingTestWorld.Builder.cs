@@ -323,6 +323,11 @@ namespace Editor.Validation.Lighting.Framework
                 yield return new Vector2Int(cx, cz);
         }
 
+        /// <summary>True if a chunk exists at the given grid coordinate (mirror of production's
+        /// <c>worldData.Chunks.TryGetValue</c> guard in the scheduler scan — the fixed grid is the world).</summary>
+        /// <param name="chunkCoord">The grid coordinate to test.</param>
+        public bool HasChunk(Vector2Int chunkCoord) => _chunks.ContainsKey(chunkCoord);
+
         /// <summary>True if the world position lies inside the grid volume.</summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         public bool IsInWorld(Vector3Int worldPos)
