@@ -55,8 +55,12 @@ Bug 15's stamp mechanism fixed, the border-heightmap fuzz (**K15a**,
 `Assets/Editor/Validation/Lighting/LightingValidationSuite.BorderHeightFuzz.cs`) still reds at its
 seed 14: after the seeded border edits, four *transparent* border voxels one step from the z-seam
 sit 1–2 sky levels under the oracle with **no pending work anywhere** — a converged, stable-but-dark
-field, exactly this bug's symptom. Classifier proof: **exactly one forced edge-check round over the
-grid heals the field to the oracle** (4 → 0 mismatches). Mechanism: both production
+field, exactly this bug's symptom. Exact diff (2026-07-05): engine sky 12/11/11/12 vs oracle 13 at
+`(21,21,15)`–`(21,24,15)` — the column of companion edit `place@(21,37,15)`, directly under seed 14's
+z=16-seam overhang at x=21; schedule params are pure functions of the seed (budget `1+14%4` = 3,
+edit cadence `14%3` = 2, shuffled completion). Classifier proof: **exactly one forced edge-check
+round over the grid heals the field to the oracle** (4 → 0 mismatches; run each chunk through
+`RunLightingJob(coord, performEdgeCheck: true)` then converge). Mechanism: both production
 `RemainingEdgeCheckRounds` (= 2) are consumed during the generation wave; a *post-edit* cross-seam
 under-report (the edit's darkness/re-spread interleaving across in-flight snapshots) then has no
 edge-check round left to reconcile it, and edge checks are the only corrector for under-bright
