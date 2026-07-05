@@ -55,8 +55,9 @@ Two additional facts ground the per-bug plans:
 
 - **Protocol:** the `validation-driven-bugfix` skill — deterministic repro first, prove-red
   before trusting green, promote repros to baselines after in-game confirmation.
-- **Numbering:** the lighting suite is at **B59** (B56–B59 = the promoted AS-1 slab family). New
-  baselines take **B60+**. The retired numbers B17–B21 / B23–B25 stay unused (fidelity §5).
+- **Numbering:** the lighting suite is at **B61** (B56–B59 = the promoted AS-1 slab family,
+  B60/B61 = the Bug-14 family). New baselines take **B62+**. The retired numbers B17–B21 /
+  B23–B25 stay unused (fidelity §5).
 - **Expected-red scenarios** register via `AddKnownBugScenarios` in
   `Assets/Editor/Validation/Lighting/LightingValidationSuite.KnownBugs.cs` (reported as
   warnings, not regressions).
@@ -394,7 +395,7 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
 | Item | One-liner                                                                       | Closes                  | Effort                   |
 |------|---------------------------------------------------------------------------------|-------------------------|--------------------------|
 | HF-1 | Editor/dev-only bounds assertions in the `ChunkData` accessors                  | fidelity A5             | ✅ DONE 2026-07-05        |
-| HF-2 | Per-job fault isolation in `ProcessLightingJobs` (eliminate the cascade class)  | fidelity B7 (near-term) | 🟢                       |
+| HF-2 | Per-job fault isolation in `ProcessLightingJobs` (eliminate the cascade class)  | fidelity B7 (near-term) | ✅ DONE 2026-07-05        |
 | HF-3 | Border heightmap fuzz baseline (B62+) — varied heights at seams + border edits  | C9 extension            | 🟡                       |
 | HF-4 | Extract the lighting pass skeleton into a shared, harness-drivable orchestrator | fidelity B7 (full)      | 🔴 — fold into AS-2/NS-3 |
 
@@ -420,9 +421,9 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
 > (`ArgumentOutOfRangeException: local position out of range: (-1, 49, 8)` in the harness claim
 > verifier — the exact halo claim the position lottery used to swallow; 1 of 53 red, sabotage-only).
 > Guards restored → **53/53 baselines green with the assertions live**. Fidelity **A5 CLOSED**; C9's
-> "crash not scenario-provable" residual resolved. Play-mode frame-cost sanity check: PENDING user
-> play session (expected noise-level — main-thread accessor traffic is not the per-voxel hot loop;
-> jobs read `NativeArray` snapshots).
+> "crash not scenario-provable" residual resolved. Play-mode frame-cost sanity check: user-verified
+> via a fluid benchmark run 2026-07-05, performance unchanged (main-thread accessor traffic is not
+> the per-voxel hot loop — jobs read `NativeArray` snapshots).
 
 ### HF-2 — Per-job fault isolation in `ProcessLightingJobs`
 
@@ -438,6 +439,24 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
 - **Caution:** swallow-and-continue can mask corruption — the log must be an ERROR, and the chunk should
   be left in a re-schedulable state (`HasLightChangesToProcess = true`) rather than silently dropped.
   Update `CHUNK_LIFECYCLE_PIPELINE.md` in the same commit (chunk-pipeline rule).
+
+> **Outcome (2026-07-05): DONE.** Two-stage isolation in **all three passes** (the scope-check confirmed
+> `ProcessGenerationJobs` and `ProcessMeshJobs` share the release-inside-loop / remove-after-loop
+> surface): a failed `Handle.Complete()` leaves the job enrolled un-released for retry; a fault after
+> `Complete()` logs one error, still releases + enrolls the job for removal, and the pass continues.
+> Lighting: per-job body extracted to `MergeCompletedLightingJob` (behavior-neutral), clear of
+> `IsAwaitingMainThreadProcess` + release + enrollment moved to a per-job `finally`, faulted chunks
+> re-flagged via `HasLightChangesToProcess`, faults counted in `LastFaultedLightJobs` (reset with the
+> `Last*` family). Generation: catch-only — the budget-retry `continue` paths keep their deliberate
+> un-released next-frame semantics; a `released` flag prevents double-release on late faults. Meshing:
+> buffer returns moved to a per-job `finally`; the chunk keeps its previous mesh on a faulted upload.
+> Suite 53/53 green (the extraction is behavior-neutral); `CHUNK_LIFECYCLE_PIPELINE.md` §2/§4 doc-synced
+> in-commit; fidelity **B7 CLOSED (near-term** — full pass-skeleton replay stays HF-4 in AS-2**)**.
+> Play-mode fault-injection check (2026-07-05, temp one-shot hook + menu item, since removed): a
+> deliberate `InvalidOperationException` in a live world's merge produced **exactly one** error
+> (`chunk ChunkCoord(20, 48) faulted — containers released, chunk re-flagged`), **zero**
+> `ObjectDisposedException` entries, no repeats — the re-flagged chunk's corrective pass ran silently
+> and the world kept running. The cascade class is confirmed eliminated.
 
 ### HF-3 — Border heightmap fuzz (baseline B62+)
 

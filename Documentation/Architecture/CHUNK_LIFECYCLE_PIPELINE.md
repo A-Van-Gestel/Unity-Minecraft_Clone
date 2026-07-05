@@ -24,15 +24,15 @@ BFS is deterministic — but edge cases in scheduling order, throttling, and cro
 
 Each `ChunkData` instance carries the following transient flags that control pipeline progression:
 
-| Flag                          | Type | Set By                                                                                    | Cleared By                                             | Purpose                                                                                                               |
-|-------------------------------|------|-------------------------------------------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
-| `IsPopulated`                 | bool | `Populate()` / `PopulateFromSave()`                                                       | `Reset()` (pool recycle)                               | Voxel data exists and is valid                                                                                        |
-| `IsLoading`                   | bool | `CheckViewDistance()`                                                                     | Never explicitly cleared (reset on pool recycle)       | Prevents duplicate disk load requests                                                                                 |
-| `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`                                          | `Update()` lighting scan after scheduling initial pass | Chunk has terrain but no lighting yet                                                                                 |
-| `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling | `ScheduleLightingUpdate()`                             | Pending light changes in managed queues                                                                               |
-| `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load     | `ScheduleLightingUpdate()`                             | Border voxels need validation against neighbors                                                                       |
-| `IsAwaitingMainThreadProcess` | bool | `ProcessLightingJobs()` start                                                             | `ProcessLightingJobs()` end                            | Lighting job completed, cross-chunk mods being applied                                                                |
-| `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()` (pool recycle)                   | Decremented in `ProcessLightingJobs()` per stable pass | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`. |
+| Flag                          | Type | Set By                                                                                    | Cleared By                                                | Purpose                                                                                                               |
+|-------------------------------|------|-------------------------------------------------------------------------------------------|-----------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| `IsPopulated`                 | bool | `Populate()` / `PopulateFromSave()`                                                       | `Reset()` (pool recycle)                                  | Voxel data exists and is valid                                                                                        |
+| `IsLoading`                   | bool | `CheckViewDistance()`                                                                     | Never explicitly cleared (reset on pool recycle)          | Prevents duplicate disk load requests                                                                                 |
+| `NeedsInitialLighting`        | bool | `ProcessGenerationJobs()` / `PopulateFromSave()`                                          | `Update()` lighting scan after scheduling initial pass    | Chunk has terrain but no lighting yet                                                                                 |
+| `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling | `ScheduleLightingUpdate()`                                | Pending light changes in managed queues                                                                               |
+| `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load     | `ScheduleLightingUpdate()`                                | Border voxels need validation against neighbors                                                                       |
+| `IsAwaitingMainThreadProcess` | bool | Per-job merge start (`MergeCompletedLightingJob`)                                         | `ProcessLightingJobs()` per-job `finally` (even on fault) | Lighting job completed, cross-chunk mods being applied                                                                |
+| `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()` (pool recycle)                   | Decremented in `ProcessLightingJobs()` per stable pass    | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`. |
 
 ### Flag Lifecycle Diagram
 
@@ -143,6 +143,29 @@ flowchart TD
     style E fill: #ff6b6b, color: #fff
     style G fill: #ffa07a, color: #fff
 ```
+
+### Per-job fault isolation in the three job passes (HF-2)
+
+All three completed-job sweeps (`ProcessGenerationJobs`, `ProcessLightingJobs`, `ProcessMeshJobs`)
+release each job's containers *inside* the loop and remove the dictionary entries only *after* it.
+Before HF-2, one exception mid-pass aborted the sweep and stranded already-released jobs in the
+dictionary — every later frame re-touched their disposed containers, spamming
+`ObjectDisposedException` and burying the original thrower. Each pass now isolates faults per job:
+
+- **`Handle.Complete()` throws** → the job may still own its buffers, so nothing is released; the
+  entry stays enrolled and is retried (isolated again) next pass.
+- **Post-`Complete()` processing throws** → one `Debug.LogError` (errors are the regression signal),
+  the job's containers are still released and the entry enrolled for removal, and the pass continues.
+  Per pass: lighting re-flags the chunk (`HasLightChangesToProcess = true`, stability unknown → a
+  corrective pass runs) and counts the fault in `WorldJobManager.LastFaultedLightJobs`; generation
+  releases only if the happy path had not (its budget-retry `continue` paths intentionally keep jobs
+  un-released across frames); meshing returns the buffers in a `finally` and the chunk keeps its
+  previous mesh.
+- **Flag pairing holds on fault:** the lighting pass clears `IsAwaitingMainThreadProcess` in a
+  per-job `finally`, so a faulted merge cannot park its chunk forever.
+
+Recovery is deliberately *not* promised (a faulted generation job can leave its chunk unpopulated,
+loudly) — the isolation exists to keep one fault from cascading into the whole pass, not to hide it.
 
 ### Step 5: Lighting Ready-Set Scan (The Critical Section)
 

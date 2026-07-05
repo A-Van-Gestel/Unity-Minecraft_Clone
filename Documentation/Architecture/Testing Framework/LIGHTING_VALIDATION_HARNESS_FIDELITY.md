@@ -280,7 +280,7 @@ there is invisible.
   and the fail-safe OFF by default, so "converges without the backstop" becomes a mechanical gate.
   Legacy mode stays the default so existing baselines are untouched.
 
-### B7 — `ProcessLightingJobs` per-pass bookkeeping is production-only ·  **OPEN · MEDIUM (new 2026-07-04)**
+### B7 — `ProcessLightingJobs` per-pass bookkeeping is production-only ·  **CLOSED — near-term (2026-07-05, HF-2); full-fidelity replay deferred to HF-4/AS-2**
 
 - The harness replays per-**job** logic (`CompleteLightingJob` mirrors merge → deferred drain →
   pull-back-claim verification → mod routing) and the frame simulator replays scheduling decisions — but
@@ -292,13 +292,19 @@ there is invisible.
   Bug 14 hotfix — the original thrower was hidden behind hundreds of cascade repeats). In the suite the
   same exception presents as **one red scenario** (the runner's per-scenario try/catch), never as a
   cascade — the class is structurally invisible, like B3/B5/B6 it lives in code the harness does not run.
-- **Fix:** roadmap item **HF-2** in
-  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) —
-  per-job fault isolation in production (an exception logs once, still releases + removes that job, clears
-  `IsAwaitingMainThreadProcess` in a `finally`, and the pass continues), which *eliminates* the class
-  instead of modeling it. The full-fidelity alternative — extracting the pass skeleton into a shared
-  orchestrator the harness can drive — is **HF-4**, deliberately folded into AS-2 / NS-3 rather than done
-  standalone.
+- **Closed (near-term) by roadmap item HF-2** (see
+  [LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md](../../Design/LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) §10):
+  per-job fault isolation in production *eliminates* the cascade class instead of modeling it. All three
+  passes (`ProcessLightingJobs`, `ProcessGenerationJobs`, `ProcessMeshJobs` — the audit confirmed the
+  gen/mesh passes share the release-inside-loop/remove-after-loop surface) now isolate each job: a failed
+  `Handle.Complete()` leaves the job enrolled un-released for retry; a fault after `Complete()` logs one
+  error, still releases + removes that job, and the pass continues. The lighting pass clears
+  `IsAwaitingMainThreadProcess` in a per-job `finally` (flag-pairing invariant), re-flags the chunk
+  (`HasLightChangesToProcess`), and counts faults in `LastFaultedLightJobs`; the generation pass's
+  budget-retry paths keep their deliberate un-released `continue` semantics. Behavior documented in
+  `CHUNK_LIFECYCLE_PIPELINE.md` §4. The full-fidelity alternative — extracting the pass skeleton into a
+  shared orchestrator the harness can drive — remains **HF-4**, deliberately folded into AS-2 / NS-3
+  rather than done standalone.
 
 ---
 
@@ -545,7 +551,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4 | **CLOSED**        | —                | done           |
 | A5 | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)     | **CLOSED**        | —                | done           |
 | B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                    | OPEN              | **Medium-High**  | medium         |
-| B7 | `ProcessLightingJobs` pass bookkeeping production-only (→ roadmap HF-2, long-term HF-4)    | OPEN              | Medium           | small (HF-2)   |
+| B7 | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 done; full replay → HF-4)     | **CLOSED (near)** | — (HF-4 w/ AS-2) | done           |
 | C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3)      | OPEN              | Medium           | medium         |
 | C9 | Flat scenario worlds never exercise border shadow-casters (B60; fuzz extension → HF-3)     | **CLOSED**        | —                | done           |
 | C6 | Per-channel removal independence                                                           | OPEN              | Low–Medium       | small          |

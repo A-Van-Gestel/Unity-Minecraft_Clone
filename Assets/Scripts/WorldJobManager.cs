@@ -84,6 +84,12 @@ public class WorldJobManager : IDisposable
     /// expected; sustained high counts indicate heavy snapshot churn worth investigating.</summary>
     public int LastStalePullBacksCleared { get; private set; }
 
+    /// <summary>Lighting jobs whose per-job processing threw in the most recent
+    /// <see cref="ProcessLightingJobs"/> call (HF-2 fault isolation). Each fault logs one error and the
+    /// pass continues — the faulted job is still released and removed, and its chunk stays
+    /// re-schedulable. Any sustained non-zero value is a bug: investigate the logged exception.</summary>
+    public int LastFaultedLightJobs { get; private set; }
+
     /// <summary>Effective cross-chunk applies in the most recent call, broken down by channel and
     /// operation. A steady non-zero in a removal bucket alongside its matching placement bucket is the
     /// signature of a stale-snapshot darkness/re-placement oscillation across a chunk seam.</summary>
@@ -640,7 +646,9 @@ public class WorldJobManager : IDisposable
 
     /// <summary>
     /// Checks for completed generation jobs, populates chunk data, generates structures,
-    /// and flags chunks for their initial lighting pass.
+    /// and flags chunks for their initial lighting pass. Each job is fault-isolated: an exception logs
+    /// one error, the job is released and removed (unless it faulted before release), and the pass
+    /// continues — budget-retry paths keep their un-released jobs for next frame as before.
     /// </summary>
     public void ProcessGenerationJobs()
     {
@@ -649,10 +657,28 @@ public class WorldJobManager : IDisposable
 
         foreach (KeyValuePair<ChunkCoord, GenerationJobData> jobEntry in GenerationJobs)
         {
-            if (jobEntry.Value.Handle.IsCompleted)
+            if (!jobEntry.Value.Handle.IsCompleted) continue;
+
+            // Fault isolation, stage 1 (HF-2): a failed Complete() means the job may still own its
+            // containers — leave the entry enrolled (no release) and retry next pass.
+            try
             {
                 jobEntry.Value.Handle.Complete();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[GENERATION] Handle.Complete() for chunk {jobEntry.Key} faulted — job left enrolled for retry. {e}");
+                continue;
+            }
 
+            // Fault isolation, stage 2 (HF-2): one faulted job must not abort the pass — released
+            // jobs stranded in GenerationJobs get re-touched every frame (the ObjectDisposedException
+            // cascade, fidelity B7). The budget-retry paths (jobFullyProcessed) intentionally keep the
+            // job un-released for next frame, so the fault path releases only when the happy path
+            // has not.
+            bool released = false;
+            try
+            {
                 ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), true);
 
                 // --- STAGE 1: Populate with base terrain (Once per chunk) ---
@@ -792,6 +818,7 @@ public class WorldJobManager : IDisposable
 
                 ReleaseGenerationJobData(jobEntry.Value);
                 _completedGenJobs.Add(jobEntry.Key);
+                released = true;
 
                 Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
                 if (chunk != null && chunk.IsActive)
@@ -802,6 +829,16 @@ public class WorldJobManager : IDisposable
                 // If we ran out of budget during processing the rest of this chunk's fast STAGE 3 steps,
                 // break to respect frame time, letting the remaining completely finished jobs process next frame.
                 if (modsBudget <= 0) break;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[GENERATION] Processing the completed generation job for chunk {jobEntry.Key} faulted — job released and removed; the chunk may be left partially processed. {e}");
+
+                if (!released)
+                {
+                    ReleaseGenerationJobData(jobEntry.Value);
+                    _completedGenJobs.Add(jobEntry.Key);
+                }
             }
         }
 
@@ -822,16 +859,33 @@ public class WorldJobManager : IDisposable
 
     /// <summary>
     /// Checks for completed mesh generation jobs and applies the resulting mesh data.
+    /// Each job is fault-isolated: an exception logs one error, the buffers are still returned and the
+    /// job removed (the chunk keeps its previous mesh), and the pass continues.
     /// </summary>
     public void ProcessMeshJobs()
     {
         _completedMeshJobs.Clear();
         foreach (KeyValuePair<ChunkCoord, MeshingJobData> jobEntry in MeshJobs)
         {
-            if (jobEntry.Value.Handle.IsCompleted)
+            if (!jobEntry.Value.Handle.IsCompleted) continue;
+
+            // Fault isolation, stage 1 (HF-2): a failed Complete() means the job may still own its
+            // buffers — leave the entry enrolled (no release) and retry next pass.
+            try
             {
                 jobEntry.Value.Handle.Complete();
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[MESHING] Handle.Complete() for chunk {jobEntry.Key} faulted — job left enrolled for retry. {e}");
+                continue;
+            }
 
+            // Fault isolation, stage 2 (HF-2): a faulted upload must not abort the pass — released jobs
+            // stranded in MeshJobs get re-touched every frame (the ObjectDisposedException cascade,
+            // fidelity B7). The chunk simply keeps its previous mesh; a later rebuild request recovers.
+            try
+            {
                 Chunk chunk = _world.GetChunkFromChunkCoord(jobEntry.Key);
                 if (chunk != null)
                 {
@@ -839,7 +893,13 @@ public class WorldJobManager : IDisposable
                     // it no longer owns the output's lifecycle — the pool is returned to centrally below.
                     chunk.ApplyMeshData(jobEntry.Value.Output);
                 }
-
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[MESHING] Applying the completed mesh for chunk {jobEntry.Key} faulted — buffers released, previous mesh kept. {e}");
+            }
+            finally
+            {
                 // MR-6: single output-release site for both branches, symmetric with the input release.
                 // The upload above (or the discarded result when the chunk is gone) is done, so the
                 // pooled buffers can be cleared and reused (or disposed if not pooled).
@@ -931,6 +991,9 @@ public class WorldJobManager : IDisposable
 
     /// <summary>
     /// Checks for completed lighting jobs, applies light changes, and triggers mesh rebuilds.
+    /// Each job's merge is fault-isolated: an exception logs one error, the job is still released and
+    /// removed with its chunk left re-schedulable, and the pass continues
+    /// (<see cref="LastFaultedLightJobs"/> counts occurrences).
     /// </summary>
     public void ProcessLightingJobs()
     {
@@ -942,6 +1005,7 @@ public class WorldJobManager : IDisposable
         LastCrossChunkModsApplyRouted = 0;
         LastCrossChunkModsEffective = 0;
         LastStalePullBacksCleared = 0;
+        LastFaultedLightJobs = 0;
         LastEffSunPlacement = 0;
         LastEffSunRemoval = 0;
         LastEffBlockPlacement = 0;
@@ -962,149 +1026,48 @@ public class WorldJobManager : IDisposable
 
         foreach (KeyValuePair<ChunkCoord, LightingJobData> jobEntry in LightingJobs)
         {
-            if (jobEntry.Value.Handle.IsCompleted)
+            if (!jobEntry.Value.Handle.IsCompleted) continue;
+
+            LightingJobData jobData = jobEntry.Value;
+
+            // Fault isolation, stage 1 (HF-2): if Complete() itself throws, the job may still own its
+            // containers — do NOT release them; leave the entry enrolled so the next pass retries under
+            // the same isolation.
+            try
             {
-                jobEntry.Value.Handle.Complete();
-                LastProcessedJobCount++;
-                LightingJobData jobData = jobEntry.Value;
+                jobData.Handle.Complete();
+            }
+            catch (Exception e)
+            {
+                LastFaultedLightJobs++;
+                Debug.LogError($"[LIGHTING] Handle.Complete() for chunk {jobEntry.Key} faulted — job left enrolled for retry. {e}");
+                continue;
+            }
 
-                ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), false);
+            LastProcessedJobCount++;
+            ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), false);
 
-                if (chunkData != null)
-                {
-                    chunkData.IsAwaitingMainThreadProcess = true;
-                }
+            // Fault isolation, stage 2 (HF-2): one merge throwing must not abort the pass — that strands
+            // every already-released job in LightingJobs and re-touches its disposed containers every
+            // frame after (the ObjectDisposedException cascade, fidelity B7).
+            try
+            {
+                MergeCompletedLightingJob(jobEntry.Key, jobData, chunkData);
+            }
+            catch (Exception e)
+            {
+                LastFaultedLightJobs++;
+                Debug.LogError($"[LIGHTING] Merging the completed lighting job for chunk {jobEntry.Key} faulted — containers released, chunk re-flagged. {e}");
 
-                bool isChunkStable = jobData.IsStable[0];
-                bool hasRealCrossChunkMods = false;
-                if (chunkData != null && chunkData.IsPopulated)
-                {
-                    ApplyLightingJobResult(chunkData, jobData);
-
-                    // Apply mods other chunks' jobs deferred for THIS chunk while its job was in
-                    // flight — now that the merge is done they can no longer be overwritten
-                    // (Bug 08, path 2). Their wake-up nodes flag the chunk for another lighting pass.
-                    DrainDeferredCrossChunkMods(jobEntry.Key, chunkData);
-
-                    // The emitting chunk's voxel origin — excluded from the Bug 13 live-support veto
-                    // (its data is exactly the stale side the removal mods came from).
-                    Vector2Int emitterOriginXZ = jobEntry.Key.ToVoxelOrigin();
-
-                    // Re-verify the job's snapshot-trusting cross-seam re-lights against live neighbor
-                    // data, clearing stale ghost light through the removal veto (Bug 14). Runs after the
-                    // merge + deferred drain so superseded claims are recognized.
-                    VerifyPullBackClaims(chunkData, emitterOriginXZ, jobData.PullBackClaims);
-
-                    foreach (LightModification mod in jobData.Mods)
-                    {
-                        Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
-                        ChunkCoord neighborChunkCoord = ChunkCoord.FromVoxelOrigin(neighborChunkVoxelPos);
-
-                        // Resolve the target chunk's state, then route via the shared decision so the
-                        // editor validation harness exercises this exact drop/persist/defer/apply rule.
-                        // The terrain lookup and in-flight checks are guarded by targetInWorld so an
-                        // out-of-world mod short-circuits without touching the chunk store or job dict.
-                        bool targetInWorld = World.IsChunkInWorld(neighborChunkCoord);
-                        ChunkData neighborChunk = targetInWorld
-                            ? _world.worldData.RequestChunk(neighborChunkVoxelPos, false)
-                            : null;
-                        bool targetLoaded = neighborChunk != null && neighborChunk.IsPopulated;
-
-                        // A target already processed this pass (_completedLightJobs) has merged and is
-                        // safe to apply to directly; one still in flight must be deferred (Bug 08 path 2).
-                        bool targetJobInFlightThisPass = targetInWorld &&
-                                                         LightingJobs.ContainsKey(neighborChunkCoord) &&
-                                                         !_completedLightJobs.Contains(neighborChunkCoord);
-
-                        LightingJobProcessor.CrossChunkModRoute route = LightingJobProcessor.RouteCrossChunkMod(
-                            targetInWorld, targetLoaded, targetJobInFlightThisPass);
-
-                        // Out-of-world mods can never be consumed; everything else keeps the chunk from
-                        // being treated as stable until delivered.
-                        hasRealCrossChunkMods |= LightingJobProcessor.CountsAsRealCrossChunkMod(route);
-
-                        switch (route)
-                        {
-                            case LightingJobProcessor.CrossChunkModRoute.DropOutOfWorld:
-                                // Dropped without affecting stability (boundary chunks would otherwise
-                                // reschedule lighting indefinitely).
-                                continue;
-
-                            case LightingJobProcessor.CrossChunkModRoute.PersistUndeliverable:
-                                PersistUndeliverableLightMod(neighborChunkCoord, in mod);
-                                continue;
-
-                            case LightingJobProcessor.CrossChunkModRoute.Defer:
-                                // Applying now would be overwritten by the target's own full-LightMap
-                                // merge — defer; drained right after that merge (DrainDeferredCrossChunkMods).
-                                if (!_deferredCrossChunkMods.TryGetValue(neighborChunkCoord, out List<DeferredLightMod> deferredList))
-                                {
-                                    deferredList = ListPool<DeferredLightMod>.Get();
-                                    _deferredCrossChunkMods[neighborChunkCoord] = deferredList;
-                                }
-
-                                deferredList.Add(new DeferredLightMod(emitterOriginXZ, in mod));
-                                continue;
-
-                            case LightingJobProcessor.CrossChunkModRoute.ApplyDirect:
-                                // Diagnostics: an ApplyDirect mod counts toward stability regardless of
-                                // effect; ApplyCrossChunkLightMod tallies how many actually changed the
-                                // neighbor (plus channel/op breakdown + a sample) to characterize the
-                                // §4.2 non-convergence mode.
-                                LastCrossChunkModsApplyRouted++;
-                                ApplyCrossChunkLightMod(neighborChunk, in mod, emitterOriginXZ);
-                                continue;
-                        }
-                    }
-                }
-                else
-                {
-                    // The job result is discarded (the chunk vanished or lost its data mid-flight),
-                    // so mods other chunks deferred for it can never be drained — degrade them to
-                    // the persisted pending stores instead.
-                    DegradeDeferredCrossChunkMods(jobEntry.Key);
-                }
-
-                // Override stability: If the Burst job reported not-stable solely because
-                // of cross-chunk mods targeting out-of-world positions (which can never be
-                // consumed), treat the chunk as effectively stable. Without this, world-boundary
-                // chunks would reschedule lighting indefinitely.
-                isChunkStable = LightingJobProcessor.IsEffectivelyStable(isChunkStable, hasRealCrossChunkMods);
-
-                if (isChunkStable)
-                {
-                    _chunksToRebuildMesh.Add(jobEntry.Key);
-                    _world.RequestNeighborMeshRebuilds(jobEntry.Key);
-
-                    // After a chunk's initial lighting stabilizes, schedule iterative
-                    // edge-check rounds (self + neighbors). During initial world generation,
-                    // chunks run their lighting with stale neighbor snapshots (neighbors are
-                    // populated but not yet lit). Each edge-check round reconciles border
-                    // lighting against the latest neighbor data.
-                    //
-                    // Multiple rounds are needed because two adjacent chunks that both
-                    // stabilize with stale data from each other need iterative convergence:
-                    // round 1 fixes the immediate frontier, round 2 reconciles any remaining
-                    // discrepancies after neighbors have run their own edge checks.
-                    if (chunkData != null && chunkData.RemainingEdgeCheckRounds > 0)
-                    {
-                        chunkData.RemainingEdgeCheckRounds--;
-                        LastEdgeRecycleJobCount++;
-
-                        // Self-edge-check: re-examine this chunk's own borders with the
-                        // latest neighbor snapshot data.
-                        chunkData.NeedsEdgeCheck = true;
-                        chunkData.HasLightChangesToProcess = true;
-
-                        TriggerNeighborEdgeChecks(jobEntry.Key);
-                    }
-                }
-                else
-                {
-                    if (chunkData != null) chunkData.HasLightChangesToProcess = true;
-                    LastUnstableJobCount++;
-                }
-
+                // Stability is unknown after a fault: keep the chunk re-schedulable so a corrective
+                // pass runs, rather than silently dropping it in a half-merged state.
+                if (chunkData != null) chunkData.HasLightChangesToProcess = true;
+            }
+            finally
+            {
+                // Unconditional: the flag-pairing invariant (set in MergeCompletedLightingJob, cleared
+                // here even on fault) and the release + removal enrollment that keep a faulted job from
+                // lingering in LightingJobs with disposed containers.
                 if (chunkData != null) chunkData.IsAwaitingMainThreadProcess = false;
 
                 // POOLING: Return the full-volume buffers for reuse; dispose per-job containers.
@@ -1150,6 +1113,155 @@ public class WorldJobManager : IDisposable
             // flags it also reads clear at schedule time, while the job is still in-flight) and is what
             // un-parks the chunk itself if it was re-flagged mid-flight — promote the 3×3 now (MT-2).
             _world.PromoteLightWorkNeighborhood(chunkCoord.ToVoxelOrigin());
+        }
+    }
+
+    /// <summary>
+    /// Merges one completed lighting job's results into its chunk: applies the light map, drains
+    /// mods other jobs deferred for it, verifies the job's pull-back claims (Bug 14), routes its
+    /// outbound cross-chunk mods, and runs the stability / edge-check bookkeeping. Extracted from
+    /// the <see cref="ProcessLightingJobs"/> loop so a fault in any single merge stays isolated to
+    /// that job (HF-2); the caller owns <c>Handle.Complete()</c>, container release, the
+    /// <c>IsAwaitingMainThreadProcess</c> clear, and removal enrollment.
+    /// </summary>
+    /// <param name="chunkCoord">The chunk whose lighting job completed.</param>
+    /// <param name="jobData">The completed job's data (already <c>Complete()</c>d).</param>
+    /// <param name="chunkData">The chunk's live data, or null when it vanished mid-flight.</param>
+    private void MergeCompletedLightingJob(ChunkCoord chunkCoord, in LightingJobData jobData, ChunkData chunkData)
+    {
+        if (chunkData != null)
+        {
+            chunkData.IsAwaitingMainThreadProcess = true;
+        }
+
+        bool isChunkStable = jobData.IsStable[0];
+        bool hasRealCrossChunkMods = false;
+        if (chunkData != null && chunkData.IsPopulated)
+        {
+            ApplyLightingJobResult(chunkData, jobData);
+
+            // Apply mods other chunks' jobs deferred for THIS chunk while its job was in
+            // flight — now that the merge is done they can no longer be overwritten
+            // (Bug 08, path 2). Their wake-up nodes flag the chunk for another lighting pass.
+            DrainDeferredCrossChunkMods(chunkCoord, chunkData);
+
+            // The emitting chunk's voxel origin — excluded from the Bug 13 live-support veto
+            // (its data is exactly the stale side the removal mods came from).
+            Vector2Int emitterOriginXZ = chunkCoord.ToVoxelOrigin();
+
+            // Re-verify the job's snapshot-trusting cross-seam re-lights against live neighbor
+            // data, clearing stale ghost light through the removal veto (Bug 14). Runs after the
+            // merge + deferred drain so superseded claims are recognized.
+            VerifyPullBackClaims(chunkData, emitterOriginXZ, jobData.PullBackClaims);
+
+            foreach (LightModification mod in jobData.Mods)
+            {
+                Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
+                ChunkCoord neighborChunkCoord = ChunkCoord.FromVoxelOrigin(neighborChunkVoxelPos);
+
+                // Resolve the target chunk's state, then route via the shared decision so the
+                // editor validation harness exercises this exact drop/persist/defer/apply rule.
+                // The terrain lookup and in-flight checks are guarded by targetInWorld so an
+                // out-of-world mod short-circuits without touching the chunk store or job dict.
+                bool targetInWorld = World.IsChunkInWorld(neighborChunkCoord);
+                ChunkData neighborChunk = targetInWorld
+                    ? _world.worldData.RequestChunk(neighborChunkVoxelPos, false)
+                    : null;
+                bool targetLoaded = neighborChunk != null && neighborChunk.IsPopulated;
+
+                // A target already processed this pass (_completedLightJobs) has merged and is
+                // safe to apply to directly; one still in flight must be deferred (Bug 08 path 2).
+                bool targetJobInFlightThisPass = targetInWorld &&
+                                                 LightingJobs.ContainsKey(neighborChunkCoord) &&
+                                                 !_completedLightJobs.Contains(neighborChunkCoord);
+
+                LightingJobProcessor.CrossChunkModRoute route = LightingJobProcessor.RouteCrossChunkMod(
+                    targetInWorld, targetLoaded, targetJobInFlightThisPass);
+
+                // Out-of-world mods can never be consumed; everything else keeps the chunk from
+                // being treated as stable until delivered.
+                hasRealCrossChunkMods |= LightingJobProcessor.CountsAsRealCrossChunkMod(route);
+
+                switch (route)
+                {
+                    case LightingJobProcessor.CrossChunkModRoute.DropOutOfWorld:
+                        // Dropped without affecting stability (boundary chunks would otherwise
+                        // reschedule lighting indefinitely).
+                        continue;
+
+                    case LightingJobProcessor.CrossChunkModRoute.PersistUndeliverable:
+                        PersistUndeliverableLightMod(neighborChunkCoord, in mod);
+                        continue;
+
+                    case LightingJobProcessor.CrossChunkModRoute.Defer:
+                        // Applying now would be overwritten by the target's own full-LightMap
+                        // merge — defer; drained right after that merge (DrainDeferredCrossChunkMods).
+                        if (!_deferredCrossChunkMods.TryGetValue(neighborChunkCoord, out List<DeferredLightMod> deferredList))
+                        {
+                            deferredList = ListPool<DeferredLightMod>.Get();
+                            _deferredCrossChunkMods[neighborChunkCoord] = deferredList;
+                        }
+
+                        deferredList.Add(new DeferredLightMod(emitterOriginXZ, in mod));
+                        continue;
+
+                    case LightingJobProcessor.CrossChunkModRoute.ApplyDirect:
+                        // Diagnostics: an ApplyDirect mod counts toward stability regardless of
+                        // effect; ApplyCrossChunkLightMod tallies how many actually changed the
+                        // neighbor (plus channel/op breakdown + a sample) to characterize the
+                        // §4.2 non-convergence mode.
+                        LastCrossChunkModsApplyRouted++;
+                        ApplyCrossChunkLightMod(neighborChunk, in mod, emitterOriginXZ);
+                        continue;
+                }
+            }
+        }
+        else
+        {
+            // The job result is discarded (the chunk vanished or lost its data mid-flight),
+            // so mods other chunks deferred for it can never be drained — degrade them to
+            // the persisted pending stores instead.
+            DegradeDeferredCrossChunkMods(chunkCoord);
+        }
+
+        // Override stability: If the Burst job reported not-stable solely because
+        // of cross-chunk mods targeting out-of-world positions (which can never be
+        // consumed), treat the chunk as effectively stable. Without this, world-boundary
+        // chunks would reschedule lighting indefinitely.
+        isChunkStable = LightingJobProcessor.IsEffectivelyStable(isChunkStable, hasRealCrossChunkMods);
+
+        if (isChunkStable)
+        {
+            _chunksToRebuildMesh.Add(chunkCoord);
+            _world.RequestNeighborMeshRebuilds(chunkCoord);
+
+            // After a chunk's initial lighting stabilizes, schedule iterative
+            // edge-check rounds (self + neighbors). During initial world generation,
+            // chunks run their lighting with stale neighbor snapshots (neighbors are
+            // populated but not yet lit). Each edge-check round reconciles border
+            // lighting against the latest neighbor data.
+            //
+            // Multiple rounds are needed because two adjacent chunks that both
+            // stabilize with stale data from each other need iterative convergence:
+            // round 1 fixes the immediate frontier, round 2 reconciles any remaining
+            // discrepancies after neighbors have run their own edge checks.
+            if (chunkData != null && chunkData.RemainingEdgeCheckRounds > 0)
+            {
+                chunkData.RemainingEdgeCheckRounds--;
+                LastEdgeRecycleJobCount++;
+
+                // Self-edge-check: re-examine this chunk's own borders with the
+                // latest neighbor snapshot data.
+                chunkData.NeedsEdgeCheck = true;
+                chunkData.HasLightChangesToProcess = true;
+
+                TriggerNeighborEdgeChecks(chunkCoord);
+            }
+        }
+        else
+        {
+            if (chunkData != null) chunkData.HasLightChangesToProcess = true;
+            LastUnstableJobCount++;
         }
     }
 
