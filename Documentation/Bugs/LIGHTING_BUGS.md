@@ -16,7 +16,7 @@ This document outlines **open** bugs related to the current lighting implementat
 ## Bug 05: Persistent Chunk-Border Shadow Patches in Dense Biomes
 
 **Severity:** Medium
-**Status:** Open / Partially mitigated
+**Status:** Fixed in code (July 2026) — awaiting in-game confirmation
 
 **Description:**
 Persistent dark/shadow patches occur primarily in visually dense areas (e.g., repeating overlapping tree canopies in forest biomes), typically originating near the borders between freshly generated chunks.
@@ -72,6 +72,30 @@ bounded edge-check round when a border-column edit stabilizes, or extend the Bug
 machinery to transparent centers with claim verification (rejected once for spread risk — see the
 rejected-approach note in `_FIXED_BUGS.md` Lighting #19 — but a *claim-verified* variant may be
 viable).
+
+**Fix (July 2026, in code — awaiting in-game confirmation):** the **re-arm** direction (the first
+candidate above). A border-column opacity edit now re-grants a bounded edge-check budget so the
+post-edit stabilization re-runs the border check that reconciles the under-report:
+
+- **Production** (`Data/ChunkData.cs` — `ModifyVoxel`): on an opacity-changing edit whose column is a
+  chunk-border column (local x/z in {0,15}), `RemainingEdgeCheckRounds` is topped up to
+  `BORDER_EDIT_EDGE_CHECK_ROUNDS` (= 1). The existing stabilization machinery
+  (`WorldJobManager.ProcessLightingJobs` re-arm + `TriggerNeighborEdgeChecks` + the
+  `AreNeighborsReadyAndLit` edge-check gate) then runs the reconciling edge check on the settled field —
+  no other engine change. Edge checks are add-only and bounded by the counter, so the re-grant cannot
+  livelock (B58/B59 stay green); `RemainingEdgeCheckRounds` is `[NonSerialized]` and already reset in
+  `ChunkData.Reset()`, so no new pool-reset or save-format work.
+- **Harness**: `LightingTestWorld.Builder.cs` mirrors the re-grant in `PlaceBlock`, and
+  `LightingFrameSimulator.RunToConvergence` consumes it via `LightingTestWorld.RunReGrantedEdgeCheckRound`
+  at grid **quiescence** (the settled field). The frame simulator lacks production's neighbor-stability
+  edge-gate, so the re-granted edge round is driven post-settle — consistent with how
+  `RunInitialLighting*` already model generation edge rounds as a post-convergence loop
+  (`DecrementEdgeCheckRound`). This is an outcome-faithful model; exact per-frame scheduling is AS-2's scope.
+
+Verified: **K15a** (border-heightmap fuzz) seed 14 flipped red→green; the whole 200-seed nightly sweep
+plus all 55 baselines are green (B8/B42 initial-wave guards, B62/B63 Bug-15 stamp family, B58/B59
+livelock tripwires all green). Prove-red: neutering the re-grant re-reds seed 14 and only seed 14.
+K15a promotes to a baseline (flip `BORDER_FUZZ_EXPECTED_RED`) after in-game confirmation.
 
 ---
 

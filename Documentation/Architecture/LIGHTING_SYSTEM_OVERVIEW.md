@@ -184,6 +184,12 @@ After a chunk's initial lighting stabilizes, its border voxels may have incorrec
 
 1. Each `ChunkData` starts with `RemainingEdgeCheckRounds = 2` (a `[NonSerialized]` counter, reset by `ChunkData.Reset()`). When a lighting job reports `IsStable` (`ProcessLightingJobs`) and rounds remain, the chunk decrements the counter and re-arms its own `NeedsEdgeCheck` + `HasLightChangesToProcess`, then propagates `NeedsEdgeCheck` to its 4 cardinal neighbors via `TriggerNeighborEdgeChecks` (only neighbors that are populated and past initial lighting). Round 1 fixes the immediate frontier; round 2 reconciles the remainder after neighbors have run
    their own edge checks. Chunks loaded from disk with stable lighting also start with `NeedsEdgeCheck = true`.
+   **Post-generation re-grant (Bug 05 fix, July 2026):** once generation spends both rounds, a later
+   *border-column* opacity edit can leave a cross-seam voxel under-bright with no round left to reconcile
+   it (edge checks are the only corrector for under-bright border light, §3.7). `ChunkData.ModifyVoxel`
+   therefore tops `RemainingEdgeCheckRounds` back up to `BORDER_EDIT_EDGE_CHECK_ROUNDS` (= 1) on an
+   opacity edit in a border column (local x/z in {0,15}), so this same stabilization machinery re-runs
+   the reconciling border check. Add-only and bounded by the counter, so it cannot livelock.
 2. In the main update loop, `NeedsEdgeCheck` is checked after initial lighting but before regular updates. It requires `AreNeighborsReadyAndLit` to fire on the primary path, with a fallback under the weaker `AreNeighborsDataReady` gate when `HasLightChangesToProcess` is also set (see [CHUNK_LIFECYCLE_PIPELINE.md](CHUNK_LIFECYCLE_PIPELINE.md) §7).
 3. `WorldJobManager.ScheduleLightingUpdate` reads `chunkData.NeedsEdgeCheck` into the job's `PerformEdgeCheck` flag and clears it.
 4. The job's edge check runs as "Pass -1" before the normal BFS seeding.

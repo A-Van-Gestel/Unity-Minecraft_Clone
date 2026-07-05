@@ -247,7 +247,17 @@ namespace Editor.Validation.Lighting.Framework
             for (int frame = 0; frame < maxFrames; frame++)
             {
                 if (!_world.HasPendingLightWork && _pendingFlights.Count == 0)
+                {
+                    // Quiescent. If a border-column opacity edit re-granted edge-check rounds
+                    // (ChunkData.ModifyVoxel / the harness mirror, Bug 05), run one edge round on the
+                    // now-SETTLED field and keep converging: the post-edit cross-seam under-report only
+                    // reconciles when the edge check reads settled neighbor data, not mid-churn. Mirror of
+                    // RunInitialLighting's post-convergence edge loop; add-only and bounded, so it terminates.
+                    if (_world.RunReGrantedEdgeCheckRound())
+                        continue;
+
                     return frame;
+                }
 
                 RunFrame(budgetPerFrame, order);
             }

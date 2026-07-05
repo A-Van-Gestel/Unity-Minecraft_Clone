@@ -161,7 +161,19 @@ namespace Editor.Validation.Lighting.Framework
             //    (production routes this through WorldData.QueueSunlightRecalculation, which lands
             //    in the owning chunk's column recalc queue).
             if (newProps.Opacity != oldProps.Opacity)
+            {
                 chunk.SunColumnRecalcQueue.Enqueue(new Vector2Int(localPos.x, localPos.z));
+
+                // Bug 05: mirror ChunkData.ModifyVoxel's border-column edge-check re-grant. An opacity
+                // edit in a border column can under-report cross-seam sky light with no edge-check round
+                // left (both spent during generation), so re-grant a bounded budget consumed by
+                // LightingFrameSimulator.RunToConvergence at grid quiescence (RunReGrantedEdgeCheckRound).
+                bool isBorderColumn = localPos.x == 0 || localPos.x == VoxelData.ChunkWidth - 1
+                                                      || localPos.z == 0 || localPos.z == VoxelData.ChunkWidth - 1;
+                if (isBorderColumn)
+                    chunk.Data.RemainingEdgeCheckRounds =
+                        Mathf.Max(chunk.Data.RemainingEdgeCheckRounds, 1);
+            }
 
             chunk.HasLightWork = true;
         }

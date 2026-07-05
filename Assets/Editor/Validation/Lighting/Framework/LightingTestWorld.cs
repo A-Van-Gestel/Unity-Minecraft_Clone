@@ -889,6 +889,63 @@ namespace Editor.Validation.Lighting.Framework
             return anyRound;
         }
 
+        /// <summary>
+        /// Runs one edge-check round for every chunk whose <see cref="ChunkData.RemainingEdgeCheckRounds"/>
+        /// was re-granted by a border-column opacity edit (<c>ChunkData.ModifyVoxel</c> / its harness
+        /// mirror, the Bug 05 fix): decrement the counter, flag the chunk's own edge check, and trigger
+        /// cardinal-neighbor edge checks. Driven by <see cref="LightingFrameSimulator.RunToConvergence"/>
+        /// at grid <b>quiescence</b> — after the post-edit field has fully settled — because the cross-seam
+        /// under-report only reconciles when the edge check reads the settled neighbor data, not mid-churn.
+        /// This is the dynamic-path analog of <see cref="DecrementEdgeCheckRound"/> (the generation wave's
+        /// post-convergence edge loop); the two never double-drive because generation spends the rounds to
+        /// 0 before any edit re-grants them. Add-only and bounded by the counter, so it terminates.
+        /// </summary>
+        /// <returns>True if at least one re-granted chunk ran an edge round (the caller keeps converging);
+        /// false when no re-granted rounds remain.</returns>
+        public bool RunReGrantedEdgeCheckRound()
+        {
+            bool anyRound = false;
+            foreach (TestChunk chunk in _chunks.Values)
+            {
+                if (chunk.Data.RemainingEdgeCheckRounds <= 0) continue;
+
+                chunk.Data.RemainingEdgeCheckRounds--;
+                chunk.Data.NeedsEdgeCheck = true;
+                chunk.HasLightWork = true;
+                TriggerNeighborEdgeChecks(chunk.Coord);
+                anyRound = true;
+            }
+
+            return anyRound;
+        }
+
+        /// <summary>
+        /// Flags the 4 cardinal neighbors of <paramref name="chunkCoord"/> for an edge check (mirror of
+        /// <c>WorldJobManager.TriggerNeighborEdgeChecks</c>): each in-grid neighbor past its initial
+        /// lighting re-examines its borders against the now-stabilized chunk. Called by
+        /// <see cref="RunReGrantedEdgeCheckRound"/>.
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate of the chunk that just stabilized.</param>
+        private void TriggerNeighborEdgeChecks(Vector2Int chunkCoord)
+        {
+            for (int d = 0; d < 4; d++)
+            {
+                Vector2Int neighborCoord = chunkCoord + d switch
+                {
+                    0 => new Vector2Int(0, 1), // North
+                    1 => new Vector2Int(1, 0), // East
+                    2 => new Vector2Int(0, -1), // South
+                    _ => new Vector2Int(-1, 0), // West
+                };
+
+                if (!_chunks.TryGetValue(neighborCoord, out TestChunk neighbor)) continue;
+                if (neighbor.Data.NeedsInitialLighting) continue;
+
+                neighbor.Data.NeedsEdgeCheck = true;
+                neighbor.HasLightWork = true;
+            }
+        }
+
         // --- Private helpers ---
 
         /// <summary>

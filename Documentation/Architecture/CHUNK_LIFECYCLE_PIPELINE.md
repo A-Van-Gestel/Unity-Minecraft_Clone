@@ -32,7 +32,7 @@ Each `ChunkData` instance carries the following transient flags that control pip
 | `HasLightChangesToProcess`    | bool | `AddToSunLightQueue()`, `AddToBlockLightQueue()`, cross-chunk mods, edge check scheduling | `ScheduleLightingUpdate()`                                | Pending light changes in managed queues                                                                               |
 | `NeedsEdgeCheck`              | bool | Post-stabilization re-arm (`ProcessLightingJobs`), neighbor propagation, or disk load     | `ScheduleLightingUpdate()`                                | Border voxels need validation against neighbors                                                                       |
 | `IsAwaitingMainThreadProcess` | bool | Per-job merge start (`MergeCompletedLightingJob`)                                         | `ProcessLightingJobs()` per-job `finally` (even on fault) | Lighting job completed, cross-chunk mods being applied                                                                |
-| `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()` (pool recycle)                   | Decremented in `ProcessLightingJobs()` per stable pass    | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`. |
+| `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()`; re-granted to 1 by `ModifyVoxel` on a border-column opacity edit (Bug 05) | Decremented in `ProcessLightingJobs()` per stable pass    | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`. |
 
 ### Flag Lifecycle Diagram
 
@@ -448,10 +448,12 @@ flowchart TD
 
 > [!NOTE]
 > ### When is NeedsEdgeCheck set?
-> There are three set sites:
+> There are three set sites (plus one indirect trigger):
 > 1. **Disk load** — `LoadOrGenerateChunk` sets `NeedsEdgeCheck = true` for chunks loaded with stable lighting (may have stale border lighting from a previous session).
 > 2. **Post-stabilization re-arm (iterative rounds)** — `ProcessLightingJobs` re-arms `NeedsEdgeCheck` (+ `HasLightChangesToProcess`) on a chunk each time its lighting job reports `IsStable`, as long as `RemainingEdgeCheckRounds > 0` (default 2). This is what gives **freshly generated** chunks their edge checks — they get them after their initial lighting stabilizes, not when `NeedsInitialLighting` clears.
 > 3. **Neighbor propagation** — when a chunk re-arms in (2) it also calls `TriggerNeighborEdgeChecks`, setting `NeedsEdgeCheck` on its 4 cardinal neighbors that are populated and past initial lighting.
+>
+> *Indirect (Bug 05 fix):* a **border-column opacity edit** does not set `NeedsEdgeCheck` directly — it re-grants `RemainingEdgeCheckRounds` (to 1) in `ModifyVoxel`, so the *next* stable pass re-arms via site (2). This gives a post-generation edit its reconciling border check even after generation spent the original 2 rounds.
 >
 > Round 1 fixes the immediate frontier against the latest neighbor data; round 2 reconciles the remainder after neighbors have run their own edge checks. The counter is `[NonSerialized]` and reset to 2 by `ChunkData.Reset()`.
 

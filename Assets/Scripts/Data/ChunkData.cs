@@ -176,6 +176,12 @@ namespace Data
         [NonSerialized]
         public int RemainingEdgeCheckRounds = 2;
 
+        // Edge-check budget re-granted to a chunk when an opacity-changing edit lands in one of its
+        // border columns (Bug 05). Post-generation the counter is already 0, so a border edit's
+        // cross-seam under-report would have no edge-check round to reconcile it; one round (self +
+        // cardinal neighbors, add-only) is enough to heal it — see ModifyVoxel.
+        private const int BORDER_EDIT_EDGE_CHECK_ROUNDS = 1;
+
         [NonSerialized]
         private readonly Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
 
@@ -535,6 +541,17 @@ namespace Data
             if (lightingEnabled && newProps.opacity != oldProps.opacity)
             {
                 World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(localPos.x + Position.x, localPos.z + Position.y));
+
+                // Bug 05: an opacity edit in a border column can under-report cross-seam sky light, and
+                // after generation both edge-check rounds are already spent — leaving no round to
+                // reconcile it, since edge checks are the only corrector for under-bright border light
+                // (LIGHTING_SYSTEM_OVERVIEW §3.6/§3.7). Re-grant a bounded budget so the post-edit
+                // stabilization re-runs the border check on this chunk and its cardinal neighbors. This
+                // is add-only and bounded, so it cannot livelock.
+                bool isBorderColumn = localPos.x == 0 || localPos.x == VoxelData.ChunkWidth - 1
+                                                      || localPos.z == 0 || localPos.z == VoxelData.ChunkWidth - 1;
+                if (isBorderColumn)
+                    RemainingEdgeCheckRounds = Math.Max(RemainingEdgeCheckRounds, BORDER_EDIT_EDGE_CHECK_ROUNDS);
             }
 
             // --- Notify World and Handle Active Voxels ---
