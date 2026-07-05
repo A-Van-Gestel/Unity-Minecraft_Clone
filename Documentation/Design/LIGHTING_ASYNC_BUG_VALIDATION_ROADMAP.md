@@ -188,40 +188,92 @@ class in isolation; the lighting suite's frame simulator predates MT-2 entirely.
 treats a recurring non-zero fail-safe count as a bug (`World.cs:1588-1591`) — this item turns
 that log line into a mechanical gate.
 
-**Implementation.**
+> **Plan detail (2026-07-05, pre-implementation trace).** The four production surfaces this
+> mode must mirror were re-verified against the current code before planning: the scheduling
+> scan (`World.cs:1560-1703`), the completion-promotion site (`WorldJobManager.cs:1108-1116`),
+> the two neighbor gates (`AreNeighborsDataReady` vs `AreNeighborsReadyAndLit`,
+> `World.cs:1904-1970`), and the flag/load/generation promotion sites (`World.cs:346`, `809`).
+> Two facts de-risk the build and one adds scope:
+> - **Key-space is a non-issue (confirmed, not a discovery step).** `TestChunk.VoxelOrigin =
+>   coord * ChunkWidth` and `Data = new ChunkData(VoxelOrigin)`, so `ChunkData.Position` *is*
+>   the voxel origin the scheduler keys on; `LightingTestWorld.WorldToChunkCoord` is the inverse.
+> - **The flag→staging path Just Works once wired.** `CompleteLightingJob` re-flags an unstable
+>   chunk via `chunk.HasLightWork = true` (a `true` write, which fires `OnLightWorkFlagged`), so
+>   mid-flight re-flags stage automatically the moment the sink points at `scheduler.Flag`.
+> - **New scope: the harness has NO `AreNeighborsReadyAndLit` analog.** The sim's Phase 2 gates
+>   only on `AreNeighborsDataReady`; production's *edge* arm (`World.cs:1656`) gates on the
+>   stricter `AreNeighborsReadyAndLit`. This absence is exactly what forced the
+>   `RunReGrantedEdgeCheckRound` quiescence hook (Bug 05's re-granted edge round is consumed at
+>   grid quiescence because no per-frame edge-gate exists). AS-2 must add this gate — it is the
+>   "per-frame edge-gate = AS-2" note from the fidelity backlog.
 
-- **`LightingFrameSimulator` opt-in scheduler mode** (constructor flag; default off so every
-  existing baseline stays byte-identical):
-    - Hold a real `LightWorkScheduler` instance (plain main-thread class — editor-safe).
-    - Replace Phase 2's `AllChunkCoords()` scan with: `DrainStaging()` → `SnapshotReady(buffer)`
-      → iterate the snapshot only. Mirror the production scan's per-chunk outcomes **by reading
-      `World.cs:1560-1701` and matching each arm**: no light work → `Remove(pos)`; job already
-      in flight → `MarkWaiting(pos)`; neighbors not ready → `MarkWaiting(pos)`; otherwise
-      schedule (budget-capped; starved chunks stay ready).
-    - **Promotion hooks**, mirroring production sites: `CompleteLightingJob` →
-      `PromoteNeighborhood(coord)` (production: `WorldJobManager.cs:1092-1100`);
-      `MarkNeighborsReady` / `MarkChunkLoaded` → `PromoteNeighborhood` (production analog:
-      generation / disk-load completion); flag transitions → wire
-      `ChunkData.OnLightWorkFlagged` to `scheduler.Flag` for the harness lifetime instead of
-      nulling it (`LightingTestWorld.cs:97-98`; the real `ChunkData` setters already fire the
-      callback — fidelity B4 closed on that — so this Just Works; still restore the saved
-      callback in `Dispose`).
-    - **Fail-safe is a switch, default OFF in scenarios.** Expose `sim.FailSafePromoteAll()`
-      (manual) or `promoteAllEveryNFrames`. The load-bearing assertion of the whole item:
-      *scenarios must converge with the fail-safe off.* Any scenario that only converges with
-      it on has found a missing promotion hook.
-    - New `FrameResult` counters: `ChunksParked`, `ChunksPromoted`, `StagingDrained`.
-- **Key-space note:** the scheduler keys on voxel-origin `Vector2Int` (`ChunkData.Position`),
-  the harness on grid coords — reuse the harness's existing conversion (discovery step: confirm
-  `TestChunk`'s `ChunkData.Position` is set to the voxel origin).
-- **Migration:** re-run the frame-sim-based Bug-09 fleet (B15/B16/B22/B26–B29/B40/B41) in
-  scheduler mode as a second pass (new baseline numbers or a mode toggle inside each — prefer a
-  shared helper that runs a scenario body in both modes).
+**Implementation — Phase 0: discovery (confirm before coding).**
+
+- Grep the Bug-09 fleet bodies (`LightingValidationSuite.Bug09Fuzz.cs` / `…Baseline.cs`, scenarios
+  B15/B16/B22/B26–B29/B40/B41) for how each drives `RunFrame` / `RunToConvergence` — this fixes the
+  shape of the both-modes shared helper (Phase 3).
+- Confirm a fresh `TestChunk`'s `NeedsInitialLighting` default vs. how `QueueFullSunlightRecalc`
+  seeds work — decides how the ready set is seeded at scheduler-mode entry (flag-callback vs. an
+  explicit seed scan).
+
+**Implementation — Phase 1: harness prerequisites (`LightingTestWorld`).**
+
+- **`AreNeighborsReadyAndLit(Vector2Int coord)` analog** — for the 8 in-grid neighbors, return
+  `false` if a neighbor `IsChunkInFlight`, or a neighbor has `NeedsInitialLighting || HasLightWork
+  || IsAwaitingMainThreadProcess`; skip out-of-grid neighbors. Mirror of `World.cs:1904-1970`,
+  dropping the `GenerationJobs`/diagonal-in-world nuances the fixed grid cannot have — document the
+  delta in the docstring (same discipline as the existing `NeighborsReady` note). This is the
+  load-bearing new fidelity surface.
+- **`SetLightWorkFlagSink(Action<Vector2Int>)`** — installs `ChunkData.OnLightWorkFlagged`; the
+  existing `Dispose` restore (`LightingTestWorld.cs:153`) already covers teardown. The sim calls
+  `world.SetLightWorkFlagSink(scheduler.Flag)` in scheduler mode only, replacing the lifetime-null
+  the constructor installs (`LightingTestWorld.cs:129-130`).
+- Expose the scan-arm read accessors not already public: `NeedsInitialLighting`, `NeedsEdgeCheck`
+  (`HasLightWork` is already reachable via `ChunkHasLightWork`).
+
+**Implementation — Phase 2: `LightingFrameSimulator` scheduler mode.**
+
+- **Constructor flag** `bool schedulerMode = false` (default off → Phase 2 keeps the
+  `AllChunkCoords()` scan; every existing baseline stays byte-identical). Holds a real
+  `LightWorkScheduler` (plain main-thread class — editor-safe).
+- **Ready-set seeding at entry:** run one `AddReady` scan over chunks with any light flag set
+  (equivalent to a single fail-safe seed), then wire the flag sink for subsequent edits/re-flags.
+  Initial lighting still runs through `RunInitialLightingParallel` (the generation wave — *not* the
+  scheduler); scheduler mode governs the steady-state + dynamic-edit convergence, matching the
+  production division (initial lighting is its own wave; the scan handles the rest).
+- **Replace Phase 2** with the production scan, arm-for-arm against `World.cs:1600-1696`:
+  `DrainStaging()` → optional fail-safe → `SnapshotReady(buffer)` → per position — in-flight →
+  `MarkWaiting`; `NeedsInitialLighting` + `AreNeighborsDataReady` → schedule; else *edge* arm
+  (`NeedsEdgeCheck` + `AreNeighborsReadyAndLit` → set `NeedsEdgeCheck`, schedule with edge-check);
+  else *regular* arm (`HasLightWork` + `AreNeighborsDataReady` → schedule); then no-flags →
+  `Remove`, else → `MarkWaiting`. Budget-capped; starved chunks stay ready.
+- **Promotion hooks**, mirroring production sites: Phase 1 after each `CompleteLightingJob` →
+  `scheduler.PromoteNeighborhood(voxelOrigin)` (production: `WorldJobManager.cs:1115`, the
+  load-bearing hook); sim wrappers `MarkNeighborsReady` / `MarkChunkLoaded` → `PromoteNeighborhood`
+  (production analog: generation / disk-load completion, `World.cs:809`); flag transitions → the
+  wired sink (Phase 1) stages them.
+- **Fail-safe is a switch, default OFF in scenarios.** Expose `sim.FailSafePromoteAll()` (manual)
+  or `promoteAllEveryNFrames` (0 = off). The load-bearing assertion of the whole item: *scenarios
+  must converge with the fail-safe off.* Any scenario that only converges with it on has found a
+  missing promotion hook.
+- New `FrameResult` counters: `ChunksParked`, `ChunksPromoted`, `StagingDrained`.
+- **Reconcile `RunReGrantedEdgeCheckRound`:** with the real edge-gate present, Bug 05's re-granted
+  edge round should fire through the normal scan, not the quiescence hook. Verify **B64/K15a stays
+  green in scheduler mode**; if it does, the hook becomes legacy-mode-only (do **not** delete it —
+  the legacy-mode baselines still depend on it; note it as such).
+
+**Implementation — Phase 3: migration + prove-red.**
+
+- **Migration:** a shared helper `RunScenarioBothModes(body)` runs a scenario in legacy + scheduler
+  mode. Keep the existing Bug-09 fleet (B15/B16/B22/B26–B29/B40/B41) in legacy mode (byte-identical)
+  and add the scheduler-mode second pass as **new baselines B65+** (suite tip is B64) — preferred
+  over a mode toggle inside each existing baseline, so the two passes are distinct regression guards.
 - **Prove-red:** temporarily disable one promotion hook (e.g. comment the
   completion-`PromoteNeighborhood`) → a border-lamp scenario must stall (converge only via
   fail-safe) → red under the fail-safe-off assertion. Restore → green.
 - **Definition of done:** scheduler mode + fleet second pass green with fail-safe off, prove-red
-  documented, fidelity finding **B6** flipped to CLOSED.
+  documented, fidelity finding **B6** flipped to CLOSED, and the "existing coverage" suite-count
+  line in `VALIDATION_SUITE_COVERAGE_ROADMAP.md` updated.
 
 **Cross-reference:** this is the lighting slice of
 [VALIDATION_SUITE_COVERAGE_ROADMAP.md](VALIDATION_SUITE_COVERAGE_ROADMAP.md) NS-3 (chunk
@@ -505,12 +557,30 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
 
 ### HF-4 — Shared lighting-pass orchestrator (deferred; fold into AS-2 / NS-3)
 
-- The only way the harness can truly replay the pass bookkeeping (B7's full closure): extract the
-  iterate/complete/release/remove skeleton into a pure orchestrator both `WorldJobManager` and the frame
-  simulator drive — the same extraction pattern as `LightingJobProcessor` (A2) and
-  `LightingScheduleDecision` (B2). A meaningful refactor of `ProcessLightingJobs`; do it as part of
-  **AS-2** (which already restructures the simulator's frame loop around a real `LightWorkScheduler`)
-  or the NS-3 chunk-lifecycle suite — not standalone.
+The only way the harness can truly replay the pass bookkeeping (B7's full closure) is to move the
+production loop structure into pure code both `WorldJobManager` and the frame simulator drive — the
+same extraction pattern as `LightingJobProcessor` (A2) and `LightingScheduleDecision` (B2). Two
+extractions, both surfaced by the AS-2 trace above:
+
+1. **Scan-arm decision** (unlocks AS-2's faithful scheduler mode) — extract the per-chunk arm logic
+   at `World.cs:1600-1696` into a pure `LightingScanDecision.EvaluateReadyChunk(inFlight,
+   needsInitial, needsEdge, hasChanges, neighborsDataReady, neighborsReadyAndLit)` returning an
+   action enum (`ScheduleInitial` / `ScheduleEdge` / `ScheduleRegular` / `Remove` / `Park`). Both
+   `World.Update` and the sim's Phase 2 call it, so the sim stops mirroring the arms *by reading
+   `World.cs` and matching each* (the fidelity risk called out in AS-2 Phase 2). Low-risk — the
+   natural extension of `LightingScheduleDecision`; **do it inside AS-2.**
+2. **Completion-pass skeleton** (B7's full closure) — extract the `ProcessLightingJobs`
+   iterate → complete → **release-inside-loop** → enroll → **remove-after-loop** → **promote-after**
+   structure, including the HF-2 per-job `try/catch/finally` fault isolation
+   (`WorldJobManager.cs:1040-1116`), into a `LightingCompletionPass.Run(keys, completeOne, release,
+   remove, promote)`. Production drives it with its `NativeArray`-backed delegates; the sim drives it
+   with `CompleteLightingJob`-backed delegates — giving the harness the **multi-job-per-pass**
+   bookkeeping (release-inside / remove-after ordering + fault isolation) it cannot replay today.
+   A meaningful refactor of `ProcessLightingJobs`; do it **once AS-2's frame loop is stable**, not
+   standalone.
+
+Both extractions are chunk-pipeline edits → `CHUNK_LIFECYCLE_PIPELINE.md` doc-sync in the same
+commit, and cross-check `_FIXED_BUGS.md` (flag-pairing / deadlock history) before merging.
 
 **Sequencing:** HF-1 first (small, unlocks HF-3's detector value and B60's prove-red), HF-2 second
 (independent, small), HF-3 third, HF-4 whenever AS-2 lands. On completion, flip fidelity A5/B7 and record
