@@ -153,6 +153,22 @@ namespace Editor.Validation.Lighting.Framework
             ChunkData.OnLightWorkFlagged = _savedLightWorkCallback;
         }
 
+        /// <summary>
+        /// Installs a sink for the static <see cref="ChunkData.OnLightWorkFlagged"/> callback for the
+        /// lifetime of this world, replacing the neutralizing null the constructor installs. AS-2 scheduler
+        /// mode wires this to <c>LightWorkScheduler.Flag</c> so a flag transition to true — including
+        /// <see cref="CompleteLightingJob"/> re-flagging an unstable chunk via <c>HasLightWork = true</c> —
+        /// stages the chunk's voxel origin (<see cref="ChunkData.Position"/>) for promotion into the ready
+        /// set. The saved original callback is still restored on <see cref="Dispose"/> regardless of what is
+        /// installed here.
+        /// </summary>
+        /// <param name="sink">The callback to receive flagged chunk voxel-origin positions, or null to keep
+        /// the callback neutralized.</param>
+        public void SetLightWorkFlagSink(Action<Vector2Int> sink)
+        {
+            ChunkData.OnLightWorkFlagged = sink;
+        }
+
         // --- Per-chunk state ---
 
         /// <summary>
@@ -334,6 +350,55 @@ namespace Editor.Validation.Lighting.Framework
         /// </summary>
         /// <param name="chunkCoord">The grid coordinate of the chunk whose neighbors are now ready.</param>
         public void MarkNeighborsReady(Vector2Int chunkCoord) => GetChunk(chunkCoord).NeighborsReady = true;
+
+        /// <summary>
+        /// Harness analog of production's <c>World.AreNeighborsReadyAndLit</c> — the stricter of the two
+        /// neighbor gates, consumed by the AS-2 scheduler scan's EDGE-check arm. Distinct from
+        /// <see cref="AreNeighborsDataReady"/> (which only checks terrain existence): this checks that every
+        /// in-grid neighbor (4 cardinal + 4 diagonal) is fully lit and stable, so a border edge comparison
+        /// reads settled data. Returns false when a neighbor has a lighting job in flight, or carries
+        /// <see cref="ChunkData.NeedsInitialLighting"/>, pending light work
+        /// (<see cref="ChunkData.HasLightChangesToProcess"/>), or <see cref="ChunkData.IsAwaitingMainThreadProcess"/>.
+        /// <para>Mirror of <c>World.cs</c>'s gate minus the checks the fixed grid cannot have: there are no
+        /// per-neighbor terrain-generation jobs (that coarse readiness is modeled by
+        /// <see cref="AreNeighborsDataReady"/>), and out-of-grid neighbors are the world boundary — skipped,
+        /// exactly like production's <c>!IsChunkInWorld</c> continue. Without this gate the Bug-05 re-granted
+        /// edge round can only be driven at grid quiescence (<see cref="RunReGrantedEdgeCheckRound"/>).</para>
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate whose 8 neighbors are gated for edge-check readiness.</param>
+        /// <returns>True when every in-grid neighbor is fully lit and stable.</returns>
+        public bool AreNeighborsReadyAndLit(Vector2Int chunkCoord)
+        {
+            foreach (Vector3Int offset in VoxelData.AllNeighborOffsets)
+            {
+                Vector2Int neighborCoord = chunkCoord + new Vector2Int(offset.x, offset.z);
+
+                // Outside the grid = world boundary: nothing to wait on (production's !IsChunkInWorld skip).
+                if (!_chunks.TryGetValue(neighborCoord, out TestChunk neighbor)) continue;
+
+                // A lighting job in flight for the neighbor means its border light is still changing.
+                if (_inFlightCoords.Contains(neighborCoord)) return false;
+
+                // Light that hasn't been computed / scheduled / merged yet — the edge comparison would read
+                // stale data (mirror of the NeedsInitialLighting / HasLightChangesToProcess /
+                // IsAwaitingMainThreadProcess arms).
+                if (neighbor.Data.NeedsInitialLighting) return false;
+                if (neighbor.HasLightWork) return false;
+                if (neighbor.Data.IsAwaitingMainThreadProcess) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>Whether the chunk still needs its first full lighting pass (scheduler-scan initial arm read).</summary>
+        /// <param name="chunkCoord">The grid coordinate to query.</param>
+        /// <returns><see cref="ChunkData.NeedsInitialLighting"/> for the chunk.</returns>
+        public bool ChunkNeedsInitialLighting(Vector2Int chunkCoord) => GetChunk(chunkCoord).Data.NeedsInitialLighting;
+
+        /// <summary>Whether the chunk has a pending border edge-check (scheduler-scan edge arm read).</summary>
+        /// <param name="chunkCoord">The grid coordinate to query.</param>
+        /// <returns><see cref="ChunkData.NeedsEdgeCheck"/> for the chunk.</returns>
+        public bool ChunkNeedsEdgeCheck(Vector2Int chunkCoord) => GetChunk(chunkCoord).Data.NeedsEdgeCheck;
 
         /// <summary>
         /// How a chunk's persisted pending light work is treated when it is marked loaded again, mirroring
