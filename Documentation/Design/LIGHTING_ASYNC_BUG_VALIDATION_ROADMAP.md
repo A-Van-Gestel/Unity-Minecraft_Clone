@@ -1,8 +1,9 @@
 # Lighting Async-Bug Validation Roadmap (AS-1 … AS-5)
 
 > **Status:** In progress — **AS-1 CLOSED 2026-07-04** (Bugs 13 + 14 both reproduced, fixed, confirmed
-> in-game, and archived — see §3 outcome; suite at B61, 53 baselines). AS-2 … AS-5 remain proposals,
-> plus the **§10 harness-hardening follow-ups HF-1 … HF-4** filed from the AS-1 session's lessons.
+> in-game, and archived — see §3 outcome). **§10 harness-hardening HF-1/HF-2/HF-3 DONE 2026-07-05**
+> (HF-3's fuzz found + closed **Bug 15** and produced the first synchronous **Bug 05** repro — see the
+> §10 outcome blocks; suite at B63, 55 baselines). AS-2 … AS-5 remain proposals; HF-4 folds into AS-2.
 > **Created:** 2026-07-03 (async-testability analysis session, repo @ `a458173`)
 > **Scope:** making the async-flavored open lighting bugs (**Bug 05 / Bug 09 / Bug 13**,
 > [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)) testable, and closing the async surfaces the
@@ -232,6 +233,13 @@ NS-3's convergence/flag-pairing assertion families in mind.
 **Target:** [Bug 05](../Bugs/LIGHTING_BUGS.md) — persistent chunk-border shadow patches in
 dense biomes.
 
+> **Update (2026-07-05, from HF-3):** a faithful synchronous Bug-05 repro now **exists on a different
+> axis** — the border-heightmap fuzz's seed 14 (K15a) reds on *post-edit* edge-round exhaustion, healed
+> by exactly one forced edge-check round (see the Bug 05 entry). The Bug-05 fix can therefore be
+> test-driven from K15a without waiting for this item. AS-3's staggered-frontier axis remains open as
+> the *initial-wave* form's habitat (fidelity C8) and as the natural re-verification sweep once the
+> edge-round fix lands.
+
 **Why this axis.** The geometry axis is exhausted (fidelity C2: canopy fuzz, all seeds
 converge), but every existing scenario lights all chunks in **one simultaneous wave** with
 `neighborsDataReady: true` throughout (C1's documented remainder). Production lights a **moving
@@ -396,7 +404,7 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
 |------|---------------------------------------------------------------------------------|-------------------------|--------------------------|
 | HF-1 | Editor/dev-only bounds assertions in the `ChunkData` accessors                  | fidelity A5             | ✅ DONE 2026-07-05        |
 | HF-2 | Per-job fault isolation in `ProcessLightingJobs` (eliminate the cascade class)  | fidelity B7 (near-term) | ✅ DONE 2026-07-05        |
-| HF-3 | Border heightmap fuzz baseline (B62+) — varied heights at seams + border edits  | C9 extension            | 🟡                       |
+| HF-3 | Border heightmap fuzz baseline (B62+) — varied heights at seams + border edits  | C9 extension            | ✅ DONE 2026-07-05        |
 | HF-4 | Extract the lighting pass skeleton into a shared, harness-drivable orchestrator | fidelity B7 (full)      | 🔴 — fold into AS-2/NS-3 |
 
 ### HF-1 — Fail-fast `ChunkData` accessors (editor/development builds only)
@@ -466,6 +474,26 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
 - With HF-1 in place this becomes a genuine crash-class detector: the fuzz samples many lottery
   positions, the assertions make every bad one loud. Prefer building it AFTER HF-1 so a found violation
   reds immediately instead of wrong-reading.
+
+> **Outcome (2026-07-05): DONE — and the fuzz's first run paid for the whole §10 arc.** Built as
+> `LightingValidationSuite.BorderHeightFuzz.cs` (grid-3, per-column random heights 8–46 at every seam,
+> seam overhangs with B60-shaped companion edits, 6–10 seeded border edits under a seeded
+> budget/cadence/shuffled schedule; 25 seeds per suite run + a 200-seed nightly menu item). It did NOT
+> land as baseline B62 directly: its **very first seed found Bug 15** — cross-chunk surface stamps on
+> opaque seam faces permanently wiped by border-column edits; every cross-seam re-derivation path
+> refused opaque centers — fixed the same day in five parts (opaque-center stamps in
+> `CheckEdgeVoxel`/`CheckEdgeVoxelRGB`, the `PullBackClaimStillSupported` mirror, the unchanged-but-lit
+> seeding re-spread, and the claim-verified dimmer/zeroed-halo stamp pull-back for the order-dependent
+> residual), confirmed in-game (the pre-fix build shows the stored-0 wipe in the F3/F7 views; the fix
+> also settled the visual-severity question — the mesher shades faces from adjacent air, so the
+> corruption was visually masked) and archived (`_FIXED_BUGS.md` Lighting **#19**). Its distilled
+> repros were promoted as baselines **B62/B63** (suite: 55 baselines green). The fuzz's one remaining
+> red, seed 14, then produced the **first faithful synchronous Bug-05 repro** (the post-edit form:
+> edge-round exhaustion, healed by exactly one forced edge-check round — see the Bug 05 entry in
+> `LIGHTING_BUGS.md`), falsifying the "not synchronously reproducible" verdict that had stood since the
+> canopy fuzz. The fuzz therefore remains known-bug repro **K15a under Bug 05** and takes its baseline
+> number when that fix lands. C9's "varied-heightmap-at-seam geometry per cross-chunk feature" lesson
+> is upgraded from recommendation to validated practice: one geometry axis, two bugs.
 
 ### HF-4 — Shared lighting-pass orchestrator (deferred; fold into AS-2 / NS-3)
 

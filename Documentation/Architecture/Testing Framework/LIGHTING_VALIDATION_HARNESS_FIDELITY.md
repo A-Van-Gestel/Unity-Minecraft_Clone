@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (39 baselines + frame simulator, menu item
+The lighting validation suite (55 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -149,8 +149,8 @@ there is invisible.
   bounds every emitted mod/claim). Verified by re-running B60's both-guards-off sabotage: it now goes
   **RED** (`ArgumentOutOfRangeException` at the halo claim `(-1, 49, 8)`) where it previously stayed green —
   retroactively giving B60 its prove-red — with all 53 baselines green under the live assertions once the
-  guards were restored. Pairs with **HF-3** (border heightmap fuzz, the C9 lesson), which widens how many
-  positions scenarios sample.
+  guards were restored. Pairs with **HF-3** (border heightmap fuzz, the C9 lesson — shipped 2026-07-05,
+  see C9's follow-through note), which widens how many positions scenarios sample.
 
 ---
 
@@ -485,6 +485,14 @@ there is invisible.
   same sabotage now reds B60 loudly, so the scenario guards the crash class too. Standing lesson for
   scenario authoring: prefer at least one **varied-heightmap-at-seam** geometry per new cross-chunk
   feature — flat worlds under-sample the shadow-caster and halo-node paths.
+- **HF-3 follow-through (2026-07-05) — the lesson validated:** the border-heightmap fuzz shipped
+  (`LightingValidationSuite.BorderHeightFuzz.cs`: per-column random heights at every seam, seam
+  overhangs, seeded border edits; K15a 25-seed suite tier + 200-seed nightly menu item) and its first
+  run found two bugs on the very geometry axis this finding predicted flat worlds were hiding:
+  seed 0 → **Bug 15** (cross-seam surface stamps wiped by border-column edits; fixed + confirmed +
+  archived `_FIXED_BUGS.md` Lighting #19, distilled repros promoted to baselines **B62/B63**), and
+  seed 14 → the **first faithful synchronous Bug 05 repro** (post-edit edge-round exhaustion — see
+  `LIGHTING_BUGS.md`). The fuzz remains known-bug repro K15a under Bug 05 until that fix lands.
 
 > **None of C3–C9 require a new harness capability** — each reuses existing primitives
 > (`MarkChunkUnloaded`/`MarkChunkLoaded`, `BeginLightingJob`/`CompleteLightingJob`, the pure-channel lamp
@@ -544,29 +552,29 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 
 ## 6. Priority backlog (snapshot)
 
-| #  | Finding                                                                                    | Status            | Priority         | Effort         |
-|----|--------------------------------------------------------------------------------------------|-------------------|------------------|----------------|
-| C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                         | **CLOSED**        | —                | done           |
-| C5 | Cumulative multi-layer attenuation probe (B45)                                             | **CLOSED**        | —                | done           |
-| C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4 | **CLOSED**        | —                | done           |
-| A5 | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)     | **CLOSED**        | —                | done           |
-| B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                    | OPEN              | **Medium-High**  | medium         |
-| B7 | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 done; full replay → HF-4)     | **CLOSED (near)** | — (HF-4 w/ AS-2) | done           |
-| C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3)      | OPEN              | Medium           | medium         |
-| C9 | Flat scenario worlds never exercise border shadow-casters (B60; fuzz extension → HF-3)     | **CLOSED**        | —                | done           |
-| C6 | Per-channel removal independence                                                           | OPEN              | Low–Medium       | small          |
-| C7 | Deterministic corner spill / in-chunk re-shadow                                            | OPEN              | Low              | small          |
-| §5 | Bug-09 fleet (B15–B25) consolidation                                                       | **CLOSED**        | —                | done           |
-| A3 | `ModifyVoxel` heightmap (shared) / enqueue path                                            | **PARTIAL**       | Low              | heightmap done |
-| A4 | Oracle shared-assumption probes                                                            | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
-| B5 | Meshing-gate coverage                                                                      | OPEN              | Low (by design)  | —              |
-| C2 | Bug-05 dense-canopy geometry (found Bug 10)                                                | **CLOSED**        | —                | done           |
-| B2 | `neighborsDataReady` toggle                                                                | **CLOSED**        | —                | done           |
-| C1 | Bug-09 geometry fuzz (randomize geometry)                                                  | **CLOSED**        | —                | done           |
-| B1 | Chunk-unload / persist-replay path                                                         | **CLOSED**        | —                | done           |
-| B4 | Pool-recycle / flag-pairing                                                                | **CLOSED**        | —                | done           |
-| A1 | Section / uniform-sky merge bypass                                                         | **CLOSED**        | —                | done           |
-| A2 | Shared mod-routing decision                                                                | **CLOSED**        | —                | done           |
+| #  | Finding                                                                                                                                              | Status            | Priority         | Effort         |
+|----|------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------|------------------|----------------|
+| C4 | Sunlight persist→replay (B46) + `AddPendingBlocklight` guard (B47)                                                                                   | **CLOSED**        | —                | done           |
+| C5 | Cumulative multi-layer attenuation probe (B45)                                                                                                       | **CLOSED**        | —                | done           |
+| C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4                                                           | **CLOSED**        | —                | done           |
+| A5 | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)                                                               | **CLOSED**        | —                | done           |
+| B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                                                                              | OPEN              | **Medium-High**  | medium         |
+| B7 | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 done; full replay → HF-4)                                                               | **CLOSED (near)** | — (HF-4 w/ AS-2) | done           |
+| C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3)                                                                | OPEN              | Medium           | medium         |
+| C9 | Flat scenario worlds never exercise border shadow-casters (B60; HF-3 fuzz shipped 2026-07-05 — found Bug 15 → B62/B63 + the first sync Bug-05 repro) | **CLOSED**        | —                | done           |
+| C6 | Per-channel removal independence                                                                                                                     | OPEN              | Low–Medium       | small          |
+| C7 | Deterministic corner spill / in-chunk re-shadow                                                                                                      | OPEN              | Low              | small          |
+| §5 | Bug-09 fleet (B15–B25) consolidation                                                                                                                 | **CLOSED**        | —                | done           |
+| A3 | `ModifyVoxel` heightmap (shared) / enqueue path                                                                                                      | **PARTIAL**       | Low              | heightmap done |
+| A4 | Oracle shared-assumption probes                                                                                                                      | **MOSTLY CLOSED** | Low (2nd oracle) | probes done    |
+| B5 | Meshing-gate coverage                                                                                                                                | OPEN              | Low (by design)  | —              |
+| C2 | Bug-05 dense-canopy geometry (found Bug 10)                                                                                                          | **CLOSED**        | —                | done           |
+| B2 | `neighborsDataReady` toggle                                                                                                                          | **CLOSED**        | —                | done           |
+| C1 | Bug-09 geometry fuzz (randomize geometry)                                                                                                            | **CLOSED**        | —                | done           |
+| B1 | Chunk-unload / persist-replay path                                                                                                                   | **CLOSED**        | —                | done           |
+| B4 | Pool-recycle / flag-pairing                                                                                                                          | **CLOSED**        | —                | done           |
+| A1 | Section / uniform-sky merge bypass                                                                                                                   | **CLOSED**        | —                | done           |
+| A2 | Shared mod-routing decision                                                                                                                          | **CLOSED**        | —                | done           |
 
 ---
 
