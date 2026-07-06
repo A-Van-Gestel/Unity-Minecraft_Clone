@@ -85,6 +85,16 @@ pointing back to this guide.
    NRE-ing before patch 3's guard could fire; it now null-guards exactly like the adjacent
    `HasWriteOperations` property already did.
 
+5. **Silence `ApiNoLongerSupported` console spam**
+   (`Modules/Unity.AI.Toolkit.Accounts/Services/Core/AccountApi.cs`) — the account
+   settings/points-balance refresh hits the retired `generators.ai.unity.com` endpoint, which
+   permanently answers `ApiNoLongerSupported` for this pinned pre-release SDK. The package already
+   treats that error as definitive (`PackagesSupported = false`, no retry), but still logged
+   *"Error after 1 attempt(s): ApiNoLongerSupported ..."* — and its `s_LastLoggedError` dedup is a
+   static that resets on every domain reload, so the message reappeared after each recompile.
+   Definitive `ApiNoLongerSupported` results now return without console logging; all other account
+   errors still log as before.
+
 ## Embed details / constraints
 
 - The package must stay pinned to **2.6.0-pre.1** (external constraint). The embedded copy is the

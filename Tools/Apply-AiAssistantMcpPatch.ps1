@@ -3,7 +3,8 @@
 Embeds com.unity.ai.assistant (pinned 2.6.0-pre.1) into Packages/ and applies the local MCP
 patches: (1) Mono Assembly.Load fallback that fixes the Unity_RunCommand tool on Unity 6000.5+,
 (2) lenient deserialization of string-encoded array parameters (Unity_ReadConsole flake),
-(3) clear error instead of NullReferenceException when a script uses a blocked namespace.
+(3) clear error instead of NullReferenceException when a script uses a blocked namespace,
+(4) silence the per-domain-reload "ApiNoLongerSupported" account-refresh console spam.
 
 .DESCRIPTION
 The embedded package is intentionally NOT committed to git (see .gitignore). Run this script
@@ -145,6 +146,23 @@ $patches = @(
         // never called; null-guard like HasWriteOperations below so callers reach the clear
         // blocked-script error instead of an opaque NullReferenceException.
         public bool Unsafe => m_Metadata?.IsUnsafe ?? false;
+'@
+    },
+    @{
+        Name        = 'Silence ApiNoLongerSupported console spam'
+        File        = 'Modules\Unity.AI.Toolkit.Accounts\Services\Core\AccountApi.cs'
+        Marker      = 'without this guard the same message spams the console'
+        Anchor      = '                    var errorMessage = result.Result.Error.AiResponseError == AiResultErrorEnum.RateLimitExceeded // typically means wrong url (staging vs prod)'
+        Replacement = @'
+                    // PATCHED (see Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md):
+                    // ApiNoLongerSupported is definitive for this pinned pre-release package (the
+                    // endpoint is retired) and is already recorded in PackagesSupported above.
+                    // The s_LastLoggedError dedup is static and resets on every domain reload, so
+                    // without this guard the same message spams the console after each recompile.
+                    if (result.Result.Error.AiResponseError == AiResultErrorEnum.ApiNoLongerSupported)
+                        return null;
+
+                    var errorMessage = result.Result.Error.AiResponseError == AiResultErrorEnum.RateLimitExceeded // typically means wrong url (staging vs prod)
 '@
     }
 )
