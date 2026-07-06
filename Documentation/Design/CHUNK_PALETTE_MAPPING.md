@@ -53,6 +53,14 @@ This guarantees that **the Burst Compiler `[BurstCompile]` and Job System retain
 
 ## 4. Prerequisites & Dependencies
 
+> **Seam status (2026-07-06):** the hydration (`ChunkSerializer.ReadChunkInternal` →
+> `ChunkData.PopulateFromSave`) and dehydration (`WriteChunkInternal`) boundaries this design
+> plugs into are each single-site today, and
+> [`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md`](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) §5
+> pins keeping them single-site as a standing constraint (its CP-3 also hardens the load
+> boundary's failure paths this migration will share). `ModManager`'s pending-mod store remains
+> the third seam, as §"pending_mods" below describes.
+
 ### AOT Migration Step (Required)
 Introducing palettes is a **chunk format version bump** that requires a `WorldMigrationStep` (see `Documentation/Design/AOT_WORLD_MIGRATION_SYSTEM.md`). Existing saves store raw global IDs with no palette header. The migration step must:
 1. Read the old format (raw `ushort` IDs with no palette).

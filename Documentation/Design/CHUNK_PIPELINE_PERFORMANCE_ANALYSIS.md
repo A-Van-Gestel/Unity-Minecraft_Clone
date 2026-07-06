@@ -14,6 +14,10 @@ recommended verification steps before implementing fixes.
 
 Related docs: `Architecture/CHUNK_LIFECYCLE_PIPELINE.md`, `Architecture/LIGHTING_SYSTEM_OVERVIEW.md`,
 `Guides/GENERAL_OPTIMIZATION_GUIDE.md`, `Bugs/JOB_SYSTEM_BUGS.md`, `Bugs/LIGHTING_BUGS.md`.
+Clarity/testability complement: [`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md`](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md)
+(CP-*, 2026-07-06) — its CP-1 deferral counters instrument this document's §3.3 pinned-trail
+mechanism, and its CP-5 `ChunkUnloadDecision` extraction is the seam §3's recommendation 3
+(unload light-pending chunks via persistence, P-4) will land on.
 
 > **Master backlog:** This document is the *deep-dive* for the chunk pipeline. The single
 > at-a-glance backlog of **all** open performance items (including this document's open findings,

@@ -53,7 +53,10 @@ CI/coverage/XML gaps close via the VS-2 extensions instead.
        changes the locking.
 - **Building blocks already available:** `ValidationReflection` (ChunkPool stubbing),
   `GoldenMaster`, temp-directory region files (the storage manager already supports a volatile
-  path).
+  path). Phase **CP-3** of
+  [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) seeds the
+  robustness slice (truncated/garbage/wrong-version payloads → `Deserialize` returns null, no
+  throw, no pooled-shell leak).
 - **Effort:** 🟡 core (1–5) → 🔴 with migration fixtures (6); build 1–5 first.
 
 ---
@@ -150,7 +153,10 @@ CI/coverage/XML gaps close via the VS-2 extensions instead.
   `RegionAddressCodec.V2Codec` behavior **pinned as-is, bug included** (existing saves depend on
   it) alongside V3 correctness assertions.
 - **Building blocks:** `ChunkRelativePositionTests` is the template for pure-math suites.
-- **Effort:** 🟢 — build it together with WS-1/VQ-1.
+- **Effort:** 🟢 — build it together with WS-1/VQ-1. **Scheduled:** phase **CP-2** of
+  [CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) executes
+  WS-1 and builds this suite alongside it (positive-domain equivalence + negative/big-coordinate
+  contract pins + region round-trips).
 
 ---
 
