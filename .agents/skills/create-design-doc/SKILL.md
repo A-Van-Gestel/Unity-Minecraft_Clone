@@ -8,7 +8,10 @@ description: Author a new document under Documentation/Design/ (system designs, 
 Authoring protocol for new documents in `Documentation/Design/` and `Documentation/Architecture/`.
 These docs are load-bearing: `CLAUDE.md` and skills `@`-reference them as ground truth, so a new
 doc must land with the house structure from its first commit. This skill owns *creating* docs;
-`docs-sync` owns keeping existing docs accurate and promoting Design → Architecture.
+`docs-sync` owns keeping existing docs accurate and promoting Design → Architecture. For the
+full "analyze a system → execution-ready phased refactor plan" workflow (which produces a
+system-design doc *through* this skill), use `create-refactor-plan` — it owns the analysis
+protocol and per-phase executor-packet contract; this skill owns only the document format.
 
 ## Step 1 — Pick the document species
 
