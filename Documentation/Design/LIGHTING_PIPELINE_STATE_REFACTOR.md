@@ -50,6 +50,11 @@ gates L1883–2028, `UnloadChunks` L2360–2404, `LoadOrGenerateChunk` L836–92
 - [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) — NS-3 (chunk
   lifecycle state-machine suite) names the flag-pairing assertion family; LP-1's invariant probes
   and LP-4's transition API are deliberate groundwork for NS-3.
+- [`MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md`](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md) —
+  the MP-* meshing sibling of this plan (same patterns: probes, pure-decision extraction, shared
+  completion skeleton). Coordination points: MP-4 renames `LightingCompletionPass` (order against
+  LP-3 freely — the suites arbitrate); MP-2 can consume LP-2's `NeighborReadinessDecision` facts
+  if LP-2 lands first, but has no hard dependency on it.
 
 ---
 

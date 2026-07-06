@@ -100,7 +100,11 @@ Every frame (or every time the camera moves a significant distance), we run a Br
   `SectionRenderer` ("has geometry"). Ship as its own small PR *before* any culling code exists —
   it is independently harmless. *(Verified 2026-07-02: not yet implemented —
   `SectionRenderer.UpdateMeshNative`/`Clear()` and `Chunk` still toggle visibility exclusively via
-  `SetActive`; no `forceRenderingOff` exists in the codebase.)*
+  `SetActive`; no `forceRenderingOff` exists in the codebase. Re-verified 2026-07-06.)*
+  **Execution packet:** scheduled as phase **MP-5** in
+  [MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md) —
+  including the renderer-fixture baselines (non-interference invariant, recycle reset) this
+  section does not specify.
 
 ### Phase 1: Data Generation (The Hard Part)
 

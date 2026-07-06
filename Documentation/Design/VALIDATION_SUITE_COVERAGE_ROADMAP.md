@@ -106,7 +106,10 @@ CI/coverage/XML gaps close via the VS-2 extensions instead.
   world-stubbing pattern scales. The LP-* plan
   ([LIGHTING_PIPELINE_STATE_REFACTOR.md](LIGHTING_PIPELINE_STATE_REFACTOR.md)) is deliberate
   groundwork: LP-1's invariant probes and LP-4's `ChunkData` flag-transition API are the first
-  two concrete members of this suite's flag-pairing assertion family.
+  two concrete members of this suite's flag-pairing assertion family. The MP-* plan
+  ([MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md](MESHING_PIPELINE_ORCHESTRATION_REFACTOR.md)) is
+  the meshing-side counterpart: MP-1's request/drop probes and MP-2's scheduling baselines are
+  the first members of the *convergence* ("every chunk eventually reaches lit + meshed") family.
 - **Effort:** 🔴 — the hardest harness on this list (World-level orchestration must be stubbed).
   Build scenario-by-scenario; even the first two scenarios (out-of-order completion, recycle
   replay) would have caught past incidents.
