@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (57 baselines + frame simulator, menu item
+The lighting validation suite (62 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -256,7 +256,7 @@ there is invisible.
   on `HasLightChangesToProcess` / `NeedsInitialLighting` (the recurring deadlock family) is unreachable.
   Reasonable boundary for a lighting-correctness suite — noted so we don't assume otherwise.
 
-### B6 — MT-2 `LightWorkScheduler` park/promote layer is unmodeled ·  **OPEN · MEDIUM-HIGH (new 2026-07-03)**
+### B6 — MT-2 `LightWorkScheduler` park/promote layer is unmodeled ·  **CLOSED (2026-07-06, AS-2)**
 
 - **What changed:** MT-2 (`Helpers/LightWorkScheduler`, shipped 2026-07-02 — *after* this document's
   June audit and the entire Bug-09 sync-repro campaign) split the lighting dirty set into a per-frame
@@ -279,6 +279,17 @@ there is invisible.
   an opt-in frame-simulator mode driving a real `LightWorkScheduler` with mirrored park/promote sites
   and the fail-safe OFF by default, so "converges without the backstop" becomes a mechanical gate.
   Legacy mode stays the default so existing baselines are untouched.
+- **CLOSED (2026-07-06, AS-2 Phases 1–3):** `LightingFrameSimulator(schedulerMode:true)` now drives a
+  real `LightWorkScheduler` — the ready/waiting split scanned via the shared `LightingScanDecision`, the
+  flag sink wired (`SetLightWorkFlagSink`), and the promotion hooks mirrored (completion
+  `PromoteNeighborhood` in the completion-pass driver, neighbor-ready/load via the `MarkNeighborsReady`/
+  `MarkChunkLoaded` wrappers), with the `PromoteAll` fail-safe **off** by default. Phase-3 baselines:
+  **B66** (cross-chunk both-modes parity), **B67** (neighbor-ready promotion un-parks), **B68**
+  (50-seed Bug-09 geometry fuzz in scheduler mode, fail-safe off), **B69** (prove-red:
+  `SuppressCompletionPromotion` stalls a chunk re-flagged mid-flight, only the fail-safe recovers it),
+  **B70** (border-heightmap fuzz — the Bug-05 re-granted edge round — settles in scheduler mode). The
+  `RunReGrantedEdgeCheckRound` quiescence hook is retained as a legacy-mode backstop (B70 confirms
+  scheduler mode settles the border edit through the real edge gate). Suite at **62 baselines**.
 
 ### B7 — `ProcessLightingJobs` per-pass bookkeeping is production-only ·  **CLOSED — FULL (2026-07-06, HF-4 #2); near-term closure was 2026-07-05, HF-2**
 
@@ -578,7 +589,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | C5 | Cumulative multi-layer attenuation probe (B45)                                                                                                       | **CLOSED**        | —                | done           |
 | C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4                                                           | **CLOSED**        | —                | done           |
 | A5 | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)                                                               | **CLOSED**        | —                | done           |
-| B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                                                                              | OPEN              | **Medium-High**  | medium         |
+| B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (closed by AS-2 scheduler mode + B66–B70)                                                     | **CLOSED**        | —                | done           |
 | B7 | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 near-term; full replay via `LightingCompletionPass` + B65, HF-4 #2)                     | **CLOSED (full)** | —                | done           |
 | C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3; Bug 05 fixed via the post-edit axis, so now belt-and-braces)   | OPEN              | Low              | medium         |
 | C9 | Flat scenario worlds never exercise border shadow-casters (B60; HF-3 fuzz shipped 2026-07-05 — found Bug 15 → B62/B63 + the first sync Bug-05 repro) | **CLOSED**        | —                | done           |

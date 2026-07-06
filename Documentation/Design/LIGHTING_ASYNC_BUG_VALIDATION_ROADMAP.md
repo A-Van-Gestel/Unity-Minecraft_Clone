@@ -4,9 +4,10 @@
 > in-game, and archived — see §3 outcome). **§10 harness-hardening HF-1/HF-2/HF-3 DONE 2026-07-05**
 > (HF-3's fuzz found + closed **Bug 15** and produced the first synchronous **Bug 05** repro — see the
 > §10 outcome blocks; that seed-14 repro then **closed Bug 05** — border-column edge-check re-grant,
-> fixed + confirmed in-game + archived `_FIXED_BUGS.md` #20, promoted to baseline **B64**; suite at B65,
-> 57 baselines — HF-4 #2 added the completion-pass skeleton + fault-isolation baseline B65). AS-2 … AS-5
-> remain proposals; HF-4 #1 (scan arm) + #2 (completion pass) done, AS-2 Phase 3 next.
+> fixed + confirmed in-game + archived `_FIXED_BUGS.md` #20, promoted to baseline **B64**; suite at B70,
+> 62 baselines). **AS-2 DONE 2026-07-06** (Phases 1–3 + HF-4 #1/#2 — scheduler mode + shared scan-arm +
+> completion-pass skeleton; fidelity B6 & B7 CLOSED; B65 fault-isolation + B66–B70 scheduler-mode).
+> AS-3 … AS-5 remain proposals; only Bug 09 open.
 > **Created:** 2026-07-03 (async-testability analysis session, repo @ `a458173`)
 > **Scope:** making the async-flavored open lighting bugs (**Bug 05 / Bug 09 / Bug 13**,
 > [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)) testable, and closing the async surfaces the
@@ -34,12 +35,12 @@ chunk-pipeline rules): **production lighting has no shared-memory concurrency by
 
 "Async" therefore decomposes into exactly four classes, each with a different testability verdict:
 
-| # | Async class                                                                                                                                         | Sync-testable?                                                                              | Covered today?                                     | Item |
-|---|-----------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|----------------------------------------------------|------|
-| 1 | **Frame-boundary interleaving** (which frame a job completes; main-thread events in between)                                                        | ✅ yes — logical interleaving                                                                | ✅ exhausted (Bug-09 fleet, fidelity §5)            | —    |
-| 2 | **MT-2 event-driven promotion** (parked chunks re-enter only via `Flag`/promote/fail-safe)                                                          | ✅ yes — logical interleaving                                                                | ❌ **not modeled at all** (fidelity B6)             | AS-2 |
-| 3 | **Genuine cross-thread surfaces** (`ChunkJobArrayPool` buffer reuse across concurrent jobs; `LightWorkScheduler.Flag` from deserialization threads) | ⚠️ not with `.Run()` — but testable in-editor via real `Schedule()` + equivalence-to-serial | ❌ (fluid system has the pattern; lighting doesn't) | AS-4 |
-| 4 | **IL2CPP / real-timing residue** (memory ordering in managed code, wall-clock job latency under load, full actor set at production frequencies)     | ❌ **structurally impossible in the editor**                                                 | ❌                                                  | AS-5 |
+| # | Async class                                                                                                                                         | Sync-testable?                                                                              | Covered today?                                     | Item   |
+|---|-----------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|----------------------------------------------------|--------|
+| 1 | **Frame-boundary interleaving** (which frame a job completes; main-thread events in between)                                                        | ✅ yes — logical interleaving                                                                | ✅ exhausted (Bug-09 fleet, fidelity §5)            | —      |
+| 2 | **MT-2 event-driven promotion** (parked chunks re-enter only via `Flag`/promote/fail-safe)                                                          | ✅ yes — logical interleaving                                                                | ✅ scheduler mode + B66–B70 (fidelity B6 CLOSED)    | AS-2 ✅ |
+| 3 | **Genuine cross-thread surfaces** (`ChunkJobArrayPool` buffer reuse across concurrent jobs; `LightWorkScheduler.Flag` from deserialization threads) | ⚠️ not with `.Run()` — but testable in-editor via real `Schedule()` + equivalence-to-serial | ❌ (fluid system has the pattern; lighting doesn't) | AS-4   |
+| 4 | **IL2CPP / real-timing residue** (memory ordering in managed code, wall-clock job latency under load, full actor set at production frequencies)     | ❌ **structurally impossible in the editor**                                                 | ❌                                                  | AS-5   |
 
 Two additional facts ground the per-bug plans:
 
@@ -73,13 +74,13 @@ Two additional facts ground the per-bug plans:
 
 ## 2. Items, ranked by expected value
 
-| Item | One-liner                                                                     | Target                                                | Chance of a red        | Effort |
-|------|-------------------------------------------------------------------------------|-------------------------------------------------------|------------------------|--------|
-| AS-1 | Bug 13 termination scenario — sync repro believed feasible, never attempted   | Bug 13                                                | **High**               | 🟢     |
-| AS-2 | Route the frame simulator through a real `LightWorkScheduler` (MT-2 layer)    | missed-promotion stalls (Bug-09-shaped symptom class) | Medium                 | 🟡     |
-| AS-3 | Staggered generation-wave fuzz — Bug 05's untried axis                        | Bug 05                                                | Medium                 | 🟡     |
-| AS-4 | Lighting parallel-determinism gate (real `Schedule()`, equivalence-to-serial) | pool aliasing / Burst races                           | Low (guard value high) | 🟡     |
-| AS-5 | In-build `LightingStress` rig + instrumentation (the only path for class 4)   | Bug 09 residue                                        | —                      | 🟡–🔴  |
+| Item | One-liner                                                                                                                      | Target                                                | Chance of a red        | Effort |
+|------|--------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------|------------------------|--------|
+| AS-1 | Bug 13 termination scenario — sync repro believed feasible, never attempted                                                    | Bug 13                                                | **High**               | 🟢     |
+| AS-2 | Route the frame simulator through a real `LightWorkScheduler` (MT-2 layer) ✅ **DONE 2026-07-06** (B66–B70, fidelity B6 CLOSED) | missed-promotion stalls (Bug-09-shaped symptom class) | Medium                 | 🟡     |
+| AS-3 | Staggered generation-wave fuzz — Bug 05's untried axis                                                                         | Bug 05                                                | Medium                 | 🟡     |
+| AS-4 | Lighting parallel-determinism gate (real `Schedule()`, equivalence-to-serial)                                                  | pool aliasing / Burst races                           | Low (guard value high) | 🟡     |
+| AS-5 | In-build `LightingStress` rig + instrumentation (the only path for class 4)                                                    | Bug 09 residue                                        | —                      | 🟡–🔴  |
 
 **Sequencing:** AS-1 first (cheapest, could red today). AS-2 second (new guard class + NS-3
 embryo; also unlocks AS-3's scheduler-mode variant). AS-4 and AS-3 in either order. AS-5 whenever
@@ -263,7 +264,15 @@ that log line into a mechanical gate.
   green in scheduler mode**; if it does, the hook becomes legacy-mode-only (do **not** delete it —
   the legacy-mode baselines still depend on it; note it as such).
 
-**Implementation — Phase 3: migration + prove-red.**
+**Implementation — Phase 3: migration + prove-red.** ✅ **DONE 2026-07-06.** Shipped as
+`LightingValidationSuite.SchedulerMode.cs`: `RunScenarioBothModes` helper + **B66** (cross-chunk both-modes
+parity), **B67** (neighbor-ready promotion un-parks a parked chunk), **B68** (50-seed Bug-09 geometry fuzz
+in scheduler mode, fail-safe off), **B69** (prove-red — `SuppressCompletionPromotion` stalls a chunk
+re-flagged mid-flight, only the fail-safe recovers it), **B70** (border-heightmap fuzz reconcile — the
+Bug-05 re-granted edge round settles in scheduler mode; the `RunReGrantedEdgeCheckRound` quiescence hook is
+kept as a legacy-mode backstop). The Bug-09 fleet stays legacy/byte-identical. 62 baselines green, editor
+assembly builds clean, fidelity **B6 CLOSED**. Harness-only (no production change) → verification is the
+suite run, no in-game needed.
 
 - **Migration:** a shared helper `RunScenarioBothModes(body)` runs a scenario in legacy + scheduler
   mode. Keep the existing Bug-09 fleet (B15/B16/B22/B26–B29/B40/B41) in legacy mode (byte-identical)

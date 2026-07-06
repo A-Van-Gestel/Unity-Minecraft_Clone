@@ -324,15 +324,19 @@ namespace Editor.Validation.Lighting
         /// </summary>
         /// <param name="iterations">Number of seeds to try.</param>
         /// <param name="startSeed">First seed value.</param>
+        /// <param name="schedulerMode">Run each iteration's simulator in AS-2 scheduler mode (MT-2 ready/waiting
+        /// split + event promotion, with the real <c>AreNeighborsReadyAndLit</c> edge gate) instead of the
+        /// legacy full grid scan. Default false.</param>
         /// <returns>The first failing seed, or null when every seed settles on the oracle.</returns>
-        private static int? SweepBorderHeightFuzz(int iterations, int startSeed)
+        private static int? SweepBorderHeightFuzz(int iterations, int startSeed, bool schedulerMode = false)
         {
             return LightingFrameSimulator.FindFailingSeed(
                 seededWorldFactory: seed => BuildBorderHeightFuzzWorld(BorderHeightFuzzCase.FromSeed(seed)),
                 scenarioBody: (world, sim, seed) => RunBorderHeightFuzzCase(world, sim,
                     BorderHeightFuzzCase.FromSeed(seed), seed),
                 iterations: iterations,
-                startSeed: startSeed);
+                startSeed: startSeed,
+                schedulerMode: schedulerMode);
         }
 
         /// <summary>

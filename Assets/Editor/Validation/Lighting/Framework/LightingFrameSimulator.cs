@@ -122,6 +122,15 @@ namespace Editor.Validation.Lighting.Framework
         public int PromoteAllEveryNFrames { get; set; }
 
         /// <summary>
+        /// Scheduler mode only, test-only (default false): when true, the completion hook's
+        /// <c>PromoteNeighborhood</c> in <see cref="RemoveAndPromote"/> is suppressed — a job completing no
+        /// longer un-parks the neighbors whose edge gate its completion just cleared. This is the AS-2 Phase-3
+        /// prove-red switch: a scenario that only converges via the completion promotion stalls under it (with
+        /// the fail-safe off), proving the hook is load-bearing. Leave false in every positive baseline.
+        /// </summary>
+        public bool SuppressCompletionPromotion { get; set; }
+
+        /// <summary>
         /// Constructs a frame simulator wrapping the given test world. The test world must already be
         /// set up (chunks created, initial lighting done if needed).
         /// </summary>
@@ -404,7 +413,8 @@ namespace Editor.Validation.Lighting.Framework
             // Completion is the load-bearing MT-2 promotion hook: it un-parks the chunk itself (if it
             // re-flagged mid-flight) and any neighbor whose AreNeighborsReadyAndLit gate this completion
             // just cleared (production: WorldJobManager.ProcessLightingJobs → PromoteLightWorkNeighborhood).
-            if (_schedulerMode)
+            // SuppressCompletionPromotion (default off) disables it for the Phase-3 prove-red only.
+            if (_schedulerMode && !SuppressCompletionPromotion)
                 _chunksPromotedThisPass += _scheduler.PromoteNeighborhood(ToVoxelOrigin(key));
         }
 

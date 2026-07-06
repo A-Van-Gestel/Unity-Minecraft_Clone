@@ -114,6 +114,11 @@ namespace Editor.Validation.Lighting
             // LightingCompletionPass skeleton and injects a merge fault to prove per-job isolation. Lives in
             // Baselines/LightingValidationSuite.Baseline.FaultIsolation.cs and self-registers here. ---
             AddFaultIsolationBaselineScenarios(scenarios);
+
+            // --- AS-2 Phase 3 scheduler-mode baselines (B66+, finding B6): the MT-2 park/promote layer
+            // exercised with the fail-safe off. Lives in LightingValidationSuite.SchedulerMode.cs and
+            // self-registers here. ---
+            AddSchedulerModeBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
@@ -127,6 +132,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the completion-pass fault-isolation baseline (implemented in Baselines/LightingValidationSuite.Baseline.FaultIsolation.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddFaultIsolationBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the AS-2 scheduler-mode baselines (implemented in LightingValidationSuite.SchedulerMode.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddSchedulerModeBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the Bug-13 suspended-slab baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
