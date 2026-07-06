@@ -103,7 +103,10 @@ CI/coverage/XML gaps close via the VS-2 extensions instead.
   fixtures of the three historical deadlocks from `_FIXED_BUGS.md`.
 - **Building blocks:** `LightingFrameSimulator` (already simulates frame-by-frame lighting
   progression) is the embryo of this harness; `BehaviorTestWorld`'s multi-chunk world shows the
-  world-stubbing pattern scales.
+  world-stubbing pattern scales. The LP-* plan
+  ([LIGHTING_PIPELINE_STATE_REFACTOR.md](LIGHTING_PIPELINE_STATE_REFACTOR.md)) is deliberate
+  groundwork: LP-1's invariant probes and LP-4's `ChunkData` flag-transition API are the first
+  two concrete members of this suite's flag-pairing assertion family.
 - **Effort:** 🔴 — the hardest harness on this list (World-level orchestration must be stubbed).
   Build scenario-by-scenario; even the first two scenarios (out-of-order completion, recycle
   replay) would have caught past incidents.

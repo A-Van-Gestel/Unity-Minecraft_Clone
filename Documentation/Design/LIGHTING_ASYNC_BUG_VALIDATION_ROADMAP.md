@@ -16,7 +16,10 @@
 > [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md)
 > (findings B3 / B6 / C8 reference this file),
 > [VALIDATION_SUITE_COVERAGE_ROADMAP.md](VALIDATION_SUITE_COVERAGE_ROADMAP.md) (AS-2 is the
-> lighting-slice embryo of NS-3).
+> lighting-slice embryo of NS-3),
+> [LIGHTING_PIPELINE_STATE_REFACTOR.md](LIGHTING_PIPELINE_STATE_REFACTOR.md) (LP-* — the
+> structural clean-up plan that builds ON AS-2/HF-4's shared scan-arm/completion-pass
+> extractions: flag transition API, shared neighbor-gate predicate; orthogonal to AS-3/4/5).
 
 ---
 
