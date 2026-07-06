@@ -523,7 +523,10 @@ there is invisible.
   models the settled-field edge check by consuming the border-edit re-grant at grid **quiescence**
   (`LightingTestWorld.RunReGrantedEdgeCheckRound`, driven from `LightingFrameSimulator.RunToConvergence`) —
   outcome-faithful and consistent with how `RunInitialLighting*` already drive generation edge rounds as a
-  post-convergence loop. Modeling the exact per-frame edge-gate is **AS-2**'s scope (the MT-2 scheduler layer).
+  post-convergence loop. The exact per-frame edge-gate was **delivered by AS-2** (2026-07-06): scheduler
+  mode's ready scan has the real `AreNeighborsReadyAndLit` edge arm, and baseline **B70** confirms the
+  border-edit re-grant settles through it in scheduler mode. The `RunReGrantedEdgeCheckRound` quiescence
+  hook is retained as the legacy-mode backstop (the legacy baselines depend on it).
 
 > **None of C3–C9 require a new harness capability** — each reuses existing primitives
 > (`MarkChunkUnloaded`/`MarkChunkLoaded`, `BeginLightingJob`/`CompleteLightingJob`, the pure-channel lamp

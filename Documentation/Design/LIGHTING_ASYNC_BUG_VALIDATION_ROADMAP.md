@@ -60,9 +60,9 @@ Two additional facts ground the per-bug plans:
 
 - **Protocol:** the `validation-driven-bugfix` skill — deterministic repro first, prove-red
   before trusting green, promote repros to baselines after in-game confirmation.
-- **Numbering:** the lighting suite is at **B61** (B56–B59 = the promoted AS-1 slab family,
-  B60/B61 = the Bug-14 family). New baselines take **B62+**. The retired numbers B17–B21 /
-  B23–B25 stay unused (fidelity §5).
+- **Numbering:** the lighting suite is at **B70** (B62/B63 = Bug-15 stamp, B64 = Bug-05 border fuzz,
+  B65 = HF-4 #2 fault isolation, B66–B70 = AS-2 scheduler mode). New baselines take **B71+**. The
+  retired numbers B17–B21 / B23–B25 stay unused (fidelity §5).
 - **Expected-red scenarios** register via `AddKnownBugScenarios` in
   `Assets/Editor/Validation/Lighting/LightingValidationSuite.KnownBugs.cs` (reported as
   warnings, not regressions).
@@ -498,12 +498,12 @@ plus the already-closed **C9** (flat worlds never make border shadow-casters). "
 production is asymptotic (the standing B3 lesson); the strategy below instead makes shared code
 fail-fast, shrinks the production-only surface, and widens geometry sampling.
 
-| Item | One-liner                                                                       | Closes                  | Effort                   |
-|------|---------------------------------------------------------------------------------|-------------------------|--------------------------|
-| HF-1 | Editor/dev-only bounds assertions in the `ChunkData` accessors                  | fidelity A5             | ✅ DONE 2026-07-05        |
-| HF-2 | Per-job fault isolation in `ProcessLightingJobs` (eliminate the cascade class)  | fidelity B7 (near-term) | ✅ DONE 2026-07-05        |
-| HF-3 | Border heightmap fuzz baseline (B62+) — varied heights at seams + border edits  | C9 extension            | ✅ DONE 2026-07-05        |
-| HF-4 | Extract the lighting pass skeleton into a shared, harness-drivable orchestrator | fidelity B7 (full)      | 🔴 — fold into AS-2/NS-3 |
+| Item | One-liner                                                                       | Closes                  | Effort                                                    |
+|------|---------------------------------------------------------------------------------|-------------------------|-----------------------------------------------------------|
+| HF-1 | Editor/dev-only bounds assertions in the `ChunkData` accessors                  | fidelity A5             | ✅ DONE 2026-07-05                                         |
+| HF-2 | Per-job fault isolation in `ProcessLightingJobs` (eliminate the cascade class)  | fidelity B7 (near-term) | ✅ DONE 2026-07-05                                         |
+| HF-3 | Border heightmap fuzz baseline (B62+) — varied heights at seams + border edits  | C9 extension            | ✅ DONE 2026-07-05                                         |
+| HF-4 | Extract the lighting pass skeleton into a shared, harness-drivable orchestrator | fidelity B7 (full)      | ✅ DONE 2026-07-06 (#1 scan arm + #2 completion pass; B65) |
 
 ### HF-1 — Fail-fast `ChunkData` accessors (editor/development builds only)
 
@@ -595,7 +595,7 @@ fail-fast, shrinks the production-only surface, and widens geometry sampling.
 > baselines green). C9's "varied-heightmap-at-seam geometry per cross-chunk feature" lesson
 > is upgraded from recommendation to validated practice: one geometry axis, two bugs.
 
-### HF-4 — Shared lighting-pass orchestrator (deferred; fold into AS-2 / NS-3)
+### HF-4 — Shared lighting-pass orchestrator ✅ DONE 2026-07-06 (folded into AS-2)
 
 The only way the harness can truly replay the pass bookkeeping (B7's full closure) is to move the
 production loop structure into pure code both `WorldJobManager` and the frame simulator drive — the
@@ -670,4 +670,5 @@ commit, and cross-check `_FIXED_BUGS.md` (flag-pairing / deadlock history) befor
 
 **Sequencing:** HF-1 first (small, unlocks HF-3's detector value and B60's prove-red), HF-2 second
 (independent, small), HF-3 third, HF-4 whenever AS-2 lands. On completion, flip fidelity A5/B7 and record
-the new baseline numbers here and in the fidelity backlog.
+the new baseline numbers here and in the fidelity backlog. **All done 2026-07-05/06** (HF-1/2/3 →
+2026-07-05; HF-4 #1/#2 → 2026-07-06 with AS-2; fidelity A5/B7/B6 all CLOSED, suite at B70).
