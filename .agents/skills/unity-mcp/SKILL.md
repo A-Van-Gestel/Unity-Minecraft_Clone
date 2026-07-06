@@ -80,7 +80,7 @@ All reference material in `references/`:
 
 **Tool details:** tools.md — parameters, rules, and example calls for all 12 named tools
 **Profiler:** profiler.md — all 10 profiler tools organized by category with drill-down workflow
-**Patterns:** recipes.md — 6 end-to-end recipes for common tasks + 8 documented constraints/gotchas
+**Patterns:** recipes.md — 6 end-to-end recipes for common tasks + 13 documented constraints/gotchas (incl. the embedded-and-patched ai.assistant package RunCommand depends on)
 
 ## Success criteria
 
