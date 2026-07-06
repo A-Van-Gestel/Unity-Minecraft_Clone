@@ -9,7 +9,7 @@
 >
 > Status: **Proposal / planning. No suite below exists yet.**
 
-**Existing coverage (for contrast):** Lighting (55 baselines), Meshing (B21), Behavior/fluid tick
+**Existing coverage (for contrast):** Lighting (57 baselines), Meshing (B21), Behavior/fluid tick
 (8 + determinism gates), Placement (13), MeshBuildQueue (9), LightWorkScheduler (9), plus the
 standalone `VoxelMetadataUtility` / `FastNoiseLite` / `ChunkRelativePosition` tests.
 

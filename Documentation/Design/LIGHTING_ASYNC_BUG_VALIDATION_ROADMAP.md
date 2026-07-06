@@ -4,8 +4,9 @@
 > in-game, and archived — see §3 outcome). **§10 harness-hardening HF-1/HF-2/HF-3 DONE 2026-07-05**
 > (HF-3's fuzz found + closed **Bug 15** and produced the first synchronous **Bug 05** repro — see the
 > §10 outcome blocks; that seed-14 repro then **closed Bug 05** — border-column edge-check re-grant,
-> fixed + confirmed in-game + archived `_FIXED_BUGS.md` #20, promoted to baseline **B64**; suite at B64,
-> 56 baselines). AS-2 … AS-5 remain proposals; HF-4 folds into AS-2.
+> fixed + confirmed in-game + archived `_FIXED_BUGS.md` #20, promoted to baseline **B64**; suite at B65,
+> 57 baselines — HF-4 #2 added the completion-pass skeleton + fault-isolation baseline B65). AS-2 … AS-5
+> remain proposals; HF-4 #1 (scan arm) + #2 (completion pass) done, AS-2 Phase 3 next.
 > **Created:** 2026-07-03 (async-testability analysis session, repo @ `a458173`)
 > **Scope:** making the async-flavored open lighting bugs (**Bug 05 / Bug 09 / Bug 13**,
 > [LIGHTING_BUGS.md](../Bugs/LIGHTING_BUGS.md)) testable, and closing the async surfaces the
@@ -196,16 +197,16 @@ that log line into a mechanical gate.
 > Two facts de-risk the build and one adds scope:
 > - **Key-space is a non-issue (confirmed, not a discovery step).** `TestChunk.VoxelOrigin =
 >   coord * ChunkWidth` and `Data = new ChunkData(VoxelOrigin)`, so `ChunkData.Position` *is*
->   the voxel origin the scheduler keys on; `LightingTestWorld.WorldToChunkCoord` is the inverse.
+    > the voxel origin the scheduler keys on; `LightingTestWorld.WorldToChunkCoord` is the inverse.
 > - **The flag→staging path Just Works once wired.** `CompleteLightingJob` re-flags an unstable
->   chunk via `chunk.HasLightWork = true` (a `true` write, which fires `OnLightWorkFlagged`), so
->   mid-flight re-flags stage automatically the moment the sink points at `scheduler.Flag`.
+    > chunk via `chunk.HasLightWork = true` (a `true` write, which fires `OnLightWorkFlagged`), so
+    > mid-flight re-flags stage automatically the moment the sink points at `scheduler.Flag`.
 > - **New scope: the harness has NO `AreNeighborsReadyAndLit` analog.** The sim's Phase 2 gates
->   only on `AreNeighborsDataReady`; production's *edge* arm (`World.cs:1656`) gates on the
->   stricter `AreNeighborsReadyAndLit`. This absence is exactly what forced the
->   `RunReGrantedEdgeCheckRound` quiescence hook (Bug 05's re-granted edge round is consumed at
->   grid quiescence because no per-frame edge-gate exists). AS-2 must add this gate — it is the
->   "per-frame edge-gate = AS-2" note from the fidelity backlog.
+    > only on `AreNeighborsDataReady`; production's *edge* arm (`World.cs:1656`) gates on the
+    > stricter `AreNeighborsReadyAndLit`. This absence is exactly what forced the
+    > `RunReGrantedEdgeCheckRound` quiescence hook (Bug 05's re-granted edge round is consumed at
+    > grid quiescence because no per-frame edge-gate exists). AS-2 must add this gate — it is the
+    > "per-frame edge-gate = AS-2" note from the fidelity backlog.
 
 **Implementation — Phase 0: discovery (confirm before coding).**
 
@@ -280,30 +281,30 @@ that log line into a mechanical gate.
 > so its verification is suite runs, not an in-game check.
 >
 > - **`RunScenarioBothModes(worldFactory, body)` helper** (static, in the sim or a suite helper):
->   runs `body` against a fresh legacy-mode world+sim, then a fresh scheduler-mode world+sim
->   (`schedulerMode:true`, `PromoteAllEveryNFrames = 0` — fail-safe OFF), and asserts *both* converge
->   to the same oracle. The `FindFailingSeed` overloads already carry the `schedulerMode` flag for the
->   fuzz variants.
+    > runs `body` against a fresh legacy-mode world+sim, then a fresh scheduler-mode world+sim
+    > (`schedulerMode:true`, `PromoteAllEveryNFrames = 0` — fail-safe OFF), and asserts *both* converge
+    > to the same oracle. The `FindFailingSeed` overloads already carry the `schedulerMode` flag for the
+    > fuzz variants.
 > - **Migration = one scheduler-mode sibling per fleet scenario.** Leave the existing Bug-09 fleet
->   (B15/B16/B22/B26–B29/B40/B41 — 9 scenarios) in legacy mode, byte-identical. Add **B65–B73**, each
->   invoking the *same* scenario body via `RunScenarioBothModes` (or a scheduler-mode-only assertion
->   where the legacy sibling already guards the oracle). Distinct baselines, not a mode toggle inside
->   the originals, so a regression in either path is a named failure. New file
->   `LightingValidationSuite.SchedulerMode.cs` (partial) to keep the fleet file diff-clean.
+    > (B15/B16/B22/B26–B29/B40/B41 — 9 scenarios) in legacy mode, byte-identical. Add **B65–B73**, each
+    > invoking the *same* scenario body via `RunScenarioBothModes` (or a scheduler-mode-only assertion
+    > where the legacy sibling already guards the oracle). Distinct baselines, not a mode toggle inside
+    > the originals, so a regression in either path is a named failure. New file
+    > `LightingValidationSuite.SchedulerMode.cs` (partial) to keep the fleet file diff-clean.
 > - **Prove-red (cleaner post-HF-4 #2).** The completion promote is now the sim driver's
->   `RemoveAndPromote` hook — add a test-only `SuppressCompletionPromotion` toggle on the sim, flip it
->   for a border-lamp / edge-gated scenario: parked neighbors never re-enter the ready set, so it
->   converges **only** with the fail-safe on → red under the fail-safe-off assertion. Clear the toggle
->   → green. Capture the exact stall (frame count, `ChunksParked` residue) in a repro comment.
+    > `RemoveAndPromote` hook — add a test-only `SuppressCompletionPromotion` toggle on the sim, flip it
+    > for a border-lamp / edge-gated scenario: parked neighbors never re-enter the ready set, so it
+    > converges **only** with the fail-safe on → red under the fail-safe-off assertion. Clear the toggle
+    > → green. Capture the exact stall (frame count, `ChunksParked` residue) in a repro comment.
 > - **`RunReGrantedEdgeCheckRound` reconcile.** Run **B64/K15a in scheduler mode**. Phase 2 now has the
->   real `AreNeighborsReadyAndLit` edge-gate, so Bug 05's re-granted edge round should fire through the
->   normal scan rather than the `RunToConvergence` quiescence hook. If B64 stays green in scheduler
->   mode without the hook firing, mark the hook **legacy-mode-only** in its docstring (do **not**
->   delete — the 56 legacy baselines still depend on it). If it does *not*, that is a real Phase-2
->   edge-gate gap to fix before closing B6.
+    > real `AreNeighborsReadyAndLit` edge-gate, so Bug 05's re-granted edge round should fire through the
+    > normal scan rather than the `RunToConvergence` quiescence hook. If B64 stays green in scheduler
+    > mode without the hook firing, mark the hook **legacy-mode-only** in its docstring (do **not**
+    > delete — the 56 legacy baselines still depend on it). If it does *not*, that is a real Phase-2
+    > edge-gate gap to fix before closing B6.
 > - **Close-out:** flip the §3 matrix row 2 (MT-2 event-driven promotion) and fidelity **B6** to
->   CLOSED with the B65–B73 numbers; bump the suite-count line here (header) and in
->   `VALIDATION_SUITE_COVERAGE_ROADMAP.md`; update the `project_lighting_async_roadmap` memory.
+    > CLOSED with the B65–B73 numbers; bump the suite-count line here (header) and in
+    > `VALIDATION_SUITE_COVERAGE_ROADMAP.md`; update the `project_lighting_async_roadmap` memory.
 
 **Cross-reference:** this is the lighting slice of
 [VALIDATION_SUITE_COVERAGE_ROADMAP.md](VALIDATION_SUITE_COVERAGE_ROADMAP.md) NS-3 (chunk
@@ -609,44 +610,51 @@ extractions, both surfaced by the AS-2 trace above:
    A meaningful refactor of `ProcessLightingJobs`; do it **once AS-2's frame loop is stable**, not
    standalone.
 
+> **DONE (2026-07-06):** shipped as designed — `Helpers/LightingCompletionPass.cs`
+> (`RunMergeLoop` + `RunRemoveAndPromote` via `ILightingCompletionDriver<TKey>`), `ProcessLightingJobs`
+> implements the driver on `this` (byte-identical), the frame simulator implements it too, and baseline
+> **B65** injects a merge fault to prove isolation. 57 baselines green, both assemblies build clean,
+> fidelity **B7 → CLOSED (full)**. Pending: in-game verification of the production `ProcessLightingJobs`
+> path (not suite-covered) before commit.
+>
 > **Plan detail (2026-07-06, HF-4 #2 — completion-pass skeleton).** HF-4 #1 (scan-arm decision) is
 > committed (`3199436`); this is the second, larger extraction, taken *before* AS-2 Phase 3 so the
 > Phase-3 prove-red and the B7-full closure test both drive the shared skeleton.
 >
 > - **Interface-driven, NOT delegate-driven.** `ProcessLightingJobs` runs every frame over every
->   in-flight job — a delegate-closure signature would allocate per pass (violates the no-GC-in-hot-path
->   rule). Extract to `LightingCompletionPass.Run<TKey>(IReadOnlyList<TKey> candidates,
+    > in-flight job — a delegate-closure signature would allocate per pass (violates the no-GC-in-hot-path
+    > rule). Extract to `LightingCompletionPass.Run<TKey>(IReadOnlyList<TKey> candidates,
 >   ILightingCompletionDriver<TKey> driver, List<TKey> enrolledScratch)`. The driver is a cached
->   instance (production: `WorldJobManager` implements the interface on `this`, zero alloc; sim: one
->   cached driver over `_pendingFlights`). Both scratch lists are reused fields.
+    > instance (production: `WorldJobManager` implements the interface on `this`, zero alloc; sim: one
+    > cached driver over `_pendingFlights`). Both scratch lists are reused fields.
 > - **The skeleton owns the control flow — that is the whole point.** `Run` contains the
->   `foreach candidate → IsComplete? → try Complete (stage-1 catch → OnCompleteFault + continue,
+    > `foreach candidate → IsComplete? → try Complete (stage-1 catch → OnCompleteFault + continue,
 >   NOT enrolled) → try Merge (stage-2 catch → OnMergeFault) finally (Release + enroll) →`
->   after-loop `foreach enrolled → RemoveAndPromote`. The sim replays this exact ordering, which is
->   what closes B7 (full). Driver hooks map 1:1 to the current `WorldJobManager.cs:1027-1116` stages:
->   `IsComplete`=`Handle.IsCompleted`, `CompleteJob`=`Handle.Complete()`, `MergeJob`=
->   `MergeCompletedLightingJob`, `OnCompleteFault`/`OnMergeFault`=the two `LastFaultedLightJobs`
->   branches, `ReleaseJob`=`IsAwaitingMainThreadProcess=false`+`ReleaseLightingJobData`,
->   `RemoveAndPromote`=`LightingJobs.Remove`+`PromoteLightWorkNeighborhood`.
+    > after-loop `foreach enrolled → RemoveAndPromote`. The sim replays this exact ordering, which is
+    > what closes B7 (full). Driver hooks map 1:1 to the current `WorldJobManager.cs:1027-1116` stages:
+    > `IsComplete`=`Handle.IsCompleted`, `CompleteJob`=`Handle.Complete()`, `MergeJob`=
+    > `MergeCompletedLightingJob`, `OnCompleteFault`/`OnMergeFault`=the two `LastFaultedLightJobs`
+    > branches, `ReleaseJob`=`IsAwaitingMainThreadProcess=false`+`ReleaseLightingJobData`,
+    > `RemoveAndPromote`=`LightingJobs.Remove`+`PromoteLightWorkNeighborhood`.
 > - **Candidates snapshot is byte-identical.** Production fills a reused `List<ChunkCoord>` from
->   `LightingJobs.Keys` before the loop instead of iterating the live dict. Safe: the loop never adds
->   to `LightingJobs`, and removal is already after-loop — so snapshot-then-iterate observes the same
->   set in the same (dictionary) order. `_completedLightJobs` becomes the `enrolledScratch`.
+    > `LightingJobs.Keys` before the loop instead of iterating the live dict. Safe: the loop never adds
+    > to `LightingJobs`, and removal is already after-loop — so snapshot-then-iterate observes the same
+    > set in the same (dictionary) order. `_completedLightJobs` becomes the `enrolledScratch`.
 > - **Sim mapping.** `IsComplete`=the age/completion predicate (reject → carried over, not enrolled —
->   replaces the current `carriedOver` list); `CompleteJob`=no-op; `MergeJob`=
->   `_world.CompleteLightingJob(flight)`; `ReleaseJob`=no-op (no containers); `RemoveAndPromote`=drop
->   the flight + (scheduler mode) `_scheduler.PromoteNeighborhood`. Completion **order**
->   (Fifo/Reverse/Shuffled) is applied to the candidates list *before* calling `Run` — order stays a
->   sim concern, the skeleton iterates as given.
+    > replaces the current `carriedOver` list); `CompleteJob`=no-op; `MergeJob`=
+    > `_world.CompleteLightingJob(flight)`; `ReleaseJob`=no-op (no containers); `RemoveAndPromote`=drop
+    > the flight + (scheduler mode) `_scheduler.PromoteNeighborhood`. Completion **order**
+    > (Fifo/Reverse/Shuffled) is applied to the candidates list *before* calling `Run` — order stays a
+    > sim concern, the skeleton iterates as given.
 > - **B7-full closure test (the payoff).** Add a sim `IsMergeFault(key)` injection hook on the sim
->   driver and a scheduler-mode scenario: inject a merge fault on chunk X mid-pass → assert the pass
->   still completes/releases/removes every *other* job (no abort), X is released + re-flagged (no
->   `ObjectDisposedException` cascade next pass), and `LastFaultedLightJobs==1`. This is the multi-job
->   fault-isolation replay the harness cannot do today.
+    > driver and a scheduler-mode scenario: inject a merge fault on chunk X mid-pass → assert the pass
+    > still completes/releases/removes every *other* job (no abort), X is released + re-flagged (no
+    > `ObjectDisposedException` cascade next pass), and `LastFaultedLightJobs==1`. This is the multi-job
+    > fault-isolation replay the harness cannot do today.
 > - **Verification.** All 56 baselines green (byte-identical production path) + the new B7 scenario;
->   `dotnet build` both assemblies; in-game injection re-check (as HF-2: one error, no cascade — the
->   production side is not suite-covered). Doc-sync `CHUNK_LIFECYCLE_PIPELINE.md` §7 (completion pass)
->   with the shared-skeleton pointer; flip fidelity **B7** to CLOSED (full).
+    > `dotnet build` both assemblies; in-game injection re-check (as HF-2: one error, no cascade — the
+    > production side is not suite-covered). Doc-sync `CHUNK_LIFECYCLE_PIPELINE.md` §7 (completion pass)
+    > with the shared-skeleton pointer; flip fidelity **B7** to CLOSED (full).
 
 Both extractions are chunk-pipeline edits → `CHUNK_LIFECYCLE_PIPELINE.md` doc-sync in the same
 commit, and cross-check `_FIXED_BUGS.md` (flag-pairing / deadlock history) before merging.

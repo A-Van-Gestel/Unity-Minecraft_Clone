@@ -19,7 +19,7 @@ namespace Editor.Validation.Lighting.Framework
     /// <see cref="LightingTestWorld.CompleteLightingJob"/>, and in what order.
     /// </para>
     /// </summary>
-    public sealed class LightingFrameSimulator
+    public sealed class LightingFrameSimulator : ILightingCompletionDriver<Vector2Int>
     {
         /// <summary>The order in which pending flights are completed within a single frame tick.</summary>
         public enum CompletionOrder
@@ -98,6 +98,21 @@ namespace Editor.Validation.Lighting.Framework
         // Scratch list reused across scheduler-mode frames for the ready-set snapshot (no per-frame alloc).
         private readonly List<Vector2Int> _readyScratch = new List<Vector2Int>();
 
+        // --- HF-4 #2: shared completion-pass driver state (per-pass scratch, reused) ---
+        // This simulator implements ILightingCompletionDriver<Vector2Int> and drives the same
+        // LightingCompletionPass skeleton production does, keying jobs by chunk coord (one in-flight job per
+        // chunk makes the coord a unique per-pass key).
+        private readonly List<Vector2Int> _passCandidates = new List<Vector2Int>();
+        private readonly Dictionary<Vector2Int, PendingFlight> _passFlights = new Dictionary<Vector2Int, PendingFlight>();
+        private readonly List<PendingFlight> _carriedOverScratch = new List<PendingFlight>();
+        private readonly List<Vector2Int> _enrolledCoordsScratch = new List<Vector2Int>();
+        private Func<LightingTestWorld.LightingJobFlight, int, bool> _currentPredicate;
+        private int _chunksPromotedThisPass;
+
+        // B7-closure fault injection (default null = disabled): a scheduler-mode scenario sets this to force
+        // MergeJob to throw for chosen chunks, exercising the skeleton's stage-2 isolation from the sim.
+        private Func<Vector2Int, bool> _injectMergeFault;
+
         /// <summary>
         /// Scheduler mode only: when &gt; 0, the ~1 s <c>PromoteAll</c> fail-safe is simulated every N frames
         /// (a seed scan + <see cref="LightWorkScheduler.PromoteAll"/>). Default 0 = OFF — the load-bearing
@@ -146,6 +161,21 @@ namespace Editor.Validation.Lighting.Framework
         /// <summary>The current frame number, incremented at the start of each <see cref="RunFrame"/> call.</summary>
         public int CurrentFrame => _currentFrame;
 
+        /// <summary>Count of merge-job faults isolated by the shared completion-pass skeleton over this
+        /// simulator's lifetime — the sim analog of <c>WorldJobManager.LastFaultedLightJobs</c>. Non-zero
+        /// only under <see cref="SetMergeFaultInjector"/> (the B7 fault-isolation closure test).</summary>
+        public int LastFaultedMergeJobs { get; private set; }
+
+        /// <summary>
+        /// Installs a per-chunk merge-fault predicate for the B7 fault-isolation closure test: the completion
+        /// pass's <c>MergeJob</c> throws for any coord the predicate returns <c>true</c> for, letting a
+        /// scheduler-mode scenario assert the pass still completes / releases / removes every other job with
+        /// no stranded-container cascade, and the faulted chunk is re-flagged for a corrective pass.
+        /// </summary>
+        /// <param name="injector">Predicate over chunk coord; return <c>true</c> to fault that chunk's merge.
+        /// Pass <c>null</c> to disable (default).</param>
+        public void SetMergeFaultInjector(Func<Vector2Int, bool> injector) => _injectMergeFault = injector;
+
         /// <summary>
         /// Executes one simulated frame tick, mirroring the production <c>ProcessLightingJobs</c> →
         /// <c>World.Update</c> lighting-scan cycle:
@@ -176,49 +206,32 @@ namespace Editor.Validation.Lighting.Framework
             _currentFrame++;
             FrameResult result = default;
 
-            // --- Phase 1: Complete pending flights (selectively) ---
+            // --- Phase 1: Complete pending flights (selectively) via the shared completion-pass skeleton ---
+            // RunMergeLoop + RunRemoveAndPromote are the same LightingCompletionPass production drives in
+            // WorldJobManager.ProcessLightingJobs, so this replays production's fault isolation +
+            // release-inside / remove-after ordering (HF-4 #2). Completion order stays a sim concern: it is
+            // applied to the candidate list (BuildPassCandidates) before the skeleton iterates it. The driver
+            // hooks (IsComplete / MergeJob / RemoveAndPromote) are this class's explicit-interface members.
             if (_pendingFlights.Count > 0)
             {
-                List<PendingFlight> toProcess = new List<PendingFlight>(_pendingFlights);
+                BuildPassCandidates(order);
+                _currentPredicate = completionPredicate;
+                _chunksPromotedThisPass = 0;
 
-                if (order == CompletionOrder.Reverse)
-                {
-                    toProcess.Reverse();
-                }
-                else if (order == CompletionOrder.Shuffled)
-                {
-                    if (_rng == null)
-                        throw new InvalidOperationException(
-                            "CompletionOrder.Shuffled requires a non-null seed in the LightingFrameSimulator constructor.");
-                    FisherYatesShuffle(toProcess, _rng);
-                }
+                LightingCompletionPass.RunMergeLoop(_passCandidates, this, _enrolledCoordsScratch);
+                // No between-loop work for the sim (production batches dropped updates + mesh rebuilds here).
+                LightingCompletionPass.RunRemoveAndPromote(_enrolledCoordsScratch, this);
 
-                List<PendingFlight> carriedOver = new List<PendingFlight>();
+                result.JobsCompleted = _enrolledCoordsScratch.Count;
+                result.JobsCarriedOver = _carriedOverScratch.Count;
+                result.ChunksPromoted += _chunksPromotedThisPass;
 
-                foreach (PendingFlight pending in toProcess)
-                {
-                    int age = _currentFrame - pending.ScheduledOnFrame;
-
-                    if (completionPredicate != null && !completionPredicate(pending.Flight, age))
-                    {
-                        carriedOver.Add(pending);
-                        result.JobsCarriedOver++;
-                        continue;
-                    }
-
-                    Vector2Int completedCoord = pending.Flight.ChunkCoord;
-                    _world.CompleteLightingJob(pending.Flight);
-                    result.JobsCompleted++;
-
-                    // Completion is the load-bearing MT-2 promotion hook: it un-parks the chunk itself (if it
-                    // re-flagged mid-flight) and any neighbor whose AreNeighborsReadyAndLit gate this completion
-                    // just cleared (production: WorldJobManager.ProcessLightingJobs → PromoteLightWorkNeighborhood).
-                    if (_schedulerMode)
-                        result.ChunksPromoted += _scheduler.PromoteNeighborhood(ToVoxelOrigin(completedCoord));
-                }
-
+                // Rebuild the in-flight set from the carried-over flights (predicate-rejected this pass); the
+                // completed ones are dropped (production: LightingJobs.Remove inside RemoveAndPromote).
                 _pendingFlights.Clear();
-                _pendingFlights.AddRange(carriedOver);
+                _pendingFlights.AddRange(_carriedOverScratch);
+
+                _currentPredicate = null;
             }
 
             // --- Phase 2: Schedule new jobs ---
@@ -286,6 +299,116 @@ namespace Editor.Validation.Lighting.Framework
             result.JobsScheduled = scheduled;
             return result;
         }
+
+        #region Completion-Pass Driver (HF-4 #2)
+
+        /// <summary>
+        /// Builds this pass's candidate list (chunk coords in the requested completion order) and the
+        /// coord→flight lookup the driver hooks read, and clears the carried-over scratch. One in-flight job
+        /// per chunk (the scheduling in-flight guard) makes the chunk coord a unique per-pass key.
+        /// </summary>
+        /// <param name="order">The completion order to impose on the candidate list.</param>
+        private void BuildPassCandidates(CompletionOrder order)
+        {
+            _passCandidates.Clear();
+            _passFlights.Clear();
+            _carriedOverScratch.Clear();
+
+            foreach (PendingFlight pf in _pendingFlights)
+            {
+                Vector2Int coord = pf.Flight.ChunkCoord;
+                _passCandidates.Add(coord);
+                _passFlights[coord] = pf;
+            }
+
+            if (order == CompletionOrder.Reverse)
+            {
+                _passCandidates.Reverse();
+            }
+            else if (order == CompletionOrder.Shuffled)
+            {
+                if (_rng == null)
+                    throw new InvalidOperationException(
+                        "CompletionOrder.Shuffled requires a non-null seed in the LightingFrameSimulator constructor.");
+                FisherYatesShuffle(_passCandidates, _rng);
+            }
+        }
+
+        // Explicit ILightingCompletionDriver<Vector2Int> implementation the shared LightingCompletionPass
+        // sequences — the sim's mirror of WorldJobManager's per-job hooks. The sim holds no native
+        // containers, so CompleteJob/ReleaseJob are no-ops and completion+merge collapse into MergeJob
+        // (CompleteLightingJob). Explicit so they stay off the simulator's public API. _currentPredicate /
+        // _passFlights are the per-pass context set by RunFrame's Phase 1.
+
+        /// <inheritdoc />
+        bool ILightingCompletionDriver<Vector2Int>.IsComplete(Vector2Int key)
+        {
+            PendingFlight pf = _passFlights[key];
+            int age = _currentFrame - pf.ScheduledOnFrame;
+            if (_currentPredicate != null && !_currentPredicate(pf.Flight, age))
+            {
+                _carriedOverScratch.Add(pf);
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <inheritdoc />
+        void ILightingCompletionDriver<Vector2Int>.CompleteJob(Vector2Int key)
+        {
+            /* sim completes in MergeJob */
+        }
+
+        /// <inheritdoc />
+        void ILightingCompletionDriver<Vector2Int>.OnCompleteFault(Vector2Int key, Exception e)
+        {
+            /* sim CompleteJob never throws */
+        }
+
+        /// <inheritdoc />
+        void ILightingCompletionDriver<Vector2Int>.MergeJob(Vector2Int key)
+        {
+            // B7 fault-injection hook (default null = no-op): model a merge that faults after the job
+            // completed — AbortLightingJob discards the result + clears the in-flight marker (like
+            // production removing the job on a stage-2 fault), then we throw so the skeleton's stage-2
+            // isolation runs (ReleaseJob + enroll + RemoveAndPromote continue; OnMergeFault re-flags).
+            if (_injectMergeFault != null && _injectMergeFault(key))
+            {
+                _world.AbortLightingJob(_passFlights[key].Flight);
+                throw new Exception($"[TEST] injected lighting merge fault for chunk {key}.");
+            }
+
+            _world.CompleteLightingJob(_passFlights[key].Flight);
+        }
+
+        /// <inheritdoc />
+        void ILightingCompletionDriver<Vector2Int>.OnMergeFault(Vector2Int key, Exception e)
+        {
+            LastFaultedMergeJobs++;
+
+            // Mirror production (WorldJobManager.OnMergeFault): a merge that threw leaves the chunk in an
+            // unknown state — re-flag it so a corrective pass reschedules it, rather than dropping it unlit.
+            _world.FlagLightWork(key);
+        }
+
+        /// <inheritdoc />
+        void ILightingCompletionDriver<Vector2Int>.ReleaseJob(Vector2Int key)
+        {
+            /* sim holds no per-job containers */
+        }
+
+        /// <inheritdoc />
+        void ILightingCompletionDriver<Vector2Int>.RemoveAndPromote(Vector2Int key)
+        {
+            // Completion is the load-bearing MT-2 promotion hook: it un-parks the chunk itself (if it
+            // re-flagged mid-flight) and any neighbor whose AreNeighborsReadyAndLit gate this completion
+            // just cleared (production: WorldJobManager.ProcessLightingJobs → PromoteLightWorkNeighborhood).
+            if (_schedulerMode)
+                _chunksPromotedThisPass += _scheduler.PromoteNeighborhood(ToVoxelOrigin(key));
+        }
+
+        #endregion
 
         #region AS-2 Scheduler Mode
 

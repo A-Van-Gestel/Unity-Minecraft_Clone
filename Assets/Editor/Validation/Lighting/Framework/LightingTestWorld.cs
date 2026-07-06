@@ -325,6 +325,15 @@ namespace Editor.Validation.Lighting.Framework
         public bool ChunkHasLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).HasLightWork;
 
         /// <summary>
+        /// Re-flags a chunk's pending light work — the harness analog of production setting
+        /// <c>ChunkData.HasLightChangesToProcess = true</c> (a merge-fault re-flag, or a dynamic edit).
+        /// Fires the <c>OnLightWorkFlagged</c> sink like production, so in scheduler mode the chunk stages
+        /// back into the ready set. Used by the completion pass's merge-fault handler (B7 closure test).
+        /// </summary>
+        /// <param name="chunkCoord">The chunk to re-flag.</param>
+        public void FlagLightWork(Vector2Int chunkCoord) => GetChunk(chunkCoord).HasLightWork = true;
+
+        /// <summary>
         /// Returns true when the given chunk's neighbor terrain data is ready, so a lighting job for it
         /// may be scheduled. Harness analog of production's <c>World.AreNeighborsDataReady</c>, consumed by
         /// <c>LightingFrameSimulator.RunFrame</c> as the second argument to
@@ -734,6 +743,29 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <summary>
+        /// Models a lighting job that completed but whose MERGE faulted — the production stage-2 fault path
+        /// (fidelity B7): removes the chunk's in-flight marker (as production's after-loop
+        /// <c>LightingJobs.Remove</c> does) and frees the flight's containers WITHOUT applying the job's
+        /// light, so the results are discarded exactly like a merge that threw mid-apply. The caller (the
+        /// completion pass's merge-fault handler) re-flags the chunk for a corrective pass. Used only by the
+        /// B7 fault-injection closure test (<see cref="LightingFrameSimulator.SetMergeFaultInjector"/>).
+        /// </summary>
+        /// <param name="flight">The in-flight job whose merge is being aborted.</param>
+        public void AbortLightingJob(LightingJobFlight flight)
+        {
+            if (flight.Completed) throw new InvalidOperationException("Flight already completed.");
+            flight.Completed = true;
+
+            // The job is no longer in flight (production removes it from LightingJobs even on a merge fault),
+            // so the chunk can reschedule once re-flagged. Results are discarded — no merge, no mod routing.
+            _inFlightCoords.Remove(flight.Coord);
+
+            foreach (IDisposable container in flight.OwnedContainers)
+                container.Dispose();
+            flight.OwnedContainers.Clear();
+        }
+
+        /// <summary>
         /// Convenience wrapper: snapshot, run, and merge one chunk's lighting job synchronously.
         /// </summary>
         /// <param name="chunkCoord">The grid coordinate of the chunk to light.</param>
@@ -1028,10 +1060,8 @@ namespace Editor.Validation.Lighting.Framework
         private int VerifyPullBackClaims(TestChunk chunk, NativeList<PullBackClaim> claims)
         {
             int cleared = 0;
-            for (int i = 0; i < claims.Length; i++)
+            foreach (PullBackClaim claim in claims)
             {
-                PullBackClaim claim = claims[i];
-
                 // Defensive: a claim must target a center voxel (the job guarantees it — see
                 // PullBackClaim); mirror of the production guard in WorldJobManager.VerifyPullBackClaims.
                 if ((uint)claim.CenterPos.x >= VoxelData.ChunkWidth ||

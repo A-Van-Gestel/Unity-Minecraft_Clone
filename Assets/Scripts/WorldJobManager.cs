@@ -19,7 +19,7 @@ using UnityEngine.Pool;
 /// Manages the lifecycle of all background jobs (generation, meshing, lighting).
 /// Owns the active <see cref="IChunkGenerator"/> strategy and delegates scheduling to it.
 /// </summary>
-public class WorldJobManager : IDisposable
+public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord>
 {
     private readonly World _world;
     private readonly IChunkGenerator _chunkGenerator;
@@ -132,6 +132,16 @@ public class WorldJobManager : IDisposable
     private readonly List<ChunkCoord> _completedGenJobs = new List<ChunkCoord>();
     private readonly List<ChunkCoord> _completedMeshJobs = new List<ChunkCoord>();
     private readonly List<ChunkCoord> _completedLightJobs = new List<ChunkCoord>();
+
+    // Reused snapshot of LightingJobs.Keys for one completion pass — the shared LightingCompletionPass
+    // iterates a stable candidate list rather than the live dictionary (removal is after-loop anyway).
+    private readonly List<ChunkCoord> _lightCompletionCandidates = new List<ChunkCoord>();
+
+    // Per-job scratch shared across the LightingCompletionPass driver hooks (single-threaded, non-reentrant
+    // pass): the job being completed/merged/released and its chunk, cached so the hooks don't re-look-them-up.
+    private LightingJobData _curLightJob;
+    private ChunkData _curLightChunk;
+
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
     private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _droppedLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
 
@@ -1015,7 +1025,7 @@ public class WorldJobManager : IDisposable
         if (LightingJobs.Count == 0) return;
 
         _chunksToRebuildMesh.Clear();
-        _completedLightJobs.Clear();
+        // _completedLightJobs is cleared + repopulated by LightingCompletionPass.RunMergeLoop below.
 
         foreach (HashSet<Vector2Int> set in _droppedLightUpdates.Values)
         {
@@ -1024,57 +1034,17 @@ public class WorldJobManager : IDisposable
 
         _droppedLightUpdates.Clear();
 
-        foreach (KeyValuePair<ChunkCoord, LightingJobData> jobEntry in LightingJobs)
-        {
-            if (!jobEntry.Value.Handle.IsCompleted) continue;
+        // Snapshot the in-flight keys, then run the shared completion-pass merge loop. The fault-isolation
+        // (stage 1/2, HF-2) and release-inside / enroll ordering now live in LightingCompletionPass, driven
+        // here via the ILightingCompletionDriver<ChunkCoord> hooks below and by the editor frame simulator,
+        // so both replay the same bookkeeping (HF-4 #2). Snapshot is byte-identical to iterating the live
+        // dictionary — the loop never adds to LightingJobs and removal is after-loop. Enrollment fills
+        // _completedLightJobs (also read by the merge's cross-chunk _completedLightJobs.Contains check).
+        _lightCompletionCandidates.Clear();
+        foreach (ChunkCoord coord in LightingJobs.Keys)
+            _lightCompletionCandidates.Add(coord);
 
-            LightingJobData jobData = jobEntry.Value;
-
-            // Fault isolation, stage 1 (HF-2): if Complete() itself throws, the job may still own its
-            // containers — do NOT release them; leave the entry enrolled so the next pass retries under
-            // the same isolation.
-            try
-            {
-                jobData.Handle.Complete();
-            }
-            catch (Exception e)
-            {
-                LastFaultedLightJobs++;
-                Debug.LogError($"[LIGHTING] Handle.Complete() for chunk {jobEntry.Key} faulted — job left enrolled for retry. {e}");
-                continue;
-            }
-
-            LastProcessedJobCount++;
-            ChunkData chunkData = _world.worldData.RequestChunk(jobEntry.Key.ToVoxelOrigin(), false);
-
-            // Fault isolation, stage 2 (HF-2): one merge throwing must not abort the pass — that strands
-            // every already-released job in LightingJobs and re-touches its disposed containers every
-            // frame after (the ObjectDisposedException cascade, fidelity B7).
-            try
-            {
-                MergeCompletedLightingJob(jobEntry.Key, jobData, chunkData);
-            }
-            catch (Exception e)
-            {
-                LastFaultedLightJobs++;
-                Debug.LogError($"[LIGHTING] Merging the completed lighting job for chunk {jobEntry.Key} faulted — containers released, chunk re-flagged. {e}");
-
-                // Stability is unknown after a fault: keep the chunk re-schedulable so a corrective
-                // pass runs, rather than silently dropping it in a half-merged state.
-                if (chunkData != null) chunkData.HasLightChangesToProcess = true;
-            }
-            finally
-            {
-                // Unconditional: the flag-pairing invariant (set in MergeCompletedLightingJob, cleared
-                // here even on fault) and the release + removal enrollment that keep a faulted job from
-                // lingering in LightingJobs with disposed containers.
-                if (chunkData != null) chunkData.IsAwaitingMainThreadProcess = false;
-
-                // POOLING: Return the full-volume buffers for reuse; dispose per-job containers.
-                ReleaseLightingJobData(jobData);
-                _completedLightJobs.Add(jobEntry.Key);
-            }
-        }
+        LightingCompletionPass.RunMergeLoop(_lightCompletionCandidates, this, _completedLightJobs);
 
         // Save vanishing neighbor updates (BATCH)
         foreach (KeyValuePair<ChunkCoord, HashSet<Vector2Int>> kvp in _droppedLightUpdates)
@@ -1105,16 +1075,81 @@ public class WorldJobManager : IDisposable
             }
         }
 
-        foreach (ChunkCoord chunkCoord in _completedLightJobs)
-        {
-            LightingJobs.Remove(chunkCoord);
-
-            // Completion is the last event in an AreNeighborsReadyAndLit unblock chain (the neighbor
-            // flags it also reads clear at schedule time, while the job is still in-flight) and is what
-            // un-parks the chunk itself if it was re-flagged mid-flight — promote the 3×3 now (MT-2).
-            _world.PromoteLightWorkNeighborhood(chunkCoord.ToVoxelOrigin());
-        }
+        // Remove + promote every enrolled job, strictly after the whole merge loop (shared skeleton, so a
+        // completion promoting a neighbor sees the fully-merged pass — MT-2). See the driver's
+        // RemoveAndPromote hook for the per-job rationale.
+        LightingCompletionPass.RunRemoveAndPromote(_completedLightJobs, this);
     }
+
+    #region LightingCompletionPass driver (HF-4 #2)
+
+    // Explicit ILightingCompletionDriver<ChunkCoord> implementation: the per-job side effects the shared
+    // LightingCompletionPass skeleton sequences (the exact body the old inline ProcessLightingJobs loop
+    // ran). Explicit so they don't widen WorldJobManager's public surface — the pass invokes them through
+    // the interface (`this`). _curLightJob / _curLightChunk cache the job + chunk across a single job's
+    // hooks; the pass is single-threaded and non-reentrant so plain fields are safe.
+
+    /// <inheritdoc />
+    bool ILightingCompletionDriver<ChunkCoord>.IsComplete(ChunkCoord key) => LightingJobs[key].Handle.IsCompleted;
+
+    /// <inheritdoc />
+    void ILightingCompletionDriver<ChunkCoord>.CompleteJob(ChunkCoord key)
+    {
+        _curLightJob = LightingJobs[key];
+        _curLightChunk = null;
+        _curLightJob.Handle.Complete();
+    }
+
+    /// <inheritdoc />
+    void ILightingCompletionDriver<ChunkCoord>.OnCompleteFault(ChunkCoord key, Exception e)
+    {
+        LastFaultedLightJobs++;
+        Debug.LogError($"[LIGHTING] Handle.Complete() for chunk {key} faulted — job left enrolled for retry. {e}");
+    }
+
+    /// <inheritdoc />
+    void ILightingCompletionDriver<ChunkCoord>.MergeJob(ChunkCoord key)
+    {
+        LastProcessedJobCount++;
+        _curLightChunk = _world.worldData.RequestChunk(key.ToVoxelOrigin(), false);
+        MergeCompletedLightingJob(key, _curLightJob, _curLightChunk);
+    }
+
+    /// <inheritdoc />
+    void ILightingCompletionDriver<ChunkCoord>.OnMergeFault(ChunkCoord key, Exception e)
+    {
+        LastFaultedLightJobs++;
+        Debug.LogError($"[LIGHTING] Merging the completed lighting job for chunk {key} faulted — containers released, chunk re-flagged. {e}");
+
+        // Stability is unknown after a fault: keep the chunk re-schedulable so a corrective pass runs,
+        // rather than silently dropping it in a half-merged state.
+        if (_curLightChunk != null) _curLightChunk.HasLightChangesToProcess = true;
+    }
+
+    /// <inheritdoc />
+    void ILightingCompletionDriver<ChunkCoord>.ReleaseJob(ChunkCoord key)
+    {
+        // Unconditional (merge finally): the flag-pairing invariant (IsAwaitingMainThreadProcess set in
+        // MergeCompletedLightingJob, cleared here even on fault) + the container release that keeps a
+        // faulted job from lingering in LightingJobs with disposed containers.
+        if (_curLightChunk != null) _curLightChunk.IsAwaitingMainThreadProcess = false;
+
+        // POOLING: Return the full-volume buffers for reuse; dispose per-job containers.
+        ReleaseLightingJobData(_curLightJob);
+    }
+
+    /// <inheritdoc />
+    void ILightingCompletionDriver<ChunkCoord>.RemoveAndPromote(ChunkCoord key)
+    {
+        LightingJobs.Remove(key);
+
+        // Completion is the last event in an AreNeighborsReadyAndLit unblock chain (the neighbor flags it
+        // also reads clear at schedule time, while the job is still in-flight) and is what un-parks the
+        // chunk itself if it was re-flagged mid-flight — promote the 3×3 now (MT-2).
+        _world.PromoteLightWorkNeighborhood(key.ToVoxelOrigin());
+    }
+
+    #endregion
 
     /// <summary>
     /// Merges one completed lighting job's results into its chunk: applies the light map, drains

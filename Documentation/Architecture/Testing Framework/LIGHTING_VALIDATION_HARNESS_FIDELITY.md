@@ -8,7 +8,7 @@
 
 ## 1. Why this document exists
 
-The lighting validation suite (56 baselines + frame simulator, menu item
+The lighting validation suite (57 baselines + frame simulator, menu item
 **`Minecraft Clone/Dev/Validate Lighting Engine`**) is strong where it runs **real production code**:
 it executes the real `NeighborhoodLightingJob`, stores voxels + light in a real `ChunkData` (section /
 uniform-sky storage, merge, and snapshot all run production code — see A1), and shares the real decision
@@ -280,7 +280,7 @@ there is invisible.
   and the fail-safe OFF by default, so "converges without the backstop" becomes a mechanical gate.
   Legacy mode stays the default so existing baselines are untouched.
 
-### B7 — `ProcessLightingJobs` per-pass bookkeeping is production-only ·  **CLOSED — near-term (2026-07-05, HF-2); full-fidelity replay deferred to HF-4/AS-2**
+### B7 — `ProcessLightingJobs` per-pass bookkeeping is production-only ·  **CLOSED — FULL (2026-07-06, HF-4 #2); near-term closure was 2026-07-05, HF-2**
 
 - The harness replays per-**job** logic (`CompleteLightingJob` mirrors merge → deferred drain →
   pull-back-claim verification → mod routing) and the frame simulator replays scheduling decisions — but
@@ -305,6 +305,16 @@ there is invisible.
   `CHUNK_LIFECYCLE_PIPELINE.md` §4. The full-fidelity alternative — extracting the pass skeleton into a
   shared orchestrator the harness can drive — remains **HF-4**, deliberately folded into AS-2 / NS-3
   rather than done standalone.
+- **Closed FULL by HF-4 #2 (2026-07-06):** the pass skeleton is now `Helpers/LightingCompletionPass.cs`
+  (`RunMergeLoop` + `RunRemoveAndPromote`, driven via `ILightingCompletionDriver<TKey>`).
+  `ProcessLightingJobs` implements the driver on `this` (byte-identical — all 57 baselines green); the
+  frame simulator implements it too, so the harness replays the exact release-inside / remove-after
+  ordering and two-stage fault isolation. Baseline **B65** injects a merge fault into one job of a
+  four-job pass (`LightingFrameSimulator.SetMergeFaultInjector` → `LightingTestWorld.AbortLightingJob`)
+  and asserts the fault is isolated + counted, the other jobs still complete, the faulted job is removed
+  rather than stranded, and the field recovers once the lost work is resubmitted — the multi-job cascade
+  class the runner's per-scenario try/catch could never present. Behavior in `CHUNK_LIFECYCLE_PIPELINE.md`
+  §4 (shared skeleton pointer).
 
 ---
 
@@ -569,7 +579,7 @@ races, so B15's manual-flight path is not the only guard of that machinery.)
 | C3 | Cross-chunk sunlight darkening race quadrant (B54/B55) — prereq for LI-1 → P-2 / TG-4 Ph.4                                                           | **CLOSED**        | —                | done           |
 | A5 | Fail-soft `ChunkData` accessors — out-of-bounds is a position lottery (closed by HF-1)                                                               | **CLOSED**        | —                | done           |
 | B6 | MT-2 `LightWorkScheduler` park/promote layer unmodeled (→ roadmap AS-2)                                                                              | OPEN              | **Medium-High**  | medium         |
-| B7 | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 done; full replay → HF-4)                                                               | **CLOSED (near)** | — (HF-4 w/ AS-2) | done           |
+| B7 | `ProcessLightingJobs` pass bookkeeping production-only (HF-2 near-term; full replay via `LightingCompletionPass` + B65, HF-4 #2)                     | **CLOSED (full)** | —                | done           |
 | C8 | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3; Bug 05 fixed via the post-edit axis, so now belt-and-braces)   | OPEN              | Low              | medium         |
 | C9 | Flat scenario worlds never exercise border shadow-casters (B60; HF-3 fuzz shipped 2026-07-05 — found Bug 15 → B62/B63 + the first sync Bug-05 repro) | **CLOSED**        | —                | done           |
 | C6 | Per-channel removal independence                                                                                                                     | OPEN              | Low–Medium       | small          |

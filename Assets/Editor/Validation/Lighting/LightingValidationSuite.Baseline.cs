@@ -109,6 +109,11 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario(
                 "B64: Border-heightmap fuzz — varied heights at every seam, seam overhangs, and border edits settle on the oracle across randomized seeds (Bug 15 + Bug 05 guard)",
                 Baseline_BorderHeightFuzz));
+
+            // --- Completion-pass fault isolation (B65, HF-4 #2 / finding B7): the sim drives the shared
+            // LightingCompletionPass skeleton and injects a merge fault to prove per-job isolation. Lives in
+            // Baselines/LightingValidationSuite.Baseline.FaultIsolation.cs and self-registers here. ---
+            AddFaultIsolationBaselineScenarios(scenarios);
         }
 
         /// <summary>Hook for the Bug-12 family baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug12.cs).</summary>
@@ -118,6 +123,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the C3 cross-chunk sunlight darkening baselines (implemented in Baselines/LightingValidationSuite.Baseline.C3Darkening.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCrossChunkDarkeningBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the completion-pass fault-isolation baseline (implemented in Baselines/LightingValidationSuite.Baseline.FaultIsolation.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddFaultIsolationBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the Bug-13 suspended-slab baselines (implemented in Baselines/LightingValidationSuite.Baseline.Bug13Slab.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
