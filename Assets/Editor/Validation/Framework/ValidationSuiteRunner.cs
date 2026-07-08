@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
+using UnityEditor;
+using UnityEngine;
 using Debug = UnityEngine.Debug;
 
 namespace Editor.Validation.Framework
@@ -46,45 +49,67 @@ namespace Editor.Validation.Framework
             int baselinePassed = 0, baselineFailed = 0, bugsReproduced = 0, bugsFixCandidates = 0;
             double totalMs = 0.0;
 
-            foreach (Scenario scenario in scenarios)
+            // Live progress bar for interactive runs: the suites run synchronously on the main thread (the console
+            // can't repaint until they finish), but EditorUtility force-repaints its progress dialog on each call,
+            // so this is the only "what's running now" signal during a long run. Suppressed for headless/batch runs
+            // (no GUI). Cleared in the finally so an exception can't leave it stuck on screen.
+            bool showProgress = logToConsole && !Application.isBatchMode;
+
+            try
             {
-                if (logToConsole)
-                    Debug.Log($"--- Scenario: {scenario.Name} ---");
-
-                bool passed;
-                Exception thrown = null;
-
-                // A Stopwatch object per scenario is fine on this editor-only path; if a zero-alloc run is ever
-                // wanted, Stopwatch.GetTimestamp() deltas measure the same interval without the allocation.
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                try
+                for (int i = 0; i < scenarios.Count; i++)
                 {
-                    passed = scenario.Run();
+                    Scenario scenario = scenarios[i];
+
+                    if (showProgress)
+                        EditorUtility.DisplayProgressBar(
+                            $"Validating {suiteName}",
+                            $"Scenario {i + 1}/{scenarios.Count}: {scenario.Name}",
+                            i / (float)scenarios.Count);
+
+                    if (logToConsole)
+                        Debug.Log($"--- Scenario {i + 1}/{scenarios.Count}: {scenario.Name} ---");
+
+                    bool passed;
+                    Exception thrown = null;
+
+                    // A Stopwatch object per scenario is fine on this editor-only path; if a zero-alloc run is ever
+                    // wanted, Stopwatch.GetTimestamp() deltas measure the same interval without the allocation.
+                    Stopwatch stopwatch = Stopwatch.StartNew();
+                    try
+                    {
+                        passed = scenario.Run();
+                    }
+                    catch (Exception e)
+                    {
+                        thrown = e;
+                        passed = false;
+                    }
+                    finally
+                    {
+                        stopwatch.Stop();
+                    }
+
+                    double elapsedMs = stopwatch.Elapsed.TotalMilliseconds;
+                    totalMs += elapsedMs;
+
+                    results.Add(new ScenarioResult
+                    {
+                        Name = scenario.Name,
+                        KnownBugId = scenario.KnownBugId,
+                        Passed = passed,
+                        ElapsedMs = elapsedMs,
+                        Exception = thrown,
+                    });
+
+                    CategorizeAndLog(scenario, passed, thrown, elapsedMs, channel, logToConsole,
+                        ref baselinePassed, ref baselineFailed, ref bugsReproduced, ref bugsFixCandidates);
                 }
-                catch (Exception e)
-                {
-                    thrown = e;
-                    passed = false;
-                }
-                finally
-                {
-                    stopwatch.Stop();
-                }
-
-                double elapsedMs = stopwatch.Elapsed.TotalMilliseconds;
-                totalMs += elapsedMs;
-
-                results.Add(new ScenarioResult
-                {
-                    Name = scenario.Name,
-                    KnownBugId = scenario.KnownBugId,
-                    Passed = passed,
-                    ElapsedMs = elapsedMs,
-                    Exception = thrown,
-                });
-
-                CategorizeAndLog(scenario, passed, thrown, elapsedMs, channel, logToConsole,
-                    ref baselinePassed, ref baselineFailed, ref bugsReproduced, ref bugsFixCandidates);
+            }
+            finally
+            {
+                if (showProgress)
+                    EditorUtility.ClearProgressBar();
             }
 
             ValidationRunResult result = new ValidationRunResult
@@ -153,6 +178,8 @@ namespace Editor.Validation.Framework
                 ? $"reproduces {knownBugId} (expected failure until implemented)."
                 : $"reproduces {knownBugId} (expected failure until the bug is fixed).";
 
+        private const int SLOWEST_SCENARIO_COUNT = 3; // how many slowest scenarios to surface in the summary
+
         /// <summary>Prints the categorized, PHPUnit-style summary derived entirely from the result counts.</summary>
         private static void LogSummary(ValidationRunResult result)
         {
@@ -170,11 +197,59 @@ namespace Editor.Validation.Framework
             else
                 Debug.LogError($"<color=red>{result.BaselineFailed} OF {baselineTotal} {upper} BASELINE TESTS FAILED — REGRESSION.</color> ({FormatDuration(result.TotalMs)} total)");
 
+            LogFailedBaselines(result);
+
             if (result.BugsReproduced > 0)
                 Debug.Log($"{result.BugsReproduced} known-bug scenario(s) still reproduce their documented bug/feature (expected).");
 
             if (result.BugsFixCandidates > 0)
                 Debug.Log($"<color=cyan>{result.BugsFixCandidates} known-bug scenario(s) now pass — fix/implementation candidates!</color>");
+
+            LogSlowestScenarios(result);
+        }
+
+        /// <summary>
+        /// Lists the failed baseline scenarios by name (with timing) directly under the red summary line, so a
+        /// regression run does not require scrolling back through the per-scenario log to find what broke.
+        /// </summary>
+        /// <param name="result">The completed run result.</param>
+        private static void LogFailedBaselines(ValidationRunResult result)
+        {
+            if (result.BaselineFailed == 0)
+                return;
+
+            StringBuilder sb = new StringBuilder($"<color=red>Failed baselines ({result.BaselineFailed}):</color>");
+            foreach (ScenarioResult scenario in result.Scenarios)
+            {
+                if (scenario.IsKnownBug || scenario.Passed)
+                    continue;
+                sb.Append($"\n  • {scenario.Name} ({FormatDuration(scenario.ElapsedMs)})");
+                if (scenario.Exception != null)
+                    sb.Append(" — threw");
+            }
+
+            Debug.LogError(sb.ToString());
+        }
+
+        /// <summary>
+        /// Surfaces the slowest scenarios so the per-scenario timing is actionable — a scenario that has drifted
+        /// pathologically slow stands out at the bottom of the run instead of hiding in the per-scenario log.
+        /// </summary>
+        /// <param name="result">The completed run result.</param>
+        private static void LogSlowestScenarios(ValidationRunResult result)
+        {
+            int show = Math.Min(SLOWEST_SCENARIO_COUNT, result.Scenarios.Count);
+            if (show <= 0)
+                return;
+
+            List<ScenarioResult> sorted = new List<ScenarioResult>(result.Scenarios);
+            sorted.Sort((a, b) => b.ElapsedMs.CompareTo(a.ElapsedMs));
+
+            StringBuilder sb = new StringBuilder($"Slowest {show} scenario(s):");
+            for (int i = 0; i < show; i++)
+                sb.Append($"\n  {i + 1}. {sorted[i].Name} ({FormatDuration(sorted[i].ElapsedMs)})");
+
+            Debug.Log(sb.ToString());
         }
 
         private const double HUMAN_BREAKDOWN_THRESHOLD_MS = 1000.0; // below this, a precise "N.N ms" reads better than a breakdown
