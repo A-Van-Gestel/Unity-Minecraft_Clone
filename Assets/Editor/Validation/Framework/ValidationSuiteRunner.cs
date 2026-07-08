@@ -110,14 +110,14 @@ namespace Editor.Validation.Framework
             bool logToConsole, ref int baselinePassed, ref int baselineFailed,
             ref int bugsReproduced, ref int bugsFixCandidates)
         {
-            string ms = FormatMs(elapsedMs);
+            string elapsed = FormatDuration(elapsedMs);
 
             if (scenario.KnownBugId == null)
             {
                 if (passed)
                 {
                     baselinePassed++;
-                    if (logToConsole) Debug.Log($"[PASS] {scenario.Name} ({ms})");
+                    if (logToConsole) Debug.Log($"[PASS] {scenario.Name} ({elapsed})");
                 }
                 else
                 {
@@ -125,19 +125,19 @@ namespace Editor.Validation.Framework
                     if (logToConsole)
                     {
                         string detail = thrown != null ? $"\nScenario threw: {thrown}" : "";
-                        Debug.LogError($"[FAIL] {scenario.Name} ({ms}){detail}");
+                        Debug.LogError($"[FAIL] {scenario.Name} ({elapsed}){detail}");
                     }
                 }
             }
             else if (passed)
             {
                 bugsFixCandidates++;
-                if (logToConsole) Debug.Log($"<color=cyan>✅ {scenario.Name} ({ms}): known-bug scenario PASSES — {KnownBugPassMessage(scenario.KnownBugId, channel)}</color>");
+                if (logToConsole) Debug.Log($"<color=cyan>✅ {scenario.Name} ({elapsed}): known-bug scenario PASSES — {KnownBugPassMessage(scenario.KnownBugId, channel)}</color>");
             }
             else
             {
                 bugsReproduced++;
-                if (logToConsole) Debug.LogWarning($"⚠️ {scenario.Name} ({ms}): {KnownBugReproMessage(scenario.KnownBugId, channel)}");
+                if (logToConsole) Debug.LogWarning($"⚠️ {scenario.Name} ({elapsed}): {KnownBugReproMessage(scenario.KnownBugId, channel)}");
             }
         }
 
@@ -166,9 +166,9 @@ namespace Editor.Validation.Framework
             int baselineTotal = result.BaselinePassed + result.BaselineFailed;
 
             if (result.BaselineFailed == 0)
-                Debug.Log($"<color=green>ALL {result.BaselinePassed} {upper} BASELINE TESTS PASSED.</color> ({FormatMs(result.TotalMs)} total)");
+                Debug.Log($"<color=green>ALL {result.BaselinePassed} {upper} BASELINE TESTS PASSED.</color> ({FormatDuration(result.TotalMs)} total)");
             else
-                Debug.LogError($"<color=red>{result.BaselineFailed} OF {baselineTotal} {upper} BASELINE TESTS FAILED — REGRESSION.</color> ({FormatMs(result.TotalMs)} total)");
+                Debug.LogError($"<color=red>{result.BaselineFailed} OF {baselineTotal} {upper} BASELINE TESTS FAILED — REGRESSION.</color> ({FormatDuration(result.TotalMs)} total)");
 
             if (result.BugsReproduced > 0)
                 Debug.Log($"{result.BugsReproduced} known-bug scenario(s) still reproduce their documented bug/feature (expected).");
@@ -177,7 +177,33 @@ namespace Editor.Validation.Framework
                 Debug.Log($"<color=cyan>{result.BugsFixCandidates} known-bug scenario(s) now pass — fix/implementation candidates!</color>");
         }
 
-        /// <summary>Formats a millisecond duration for log output (fixed, culture-invariant).</summary>
-        private static string FormatMs(double ms) => $"{ms.ToString("F1", CultureInfo.InvariantCulture)} ms";
+        private const double HUMAN_BREAKDOWN_THRESHOLD_MS = 1000.0; // below this, a precise "N.N ms" reads better than a breakdown
+        private const long MS_PER_SECOND = 1000;
+        private const long MS_PER_MINUTE = 60 * MS_PER_SECOND;
+        private const long MS_PER_HOUR = 60 * MS_PER_MINUTE;
+
+        /// <summary>
+        /// Formats a millisecond duration for log output. Sub-second durations stay as a precise, culture-invariant
+        /// <c>"N.N ms"</c>; anything longer is broken into human-readable <c>h/min/s/ms</c> components so a
+        /// multi-second or multi-minute total does not read as an unwieldy raw millisecond count.
+        /// </summary>
+        /// <param name="ms">The duration in milliseconds.</param>
+        /// <returns>A human-readable duration string.</returns>
+        private static string FormatDuration(double ms)
+        {
+            if (ms < HUMAN_BREAKDOWN_THRESHOLD_MS)
+                return $"{ms.ToString("F1", CultureInfo.InvariantCulture)} ms";
+
+            long totalMs = (long)Math.Round(ms);
+            long hours = totalMs / MS_PER_HOUR;
+            long minutes = (totalMs % MS_PER_HOUR) / MS_PER_MINUTE;
+            long seconds = (totalMs % MS_PER_MINUTE) / MS_PER_SECOND;
+            long millis = totalMs % MS_PER_SECOND;
+
+            string result = $"{seconds} s {millis} ms";
+            if (hours > 0 || minutes > 0) result = $"{minutes} min {result}";
+            if (hours > 0) result = $"{hours} h {result}";
+            return result;
+        }
     }
 }
