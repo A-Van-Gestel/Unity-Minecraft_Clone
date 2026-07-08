@@ -10,6 +10,10 @@
 **Last audited:** 2026-06-12, at commit `39c92ef` (branch `feat/Modular-World-Generation-&-World-Types`).
 **Implementation status synced:** 2026-06-20, at commit `ea2aec0` — all Meshing & Rendering items
 except MR-8 (greedy meshing) are now closed and in-game confirmed (MR-1 through MR-7, MR-9).
+**Implementation status synced:** 2026-07-08 — `VS-1` (shared validation-suite runner) shipped:
+`Framework/ValidationSuiteRunner` + `ValidationRunResult`, six suites + `ChunkRelativePositionTests`
+migrated with unchanged verdicts; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` left as a tracked
+follow-up. VS-2/VS-3 now build on the runner's result object.
 **Third-pass audit:** 2026-07-02, at commit `99c3e6e` — added `WG-1..3`, `LI-2`, `GS-6`, `WS-1`;
 re-scoped `P-1` (see the pipeline table note).
 **Fourth-pass audit:** 2026-07-02, at commit `99c3e6e` — added `SL-1..4` (serialization save/load),
@@ -294,11 +298,11 @@ gates.
 
 ### Validation Suites
 
-| ID   | Finding                                                                                    | Effort | Risk | Benefit | Seed | Save |
-|------|--------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| VS-1 | Suite-runner scaffolding copy-pasted across all six suites (~90 near-identical lines each) |   🟡   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| VS-2 | Suites are human-in-the-loop only: no aggregate run-all, no CI/headless entry point        |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| VS-3 | No stale-assembly guard — a suite can silently validate stale code after an edit           |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| ID   | Finding                                                                                                                                                                                                                                                                                                                                                        | Effort | Risk | Benefit | Seed | Save |
+|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| VS-1 | ✅ **SHIPPED 2026-07-08** — shared `Framework/ValidationSuiteRunner` + `ValidationRunResult` (per-scenario + total timing; `KnownBugChannel` ends the archive-vs-promote drift); six suites + `ChunkRelativePositionTests` migrated, verdicts unchanged; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` remain a tracked follow-up (assertion-model mismatch) |   ✅    |  ✅   |    ⚪    |  ✅   |  ✅   |
+| VS-2 | Suites are human-in-the-loop only: no aggregate run-all, no CI/headless entry point                                                                                                                                                                                                                                                                            |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| VS-3 | No stale-assembly guard — a suite can silently validate stale code after an edit                                                                                                                                                                                                                                                                               |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 
 ### World Scaling Enablers
 
@@ -2267,6 +2271,30 @@ the combined handle; assign constant section bounds in `ConvertMeshOutput`.
 
 ### VS-1. Suite-runner scaffolding copy-pasted across all six suites
 
+> **✅ Implemented 2026-07-08 (branch `feat/async-lighting-validation-suite`).** Extracted
+> `Assets/Editor/Validation/Framework/`: `ValidationSuiteRunner.Execute(...)` (categorized loop +
+> per-scenario/total wall-clock timing), the `ValidationRunResult`/`ScenarioResult` result object,
+> the shared `Scenario` struct, and a `KnownBugChannel` enum (`Bug`/`Unimplemented`) that replaces the
+> drifting per-suite "archive vs promote" message strings. Each suite now exposes a headless
+> `Execute()` returning the result; `[MenuItem] RunAll()` is a thin `void` wrapper. The six suites and
+> `ChunkRelativePositionTests` were migrated (shared `Scenario` pulled in per-file via
+> `using Scenario = …Framework.Scenario;`) and re-verified to report identical baseline/known-bug
+> counts before/after (62/21/15/13/9/9 baselines; ChunkMath now 14, previously a bare pass/fail bool).
+> **Remaining (tracked follow-up):** `VoxelMetadataUtilityTests` and `FastNoiseLiteTests` — their
+> granular `AssertEqual`/golden-value harnesses don't map cleanly to one-bool-per-scenario. The result
+> object was designed to also feed VS-2 (CI exit code + NUnit-XML) and VS-3 (stale-assembly preamble).
+>
+> **Possible future refinements (tracked, not blocking):**
+> - Re-add per-suite header annotations (`(MT-1)`/`(MT-2)`, dropped in the migration) as a structured
+    > `Scenario`/suite tag rather than baking them into the display name (noted in `ValidationSuiteRunner.cs`).
+> - Optionally hoist the still-duplicated `Check(label, condition)` / `Expect(condition, message)` logging
+    > primitives (MeshQueue + LightScheduler + Placement, ~76 call sites) into a shared `ValidationLog` — a
+    > separate, bisectable commit, not required for VS-1.
+> - Add a per-scenario category tag to `ScenarioResult` so VS-2 can preserve distinctions the current binary
+    > baseline/known-bug split flattens (e.g. Placement's data-audit scenarios).
+> - Zero-alloc timing: swap the per-scenario `Stopwatch` for `Stopwatch.GetTimestamp()` deltas (noted in
+    > `ValidationSuiteRunner.cs`).
+
 **Observed:** Every suite entry file re-declares the same private `Scenario` struct and the same
 `RunAll` body — scenario loop, try/catch, baseline vs known-bug counting, colorized summary — as
 near-byte-identical copies (~90 lines × 6: `LightingValidationSuite.cs`,
@@ -2453,10 +2481,11 @@ evaluator (part a, 🔴, seed-gated) should be scheduled like any generator chan
 differential mandatory) and ideally alongside the next planned worldgen feature work, with ET-1's
 Burst port landing on top of it.
 
-VS-1..3 (validation suites) form one small dependency chain: VS-1's shared runner first (each suite
-re-verified against its own pre-refactor verdicts), then VS-2's aggregate + CI entry points and
-VS-3's stale-assembly preamble land in that runner in one place. Worth scheduling before the next
-multi-suite regression campaign (LI-2 and GS-5 will both lean on several suites at once).
+VS-1..3 (validation suites) form one small dependency chain: **VS-1's shared runner is ✅ done
+(2026-07-08** — `ValidationSuiteRunner` + result object; six suites + ChunkRelativePosition migrated,
+verdicts unchanged), so VS-2's aggregate + CI entry points and VS-3's stale-assembly preamble now land
+in that runner in one place. Worth scheduling before the next multi-suite regression campaign (LI-2
+and GS-5 will both lean on several suites at once).
 
 ---
 

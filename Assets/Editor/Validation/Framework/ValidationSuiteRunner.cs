@@ -36,6 +36,9 @@ namespace Editor.Validation.Framework
             KnownBugChannel channel = KnownBugChannel.Bug,
             bool logToConsole = true)
         {
+            // suiteName is passed plain; per-suite header annotations (e.g. "(MT-1)"/"(MT-2)") were dropped in
+            // the VS-1 migration — future: carry them as a structured Scenario/suite tag rather than baking them
+            // into the display name, so the summary can surface them without hard-coding per suite.
             if (logToConsole)
                 Debug.Log($"--- Starting {suiteName} Validation ---");
 
