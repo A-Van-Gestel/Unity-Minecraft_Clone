@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Lighting
 {

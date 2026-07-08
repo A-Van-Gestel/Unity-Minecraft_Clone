@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using Editor.Validation.Meshing.Framework;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Meshing
 {

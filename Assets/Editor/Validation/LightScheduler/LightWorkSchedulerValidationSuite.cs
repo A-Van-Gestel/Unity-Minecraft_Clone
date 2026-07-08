@@ -1,5 +1,5 @@
-using System;
 using System.Collections.Generic;
+using Editor.Validation.Framework;
 using Helpers;
 using UnityEditor;
 using UnityEngine;
@@ -22,91 +22,25 @@ namespace Editor.Validation.LightScheduler
     /// </summary>
     public static partial class LightWorkSchedulerValidationSuite
     {
-        /// <summary>A single validation scenario: a named test delegate, optionally tied to a documented bug.</summary>
-        private readonly struct Scenario
-        {
-            /// <summary>The scenario name used in log output.</summary>
-            public readonly string Name;
-
-            /// <summary>The test body. Returns true when all of its assertions passed.</summary>
-            public readonly Func<bool> Run;
-
-            /// <summary>The documented bug this scenario reproduces, or null for a baseline regression scenario.</summary>
-            public readonly string KnownBugId;
-
-            /// <summary>Initializes a scenario.</summary>
-            public Scenario(string name, Func<bool> run, string knownBugId = null)
-            {
-                Name = name;
-                Run = run;
-                KnownBugId = knownBugId;
-            }
-        }
-
         /// <summary>
-        /// Runs every registered scenario and prints a categorized summary. Baseline failures mark the
-        /// suite red; known-bug reproductions are reported as warnings.
+        /// Runs every registered scenario and prints a categorized summary via the shared
+        /// <see cref="ValidationSuiteRunner"/>. Baseline failures mark the suite red; known-bug
+        /// reproductions are reported as warnings.
         /// </summary>
         [MenuItem("Minecraft Clone/Dev/Validate Light Work Scheduler")]
-        public static void RunAll()
-        {
-            Debug.Log("--- Starting Light Work Scheduler Validation (MT-2) ---");
+        public static void RunAll() => Execute();
 
+        /// <summary>
+        /// Builds and runs the scheduler scenarios, returning the categorized result (the headless/CI entry
+        /// point). Uses the <see cref="KnownBugChannel.Unimplemented"/> channel because the known-bug slot
+        /// here pins not-yet-implemented behavior — a pass means "promote to a baseline", not "archive a fix".
+        /// </summary>
+        /// <returns>The categorized, timed result of the run.</returns>
+        public static ValidationRunResult Execute()
+        {
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
-
-            int baselinePassed = 0;
-            int baselineFailed = 0;
-            int bugsReproduced = 0;
-            int bugsFixCandidates = 0;
-
-            foreach (Scenario scenario in scenarios)
-            {
-                Debug.Log($"--- Scenario: {scenario.Name} ---");
-                bool passed;
-
-                try
-                {
-                    passed = scenario.Run();
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[FAIL] {scenario.Name}\nScenario threw: {e}");
-                    passed = false;
-                }
-
-                if (scenario.KnownBugId == null)
-                {
-                    if (passed) baselinePassed++;
-                    else baselineFailed++;
-                }
-                else if (passed)
-                {
-                    bugsFixCandidates++;
-                    Debug.Log($"<color=cyan>✅ {scenario.Name}: known-bug scenario PASSES — {scenario.KnownBugId} may be implemented. Verify, then promote it to a baseline.</color>");
-                }
-                else
-                {
-                    bugsReproduced++;
-                    Debug.LogWarning($"⚠️ {scenario.Name}: reproduces {scenario.KnownBugId} (expected failure until implemented).");
-                }
-            }
-
-            // --- Summary ---
-            if (baselineFailed == 0)
-            {
-                Debug.Log($"<color=green>ALL {baselinePassed} LIGHT WORK SCHEDULER BASELINE TESTS PASSED.</color>");
-            }
-            else
-            {
-                Debug.LogError($"<color=red>{baselineFailed} OF {baselinePassed + baselineFailed} LIGHT WORK SCHEDULER BASELINE TESTS FAILED — REGRESSION.</color>");
-            }
-
-            if (bugsReproduced > 0)
-                Debug.Log($"{bugsReproduced} known-bug scenario(s) still reproduce their documented behavior gap (expected).");
-
-            if (bugsFixCandidates > 0)
-                Debug.Log($"<color=cyan>{bugsFixCandidates} known-bug scenario(s) now pass — implementation candidates!</color>");
+            return ValidationSuiteRunner.Execute("Light Work Scheduler", scenarios, KnownBugChannel.Unimplemented);
         }
 
         /// <summary>Registers the baseline regression scenarios (implemented in LightWorkSchedulerValidationSuite.Baseline.cs).</summary>

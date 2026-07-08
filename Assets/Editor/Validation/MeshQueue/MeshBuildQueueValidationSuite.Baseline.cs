@@ -4,6 +4,7 @@ using System.Text;
 using Data;
 using Helpers;
 using UnityEngine;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.MeshQueue
 {

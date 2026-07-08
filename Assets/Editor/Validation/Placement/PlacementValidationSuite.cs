@@ -1,5 +1,5 @@
-using System;
 using System.Collections.Generic;
+using Editor.Validation.Framework;
 using UnityEditor;
 using UnityEngine;
 
@@ -26,94 +26,27 @@ namespace Editor.Validation.Placement
     /// </summary>
     public static partial class PlacementValidationSuite
     {
-        /// <summary>A single validation scenario: a named test delegate, optionally tied to a documented bug.</summary>
-        private readonly struct Scenario
-        {
-            /// <summary>The scenario name used in log output.</summary>
-            public readonly string Name;
-
-            /// <summary>The test body. Returns true when all of its assertions passed.</summary>
-            public readonly Func<bool> Run;
-
-            /// <summary>The documented bug this scenario reproduces, or null for a baseline regression scenario.</summary>
-            public readonly string KnownBugId;
-
-            /// <summary>Initializes a scenario.</summary>
-            public Scenario(string name, Func<bool> run, string knownBugId = null)
-            {
-                Name = name;
-                Run = run;
-                KnownBugId = knownBugId;
-            }
-        }
-
         /// <summary>
-        /// Runs every registered scenario and prints a categorized summary. Baseline failures mark the suite red;
-        /// data-audit and known-bug reproductions are reported as warnings (expected until the tags/logic are fixed).
+        /// Runs every registered scenario and prints a categorized summary via the shared
+        /// <see cref="ValidationSuiteRunner"/>. Baseline failures mark the suite red; known-bug
+        /// reproductions are reported as warnings.
         /// </summary>
         [MenuItem("Minecraft Clone/Dev/Validate Placement")]
-        public static void RunAll()
-        {
-            Debug.Log("--- Starting Player Placement Validation ---");
+        public static void RunAll() => Execute();
 
+        /// <summary>
+        /// Builds and runs the placement scenarios (baselines, the real-database data audit, and the PLAYER_BUGS §03
+        /// regression guards), returning the categorized result (the headless/CI entry point).
+        /// </summary>
+        /// <returns>The categorized, timed result of the run.</returns>
+        public static ValidationRunResult Execute()
+        {
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
             AddDataAuditScenarios(scenarios);
             AddRegressionScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
-
-            int baselinePassed = 0;
-            int baselineFailed = 0;
-            int bugsReproduced = 0;
-            int bugsFixCandidates = 0;
-
-            foreach (Scenario scenario in scenarios)
-            {
-                Debug.Log($"--- Scenario: {scenario.Name} ---");
-                bool passed;
-
-                try
-                {
-                    passed = scenario.Run();
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[FAIL] {scenario.Name}\nScenario threw: {e}");
-                    passed = false;
-                }
-
-                if (scenario.KnownBugId == null)
-                {
-                    if (passed) baselinePassed++;
-                    else baselineFailed++;
-                }
-                else if (passed)
-                {
-                    bugsFixCandidates++;
-                    Debug.Log($"<color=cyan>✅ {scenario.Name}: known-bug scenario PASSES — {scenario.KnownBugId} may be fixed. Verify in-game, then archive via the archive-fixed-bug workflow.</color>");
-                }
-                else
-                {
-                    bugsReproduced++;
-                    Debug.LogWarning($"⚠️ {scenario.Name}: reproduces {scenario.KnownBugId} (expected failure until the bug is fixed).");
-                }
-            }
-
-            // --- Summary ---
-            if (baselineFailed == 0)
-            {
-                Debug.Log($"<color=green>ALL {baselinePassed} PLACEMENT BASELINE TESTS PASSED.</color>");
-            }
-            else
-            {
-                Debug.LogError($"<color=red>{baselineFailed} OF {baselinePassed + baselineFailed} PLACEMENT BASELINE TESTS FAILED — REGRESSION.</color>");
-            }
-
-            if (bugsReproduced > 0)
-                Debug.Log($"{bugsReproduced} known-bug/data-audit scenario(s) still reproduce their documented bug (expected).");
-
-            if (bugsFixCandidates > 0)
-                Debug.Log($"<color=cyan>{bugsFixCandidates} known-bug/data-audit scenario(s) now pass — fix candidates!</color>");
+            return ValidationSuiteRunner.Execute("Placement", scenarios);
         }
 
         /// <summary>

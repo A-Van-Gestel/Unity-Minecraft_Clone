@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Editor.Validation.Lighting.Framework;
 using Jobs.BurstData;
 using UnityEngine;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Lighting
 {

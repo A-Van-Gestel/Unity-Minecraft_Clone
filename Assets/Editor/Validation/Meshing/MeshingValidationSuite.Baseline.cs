@@ -7,6 +7,7 @@ using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Meshing
 {

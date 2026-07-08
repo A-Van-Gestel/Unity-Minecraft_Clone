@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
 using Editor.Validation.Meshing.Framework;
+using Helpers;
 using UnityEngine;
+using Object = UnityEngine.Object;
+using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.Meshing
 {
@@ -234,7 +237,7 @@ namespace Editor.Validation.Meshing
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(sentinel);
+                Object.DestroyImmediate(sentinel);
             }
 
             return allPassed;
@@ -254,7 +257,7 @@ namespace Editor.Validation.Meshing
             using SectionRendererTestFixture fixture = new SectionRendererTestFixture();
             fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 0, fluidCount: 0);
 
-            const float size = Helpers.ChunkMath.SECTION_SIZE;
+            const float size = ChunkMath.SECTION_SIZE;
             const float half = size * 0.5f;
             Bounds expected = new Bounds(new Vector3(half, half, half), new Vector3(size, size, size));
 
