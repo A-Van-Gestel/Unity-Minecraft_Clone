@@ -22,9 +22,10 @@ Proven precedent: the pipeline-refactor trilogy of 2026-07-06
 - **Use** for a system-scale analysis whose deliverable is a plan: multiple files, an
   orchestration layer, a flag/state surface, a "make X cleaner and more testable" request.
 - **Skip** for: a single targeted refactor the user wants done now (just do it, or
-  `refactor-safely`); a bug hunt (`voxel-debugging`); a pure performance pass
-  (`burst-optimization` / `perf-benchmark` — though findings here may *interlock* with perf
-  backlogs, see Step 4); updating an existing plan doc (`docs-sync`).
+  `refactor-safely`); planning one session-scale change — a single backlog item, fix, or
+  feature (`create-implementation-plan`); a bug hunt (`voxel-debugging`); a pure performance
+  pass (`burst-optimization` / `perf-benchmark` — though findings here may *interlock* with
+  perf backlogs, see Step 4); updating an existing plan doc (`docs-sync`).
 
 ## Step 1 — Pin the scope contract
 
