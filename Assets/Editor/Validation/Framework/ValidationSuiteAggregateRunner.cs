@@ -60,7 +60,7 @@ namespace Editor.Validation.Framework
                         EditorUtility.DisplayProgressBar("Validate All",
                             $"Suite {i + 1}/{suites.Count}: {suite.DisplayName}", i / (float)suites.Count);
 
-                    results.Add(RunOneIsolated(suite, logToConsole));
+                    results.Add(RunOneIsolated(suite, logToConsole, s_worldGuard));
                 }
             }
             finally
@@ -82,16 +82,22 @@ namespace Editor.Validation.Framework
             return aggregate;
         }
 
+        /// <summary>The production guard: snapshots and restores the global <c>World.Instance</c> singleton.</summary>
+        private static readonly IIsolationGuard s_worldGuard = new WorldInstanceGuard();
+
         /// <summary>
-        /// Runs one suite with the global-state isolation guard around it (see the type remarks). The suite's own
-        /// progress bar is suppressed (<c>showProgress: false</c>) so this runner's single combined bar is the only one.
+        /// Runs one suite with the given global-state isolation guard around it (see the type remarks). The suite's
+        /// own progress bar is suppressed (<c>showProgress: false</c>) so this runner's single combined bar is the only
+        /// one. Internal + guard-injectable so the framework self-test can prove the trip path with a mock guard,
+        /// without fabricating a real <c>World</c> (which would fire <c>World.Awake</c> and real subsystem side effects).
         /// </summary>
         /// <param name="suite">The suite to run.</param>
         /// <param name="logToConsole">Whether the suite (and the guard) should log.</param>
-        /// <returns>The suite's result, replaced by a failed result if it threw or leaked global state.</returns>
-        private static ValidationRunResult RunOneIsolated(RegisteredSuite suite, bool logToConsole)
+        /// <param name="guard">The global-state guard to snapshot/restore around the suite.</param>
+        /// <returns>The suite's result, replaced by a failed result if it threw or leaked guarded global state.</returns>
+        internal static ValidationRunResult RunOneIsolated(RegisteredSuite suite, bool logToConsole, IIsolationGuard guard)
         {
-            object worldBefore = World.Instance;
+            object snapshot = guard.Capture();
 
             ValidationRunResult result;
             try
@@ -105,12 +111,12 @@ namespace Editor.Validation.Framework
                 result = SuiteLevelFailure(suite.DisplayName, "suite-level failure", e);
             }
 
-            // Isolation guard: a suite must leave the shared World.Instance exactly as it found it.
-            if (!ReferenceEquals(World.Instance, worldBefore))
+            // Isolation guard: a suite must leave the guarded global state exactly as it found it. RestoreIfLeaked
+            // force-restores the snapshot (protecting the next suite) and reports whether a leak had occurred.
+            if (guard.RestoreIfLeaked(snapshot))
             {
-                ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), worldBefore);
                 if (logToConsole)
-                    Debug.LogError($"<color=red>ISOLATION VIOLATION: '{suite.DisplayName}' left World.Instance mutated. " +
+                    Debug.LogError($"<color=red>ISOLATION VIOLATION: '{suite.DisplayName}' left {guard.StateName} mutated. " +
                                    "Restored it to protect the next suite; this suite's run is UNTRUSTED and marked failed.</color>");
                 result = AppendIsolationFailure(result, suite.DisplayName);
             }
@@ -197,6 +203,45 @@ namespace Editor.Validation.Framework
                 Debug.Log($"{aggregate.BugsReproduced} known-bug scenario(s) still reproduce their documented bug/feature (expected).");
             if (aggregate.BugsFixCandidates > 0)
                 Debug.Log($"<color=cyan>{aggregate.BugsFixCandidates} known-bug scenario(s) now pass — fix/implementation candidates!</color>");
+        }
+
+        /// <summary>
+        /// Snapshots and restores a piece of process-global state around a suite run, so the aggregate runner can
+        /// guarantee one suite never leaks that state into the next. The production implementation guards
+        /// <c>World.Instance</c>; a mock implementation lets the self-test prove the trip path without a real World.
+        /// </summary>
+        internal interface IIsolationGuard
+        {
+            /// <summary>Human-readable name of the guarded state, for the violation message.</summary>
+            string StateName { get; }
+
+            /// <summary>Captures the current value of the guarded state to compare against after the suite runs.</summary>
+            /// <returns>An opaque snapshot to pass back to <see cref="RestoreIfLeaked"/>.</returns>
+            object Capture();
+
+            /// <summary>Restores the guarded state to <paramref name="snapshot"/> if the suite mutated it.</summary>
+            /// <param name="snapshot">The value returned by <see cref="Capture"/>.</param>
+            /// <returns>True if the state had leaked (and was restored); false if the suite left it untouched.</returns>
+            bool RestoreIfLeaked(object snapshot);
+        }
+
+        /// <summary>Guards the global <c>World.Instance</c> singleton via reference identity + the reflection setter.</summary>
+        private sealed class WorldInstanceGuard : IIsolationGuard
+        {
+            /// <inheritdoc/>
+            public string StateName => "World.Instance";
+
+            /// <inheritdoc/>
+            public object Capture() => World.Instance;
+
+            /// <inheritdoc/>
+            public bool RestoreIfLeaked(object snapshot)
+            {
+                if (ReferenceEquals(World.Instance, snapshot))
+                    return false;
+                ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), snapshot);
+                return true;
+            }
         }
     }
 }

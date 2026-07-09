@@ -45,7 +45,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 7;
+        public const int ExpectedSuiteCount = 8;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -57,6 +57,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Mesh Build Queue", MeshBuildQueueValidationSuite.Execute),
             new RegisteredSuite("Light Work Scheduler", LightWorkSchedulerValidationSuite.Execute),
             new RegisteredSuite("Chunk Math", ChunkRelativePositionTests.Execute),
+            new RegisteredSuite("Validation Framework", ValidationFrameworkSelfTest.Execute),
         };
     }
 }
