@@ -127,12 +127,12 @@ namespace Editor.Validation.Framework
             {
                 w.WriteStartElement("failure");
                 w.WriteStartElement("message");
-                w.WriteCData(sc.Exception != null ? sc.Exception.Message : "Baseline scenario returned false.");
+                WriteCData(w, sc.Exception != null ? sc.Exception.Message : "Baseline scenario returned false.");
                 w.WriteEndElement();
                 if (sc.Exception != null)
                 {
                     w.WriteStartElement("stack-trace");
-                    w.WriteCData(sc.Exception.ToString());
+                    WriteCData(w, sc.Exception.ToString());
                     w.WriteEndElement();
                 }
 
@@ -142,12 +142,33 @@ namespace Editor.Validation.Framework
             {
                 w.WriteStartElement("reason");
                 w.WriteStartElement("message");
-                w.WriteCData($"Reproduces {sc.KnownBugId} (expected until fixed/implemented).");
+                WriteCData(w, $"Reproduces {sc.KnownBugId} (expected until fixed/implemented).");
                 w.WriteEndElement();
                 w.WriteEndElement();
             }
 
             w.WriteEndElement();
+        }
+
+        /// <summary>
+        /// Writes <paramref name="text"/> as CDATA, split across sections at every <c>]]&gt;</c> so no single section
+        /// contains the terminator — <see cref="XmlWriter.WriteCData"/> throws on an embedded <c>]]&gt;</c>, and
+        /// scenario exception text (message + stack trace) is arbitrary, developer-uncontrolled content.
+        /// </summary>
+        /// <param name="w">The XML writer.</param>
+        /// <param name="text">The (possibly null) text to emit as CDATA.</param>
+        private static void WriteCData(XmlWriter w, string text)
+        {
+            text ??= "";
+            int start = 0;
+            int idx;
+            while ((idx = text.IndexOf("]]>", start, StringComparison.Ordinal)) >= 0)
+            {
+                // Include the "]]" in this section; the ">" begins the next, so neither section holds the full "]]>".
+                w.WriteCData(text.Substring(start, idx - start + 2));
+                start = idx + 2;
+            }
+            w.WriteCData(text.Substring(start));
         }
 
         /// <summary>Formats an integer culture-invariantly.</summary>

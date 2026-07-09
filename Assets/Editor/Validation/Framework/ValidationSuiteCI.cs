@@ -49,9 +49,18 @@ namespace Editor.Validation.Framework
                 AggregateRunResult aggregate = ValidationSuiteAggregateRunner.Run(logToConsole: true, suites);
                 WriteResults(aggregate, xmlPath);
 
-                bool ok = aggregate.Success && !aggregate.AnySuiteRanNothing && !aggregate.RanNothing;
+                // A registry below its expected floor means a suite was dropped from the standard set — a silent
+                // coverage regression. In the interactive runner that is only a warning (no exit code); here it must
+                // fail the run, else CI stays green while validating fewer suites than it thinks. It fails a subset
+                // run too: a broken registry is a real defect regardless of which subset was requested.
+                bool registryComplete = ValidationSuiteRegistry.Suites.Count >= ValidationSuiteRegistry.ExpectedSuiteCount;
+                if (!registryComplete)
+                    Debug.LogError($"<color=red>Validate All (headless): registry has {ValidationSuiteRegistry.Suites.Count} " +
+                                   $"suites, expected at least {ValidationSuiteRegistry.ExpectedSuiteCount} — a suite was dropped. Failing.</color>");
+
+                bool ok = registryComplete && aggregate.Success && !aggregate.AnySuiteRanNothing && !aggregate.RanNothing;
                 Debug.Log($"Validate All (headless): exiting {(ok ? 0 : 1)} — Success={aggregate.Success}, " +
-                          $"AnySuiteRanNothing={aggregate.AnySuiteRanNothing}, RanNothing={aggregate.RanNothing}");
+                          $"AnySuiteRanNothing={aggregate.AnySuiteRanNothing}, RanNothing={aggregate.RanNothing}, RegistryComplete={registryComplete}");
                 EditorApplication.Exit(ok ? 0 : 1);
             }
             catch (Exception e)

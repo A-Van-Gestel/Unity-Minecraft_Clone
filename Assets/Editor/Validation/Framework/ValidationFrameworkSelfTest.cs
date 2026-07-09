@@ -34,8 +34,10 @@ namespace Editor.Validation.Framework
                 new Scenario("NUnit XML: known-bug repro is Inconclusive + reason + property", XmlInconclusiveDetail),
                 new Scenario("NUnit XML: known-bug now-passing is Passed + FixCandidate", XmlFixCandidate),
                 new Scenario("NUnit XML: round-trip case counts preserved", XmlRoundTripCounts),
+                new Scenario("NUnit XML: exception text containing ']]>' round-trips", XmlCDataTerminatorEscaped),
                 new Scenario("Isolation guard: trips on leak, restores, marks failed", GuardTripsOnLeak),
                 new Scenario("Isolation guard: no false-positive when clean", GuardCleanNoFalsePositive),
+                new Scenario("Registry: suite count matches ExpectedSuiteCount", RegistryMeetsExpectedCount),
             };
             return ValidationSuiteRunner.Execute("Validation Framework", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -167,6 +169,30 @@ namespace Editor.Validation.Framework
                    && Check(passed == 3 && failed == 1 && inconclusive == 1, "round-trip case-result tally wrong");
         }
 
+        private static bool XmlCDataTerminatorEscaped()
+        {
+            // An exception message carrying the CDATA terminator would make a naive XmlWriter.WriteCData throw.
+            List<ScenarioResult> scenarios = new List<ScenarioResult>
+            {
+                new ScenarioResult { Name = "boom", Passed = false, Exception = new Exception("bad ]]> payload ]]>") },
+            };
+            ValidationRunResult suite = new ValidationRunResult { SuiteName = "Term", Scenarios = scenarios, BaselineFailed = 1 };
+            AggregateRunResult agg = new AggregateRunResult { Suites = new List<ValidationRunResult> { suite } };
+
+            string xml;
+            try
+            {
+                xml = WriteXml(agg);
+            }
+            catch (Exception e)
+            {
+                return Check(false, $"writer threw on a ']]>' payload: {e.Message}");
+            }
+
+            XmlNode msg = Parse(xml).SelectSingleNode("//test-case[@name='boom']/failure/message");
+            return Check(msg != null && msg.InnerText.Contains("]]>"), "']]>' payload not preserved in <failure><message>");
+        }
+
         // --- Isolation-guard scenarios (mock guard, no real World touched) ---
 
         private static bool GuardTripsOnLeak()
@@ -196,6 +222,15 @@ namespace Editor.Validation.Framework
             return Check(guard.State == "clean", "guard mutated state on a clean run")
                    && Check(r.BaselineFailed == 0 && r.Success, "guard false-tripped a clean suite")
                    && Check(r.BaselinePassed == 1, "clean suite pass count changed");
+        }
+
+        private static bool RegistryMeetsExpectedCount()
+        {
+            // Keeps the explicit registry and its floor in sync: catches a dropped suite (Count < Expected, which the
+            // headless gate fails on) AND a suite added without bumping the const (Count > Expected, a stale floor).
+            return Check(ValidationSuiteRegistry.Suites.Count == ValidationSuiteRegistry.ExpectedSuiteCount,
+                $"registry has {ValidationSuiteRegistry.Suites.Count} suites but ExpectedSuiteCount is " +
+                $"{ValidationSuiteRegistry.ExpectedSuiteCount} — keep them in sync (same file).");
         }
 
         /// <summary>A one-scenario, all-pass suite result for the guard scenarios.</summary>
