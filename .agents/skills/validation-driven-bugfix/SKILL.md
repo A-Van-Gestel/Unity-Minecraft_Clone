@@ -12,6 +12,7 @@ for a new system (fluids, chunk pipeline, …), follow `references/building-a-ne
 
 ## Relationship to other skills
 
+- `run-validation-suite` is the **run-and-read** companion: when the task is only to *execute* a suite (one, a subset, or `Validate All`/headless) and interpret its console/XML output — not to author a scenario or fix a bug — use that skill instead. Come here the moment the work becomes "add a repro / fix a bug / promote a scenario".
 - `voxel-debugging` **precedes** this skill: it diagnoses and locates the root cause. Once the bug is understood (or already documented in `Documentation/Bugs/`), switch here for the fix.
 - `archive-fixed-bug` **ends** this skill: after in-game confirmation, the bug entry moves to `_FIXED_BUGS.md`.
 - `docs-sync` runs alongside: bug entries get repro-scenario pointers; fixes update the entry's Status.
