@@ -1,6 +1,9 @@
 # Own stuff
 /Assets/settings.json*
 
+# Validation-suite headless results (NUnit XML build artifact — ValidationSuiteCI.RunHeadless)
+/TestResults/
+
 # NugetForUnity
 /Assets/Packages/
 
