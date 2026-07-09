@@ -269,7 +269,7 @@ namespace Editor.Validation.Framework
         /// </summary>
         /// <param name="ms">The duration in milliseconds.</param>
         /// <returns>A human-readable duration string.</returns>
-        private static string FormatDuration(double ms)
+        internal static string FormatDuration(double ms)
         {
             if (ms < HUMAN_BREAKDOWN_THRESHOLD_MS)
                 return $"{ms.ToString("F1", CultureInfo.InvariantCulture)} ms";
