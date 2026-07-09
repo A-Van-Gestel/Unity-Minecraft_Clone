@@ -23,8 +23,10 @@ namespace Editor.Validation
         /// Builds and runs the ChunkRelativePosition scenarios, returning the categorized result (the
         /// headless/CI entry point).
         /// </summary>
+        /// <param name="logToConsole">When false, runs silently and only returns the result (for headless/CI use).</param>
+        /// <param name="showProgress">When false, suppresses this suite's own progress bar (the aggregate runner drives one).</param>
         /// <returns>The categorized, timed result of the run.</returns>
-        public static ValidationRunResult Execute()
+        public static ValidationRunResult Execute(bool logToConsole = true, bool showProgress = true)
         {
             List<Scenario> scenarios = new List<Scenario>();
 
@@ -79,7 +81,7 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("Operator - (Distance)", RunOperatorDistance));
             scenarios.Add(new Scenario("Operator == / !=", RunOperatorEquality));
 
-            return ValidationSuiteRunner.Execute("Chunk Math", scenarios);
+            return ValidationSuiteRunner.Execute("Chunk Math", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
         /// <summary>

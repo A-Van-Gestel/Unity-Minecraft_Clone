@@ -32,12 +32,16 @@ namespace Editor.Validation.Framework
         /// <param name="scenarios">The scenarios to run, in registration order.</param>
         /// <param name="channel">The vocabulary for known-bug state changes (fix/archive vs implement/promote).</param>
         /// <param name="logToConsole">When false, runs silently and only returns the result (for headless/CI use).</param>
+        /// <param name="showProgress">When false, suppresses this suite's own <see cref="EditorUtility"/> progress
+        /// bar. The aggregate runner (VS-2 "Validate All") sets this false so it can drive a single combined bar
+        /// instead of each suite's inner bar clobbering it (only one modal progress dialog exists).</param>
         /// <returns>The categorized, timed result of the run.</returns>
         public static ValidationRunResult Execute(
             string suiteName,
             IReadOnlyList<Scenario> scenarios,
             KnownBugChannel channel = KnownBugChannel.Bug,
-            bool logToConsole = true)
+            bool logToConsole = true,
+            bool showProgress = true)
         {
             // suiteName is passed plain; per-suite header annotations (e.g. "(MT-1)"/"(MT-2)") were dropped in
             // the VS-1 migration — future: carry them as a structured Scenario/suite tag rather than baking them
@@ -52,8 +56,9 @@ namespace Editor.Validation.Framework
             // Live progress bar for interactive runs: the suites run synchronously on the main thread (the console
             // can't repaint until they finish), but EditorUtility force-repaints its progress dialog on each call,
             // so this is the only "what's running now" signal during a long run. Suppressed for headless/batch runs
-            // (no GUI). Cleared in the finally so an exception can't leave it stuck on screen.
-            bool showProgress = logToConsole && !Application.isBatchMode;
+            // (no GUI) and when the caller drives its own bar (showProgress == false, e.g. the aggregate runner).
+            // Cleared in the finally so an exception can't leave it stuck on screen.
+            bool showProgressBar = showProgress && logToConsole && !Application.isBatchMode;
 
             try
             {
@@ -61,7 +66,7 @@ namespace Editor.Validation.Framework
                 {
                     Scenario scenario = scenarios[i];
 
-                    if (showProgress)
+                    if (showProgressBar)
                         EditorUtility.DisplayProgressBar(
                             $"Validating {suiteName}",
                             $"Scenario {i + 1}/{scenarios.Count}: {scenario.Name}",
@@ -108,7 +113,7 @@ namespace Editor.Validation.Framework
             }
             finally
             {
-                if (showProgress)
+                if (showProgressBar)
                     EditorUtility.ClearProgressBar();
             }
 

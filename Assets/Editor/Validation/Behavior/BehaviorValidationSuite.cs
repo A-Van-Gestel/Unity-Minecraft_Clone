@@ -30,13 +30,15 @@ namespace Editor.Validation.Behavior
         /// <summary>
         /// Builds and runs the behavior scenarios, returning the categorized result (the headless/CI entry point).
         /// </summary>
+        /// <param name="logToConsole">When false, runs silently and only returns the result (for headless/CI use).</param>
+        /// <param name="showProgress">When false, suppresses this suite's own progress bar (the aggregate runner drives one).</param>
         /// <returns>The categorized, timed result of the run.</returns>
-        public static ValidationRunResult Execute()
+        public static ValidationRunResult Execute(bool logToConsole = true, bool showProgress = true)
         {
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
-            return ValidationSuiteRunner.Execute("Behavior", scenarios);
+            return ValidationSuiteRunner.Execute("Behavior", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
         /// <summary>Registers the baseline regression scenarios (implemented in BehaviorValidationSuite.Baseline.cs).</summary>

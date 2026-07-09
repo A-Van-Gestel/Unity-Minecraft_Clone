@@ -38,15 +38,17 @@ namespace Editor.Validation.Placement
         /// Builds and runs the placement scenarios (baselines, the real-database data audit, and the PLAYER_BUGS §03
         /// regression guards), returning the categorized result (the headless/CI entry point).
         /// </summary>
+        /// <param name="logToConsole">When false, runs silently and only returns the result (for headless/CI use).</param>
+        /// <param name="showProgress">When false, suppresses this suite's own progress bar (the aggregate runner drives one).</param>
         /// <returns>The categorized, timed result of the run.</returns>
-        public static ValidationRunResult Execute()
+        public static ValidationRunResult Execute(bool logToConsole = true, bool showProgress = true)
         {
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
             AddDataAuditScenarios(scenarios);
             AddRegressionScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
-            return ValidationSuiteRunner.Execute("Placement", scenarios);
+            return ValidationSuiteRunner.Execute("Placement", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
 
         /// <summary>

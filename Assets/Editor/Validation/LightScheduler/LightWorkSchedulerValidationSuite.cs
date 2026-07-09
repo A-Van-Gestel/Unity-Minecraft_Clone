@@ -35,12 +35,14 @@ namespace Editor.Validation.LightScheduler
         /// point). Uses the <see cref="KnownBugChannel.Unimplemented"/> channel because the known-bug slot
         /// here pins not-yet-implemented behavior — a pass means "promote to a baseline", not "archive a fix".
         /// </summary>
+        /// <param name="logToConsole">When false, runs silently and only returns the result (for headless/CI use).</param>
+        /// <param name="showProgress">When false, suppresses this suite's own progress bar (the aggregate runner drives one).</param>
         /// <returns>The categorized, timed result of the run.</returns>
-        public static ValidationRunResult Execute()
+        public static ValidationRunResult Execute(bool logToConsole = true, bool showProgress = true)
         {
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
-            return ValidationSuiteRunner.Execute("Light Work Scheduler", scenarios, KnownBugChannel.Unimplemented);
+            return ValidationSuiteRunner.Execute("Light Work Scheduler", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
 
         /// <summary>Registers the baseline regression scenarios (implemented in LightWorkSchedulerValidationSuite.Baseline.cs).</summary>
