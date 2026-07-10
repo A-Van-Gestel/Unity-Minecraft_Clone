@@ -263,6 +263,10 @@ namespace Editor.Validation.Lighting.Framework
             internal NativeArray<ushort> CenterLight;
             internal NativeArray<ushort> PaddedLight;
 
+            // LI-2: the Y-band height the job's volumes were gathered with — CompleteLightingJob must
+            // extract with the same value (mirror of LightingJobData.BandHeight).
+            internal int BandHeight;
+
             internal readonly List<IDisposable> OwnedContainers = new List<IDisposable>();
             internal bool Completed;
 
@@ -588,10 +592,15 @@ namespace Editor.Validation.Lighting.Framework
                 LightSW = lSW, LightNW = lNW, LightSE = lSE, LightNE = lNE,
             };
 
+            // LI-2 Step 2: banding plumbed but not yet enabled — the harness mirrors production's
+            // full-height default until the derivation is wired into both schedule sites together.
+            flight.BandHeight = ChunkMath.CHUNK_HEIGHT;
+
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 PaddedVoxels = paddedVoxels,
                 PaddedLight = paddedLight,
+                BandHeight = flight.BandHeight,
                 ChunkPosition = chunk.VoxelOrigin,
                 SunlightBfsQueue = sunQueue,
                 BlocklightBfsQueue = blockQueue,
@@ -658,7 +667,8 @@ namespace Editor.Validation.Lighting.Framework
                 // targeting in-flight chunks are DEFERRED and drained right after this merge (Bug 08 path-2).
                 // LI-1: extract the job's center light from the padded volume into the center light buffer
                 // first (mirror of WorldJobManager.ApplyLightingJobResult), then merge; voxels are unchanged.
-                ChunkMath.ExtractCenterLight(flight.PaddedLight, flight.CenterLight);
+                // LI-2: band rows only — above them CenterLight keeps its schedule-time snapshot.
+                ChunkMath.ExtractCenterLight(flight.PaddedLight, flight.CenterLight, flight.BandHeight);
                 chunk.Data.ApplyJobLightMap(flight.CenterVoxels, flight.CenterLight, null);
 
                 // Drain mods deferred for this chunk while its job was in flight

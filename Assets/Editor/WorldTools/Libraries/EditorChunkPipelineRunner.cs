@@ -194,10 +194,15 @@ namespace Editor.WorldTools.Libraries
             jobData.PaddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             jobData.PaddedLight = new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
+            // LI-2: the editor preview pipeline always runs full height (its worlds are one-shot renders,
+            // not the streaming hot path the band optimizes).
+            jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
+
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 PaddedVoxels = jobData.PaddedVoxels,
                 PaddedLight = jobData.PaddedLight,
+                BandHeight = jobData.BandHeight,
                 ChunkPosition = voxelOrigin,
                 SunlightBfsQueue = jobData.SunLightQueue,
                 BlocklightBfsQueue = jobData.BlockLightQueue,

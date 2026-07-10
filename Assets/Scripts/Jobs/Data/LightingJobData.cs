@@ -56,6 +56,15 @@ namespace Jobs.Data
         public NativeArray<uint> PaddedVoxels;
         public NativeArray<ushort> PaddedLight;
 
+        /// <summary>
+        /// LI-2: the Y-band height this job's padded volumes were gathered with
+        /// (<c>NeighborhoodLightingJob.BandHeight</c>). The completion-side extract MUST pass the same
+        /// value to <c>ChunkMath.ExtractCenterLight</c> — rows at/above it are un-gathered scratch in
+        /// <see cref="PaddedLight"/> and must be left to <see cref="LightMap"/>'s schedule-time snapshot.
+        /// <c>ChunkMath.CHUNK_HEIGHT</c> = full height (banding disabled for this job).
+        /// </summary>
+        public int BandHeight;
+
         // --- Output data ---
         public NativeArray<uint> Map; // The center chunk voxel snapshot (gather source + ApplyJobLightMap reference)
         public NativeArray<ushort> LightMap; // The center chunk light buffer (gather source + readback target)

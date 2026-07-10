@@ -608,10 +608,15 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 HashSetPool<Vector2Int>.Release(columns);
             }
 
+            // LI-2 Step 2: banding is plumbed but not yet enabled — every job runs full height until the
+            // band derivation is wired in behind the EnableLightingBandGather flag.
+            jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
+
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 PaddedVoxels = jobData.PaddedVoxels,
                 PaddedLight = jobData.PaddedLight,
+                BandHeight = jobData.BandHeight,
                 ChunkPosition = chunkData.Position,
                 SunlightBfsQueue = jobData.SunLightQueue,
                 BlocklightBfsQueue = jobData.BlockLightQueue,
@@ -1553,8 +1558,9 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
         // LI-1: the job wrote light only into the center [2,18) region of the padded volume — extract it
         // back into the section-contiguous center LightMap, then merge through the same ApplyJobLightMap.
         // Voxels are never modified in-job, so jobData.Map (the unchanged center voxel snapshot) is still
-        // the correct merge reference.
-        ChunkMath.ExtractCenterLight(jobData.PaddedLight, jobData.LightMap);
+        // the correct merge reference. LI-2: only the job's gathered band rows are extracted; above them
+        // LightMap keeps its schedule-time snapshot, which the job provably did not change.
+        ChunkMath.ExtractCenterLight(jobData.PaddedLight, jobData.LightMap, jobData.BandHeight);
         chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes);
     }
 

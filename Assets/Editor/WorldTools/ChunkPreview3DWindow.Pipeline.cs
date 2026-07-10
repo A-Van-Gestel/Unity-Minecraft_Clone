@@ -313,7 +313,7 @@ namespace Editor.WorldTools
 
                 // LI-1: the job wrote light into the padded volume's center region — extract it back into
                 // the center light map before reading it into persistent storage below.
-                ChunkMath.ExtractCenterLight(data.PaddedLight, data.LightMap);
+                ChunkMath.ExtractCenterLight(data.PaddedLight, data.LightMap, data.BandHeight);
 
                 Vector2Int voxelOrigin = kvp.Key.ToVoxelOrigin();
 

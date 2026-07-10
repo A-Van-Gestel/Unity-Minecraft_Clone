@@ -257,6 +257,7 @@ namespace Config
                     {
                         PaddedVoxels = paddedVoxels,
                         PaddedLight = paddedLight,
+                        BandHeight = ChunkMath.CHUNK_HEIGHT, // LI-2: the probe calibrates the full-height path
                         ChunkPosition = new Vector2Int(0, 0),
                         SunlightBfsQueue = sunQueue,
                         BlocklightBfsQueue = blockQueue,
