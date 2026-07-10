@@ -593,8 +593,8 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             jobData.Mods = new NativeList<LightModification>(allocator);
             jobData.PullBackClaims = new NativeList<PullBackClaim>(allocator);
             jobData.IsStable = new NativeArray<bool>(1, allocator);
-            jobData.SunLightQueue = chunkData.GetSunlightQueueForJob(allocator);
-            jobData.BlockLightQueue = chunkData.GetBlocklightQueueForJob(allocator);
+            jobData.SunLightQueue = chunkData.GetSunlightQueueForJob(allocator, out int maxSunNodeY);
+            jobData.BlockLightQueue = chunkData.GetBlocklightQueueForJob(allocator, out int maxBlockNodeY);
             jobData.SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator);
 
             if (_world.worldData.SunlightRecalculationQueue.TryGetValue(chunkData.Position, out HashSet<Vector2Int> columns))
@@ -608,15 +608,40 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
                 HashSetPool<Vector2Int>.Release(columns);
             }
 
-            // LI-2 Step 2: banding is plumbed but not yet enabled — every job runs full height until the
-            // band derivation is wired in behind the EnableLightingBandGather flag.
+            // LI-2: derive the job's Y-band (EnableLightingBandGather; full height = banding off).
+            // Restricted to the pooled steady-state path: the TempJob startup sweep is initial lighting
+            // (the derivation's column-recalc rule would force full height anyway), and only the pooled
+            // fills' missing-neighbor semantics (zero-FILLED maps) match NeighborBandTop's summary.
+            uint3x3 bandTopLight = default;
             jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
+            if (_world.EnableLightingBandGather && usePooledBuffers)
+            {
+                LightingBandChunkTop centerTop = chunkData.GetLightingBandTop();
+                LightingBandChunkTop w = NeighborBandTop(chunkCoord, -1, 0);
+                LightingBandChunkTop e = NeighborBandTop(chunkCoord, 1, 0);
+                LightingBandChunkTop s = NeighborBandTop(chunkCoord, 0, -1);
+                LightingBandChunkTop n = NeighborBandTop(chunkCoord, 0, 1);
+                LightingBandChunkTop sw = NeighborBandTop(chunkCoord, -1, -1);
+                LightingBandChunkTop nw = NeighborBandTop(chunkCoord, -1, 1);
+                LightingBandChunkTop se = NeighborBandTop(chunkCoord, 1, -1);
+                LightingBandChunkTop ne = NeighborBandTop(chunkCoord, 1, 1);
+
+                jobData.BandHeight = LightingBandDecision.DeriveBandHeight(in centerTop,
+                    in w, in e, in s, in n, in sw, in nw, in se, in ne,
+                    math.max(maxSunNodeY, maxBlockNodeY),
+                    jobData.SunLightRecalcQueue.Count > 0,
+                    chunkData.NeedsEdgeCheck);
+
+                bandTopLight = LightingBandDecision.BuildTopLightTable(in centerTop,
+                    in w, in e, in s, in n, in sw, in nw, in se, in ne);
+            }
 
             NeighborhoodLightingJob job = new NeighborhoodLightingJob
             {
                 PaddedVoxels = jobData.PaddedVoxels,
                 PaddedLight = jobData.PaddedLight,
                 BandHeight = jobData.BandHeight,
+                BandTopLight = bandTopLight,
                 ChunkPosition = chunkData.Position,
                 SunlightBfsQueue = jobData.SunLightQueue,
                 BlocklightBfsQueue = jobData.BlockLightQueue,
@@ -645,6 +670,23 @@ public class WorldJobManager : IDisposable, ILightingCompletionDriver<ChunkCoord
             ReleaseLightingJobData(jobData);
             throw;
         }
+    }
+
+    /// <summary>
+    /// A neighbor's uniform-top summary for the LI-2 band derivation. Presence mirrors the pooled
+    /// snapshot fills exactly: a live chunk is summarized from its <see cref="ChunkData"/>; a missing
+    /// one (vestigial here — the neighbors-ready gate precedes scheduling) summarizes as the zero-FILLED
+    /// map <c>FillEmpty*</c> would produce (present, uniform air, light 0), which drives the derivation
+    /// to its conservative full-height arm.
+    /// </summary>
+    /// <param name="center">The center chunk's coordinate.</param>
+    /// <param name="dx">Neighbor X offset (−1..1).</param>
+    /// <param name="dz">Neighbor Z offset (−1..1).</param>
+    /// <returns>The neighbor's summary.</returns>
+    private LightingBandChunkTop NeighborBandTop(ChunkCoord center, int dx, int dz)
+    {
+        ChunkData neighbor = _world.worldData.RequestChunk(center.Neighbor(dx, dz).ToVoxelOrigin(), false);
+        return neighbor != null ? neighbor.GetLightingBandTop() : default;
     }
 
     /// <summary>

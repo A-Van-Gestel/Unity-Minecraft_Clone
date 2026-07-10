@@ -1244,15 +1244,20 @@ namespace Data
         /// Flushes the managed blocklight queue into a NativeQueue for Burst Job processing.
         /// </summary>
         /// <param name="allocator">The memory allocator to use (e.g., Allocator.TempJob).</param>
+        /// <param name="maxNodeY">Highest node Y flushed, or −1 when the queue was empty — an LI-2
+        /// band-derivation input (see <see cref="LightingBandDecision"/>).</param>
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
-        public NativeQueue<LightQueueNode> GetBlocklightQueueForJob(Allocator allocator)
+        public NativeQueue<LightQueueNode> GetBlocklightQueueForJob(Allocator allocator, out int maxNodeY)
         {
             NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
+            maxNodeY = -1;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
             while (BlockLightQueueCount > 0)
             {
-                nativeQueue.Enqueue(_blocklightBfsQueue.Dequeue());
+                LightQueueNode node = _blocklightBfsQueue.Dequeue();
+                if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
+                nativeQueue.Enqueue(node);
             }
 
             // The managed queue is now empty and ready for new requests.
@@ -1263,15 +1268,20 @@ namespace Data
         /// Flushes the managed sunlight queue into a NativeQueue for Burst Job processing.
         /// </summary>
         /// <param name="allocator">The memory allocator to use (e.g., Allocator.TempJob).</param>
+        /// <param name="maxNodeY">Highest node Y flushed, or −1 when the queue was empty — an LI-2
+        /// band-derivation input (see <see cref="LightingBandDecision"/>).</param>
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
-        public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator)
+        public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator, out int maxNodeY)
         {
             NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
+            maxNodeY = -1;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
             while (SunLightQueueCount > 0)
             {
-                nativeQueue.Enqueue(_sunlightBfsQueue.Dequeue());
+                LightQueueNode node = _sunlightBfsQueue.Dequeue();
+                if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
+                nativeQueue.Enqueue(node);
             }
 
             // The managed queue is now empty and ready for new requests.
