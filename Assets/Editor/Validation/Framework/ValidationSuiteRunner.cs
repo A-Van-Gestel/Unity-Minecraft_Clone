@@ -43,6 +43,11 @@ namespace Editor.Validation.Framework
             bool logToConsole = true,
             bool showProgress = true)
         {
+            // Stale-code preamble (VS-3): warn loudly if the loaded assemblies may be out of date vs source on disk.
+            // Diagnostic only — never throws, never fails a baseline. Suppressed while the aggregate runner's scope is
+            // open (it checks once around its whole loop, not once per inner suite).
+            StaleAssemblyGuard.WarnIfStale();
+
             // suiteName is passed plain; per-suite header annotations (e.g. "(MT-1)"/"(MT-2)") were dropped in
             // the VS-1 migration — future: carry them as a structured Scenario/suite tag rather than baking them
             // into the display name, so the summary can surface them without hard-coding per suite.

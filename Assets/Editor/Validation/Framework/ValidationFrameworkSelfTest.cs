@@ -37,6 +37,12 @@ namespace Editor.Validation.Framework
                 new Scenario("NUnit XML: exception text containing ']]>' round-trips", XmlCDataTerminatorEscaped),
                 new Scenario("Isolation guard: trips on leak, restores, marks failed", GuardTripsOnLeak),
                 new Scenario("Isolation guard: no false-positive when clean", GuardCleanNoFalsePositive),
+                new Scenario("Stale guard: fresh tree is neither stale nor inconclusive", StaleGuardFresh),
+                new Scenario("Stale guard: isCompiling ⇒ stale", StaleGuardCompiling),
+                new Scenario("Stale guard: source newer than DLL ⇒ stale", StaleGuardSourceNewer),
+                new Scenario("Stale guard: source within tolerance ⇒ not stale", StaleGuardWithinTolerance),
+                new Scenario("Stale guard: on-disk DLL newer than loaded ⇒ stale", StaleGuardDiskNewerThanLoaded),
+                new Scenario("Stale guard: unresolved assembly ⇒ inconclusive, not stale", StaleGuardUnresolvedInconclusive),
                 new Scenario("Registry: suite count matches ExpectedSuiteCount", RegistryMeetsExpectedCount),
             };
             return ValidationSuiteRunner.Execute("Validation Framework", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
@@ -222,6 +228,66 @@ namespace Editor.Validation.Framework
             return Check(guard.State == "clean", "guard mutated state on a clean run")
                    && Check(r.BaselineFailed == 0 && r.Success, "guard false-tripped a clean suite")
                    && Check(r.BaselinePassed == 1, "clean suite pass count changed");
+        }
+
+        // --- Stale-assembly-guard scenarios (VS-3) ---
+        //
+        // These exercise the pure StaleAssemblyGuard.Decide with crafted timestamps, so the staleness logic is proven
+        // deterministically without touching the real filesystem or Unity's compile state. TOL is the tolerance the
+        // scenarios reason against; the deltas are chosen well inside/outside it.
+
+        private const double TOL = 2.0;
+
+        /// <summary>A resolved assembly whose DLL is <paramref name="dllAheadOfSourceSec"/> newer than its source, and
+        /// (optionally) whose on-disk DLL is <paramref name="diskAheadOfLoadedSec"/> newer than the loaded domain.</summary>
+        private static AssemblyFreshness Asm(double dllAheadOfSourceSec, double diskAheadOfLoadedSec = 0.0, bool captureLoaded = true)
+        {
+            DateTime baseUtc = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+            DateTime dll = baseUtc;
+            DateTime source = baseUtc.AddSeconds(-dllAheadOfSourceSec); // +ahead ⇒ source older ⇒ fresh
+            DateTime loaded = captureLoaded ? dll.AddSeconds(-diskAheadOfLoadedSec) : DateTime.MinValue;
+            return new AssemblyFreshness("Test-Asm", dll, source, loaded, resolved: true);
+        }
+
+        private static bool StaleGuardFresh()
+        {
+            StaleVerdict v = StaleAssemblyGuard.Decide(false, false, new[] { Asm(dllAheadOfSourceSec: 100.0) }, TOL);
+            return Check(!v.IsStale, "fresh tree reported stale") && Check(!v.IsInconclusive, "fresh tree reported inconclusive");
+        }
+
+        private static bool StaleGuardCompiling()
+        {
+            StaleVerdict v = StaleAssemblyGuard.Decide(true, false, new[] { Asm(dllAheadOfSourceSec: 100.0) }, TOL);
+            return Check(v.IsStale, "isCompiling did not report stale");
+        }
+
+        private static bool StaleGuardSourceNewer()
+        {
+            // Source edited 10s after the DLL was built (10 > TOL) ⇒ a recompile is pending.
+            StaleVerdict v = StaleAssemblyGuard.Decide(false, false, new[] { Asm(dllAheadOfSourceSec: -10.0) }, TOL);
+            return Check(v.IsStale, "source-newer-than-DLL did not report stale");
+        }
+
+        private static bool StaleGuardWithinTolerance()
+        {
+            // Source 1s ahead of the DLL (1 < TOL) — clock/save jitter, not a real edit ⇒ not stale.
+            StaleVerdict v = StaleAssemblyGuard.Decide(false, false, new[] { Asm(dllAheadOfSourceSec: -1.0) }, TOL);
+            return Check(!v.IsStale, "within-tolerance delta false-tripped stale");
+        }
+
+        private static bool StaleGuardDiskNewerThanLoaded()
+        {
+            // On-disk DLL 10s newer than what the domain loaded ⇒ recompiled without a reload; source stays fresh.
+            StaleVerdict v = StaleAssemblyGuard.Decide(false, false,
+                new[] { Asm(dllAheadOfSourceSec: 100.0, diskAheadOfLoadedSec: 10.0) }, TOL);
+            return Check(v.IsStale, "disk-DLL-newer-than-loaded did not report stale");
+        }
+
+        private static bool StaleGuardUnresolvedInconclusive()
+        {
+            StaleVerdict v = StaleAssemblyGuard.Decide(false, false, new[] { AssemblyFreshness.Unresolved("Missing-Asm") }, TOL);
+            return Check(v.IsInconclusive, "unresolved assembly not reported inconclusive")
+                   && Check(!v.IsStale, "unresolved assembly wrongly reported stale");
         }
 
         private static bool RegistryMeetsExpectedCount()

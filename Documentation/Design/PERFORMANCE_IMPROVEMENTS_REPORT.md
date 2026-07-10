@@ -302,11 +302,11 @@ gates.
 
 ### Validation Suites
 
-| ID   | Finding                                                                                                                                                                                                                                                                                                                                                                                              | Effort | Risk | Benefit | Seed | Save |
-|------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| VS-1 | ✅ **SHIPPED 2026-07-08** — shared `Framework/ValidationSuiteRunner` + `ValidationRunResult` (per-scenario + total timing; `KnownBugChannel` ends the archive-vs-promote drift); six suites + `ChunkRelativePositionTests` migrated, verdicts unchanged; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` remain a tracked follow-up (assertion-model mismatch)                                       |   ✅    |  ✅   |    ⚪    |  ✅   |  ✅   |
-| VS-2 | ✅ **SHIPPED 2026-07-09** — `Validate All` aggregate + `ValidationSuiteCI` headless entry (`RunHeadless` exit-code + NUnit3 XML; `RunSelected`/`-validationSuites` subset) over an explicit registry; per-suite `World.Instance` isolation guard (snapshot→force-restore→mark-failed) proven leak-tight; `Validation Framework` self-test suite added (8 suites, 151 baselines, fwd==rev==individual) |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| VS-3 | No stale-assembly guard — a suite can silently validate stale code after an edit                                                                                                                                                                                                                                                                                                                     |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| ID   | Finding                                                                                                                                                                                                                                                                                                                                                                                                        | Effort | Risk | Benefit | Seed | Save |
+|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| VS-1 | ✅ **SHIPPED 2026-07-08** — shared `Framework/ValidationSuiteRunner` + `ValidationRunResult` (per-scenario + total timing; `KnownBugChannel` ends the archive-vs-promote drift); six suites + `ChunkRelativePositionTests` migrated, verdicts unchanged; `VoxelMetadataUtilityTests`/`FastNoiseLiteTests` remain a tracked follow-up (assertion-model mismatch)                                                 |   ✅    |  ✅   |    ⚪    |  ✅   |  ✅   |
+| VS-2 | ✅ **SHIPPED 2026-07-09** — `Validate All` aggregate + `ValidationSuiteCI` headless entry (`RunHeadless` exit-code + NUnit3 XML; `RunSelected`/`-validationSuites` subset) over an explicit registry; per-suite `World.Instance` isolation guard (snapshot→force-restore→mark-failed) proven leak-tight; `Validation Framework` self-test suite added (8 suites, 151 baselines, fwd==rev==individual)           |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| VS-3 | ✅ **SHIPPED 2026-07-10** — `Framework/StaleAssemblyGuard` diagnostic preamble in the shared runner (warn-only, never fails a baseline, suppressed to warn once per aggregate); 3 signals (isCompiling/isUpdating, source-vs-DLL, domain-vs-disk `[InitializeOnLoadMethod]` capture) over the two project assemblies; 6 self-tests (Validation Framework → 16, aggregate → 159); live-proven stale warning fires once |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
 
 ### World Scaling Enablers
 
@@ -2444,6 +2444,27 @@ and the numbers reflect editor-Mono execution either way.
 
 ### VS-3. No stale-assembly guard — a suite can silently validate stale code
 
+> **✅ Implemented 2026-07-10 (branch `feat/async-lighting-validation-suite`).** Added
+> **`Framework/StaleAssemblyGuard`** — a diagnostic preamble wired as the first line of
+> `ValidationSuiteRunner.Execute` (the one shared funnel, so every entry point — individual menu items,
+> headless single-suite `Execute`, `Validate All`, CI — is covered). The aggregate runner checks once and
+> opens a ref-counted `SuppressScope` around its suite loop, so an 8-suite run warns **at most once**, not
+> eight times. It never throws and never fails a baseline (verified in-editor: a stale run still returned
+> `Success=True` with the warning attached); an IO/resolution failure degrades to an *inconclusive* warning
+> rather than a silent false all-clear. Three signals against the two project assemblies
+> (`Assembly-CSharp` = production under validation, `Assembly-CSharp-Editor` = the suite code):
+> `isCompiling`/`isUpdating`; **source-vs-DLL** (newest `.cs` in an assembly's `CompilationPipeline`
+> `sourceFiles` newer than its compiled DLL — the load-bearing signal, since even `isCompiling == false` has
+> produced stale runs); and **domain-vs-disk** (on-disk DLL newer than what this domain loaded, captured at
+> `[InitializeOnLoadMethod]` — catches recompile-without-reload). A 2 s tolerance absorbs save→compile jitter.
+> The pure `Decide(...)` is guarded by **6 self-test scenarios** in the Validation Framework suite
+> (fresh / compiling / source-newer / within-tolerance / disk-newer-than-loaded / unresolved-inconclusive),
+> bringing that suite to 16 and the aggregate to **159 baselines**. Live-proven: touching a source file's
+> mtime into the future (no recompile) fired exactly one stale warning through a real aggregate run.
+> **Scope:** warn-only everywhere (the report's diagnostic intent) — the headless/CI exit code stays driven by
+> baseline results, not by the staleness heuristic. Two-assembly scope: a future `.asmdef` split would need
+> its new assembly added to the guard's list.
+
 **Observed:** A documented operational foot-gun (workflow memory + the `dotnet build` notes in
 CLAUDE.md): after editing code, the menu-item suites can execute against the *previous* compiled
 assembly if Unity's script compilation didn't actually run (`dotnet build` alone never recompiles
@@ -2565,9 +2586,10 @@ VS-1..3 (validation suites) form one small dependency chain: **VS-1's shared run
 (2026-07-08** — `ValidationSuiteRunner` + result object; six suites + ChunkRelativePosition migrated,
 verdicts unchanged) and **VS-2 is ✅ done (2026-07-09** — `Validate All` aggregate + `ValidationSuiteCI`
 headless/agent entry + NUnit3 XML, over an explicit registry with a leak-tight `World.Instance` isolation
-guard). **VS-3 (stale-assembly preamble) remains** — it now lands in the same aggregate runner in one place,
-and is worth doing before the next multi-suite regression campaign (LI-2 and GS-5 will both lean on several
-suites at once).
+guard) and **VS-3 is ✅ done (2026-07-10** — `StaleAssemblyGuard` diagnostic preamble in the shared runner:
+warn-only, suppressed to fire once per aggregate, three signals over the two project assemblies, 6 self-tests,
+live-proven). The whole VS-1..3 chain is now complete; the multi-suite regression campaigns ahead (LI-2, GS-5)
+inherit a one-click `Validate All` that also flags stale-code runs automatically.
 
 ---
 

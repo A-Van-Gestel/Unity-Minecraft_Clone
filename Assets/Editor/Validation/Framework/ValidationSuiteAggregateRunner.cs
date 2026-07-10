@@ -46,21 +46,28 @@ namespace Editor.Validation.Framework
             if (logToConsole)
                 Debug.Log($"=== Validate All: running {suites.Count} suite(s) ===");
 
+            // Stale-code check once for the whole aggregate (VS-3); the SuppressScope below stops each inner suite's
+            // ValidationSuiteRunner.Execute from re-checking, so an 8-suite run warns at most once.
+            StaleAssemblyGuard.WarnIfStale();
+
             List<ValidationRunResult> results = new List<ValidationRunResult>(suites.Count);
             bool showProgress = logToConsole && !Application.isBatchMode;
             Stopwatch total = Stopwatch.StartNew();
 
             try
             {
-                for (int i = 0; i < suites.Count; i++)
+                using (StaleAssemblyGuard.SuppressScope())
                 {
-                    RegisteredSuite suite = suites[i];
+                    for (int i = 0; i < suites.Count; i++)
+                    {
+                        RegisteredSuite suite = suites[i];
 
-                    if (showProgress)
-                        EditorUtility.DisplayProgressBar("Validate All",
-                            $"Suite {i + 1}/{suites.Count}: {suite.DisplayName}", i / (float)suites.Count);
+                        if (showProgress)
+                            EditorUtility.DisplayProgressBar("Validate All",
+                                $"Suite {i + 1}/{suites.Count}: {suite.DisplayName}", i / (float)suites.Count);
 
-                    results.Add(RunOneIsolated(suite, logToConsole, s_worldGuard));
+                        results.Add(RunOneIsolated(suite, logToConsole, s_worldGuard));
+                    }
                 }
             }
             finally
